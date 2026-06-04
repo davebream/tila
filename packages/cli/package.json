@@ -28,10 +28,7 @@
   "bin": {
     "tila": "bin/tila.cjs"
   },
-  "exports": {
-    ".": "./dist/index.js"
-  },
-  "files": ["bin", "dist"],
+  "files": ["bin"],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
