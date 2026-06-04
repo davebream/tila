@@ -39,7 +39,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace dependencies
-        run: pnpm --filter @tila/schemas build
+        run: pnpm build
 
       - name: Compile binaries (all 8 targets)
         working-directory: packages/cli
