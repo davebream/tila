@@ -138,6 +138,31 @@ importers:
         version: 4.1.8(@types/node@25.8.0)(jsdom@26.1.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(vite@7.3.3(@types/node@25.8.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.0)(yaml@2.9.0))
 
   packages/cli:
+    optionalDependencies:
+      tila-cli-darwin-arm64:
+        specifier: 0.1.0
+        version: link:../cli-darwin-arm64
+      tila-cli-darwin-x64:
+        specifier: 0.1.0
+        version: link:../cli-darwin-x64
+      tila-cli-linux-arm64:
+        specifier: 0.1.0
+        version: link:../cli-linux-arm64
+      tila-cli-linux-arm64-musl:
+        specifier: 0.1.0
+        version: link:../cli-linux-arm64-musl
+      tila-cli-linux-x64:
+        specifier: 0.1.0
+        version: link:../cli-linux-x64
+      tila-cli-linux-x64-musl:
+        specifier: 0.1.0
+        version: link:../cli-linux-x64-musl
+      tila-cli-windows-arm64:
+        specifier: 0.1.0
+        version: link:../cli-windows-arm64
+      tila-cli-windows-x64:
+        specifier: 0.1.0
+        version: link:../cli-windows-x64
     devDependencies:
       '@clack/prompts':
         specifier: ^1.4.0
