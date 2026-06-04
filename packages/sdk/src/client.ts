@@ -1,10 +1,6 @@
-import { createRequire } from "node:module";
 import { ErrorEnvelopeSchema, type TilaProjectConfig } from "@tila/schemas";
 import type { z } from "zod";
-
-const require = createRequire(import.meta.url);
-const SDK_VERSION: string = (require("../package.json") as { version: string })
-  .version;
+import { SDK_VERSION } from "./version";
 
 export interface ClientOptions {
   baseUrl: string;

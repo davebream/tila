@@ -1,6 +1,6 @@
 {
   "name": "tila-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "MIT",
   "description": "tila CLI \u2014 durable state & coordination for multi-machine agentic work",
   "keywords": [
@@ -48,14 +48,14 @@
     "gen:version": "node scripts/gen-version.mjs"
   },
   "optionalDependencies": {
-    "tila-cli-darwin-arm64": "0.1.1",
-    "tila-cli-darwin-x64": "0.1.1",
-    "tila-cli-linux-arm64": "0.1.1",
-    "tila-cli-linux-arm64-musl": "0.1.1",
-    "tila-cli-linux-x64": "0.1.1",
-    "tila-cli-linux-x64-musl": "0.1.1",
-    "tila-cli-windows-arm64": "0.1.1",
-    "tila-cli-windows-x64": "0.1.1"
+    "tila-cli-darwin-arm64": "0.1.2",
+    "tila-cli-darwin-x64": "0.1.2",
+    "tila-cli-linux-arm64": "0.1.2",
+    "tila-cli-linux-arm64-musl": "0.1.2",
+    "tila-cli-linux-x64": "0.1.2",
+    "tila-cli-linux-x64-musl": "0.1.2",
+    "tila-cli-windows-arm64": "0.1.2",
+    "tila-cli-windows-x64": "0.1.2"
   },
   "devDependencies": {
     "@clack/prompts": "^1.4.0",
