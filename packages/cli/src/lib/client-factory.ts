@@ -1,11 +1,6 @@
-import { createRequire } from "node:module";
 import type { TilaProjectConfig } from "@tila/schemas";
 import { TilaClient } from "tila-sdk";
-
-const require = createRequire(import.meta.url);
-const { version: CLI_VERSION } = require("../../package.json") as {
-  version: string;
-};
+import { VERSION as CLI_VERSION } from "../version";
 
 const CLI_SOURCE_HEADERS: Record<string, string> = {
   "X-Tila-Source": `cli/${CLI_VERSION}`,

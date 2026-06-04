@@ -1,8 +1,5 @@
-import { createRequire } from "node:module";
 import { defineCommand, runMain } from "citty";
-
-const require = createRequire(import.meta.url);
-const { version } = require("../package.json") as { version: string };
+import { VERSION as version } from "./version";
 
 const main = defineCommand({
   meta: {
