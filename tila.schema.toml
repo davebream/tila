@@ -1,0 +1,83 @@
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# WORK UNITS — types of work items tracked in this project
+# ---------------------------------------------------------------------------
+
+[work_units.task]
+fields = [
+  { name = "title",       required = true,  type = "string" },
+  { name = "description", required = false, type = "text" },
+  { name = "status",      required = true,  type = "enum",
+    values = ["open", "in_progress", "blocked", "done", "cancelled"] },
+]
+parents = []
+
+# ---------------------------------------------------------------------------
+# ARTIFACTS — content-addressed blobs produced or uploaded into the project
+# ---------------------------------------------------------------------------
+
+[artifacts.lesson]
+mime_types = ["text/markdown"]
+retention_days = 0            # never expire — project memory
+searchable = true             # opt-in to FTS5 full-text indexing
+search_mode = "full_text"
+
+[artifacts.adr]
+mime_types = ["text/markdown"]
+retention_days = 0            # never expire — architectural decisions
+searchable = true
+search_mode = "full_text"
+
+[artifacts.plan]
+mime_types = ["text/markdown"]
+retention_days = 30
+searchable = true
+search_mode = "full_text"
+auto_supersedes = true
+
+[artifacts.design]
+mime_types = ["text/markdown"]
+retention_days = 90
+searchable = true
+search_mode = "full_text"
+auto_supersedes = true
+
+[artifacts.review]
+mime_types = ["text/markdown"]
+retention_days = 30
+requires_reference_to = ["design"]
+searchable = true
+search_mode = "full_text"
+
+[artifacts.research]
+mime_types = ["text/markdown", "text/plain", "application/pdf"]
+retention_days = 0            # never expire — source artifacts
+searchable = true
+search_mode = "full_text"
+
+[artifacts.index]
+mime_types = ["text/markdown"]
+retention_days = 0
+searchable = true             # index artifacts gather entries under a scope
+search_mode = "full_text"
+
+[artifacts.patch]
+mime_types = ["text/x-patch", "application/x-patch"]
+retention_days = 7
+searchable = false            # binary-adjacent; not useful to index as text
+
+# ---------------------------------------------------------------------------
+# ARTIFACT RELATIONSHIPS — typed edges artifacts can have to each other
+# ---------------------------------------------------------------------------
+
+[artifact_relationships]
+types = [
+  "references",
+  "supersedes",
+  "derived-from",
+  "extends",
+  "rebuts",
+  "index-of",
+  "entry-of",
+]

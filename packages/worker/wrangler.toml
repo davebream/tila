@@ -1,0 +1,69 @@
+name = "tila"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+
+[placement]
+mode = "smart"
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "PROJECT"
+class_name = "ProjectDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProjectDO"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tila-global"
+database_id = "" # Set during tila init --cloudflare
+
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "tila-artifacts"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "tila-analytics"
+
+[triggers]
+crons = ["0 3 * * *"] # Daily sweep at 03:00 UTC
+
+[vars]
+# CORS_ALLOWED_ORIGINS is set automatically during `tila infra provision` to the Pages project URL.
+# For local cross-origin development (Vite on :5173 + wrangler on :8787), set this to:
+#   CORS_ALLOWED_ORIGINS = "http://localhost:5173"
+# Never use wildcards ("*") — the CSRF guard rejects them.
+CORS_ALLOWED_ORIGINS = ""
+
+# Static Assets binding — serves the UI same-origin as the Worker.
+# run_worker_first ensures API/auth routes are handled by the Worker
+# even when not_found_handling = "single-page-application" is active.
+# (Generated per-deploy config in wrangler.<slug>.toml is authoritative;
+# this block provides parity for `wrangler dev` local development.)
+[assets]
+directory = "../ui/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/auth/*", "/projects/*", "/_internal/*"]
+
+# --- Required secrets (set via: wrangler secret put <NAME>) ---
+# GITHUB_SESSION_HMAC_KEY — 32-byte base64url-encoded HMAC key for session token signing
+#   Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+#   Set: wrangler secret put GITHUB_SESSION_HMAC_KEY
+#
+# GITHUB_APP_ID — GitHub App ID (numeric, optional for App-based auth)
+#   Set: wrangler secret put GITHUB_APP_ID
+#
+# GITHUB_APP_PRIVATE_KEY — GitHub App RSA private key in PEM format (optional for App-based auth)
+#   Set: wrangler secret put GITHUB_APP_PRIVATE_KEY
+#
+# GITHUB_APP_CLIENT_ID — GitHub App OAuth client ID (optional for App-based auth)
+#   Set: wrangler secret put GITHUB_APP_CLIENT_ID
+#
+# GITHUB_APP_CLIENT_SECRET — GitHub App OAuth client secret (optional for App-based auth)
+#   Set: wrangler secret put GITHUB_APP_CLIENT_SECRET
+#
+# GITHUB_OIDC_AUDIENCE — Expected 'aud' claim in OIDC tokens (set via wrangler secret put)

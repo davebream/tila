@@ -1,0 +1,390 @@
+import {
+  D1ProjectRegistry,
+  D1RateLimitStore,
+  D1SessionStore,
+  GitHubAppConfigStore,
+  RepoAllowlistStore,
+} from "@tila/backend-d1";
+import { Hono } from "hono";
+import { COOKIE_SESSION_TTL_SECONDS } from "../config";
+import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
+import {
+  checkUserMembership,
+  getInstallationAccessToken,
+  mintAppJwt,
+} from "../lib/github-app";
+import { hashToken } from "../lib/hash-token";
+import { invalidateSession } from "../lib/session-cache";
+import type {
+  CookieSessionTokenResult,
+  Env,
+  HonoVariables,
+  WorkspaceSessionTokenResult,
+} from "../types";
+
+type AppEnv = { Bindings: Env; Variables: HonoVariables };
+export const workspace = new Hono<AppEnv>();
+
+const WORKSPACE_DEADLINE_MS = 25_000;
+const SELECT_RATE_LIMIT_MAX = 20;
+const SELECT_RATE_LIMIT_WINDOW_MS = 60_000;
+const PROJECT_SESSION_TTL_MS = COOKIE_SESSION_TTL_SECONDS * 1000;
+
+const PERMISSION_HIERARCHY: Record<string, number> = {
+  none: 0,
+  read: 1,
+  triage: 2,
+  write: 3,
+  maintain: 4,
+  admin: 5,
+};
+
+function permissionToScope(perm: string): string {
+  return (PERMISSION_HIERARCHY[perm] ?? 0) >= PERMISSION_HIERARCHY.write
+    ? "full"
+    : "read";
+}
+
+workspace.get("/projects", async (c) => {
+  const tokenResult = c.get("tokenResult");
+  const githubLogin =
+    tokenResult.kind === "workspace-session"
+      ? (tokenResult as WorkspaceSessionTokenResult).githubLogin
+      : tokenResult.name;
+
+  const registry = new D1ProjectRegistry(c.env.DB);
+  const allProjects = await registry.listAll();
+
+  if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
+    const accessible = allProjects.map(({ projectId }) => ({
+      projectId,
+      displayName: projectId,
+      repos: [],
+    }));
+    return c.json({ ok: true, projects: accessible });
+  }
+  const configStore = new GitHubAppConfigStore(c.env.DB);
+  const allowlistStore = new RepoAllowlistStore(c.env.DB);
+
+  const appJwt = await mintAppJwt(
+    Number(c.env.GITHUB_APP_ID),
+    c.env.GITHUB_APP_PRIVATE_KEY,
+  );
+  const startTime = Date.now();
+
+  const accessible = [];
+  for (const { projectId } of allProjects) {
+    if (Date.now() - startTime > WORKSPACE_DEADLINE_MS) break;
+
+    const installation = await configStore.getInstallation(projectId);
+    if (!installation) continue;
+
+    const allowedRepos = await allowlistStore.listForProject(projectId);
+    if (allowedRepos.length === 0) continue;
+
+    try {
+      const installationToken = await getInstallationAccessToken(
+        appJwt,
+        installation.installation_id,
+      );
+
+      const userRepos = [];
+      for (const repo of allowedRepos) {
+        if (Date.now() - startTime > WORKSPACE_DEADLINE_MS) break;
+        const perm = await checkUserMembership(
+          installationToken,
+          repo.github_owner,
+          repo.github_repo,
+          githubLogin,
+        );
+        if (perm && perm !== "none") {
+          userRepos.push({
+            owner: repo.github_owner,
+            repo: repo.github_repo,
+            permission: perm,
+          });
+        }
+      }
+
+      if (userRepos.length > 0) {
+        const meta = await registry.get(projectId);
+        accessible.push({
+          projectId,
+          displayName: meta?.displayName ?? projectId,
+          repos: userRepos,
+        });
+      }
+    } catch (err) {
+      console.warn(`[workspace] skipping project ${projectId}:`, err);
+    }
+  }
+
+  return c.json({ ok: true, projects: accessible });
+});
+
+workspace.post("/select", async (c) => {
+  // Rate limit: keyed by IP
+  const ip = c.req.raw.headers.get("CF-Connecting-IP");
+  if (ip) {
+    const rateLimitStore = new D1RateLimitStore(c.env.DB);
+    try {
+      const isLimited = await rateLimitStore.check(
+        `workspace-select:${ip}`,
+        SELECT_RATE_LIMIT_MAX,
+        SELECT_RATE_LIMIT_WINDOW_MS,
+      );
+      if (isLimited) {
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many project select attempts",
+              retryable: true,
+            },
+          },
+          429,
+        );
+      }
+    } catch {
+      // Fail open on D1 error
+    }
+  }
+
+  // Require workspace-session token kind
+  const tokenResult = c.get("tokenResult");
+  if (tokenResult.kind !== "workspace-session") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "INVALID_SESSION",
+          message: "This endpoint requires a workspace session",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
+  const wsSession = tokenResult as WorkspaceSessionTokenResult;
+
+  // Parse body
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Invalid JSON body",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
+  const parsed = body as Record<string, unknown> | null;
+  if (!parsed || typeof parsed.project_id !== "string" || !parsed.project_id) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Missing required field: project_id",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
+  const projectId = parsed.project_id as string;
+
+  // Check GitHub App config
+  if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "NOT_CONFIGURED",
+          message: "GitHub App not configured",
+          retryable: false,
+        },
+      },
+      500,
+    );
+  }
+
+  // Load installation config for the project
+  const configStore = new GitHubAppConfigStore(c.env.DB);
+  const installation = await configStore.getInstallation(projectId);
+  if (!installation) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "Project not found or GitHub App not installed",
+          retryable: false,
+        },
+      },
+      404,
+    );
+  }
+
+  // Get installation access token
+  let installationToken: string;
+  try {
+    const appJwt = await mintAppJwt(
+      Number(c.env.GITHUB_APP_ID),
+      c.env.GITHUB_APP_PRIVATE_KEY,
+    );
+    installationToken = await getInstallationAccessToken(
+      appJwt,
+      installation.installation_id,
+    );
+  } catch (err) {
+    console.error("[workspace/select] Failed to get installation token:", err);
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "GITHUB_API_ERROR",
+          message: "Failed to obtain GitHub App installation token",
+          retryable: true,
+        },
+      },
+      502,
+    );
+  }
+
+  // Filter against _project_repos allowlist
+  const allowlistStore = new RepoAllowlistStore(c.env.DB);
+  const allowedRepos = await allowlistStore.listForProject(projectId);
+
+  const login = wsSession.githubLogin;
+  let bestPermission = "none";
+
+  for (const repo of allowedRepos) {
+    const perm = await checkUserMembership(
+      installationToken,
+      repo.github_owner,
+      repo.github_repo,
+      login,
+    );
+    if (
+      perm &&
+      (PERMISSION_HIERARCHY[perm] ?? 0) >
+        (PERMISSION_HIERARCHY[bestPermission] ?? 0)
+    ) {
+      bestPermission = perm;
+    }
+  }
+
+  if (bestPermission === "none" || allowedRepos.length === 0) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "Insufficient repository permissions for this project",
+          retryable: false,
+        },
+      },
+      403,
+    );
+  }
+
+  // Revoke workspace session and evict from cache
+  const sessionStore = new D1SessionStore(c.env.DB);
+  try {
+    await sessionStore.revoke(wsSession.sessionHash);
+  } catch {
+    // Non-fatal: proceed to create new session
+  }
+  invalidateSession(wsSession.sessionHash);
+
+  // Create project-scoped session
+  const newSessionToken = crypto.randomUUID();
+  const newSessionHash = await hashToken(newSessionToken);
+  const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
+  const scopes = permissionToScope(bestPermission);
+
+  await sessionStore.create({
+    sessionHash: newSessionHash,
+    projectId,
+    tokenHash: "",
+    actorName: login,
+    scopes,
+    expiresAt,
+  });
+
+  // Build session cookie
+  const localDev = isLocalhost(c.req.url);
+  const cookie = buildSessionCookie(newSessionToken, localDev);
+
+  return new Response(JSON.stringify({ ok: true, projectId, scopes }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Set-Cookie": cookie,
+    },
+  });
+});
+
+const WORKSPACE_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+
+workspace.post("/deselect", async (c) => {
+  const tokenResult = c.get("tokenResult");
+  if (tokenResult.kind !== "cookie-session") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "INVALID_SESSION",
+          message: "This endpoint requires a project session",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
+  const session = tokenResult as CookieSessionTokenResult;
+  const sessionStore = new D1SessionStore(c.env.DB);
+
+  try {
+    await sessionStore.revoke(session.sessionHash);
+  } catch {
+    // Non-fatal
+  }
+  invalidateSession(session.sessionHash);
+
+  const newSessionToken = crypto.randomUUID();
+  const newSessionHash = await hashToken(newSessionToken);
+  const expiresAt = Date.now() + WORKSPACE_SESSION_TTL_MS;
+
+  await sessionStore.create({
+    sessionHash: newSessionHash,
+    projectId: "",
+    tokenHash: "",
+    actorName: session.name,
+    scopes: "",
+    expiresAt,
+  });
+
+  const localDev = isLocalhost(c.req.url);
+  const cookie = buildSessionCookie(newSessionToken, localDev);
+
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Set-Cookie": cookie,
+    },
+  });
+});

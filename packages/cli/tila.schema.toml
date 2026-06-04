@@ -1,0 +1,26 @@
+# tila schema definition for the dev project
+# Used by `tila schema push` to register record types
+
+[project]
+id = "dev-project"
+
+[records.deploy_config]
+format = "json"
+history = "revision"
+key_description = "deployment configuration variant"
+
+[records.deploy_config.fields]
+region = { type = "string", required = true }
+provider = { type = "string", required = true }
+workers_route = { type = "string" }
+r2_bucket = { type = "string" }
+
+[records.db_schema]
+format = "json"
+history = "revision"
+key_description = "database schema documentation"
+
+[records.db_schema.fields]
+table_name = { type = "string", required = true }
+columns = { type = "json", required = true }
+version = { type = "number" }

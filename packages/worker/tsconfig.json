@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../schemas" },
+    { "path": "../core" },
+    { "path": "../backend-d1" },
+    { "path": "../backend-do" },
+    { "path": "../backend-r2" }
+  ]
+}

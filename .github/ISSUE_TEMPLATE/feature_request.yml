@@ -1,0 +1,26 @@
+name: Feature Request
+description: Suggest a feature for tila
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: Describe the problem you are trying to solve.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe what you would like to happen.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions or features you have considered.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context about the feature request.

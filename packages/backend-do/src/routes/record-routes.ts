@@ -1,0 +1,531 @@
+import { applyRecordLegacyDefaults } from "@tila/core";
+import {
+  type RequestOrigin,
+  artifactOps,
+  constraintOps,
+  recordOps,
+  schemaOps,
+  validateRecordValue,
+} from "@tila/ops-sqlite";
+import {
+  RecordArchiveRequestSchema,
+  RecordCreateRequestSchema,
+  RecordPatchRequestSchema,
+  RecordSetRequestSchema,
+  RecordUnarchiveRequestSchema,
+  formatRecordResource,
+} from "@tila/schemas";
+import { Hono } from "hono";
+import { jsonError } from "./responses";
+import type { ProjectSubRouter, RouterDeps } from "./types";
+
+const { checkRecordTypeDeclared, resolveCurrentSchema } = constraintOps;
+
+function serializeRecord(result: recordOps.RecordRow) {
+  return {
+    type: result.type,
+    key: result.key,
+    schema_version: result.schema_version,
+    value: result.value,
+    value_sha256: result.value_sha256,
+    revision: result.revision,
+    archived: result.archived,
+    created_at: result.created_at,
+    updated_at: result.updated_at,
+    updated_by: result.updated_by,
+    tags: result.tags,
+  };
+}
+
+function upsertCanonicalSnapshot(
+  deps: RouterDeps,
+  type: string,
+  key: string,
+  canonicalArtifactKey: string,
+  valueSha256: string,
+  actor: string,
+): void {
+  const resource = formatRecordResource(type, key);
+  artifactOps.upsertPointer(
+    deps.db,
+    {
+      r2_key: canonicalArtifactKey,
+      resource,
+      kind: "record-snapshot-canonical",
+      sha256: valueSha256,
+      bytes: 0,
+      fence: null,
+      mime_type: "application/json",
+      produced_at: Date.now(),
+      produced_by: actor,
+      expires_at: null,
+    },
+    { actor },
+    "artifact.produced",
+  );
+}
+
+export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
+  const app = new Hono();
+
+  app.post("/record/:type/create", async (c) => {
+    const { type } = c.req.param();
+    const rawBody = (await c.req.json()) as Record<string, unknown>;
+    const body = RecordCreateRequestSchema.parse(rawBody);
+    const actor = c.req.header("x-actor") ?? "anonymous";
+    const provenance: RequestOrigin = {
+      actor,
+      tokenId: (rawBody.actor_token_id as string | null | undefined) ?? null,
+      source: (rawBody.source as string | null | undefined) ?? null,
+      sourceVersion:
+        (rawBody.source_version as string | null | undefined) ?? null,
+    };
+
+    const currentSchema = resolveCurrentSchema(deps.db);
+    const schemaVersion = currentSchema
+      ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
+      : 0;
+
+    if (currentSchema) {
+      const typeCheck = checkRecordTypeDeclared(currentSchema, type);
+      if (!typeCheck.ok) {
+        return jsonError(c, 422, "constraint-violation", typeCheck.message);
+      }
+
+      const recordDef = currentSchema.records?.[type];
+      if (recordDef) {
+        const valResult = validateRecordValue(body.value, recordDef);
+        if (!valResult.ok) {
+          return jsonError(
+            c,
+            422,
+            "constraint-violation",
+            valResult.errors.join("; "),
+          );
+        }
+      }
+    }
+
+    const canonicalArtifactKey =
+      ((rawBody as Record<string, unknown>).canonical_artifact_key as
+        | string
+        | null
+        | undefined) ?? null;
+    const result = await recordOps.createRecord(
+      deps.db,
+      {
+        type,
+        key: body.key,
+        value: body.value,
+        tags: body.tags,
+        message: body.message,
+        source_artifact_key: body.source_artifact_key,
+        canonical_artifact_key: canonicalArtifactKey,
+        schema_version: schemaVersion,
+        actor,
+      },
+      provenance,
+    );
+
+    if (canonicalArtifactKey !== null) {
+      upsertCanonicalSnapshot(
+        deps,
+        type,
+        body.key,
+        canonicalArtifactKey,
+        result.value_sha256,
+        actor,
+      );
+    }
+
+    return c.json(
+      {
+        ok: true,
+        record: serializeRecord(result),
+        fence: result.fence,
+        revision: result.revision,
+      },
+      201,
+    );
+  });
+
+  app.post("/record/:type/:key{.+}/set", async (c) => {
+    const { type, key } = c.req.param();
+    const rawSetBody = (await c.req.json()) as Record<string, unknown>;
+    const body = RecordSetRequestSchema.parse(rawSetBody);
+    const actor = c.req.header("x-actor") ?? "anonymous";
+    const setProvenance: RequestOrigin = {
+      actor,
+      tokenId: (rawSetBody.actor_token_id as string | null | undefined) ?? null,
+      source: (rawSetBody.source as string | null | undefined) ?? null,
+      sourceVersion:
+        (rawSetBody.source_version as string | null | undefined) ?? null,
+    };
+
+    const currentSchema = resolveCurrentSchema(deps.db);
+    const schemaVersion = currentSchema
+      ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
+      : 0;
+
+    if (currentSchema) {
+      const typeCheck = checkRecordTypeDeclared(currentSchema, type);
+      if (!typeCheck.ok) {
+        return jsonError(c, 422, "constraint-violation", typeCheck.message);
+      }
+
+      const recordDef = currentSchema.records?.[type];
+      if (recordDef) {
+        const valResult = validateRecordValue(body.value, recordDef);
+        if (!valResult.ok) {
+          return jsonError(
+            c,
+            422,
+            "constraint-violation",
+            valResult.errors.join("; "),
+          );
+        }
+      }
+    }
+
+    const canonicalArtifactKey =
+      ((rawSetBody as Record<string, unknown>).canonical_artifact_key as
+        | string
+        | null
+        | undefined) ?? null;
+    const result = await recordOps.setRecord(
+      deps.db,
+      {
+        type,
+        key,
+        value: body.value,
+        fence: body.fence,
+        tags: body.tags,
+        message: body.message,
+        source_artifact_key: body.source_artifact_key,
+        canonical_artifact_key: canonicalArtifactKey,
+        schema_version: schemaVersion,
+        actor,
+      },
+      setProvenance,
+    );
+
+    if (canonicalArtifactKey !== null) {
+      upsertCanonicalSnapshot(
+        deps,
+        type,
+        key,
+        canonicalArtifactKey,
+        result.value_sha256,
+        actor,
+      );
+    }
+
+    return c.json({
+      ok: true,
+      record: serializeRecord(result),
+      fence: result.fence,
+      revision: result.revision,
+    });
+  });
+
+  app.post("/record/:type/:key{.+}/patch", async (c) => {
+    const { type, key } = c.req.param();
+    const rawPatchBody = (await c.req.json()) as Record<string, unknown>;
+    const body = RecordPatchRequestSchema.parse(rawPatchBody);
+    const actor = c.req.header("x-actor") ?? "anonymous";
+    const patchProvenance: RequestOrigin = {
+      actor,
+      tokenId:
+        (rawPatchBody.actor_token_id as string | null | undefined) ?? null,
+      source: (rawPatchBody.source as string | null | undefined) ?? null,
+      sourceVersion:
+        (rawPatchBody.source_version as string | null | undefined) ?? null,
+    };
+
+    const currentSchema = resolveCurrentSchema(deps.db);
+    const schemaVersion = currentSchema
+      ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
+      : 0;
+
+    if (currentSchema) {
+      const typeCheck = checkRecordTypeDeclared(currentSchema, type);
+      if (!typeCheck.ok) {
+        return jsonError(c, 422, "constraint-violation", typeCheck.message);
+      }
+    }
+
+    const result = await recordOps.patchRecord(
+      deps.db,
+      {
+        type,
+        key,
+        patch: body.patch as Record<string, unknown>,
+        fence: body.fence,
+        message: body.message,
+        schema_version: schemaVersion,
+        actor,
+      },
+      patchProvenance,
+    );
+
+    return c.json({
+      ok: true,
+      record: serializeRecord(result),
+      fence: result.fence,
+      revision: result.revision,
+    });
+  });
+
+  app.post("/record/:type/:key{.+}/archive", async (c) => {
+    const { type, key } = c.req.param();
+    const rawArchiveBody = (await c.req.json()) as Record<string, unknown>;
+    const body = RecordArchiveRequestSchema.parse(rawArchiveBody);
+    const actor = c.req.header("x-actor") ?? "anonymous";
+    const archiveProvenance: RequestOrigin = {
+      actor,
+      tokenId:
+        (rawArchiveBody.actor_token_id as string | null | undefined) ?? null,
+      source: (rawArchiveBody.source as string | null | undefined) ?? null,
+      sourceVersion:
+        (rawArchiveBody.source_version as string | null | undefined) ?? null,
+    };
+
+    const currentSchema = resolveCurrentSchema(deps.db);
+    const schemaVersion = currentSchema
+      ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
+      : 0;
+
+    if (currentSchema) {
+      const typeCheck = checkRecordTypeDeclared(currentSchema, type);
+      if (!typeCheck.ok) {
+        return jsonError(c, 422, "constraint-violation", typeCheck.message);
+      }
+    }
+
+    const result = recordOps.archiveRecord(
+      deps.db,
+      {
+        type,
+        key,
+        fence: body.fence,
+        message: body.message,
+        schema_version: schemaVersion,
+        actor,
+      },
+      archiveProvenance,
+    );
+
+    return c.json({
+      ok: true,
+      record: serializeRecord(result),
+      fence: result.fence,
+      revision: result.revision,
+    });
+  });
+
+  app.post("/record/:type/:key{.+}/unarchive", async (c) => {
+    const { type, key } = c.req.param();
+    const rawUnarchiveBody = (await c.req.json()) as Record<string, unknown>;
+    const body = RecordUnarchiveRequestSchema.parse(rawUnarchiveBody);
+    const actor = c.req.header("x-actor") ?? "anonymous";
+    const unarchiveProvenance: RequestOrigin = {
+      actor,
+      tokenId:
+        (rawUnarchiveBody.actor_token_id as string | null | undefined) ?? null,
+      source: (rawUnarchiveBody.source as string | null | undefined) ?? null,
+      sourceVersion:
+        (rawUnarchiveBody.source_version as string | null | undefined) ?? null,
+    };
+
+    const currentSchema = resolveCurrentSchema(deps.db);
+    const schemaVersion = currentSchema
+      ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
+      : 0;
+
+    if (currentSchema) {
+      const typeCheck = checkRecordTypeDeclared(currentSchema, type);
+      if (!typeCheck.ok) {
+        return jsonError(c, 422, "constraint-violation", typeCheck.message);
+      }
+    }
+
+    const result = recordOps.unarchiveRecord(
+      deps.db,
+      {
+        type,
+        key,
+        fence: body.fence,
+        message: body.message,
+        schema_version: schemaVersion,
+        actor,
+      },
+      unarchiveProvenance,
+    );
+
+    return c.json({
+      ok: true,
+      record: serializeRecord(result),
+      fence: result.fence,
+      revision: result.revision,
+    });
+  });
+
+  app.post("/record/:type/:key{.+}/stamp-artifacts", async (c) => {
+    const { type, key } = c.req.param();
+    const body = (await c.req.json()) as {
+      revision: number;
+      canonical_artifact_key: string;
+      source_artifact_key: string | null;
+      sha256: string;
+      bytes: number;
+      actor: string;
+    };
+
+    if (
+      typeof body.revision !== "number" ||
+      !body.canonical_artifact_key ||
+      !body.sha256
+    ) {
+      return jsonError(
+        c,
+        400,
+        "validation-error",
+        "revision, canonical_artifact_key, and sha256 are required",
+      );
+    }
+
+    const actor = body.actor ?? c.req.header("x-actor") ?? "anonymous";
+
+    recordOps.stampArtifacts(deps.db, {
+      type,
+      key,
+      revision: body.revision,
+      canonical_artifact_key: body.canonical_artifact_key,
+      source_artifact_key: body.source_artifact_key ?? null,
+    });
+
+    const resource = formatRecordResource(type, key);
+    artifactOps.upsertPointer(
+      deps.db,
+      {
+        r2_key: body.canonical_artifact_key,
+        resource,
+        kind: "record-snapshot-canonical",
+        sha256: body.sha256,
+        bytes: body.bytes ?? 0,
+        fence: null,
+        mime_type: "application/json",
+        produced_at: Date.now(),
+        produced_by: actor,
+        expires_at: null,
+      },
+      { actor },
+      "artifact.produced",
+    );
+
+    return c.json({ ok: true });
+  });
+
+  app.get("/record/types-in-use", (c) => {
+    const types = recordOps.listRecordTypesInUse(deps.db);
+    return c.json({ ok: true, types });
+  });
+
+  app.get("/record/:type/list", (c) => {
+    const { type } = c.req.param();
+    const tag = c.req.query("tag");
+    const includeArchived = c.req.query("includeArchived") === "true";
+    const limitParam = c.req.query("limit");
+    const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
+    const dataFilterParam = c.req.query("dataFilter");
+
+    let dataFilter: Record<string, unknown> | undefined;
+    if (dataFilterParam) {
+      try {
+        dataFilter = JSON.parse(dataFilterParam) as Record<string, unknown>;
+      } catch {
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          "dataFilter must be valid JSON",
+        );
+      }
+    }
+
+    try {
+      const result = recordOps.listRecords(deps.db, {
+        type,
+        includeArchived,
+        tag: tag ?? undefined,
+        dataFilter,
+        limit,
+      });
+
+      return c.json({
+        ok: true,
+        items: result.items,
+        meta: {
+          total: result.total,
+          limit: limit ?? 200,
+          next_cursor: result.next_cursor,
+        },
+      });
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.includes("dataFilter values must be scalar")
+      ) {
+        return jsonError(c, 400, "validation-error", err.message);
+      }
+      throw err;
+    }
+  });
+
+  app.get("/record/:type/:key{.+}/history", (c) => {
+    const { type, key } = c.req.param();
+    const includeValues = c.req.query("values") === "true";
+    const limitParam = c.req.query("limit");
+    const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
+
+    const result = recordOps.listRecordHistory(deps.db, type, key, {
+      limit,
+      includeValues,
+    });
+
+    return c.json({
+      ok: true,
+      items: result.items,
+      meta: {
+        total: result.total,
+        limit: limit ?? 20,
+        next_cursor: result.next_cursor,
+      },
+    });
+  });
+
+  app.get("/record/:type/:key{.+}", (c) => {
+    const { type, key } = c.req.param();
+    const result = recordOps.getRecord(deps.db, type, key);
+
+    if (!result) {
+      return jsonError(c, 404, "not-found", `Record ${type}/${key} not found`);
+    }
+
+    // Apply legacy default enrichment using the current schema.
+    // Uses current schema (not the schema version the record was written against)
+    // because new fields with default_for_legacy only exist in the latest schema.
+    const currentSchema = resolveCurrentSchema(deps.db);
+    const enrichedValue = currentSchema
+      ? applyRecordLegacyDefaults(result.value, currentSchema, result.type)
+      : result.value;
+
+    return c.json({
+      ok: true,
+      record: serializeRecord({ ...result, value: enrichedValue }),
+      fence: result.fence,
+    });
+  });
+
+  return app;
+}

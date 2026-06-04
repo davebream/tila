@@ -1,0 +1,22 @@
+{
+  "name": "tila-cli-windows-arm64",
+  "version": "0.1.0",
+  "description": "Windows arm64 binary for tila-cli",
+  "os": ["win32"],
+  "cpu": ["arm64"],
+  "bin": {
+    "tila": "bin/tila.exe"
+  },
+  "files": ["bin"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davebream/tila.git",
+    "directory": "packages/cli-windows-arm64"
+  },
+  "homepage": "https://github.com/davebream/tila#readme",
+  "bugs": "https://github.com/davebream/tila/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}

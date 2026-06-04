@@ -1,0 +1,525 @@
+import * as p from "@clack/prompts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@clack/prompts", () => ({
+  text: vi.fn().mockResolvedValue(""),
+  password: vi.fn().mockResolvedValue(""),
+  confirm: vi.fn().mockResolvedValue(true),
+  select: vi.fn().mockResolvedValue(null),
+  spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
+  note: vi.fn(),
+  cancel: vi.fn(),
+  isCancel: vi.fn().mockReturnValue(false),
+  log: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    step: vi.fn(),
+    success: vi.fn(),
+    message: vi.fn(),
+  },
+}));
+
+// --- SDK mock helpers ---
+
+type Cloudflare = import("../../lib/cloudflare-client").Cloudflare;
+
+function makeAsyncIterable<T>(items: T[]): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator]() {
+      let i = 0;
+      return {
+        async next() {
+          if (i < items.length)
+            return { value: items[i++], done: false as const };
+          return { value: undefined as unknown as T, done: true as const };
+        },
+      };
+    },
+  };
+}
+
+function makeMockClient(overrides?: Record<string, unknown>) {
+  return {
+    d1: {
+      database: {
+        list: vi.fn(),
+        create: vi.fn(),
+        query: vi.fn(),
+      },
+    },
+    ...overrides,
+  } as unknown as Cloudflare;
+}
+
+describe("ensureD1Database", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+    vi.spyOn(process, "exit").mockImplementation(
+      (_code: string | number | null | undefined) => {
+        throw new Error(`process.exit(${_code})`);
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockFetchD1List(
+    databases: Array<{ name: string; uuid: string }>,
+    status = 200,
+  ) {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => ({ result: databases }),
+      text: async () => JSON.stringify({ result: databases }),
+    } as Response);
+  }
+
+  it("returns existing database UUID when tila-global exists", async () => {
+    const client = makeMockClient();
+    mockFetchD1List([
+      { name: "other-db", uuid: "other-uuid" },
+      { name: "tila-global", uuid: "existing-uuid" },
+    ]);
+
+    const { ensureD1Database } = await import("../../lib/cloudflare-resources");
+    const uuid = await ensureD1Database(client, "acct-123", "test-token");
+    expect(uuid).toBe("existing-uuid");
+    expect(client.d1.database.create).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("name=tila-global"),
+      expect.anything(),
+    );
+  });
+
+  it("creates database when tila-global does not exist", async () => {
+    const client = makeMockClient();
+    mockFetchD1List([{ name: "other-db", uuid: "other-uuid" }]);
+    (client.d1.database.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      uuid: "new-uuid",
+    });
+
+    const { ensureD1Database } = await import("../../lib/cloudflare-resources");
+    const uuid = await ensureD1Database(client, "acct-123", "test-token");
+    expect(uuid).toBe("new-uuid");
+    expect(client.d1.database.create).toHaveBeenCalledWith({
+      account_id: "acct-123",
+      name: "tila-global",
+    });
+  });
+
+  it("creates database when list is empty", async () => {
+    const client = makeMockClient();
+    mockFetchD1List([]);
+    (client.d1.database.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      uuid: "new-uuid",
+    });
+
+    const { ensureD1Database } = await import("../../lib/cloudflare-resources");
+    const uuid = await ensureD1Database(client, "acct-123", "test-token");
+    expect(uuid).toBe("new-uuid");
+  });
+
+  it("exits when D1 create returns no UUID", async () => {
+    const client = makeMockClient();
+    mockFetchD1List([]);
+    (client.d1.database.create as ReturnType<typeof vi.fn>).mockResolvedValue(
+      {},
+    );
+
+    const { ensureD1Database } = await import("../../lib/cloudflare-resources");
+    await expect(
+      ensureD1Database(client, "acct-123", "test-token"),
+    ).rejects.toThrow("process.exit(1)");
+  });
+
+  it("propagates SDK errors", async () => {
+    const client = makeMockClient();
+    mockFetchD1List([]);
+    (client.d1.database.create as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("API error"),
+    );
+
+    const { ensureD1Database } = await import("../../lib/cloudflare-resources");
+    await expect(
+      ensureD1Database(client, "acct-123", "test-token"),
+    ).rejects.toThrow("API error");
+  });
+});
+
+describe("insertTokenAndProject", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("calls two parameterized D1 queries for project and token", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      {},
+    );
+
+    const { insertTokenAndProject } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await insertTokenAndProject({
+      client,
+      accountId: "acc-1",
+      databaseId: "db-uuid",
+      tokenHash: "abc123hash",
+      slug: "test-proj",
+    });
+
+    // Three queries: project insert, token delete, token insert
+    expect(client.d1.database.query).toHaveBeenCalledTimes(3);
+
+    // First call: project insert with parameterized query
+    const firstCall = (client.d1.database.query as ReturnType<typeof vi.fn>)
+      .mock.calls[0];
+    expect(firstCall[0]).toBe("db-uuid");
+    expect(firstCall[1].sql).toContain("_projects");
+    expect(firstCall[1].params).toEqual(
+      expect.arrayContaining(["test-proj", "tila-init", "acc-1"]),
+    );
+    for (const p of firstCall[1].params) {
+      expect(typeof p).toBe("string");
+    }
+
+    // Second call: delete existing non-revoked init token
+    const secondCall = (client.d1.database.query as ReturnType<typeof vi.fn>)
+      .mock.calls[1];
+    expect(secondCall[0]).toBe("db-uuid");
+    expect(secondCall[1].sql).toContain("DELETE");
+    expect(secondCall[1].sql).toContain("_tokens");
+    expect(secondCall[1].params).toEqual(["test-proj", "init"]);
+
+    // Third call: token insert with parameterized query
+    const thirdCall = (client.d1.database.query as ReturnType<typeof vi.fn>)
+      .mock.calls[2];
+    expect(thirdCall[0]).toBe("db-uuid");
+    expect(thirdCall[1].sql).toContain("INSERT");
+    expect(thirdCall[1].sql).toContain("_tokens");
+    expect(thirdCall[1].params).toEqual(
+      expect.arrayContaining(["abc123hash", "test-proj", "init", "full"]),
+    );
+    for (const p of thirdCall[1].params) {
+      expect(typeof p).toBe("string");
+    }
+  });
+
+  it("propagates SDK errors from query", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("D1 error"),
+    );
+
+    const { insertTokenAndProject } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(
+      insertTokenAndProject({
+        client,
+        accountId: "acc-1",
+        databaseId: "db-uuid",
+        tokenHash: "abc123hash",
+        slug: "test-proj",
+      }),
+    ).rejects.toThrow("D1 error");
+  });
+});
+
+function makeD1Page(rows: unknown[]) {
+  return makeAsyncIterable([{ results: rows }]);
+}
+
+describe("queryD1", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("returns rows from a single-result D1 query", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeD1Page([
+        { project_id: "proj-1", display_name: "Project One" },
+        { project_id: "proj-2", display_name: "Project Two" },
+      ]),
+    );
+
+    const { queryD1 } = await import("../../lib/cloudflare-resources");
+    const rows = await queryD1(
+      client,
+      "acct-1",
+      "db-uuid",
+      "SELECT * FROM _projects",
+    );
+
+    expect(rows).toEqual([
+      { project_id: "proj-1", display_name: "Project One" },
+      { project_id: "proj-2", display_name: "Project Two" },
+    ]);
+    expect(client.d1.database.query).toHaveBeenCalledWith("db-uuid", {
+      account_id: "acct-1",
+      sql: "SELECT * FROM _projects",
+    });
+  });
+
+  it("passes params when provided", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeD1Page([{ cnt: 3 }]),
+    );
+
+    const { queryD1 } = await import("../../lib/cloudflare-resources");
+    const rows = await queryD1(
+      client,
+      "acct-1",
+      "db-uuid",
+      "SELECT COUNT(*) as cnt FROM _tokens WHERE project_id = ?",
+      ["my-proj"],
+    );
+
+    expect(rows).toEqual([{ cnt: 3 }]);
+    expect(client.d1.database.query).toHaveBeenCalledWith("db-uuid", {
+      account_id: "acct-1",
+      sql: "SELECT COUNT(*) as cnt FROM _tokens WHERE project_id = ?",
+      params: ["my-proj"],
+    });
+  });
+
+  it("returns empty array when query yields no results", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeD1Page([]),
+    );
+
+    const { queryD1 } = await import("../../lib/cloudflare-resources");
+    const rows = await queryD1(
+      client,
+      "acct-1",
+      "db-uuid",
+      "SELECT * FROM _projects",
+    );
+
+    expect(rows).toEqual([]);
+  });
+
+  it("returns empty array when page has no items", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAsyncIterable([]),
+    );
+
+    const { queryD1 } = await import("../../lib/cloudflare-resources");
+    const rows = await queryD1(client, "acct-1", "db-uuid", "SELECT 1");
+
+    expect(rows).toEqual([]);
+  });
+
+  it("returns empty array when QueryResult has no results property", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAsyncIterable([{}]),
+    );
+
+    const { queryD1 } = await import("../../lib/cloudflare-resources");
+    const rows = await queryD1(client, "acct-1", "db-uuid", "SELECT 1");
+
+    expect(rows).toEqual([]);
+  });
+
+  it("propagates SDK errors", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("D1 query failed"),
+    );
+
+    const { queryD1 } = await import("../../lib/cloudflare-resources");
+    await expect(
+      queryD1(client, "acct-1", "db-uuid", "SELECT 1"),
+    ).rejects.toThrow("D1 query failed");
+  });
+});
+
+describe("ensureR2Bucket", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+    vi.spyOn(process, "exit").mockImplementation(
+      (_code: string | number | null | undefined) => {
+        throw new Error(`process.exit(${_code})`);
+      },
+    );
+  });
+
+  it("creates bucket via SDK", async () => {
+    const client = makeMockClient({
+      r2: {
+        buckets: { create: vi.fn().mockResolvedValue({ name: "my-bucket" }) },
+      },
+    });
+
+    const { ensureR2Bucket } = await import("../../lib/cloudflare-resources");
+    await ensureR2Bucket(client, "acct-123", "my-bucket");
+
+    expect(client.r2.buckets.create).toHaveBeenCalledWith({
+      account_id: "acct-123",
+      name: "my-bucket",
+    });
+  });
+
+  it("handles bucket already exists gracefully", async () => {
+    const client = makeMockClient({
+      r2: {
+        buckets: {
+          create: vi.fn().mockRejectedValue(new Error("already exists")),
+        },
+      },
+    });
+
+    const { ensureR2Bucket } = await import("../../lib/cloudflare-resources");
+    // Should not throw
+    await ensureR2Bucket(client, "acct-123", "my-bucket");
+  });
+
+  it("exits on other SDK errors", async () => {
+    const client = makeMockClient({
+      r2: {
+        buckets: {
+          create: vi.fn().mockRejectedValue(new Error("permission denied")),
+        },
+      },
+    });
+
+    const { ensureR2Bucket } = await import("../../lib/cloudflare-resources");
+    await expect(
+      ensureR2Bucket(client, "acct-123", "my-bucket"),
+    ).rejects.toThrow("process.exit(1)");
+  });
+});
+
+describe("applyR2Lifecycle", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("calls SDK lifecycle.update with correct rules", async () => {
+    const mockUpdate = vi.fn().mockResolvedValue({});
+    const client = makeMockClient({
+      r2: { buckets: { lifecycle: { update: mockUpdate } } },
+    });
+
+    const { applyR2Lifecycle } = await import("../../lib/cloudflare-resources");
+    await applyR2Lifecycle(client, "acct-123", "my-bucket");
+
+    expect(mockUpdate).toHaveBeenCalledWith("my-bucket", {
+      account_id: "acct-123",
+      rules: expect.arrayContaining([
+        expect.objectContaining({
+          id: "backstop-produced-1y",
+          conditions: { prefix: "produced/" },
+          enabled: true,
+          deleteObjectsTransition: {
+            condition: { maxAge: 365 * 86400, type: "Age" },
+          },
+        }),
+        expect.objectContaining({
+          id: "abort-incomplete-uploads-1d",
+          enabled: true,
+          abortMultipartUploadsTransition: {
+            condition: { maxAge: 86400, type: "Age" },
+          },
+        }),
+      ]),
+    });
+  });
+
+  it("does not throw on SDK failure", async () => {
+    const mockUpdate = vi.fn().mockRejectedValue(new Error("Access denied"));
+    const client = makeMockClient({
+      r2: { buckets: { lifecycle: { update: mockUpdate } } },
+    });
+
+    const { applyR2Lifecycle } = await import("../../lib/cloudflare-resources");
+    await expect(
+      applyR2Lifecycle(client, "acct-123", "my-bucket"),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("setWorkerSecret", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("calls SDK secrets.update with correct args", async () => {
+    const mockUpdate = vi.fn().mockResolvedValue({});
+    const mockClient = {
+      workers: { scripts: { secrets: { update: mockUpdate } } },
+    } as unknown as Cloudflare;
+
+    const { setWorkerSecret } = await import("../../lib/cloudflare-resources");
+    await setWorkerSecret(
+      mockClient,
+      "acct-123",
+      "my-worker",
+      "MY_SECRET",
+      "secret-value",
+    );
+
+    expect(mockUpdate).toHaveBeenCalledWith("my-worker", {
+      account_id: "acct-123",
+      name: "MY_SECRET",
+      text: "secret-value",
+      type: "secret_text",
+    });
+  });
+
+  it("throws on SDK error with secret name in message", async () => {
+    const mockClient = {
+      workers: {
+        scripts: {
+          secrets: {
+            update: vi.fn().mockRejectedValue(new Error("Forbidden")),
+          },
+        },
+      },
+    } as unknown as Cloudflare;
+
+    const { setWorkerSecret } = await import("../../lib/cloudflare-resources");
+    await expect(
+      setWorkerSecret(
+        mockClient,
+        "acct-123",
+        "my-worker",
+        "MY_SECRET",
+        "value",
+      ),
+    ).rejects.toThrow("Forbidden");
+  });
+
+  it("setWorkerSecrets calls all secrets in parallel", async () => {
+    const mockUpdate = vi.fn().mockResolvedValue({});
+    const mockClient = {
+      workers: { scripts: { secrets: { update: mockUpdate } } },
+    } as unknown as Cloudflare;
+
+    const { setWorkerSecrets } = await import("../../lib/cloudflare-resources");
+    await setWorkerSecrets(mockClient, "acct-123", "my-worker", {
+      FIRST: "value1",
+      SECOND: "value2",
+      THIRD: "value3",
+    });
+
+    expect(mockUpdate).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ensurePagesProject and deployToPages removed in Option A refactor (wrangler deploy path)

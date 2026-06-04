@@ -1,0 +1,31 @@
+{
+  "name": "tila",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev:setup": "bash scripts/dev-setup.sh",
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "biome check .",
+    "check": "biome check --write .",
+    "typecheck": "turbo typecheck",
+    "clean": "turbo clean"
+  },
+  "pnpm": {
+    "overrides": {
+      "wrangler": ">=4.59.1",
+      "ws": ">=8.20.1"
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "lefthook": "^1.7.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0"
+  }
+}

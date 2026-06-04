@@ -1,0 +1,84 @@
+{
+  "name": "tila-cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "tila CLI — durable state & coordination for multi-machine agentic work",
+  "keywords": [
+    "tila",
+    "cli",
+    "agentic",
+    "ai-agents",
+    "agent-coordination",
+    "cloudflare",
+    "mcp",
+    "state-management"
+  ],
+  "author": "Dawid Leszczyński (https://github.com/davebream)",
+  "homepage": "https://github.com/davebream/tila#readme",
+  "bugs": "https://github.com/davebream/tila/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davebream/tila.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "tila": "bin/tila.cjs"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": ["bin", "dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "build:worker-sidecar": "pnpm --filter @tila/worker exec wrangler deploy --dry-run --outdir ../cli/worker",
+    "compile": "bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:linux-x64-musl && bun run compile:linux-arm64-musl && bun run compile:darwin-arm64 && bun run compile:darwin-x64 && bun run compile:windows-x64 && bun run compile:windows-arm64",
+    "compile:linux-x64": "bun run build:worker-sidecar && bun build --compile --target bun-linux-x64 src/index.ts --outfile dist/binaries/tila-linux-x64",
+    "compile:linux-arm64": "bun run build:worker-sidecar && bun build --compile --target bun-linux-arm64 src/index.ts --outfile dist/binaries/tila-linux-arm64",
+    "compile:linux-x64-musl": "bun run build:worker-sidecar && bun build --compile --target bun-linux-x64-musl src/index.ts --outfile dist/binaries/tila-linux-x64-musl",
+    "compile:linux-arm64-musl": "bun run build:worker-sidecar && bun build --compile --target bun-linux-arm64-musl src/index.ts --outfile dist/binaries/tila-linux-arm64-musl",
+    "compile:darwin-arm64": "bun run build:worker-sidecar && bun build --compile --target bun-darwin-arm64 src/index.ts --outfile dist/binaries/tila-darwin-arm64",
+    "compile:darwin-x64": "bun run build:worker-sidecar && bun build --compile --target bun-darwin-x64 src/index.ts --outfile dist/binaries/tila-darwin-x64",
+    "compile:windows-x64": "bun run build:worker-sidecar && bun build --compile --target bun-windows-x64 src/index.ts --outfile dist/binaries/tila-windows-x64.exe",
+    "compile:windows-arm64": "bun run build:worker-sidecar && bun build --compile --target bun-windows-arm64 src/index.ts --outfile dist/binaries/tila-windows-arm64.exe"
+  },
+  "optionalDependencies": {
+    "tila-cli-darwin-arm64": "0.1.0",
+    "tila-cli-darwin-x64": "0.1.0",
+    "tila-cli-linux-arm64": "0.1.0",
+    "tila-cli-linux-arm64-musl": "0.1.0",
+    "tila-cli-linux-x64": "0.1.0",
+    "tila-cli-linux-x64-musl": "0.1.0",
+    "tila-cli-windows-arm64": "0.1.0",
+    "tila-cli-windows-x64": "0.1.0"
+  },
+  "devDependencies": {
+    "@clack/prompts": "^1.4.0",
+    "@tila/backend-local": "workspace:*",
+    "@tila/core": "workspace:*",
+    "@tila/schemas": "workspace:*",
+    "tila-sdk": "workspace:*",
+    "@types/node": "^25.8.0",
+    "ansis": "^4.3.1",
+    "citty": "^0.2.2",
+    "cloudflare": "^6.3.0",
+    "console-table-printer": "^2.15.0",
+    "dotenv": "^17.4.2",
+    "esbuild": "^0.28.0",
+    "object-treeify": "^5.0.1",
+    "smol-toml": "^1.6.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0",
+    "yaml": "^2.7.0",
+    "yocto-spinner": "^1.2.0",
+    "zod": "^3.24.0"
+  }
+}

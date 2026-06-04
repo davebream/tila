@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/schemas" },
+    { "path": "packages/core" },
+    { "path": "packages/backend-d1" },
+    { "path": "packages/backend-do" },
+    { "path": "packages/backend-r2" },
+    { "path": "packages/worker" },
+    { "path": "packages/ui" },
+    { "path": "packages/cli" },
+    { "path": "packages/integration-tests" }
+  ]
+}

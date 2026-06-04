@@ -1,0 +1,22 @@
+{
+  "name": "tila-cli-linux-arm64",
+  "version": "0.1.0",
+  "description": "Linux arm64 binary for tila-cli",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "bin": {
+    "tila": "bin/tila"
+  },
+  "files": ["bin"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davebream/tila.git",
+    "directory": "packages/cli-linux-arm64"
+  },
+  "homepage": "https://github.com/davebream/tila#readme",
+  "bugs": "https://github.com/davebream/tila/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,6 @@
+dist/binaries/
+
+# tila
+.tila/.env
+.tila/.session
+.tila/wrangler.toml

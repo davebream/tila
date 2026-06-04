@@ -1,0 +1,3 @@
+# Generated per-deploy wrangler configs
+wrangler.*.toml
+!wrangler.toml

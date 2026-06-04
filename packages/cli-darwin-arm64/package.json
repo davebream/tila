@@ -1,0 +1,22 @@
+{
+  "name": "tila-cli-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Darwin arm64 binary for tila-cli",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "bin": {
+    "tila": "bin/tila"
+  },
+  "files": ["bin"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davebream/tila.git",
+    "directory": "packages/cli-darwin-arm64"
+  },
+  "homepage": "https://github.com/davebream/tila#readme",
+  "bugs": "https://github.com/davebream/tila/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}

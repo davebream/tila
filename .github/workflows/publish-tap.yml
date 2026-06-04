@@ -1,0 +1,77 @@
+name: Publish Homebrew Tap
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Extract release metadata
+        id: meta
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Download checksums
+        id: checksums
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          curl -fsSL "https://github.com/davebream/tila/releases/download/${TAG}/checksums.txt" -o checksums.txt
+
+          SHA_DARWIN_ARM64=$(grep 'tila-darwin-arm64$' checksums.txt | awk '{print $1}')
+          SHA_DARWIN_X64=$(grep 'tila-darwin-x64$' checksums.txt | awk '{print $1}')
+          SHA_LINUX_ARM64=$(grep 'tila-linux-arm64$' checksums.txt | awk '{print $1}')
+          SHA_LINUX_X64=$(grep 'tila-linux-x64$' checksums.txt | awk '{print $1}')
+
+          echo "sha_darwin_arm64=${SHA_DARWIN_ARM64}" >> $GITHUB_OUTPUT
+          echo "sha_darwin_x64=${SHA_DARWIN_X64}" >> $GITHUB_OUTPUT
+          echo "sha_linux_arm64=${SHA_LINUX_ARM64}" >> $GITHUB_OUTPUT
+          echo "sha_linux_x64=${SHA_LINUX_X64}" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: davebream/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+      - name: Update formula
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+
+          # Update version
+          sed -i "s|version \".*\"|version \"${VERSION}\"|g" Formula/tila.rb
+
+          # Update URLs (replace tag in download URLs)
+          sed -i "s|releases/download/v[^/]*/tila-|releases/download/${TAG}/tila-|g" Formula/tila.rb
+
+          # Update SHA-256 hashes per platform
+          # darwin-arm64
+          sed -i "/tila-darwin-arm64/{ n; s|sha256 \".*\"|sha256 \"${{ steps.checksums.outputs.sha_darwin_arm64 }}\"|; }" Formula/tila.rb
+          # darwin-x64
+          sed -i "/tila-darwin-x64/{ n; s|sha256 \".*\"|sha256 \"${{ steps.checksums.outputs.sha_darwin_x64 }}\"|; }" Formula/tila.rb
+          # linux-arm64
+          sed -i "/tila-linux-arm64/{ n; s|sha256 \".*\"|sha256 \"${{ steps.checksums.outputs.sha_linux_arm64 }}\"|; }" Formula/tila.rb
+          # linux-x64
+          sed -i "/tila-linux-x64/{ n; s|sha256 \".*\"|sha256 \"${{ steps.checksums.outputs.sha_linux_x64 }}\"|; }" Formula/tila.rb
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet Formula/tila.rb; then
+            echo "WARNING: Formula unchanged after sed replacements — manual inspection needed" >&2
+            exit 1
+          fi
+
+          git add Formula/tila.rb
+          git commit -m "Update tila formula to ${{ steps.meta.outputs.tag }}"
+          git push

@@ -1,0 +1,4 @@
+# Exclude compiled binaries — published via per-platform packages, not the main package
+# Note: at CI publish time, dist/binaries/ will not exist (bun compile is not run in npm-publish job)
+dist/binaries/
+*.map

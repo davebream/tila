@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "tila-dev": {
+      "command": "npx",
+      "args": ["-y", "tila-mcp-server"],
+      "env": {
+        "TILA_API_TOKEN": "dev-token",
+        "TILA_API_URL": "http://localhost:8787",
+        "TILA_PROJECT_ID": "your-project-id"
+      }
+    }
+  }
+}

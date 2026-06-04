@@ -1,0 +1,25 @@
+{
+  "name": "@tila/integration-tests",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "consumer": "vitest run --reporter=verbose src/consumer.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.12",
+    "@cloudflare/workers-types": "^4.20260602.1",
+    "@types/node": "^22.0.0",
+    "@tila/backend-r2": "workspace:*",
+    "tila-cli": "workspace:*",
+    "@tila/schemas": "workspace:*",
+    "tila-sdk": "workspace:*",
+    "hono": "^4.6.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0",
+    "zod": "^3.24.0"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@tila/backend-do",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "prebuild": "node -e \"const{execSync:e}=require('child_process');const{writeFileSync:w}=require('fs');const sha=e('git rev-parse --short HEAD').toString().trim();w('src/version.ts','export const DO_CODE_VERSION = \\\"'+sha+'\\\";\\n')\"",
+    "build": "pnpm run prebuild && tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tila/core": "workspace:*",
+    "@tila/ops-sqlite": "workspace:*",
+    "@tila/schemas": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.6.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260602.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0"
+  }
+}
