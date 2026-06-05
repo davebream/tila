@@ -39,6 +39,14 @@ export type { IndexCreateOpts } from "./indexes";
 export { createSummaryMethods } from "./summary";
 export { createSearchMethods } from "./search";
 
+// Namespace coexistence convention
+export { createNamespace } from "./namespace";
+export {
+  applyPrefix,
+  stripPrefix,
+  validateNamespace,
+} from "./namespace-prefix";
+
 // Coordination primitives
 export { ClaimHandle, withClaim } from "./claim-handle";
 export type { ClaimHandleOptions } from "./claim-handle";
