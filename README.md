@@ -240,6 +240,7 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 - [Search](docs/06-SEARCH.md): searchable artifact kinds and FTS5 usage
 - [GitHub-scoped Auth](docs/07-GITHUB-SCOPED-AUTH.md): GitHub auth (default) and repo allowlist
 - [Records](docs/08-RECORDS.md): typed mutable JSON state primitive
+- [Shared-Project Coexistence](docs/09-SHARED-PROJECT-COEXISTENCE.md): sharing one project across a framework and direct use
 
 ---
 

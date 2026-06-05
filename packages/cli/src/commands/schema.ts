@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { TilaApiError } from "tila-sdk";
 import { z } from "zod";
 import { resolveContext } from "../context";
 import { printJson, printJsonError } from "../lib/output";
+import { loadComposedSchema } from "../lib/schema-loader";
 
 const PreviewSchemaResponseSchema = z.object({
   ok: z.literal(true),
@@ -34,22 +34,45 @@ export default defineCommand({
           process.exit(1);
         }
 
-        // Read tila.schema.toml from current working directory
-        let definition: string;
-        try {
-          definition = readFileSync("tila.schema.toml", "utf8");
-        } catch {
-          if (args.json) {
-            printJsonError(
-              "tila.schema.toml not found in current directory",
-              "FILE_NOT_FOUND",
-            );
+        // Discover and compose *.schema.toml fragments from current directory
+        const loaded = loadComposedSchema();
+
+        if (!loaded.ok) {
+          if (loaded.code === "FILE_NOT_FOUND") {
+            if (args.json) {
+              printJsonError(
+                "No schema fragments found in current directory",
+                "FILE_NOT_FOUND",
+              );
+            } else {
+              console.error(
+                "Error: No schema fragments found in current directory. Create a tila.schema.toml file.",
+              );
+            }
           } else {
-            console.error(
-              "Error: tila.schema.toml not found in current directory.",
-            );
+            // SCHEMA_PARSE_ERROR
+            const msgs = loaded.errors.map((e) => e.message).join("; ");
+            if (args.json) {
+              printJsonError(
+                `Schema parse error: ${msgs}`,
+                "SCHEMA_PARSE_ERROR",
+              );
+            } else {
+              console.error(`Schema parse error: ${msgs}`);
+            }
           }
           process.exit(1);
+          return; // unreachable at runtime; needed so mocked exit in tests doesn't fall through
+        }
+
+        const { definition } = loaded;
+
+        // Render advisory warnings as a single block (not N bullets)
+        if (loaded.warnings.length > 0) {
+          const warningLines = loaded.warnings
+            .map((w) => `  ${w.message} (${w.fragments.join(", ")})`)
+            .join("\n");
+          console.warn(`Schema composition warnings:\n${warningLines}`);
         }
 
         let result: z.infer<typeof PreviewSchemaResponseSchema>;
@@ -217,21 +240,49 @@ export default defineCommand({
       async run({ args }) {
         const { schema } = await resolveContext();
 
-        // Read tila.schema.toml from current working directory
-        let definition: string;
-        try {
-          definition = readFileSync("tila.schema.toml", "utf8");
-        } catch {
-          if (args.json) {
-            printJsonError(
-              "tila.schema.toml not found in current directory",
-              "FILE_NOT_FOUND",
-            );
+        // Discover and compose *.schema.toml fragments from current directory
+        const loaded = loadComposedSchema();
+
+        if (!loaded.ok) {
+          if (loaded.code === "FILE_NOT_FOUND") {
+            // Intentional cleanup: the original code had a double-emit in --json mode
+            // (printJsonError inside if (args.json) then unconditional console.error
+            // below it). Both branches now exit cleanly inside their own branch,
+            // matching the clean if/else pattern used in schema diff.
+            if (args.json) {
+              printJsonError(
+                "No schema fragments found in current directory",
+                "FILE_NOT_FOUND",
+              );
+            } else {
+              console.error(
+                "Error: No schema fragments found in current directory. Create a tila.schema.toml file.",
+              );
+            }
+          } else {
+            // SCHEMA_PARSE_ERROR
+            const msgs = loaded.errors.map((e) => e.message).join("; ");
+            if (args.json) {
+              printJsonError(
+                `Schema parse error: ${msgs}`,
+                "SCHEMA_PARSE_ERROR",
+              );
+            } else {
+              console.error(`Schema parse error: ${msgs}`);
+            }
           }
-          console.error(
-            "Error: tila.schema.toml not found in current directory.",
-          );
           process.exit(1);
+          return; // TypeScript: unreachable, but helps narrowing
+        }
+
+        const { definition } = loaded;
+
+        // Render advisory warnings as a single block (not N bullets — per cli-output.md)
+        if (loaded.warnings.length > 0) {
+          const warningLines = loaded.warnings
+            .map((w) => `  ${w.message} (${w.fragments.join(", ")})`)
+            .join("\n");
+          console.warn(`Schema composition warnings:\n${warningLines}`);
         }
 
         const result = await schema.applySchema({
@@ -279,14 +330,17 @@ export default defineCommand({
         const { schema } = await resolveContext();
         const record = await schema.getCurrentSchema();
 
+        // Read declared version via loadComposedSchema (no regex on serialized output).
+        // status is read-only and must never hard-error:
+        //   - FILE_NOT_FOUND → no local schema file is fine (declaredVersion stays null)
+        //   - SCHEMA_PARSE_ERROR → swallow and report declared version as unknown
+        //     (preserves the old regex leniency for status)
         let declaredVersion: number | null = null;
-        try {
-          const toml = readFileSync("tila.schema.toml", "utf8");
-          const match = /^\s*schema_version\s*=\s*(\d+)/m.exec(toml);
-          if (match) declaredVersion = Number.parseInt(match[1], 10);
-        } catch {
-          // No local tila.schema.toml — that's fine for status
+        const loaded = loadComposedSchema();
+        if (loaded.ok) {
+          declaredVersion = loaded.schemaVersion;
         }
+        // FILE_NOT_FOUND and SCHEMA_PARSE_ERROR both leave declaredVersion as null
 
         const appliedVersion = record.version ?? null;
 

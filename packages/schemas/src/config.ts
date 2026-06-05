@@ -166,3 +166,18 @@ export const TilaSchemaTomlSchema = z.object({
 });
 
 export type TilaSchemaToml = z.infer<typeof TilaSchemaTomlSchema>;
+
+// --- Fragment composition merge policy ---
+// Single source of truth for how each top-level section is merged when multiple
+// *.schema.toml fragments are composed into one effective definition.
+export const SCHEMA_SECTION_MERGE_POLICY = {
+  work_units: "disjoint-keys",
+  records: "disjoint-keys",
+  templates: "disjoint-keys",
+  artifacts: "disjoint-keys",
+  hierarchy: "singleton",
+  artifact_relationships: "singleton",
+  entity_artifact_references: "singleton",
+  schema_version: "singleton-scalar",
+} as const;
+export type SchemaSectionMergePolicy = typeof SCHEMA_SECTION_MERGE_POLICY;

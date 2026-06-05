@@ -188,6 +188,8 @@ Reasons:
 Future multi-repo support may enforce authorization and filtering from
 `repo:*` tags, but tags do not become identity.
 
+> For multi-namespace coexistence within one project (frameworks on the SDK sharing a project with direct use), see [Shared-Project Coexistence](09-SHARED-PROJECT-COEXISTENCE.md).
+
 ### Type Validation
 
 Record types are declared in `tila.schema.toml` under `[records.<type>]`.
