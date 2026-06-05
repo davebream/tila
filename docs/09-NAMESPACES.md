@@ -8,7 +8,7 @@ prevents those collisions without any server-side change.
 ## The convention
 
 ```ts
-import { createNamespace } from "@tila/sdk";
+import { createNamespace } from "tila-sdk";
 
 const ns = createNamespace(client, projectId, "cp");
 

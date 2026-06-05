@@ -1,5 +1,5 @@
 /**
- * Namespace coexistence convention for @tila/sdk.
+ * Namespace coexistence convention for tila-sdk.
  *
  * createNamespace(client, projectId, ns) returns {tasks, records, artifacts, templates}
  * where every declared name (work-unit type, record type, artifact kind,
