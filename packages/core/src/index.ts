@@ -77,6 +77,14 @@ export {
 // Semver utilities
 export { compareSemver } from "./semver";
 
+// Schema fragment composition engine
+export {
+  composeSchemaFragments,
+  type SchemaFragment,
+  type ComposeWarning,
+  type ComposeSchemaResult,
+} from "./schema-compose";
+
 // Grep matcher, validator, line-splitter, and cap constants
 export {
   GrepQueryError,

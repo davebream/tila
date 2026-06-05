@@ -76,6 +76,8 @@ export {
   type TemplateRelationship,
   RecordDefinitionSchema,
   type RecordDefinition,
+  SCHEMA_SECTION_MERGE_POLICY,
+  type SchemaSectionMergePolicy,
 } from "./config";
 export { TilaInfraConfigSchema, type TilaInfraConfig } from "./infra-config";
 
