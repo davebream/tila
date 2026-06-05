@@ -17,7 +17,7 @@
     "tila-cli": "workspace:*",
     "@tila/schemas": "workspace:*",
     "tila-sdk": "workspace:*",
-    "hono": "^4.6.0",
+    "hono": "^4.12.21",
     "typescript": "^5.7.0",
     "vitest": "^4.1.0",
     "zod": "^3.24.0"
