@@ -949,6 +949,33 @@ tila record tag remove service api repo:api-service
 Do not implement tag add/remove commands in v0.1 unless needed by the initial
 record implementation.
 
+### Tags as a Shared Facet
+
+Tags are no longer records-only. As of the `tags-on-work-units-artifacts`
+feature, the same `TagSchema` is shared across all three primary data types:
+
+| Data type | Storage table | SDK method | MCP tool |
+|---|---|---|---|
+| Records | `record_tags` | `records.create({ tags })` | `tila_record_get` / `tila_record_list` |
+| Work units (tasks/entities) | `entity_tags` | `tasks.create(id, type, data, tags)` | `tila_task_create` |
+| Artifacts | `artifact_tags` | `artifacts.upload(file, { tags })` / `artifacts.writeText(...)` | `tila_artifact_put` / `tila_artifact_write_text` |
+
+The single shared contract (`TagSchema` in `@tila/schemas`):
+
+```text
+Regex:    ^[a-zA-Z0-9][a-zA-Z0-9_:.-]{0,63}$
+Max tags: 20 per parent
+Storage:  lowercase normalized, case-insensitive dedup
+```
+
+Identity is unchanged for all three types — tags are strictly additive metadata
+and do not alter `(type, key)` for records, `entities.id` for work units, or
+`artifact_pointers.r2_key` for artifacts.
+
+The `tag_filter` query parameter on list/search routes (worker + SDK + MCP) is
+implemented in sibling task T5 and is forthcoming. The ops-layer equality-filter
+foundation is already in place.
+
 ### Data Filters
 
 `dataFilter` supports top-level field equality only.
