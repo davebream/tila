@@ -143,4 +143,23 @@ describe("getLatestPointer", () => {
     const result = getLatestPointer(db, "plan", "task-1");
     expect(result?.r2_key).toBe("keys/chain-b-v2.md");
   });
+
+  it("returns tags written via upsertPointer", () => {
+    const ptr = makePointer();
+    upsertPointer(db, ptr, { actor: "agent" }, undefined, null, false, [
+      "team:eng",
+      "env:prod",
+    ]);
+    const result = getLatestPointer(db, "plan", "task-1");
+    expect(result?.tags?.slice().sort()).toEqual(
+      ["env:prod", "team:eng"].sort(),
+    );
+  });
+
+  it("returns empty tags array when none were written", () => {
+    const ptr = makePointer();
+    upsertPointer(db, ptr, { actor: "agent" });
+    const result = getLatestPointer(db, "plan", "task-1");
+    expect(result?.tags).toEqual([]);
+  });
 });
