@@ -250,6 +250,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       parsed.data.data,
       parsed.data.fence,
       origin,
+      (parsed.data as { tags?: string[] }).tags,
     );
     return c.json({ ok: true, entity });
   });

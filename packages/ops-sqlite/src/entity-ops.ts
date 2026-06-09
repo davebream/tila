@@ -5,8 +5,9 @@ import type {
   Entity,
   RecordSearchResult,
 } from "@tila/schemas";
+import { TagsSchema } from "@tila/schemas";
 import type { TilaSchemaToml } from "@tila/schemas";
-import { type SQL, and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { type SQL, and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
   SearchQueryError,
@@ -72,6 +73,7 @@ function rowToEntity(row: typeof schema.entities.$inferSelect): Entity {
     created_at: row.created_at,
     updated_at: row.updated_at,
     created_by: row.created_by,
+    tags: [], // populated by get/list after tag read; rowToEntity cannot read tags
   };
 }
 
@@ -82,11 +84,16 @@ export function create(
     type: string;
     data: Record<string, unknown>;
     created_by: string;
+    tags?: string[];
   },
   schemaVersion: number,
   origin: RequestOrigin,
 ): Entity {
   const now = Date.now();
+  // Validate + normalize tags before the transaction to avoid holding the lock
+  const normalizedTags =
+    input.tags !== undefined ? (TagsSchema.parse(input.tags) as string[]) : [];
+
   return db.transaction((tx) => {
     try {
       tx.insert(schema.entities)
@@ -109,6 +116,12 @@ export function create(
         throw new EntityAlreadyExistsError(input.id);
       }
       throw err;
+    }
+
+    // Insert tags AFTER the entity-insert try/catch so a tag-PK collision
+    // is never misclassified as EntityAlreadyExistsError.
+    for (const tag of normalizedTags) {
+      tx.insert(schema.entityTags).values({ entity_id: input.id, tag }).run();
     }
 
     appendJournal(tx, {
@@ -137,7 +150,9 @@ export function create(
       .where(eq(schema.entities.id, input.id))
       .get();
 
-    return rowToEntity(row as typeof schema.entities.$inferSelect);
+    const entity = rowToEntity(row as typeof schema.entities.$inferSelect);
+    entity.tags = normalizedTags;
+    return entity;
   });
 }
 
@@ -154,6 +169,15 @@ export function get(
 
   if (!row) return null;
   const entity = rowToEntity(row);
+
+  // Read tags for this entity
+  const tagRows = db
+    .select()
+    .from(schema.entityTags)
+    .where(eq(schema.entityTags.entity_id, id))
+    .all();
+  entity.tags = tagRows.map((t) => t.tag);
+
   if (!enrichOpts) return entity;
   const cache = new Map<number, TilaSchemaToml | null>();
   return enrichEntity(entity, cache, enrichOpts);
@@ -169,6 +193,7 @@ export function list(
     order?: "asc" | "desc";
     limit?: number;
     offset?: number;
+    tag?: string;
   },
   enrichOpts?: EnrichOpts,
 ): { entities: Entity[]; total: number } {
@@ -197,6 +222,11 @@ export function list(
         );
       }
     }
+  }
+  if (filter?.tag) {
+    conditions.push(
+      sql`EXISTS (SELECT 1 FROM entity_tags et WHERE et.entity_id = ${schema.entities.id} AND et.tag = ${filter.tag})`,
+    );
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -251,6 +281,30 @@ export function list(
   const rows = query.all();
   const entities = rows.map(rowToEntity);
 
+  // Batch tag enrichment: single OR query over all returned entities (no N+1)
+  if (entities.length > 0) {
+    const tagConditions = entities.map((e) =>
+      eq(schema.entityTags.entity_id, e.id),
+    );
+    const allTags = db
+      .select()
+      .from(schema.entityTags)
+      .where(or(...(tagConditions as [SQL, ...SQL[]])))
+      .all();
+
+    // Build tag map: entity_id -> tags[]
+    const tagMap = new Map<string, string[]>();
+    for (const t of allTags) {
+      const arr = tagMap.get(t.entity_id) ?? [];
+      arr.push(t.tag);
+      tagMap.set(t.entity_id, arr);
+    }
+
+    for (const entity of entities) {
+      entity.tags = tagMap.get(entity.id) ?? [];
+    }
+  }
+
   if (!enrichOpts) return { entities, total };
   const cache = new Map<number, TilaSchemaToml | null>();
   return {
@@ -301,7 +355,12 @@ export function update(
   data: Record<string, unknown>,
   fence: number,
   origin: RequestOrigin,
+  tags?: string[],
 ): Entity {
+  // Validate + normalize tags before the transaction
+  const normalizedTags =
+    tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
+
   return db.transaction((tx) => {
     const existing = tx
       .select()
@@ -337,6 +396,16 @@ export function update(
       .where(eq(schema.entities.id, id))
       .run();
 
+    // Tag update: undefined=preserve, []=clear, [...]= replace
+    if (normalizedTags !== undefined) {
+      tx.delete(schema.entityTags)
+        .where(eq(schema.entityTags.entity_id, id))
+        .run();
+      for (const tag of normalizedTags) {
+        tx.insert(schema.entityTags).values({ entity_id: id, tag }).run();
+      }
+    }
+
     appendJournal(tx, {
       kind: "entity.updated",
       resource: id,
@@ -363,7 +432,21 @@ export function update(
       .where(eq(schema.entities.id, id))
       .get();
 
-    return rowToEntity(updated as typeof schema.entities.$inferSelect);
+    const entity = rowToEntity(updated as typeof schema.entities.$inferSelect);
+
+    // Attach final tags: if we updated them, use normalizedTags; else read current tags
+    if (normalizedTags !== undefined) {
+      entity.tags = normalizedTags;
+    } else {
+      const tagRows = tx
+        .select()
+        .from(schema.entityTags)
+        .where(eq(schema.entityTags.entity_id, id))
+        .all();
+      entity.tags = tagRows.map((t) => t.tag);
+    }
+
+    return entity;
   });
 }
 
