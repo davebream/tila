@@ -14,8 +14,10 @@ import {
   RecordSetRequestSchema,
   RecordUnarchiveRequestSchema,
   formatRecordResource,
+  parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { ZodError } from "zod";
 import { jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
@@ -453,6 +455,21 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       }
     }
 
+    let tagFilter: string[] | undefined;
+    try {
+      tagFilter = parseTagFilter(c.req.query("tag_filter"));
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          err.issues.map((i) => i.message).join("; "),
+        );
+      }
+      throw err;
+    }
+
     try {
       const result = recordOps.listRecords(deps.db, {
         type,
@@ -460,6 +477,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         tag: tag ?? undefined,
         dataFilter,
         limit,
+        tagFilter,
       });
 
       return c.json({

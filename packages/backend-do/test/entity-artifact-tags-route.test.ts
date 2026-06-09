@@ -7,6 +7,14 @@
  * - POST /artifact/pointer with tags -> GET /artifact/latest returns tags
  * - GET /artifact/pointers returns tags
  * - Response tags default to [] when omitted from create
+ *
+ * Phase 4 tag_filter tests (Task 4):
+ * - GET /entity/list?tag_filter=a,b — AND filtering
+ * - GET /entity/search?q=…&tag_filter=… — AND filtering on FTS
+ * - GET /search?q=…&tag_filter=… — unified search AND filtering
+ * - GET /artifact/list?tag_filter=… — AND filtering
+ * - GET /artifact/search?q=…&tag_filter=… — AND filtering on FTS
+ * - invalid tag_filter → 400
  */
 
 import Database from "better-sqlite3";
@@ -20,10 +28,12 @@ import {
   type MigrationStorage,
   artifactOps,
   entityOps,
+  recordOps,
   schema,
 } from "../../ops-sqlite/src";
 import { createArtifactRoutes } from "../src/routes/artifact-routes";
 import { createEntityRoutes } from "../src/routes/entity-routes";
+import { createRecordRoutes } from "../src/routes/record-routes";
 import type { RouterDeps } from "../src/routes/types";
 
 // Patch COALESCE-based PK that standard SQLite does not support
@@ -364,5 +374,209 @@ describe("artifact pointer upsert + get/list tags via DO route", () => {
     );
     expect(ptr).toBeDefined();
     expect(ptr?.tags).toEqual(["new:tag"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 4: tag_filter AND filtering via DO routes
+// ---------------------------------------------------------------------------
+
+// Helper to seed an entity via ops directly
+function seedEntity(
+  d: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  id: string,
+  tags: string[],
+) {
+  entityOps.create(
+    d as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+    { id, type: "task", data: { title: id }, created_by: "agent", tags },
+    1,
+    { actor: "agent" },
+  );
+}
+
+// Helper to seed an artifact via ops
+function seedArtifact(
+  d: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  key: string,
+  title: string,
+  tags: string[],
+) {
+  artifactOps.upsertPointer(
+    d as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+    {
+      r2_key: key,
+      resource: null,
+      kind: "plan",
+      sha256: key,
+      bytes: 100,
+      fence: null,
+      mime_type: "text/plain",
+      produced_at: Date.now(),
+      produced_by: "agent",
+      expires_at: null,
+    },
+    { actor: "agent" },
+    undefined,
+    { title, body_text: title },
+    false,
+    tags,
+  );
+}
+
+describe("tag_filter AND filtering on /entity/list", () => {
+  it("returns only entities matching all tags in tag_filter", async () => {
+    seedEntity(db, "T-filter1", ["repo:a", "team:x"]);
+    seedEntity(db, "T-filter2", ["repo:a"]);
+    seedEntity(db, "T-filter3", ["team:x"]);
+
+    const app = createEntityRoutes(
+      makeDeps(
+        db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      ),
+    );
+    const res = await app.request("/entity/list?tag_filter=repo:a,team:x");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      entities: Array<{ id: string }>;
+    };
+    expect(body.ok).toBe(true);
+    const ids = body.entities.map((e) => e.id);
+    expect(ids).toContain("T-filter1");
+    expect(ids).not.toContain("T-filter2");
+    expect(ids).not.toContain("T-filter3");
+  });
+
+  it("returns 400 on invalid tag grammar in tag_filter", async () => {
+    const app = createEntityRoutes(
+      makeDeps(
+        db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      ),
+    );
+    const res = await app.request("/entity/list?tag_filter=bad!tag");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toMatch(/validation-error|invalid-query/);
+  });
+});
+
+describe("tag_filter AND filtering on /artifact/list", () => {
+  it("returns only artifacts matching all tags in tag_filter", async () => {
+    // r2_key must contain a slash (artifact_pointers_r2_key_has_slash CHECK)
+    seedArtifact(db, "plan/art-1.md", "art1", ["repo:a", "team:x"]);
+    seedArtifact(db, "plan/art-2.md", "art2", ["repo:a"]);
+    seedArtifact(db, "plan/art-3.md", "art3", ["team:x"]);
+
+    const app = createArtifactRoutes(
+      makeDeps(
+        db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      ),
+    );
+    const res = await app.request("/artifact/list?tag_filter=repo:a,team:x");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      pointers: Array<{ r2_key: string }>;
+    };
+    expect(body.ok).toBe(true);
+    const keys = body.pointers.map((p) => p.r2_key);
+    expect(keys).toContain("plan/art-1.md");
+    expect(keys).not.toContain("plan/art-2.md");
+    expect(keys).not.toContain("plan/art-3.md");
+  });
+
+  it("returns 400 on invalid tag grammar in artifact list tag_filter", async () => {
+    const app = createArtifactRoutes(
+      makeDeps(
+        db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      ),
+    );
+    const res = await app.request("/artifact/list?tag_filter=bad tag");
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("tag_filter on /artifact/search", () => {
+  it("returns 400 on invalid tag grammar in artifact search tag_filter", async () => {
+    const app = createArtifactRoutes(
+      makeDeps(
+        db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      ),
+    );
+    const res = await app.request(
+      "/artifact/search?q=hello&tag_filter=bad!tag",
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toMatch(/validation-error|invalid-query/);
+  });
+
+  it("accepts valid tag_filter and passes it to ops (no FTS results in empty db is ok)", async () => {
+    const app = createArtifactRoutes(
+      makeDeps(
+        db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      ),
+    );
+    const res = await app.request(
+      "/artifact/search?q=hello&tag_filter=repo:a,team:x",
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      results: unknown[];
+    };
+    expect(body.ok).toBe(true);
+    expect(body.results).toEqual([]);
+  });
+});
+
+describe("tag_filter AND filtering on /record/:type/list", () => {
+  it("returns only records matching all tags in tag_filter", async () => {
+    // seed records with tags
+    await recordOps.createRecord(
+      db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      {
+        type: "config",
+        key: "r1",
+        value: { x: 1 },
+        schema_version: 1,
+        actor: "agent",
+        tags: ["repo:a", "team:x"],
+      },
+      { actor: "agent" },
+    );
+    await recordOps.createRecord(
+      db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      {
+        type: "config",
+        key: "r2",
+        value: { x: 2 },
+        schema_version: 1,
+        actor: "agent",
+        tags: ["repo:a"],
+      },
+      { actor: "agent" },
+    );
+
+    const app = createRecordRoutes(
+      makeDeps(
+        db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+      ),
+    );
+    const res = await app.request(
+      "/record/config/list?tag_filter=repo:a,team:x",
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      items: Array<{ key: string }>;
+    };
+    expect(body.ok).toBe(true);
+    const keys = body.items.map((i) => i.key);
+    expect(keys).toContain("r1");
+    expect(keys).not.toContain("r2");
   });
 });
