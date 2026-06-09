@@ -9,9 +9,11 @@ import {
   TilaSchemaTomlSchema,
   canonicalJson,
   canonicalJsonSha256,
+  parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import TOML from "smol-toml";
+import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
@@ -565,6 +567,14 @@ records.get("/:type", async (c) => {
       );
     }
   }
+  let tagFilter: string[] | undefined;
+  try {
+    tagFilter = parseTagFilter(c.req.query("tag_filter"));
+  } catch (err) {
+    if (err instanceof ZodError) return zodValidationError(c, err);
+    throw err;
+  }
+  if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
   return forwardToDO(
     stub,
     `/record/${type}/list`,

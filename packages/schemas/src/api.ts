@@ -704,6 +704,78 @@ export type EntityArtifactReferenceListResponse = z.infer<
   typeof EntityArtifactReferenceListResponseSchema
 >;
 
+// --- tag_filter query parsing ---
+
+/**
+ * Parse a raw comma-separated `tag_filter` query-string value into a validated,
+ * normalized (lowercase, deduped, max-20) array of tags.
+ *
+ * - Empty / absent input → `undefined` (no filter)
+ * - Invalid tag grammar  → throws `ZodError`
+ * - More than 20 unique tags → throws `ZodError`
+ */
+export function parseTagFilter(raw: string | undefined): string[] | undefined {
+  if (!raw) return undefined;
+
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+
+  if (parts.length === 0) return undefined;
+
+  // Validate each lowercased tag against the grammar (TagSchema accepts both
+  // upper and lower; we pass the already-lowercased value so it validates cleanly).
+  for (const part of parts) {
+    TagSchema.parse(part);
+  }
+
+  // Deduplicate
+  const unique = [...new Set(parts)];
+
+  if (unique.length > 20) {
+    throw new z.ZodError([
+      {
+        code: z.ZodIssueCode.too_big,
+        maximum: 20,
+        type: "array",
+        inclusive: true,
+        exact: false,
+        message: "tag_filter may not have more than 20 tags",
+        path: ["tag_filter"],
+      },
+    ]);
+  }
+
+  return unique;
+}
+
+/**
+ * Zod field for a `tag_filter` query parameter.
+ * Accepts an optional string, transforms it via `parseTagFilter`.
+ * Uses superRefine + transform so that ZodErrors from parseTagFilter are
+ * reported via ctx.addIssue rather than thrown (thrown ZodErrors escape
+ * safeParse in Zod v3).
+ */
+export const tagFilterQueryParam = z
+  .string()
+  .optional()
+  .superRefine((v, ctx) => {
+    if (!v) return;
+    try {
+      parseTagFilter(v);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        for (const issue of err.issues) {
+          ctx.addIssue(issue);
+        }
+      } else {
+        throw err;
+      }
+    }
+  })
+  .transform((v) => parseTagFilter(v));
+
 // --- Artifact Search API ---
 
 export const ArtifactSearchResponseSchema = z.object({
@@ -733,6 +805,7 @@ export const ArtifactSearchQuerySchema = z.object({
     .default("20")
     .transform((v) => Number.parseInt(v, 10))
     .pipe(z.number().int().min(1).max(100)),
+  tag_filter: tagFilterQueryParam,
 });
 
 export type ArtifactSearchQuery = z.infer<typeof ArtifactSearchQuerySchema>;
@@ -820,6 +893,7 @@ export const UnifiedSearchQuerySchema = z.object({
     .default("20")
     .transform((v) => Number.parseInt(v, 10))
     .pipe(z.number().int().min(1).max(100)),
+  tag_filter: tagFilterQueryParam,
 });
 
 export type UnifiedSearchQuery = z.infer<typeof UnifiedSearchQuerySchema>;
@@ -1076,59 +1150,3 @@ export const RecordTypesResponseSchema = z.object({
 });
 
 export type RecordTypesResponse = z.infer<typeof RecordTypesResponseSchema>;
-
-// --- tag_filter query parsing ---
-
-/**
- * Parse a raw comma-separated `tag_filter` query-string value into a validated,
- * normalized (lowercase, deduped, max-20) array of tags.
- *
- * - Empty / absent input → `undefined` (no filter)
- * - Invalid tag grammar  → throws `ZodError`
- * - More than 20 unique tags → throws `ZodError`
- */
-export function parseTagFilter(raw: string | undefined): string[] | undefined {
-  if (!raw) return undefined;
-
-  const parts = raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0);
-
-  if (parts.length === 0) return undefined;
-
-  // Validate each lowercased tag against the grammar (TagSchema accepts both
-  // upper and lower; we pass the already-lowercased value so it validates cleanly).
-  for (const part of parts) {
-    TagSchema.parse(part);
-  }
-
-  // Deduplicate
-  const unique = [...new Set(parts)];
-
-  if (unique.length > 20) {
-    throw new z.ZodError([
-      {
-        code: z.ZodIssueCode.too_big,
-        maximum: 20,
-        type: "array",
-        inclusive: true,
-        exact: false,
-        message: "tag_filter may not have more than 20 tags",
-        path: ["tag_filter"],
-      },
-    ]);
-  }
-
-  return unique;
-}
-
-/**
- * Zod field for a `tag_filter` query parameter.
- * Accepts an optional string, transforms it via `parseTagFilter`.
- * Surfaces a ZodError on invalid input, passing through `undefined` when absent/empty.
- */
-export const tagFilterQueryParam = z
-  .string()
-  .optional()
-  .transform((v) => parseTagFilter(v));

@@ -142,4 +142,52 @@ describe("search route", () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe("GET /search tag_filter", () => {
+    const FULL_TOKEN: HonoVariables["tokenResult"] = {
+      kind: "d1-token" as const,
+      projectId: "proj-1",
+      name: "admin-token",
+      scopes: "full",
+      tokenId: "tok-uuid",
+    };
+
+    it("returns 400 for an invalid tag grammar", async () => {
+      const stub = mockStub(
+        new Response(JSON.stringify({ results: [], total: 0 }), {
+          status: 200,
+        }),
+      );
+      const app = createApp(stub, FULL_TOKEN);
+      const res = await app.fetch(
+        new Request("http://localhost/search?q=hello&tag_filter=bad!tag"),
+        MOCK_ENV,
+        MOCK_CTX,
+      );
+      expect(res.status).toBe(400);
+      expect(stub.fetch).not.toHaveBeenCalled();
+    });
+
+    it("forwards valid tag_filter to the DO", async () => {
+      const stub = mockStub(
+        new Response(JSON.stringify({ results: [], total: 0 }), {
+          status: 200,
+        }),
+      );
+      const app = createApp(stub, FULL_TOKEN);
+      const res = await app.fetch(
+        new Request("http://localhost/search?q=hello&tag_filter=repo:a,team:x"),
+        MOCK_ENV,
+        MOCK_CTX,
+      );
+      expect(res.status).toBe(200);
+      const forwardedReq = vi.mocked(stub.fetch).mock.calls[0][0] as
+        | Request
+        | string;
+      const forwardedUrl =
+        typeof forwardedReq === "string" ? forwardedReq : forwardedReq.url;
+      const parsed = new URL(forwardedUrl);
+      expect(parsed.searchParams.get("tag_filter")).toBe("repo:a,team:x");
+    });
+  });
 });

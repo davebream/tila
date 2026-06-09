@@ -7,9 +7,11 @@ import {
   ListEntityRelationshipsRequestSchema,
   TilaSchemaTomlSchema,
   UpdateEntityRequestSchema,
+  parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import TOML from "smol-toml";
+import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
@@ -189,6 +191,14 @@ entities.get("/", async (c) => {
   if (limit) query.limit = limit;
   const offset = c.req.query("offset");
   if (offset) query.offset = offset;
+  let tagFilter: string[] | undefined;
+  try {
+    tagFilter = parseTagFilter(c.req.query("tag_filter"));
+  } catch (err) {
+    if (err instanceof ZodError) return zodValidationError(c, err);
+    throw err;
+  }
+  if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
   return forwardToDO(
     stub,
     "/entity/list",
