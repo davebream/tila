@@ -7,7 +7,7 @@ import type {
 } from "@tila/schemas";
 import { TagsSchema } from "@tila/schemas";
 import type { TilaSchemaToml } from "@tila/schemas";
-import { type SQL, and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { type SQL, and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
   SearchQueryError,
@@ -281,15 +281,13 @@ export function list(
   const rows = query.all();
   const entities = rows.map(rowToEntity);
 
-  // Batch tag enrichment: single OR query over all returned entities (no N+1)
+  // Batch tag enrichment: single IN query over all returned entities (no N+1)
   if (entities.length > 0) {
-    const tagConditions = entities.map((e) =>
-      eq(schema.entityTags.entity_id, e.id),
-    );
+    const ids = entities.map((e) => e.id);
     const allTags = db
       .select()
       .from(schema.entityTags)
-      .where(or(...(tagConditions as [SQL, ...SQL[]])))
+      .where(inArray(schema.entityTags.entity_id, ids))
       .all();
 
     // Build tag map: entity_id -> tags[]

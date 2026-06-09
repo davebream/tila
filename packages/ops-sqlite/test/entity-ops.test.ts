@@ -615,6 +615,76 @@ describe("entity tags", () => {
     expect(updated.tags).toEqual(["env:staging"]);
   });
 
+  it("create throws on a malformed tag (space inside tag)", () => {
+    expect(() =>
+      create(
+        testDb.db,
+        {
+          id: "e-bad-tag-1",
+          type: "task",
+          data: { name: "Bad tag entity" },
+          created_by: "actor-1",
+          tags: ["bad tag!"],
+        },
+        1,
+        { actor: "actor-1" },
+      ),
+    ).toThrow();
+  });
+
+  it("create throws on a leading-hyphen tag", () => {
+    expect(() =>
+      create(
+        testDb.db,
+        {
+          id: "e-bad-tag-2",
+          type: "task",
+          data: { name: "Bad tag entity" },
+          created_by: "actor-1",
+          tags: ["-leading-hyphen"],
+        },
+        1,
+        { actor: "actor-1" },
+      ),
+    ).toThrow();
+  });
+
+  it("create throws when more than 20 tags are provided", () => {
+    const tooManyTags = Array.from({ length: 21 }, (_, i) => `tag${i}`);
+    expect(() =>
+      create(
+        testDb.db,
+        {
+          id: "e-too-many-tags",
+          type: "task",
+          data: { name: "Too many tags" },
+          created_by: "actor-1",
+          tags: tooManyTags,
+        },
+        1,
+        { actor: "actor-1" },
+      ),
+    ).toThrow();
+  });
+
+  it("create with case-duplicate tags persists exactly one lowercased tag", () => {
+    const entity = create(
+      testDb.db,
+      {
+        id: "e-dedup-tag",
+        type: "task",
+        data: { name: "Dedup tags entity" },
+        created_by: "actor-1",
+        tags: ["env:prod", "ENV:PROD"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    expect(entity.tags).toEqual(["env:prod"]);
+    expect(entity.tags).toHaveLength(1);
+  });
+
   it("tag-PK collision on create does not misclassify as EntityAlreadyExistsError", () => {
     // This verifies tag inserts happen after the entity-insert try/catch
     // so a tag PK collision can never be mistaken for EntityAlreadyExistsError.
