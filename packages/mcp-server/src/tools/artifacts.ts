@@ -76,17 +76,23 @@ export function registerArtifactTools(
         .max(100)
         .default(20)
         .describe("Maximum results to return"),
+      tag_filter: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Filter by tags using AND semantics — only artifacts carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+        ),
     },
-    async ({ q, kind, resource, limit }) => {
+    async ({ q, kind, resource, limit, tag_filter }) => {
       try {
-        const result = await client.get(`${base}/search`, {
-          query: {
-            q,
-            kind,
-            resource,
-            limit: String(limit),
-          },
-        });
+        const query: Record<string, string | undefined> = {
+          q,
+          kind,
+          resource,
+          limit: String(limit),
+        };
+        if (tag_filter?.length) query.tag_filter = tag_filter.join(",");
+        const result = await client.get(`${base}/search`, { query });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -206,15 +212,18 @@ export function registerArtifactTools(
         .max(100)
         .default(20)
         .describe("Maximum results to return"),
+      tag_filter: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Filter by tags using AND semantics — only results carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+        ),
     },
-    async ({ q, limit }) => {
+    async ({ q, limit, tag_filter }) => {
       try {
-        const result = await client.get(`${projectBase}/search`, {
-          query: {
-            q,
-            limit: String(limit),
-          },
-        });
+        const query: Record<string, string> = { q, limit: String(limit) };
+        if (tag_filter?.length) query.tag_filter = tag_filter.join(",");
+        const result = await client.get(`${projectBase}/search`, { query });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

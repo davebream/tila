@@ -301,4 +301,42 @@ describe("registerEntityTools", () => {
       ).rejects.toThrow("network failure");
     });
   });
+
+  describe("tila_task_list tag_filter", () => {
+    it("forwards tag_filter as comma-joined query param when provided", async () => {
+      client.get.mockResolvedValue({ ok: true, entities: [], total: 0 });
+
+      const handler = findHandler("tila_task_list");
+      await handler({ tag_filter: ["repo:a", "team:x"] });
+
+      expect(client.get).toHaveBeenCalledWith(
+        `/projects/${PROJECT_ID}/tasks`,
+        expect.objectContaining({
+          query: expect.objectContaining({ tag_filter: "repo:a,team:x" }),
+        }),
+      );
+    });
+
+    it("omits tag_filter query param when tag_filter is not provided", async () => {
+      client.get.mockResolvedValue({ ok: true, entities: [], total: 0 });
+
+      const handler = findHandler("tila_task_list");
+      await handler({});
+
+      const callArgs = client.get.mock.calls[0];
+      const query = callArgs[1]?.query as Record<string, unknown>;
+      expect(query).not.toHaveProperty("tag_filter");
+    });
+
+    it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {
+      const { z } = require("zod");
+      const listCall = server.tool.mock.calls.find(
+        (c: unknown[]) => c[0] === "tila_task_list",
+      );
+      if (!listCall) throw new Error("tila_task_list not found");
+      const schema = listCall[2] as Record<string, import("zod").ZodTypeAny>;
+      const result = z.object(schema).safeParse({ tag_filter: ["bad tag!"] });
+      expect(result.success).toBe(true);
+    });
+  });
 });

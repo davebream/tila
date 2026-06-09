@@ -98,14 +98,23 @@ export function registerRecordTools(
         .boolean()
         .optional()
         .describe("Include archived records (default: false)"),
+      tag_filter: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Filter by tags using AND semantics — only records carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+        ),
     },
-    async ({ type, tag, filter, include_archived }) => {
+    async ({ type, tag, filter, include_archived, tag_filter }) => {
       try {
         const query: Record<string, string | undefined> = { tag, filter };
         if (include_archived !== undefined) {
           query["include-archived"] = String(include_archived);
         }
-        const result = await records.list(type, query);
+        const result = await records.list(type, {
+          ...query,
+          ...(tag_filter !== undefined ? { tagFilter: tag_filter } : {}),
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

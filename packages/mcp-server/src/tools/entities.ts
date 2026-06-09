@@ -52,12 +52,22 @@ function registerCrudTools(
     {
       type: z.string().optional().describe(`Filter by ${labelSingular} type`),
       status: z.string().optional().describe("Filter by status field value"),
+      tag_filter: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Filter by tags using AND semantics — only items carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+        ),
     },
-    async ({ type, status }) => {
+    async ({ type, status, tag_filter }) => {
       try {
-        const result = await client.get(basePath, {
-          query: { compact: "true", type, status },
-        });
+        const query: Record<string, string | undefined> = {
+          compact: "true",
+          type,
+          status,
+        };
+        if (tag_filter?.length) query.tag_filter = tag_filter.join(",");
+        const result = await client.get(basePath, { query });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
