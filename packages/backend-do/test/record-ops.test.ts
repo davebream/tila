@@ -1,9 +1,5 @@
 import { FenceError } from "@tila/core";
 import {
-  MIGRATIONS,
-  MIGRATION_BOOTSTRAP,
-  type Migration,
-  type MigrationStorage,
   RecordAlreadyExistsError,
   RecordInvalidStateError,
   RecordNotFoundError,
@@ -11,70 +7,22 @@ import {
   recordOps,
   schema,
 } from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
 import { and, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
-// Standard SQLite does not support expression-based PKs used in artifact_relationships.
-// Replace for testing (same pattern as check-constraints.test.ts).
-function patchMigration(sql: string): string {
-  return sql.replace(
-    "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-    "PRIMARY KEY (from_key, type)",
-  );
-}
-
-function createMigrationStorage(
-  sqlite: InstanceType<typeof Database>,
-): MigrationStorage {
-  return {
-    sql: {
-      exec<T>(statement: string, ...bindings: unknown[]) {
-        const patched = patchMigration(statement);
-        if (/^\s*(SELECT|PRAGMA)\b/i.test(patched)) {
-          return {
-            toArray: () => sqlite.prepare(patched).all(...bindings) as T[],
-          };
-        }
-        if (bindings.length > 0) {
-          sqlite.prepare(patched).run(...bindings);
-        } else {
-          sqlite.exec(patched);
-        }
-        return { toArray: () => [] as T[] };
-      },
-    },
-  };
-}
-
-function runMigration(
-  sqlite: InstanceType<typeof Database>,
-  migration: Migration,
-) {
-  if ("run" in migration) {
-    migration.run(createMigrationStorage(sqlite));
-    return;
-  }
-  sqlite.exec(patchMigration(migration.sql));
-}
-
-let rawDb: InstanceType<typeof Database>;
-let db: ReturnType<typeof drizzle<typeof schema>>;
+let testDb: TestDb;
+let rawDb: TestDb["sqlite"];
+let db: TestDb["db"];
 
 beforeEach(() => {
-  rawDb = new Database(":memory:");
-  rawDb.pragma("foreign_keys = ON");
-  rawDb.exec(MIGRATION_BOOTSTRAP);
-  // Run all migrations in order so all columns (including token_id added in 0004) exist
-  for (const migration of MIGRATIONS) {
-    runMigration(rawDb, migration);
-  }
-  db = drizzle(rawDb, { schema });
+  testDb = createTestDb({ foreignKeys: "on" });
+  rawDb = testDb.sqlite;
+  db = testDb.db;
 });
 
 afterEach(() => {
-  rawDb.close();
+  testDb.sqlite.close();
 });
 
 describe("createRecord", () => {
