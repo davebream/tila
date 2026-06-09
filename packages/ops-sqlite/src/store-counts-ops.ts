@@ -26,6 +26,8 @@ export const DOMAIN_TABLE_NAMES = [
   "artifact_search_docs",
   "entity_search_docs",
   "record_search_docs",
+  "entity_tags",
+  "artifact_tags",
 ] as const;
 
 export type DomainTableName = (typeof DOMAIN_TABLE_NAMES)[number];
@@ -80,6 +82,8 @@ export function countStoreRows(
       artifact_search_docs: countTable(db, "artifact_search_docs"),
       entity_search_docs: countTable(db, "entity_search_docs"),
       record_search_docs: countTable(db, "record_search_docs"),
+      entity_tags: countTable(db, "entity_tags"),
+      artifact_tags: countTable(db, "artifact_tags"),
     },
     schemaHistory: countTable(db, "_schema_history"),
   };
