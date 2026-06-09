@@ -9,6 +9,7 @@ import {
   MIGRATION_0009,
   MIGRATION_0011,
   MIGRATION_0012,
+  MIGRATION_0018,
   MIGRATION_BOOTSTRAP,
   type Migration,
   type MigrationStorage,
@@ -177,6 +178,8 @@ const ALL_LOCAL_MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 16, run: runMigration0016 },
   // Version 17: C7 fence-resource unification — backfill canonical type:id fence rows.
   { version: 17, run: runMigration0017 },
+  // Version 18: tags on work-units + artifacts — entity_tags + artifact_tags tables.
+  { version: 18, sql: MIGRATION_0018 },
 ];
 
 /**
