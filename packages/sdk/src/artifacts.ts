@@ -15,6 +15,7 @@ export interface ArtifactUploadOpts {
   fence?: number;
   mimeType?: string;
   flavor?: string;
+  tags?: string[];
 }
 
 export function createArtifactMethods(client: TilaClient, projectId: string) {
@@ -46,6 +47,8 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
             if (opts.fence !== undefined)
               formData.append("fence", String(opts.fence));
             if (opts.flavor) formData.append("flavor", opts.flavor);
+            if (opts.tags !== undefined)
+              formData.append("tags", JSON.stringify(opts.tags));
             return client.postFormData<ArtifactPutResponse>(base, formData);
           });
         }
@@ -67,6 +70,8 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         if (opts.fence !== undefined)
           formData.append("fence", String(opts.fence));
         if (opts.flavor) formData.append("flavor", opts.flavor);
+        if (opts.tags !== undefined)
+          formData.append("tags", JSON.stringify(opts.tags));
 
         return client.postFormData<ArtifactPutResponse>(base, formData);
       },
