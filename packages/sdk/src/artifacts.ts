@@ -119,17 +119,27 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
       resource?: string;
       kind?: string;
       limit?: string;
+      tagFilter?: string[];
     }): Promise<ArtifactListResponse> {
-      return client.get<ArtifactListResponse>(base, { query });
+      const { tagFilter, ...rest } = query ?? {};
+      const q: Record<string, string | undefined> = { ...rest };
+      if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
+      return client.get<ArtifactListResponse>(base, { query: q });
     },
 
     async search(
       q: string,
-      opts?: { kind?: string; resource?: string; limit?: string },
+      opts?: {
+        kind?: string;
+        resource?: string;
+        limit?: string;
+        tagFilter?: string[];
+      },
     ): Promise<ArtifactSearchResponse> {
-      return client.get<ArtifactSearchResponse>(`${base}/search`, {
-        query: { q, ...opts },
-      });
+      const { tagFilter, ...rest } = opts ?? {};
+      const query: Record<string, string | undefined> = { q, ...rest };
+      if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
+      return client.get<ArtifactSearchResponse>(`${base}/search`, { query });
     },
 
     async grep(

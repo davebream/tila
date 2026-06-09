@@ -130,4 +130,43 @@ describe("entity create with tags (SDK)", () => {
     >;
     expect(entities[0].tags).toEqual(["env:staging"]);
   });
+
+  it("list sends tag_filter query param when tagFilter provided", async () => {
+    const responseBody = { ok: true, entities: [], total: 0 };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseBody));
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const tasks = createTaskMethods(client, "proj-1");
+
+    await tasks.list({ tagFilter: ["repo:a", "team:x"] });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("tag_filter=repo%3Aa%2Cteam%3Ax");
+  });
+
+  it("list omits tag_filter when tagFilter is not provided", async () => {
+    const responseBody = { ok: true, entities: [], total: 0 };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseBody));
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const tasks = createTaskMethods(client, "proj-1");
+
+    await tasks.list({});
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).not.toContain("tag_filter");
+  });
+
+  it("list omits tag_filter when tagFilter is empty array", async () => {
+    const responseBody = { ok: true, entities: [], total: 0 };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseBody));
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const tasks = createTaskMethods(client, "proj-1");
+
+    await tasks.list({ tagFilter: [] });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).not.toContain("tag_filter");
+  });
 });

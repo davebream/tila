@@ -33,8 +33,12 @@ function _createMethods(client: TilaClient, base: string) {
       status?: string;
       limit?: string;
       cursor?: string;
+      tagFilter?: string[];
     }): Promise<EntityListResponse> {
-      return client.get<EntityListResponse>(base, { query });
+      const { tagFilter, ...rest } = query ?? {};
+      const q: Record<string, string | undefined> = { ...rest };
+      if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
+      return client.get<EntityListResponse>(base, { query: q });
     },
 
     async update(
