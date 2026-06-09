@@ -298,6 +298,7 @@ export const EntityDetailResponseSchema = z.object({
     created_at: z.number().int(),
     updated_at: z.number().int(),
     created_by: z.string(),
+    tags: z.array(z.string()),
   }),
   relationships: z.array(EntityRelationshipSchema).default([]),
 });
