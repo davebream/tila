@@ -10,55 +10,12 @@
  * calls ctx.storage.put/setAlarm which throws on the {ctx: {} as DurableObjectState}
  * harness stub — the 400 path returns before touching storage, so it is runnable here.
  */
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  MIGRATION_0004,
-  MIGRATION_0011,
-  MIGRATION_0016,
-  runMigration0016,
-  schema,
-} from "../../ops-sqlite/src";
+import type { schema } from "../../ops-sqlite/src";
 import { createArtifactRoutes } from "../src/routes/artifact-routes";
 import type { RouterDeps } from "../src/routes/types";
-
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-).replace(",\n  FOREIGN KEY (resource) REFERENCES entities(id)", "");
-
-function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  sqlite.exec(MIGRATION_0003);
-  sqlite.exec(MIGRATION_0004);
-  sqlite.exec(MIGRATION_0011);
-  sqlite.exec(
-    "ALTER TABLE journal ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE journal ADD COLUMN source_version TEXT DEFAULT NULL;",
-  );
-  runMigration0016({
-    sql: {
-      exec<T>(statement: string) {
-        if (/^\s*(SELECT|PRAGMA)\b/i.test(statement)) {
-          return { toArray: () => sqlite.prepare(statement).all() as T[] };
-        }
-        sqlite.exec(statement);
-        return { toArray: () => [] as T[] };
-      },
-    },
-  });
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
+import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
 function makeDeps(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
@@ -70,17 +27,16 @@ function makeDeps(
   };
 }
 
-let sqlite: InstanceType<typeof Database>;
+let testDb: TestDb;
 let db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 
 beforeEach(() => {
-  const testDb = createTestDb();
-  sqlite = testDb.sqlite;
+  testDb = createTestDb();
   db = testDb.db;
 });
 
 afterEach(() => {
-  sqlite.close();
+  testDb.sqlite.close();
 });
 
 describe("POST /search/reindex -- body validation (issue #412)", () => {

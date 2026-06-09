@@ -1,53 +1,11 @@
-import {
-  MIGRATION_0001,
-  MIGRATION_0002,
-  MIGRATION_0004,
-  MIGRATION_0009,
-  MIGRATION_0013,
-  MIGRATION_0018,
-  schema,
-} from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import type { schema } from "@tila/ops-sqlite";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEntityRoutes } from "../src/routes/entity-routes";
 import { installProjectErrorHandlers } from "../src/routes/errors";
 import type { RouterDeps } from "../src/routes/types";
-
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-interface TestDb {
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-  sqlite: InstanceType<typeof Database>;
-}
-
-function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  // MIGRATION_0002: adds change_summary + strategy columns to _schema_history
-  sqlite.exec(MIGRATION_0002);
-  // MIGRATION_0004: adds token_id column to journal
-  sqlite.exec(MIGRATION_0004);
-  // MIGRATION_0009: entity_search_docs FTS table (entity create inserts into it)
-  sqlite.exec(MIGRATION_0009);
-  // MIGRATION_0013: adds source + source_version columns to journal
-  sqlite.exec(MIGRATION_0013);
-  // MIGRATION_0018: entity_tags + artifact_tags tables
-  sqlite.exec(MIGRATION_0018);
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
+import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
 function makeDeps(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
@@ -69,19 +27,18 @@ function createApp(
   return app;
 }
 
-let rawDb: InstanceType<typeof Database>;
+let testDb: TestDb;
 let db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 let app: Hono;
 
 beforeEach(() => {
-  const testDb = createTestDb();
-  rawDb = testDb.sqlite;
+  testDb = createTestDb();
   db = testDb.db;
   app = createApp(db);
 });
 
 afterEach(() => {
-  rawDb.close();
+  testDb.sqlite.close();
 });
 
 // ---------------------------------------------------------------------------

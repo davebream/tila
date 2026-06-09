@@ -1,49 +1,6 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
-import {
-  MIGRATION_0001,
-  MIGRATION_0004,
-  MIGRATION_0005,
-  MIGRATION_0006,
-  MIGRATION_0007,
-  MIGRATION_0008,
-  MIGRATION_0009,
-  MIGRATION_0010,
-  MIGRATION_0018,
-  coordinationOps,
-  entityOps,
-  schema,
-} from "../../ops-sqlite/src";
-
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  sqlite.exec(MIGRATION_0004); // journal.token_id column
-  sqlite.exec(MIGRATION_0005); // entity_relationships index
-  sqlite.exec(MIGRATION_0006); // gates table
-  sqlite.exec(MIGRATION_0007); // signals table
-  sqlite.exec(MIGRATION_0008); // records table
-  sqlite.exec(MIGRATION_0009); // entity FTS
-  sqlite.exec(MIGRATION_0010); // claims: holder → machine + user
-  sqlite.exec(
-    "ALTER TABLE journal ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE journal ADD COLUMN source_version TEXT DEFAULT NULL;",
-  );
-  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
+import { coordinationOps, entityOps } from "../../ops-sqlite/src";
+import { createTestDb } from "./helpers/create-test-db";
 
 describe("entity_search_docs transaction coupling", () => {
   it("inserts search doc on entity create", () => {
