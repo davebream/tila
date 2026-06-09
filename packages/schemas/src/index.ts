@@ -334,6 +334,9 @@ export {
 // --- Deploy route constants ---
 export { RUN_WORKER_FIRST } from "./deploy-routes";
 
+// --- Tag schemas (shared across records, entities, and artifacts) ---
+export { TagSchema, type Tag, TagsSchema, type Tags } from "./tags";
+
 // --- Record schemas ---
 export {
   RecordTypeSchema,
