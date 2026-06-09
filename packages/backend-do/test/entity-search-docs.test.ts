@@ -11,6 +11,7 @@ import {
   MIGRATION_0008,
   MIGRATION_0009,
   MIGRATION_0010,
+  MIGRATION_0018,
   coordinationOps,
   entityOps,
   schema,
@@ -35,6 +36,7 @@ function createTestDb() {
   sqlite.exec(
     "ALTER TABLE journal ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE journal ADD COLUMN source_version TEXT DEFAULT NULL;",
   );
+  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
   const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
     "sync",
     unknown,

@@ -14,6 +14,7 @@ import {
   MIGRATION_0010,
   MIGRATION_0011,
   MIGRATION_0012,
+  MIGRATION_0018,
   SearchQueryError,
   artifactOps,
   coordinationOps,
@@ -53,6 +54,7 @@ function createTestDb(): TestDb {
   sqlite.exec(
     "ALTER TABLE record_revisions ADD COLUMN token_id TEXT DEFAULT NULL; ALTER TABLE record_revisions ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE record_revisions ADD COLUMN source_version TEXT DEFAULT NULL;",
   );
+  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
   const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
     "sync",
     unknown,

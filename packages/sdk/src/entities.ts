@@ -14,8 +14,14 @@ function _createMethods(client: TilaClient, base: string) {
       id: string,
       type: string,
       data?: Record<string, unknown>,
+      tags?: string[],
     ): Promise<EntityResponse> {
-      return client.post<EntityResponse>(base, { id, type, data });
+      return client.post<EntityResponse>(base, {
+        id,
+        type,
+        data,
+        ...(tags !== undefined ? { tags } : {}),
+      });
     },
 
     async get(id: string): Promise<EntityDetailResponse> {

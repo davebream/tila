@@ -4,6 +4,7 @@ import {
   MIGRATION_0004,
   MIGRATION_0009,
   MIGRATION_0013,
+  MIGRATION_0018,
   schema,
 } from "@tila/ops-sqlite";
 import Database from "better-sqlite3";
@@ -38,6 +39,8 @@ function createTestDb(): TestDb {
   sqlite.exec(MIGRATION_0009);
   // MIGRATION_0013: adds source + source_version columns to journal
   sqlite.exec(MIGRATION_0013);
+  // MIGRATION_0018: entity_tags + artifact_tags tables
+  sqlite.exec(MIGRATION_0018);
   const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
     "sync",
     unknown,

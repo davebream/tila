@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TagsSchema } from "./tags";
 
 // --- Record identity schemas ---
 
@@ -90,25 +91,7 @@ export const RecordKeySchema = z.string().superRefine((val, ctx) => {
 
 export type RecordKey = z.infer<typeof RecordKeySchema>;
 
-export const RecordTagSchema = z
-  .array(
-    z
-      .string()
-      .regex(/^[a-zA-Z0-9][a-zA-Z0-9_:.-]{0,63}$/, "Invalid tag format"),
-  )
-  .transform((tags) => {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const tag of tags) {
-      const lower = tag.toLowerCase();
-      if (!seen.has(lower)) {
-        seen.add(lower);
-        result.push(lower);
-      }
-    }
-    return result;
-  })
-  .refine((tags) => tags.length <= 20, "Record may not have more than 20 tags");
+export const RecordTagSchema = TagsSchema;
 
 export type RecordTag = z.infer<typeof RecordTagSchema>;
 

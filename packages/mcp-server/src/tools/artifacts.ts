@@ -31,8 +31,14 @@ export function registerArtifactTools(
         .int()
         .optional()
         .describe("Fencing token if uploading against a claimed entity"),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Optional tags for the artifact (e.g. ['team:eng', 'env:prod'])",
+        ),
     },
-    async ({ content, kind, mime_type, resource, fence }) => {
+    async ({ content, kind, mime_type, resource, fence, tags }) => {
       try {
         const bytes = Buffer.from(content, "base64");
         const blob = new Blob([bytes], { type: mime_type });
@@ -42,6 +48,7 @@ export function registerArtifactTools(
         formData.append("mime_type", mime_type);
         if (resource) formData.append("resource", resource);
         if (fence !== undefined) formData.append("fence", String(fence));
+        if (tags !== undefined) formData.append("tags", JSON.stringify(tags));
         const result = await client.postFormData(base, formData);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
@@ -110,16 +117,24 @@ export function registerArtifactTools(
         .int()
         .optional()
         .describe("Fencing token if uploading against a claimed entity"),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Optional tags for the artifact (e.g. ['team:eng', 'env:prod'])",
+        ),
     },
-    async ({ content, kind, mime_type, resource, fence }) => {
+    async ({ content, kind, mime_type, resource, fence, tags }) => {
       try {
-        const result = await client.post(`${base}/text`, {
+        const body: Record<string, unknown> = {
           content,
           kind,
           mime_type,
           resource,
           fence,
-        });
+        };
+        if (tags !== undefined) body.tags = tags;
+        const result = await client.post(`${base}/text`, body);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

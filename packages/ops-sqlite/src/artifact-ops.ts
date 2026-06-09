@@ -4,6 +4,7 @@ import type {
   ArtifactSearchResult,
   JournalEventKind,
 } from "@tila/schemas";
+import { TagsSchema } from "@tila/schemas";
 import {
   type SQL,
   and,
@@ -51,7 +52,12 @@ export function upsertPointer(
   journalKind?: JournalEventKind,
   searchText?: { title: string | null; body_text: string } | null,
   autoSupersedes?: boolean,
+  tags?: string[],
 ): void {
+  // Validate + normalize tags outside the transaction to avoid holding the lock
+  const normalizedTags =
+    tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
+
   db.transaction((tx) => {
     // Fence validation is skipped only for source artifacts (resource=null)
     // and explicitly unfenced uploads.
@@ -63,6 +69,19 @@ export function upsertPointer(
     tx.run(
       sql`INSERT OR IGNORE INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, content_inline) VALUES(${pointer.r2_key}, ${pointer.resource}, ${pointer.kind}, ${pointer.sha256}, ${pointer.bytes}, ${pointer.fence}, ${pointer.mime_type}, ${pointer.produced_at}, ${pointer.produced_by}, ${pointer.expires_at}, 0, ${pointer.content_inline ?? null})`,
     );
+
+    // Tags: on re-upsert of an existing r2_key (content-addressed; INSERT OR IGNORE
+    // is a no-op), delete-all-then-reinsert ONLY when tags provided; preserve when undefined.
+    if (normalizedTags !== undefined) {
+      tx.run(
+        sql`DELETE FROM artifact_tags WHERE artifact_key = ${pointer.r2_key}`,
+      );
+      for (const tag of normalizedTags) {
+        tx.insert(schema.artifactTags)
+          .values({ artifact_key: pointer.r2_key, tag })
+          .run();
+      }
+    }
 
     // Conditional search doc insert -- atomic with pointer write.
     // INSERT OR IGNORE mirrors pointer idempotency: re-upload of same
@@ -159,6 +178,13 @@ export function getLatestPointer(
 
   if (!row) return null;
 
+  // Read tags for this pointer (single query)
+  const tagRows = db
+    .select()
+    .from(schema.artifactTags)
+    .where(eq(schema.artifactTags.artifact_key, row.r2_key))
+    .all();
+
   return {
     r2_key: row.r2_key,
     resource: row.resource,
@@ -171,12 +197,18 @@ export function getLatestPointer(
     produced_by: row.produced_by,
     expires_at: row.expires_at,
     tombstoned: row.tombstoned,
+    tags: tagRows.map((t) => t.tag),
   };
 }
 
 export function listPointers(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  query: { resource?: string; kind?: string | string[]; limit?: number },
+  query: {
+    resource?: string;
+    kind?: string | string[];
+    limit?: number;
+    tag?: string;
+  },
 ): ArtifactPointer[] {
   const conditions: SQL[] = [eq(schema.artifactPointers.tombstoned, 0)];
 
@@ -190,6 +222,11 @@ export function listPointers(
       conditions.push(eq(schema.artifactPointers.kind, query.kind));
     }
   }
+  if (query.tag) {
+    conditions.push(
+      sql`EXISTS (SELECT 1 FROM artifact_tags at WHERE at.artifact_key = ${schema.artifactPointers.r2_key} AND at.tag = ${query.tag})`,
+    );
+  }
 
   const rows = db
     .select()
@@ -197,6 +234,27 @@ export function listPointers(
     .where(and(...conditions))
     .limit(query.limit ?? 100)
     .all();
+
+  if (rows.length === 0) return [];
+
+  // Batch-enrich tags with a single query (no N+1)
+  const r2Keys = rows.map((r) => r.r2_key);
+  const tagRows = db
+    .select()
+    .from(schema.artifactTags)
+    .where(inArray(schema.artifactTags.artifact_key, r2Keys))
+    .all();
+
+  // Group tags by artifact_key
+  const tagsByKey = new Map<string, string[]>();
+  for (const t of tagRows) {
+    let arr = tagsByKey.get(t.artifact_key);
+    if (!arr) {
+      arr = [];
+      tagsByKey.set(t.artifact_key, arr);
+    }
+    arr.push(t.tag);
+  }
 
   return rows.map((row) => ({
     r2_key: row.r2_key,
@@ -210,6 +268,7 @@ export function listPointers(
     produced_by: row.produced_by,
     expires_at: row.expires_at,
     tombstoned: row.tombstoned,
+    tags: tagsByKey.get(row.r2_key) ?? [],
   }));
 }
 
@@ -342,6 +401,7 @@ export function listExpiredPointers(
     produced_by: row.produced_by,
     expires_at: row.expires_at,
     tombstoned: row.tombstoned,
+    tags: [],
   }));
 }
 
@@ -394,6 +454,19 @@ export function deleteTombstonedPointers(
   cutoff: number,
 ): number {
   return db.transaction((tx) => {
+    // Explicitly delete artifact_tags BEFORE the pointer delete, using the
+    // same predicate subquery. ON DELETE CASCADE is inert in the DO (FK enforcement
+    // is off in production), so this explicit delete is required to prevent orphans.
+    tx.run(
+      sql`DELETE FROM artifact_tags
+          WHERE artifact_key IN (
+            SELECT r2_key FROM artifact_pointers
+            WHERE tombstoned = 1
+              AND tombstoned_at IS NOT NULL
+              AND tombstoned_at < ${cutoff}
+          )`,
+    );
+
     tx.run(
       sql`DELETE FROM artifact_pointers
           WHERE tombstoned = 1

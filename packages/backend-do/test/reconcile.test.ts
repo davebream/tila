@@ -4,6 +4,7 @@ import {
   MIGRATION_0004,
   MIGRATION_0011,
   MIGRATION_0013,
+  MIGRATION_0018,
   artifactOps,
   runMigration0016,
   schema,
@@ -61,6 +62,7 @@ function createTestDb() {
   sqlite.exec(MIGRATION_0011);
   sqlite.exec(MIGRATION_0013);
   runMigration0016(makeMigStorage(sqlite));
+  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
   return drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
     "sync",
     unknown,
@@ -77,6 +79,7 @@ function createTestDbWithSearch() {
   sqlite.exec(MIGRATION_0011);
   sqlite.exec(MIGRATION_0013);
   runMigration0016(makeMigStorage(sqlite));
+  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
   return drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
     "sync",
     unknown,

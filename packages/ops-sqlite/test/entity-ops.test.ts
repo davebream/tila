@@ -393,6 +393,333 @@ describe("list", () => {
   });
 });
 
+describe("entity tags", () => {
+  it("create with tags persists and normalizes tags", () => {
+    const entity = create(
+      testDb.db,
+      {
+        id: "e-tag-1",
+        type: "task",
+        data: { name: "Tagged entity" },
+        created_by: "actor-1",
+        tags: ["Env:Prod", "team:platform"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    // tags are lowercased
+    expect(entity.tags).toEqual(["env:prod", "team:platform"]);
+  });
+
+  it("create without tags returns empty tags array", () => {
+    const entity = create(
+      testDb.db,
+      {
+        id: "e-tag-notags",
+        type: "task",
+        data: { name: "No tags entity" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    expect(entity.tags).toEqual([]);
+  });
+
+  it("get returns tags", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-get-tags",
+        type: "task",
+        data: { name: "get tags test" },
+        created_by: "actor-1",
+        tags: ["env:prod"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    const found = get(testDb.db, "e-get-tags");
+    expect(found?.tags).toEqual(["env:prod"]);
+  });
+
+  it("list batch-enriches tags for multiple entities (no N+1)", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-list-tag-1",
+        type: "task",
+        data: { name: "E1" },
+        created_by: "actor-1",
+        tags: ["team:alpha"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "e-list-tag-2",
+        type: "task",
+        data: { name: "E2" },
+        created_by: "actor-1",
+        tags: ["team:beta", "env:staging"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    const result = list(testDb.db);
+    const e1 = result.entities.find((e) => e.id === "e-list-tag-1");
+    const e2 = result.entities.find((e) => e.id === "e-list-tag-2");
+    expect(e1?.tags).toEqual(["team:alpha"]);
+    expect(e2?.tags).toEqual(
+      expect.arrayContaining(["team:beta", "env:staging"]),
+    );
+    expect(e2?.tags).toHaveLength(2);
+  });
+
+  it("list filters by tag via ops-layer tag filter", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-filter-tag-1",
+        type: "task",
+        data: { name: "E1" },
+        created_by: "actor-1",
+        tags: ["env:prod"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "e-filter-tag-2",
+        type: "task",
+        data: { name: "E2" },
+        created_by: "actor-1",
+        tags: ["env:staging"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    const result = list(testDb.db, { tag: "env:prod" });
+    expect(result.entities).toHaveLength(1);
+    expect(result.entities[0].id).toBe("e-filter-tag-1");
+  });
+
+  it("update with undefined tags preserves existing tags", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-upd-tag-1",
+        type: "task",
+        data: { name: "Original" },
+        created_by: "actor-1",
+        tags: ["env:prod"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    const fence = acquire(
+      testDb.db,
+      "e-upd-tag-1",
+      "actor-1",
+      "actor-1",
+      "exclusive",
+      60_000,
+    ).fence;
+
+    const updated = update(
+      testDb.db,
+      "e-upd-tag-1",
+      { name: "Updated" },
+      fence,
+      { actor: "actor-1" },
+      // no tags arg → undefined → preserve
+    );
+
+    expect(updated.tags).toEqual(["env:prod"]);
+  });
+
+  it("update with tags: [] clears existing tags", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-upd-tag-2",
+        type: "task",
+        data: { name: "Original" },
+        created_by: "actor-1",
+        tags: ["env:prod"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    const fence = acquire(
+      testDb.db,
+      "e-upd-tag-2",
+      "actor-1",
+      "actor-1",
+      "exclusive",
+      60_000,
+    ).fence;
+
+    const updated = update(
+      testDb.db,
+      "e-upd-tag-2",
+      { name: "Updated" },
+      fence,
+      { actor: "actor-1" },
+      [],
+    );
+
+    expect(updated.tags).toEqual([]);
+  });
+
+  it("update with tags: [x] replaces existing tags", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-upd-tag-3",
+        type: "task",
+        data: { name: "Original" },
+        created_by: "actor-1",
+        tags: ["env:prod", "team:alpha"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    const fence = acquire(
+      testDb.db,
+      "e-upd-tag-3",
+      "actor-1",
+      "actor-1",
+      "exclusive",
+      60_000,
+    ).fence;
+
+    const updated = update(
+      testDb.db,
+      "e-upd-tag-3",
+      { name: "Updated" },
+      fence,
+      { actor: "actor-1" },
+      ["env:staging"],
+    );
+
+    expect(updated.tags).toEqual(["env:staging"]);
+  });
+
+  it("create throws on a malformed tag (space inside tag)", () => {
+    expect(() =>
+      create(
+        testDb.db,
+        {
+          id: "e-bad-tag-1",
+          type: "task",
+          data: { name: "Bad tag entity" },
+          created_by: "actor-1",
+          tags: ["bad tag!"],
+        },
+        1,
+        { actor: "actor-1" },
+      ),
+    ).toThrow();
+  });
+
+  it("create throws on a leading-hyphen tag", () => {
+    expect(() =>
+      create(
+        testDb.db,
+        {
+          id: "e-bad-tag-2",
+          type: "task",
+          data: { name: "Bad tag entity" },
+          created_by: "actor-1",
+          tags: ["-leading-hyphen"],
+        },
+        1,
+        { actor: "actor-1" },
+      ),
+    ).toThrow();
+  });
+
+  it("create throws when more than 20 tags are provided", () => {
+    const tooManyTags = Array.from({ length: 21 }, (_, i) => `tag${i}`);
+    expect(() =>
+      create(
+        testDb.db,
+        {
+          id: "e-too-many-tags",
+          type: "task",
+          data: { name: "Too many tags" },
+          created_by: "actor-1",
+          tags: tooManyTags,
+        },
+        1,
+        { actor: "actor-1" },
+      ),
+    ).toThrow();
+  });
+
+  it("create with case-duplicate tags persists exactly one lowercased tag", () => {
+    const entity = create(
+      testDb.db,
+      {
+        id: "e-dedup-tag",
+        type: "task",
+        data: { name: "Dedup tags entity" },
+        created_by: "actor-1",
+        tags: ["env:prod", "ENV:PROD"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    expect(entity.tags).toEqual(["env:prod"]);
+    expect(entity.tags).toHaveLength(1);
+  });
+
+  it("tag-PK collision on create does not misclassify as EntityAlreadyExistsError", () => {
+    // This verifies tag inserts happen after the entity-insert try/catch
+    // so a tag PK collision can never be mistaken for EntityAlreadyExistsError.
+    // We test the normal create path works — the entity PK throws EntityAlreadyExistsError,
+    // not a generic error.
+    create(
+      testDb.db,
+      {
+        id: "e-dup-tag",
+        type: "task",
+        data: { name: "Original" },
+        created_by: "actor-1",
+        tags: ["env:prod"],
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    expect(() =>
+      create(
+        testDb.db,
+        {
+          id: "e-dup-tag",
+          type: "task",
+          data: { name: "Duplicate" },
+          created_by: "actor-2",
+          tags: ["env:prod"],
+        },
+        1,
+        { actor: "actor-2" },
+      ),
+    ).toThrow(EntityAlreadyExistsError);
+  });
+});
+
 describe("searchEntities", () => {
   it("FTS5 search finds entity by name", () => {
     create(

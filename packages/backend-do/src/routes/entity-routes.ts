@@ -39,6 +39,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       actor_token_id?: string | null;
       source?: string | null;
       source_version?: string | null;
+      tags?: string[];
     };
 
     const parsedSchema = resolveCurrentSchema(db);
@@ -71,6 +72,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         type: body.type,
         data: body.data,
         created_by: body.created_by,
+        tags: body.tags,
       },
       body.schema_version ?? schemaOps.getCurrentSchema(db)?.version ?? 1,
       origin,
@@ -250,6 +252,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       parsed.data.data,
       parsed.data.fence,
       origin,
+      (parsed.data as { tags?: string[] }).tags,
     );
     return c.json({ ok: true, entity });
   });

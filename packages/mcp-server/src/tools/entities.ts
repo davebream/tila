@@ -25,10 +25,18 @@ function registerCrudTools(
         .record(z.unknown())
         .default({})
         .describe(`Key-value data fields for the ${labelSingular}`),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe(
+          `Optional tags for the ${labelSingular} (e.g. ['team:eng', 'env:prod'])`,
+        ),
     },
-    async ({ id, type, data }) => {
+    async ({ id, type, data, tags }) => {
       try {
-        const result = await client.post(basePath, { id, type, data });
+        const body: Record<string, unknown> = { id, type, data };
+        if (tags !== undefined) body.tags = tags;
+        const result = await client.post(basePath, body);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

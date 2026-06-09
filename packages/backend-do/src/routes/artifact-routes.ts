@@ -49,6 +49,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       actor_token_id?: string | null;
       source?: string | null;
       source_version?: string | null;
+      tags?: string[];
     };
 
     const parsedSchema = resolveCurrentSchema(db);
@@ -102,6 +103,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       undefined,
       searchText,
       autoSupersedes,
+      body.tags,
     );
     return c.json({ ok: true });
   });

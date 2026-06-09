@@ -295,6 +295,32 @@ export const records = sqliteTable(
   ],
 );
 
+// --- entity_tags ---
+export const entityTags = sqliteTable(
+  "entity_tags",
+  {
+    entity_id: text("entity_id").notNull(),
+    tag: text("tag").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.entity_id, table.tag] }),
+    index("idx_entity_tags_tag").on(table.tag),
+  ],
+);
+
+// --- artifact_tags ---
+export const artifactTags = sqliteTable(
+  "artifact_tags",
+  {
+    artifact_key: text("artifact_key").notNull(),
+    tag: text("tag").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.artifact_key, table.tag] }),
+    index("idx_artifact_tags_tag").on(table.tag),
+  ],
+);
+
 // --- record_tags ---
 export const recordTags = sqliteTable(
   "record_tags",

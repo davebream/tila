@@ -14,6 +14,7 @@ export const ArtifactPointerSchema = z.object({
   produced_by: z.string(),
   expires_at: z.number().int().nullable(),
   tombstoned: z.number().int().default(0),
+  tags: z.array(z.string()).default([]),
 });
 
 export type ArtifactPointer = z.infer<typeof ArtifactPointerSchema>;

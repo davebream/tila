@@ -1,5 +1,11 @@
+import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import { callPointerWithRetry, compensateAndRespond } from "./artifacts";
+import type { Env, HonoVariables } from "../types";
+import {
+  artifacts,
+  callPointerWithRetry,
+  compensateAndRespond,
+} from "./artifacts";
 
 function mockStub(responses: Array<Response | Error>): DurableObjectStub {
   let callIndex = 0;
@@ -199,5 +205,221 @@ describe("compensateAndRespond", () => {
 
     expect(result.body.error.code).toBe("upload-failed");
     expect("r2Key" in result.body.error).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Always-on handler-level tests: tag forwarding through the artifact routes
+//
+// These tests drive the real Hono route handlers with mocked bindings so they
+// run in CI without any environment variables set.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a test Hono app that wraps the artifacts router and injects mock
+ * context variables (tokenResult, doStub, R2 bucket) via middleware.
+ *
+ * The DO stub records every fetch call so tests can inspect the payload
+ * that was forwarded to /artifact/pointer.
+ *
+ * The env object is passed as the second argument to `app.fetch(req, env, ctx)`
+ * following the pattern established in artifacts.reconcile.test.ts.
+ */
+function buildTestApp(doStubResponses: Array<Response | Error>) {
+  // Capture all fetch calls on the DO stub so tests can inspect the bodies.
+  const capturedFetchCalls: Array<{ url: string; body: unknown }> = [];
+  let callIndex = 0;
+
+  const doStub: DurableObjectStub = {
+    fetch: vi.fn(async (req: Request) => {
+      const bodyText = await req.text();
+      let body: unknown;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        body = bodyText;
+      }
+      capturedFetchCalls.push({ url: req.url, body });
+
+      const response = doStubResponses[callIndex++];
+      if (response instanceof Error) throw response;
+      return response;
+    }),
+  } as unknown as DurableObjectStub;
+
+  // Mock R2 bucket: put() always succeeds with size=100 (not 0 = not deduplicated)
+  const mockR2Bucket = {
+    put: vi.fn().mockResolvedValue({ size: 100 }),
+    delete: vi.fn().mockResolvedValue(undefined),
+    get: vi.fn().mockResolvedValue(null),
+    head: vi.fn().mockResolvedValue(null),
+    list: vi.fn().mockResolvedValue({ objects: [] }),
+  } as unknown as R2Bucket;
+
+  // Minimal analytics stub (fire-and-forget, never load-bearing)
+  const mockAnalytics = {
+    writeDataPoint: vi.fn(),
+  } as unknown as AnalyticsEngineDataset;
+
+  const mockExecutionCtx: ExecutionContext = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+
+  const mockEnv = {
+    DB: {} as D1Database,
+    PROJECT: {} as DurableObjectNamespace,
+    ARTIFACTS: mockR2Bucket,
+    ANALYTICS: mockAnalytics,
+  } as unknown as Env;
+
+  const tokenResult = {
+    kind: "d1-token" as const,
+    projectId: "test-project",
+    name: "test-agent",
+    scopes: "full",
+    tokenId: "tok_test",
+  };
+
+  const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
+
+  // Inject context variables (tokenResult, doStub) via middleware.
+  // Bindings (ARTIFACTS, ANALYTICS) are supplied through the env argument to
+  // app.fetch(req, env, ctx) — Hono populates c.env from that argument.
+  app.use("/*", async (c, next) => {
+    c.set("tokenResult", tokenResult);
+    c.set("doStub", doStub);
+    c.set("projectId", "test-project");
+    return next();
+  });
+
+  app.route("/", artifacts);
+
+  return { app, mockEnv, mockExecutionCtx, capturedFetchCalls, doStub };
+}
+
+describe("artifact multipart upload route — tag forwarding (always-on)", () => {
+  it("forwards tags from FormData to the DO pointer payload", async () => {
+    const { app, mockEnv, mockExecutionCtx, capturedFetchCalls } = buildTestApp(
+      [new Response(JSON.stringify({ ok: true }), { status: 200 })],
+    );
+
+    const formData = new FormData();
+    const file = new File(["hello world"], "test.txt", { type: "text/plain" });
+    formData.append("file", file);
+    formData.append("kind", "log");
+    formData.append("tags", JSON.stringify(["env:prod", "team:x"]));
+
+    const req = new Request("http://localhost/", {
+      method: "POST",
+      body: formData,
+    });
+
+    const res = await app.fetch(req, mockEnv, mockExecutionCtx);
+
+    expect(res.status).toBe(200);
+
+    // Find the pointer registration call
+    const pointerCall = capturedFetchCalls.find((c) =>
+      c.url.includes("/artifact/pointer"),
+    );
+    expect(pointerCall).toBeDefined();
+    expect((pointerCall?.body as Record<string, unknown>).tags).toEqual([
+      "env:prod",
+      "team:x",
+    ]);
+  });
+
+  it("does not crash when tags field is absent (tags undefined in payload)", async () => {
+    const { app, mockEnv, mockExecutionCtx, capturedFetchCalls } = buildTestApp(
+      [new Response(JSON.stringify({ ok: true }), { status: 200 })],
+    );
+
+    const formData = new FormData();
+    const file = new File(["hello"], "no-tags.txt", { type: "text/plain" });
+    formData.append("file", file);
+    formData.append("kind", "log");
+    // No tags field
+
+    const req = new Request("http://localhost/", {
+      method: "POST",
+      body: formData,
+    });
+
+    const res = await app.fetch(req, mockEnv, mockExecutionCtx);
+    expect(res.status).toBe(200);
+
+    const pointerCall = capturedFetchCalls.find((c) =>
+      c.url.includes("/artifact/pointer"),
+    );
+    expect(pointerCall).toBeDefined();
+    const payload = pointerCall?.body as Record<string, unknown>;
+    // tags should be absent or undefined — must NOT be a non-array value
+    expect(payload.tags === undefined || Array.isArray(payload.tags)).toBe(
+      true,
+    );
+    if (Array.isArray(payload.tags)) {
+      expect(payload.tags).toHaveLength(0);
+    }
+  });
+});
+
+describe("artifact text-write route — tag forwarding (always-on)", () => {
+  it("forwards tags from JSON body to the DO pointer payload", async () => {
+    const { app, mockEnv, mockExecutionCtx, capturedFetchCalls } = buildTestApp(
+      [new Response(JSON.stringify({ ok: true }), { status: 200 })],
+    );
+
+    const req = new Request("http://localhost/text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: "# Hello",
+        kind: "note",
+        mime_type: "text/markdown",
+        tags: ["env:staging", "owner:alice"],
+      }),
+    });
+
+    const res = await app.fetch(req, mockEnv, mockExecutionCtx);
+    expect(res.status).toBe(200);
+
+    const pointerCall = capturedFetchCalls.find((c) =>
+      c.url.includes("/artifact/pointer"),
+    );
+    expect(pointerCall).toBeDefined();
+    expect((pointerCall?.body as Record<string, unknown>).tags).toEqual([
+      "env:staging",
+      "owner:alice",
+    ]);
+  });
+
+  it("does not crash when tags are absent from the text-write body", async () => {
+    const { app, mockEnv, mockExecutionCtx, capturedFetchCalls } = buildTestApp(
+      [new Response(JSON.stringify({ ok: true }), { status: 200 })],
+    );
+
+    const req = new Request("http://localhost/text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: "plain content",
+        kind: "log",
+        mime_type: "text/plain",
+        // no tags
+      }),
+    });
+
+    const res = await app.fetch(req, mockEnv, mockExecutionCtx);
+    expect(res.status).toBe(200);
+
+    const pointerCall = capturedFetchCalls.find((c) =>
+      c.url.includes("/artifact/pointer"),
+    );
+    expect(pointerCall).toBeDefined();
+    const payload = pointerCall?.body as Record<string, unknown>;
+    expect(payload.tags === undefined || Array.isArray(payload.tags)).toBe(
+      true,
+    );
   });
 });

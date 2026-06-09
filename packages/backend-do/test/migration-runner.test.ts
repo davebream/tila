@@ -68,7 +68,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
     ]);
 
     const tableNames = (
@@ -100,7 +100,7 @@ describe("migration runner", () => {
     runProjectMigrations(storage);
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
     ]);
   });
 
@@ -112,7 +112,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
     ]);
   });
 
@@ -131,7 +131,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
     ]);
   });
 
@@ -144,7 +144,7 @@ describe("migration runner", () => {
 
     expect(() => runProjectMigrations(createStorage(sqlite))).not.toThrow();
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
     ]);
     expect(columns(sqlite, "claims")).toEqual(
       expect.arrayContaining(["holder", "machine", "user"]),
@@ -196,6 +196,51 @@ CREATE TABLE claims (
 
     expect(columns(sqlite, "journal")).toContain("source");
     expect(columns(sqlite, "journal")).toContain("source_version");
+  });
+
+  it("migration 18 creates entity_tags and artifact_tags tables with tag indexes", () => {
+    const sqlite = new Database(":memory:");
+    runProjectMigrations(createStorage(sqlite));
+
+    const tableNames = (
+      sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+        )
+        .all() as { name: string }[]
+    ).map((t) => t.name);
+
+    expect(tableNames).toContain("entity_tags");
+    expect(tableNames).toContain("artifact_tags");
+
+    const indexNames = (
+      sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
+        )
+        .all() as { name: string }[]
+    ).map((i) => i.name);
+
+    expect(indexNames).toContain("idx_entity_tags_tag");
+    expect(indexNames).toContain("idx_artifact_tags_tag");
+
+    // Verify columns of entity_tags
+    const entityTagsCols = (
+      sqlite.prepare("PRAGMA table_info(entity_tags)").all() as {
+        name: string;
+      }[]
+    ).map((r) => r.name);
+    expect(entityTagsCols).toContain("entity_id");
+    expect(entityTagsCols).toContain("tag");
+
+    // Verify columns of artifact_tags
+    const artifactTagsCols = (
+      sqlite.prepare("PRAGMA table_info(artifact_tags)").all() as {
+        name: string;
+      }[]
+    ).map((r) => r.name);
+    expect(artifactTagsCols).toContain("artifact_key");
+    expect(artifactTagsCols).toContain("tag");
   });
 
   it("migration 13 is idempotent when columns already exist", () => {

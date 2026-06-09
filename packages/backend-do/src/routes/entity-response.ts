@@ -17,6 +17,7 @@ export function filterFields(
     created_at: entity.created_at,
     updated_at: entity.updated_at,
     created_by: entity.created_by,
+    tags: entity.tags,
     ...data,
   };
   const result: Record<string, unknown> = {};

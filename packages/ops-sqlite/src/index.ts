@@ -24,6 +24,7 @@ export {
   MIGRATION_0014,
   MIGRATION_0015,
   MIGRATION_0016,
+  MIGRATION_0018,
   runMigration0002,
   runMigration0004,
   runMigration0010,

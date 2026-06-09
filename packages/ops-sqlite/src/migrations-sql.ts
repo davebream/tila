@@ -564,6 +564,26 @@ export function runMigration0017(storage: MigrationStorage): void {
   }
 }
 
+export const MIGRATION_0018 = `
+CREATE TABLE IF NOT EXISTS entity_tags (
+  entity_id TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (entity_id, tag),
+  FOREIGN KEY (entity_id) REFERENCES entities(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_tags_tag ON entity_tags(tag);
+
+CREATE TABLE IF NOT EXISTS artifact_tags (
+  artifact_key TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (artifact_key, tag),
+  FOREIGN KEY (artifact_key) REFERENCES artifact_pointers(r2_key) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_tags_tag ON artifact_tags(tag);
+`;
+
 /**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
@@ -587,4 +607,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 15, sql: MIGRATION_0015 },
   { version: 16, run: runMigration0016 },
   { version: 17, run: runMigration0017 },
+  { version: 18, sql: MIGRATION_0018 },
 ];
