@@ -683,3 +683,119 @@ describe("listRecordHistory", () => {
     expect(result.next_cursor).toBe("truncated");
   });
 });
+
+describe("listRecords tagFilter (multi-tag AND)", () => {
+  it("returns only records carrying ALL tags in tagFilter", async () => {
+    await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "api",
+        value: { name: "api" },
+        tags: ["repo:a", "team:x"],
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+    await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "web",
+        value: { name: "web" },
+        tags: ["repo:a"],
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+    await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "worker",
+        value: { name: "worker" },
+        tags: ["team:x"],
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+
+    const result = listRecords(testDb.db, {
+      type: "svc",
+      tagFilter: ["repo:a", "team:x"],
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].key).toBe("api");
+  });
+
+  it("single-tag tagFilter returns records with that tag", async () => {
+    await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "api2",
+        value: { name: "api2" },
+        tags: ["repo:a", "team:x"],
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+    await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "web2",
+        value: { name: "web2" },
+        tags: ["repo:a"],
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+
+    const result = listRecords(testDb.db, {
+      type: "svc",
+      tagFilter: ["repo:a"],
+    });
+    expect(result.items).toHaveLength(2);
+  });
+
+  it("singular tag AND tagFilter both apply (AND semantics)", async () => {
+    await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "api3",
+        value: { name: "api3" },
+        tags: ["repo:a", "team:x"],
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+    await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "web3",
+        value: { name: "web3" },
+        tags: ["repo:a"],
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+
+    const result = listRecords(testDb.db, {
+      type: "svc",
+      tag: "repo:a",
+      tagFilter: ["team:x"],
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].key).toBe("api3");
+  });
+});

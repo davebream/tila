@@ -11,9 +11,14 @@ import {
   schema,
   schemaOps,
 } from "@tila/ops-sqlite";
-import { ArchiveRequestSchema, UpdateEntityRequestSchema } from "@tila/schemas";
+import {
+  ArchiveRequestSchema,
+  UpdateEntityRequestSchema,
+  parseTagFilter,
+} from "@tila/schemas";
 import { eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { ZodError } from "zod";
 import { filterFields } from "./entity-response";
 import { formatZodIssues, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
@@ -122,6 +127,22 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.get("/entity/list", (c) => {
     const { db } = deps;
+
+    let tagFilter: string[] | undefined;
+    try {
+      tagFilter = parseTagFilter(c.req.query("tag_filter"));
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          err.issues.map((i) => i.message).join("; "),
+        );
+      }
+      throw err;
+    }
+
     const typeRaw = c.req.query("type");
     const type = typeRaw?.includes(",")
       ? typeRaw.split(",").filter(Boolean)
@@ -164,6 +185,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         order,
         limit,
         offset,
+        ...(tagFilter?.length ? { tagFilter } : {}),
       },
       deps.enrichOpts(),
     );
@@ -439,8 +461,28 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         ? Math.min(parsedLimit, 100)
         : 20;
 
+    let tagFilter: string[] | undefined;
     try {
-      const results = entityOps.searchEntities(db, { q, entity_type, limit });
+      tagFilter = parseTagFilter(c.req.query("tag_filter"));
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          err.issues.map((i) => i.message).join("; "),
+        );
+      }
+      throw err;
+    }
+
+    try {
+      const results = entityOps.searchEntities(db, {
+        q,
+        entity_type,
+        limit,
+        tagFilter,
+      });
       return c.json({ ok: true, results, total: results.length });
     } catch (err) {
       if (err instanceof artifactOps.SearchQueryError) {
@@ -463,8 +505,23 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         ? Math.min(parsedLimit, 100)
         : 20;
 
+    let tagFilter: string[] | undefined;
     try {
-      const results = entityOps.searchAll(db, { q, limit });
+      tagFilter = parseTagFilter(c.req.query("tag_filter"));
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          err.issues.map((i) => i.message).join("; "),
+        );
+      }
+      throw err;
+    }
+
+    try {
+      const results = entityOps.searchAll(db, { q, limit, tagFilter });
       return c.json({ ok: true, results, total: results.length });
     } catch (err) {
       if (err instanceof artifactOps.SearchQueryError) {

@@ -17,9 +17,10 @@ search.get("/", requirePermission("read"), async (c) => {
   const parsed = UnifiedSearchQuerySchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
 
-  const { q, limit } = parsed.data;
+  const { q, limit, tag_filter: tagFilter } = parsed.data;
   const query: Record<string, string> = { q };
   if (limit !== undefined) query.limit = String(limit);
+  if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
 
   const stub = c.get("doStub");
   return forwardToDO(

@@ -16,9 +16,11 @@ import {
   ArtifactSearchQuerySchema,
   ArtifactTextWriteRequestSchema,
   TilaSchemaTomlSchema,
+  parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import TOML from "smol-toml";
+import { ZodError } from "zod";
 import { SWEEP_BATCH_SIZE } from "../config";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
@@ -480,6 +482,14 @@ artifacts.get("/", requirePermission("read"), async (c) => {
   if (kind) query.kind = kind;
   const limit = c.req.query("limit");
   if (limit) query.limit = limit;
+  let tagFilter: string[] | undefined;
+  try {
+    tagFilter = parseTagFilter(c.req.query("tag_filter"));
+  } catch (err) {
+    if (err instanceof ZodError) return zodValidationError(c, err);
+    throw err;
+  }
+  if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
   return forwardToDO(
     stub,
     "/artifact/list",
@@ -866,12 +876,20 @@ artifacts.get("/search", requirePermission("read"), async (c) => {
   const parsed = ArtifactSearchQuerySchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
 
-  const { q, kind, resource, source_only, limit } = parsed.data;
+  const {
+    q,
+    kind,
+    resource,
+    source_only,
+    limit,
+    tag_filter: tagFilter,
+  } = parsed.data;
   const query: Record<string, string> = { q };
   if (kind !== undefined) query.kind = kind;
   if (resource !== undefined) query.resource = resource;
   if (source_only) query.source_only = "true";
   if (limit !== undefined) query.limit = String(limit);
+  if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
 
   const stub = c.get("doStub");
   return forwardToDO(

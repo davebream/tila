@@ -763,3 +763,134 @@ describe("searchEntities", () => {
     );
   });
 });
+
+describe("list tagFilter (multi-tag AND)", () => {
+  it("returns only entities carrying ALL tags in tagFilter", () => {
+    // e1 has both tags, e2 has only repo:a, e3 has only team:x
+    create(
+      testDb.db,
+      {
+        id: "e-tf-1",
+        type: "task",
+        data: { name: "E1" },
+        created_by: "actor",
+        tags: ["repo:a", "team:x"],
+      },
+      1,
+      { actor: "actor" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "e-tf-2",
+        type: "task",
+        data: { name: "E2" },
+        created_by: "actor",
+        tags: ["repo:a"],
+      },
+      1,
+      { actor: "actor" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "e-tf-3",
+        type: "task",
+        data: { name: "E3" },
+        created_by: "actor",
+        tags: ["team:x"],
+      },
+      1,
+      { actor: "actor" },
+    );
+
+    const result = list(testDb.db, { tagFilter: ["repo:a", "team:x"] });
+    expect(result.entities).toHaveLength(1);
+    expect(result.entities[0].id).toBe("e-tf-1");
+  });
+
+  it("single-tag tagFilter returns entities with that tag", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-tf-4",
+        type: "task",
+        data: { name: "E4" },
+        created_by: "actor",
+        tags: ["repo:a", "team:x"],
+      },
+      1,
+      { actor: "actor" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "e-tf-5",
+        type: "task",
+        data: { name: "E5" },
+        created_by: "actor",
+        tags: ["repo:a"],
+      },
+      1,
+      { actor: "actor" },
+    );
+
+    const result = list(testDb.db, { tagFilter: ["repo:a"] });
+    expect(result.entities).toHaveLength(2);
+  });
+
+  it("mixed-case tagFilter matches lowercased stored tags", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-tf-6",
+        type: "task",
+        data: { name: "E6" },
+        created_by: "actor",
+        tags: ["repo:a"],
+      },
+      1,
+      { actor: "actor" },
+    );
+
+    // tags stored as lowercase; filter uppercased should still match
+    const result = list(testDb.db, { tagFilter: ["REPO:A"] });
+    // Note: ops layer lowercases defensively; stored as "repo:a"
+    expect(result.entities).toHaveLength(1);
+    expect(result.entities[0].id).toBe("e-tf-6");
+  });
+
+  it("singular tag AND tagFilter both apply (AND semantics)", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-tf-7",
+        type: "task",
+        data: { name: "E7" },
+        created_by: "actor",
+        tags: ["repo:a", "team:x"],
+      },
+      1,
+      { actor: "actor" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "e-tf-8",
+        type: "task",
+        data: { name: "E8" },
+        created_by: "actor",
+        tags: ["repo:a"],
+      },
+      1,
+      { actor: "actor" },
+    );
+
+    const result = list(testDb.db, {
+      tag: "repo:a",
+      tagFilter: ["team:x"],
+    });
+    expect(result.entities).toHaveLength(1);
+    expect(result.entities[0].id).toBe("e-tf-7");
+  });
+});

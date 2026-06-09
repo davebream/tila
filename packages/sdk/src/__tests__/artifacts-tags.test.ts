@@ -115,4 +115,68 @@ describe("artifact upload with tags (SDK)", () => {
     >;
     expect(pointers[0].tags).toEqual(["team:eng"]);
   });
+
+  it("list sends tag_filter query param when tagFilter provided", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, pointers: [], total: 0 }), {
+        status: 200,
+      }),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    await artifacts.list({ tagFilter: ["repo:a", "team:x"] });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(decodeURIComponent(url)).toContain("tag_filter=repo:a,team:x");
+  });
+
+  it("list omits tag_filter when tagFilter is not provided", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, pointers: [], total: 0 }), {
+        status: 200,
+      }),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    await artifacts.list({});
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).not.toContain("tag_filter");
+  });
+
+  it("search sends tag_filter query param when tagFilter provided", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, results: [], total: 0 }), {
+        status: 200,
+      }),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    await artifacts.search("my query", { tagFilter: ["repo:a", "team:x"] });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(decodeURIComponent(url)).toContain("tag_filter=repo:a,team:x");
+  });
+
+  it("search omits tag_filter when tagFilter is not provided", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, results: [], total: 0 }), {
+        status: 200,
+      }),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    await artifacts.search("my query");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).not.toContain("tag_filter");
+  });
 });

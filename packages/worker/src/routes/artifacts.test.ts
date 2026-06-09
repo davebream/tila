@@ -423,3 +423,83 @@ describe("artifact text-write route — tag forwarding (always-on)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// tag_filter on artifact list and search routes
+// ---------------------------------------------------------------------------
+
+describe("GET / (artifact list) tag_filter", () => {
+  it("returns 400 for an invalid tag grammar", async () => {
+    const { app, mockEnv, mockExecutionCtx, doStub } = buildTestApp([
+      new Response(JSON.stringify({ ok: true, artifacts: [] }), {
+        status: 200,
+      }),
+    ]);
+
+    const res = await app.fetch(
+      new Request("http://localhost/?tag_filter=bad!tag"),
+      mockEnv,
+      mockExecutionCtx,
+    );
+
+    expect(res.status).toBe(400);
+    expect(doStub.fetch).not.toHaveBeenCalled();
+  });
+
+  it("forwards valid tag_filter to the DO", async () => {
+    const { app, mockEnv, mockExecutionCtx, doStub } = buildTestApp([
+      new Response(JSON.stringify({ ok: true, artifacts: [] }), {
+        status: 200,
+      }),
+    ]);
+
+    const res = await app.fetch(
+      new Request("http://localhost/?tag_filter=repo:a,team:x"),
+      mockEnv,
+      mockExecutionCtx,
+    );
+
+    expect(res.status).toBe(200);
+    const forwardedReq = vi.mocked(doStub.fetch).mock.calls[0][0] as Request;
+    const parsed = new URL(forwardedReq.url);
+    expect(parsed.searchParams.get("tag_filter")).toBe("repo:a,team:x");
+  });
+});
+
+describe("GET /search (artifact search) tag_filter", () => {
+  it("returns 400 for an invalid tag grammar", async () => {
+    const { app, mockEnv, mockExecutionCtx, doStub } = buildTestApp([
+      new Response(JSON.stringify({ ok: true, results: [], total: 0 }), {
+        status: 200,
+      }),
+    ]);
+
+    const res = await app.fetch(
+      new Request("http://localhost/search?q=hello&tag_filter=bad!tag"),
+      mockEnv,
+      mockExecutionCtx,
+    );
+
+    expect(res.status).toBe(400);
+    expect(doStub.fetch).not.toHaveBeenCalled();
+  });
+
+  it("forwards valid tag_filter to the DO", async () => {
+    const { app, mockEnv, mockExecutionCtx, doStub } = buildTestApp([
+      new Response(JSON.stringify({ ok: true, results: [], total: 0 }), {
+        status: 200,
+      }),
+    ]);
+
+    const res = await app.fetch(
+      new Request("http://localhost/search?q=hello&tag_filter=repo:a,team:x"),
+      mockEnv,
+      mockExecutionCtx,
+    );
+
+    expect(res.status).toBe(200);
+    const forwardedReq = vi.mocked(doStub.fetch).mock.calls[0][0] as Request;
+    const parsed = new URL(forwardedReq.url);
+    expect(parsed.searchParams.get("tag_filter")).toBe("repo:a,team:x");
+  });
+});

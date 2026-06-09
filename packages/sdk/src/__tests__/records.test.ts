@@ -275,6 +275,41 @@ describe("createRecordMethods", () => {
     expect(init.method).toBe("GET");
   });
 
+  it("list sends tag_filter query param when tagFilter provided", async () => {
+    const responseBody = {
+      ok: true,
+      items: [],
+      meta: { total: 0, limit: 200, next_cursor: null },
+    };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const records = createRecordMethods(client, "proj-1");
+
+    await records.list("config", { tagFilter: ["repo:a", "team:x"] });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("tag_filter=");
+    expect(decodeURIComponent(url)).toContain("tag_filter=repo:a,team:x");
+  });
+
+  it("list omits tag_filter when tagFilter is not provided", async () => {
+    const responseBody = {
+      ok: true,
+      items: [],
+      meta: { total: 0, limit: 200, next_cursor: null },
+    };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const records = createRecordMethods(client, "proj-1");
+
+    await records.list("config", {});
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).not.toContain("tag_filter");
+  });
+
   it("types issues GET /projects/:id/records/_types", async () => {
     const responseBody = {
       ok: true,

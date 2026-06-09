@@ -21,6 +21,7 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
+import { tagExistsConditions } from "./tag-filter-ops";
 
 /**
  * Thrown when an FTS5 MATCH query has invalid syntax.
@@ -208,6 +209,7 @@ export function listPointers(
     kind?: string | string[];
     limit?: number;
     tag?: string;
+    tagFilter?: string[];
   },
 ): ArtifactPointer[] {
   const conditions: SQL[] = [eq(schema.artifactPointers.tombstoned, 0)];
@@ -225,6 +227,16 @@ export function listPointers(
   if (query.tag) {
     conditions.push(
       sql`EXISTS (SELECT 1 FROM artifact_tags at WHERE at.artifact_key = ${schema.artifactPointers.r2_key} AND at.tag = ${query.tag})`,
+    );
+  }
+  if (query.tagFilter?.length) {
+    const normalizedTags = query.tagFilter.map((t) => t.toLowerCase());
+    conditions.push(
+      ...tagExistsConditions(
+        "artifact_tags",
+        sql`jt.artifact_key = ${schema.artifactPointers.r2_key}`,
+        normalizedTags,
+      ),
     );
   }
 
@@ -637,6 +649,7 @@ export function searchArtifacts(
     resource?: string;
     source_only?: boolean;
     limit?: number;
+    tagFilter?: string[];
   },
 ): ArtifactSearchResult[] {
   validateFtsQuery(query.q);
@@ -664,6 +677,16 @@ export function searchArtifacts(
     conditions.push(sql`d.resource IS NULL`);
   } else if (query.resource) {
     conditions.push(sql`d.resource = ${query.resource}`);
+  }
+
+  if (query.tagFilter?.length) {
+    conditions.push(
+      ...tagExistsConditions(
+        "artifact_tags",
+        sql`jt.artifact_key = d.artifact_key`,
+        query.tagFilter.map((t) => t.toLowerCase()),
+      ),
+    );
   }
 
   const whereClause = sql.join(conditions, sql.raw(" AND "));

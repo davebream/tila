@@ -21,6 +21,7 @@ import { type RequestOrigin, appendJournal } from "./journal-ops";
 import { searchRecords } from "./record-ops";
 import * as schema from "./schema";
 import { getSchemaByVersion } from "./schema-ops";
+import { tagExistsConditions } from "./tag-filter-ops";
 
 export class EntityNotFoundError extends Error {
   constructor(public readonly entityId: string) {
@@ -194,6 +195,7 @@ export function list(
     limit?: number;
     offset?: number;
     tag?: string;
+    tagFilter?: string[];
   },
   enrichOpts?: EnrichOpts,
 ): { entities: Entity[]; total: number } {
@@ -226,6 +228,16 @@ export function list(
   if (filter?.tag) {
     conditions.push(
       sql`EXISTS (SELECT 1 FROM entity_tags et WHERE et.entity_id = ${schema.entities.id} AND et.tag = ${filter.tag})`,
+    );
+  }
+  if (filter?.tagFilter?.length) {
+    const normalizedTags = filter.tagFilter.map((t) => t.toLowerCase());
+    conditions.push(
+      ...tagExistsConditions(
+        "entity_tags",
+        sql`jt.entity_id = ${schema.entities.id}`,
+        normalizedTags,
+      ),
     );
   }
 
@@ -525,10 +537,23 @@ export interface EntitySearchResult {
  */
 export function searchEntities(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  query: { q: string; entity_type?: string; limit?: number },
+  query: {
+    q: string;
+    entity_type?: string;
+    limit?: number;
+    tagFilter?: string[];
+  },
 ): EntitySearchResult[] {
   validateFtsQuery(query.q);
   const limit = Math.min(query.limit ?? 20, 100);
+
+  const tagConditions = query.tagFilter?.length
+    ? tagExistsConditions(
+        "entity_tags",
+        sql`jt.entity_id = d.entity_id`,
+        query.tagFilter.map((t) => t.toLowerCase()),
+      )
+    : [];
 
   try {
     const rows = db.all<{
@@ -552,6 +577,7 @@ export function searchEntities(
       WHERE entity_search_docs_fts MATCH ${query.q}
         AND e.archived = 0
         ${query.entity_type ? sql`AND d.entity_type = ${query.entity_type}` : sql``}
+        ${tagConditions.length ? sql`AND ${sql.join(tagConditions, sql.raw(" AND "))}` : sql``}
       ORDER BY bm25(entity_search_docs_fts)
       LIMIT ${limit}
     `);
@@ -590,15 +616,27 @@ export type UnifiedSearchResult =
  */
 export function searchAll(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  query: { q: string; limit?: number },
+  query: { q: string; limit?: number; tagFilter?: string[] },
 ): UnifiedSearchResult[] {
   const limit = Math.min(query.limit ?? 20, 100);
   // Over-fetch from each source to allow interleaving (3 sources now)
   const perSourceLimit = Math.ceil(limit / 3) + 5;
 
-  const entities = searchEntities(db, { q: query.q, limit: perSourceLimit });
-  const artifacts = searchArtifacts(db, { q: query.q, limit: perSourceLimit });
-  const records = searchRecords(db, { q: query.q, limit: perSourceLimit });
+  const entities = searchEntities(db, {
+    q: query.q,
+    limit: perSourceLimit,
+    tagFilter: query.tagFilter,
+  });
+  const artifacts = searchArtifacts(db, {
+    q: query.q,
+    limit: perSourceLimit,
+    tagFilter: query.tagFilter,
+  });
+  const records = searchRecords(db, {
+    q: query.q,
+    limit: perSourceLimit,
+    tagFilter: query.tagFilter,
+  });
 
   const entityResults: UnifiedSearchResult[] = entities.map((r) => ({
     type: "entity" as const,

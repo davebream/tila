@@ -96,9 +96,13 @@ export function createRecordMethods(client: TilaClient, projectId: string) {
         filter?: string;
         "include-archived"?: string;
         limit?: string;
+        tagFilter?: string[];
       },
     ): Promise<RecordListResponse> {
-      return client.get<RecordListResponse>(`${base}/${type}`, { query });
+      const { tagFilter, ...rest } = query ?? {};
+      const q: Record<string, string | undefined> = { ...rest };
+      if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
+      return client.get<RecordListResponse>(`${base}/${type}`, { query: q });
     },
 
     async types(): Promise<RecordTypesResponse> {

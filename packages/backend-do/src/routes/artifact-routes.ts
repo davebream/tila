@@ -6,8 +6,10 @@ import {
   searchDriftOps,
   searchReindexOps,
 } from "@tila/ops-sqlite";
+import { parseTagFilter } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { ZodError } from "zod";
 import type { ReindexState } from "../project-do";
 import { jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
@@ -154,7 +156,27 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
     const { db } = deps;
     const resource = c.req.query("resource") ?? undefined;
     const kind = parseMulti(c.req.query("kind"));
-    const pointers = artifactOps.listPointers(db, { resource, kind });
+
+    let tagFilter: string[] | undefined;
+    try {
+      tagFilter = parseTagFilter(c.req.query("tag_filter"));
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          err.issues.map((i) => i.message).join("; "),
+        );
+      }
+      throw err;
+    }
+
+    const pointers = artifactOps.listPointers(db, {
+      resource,
+      kind,
+      tagFilter,
+    });
     return c.json({ ok: true, pointers });
   });
 
@@ -209,6 +231,21 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
         ? Math.min(parsedLimit, 100)
         : 20;
 
+    let tagFilter: string[] | undefined;
+    try {
+      tagFilter = parseTagFilter(c.req.query("tag_filter"));
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          err.issues.map((i) => i.message).join("; "),
+        );
+      }
+      throw err;
+    }
+
     try {
       const results = artifactOps.searchArtifacts(db, {
         q,
@@ -216,6 +253,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
         resource,
         source_only,
         limit,
+        tagFilter,
       });
       return c.json({ ok: true, results, total: results.length });
     } catch (err) {

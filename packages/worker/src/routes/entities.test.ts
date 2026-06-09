@@ -333,3 +333,45 @@ describe("Idempotency middleware wiring (entities route)", () => {
     expect(vi.mocked(stub.fetch).mock.calls.length).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// tag_filter on entity list route
+// ---------------------------------------------------------------------------
+
+describe("GET / (entity list) tag_filter", () => {
+  it("returns 400 for an invalid tag grammar", async () => {
+    const stub = mockStub(jsonResponse({ ok: true, entities: [] }));
+    const app = createApp(stub, FULL_TOKEN as never);
+
+    const res = await app.request(
+      "/?tag_filter=bad!tag",
+      undefined,
+      MOCK_ENV,
+      MOCK_CTX,
+    );
+
+    expect(res.status).toBe(400);
+    expect(stub.fetch).not.toHaveBeenCalled();
+  });
+
+  it("forwards valid tag_filter comma-joined to the DO", async () => {
+    const stub = mockStub(jsonResponse({ ok: true, entities: [] }));
+    const app = createApp(stub, FULL_TOKEN as never);
+
+    const res = await app.request(
+      "/?tag_filter=repo:a,team:x",
+      undefined,
+      MOCK_ENV,
+      MOCK_CTX,
+    );
+
+    expect(res.status).toBe(200);
+    const forwardedReq = vi.mocked(stub.fetch).mock.calls[0][0] as
+      | Request
+      | string;
+    const forwardedUrl =
+      typeof forwardedReq === "string" ? forwardedReq : forwardedReq.url;
+    const parsed = new URL(forwardedUrl);
+    expect(parsed.searchParams.get("tag_filter")).toBe("repo:a,team:x");
+  });
+});

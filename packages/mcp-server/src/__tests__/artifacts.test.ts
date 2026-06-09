@@ -409,4 +409,88 @@ describe("registerArtifactTools", () => {
       ).rejects.toThrow("server down");
     });
   });
+
+  describe("tila_artifact_search tag_filter", () => {
+    it("forwards tag_filter as comma-joined query param when provided", async () => {
+      client.get.mockResolvedValue({ ok: true, results: [], total: 0 });
+
+      const handler = findHandler("tila_artifact_search");
+      await handler({ q: "test", limit: 20, tag_filter: ["repo:a", "team:x"] });
+
+      expect(client.get).toHaveBeenCalledWith(
+        `/projects/${PROJECT_ID}/artifacts/search`,
+        expect.objectContaining({
+          query: expect.objectContaining({ tag_filter: "repo:a,team:x" }),
+        }),
+      );
+    });
+
+    it("omits tag_filter query param when not provided", async () => {
+      client.get.mockResolvedValue({ ok: true, results: [], total: 0 });
+
+      const handler = findHandler("tila_artifact_search");
+      await handler({ q: "test", limit: 20 });
+
+      const callArgs = client.get.mock.calls[0];
+      const query = callArgs[1]?.query as Record<string, unknown>;
+      expect(query).not.toHaveProperty("tag_filter");
+    });
+
+    it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {
+      const { z } = require("zod");
+      const call = server.tool.mock.calls.find(
+        (c: unknown[]) => c[0] === "tila_artifact_search",
+      );
+      if (!call) throw new Error("tila_artifact_search not found");
+      const schema = call[2] as Record<string, import("zod").ZodTypeAny>;
+      const result = z
+        .object(schema)
+        .safeParse({ q: "x", tag_filter: ["bad tag!"] });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("tila_search tag_filter", () => {
+    it("forwards tag_filter as comma-joined query param when provided", async () => {
+      client.get.mockResolvedValue({ ok: true, results: [] });
+
+      const handler = findHandler("tila_search");
+      await handler({
+        q: "deploy",
+        limit: 50,
+        tag_filter: ["repo:a", "team:x"],
+      });
+
+      expect(client.get).toHaveBeenCalledWith(
+        `/projects/${PROJECT_ID}/search`,
+        expect.objectContaining({
+          query: expect.objectContaining({ tag_filter: "repo:a,team:x" }),
+        }),
+      );
+    });
+
+    it("omits tag_filter query param when not provided", async () => {
+      client.get.mockResolvedValue({ ok: true, results: [] });
+
+      const handler = findHandler("tila_search");
+      await handler({ q: "deploy", limit: 50 });
+
+      const callArgs = client.get.mock.calls[0];
+      const query = callArgs[1]?.query as Record<string, unknown>;
+      expect(query).not.toHaveProperty("tag_filter");
+    });
+
+    it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {
+      const { z } = require("zod");
+      const call = server.tool.mock.calls.find(
+        (c: unknown[]) => c[0] === "tila_search",
+      );
+      if (!call) throw new Error("tila_search not found");
+      const schema = call[2] as Record<string, import("zod").ZodTypeAny>;
+      const result = z
+        .object(schema)
+        .safeParse({ q: "x", tag_filter: ["bad tag!"] });
+      expect(result.success).toBe(true);
+    });
+  });
 });

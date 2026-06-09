@@ -226,6 +226,48 @@ describe("registerRecordTools", () => {
       values: true,
     });
   });
+
+  describe("tila_record_list tag_filter", () => {
+    it("forwards tag_filter array as tagFilter to records.list when provided", async () => {
+      registerRecordTools(asServer(server), asClient(client), "proj-1");
+      mockRecords.list.mockResolvedValue({ ok: true, records: [], total: 0 });
+
+      const handler = server.tool.mock.calls[3][3] as (
+        args: unknown,
+      ) => Promise<unknown>;
+      await handler({ type: "config", tag_filter: ["repo:a", "team:x"] });
+
+      expect(mockRecords.list).toHaveBeenCalledWith(
+        "config",
+        expect.objectContaining({ tagFilter: ["repo:a", "team:x"] }),
+      );
+    });
+
+    it("omits tagFilter from records.list when tag_filter is not provided", async () => {
+      registerRecordTools(asServer(server), asClient(client), "proj-1");
+      mockRecords.list.mockResolvedValue({ ok: true, records: [], total: 0 });
+
+      const handler = server.tool.mock.calls[3][3] as (
+        args: unknown,
+      ) => Promise<unknown>;
+      await handler({ type: "config" });
+
+      const callArgs = mockRecords.list.mock.calls[0];
+      const query = callArgs[1] as Record<string, unknown>;
+      expect(query).not.toHaveProperty("tagFilter");
+    });
+
+    it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {
+      registerRecordTools(asServer(server), asClient(client), "proj-1");
+      const { z } = require("zod");
+      const listCall = server.tool.mock.calls[3];
+      const schema = listCall[2] as Record<string, import("zod").ZodTypeAny>;
+      const result = z
+        .object(schema)
+        .safeParse({ type: "config", tag_filter: ["bad tag!"] });
+      expect(result.success).toBe(true);
+    });
+  });
 });
 
 describe("registerAllResources (record resources)", () => {
