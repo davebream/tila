@@ -11,6 +11,7 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { SearchQueryError, validateFtsQuery } from "./artifact-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
+import { tagExistsConditions } from "./tag-filter-ops";
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -1080,6 +1081,7 @@ export function listRecords(
     type: string;
     includeArchived?: boolean;
     tag?: string;
+    tagFilter?: string[];
     dataFilter?: Record<string, unknown>;
     limit?: number;
   },
@@ -1106,6 +1108,16 @@ export function listRecords(
   if (filter.tag) {
     conditions.push(
       sql`EXISTS (SELECT 1 FROM record_tags rt WHERE rt.type = ${schema.records.type} AND rt.key = ${schema.records.key} AND rt.tag = ${filter.tag})`,
+    );
+  }
+  if (filter.tagFilter?.length) {
+    const normalizedTags = filter.tagFilter.map((t) => t.toLowerCase());
+    conditions.push(
+      ...tagExistsConditions(
+        "record_tags",
+        sql`jt.type = ${schema.records.type} AND jt.key = ${schema.records.key}`,
+        normalizedTags,
+      ),
     );
   }
 

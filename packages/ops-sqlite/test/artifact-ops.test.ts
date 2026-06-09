@@ -399,3 +399,94 @@ describe("tag validation (negative paths)", () => {
     ).not.toThrow();
   });
 });
+
+describe("listPointers tagFilter (multi-tag AND)", () => {
+  it("returns only pointers carrying ALL tags in tagFilter", () => {
+    // p1 has both tags, p2 has only repo:a, p3 has only team:x
+    upsertPointer(
+      testDb.db,
+      makePointer("artifacts/tf/p1.txt"),
+      origin,
+      undefined,
+      undefined,
+      false,
+      ["repo:a", "team:x"],
+    );
+    upsertPointer(
+      testDb.db,
+      makePointer("artifacts/tf/p2.txt"),
+      origin,
+      undefined,
+      undefined,
+      false,
+      ["repo:a"],
+    );
+    upsertPointer(
+      testDb.db,
+      makePointer("artifacts/tf/p3.txt"),
+      origin,
+      undefined,
+      undefined,
+      false,
+      ["team:x"],
+    );
+
+    const result = listPointers(testDb.db, {
+      tagFilter: ["repo:a", "team:x"],
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0].r2_key).toBe("artifacts/tf/p1.txt");
+  });
+
+  it("single-tag tagFilter returns pointers with that tag", () => {
+    upsertPointer(
+      testDb.db,
+      makePointer("artifacts/tf2/p1.txt"),
+      origin,
+      undefined,
+      undefined,
+      false,
+      ["repo:a", "team:x"],
+    );
+    upsertPointer(
+      testDb.db,
+      makePointer("artifacts/tf2/p2.txt"),
+      origin,
+      undefined,
+      undefined,
+      false,
+      ["repo:a"],
+    );
+
+    const result = listPointers(testDb.db, { tagFilter: ["repo:a"] });
+    expect(result).toHaveLength(2);
+  });
+
+  it("singular tag AND tagFilter both apply (AND semantics)", () => {
+    upsertPointer(
+      testDb.db,
+      makePointer("artifacts/tf3/p1.txt"),
+      origin,
+      undefined,
+      undefined,
+      false,
+      ["repo:a", "team:x"],
+    );
+    upsertPointer(
+      testDb.db,
+      makePointer("artifacts/tf3/p2.txt"),
+      origin,
+      undefined,
+      undefined,
+      false,
+      ["repo:a"],
+    );
+
+    const result = listPointers(testDb.db, {
+      tag: "repo:a",
+      tagFilter: ["team:x"],
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0].r2_key).toBe("artifacts/tf3/p1.txt");
+  });
+});

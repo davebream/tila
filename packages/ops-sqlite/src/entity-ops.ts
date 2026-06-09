@@ -21,6 +21,7 @@ import { type RequestOrigin, appendJournal } from "./journal-ops";
 import { searchRecords } from "./record-ops";
 import * as schema from "./schema";
 import { getSchemaByVersion } from "./schema-ops";
+import { tagExistsConditions } from "./tag-filter-ops";
 
 export class EntityNotFoundError extends Error {
   constructor(public readonly entityId: string) {
@@ -194,6 +195,7 @@ export function list(
     limit?: number;
     offset?: number;
     tag?: string;
+    tagFilter?: string[];
   },
   enrichOpts?: EnrichOpts,
 ): { entities: Entity[]; total: number } {
@@ -226,6 +228,16 @@ export function list(
   if (filter?.tag) {
     conditions.push(
       sql`EXISTS (SELECT 1 FROM entity_tags et WHERE et.entity_id = ${schema.entities.id} AND et.tag = ${filter.tag})`,
+    );
+  }
+  if (filter?.tagFilter?.length) {
+    const normalizedTags = filter.tagFilter.map((t) => t.toLowerCase());
+    conditions.push(
+      ...tagExistsConditions(
+        "entity_tags",
+        sql`jt.entity_id = ${schema.entities.id}`,
+        normalizedTags,
+      ),
     );
   }
 
