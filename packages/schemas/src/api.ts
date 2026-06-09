@@ -10,7 +10,7 @@ import {
   EntityRelationshipSchema,
   EntityRelationshipTypeSchema,
 } from "./relationship";
-import { TagsSchema } from "./tags";
+import { TagSchema, TagsSchema } from "./tags";
 
 // --- Error envelope ---
 
@@ -1076,3 +1076,59 @@ export const RecordTypesResponseSchema = z.object({
 });
 
 export type RecordTypesResponse = z.infer<typeof RecordTypesResponseSchema>;
+
+// --- tag_filter query parsing ---
+
+/**
+ * Parse a raw comma-separated `tag_filter` query-string value into a validated,
+ * normalized (lowercase, deduped, max-20) array of tags.
+ *
+ * - Empty / absent input → `undefined` (no filter)
+ * - Invalid tag grammar  → throws `ZodError`
+ * - More than 20 unique tags → throws `ZodError`
+ */
+export function parseTagFilter(raw: string | undefined): string[] | undefined {
+  if (!raw) return undefined;
+
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+
+  if (parts.length === 0) return undefined;
+
+  // Validate each lowercased tag against the grammar (TagSchema accepts both
+  // upper and lower; we pass the already-lowercased value so it validates cleanly).
+  for (const part of parts) {
+    TagSchema.parse(part);
+  }
+
+  // Deduplicate
+  const unique = [...new Set(parts)];
+
+  if (unique.length > 20) {
+    throw new z.ZodError([
+      {
+        code: z.ZodIssueCode.too_big,
+        maximum: 20,
+        type: "array",
+        inclusive: true,
+        exact: false,
+        message: "tag_filter may not have more than 20 tags",
+        path: ["tag_filter"],
+      },
+    ]);
+  }
+
+  return unique;
+}
+
+/**
+ * Zod field for a `tag_filter` query parameter.
+ * Accepts an optional string, transforms it via `parseTagFilter`.
+ * Surfaces a ZodError on invalid input, passing through `undefined` when absent/empty.
+ */
+export const tagFilterQueryParam = z
+  .string()
+  .optional()
+  .transform((v) => parseTagFilter(v));

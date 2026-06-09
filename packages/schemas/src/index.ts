@@ -263,6 +263,8 @@ export {
   type ArtifactGrepResponse,
   ArtifactGrepQuerySchema,
   type ArtifactGrepQuery,
+  parseTagFilter,
+  tagFilterQueryParam,
 } from "./api";
 
 // --- Signal API request/response contracts ---
