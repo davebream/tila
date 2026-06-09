@@ -1,52 +1,8 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  MIGRATION_0004,
-  MIGRATION_0011,
-  artifactOps,
-  schema,
-} from "../../ops-sqlite/src";
+import { artifactOps } from "../../ops-sqlite/src";
+import { createTestDb } from "./helpers/create-test-db";
 
 const { upsertPointer } = artifactOps;
-
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-// Drop FK on resource -> entities(id) so we can insert pointers without entities
-const MIGRATION_FOR_SEARCH = MIGRATION_0001_TEST.replace(
-  ",\n  FOREIGN KEY (resource) REFERENCES entities(id)",
-  "",
-);
-
-interface TestDb {
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-  sqlite: InstanceType<typeof Database>;
-}
-
-function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_FOR_SEARCH);
-  sqlite.exec(MIGRATION_0003);
-  sqlite.exec(MIGRATION_0004);
-  sqlite.exec(MIGRATION_0011);
-  sqlite.exec(
-    "ALTER TABLE journal ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE journal ADD COLUMN source_version TEXT DEFAULT NULL;",
-  );
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
 
 function makePointer(overrides?: Partial<Parameters<typeof upsertPointer>[1]>) {
   return {

@@ -1,45 +1,11 @@
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  MIGRATION_0004,
-  artifactOps,
-  schema,
-} from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { artifactOps, type schema } from "@tila/ops-sqlite";
+import type Database from "better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
+import { createTestDb } from "./helpers/create-test-db";
 
 type SearchRebuildCandidate = artifactOps.SearchRebuildCandidate;
 const { rebuildSearchDocs } = artifactOps;
-
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-// Remove FK constraint for test isolation
-const MIGRATION_FOR_REBUILD = MIGRATION_0001_TEST.replace(
-  ",\n  FOREIGN KEY (resource) REFERENCES entities(id)",
-  "",
-);
-
-function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_FOR_REBUILD);
-  sqlite.exec(MIGRATION_0003);
-  sqlite.exec(MIGRATION_0004);
-  sqlite.exec(
-    "ALTER TABLE journal ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE journal ADD COLUMN source_version TEXT DEFAULT NULL;",
-  );
-  return drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-}
 
 function insertPointer(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
@@ -90,7 +56,7 @@ function getSearchDoc(
 
 describe("rebuildSearchDocs", () => {
   it("returns all zeros for empty candidates list", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const result = rebuildSearchDocs(db, [], { actor: "test-actor" }, false);
     expect(result.candidates_found).toBe(0);
     expect(result.written).toBe(0);
@@ -101,7 +67,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("reports skipped in dry-run when pointer has no search doc", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/abc123.md");
     const candidates: SearchRebuildCandidate[] = [
       {
@@ -131,7 +97,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("writes search doc on apply when pointer has no search doc", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/abc123.md");
     const candidates: SearchRebuildCandidate[] = [
       {
@@ -163,7 +129,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("skips tombstoned pointer with no search doc (never resurrect)", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/abc123.md", { tombstoned: 1 });
     const candidates: SearchRebuildCandidate[] = [
       {
@@ -191,7 +157,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("tombstones leaked search doc when pointer is tombstoned", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/abc123.md", { tombstoned: 1 });
     insertSearchDoc(db, "produced/res1/abc123.md", { tombstoned: 0 });
     const candidates: SearchRebuildCandidate[] = [
@@ -222,7 +188,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("skips already-current search doc (matching sha256)", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/abc123.md");
     insertSearchDoc(db, "produced/res1/abc123.md", {
       source_sha256: "abc123",
@@ -252,7 +218,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("updates stale search doc when sha256 differs", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/def456.md", { sha256: "def456" });
     insertSearchDoc(db, "produced/res1/def456.md", {
       source_sha256: "abc123",
@@ -285,7 +251,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("marks candidate unrecoverable when body_text is null", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/abc123.md");
     const candidates: SearchRebuildCandidate[] = [
       {
@@ -313,7 +279,7 @@ describe("rebuildSearchDocs", () => {
   });
 
   it("skips already-tombstoned search doc for tombstoned pointer", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/res1/abc123.md", { tombstoned: 1 });
     insertSearchDoc(db, "produced/res1/abc123.md", { tombstoned: 1 });
     const candidates: SearchRebuildCandidate[] = [

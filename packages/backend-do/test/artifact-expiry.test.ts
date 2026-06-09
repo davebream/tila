@@ -1,72 +1,11 @@
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  MIGRATION_0004,
-  MIGRATION_0011,
-  MIGRATION_0018,
-  artifactOps,
-  runMigration0016,
-  schema,
-} from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
+import { artifactOps, type schema } from "@tila/ops-sqlite";
 import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
+import { createTestDb } from "./helpers/create-test-db";
 
 const { listExpiredPointers, listPointers, tombstonePointer, upsertPointer } =
   artifactOps;
-
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-// Drop FK on resource -> entities(id) so we can insert pointers without entities
-const MIGRATION_FOR_EXPIRY = MIGRATION_0001_TEST.replace(
-  ",\n  FOREIGN KEY (resource) REFERENCES entities(id)",
-  "",
-);
-
-function makeMigrationStorage(sqlite: InstanceType<typeof Database>) {
-  return {
-    sql: {
-      exec<T>(statement: string, ...bindings: unknown[]) {
-        if (/^\s*(SELECT|PRAGMA)\b/i.test(statement)) {
-          return {
-            toArray: () => sqlite.prepare(statement).all(...bindings) as T[],
-          };
-        }
-        if (bindings.length > 0) {
-          sqlite.prepare(statement).run(...bindings);
-        } else {
-          sqlite.exec(statement);
-        }
-        return { toArray: () => [] as T[] };
-      },
-    },
-  };
-}
-
-function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_FOR_EXPIRY);
-  sqlite.exec(MIGRATION_0003);
-  sqlite.exec(MIGRATION_0004);
-  sqlite.exec(MIGRATION_0011);
-  sqlite.exec(
-    "ALTER TABLE journal ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE journal ADD COLUMN source_version TEXT DEFAULT NULL;",
-  );
-  runMigration0016(makeMigrationStorage(sqlite));
-  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
-  return drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-}
 
 function insertPointer(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
@@ -125,7 +64,7 @@ function countFtsResults(
 
 describe("listExpiredPointers", () => {
   it("returns only rows with expires_at <= now AND tombstoned = 0", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const now = Date.now();
     insertPointer(db, "expired/1/abc.bin", now - 1000); // expired
     insertPointer(db, "future/2/def.bin", now + 60000); // not expired
@@ -137,7 +76,7 @@ describe("listExpiredPointers", () => {
   });
 
   it("respects the limit parameter", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const now = Date.now();
     insertPointer(db, "expired/1/a.bin", now - 1000);
     insertPointer(db, "expired/2/b.bin", now - 2000);
@@ -148,7 +87,7 @@ describe("listExpiredPointers", () => {
   });
 
   it("excludes already-tombstoned rows", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const now = Date.now();
     insertPointer(db, "expired/1/a.bin", now - 1000);
     tombstonePointer(db, "expired/1/a.bin", { actor: "test" });
@@ -160,7 +99,7 @@ describe("listExpiredPointers", () => {
 
 describe("tombstonePointer with journalKind", () => {
   it("tombstones pointer and excludes it from listPointers", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "expired/1/a.bin", Date.now() - 1000);
 
     // Verify present before tombstone
@@ -180,7 +119,7 @@ describe("tombstonePointer with journalKind", () => {
   });
 
   it("defaults to artifact.tombstoned when journalKind is omitted", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "test/1/b.bin", null);
 
     // Should not throw when called without journalKind
@@ -193,7 +132,7 @@ describe("tombstonePointer with journalKind", () => {
   });
 
   it("accepts artifact.expired journal kind without error", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "expired/2/c.bin", Date.now() - 500);
 
     expect(() =>
@@ -212,7 +151,7 @@ describe("tombstonePointer with journalKind", () => {
 
 describe("tombstonePointer search doc cleanup", () => {
   it("deletes search doc when tombstoning a pointer with an indexed search doc", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const key = "produced/1/abc.md";
     insertPointer(db, key, null);
     insertSearchDoc(db, key, { title: "My Doc", bodyText: "hello world" });
@@ -230,7 +169,7 @@ describe("tombstonePointer search doc cleanup", () => {
   });
 
   it("tombstone without search doc is a no-op (no error)", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const key = "produced/2/def.bin";
     insertPointer(db, key, null);
 
@@ -245,7 +184,7 @@ describe("tombstonePointer search doc cleanup", () => {
   });
 
   it("tombstone idempotency -- second tombstone does not throw", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const key = "produced/3/ghi.md";
     insertPointer(db, key, null);
     insertSearchDoc(db, key);
@@ -261,7 +200,7 @@ describe("tombstonePointer search doc cleanup", () => {
   });
 
   it("listExpiredPointers excludes tombstoned rows after search doc cleanup", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const now = Date.now();
     const key = "expired/4/jkl.md";
     insertPointer(db, key, now - 1000);
@@ -280,7 +219,7 @@ describe("tombstonePointer search doc cleanup", () => {
 describe("retention enforcement via schema", () => {
   it("retention_days: 7 results in expires_at = produced_at + 7 days", () => {
     // Simulates what the DO handler computes for retention_days: 7
-    const db = createTestDb();
+    const { db } = createTestDb();
     const producedAt = Date.now();
     const retentionDays = 7;
     const computedExpiresAt = producedAt + retentionDays * 86_400_000;
@@ -312,7 +251,7 @@ describe("retention enforcement via schema", () => {
   });
 
   it("retention_days: 0 results in expires_at = null", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/T-2/def456.md", null); // null = retention_days: 0
 
     const pointers = listPointers(db, {});
@@ -323,7 +262,7 @@ describe("retention enforcement via schema", () => {
   it("undeclared kind results in expires_at = null", () => {
     // When the schema has no entry for the kind, getArtifactKindRetention returns 0
     // DO handler computes null. Same as retention_days: 0.
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "produced/T-3/ghi789.bin", null);
 
     const pointers = listPointers(db, {});
@@ -333,7 +272,7 @@ describe("retention enforcement via schema", () => {
 
   it("indexes/ prefix is lifecycle-exempt (expires_at = null even with retention)", () => {
     // indexes/ prefix artifacts always get expires_at = null regardless of schema
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "indexes/sha256abc.json", null);
 
     const pointers = listPointers(db, {});
@@ -342,7 +281,7 @@ describe("retention enforcement via schema", () => {
   });
 
   it("sources/ prefix is lifecycle-exempt (expires_at = null even with retention)", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     insertPointer(db, "sources/sha256def.bin", null);
 
     const pointers = listPointers(db, {});
@@ -351,7 +290,7 @@ describe("retention enforcement via schema", () => {
   });
 
   it("listExpiredPointers excludes null expires_at rows (isNotNull guard)", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const now = Date.now();
 
     // Row with past expires_at (should be returned)
@@ -367,7 +306,7 @@ describe("retention enforcement via schema", () => {
   });
 
   it("shared sha256 pointers expire independently (dedup safety)", () => {
-    const db = createTestDb();
+    const { db } = createTestDb();
     const now = Date.now();
     const sharedSha256 = "sha-shared-content-abc123";
 
