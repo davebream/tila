@@ -281,3 +281,125 @@ describe("searchAll returns all three result types", () => {
     expect(results).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// searchEntities — tagFilter (post-MATCH EXISTS)
+// ---------------------------------------------------------------------------
+
+describe("searchEntities — tagFilter", () => {
+  it("returns only entities carrying all tagFilter tags (AND)", () => {
+    const { db, sqlite } = createTestDb();
+    createEntity(db, { id: "tf-e1", data: { name: "tagfilterterm one" } });
+    createEntity(db, { id: "tf-e2", data: { name: "tagfilterterm two" } });
+    createEntity(db, { id: "tf-e3", data: { name: "tagfilterterm three" } });
+
+    // e1 has both tags, e2 has only repo:a, e3 has neither
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-e1", "repo:a");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-e1", "team:x");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-e2", "repo:a");
+
+    const results = entityOps.searchEntities(db, {
+      q: "tagfilterterm",
+      tagFilter: ["repo:a", "team:x"],
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].entity_id).toBe("tf-e1");
+  });
+
+  it("single tagFilter returns all entities with that tag", () => {
+    const { db, sqlite } = createTestDb();
+    createEntity(db, { id: "tf-s1", data: { name: "singletagterm alpha" } });
+    createEntity(db, { id: "tf-s2", data: { name: "singletagterm beta" } });
+    createEntity(db, { id: "tf-s3", data: { name: "singletagterm gamma" } });
+
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-s1", "repo:a");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-s2", "repo:a");
+
+    const results = entityOps.searchEntities(db, {
+      q: "singletagterm",
+      tagFilter: ["repo:a"],
+    });
+    expect(results).toHaveLength(2);
+    const ids = results.map((r) => r.entity_id);
+    expect(ids).toContain("tf-s1");
+    expect(ids).toContain("tf-s2");
+  });
+
+  it("bm25 ordering preserved among tag-filtered survivors", () => {
+    const { db, sqlite } = createTestDb();
+    // e-high has many repetitions of 'bm25tagterm' (higher relevance)
+    createEntity(db, {
+      id: "tf-bm-high",
+      data: {
+        name: "bm25tagterm bm25tagterm bm25tagterm bm25tagterm bm25tagterm",
+      },
+    });
+    // e-low has one occurrence
+    createEntity(db, {
+      id: "tf-bm-low",
+      data: { name: "bm25tagterm something else" },
+    });
+
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-bm-high", "keep:yes");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-bm-low", "keep:yes");
+
+    const results = entityOps.searchEntities(db, {
+      q: "bm25tagterm",
+      tagFilter: ["keep:yes"],
+    });
+    expect(results).toHaveLength(2);
+    expect(results[0].entity_id).toBe("tf-bm-high");
+  });
+
+  it("empty tagFilter behaves same as no tagFilter", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "tf-empty", data: { name: "emptytagfilterterm" } });
+
+    const withEmpty = entityOps.searchEntities(db, {
+      q: "emptytagfilterterm",
+      tagFilter: [],
+    });
+    const withUndefined = entityOps.searchEntities(db, {
+      q: "emptytagfilterterm",
+    });
+    expect(withEmpty).toHaveLength(withUndefined.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchAll — tagFilter forwarded to all three sub-searches
+// ---------------------------------------------------------------------------
+
+describe("searchAll — tagFilter", () => {
+  it("filters entity results by tagFilter in searchAll", () => {
+    const { db, sqlite } = createTestDb();
+    createEntity(db, { id: "sa-e1", data: { name: "searchalltagterm one" } });
+    createEntity(db, { id: "sa-e2", data: { name: "searchalltagterm two" } });
+
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("sa-e1", "scope:included");
+
+    const results = entityOps.searchAll(db, {
+      q: "searchalltagterm",
+      tagFilter: ["scope:included"],
+    });
+    const entityResults = results.filter((r) => r.type === "entity");
+    expect(entityResults).toHaveLength(1);
+    expect((entityResults[0] as { entity_id: string }).entity_id).toBe("sa-e1");
+  });
+});

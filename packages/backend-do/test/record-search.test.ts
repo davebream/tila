@@ -561,3 +561,104 @@ describe("searchRecords", () => {
     expect(results).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// searchRecords — tagFilter (post-MATCH EXISTS)
+// ---------------------------------------------------------------------------
+
+describe("searchRecords — tagFilter", () => {
+  it("returns only records carrying all tagFilter tags (AND)", async () => {
+    await recordOps.createRecord(
+      db,
+      {
+        type: "doc",
+        key: "rtag-1",
+        value: { body: "recordtagfilterterm content" },
+        schema_version: 1,
+        actor: "agent",
+      },
+      { actor: "agent" },
+    );
+    await recordOps.createRecord(
+      db,
+      {
+        type: "doc",
+        key: "rtag-2",
+        value: { body: "recordtagfilterterm content" },
+        schema_version: 1,
+        actor: "agent",
+      },
+      { actor: "agent" },
+    );
+    await recordOps.createRecord(
+      db,
+      {
+        type: "doc",
+        key: "rtag-3",
+        value: { body: "recordtagfilterterm content" },
+        schema_version: 1,
+        actor: "agent",
+      },
+      { actor: "agent" },
+    );
+
+    // rtag-1 has both tags, rtag-2 has only repo:a, rtag-3 has neither
+    rawDb
+      .prepare("INSERT INTO record_tags(type, key, tag) VALUES(?, ?, ?)")
+      .run("doc", "rtag-1", "repo:a");
+    rawDb
+      .prepare("INSERT INTO record_tags(type, key, tag) VALUES(?, ?, ?)")
+      .run("doc", "rtag-1", "team:x");
+    rawDb
+      .prepare("INSERT INTO record_tags(type, key, tag) VALUES(?, ?, ?)")
+      .run("doc", "rtag-2", "repo:a");
+
+    const results = recordOps.searchRecords(db, {
+      q: "recordtagfilterterm",
+      tagFilter: ["repo:a", "team:x"],
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].record_key).toBe("rtag-1");
+  });
+
+  it("bm25 ordering preserved among tag-filtered record survivors", async () => {
+    await recordOps.createRecord(
+      db,
+      {
+        type: "note",
+        key: "rbm-high",
+        value: {
+          body: "recordbm25term recordbm25term recordbm25term recordbm25term recordbm25term",
+        },
+        schema_version: 1,
+        actor: "agent",
+      },
+      { actor: "agent" },
+    );
+    await recordOps.createRecord(
+      db,
+      {
+        type: "note",
+        key: "rbm-low",
+        value: { body: "recordbm25term other words here" },
+        schema_version: 1,
+        actor: "agent",
+      },
+      { actor: "agent" },
+    );
+
+    rawDb
+      .prepare("INSERT INTO record_tags(type, key, tag) VALUES(?, ?, ?)")
+      .run("note", "rbm-high", "scope:keep");
+    rawDb
+      .prepare("INSERT INTO record_tags(type, key, tag) VALUES(?, ?, ?)")
+      .run("note", "rbm-low", "scope:keep");
+
+    const results = recordOps.searchRecords(db, {
+      q: "recordbm25term",
+      tagFilter: ["scope:keep"],
+    });
+    expect(results).toHaveLength(2);
+    expect(results[0].record_key).toBe("rbm-high");
+  });
+});

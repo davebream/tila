@@ -649,6 +649,7 @@ export function searchArtifacts(
     resource?: string;
     source_only?: boolean;
     limit?: number;
+    tagFilter?: string[];
   },
 ): ArtifactSearchResult[] {
   validateFtsQuery(query.q);
@@ -676,6 +677,16 @@ export function searchArtifacts(
     conditions.push(sql`d.resource IS NULL`);
   } else if (query.resource) {
     conditions.push(sql`d.resource = ${query.resource}`);
+  }
+
+  if (query.tagFilter?.length) {
+    conditions.push(
+      ...tagExistsConditions(
+        "artifact_tags",
+        sql`jt.artifact_key = d.artifact_key`,
+        query.tagFilter.map((t) => t.toLowerCase()),
+      ),
+    );
   }
 
   const whereClause = sql.join(conditions, sql.raw(" AND "));

@@ -147,10 +147,18 @@ export function extractSearchText(value: Record<string, unknown>): string {
  */
 export function searchRecords(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  query: { q: string; limit?: number },
+  query: { q: string; limit?: number; tagFilter?: string[] },
 ): RecordSearchResult[] {
   validateFtsQuery(query.q);
   const limit = Math.min(query.limit ?? 20, 100);
+
+  const tagConditions = query.tagFilter?.length
+    ? tagExistsConditions(
+        "record_tags",
+        sql`jt.type = d.record_type AND jt.key = d.record_key`,
+        query.tagFilter.map((t) => t.toLowerCase()),
+      )
+    : [];
 
   try {
     const rows = db.all<{
@@ -168,6 +176,7 @@ export function searchRecords(
       JOIN record_search_docs d ON d.rowid = fts.rowid
       WHERE record_search_docs_fts MATCH ${query.q}
         AND d.tombstoned = 0
+        ${tagConditions.length ? sql`AND ${sql.join(tagConditions, sql.raw(" AND "))}` : sql``}
       ORDER BY bm25(record_search_docs_fts)
       LIMIT ${limit}
     `);

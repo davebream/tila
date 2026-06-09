@@ -1,6 +1,7 @@
 import {
   MIGRATION_0001,
   MIGRATION_0003,
+  MIGRATION_0018,
   SearchQueryError,
   artifactOps,
   schema,
@@ -40,6 +41,7 @@ function createTestDb(): TestDb {
   sqlite.pragma("foreign_keys = OFF");
   sqlite.exec(MIGRATION_0001_TEST);
   sqlite.exec(MIGRATION_0003);
+  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
   const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
     "sync",
     unknown,
@@ -510,5 +512,83 @@ describe("searchArtifacts", () => {
         searchArtifacts(db, { q: "NEAR(migration sqlite, 5)" }),
       ).not.toThrow(SearchQueryError);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchArtifacts — tagFilter (post-MATCH EXISTS)
+// ---------------------------------------------------------------------------
+
+describe("searchArtifacts — tagFilter", () => {
+  it("returns only artifacts carrying all tagFilter tags (AND)", () => {
+    const { db, sqlite } = createTestDb();
+
+    insertPointer(sqlite, "proj/tag-a/1.md");
+    insertPointer(sqlite, "proj/tag-b/2.md");
+    insertPointer(sqlite, "proj/tag-c/3.md");
+
+    insertSearchDoc(sqlite, {
+      artifact_key: "proj/tag-a/1.md",
+      body_text: "artifacttagterm content here",
+    });
+    insertSearchDoc(sqlite, {
+      artifact_key: "proj/tag-b/2.md",
+      body_text: "artifacttagterm content here",
+    });
+    insertSearchDoc(sqlite, {
+      artifact_key: "proj/tag-c/3.md",
+      body_text: "artifacttagterm content here",
+    });
+
+    // a has both tags, b has only repo:a, c has neither
+    sqlite
+      .prepare("INSERT INTO artifact_tags(artifact_key, tag) VALUES(?, ?)")
+      .run("proj/tag-a/1.md", "repo:a");
+    sqlite
+      .prepare("INSERT INTO artifact_tags(artifact_key, tag) VALUES(?, ?)")
+      .run("proj/tag-a/1.md", "team:x");
+    sqlite
+      .prepare("INSERT INTO artifact_tags(artifact_key, tag) VALUES(?, ?)")
+      .run("proj/tag-b/2.md", "repo:a");
+
+    const results = searchArtifacts(db, {
+      q: "artifacttagterm",
+      tagFilter: ["repo:a", "team:x"],
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].r2_key).toBe("proj/tag-a/1.md");
+  });
+
+  it("bm25 ordering preserved among tag-filtered artifact survivors", () => {
+    const { db, sqlite } = createTestDb();
+
+    insertPointer(sqlite, "proj/bm-high/1.md");
+    insertPointer(sqlite, "proj/bm-low/2.md");
+
+    // high relevance: many repetitions
+    insertSearchDoc(sqlite, {
+      artifact_key: "proj/bm-high/1.md",
+      body_text:
+        "artifactbm25term artifactbm25term artifactbm25term artifactbm25term artifactbm25term",
+    });
+    // low relevance: one occurrence
+    insertSearchDoc(sqlite, {
+      artifact_key: "proj/bm-low/2.md",
+      body_text: "artifactbm25term other words here",
+    });
+
+    sqlite
+      .prepare("INSERT INTO artifact_tags(artifact_key, tag) VALUES(?, ?)")
+      .run("proj/bm-high/1.md", "scope:keep");
+    sqlite
+      .prepare("INSERT INTO artifact_tags(artifact_key, tag) VALUES(?, ?)")
+      .run("proj/bm-low/2.md", "scope:keep");
+
+    const results = searchArtifacts(db, {
+      q: "artifactbm25term",
+      tagFilter: ["scope:keep"],
+    });
+    expect(results).toHaveLength(2);
+    expect(results[0].r2_key).toBe("proj/bm-high/1.md");
   });
 });
