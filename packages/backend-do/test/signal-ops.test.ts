@@ -1,6 +1,7 @@
 import {
   MIGRATION_0001,
   MIGRATION_0007,
+  MIGRATION_0018,
   runMigration0016,
   schema,
   signalOps,
@@ -27,6 +28,7 @@ function createTestDb(): TestDb {
   sqlite.pragma("foreign_keys = OFF");
   sqlite.exec(MIGRATION_0001_TEST);
   sqlite.exec(MIGRATION_0007);
+  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
   runMigration0016({
     sql: {
       exec<T>(statement: string) {

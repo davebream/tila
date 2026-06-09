@@ -10,6 +10,7 @@ import {
   EntityRelationshipSchema,
   EntityRelationshipTypeSchema,
 } from "./relationship";
+import { TagsSchema } from "./tags";
 
 // --- Error envelope ---
 
@@ -121,6 +122,7 @@ export const CreateEntityRequestSchema = z.object({
   id: z.string(),
   type: z.string(),
   data: z.record(z.unknown()).default({}),
+  tags: TagsSchema.optional(),
 });
 
 export type CreateEntityRequest = z.infer<typeof CreateEntityRequestSchema>;
@@ -128,6 +130,7 @@ export type CreateEntityRequest = z.infer<typeof CreateEntityRequestSchema>;
 export const UpdateEntityRequestSchema = z.object({
   data: z.record(z.unknown()),
   fence: z.number().int(),
+  tags: TagsSchema.optional(),
 });
 
 export type UpdateEntityRequest = z.infer<typeof UpdateEntityRequestSchema>;
@@ -149,6 +152,7 @@ export const EntityResponseSchema = z.object({
     created_at: z.number().int(),
     updated_at: z.number().int(),
     created_by: z.string(),
+    tags: z.array(z.string()),
   }),
 });
 
@@ -166,6 +170,7 @@ export const EntityListResponseSchema = z.object({
       created_at: z.number().int(),
       updated_at: z.number().int(),
       created_by: z.string(),
+      tags: z.array(z.string()),
     }),
   ),
 });
@@ -184,6 +189,7 @@ export const PaginatedEntityListResponseSchema = z.object({
       created_at: z.number().int(),
       updated_at: z.number().int(),
       created_by: z.string(),
+      tags: z.array(z.string()),
     }),
   ),
   total: z.number().int(),
@@ -825,6 +831,7 @@ export const ArtifactTextWriteRequestSchema = z.object({
   mime_type: z.string().default("text/markdown"),
   resource: z.string().optional(),
   fence: z.number().int().optional(),
+  tags: TagsSchema.optional(),
 });
 export type ArtifactTextWriteRequest = z.infer<
   typeof ArtifactTextWriteRequestSchema
@@ -853,6 +860,7 @@ export const ArtifactListResponseSchema = z.object({
       produced_by: z.string(),
       expires_at: z.number().nullable(),
       tombstoned: z.number(),
+      tags: z.array(z.string()),
     }),
   ),
 });

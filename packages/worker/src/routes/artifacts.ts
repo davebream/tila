@@ -172,7 +172,14 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
   const parsed = ArtifactTextWriteRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
 
-  const { content, kind, mime_type: mimeType, resource, fence } = parsed.data;
+  const {
+    content,
+    kind,
+    mime_type: mimeType,
+    resource,
+    fence,
+    tags,
+  } = parsed.data;
 
   if (resource && fence === undefined) {
     return c.json(
@@ -253,6 +260,7 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     content_inline: contentInline,
     source: c.get("source"),
     source_version: c.get("sourceVersion"),
+    tags: tags ?? undefined,
   };
 
   const pointerResult = await callPointerWithRetry(
@@ -322,6 +330,17 @@ artifacts.post("/", requirePermission("write"), async (c) => {
   const resource = formData.get("resource") as string | null;
   const fenceStr = formData.get("fence") as string | null;
   const fence = fenceStr ? Number.parseInt(fenceStr, 10) : null;
+  // Extract tags from FormData -- sent as a JSON-encoded array string
+  const tagsRaw = formData.get("tags") as string | null;
+  let tags: string[] | undefined;
+  if (tagsRaw) {
+    try {
+      const parsed = JSON.parse(tagsRaw);
+      if (Array.isArray(parsed)) tags = parsed as string[];
+    } catch {
+      // invalid JSON -- ignore and leave tags undefined
+    }
+  }
   if (resource && fence === null) {
     return c.json(
       {
@@ -414,6 +433,7 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     content_inline: contentInline,
     source: c.get("source"),
     source_version: c.get("sourceVersion"),
+    tags,
   };
 
   const pointerResult = await callPointerWithRetry(
