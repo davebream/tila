@@ -1,52 +1,6 @@
-import {
-  MIGRATION_0001,
-  MIGRATION_0007,
-  MIGRATION_0018,
-  runMigration0016,
-  schema,
-  signalOps,
-  sweepOps,
-} from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { signalOps, sweepOps } from "@tila/ops-sqlite";
 import { describe, expect, it } from "vitest";
-
-// Strip FK constraints and Cloudflare-specific SQL for standard SQLite
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-).replace(",\n  FOREIGN KEY (resource) REFERENCES entities(id)", "");
-
-interface TestDb {
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-  sqlite: InstanceType<typeof Database>;
-}
-
-function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  sqlite.exec(MIGRATION_0007);
-  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
-  runMigration0016({
-    sql: {
-      exec<T>(statement: string) {
-        if (/^\s*(SELECT|PRAGMA)\b/i.test(statement)) {
-          return { toArray: () => sqlite.prepare(statement).all() as T[] };
-        }
-        sqlite.exec(statement);
-        return { toArray: () => [] as T[] };
-      },
-    },
-  });
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
+import { createTestDb } from "./helpers/create-test-db";
 
 describe("signal-ops", () => {
   describe("send", () => {

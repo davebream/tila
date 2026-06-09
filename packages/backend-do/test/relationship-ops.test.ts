@@ -1,36 +1,9 @@
-import { MIGRATION_0001, relationshipOps, schema } from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { relationshipOps } from "@tila/ops-sqlite";
 import { describe, expect, it } from "vitest";
-
-// Cloudflare's SQLite fork supports expressions in PRIMARY KEY (e.g. COALESCE).
-// Standard SQLite (better-sqlite3) does not. Patch the artifact_relationships PK.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-interface TestDb {
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-  sqlite: InstanceType<typeof Database>;
-}
-
-function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
-  // Disable FK so we don't need to insert entity rows before relationships
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
+import { createTestDb } from "./helpers/create-test-db";
 
 function countRows(
-  sqlite: InstanceType<typeof Database>,
+  sqlite: ReturnType<typeof createTestDb>["sqlite"],
   table: string,
 ): number {
   const row = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {
@@ -39,11 +12,13 @@ function countRows(
   return row.n;
 }
 
-function journalCount(sqlite: InstanceType<typeof Database>): number {
+function journalCount(
+  sqlite: ReturnType<typeof createTestDb>["sqlite"],
+): number {
   return countRows(sqlite, "journal");
 }
 
-function relCount(sqlite: InstanceType<typeof Database>): number {
+function relCount(sqlite: ReturnType<typeof createTestDb>["sqlite"]): number {
   return countRows(sqlite, "entity_relationships");
 }
 

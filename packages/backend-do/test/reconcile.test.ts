@@ -1,95 +1,25 @@
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  MIGRATION_0004,
-  MIGRATION_0011,
-  MIGRATION_0013,
-  MIGRATION_0018,
-  artifactOps,
-  runMigration0016,
-  schema,
-} from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
+import { artifactOps } from "@tila/ops-sqlite";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { schema } from "../../ops-sqlite/src";
+import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
 type OrphanBlob = artifactOps.OrphanBlob;
 const { listPointers, reconcilePointers } = artifactOps;
 
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-// Replace the expression-based PK for unit testing.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
+let testDb: TestDb;
 
-// artifact_pointers has a FK on resource -> entities(id).
-// For reconcile tests we want to insert orphan blobs without a corresponding entity.
-// We drop the FK constraint by removing it from the migration DDL.
-// Instead, use resource=null (source artifacts) which have no FK dependency.
-const MIGRATION_FOR_RECONCILE = MIGRATION_0001_TEST.replace(
-  ",\n  FOREIGN KEY (resource) REFERENCES entities(id)",
-  "",
-);
+beforeEach(() => {
+  testDb = createTestDb();
+});
 
-function makeMigStorage(sqlite: InstanceType<typeof Database>) {
-  return {
-    sql: {
-      exec<T>(statement: string, ...bindings: unknown[]) {
-        if (/^\s*(SELECT|PRAGMA)\b/i.test(statement)) {
-          return {
-            toArray: () => sqlite.prepare(statement).all(...bindings) as T[],
-          };
-        }
-        if (bindings.length > 0) {
-          sqlite.prepare(statement).run(...bindings);
-        } else {
-          sqlite.exec(statement);
-        }
-        return { toArray: () => [] as T[] };
-      },
-    },
-  };
-}
-
-function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_FOR_RECONCILE);
-  sqlite.exec(MIGRATION_0004);
-  sqlite.exec(MIGRATION_0011);
-  sqlite.exec(MIGRATION_0013);
-  runMigration0016(makeMigStorage(sqlite));
-  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
-  return drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-}
-
-function createTestDbWithSearch() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_FOR_RECONCILE);
-  sqlite.exec(MIGRATION_0003);
-  sqlite.exec(MIGRATION_0004);
-  sqlite.exec(MIGRATION_0011);
-  sqlite.exec(MIGRATION_0013);
-  runMigration0016(makeMigStorage(sqlite));
-  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
-  return drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-}
+afterEach(() => {
+  testDb.sqlite.close();
+});
 
 describe("reconcilePointers", () => {
   it("reports 0 orphans when r2_blobs list is empty", () => {
-    const db = createTestDb();
+    const { db } = testDb;
     const result = reconcilePointers(db, [], { actor: "test-actor" }, false);
     expect(result.orphans_found).toBe(0);
     expect(result.orphans_recovered).toBe(0);
@@ -98,7 +28,7 @@ describe("reconcilePointers", () => {
   });
 
   it("reports orphan as skipped in dry-run mode", () => {
-    const db = createTestDb();
+    const { db } = testDb;
     const orphans: OrphanBlob[] = [
       {
         key: "sources/def456.md",
@@ -123,7 +53,7 @@ describe("reconcilePointers", () => {
   });
 
   it("recovers orphan when apply is true", () => {
-    const db = createTestDb();
+    const { db } = testDb;
     const orphans: OrphanBlob[] = [
       {
         key: "sources/ghi789.md",
@@ -152,7 +82,7 @@ describe("reconcilePointers", () => {
   });
 
   it("reports unrecoverable when tila-kind metadata is missing", () => {
-    const db = createTestDb();
+    const { db } = testDb;
     const orphans: OrphanBlob[] = [
       {
         key: "sources/jkl012.bin",
@@ -172,7 +102,7 @@ describe("reconcilePointers", () => {
   });
 
   it("emits artifact.reconciled journal event on recovery", () => {
-    const db = createTestDb();
+    const { db } = testDb;
     const orphans: OrphanBlob[] = [
       {
         key: "sources/mno345.txt",
@@ -197,7 +127,7 @@ describe("reconcilePointers", () => {
   });
 
   it("creates artifact_search_docs row when search_body_text is provided", () => {
-    const db = createTestDbWithSearch();
+    const { db } = testDb;
     const orphans: OrphanBlob[] = [
       {
         key: "sources/search-test.md",
@@ -230,7 +160,7 @@ describe("reconcilePointers", () => {
   });
 
   it("does not create artifact_search_docs row when search fields are absent", () => {
-    const db = createTestDbWithSearch();
+    const { db } = testDb;
     const orphans: OrphanBlob[] = [
       {
         key: "sources/no-search.bin",

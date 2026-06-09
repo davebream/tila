@@ -1,32 +1,6 @@
-import { MIGRATION_0001, MIGRATION_0003, schema } from "@tila/ops-sqlite";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-interface TestDb {
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-  sqlite: InstanceType<typeof Database>;
-}
-
-function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  sqlite.exec(MIGRATION_0003);
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
+import { createTestDb } from "./helpers/create-test-db";
 
 function insertSearchDoc(
   sqlite: InstanceType<typeof Database>,
@@ -84,8 +58,13 @@ function ftsQuery(
 }
 
 describe("artifact_search_docs schema", () => {
-  it("migration applies without errors", () => {
-    expect(() => createTestDb()).not.toThrow();
+  it("shared helper database setup includes artifact_search_docs table", () => {
+    // Verifies the shared createTestDb helper provisions the artifact_search_docs
+    // table (and FTS5 index) so that search-doc tests can run against it.
+    const { sqlite } = createTestDb();
+    expect(() =>
+      insertSearchDoc(sqlite, { artifact_key: "proj/1/abc.md" }),
+    ).not.toThrow();
   });
 
   it("insert a search doc row succeeds", () => {

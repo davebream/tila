@@ -1,11 +1,4 @@
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  MIGRATION_0018,
-  SearchQueryError,
-  artifactOps,
-  schema,
-} from "@tila/ops-sqlite";
+import { SearchQueryError, artifactOps } from "@tila/ops-sqlite";
 /**
  * Tests for searchArtifacts FTS5 query function.
  *
@@ -18,37 +11,11 @@ import {
  * - Boolean: AND, OR, NOT (uppercase)
  * - NEAR operator: NEAR(term1 term2, N) within N tokens
  */
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
+import { createTestDb } from "./helpers/create-test-db";
 
 const { searchArtifacts } = artifactOps;
-
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-interface TestDb {
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-  sqlite: InstanceType<typeof Database>;
-}
-
-function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  sqlite.exec(MIGRATION_0003);
-  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
 
 /** Insert a search doc row (triggers fire to populate FTS5 index). */
 function insertSearchDoc(

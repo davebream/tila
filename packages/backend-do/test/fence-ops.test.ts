@@ -1,36 +1,12 @@
 import { FenceError } from "@tila/core";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
-import {
-  FenceNotFoundError,
-  MIGRATION_0001,
-  fenceOps,
-  schema,
-} from "../../ops-sqlite/src";
+import { FenceNotFoundError, fenceOps } from "../../ops-sqlite/src";
+import { createTestDb } from "./helpers/create-test-db";
 
 const { assertResourceFence } = fenceOps;
 
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.exec(MIGRATION_0001_TEST);
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
-
 function insertEntity(
-  sqlite: InstanceType<typeof Database>,
+  sqlite: ReturnType<typeof createTestDb>["sqlite"],
   id: string,
   type: string,
 ) {

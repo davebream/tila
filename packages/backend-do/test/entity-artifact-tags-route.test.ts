@@ -17,82 +17,30 @@
  * - invalid tag_filter → 400
  */
 
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  MIGRATIONS,
-  MIGRATION_BOOTSTRAP,
-  type Migration,
-  type MigrationStorage,
   artifactOps,
   entityOps,
   recordOps,
-  schema,
+  type schema,
 } from "../../ops-sqlite/src";
 import { createArtifactRoutes } from "../src/routes/artifact-routes";
 import { createEntityRoutes } from "../src/routes/entity-routes";
 import { createRecordRoutes } from "../src/routes/record-routes";
 import type { RouterDeps } from "../src/routes/types";
+import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
-// Patch COALESCE-based PK that standard SQLite does not support
-function patchMigration(sql: string): string {
-  return sql.replace(
-    "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-    "PRIMARY KEY (from_key, type)",
-  );
-}
-
-function createMigrationStorage(
-  sqlite: InstanceType<typeof Database>,
-): MigrationStorage {
-  return {
-    sql: {
-      exec<T>(statement: string, ...bindings: unknown[]) {
-        const patched = patchMigration(statement);
-        if (/^\s*(SELECT|PRAGMA)\b/i.test(patched)) {
-          return {
-            toArray: () => sqlite.prepare(patched).all(...bindings) as T[],
-          };
-        }
-        if (bindings.length > 0) {
-          sqlite.prepare(patched).run(...bindings);
-        } else {
-          sqlite.exec(patched);
-        }
-        return { toArray: () => [] as T[] };
-      },
-    },
-  };
-}
-
-function runMigration(
-  sqlite: InstanceType<typeof Database>,
-  migration: Migration,
-) {
-  if ("run" in migration) {
-    migration.run(createMigrationStorage(sqlite));
-    return;
-  }
-  sqlite.exec(patchMigration(migration.sql));
-}
-
-let rawDb: InstanceType<typeof Database>;
-let db: ReturnType<typeof drizzle<typeof schema>>;
+let testDb: TestDb;
+let db: TestDb["db"];
 
 beforeEach(() => {
-  rawDb = new Database(":memory:");
-  rawDb.pragma("foreign_keys = OFF"); // mirrors DO runtime; explicit deletes tested
-  rawDb.exec(MIGRATION_BOOTSTRAP);
-  for (const migration of MIGRATIONS) {
-    runMigration(rawDb, migration);
-  }
-  db = drizzle(rawDb, { schema });
+  testDb = createTestDb();
+  db = testDb.db;
 });
 
 afterEach(() => {
-  rawDb.close();
+  testDb.sqlite.close();
 });
 
 function makeDeps(

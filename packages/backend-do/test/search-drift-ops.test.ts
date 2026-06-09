@@ -1,38 +1,12 @@
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  schema,
-  searchDriftOps,
-} from "@tila/ops-sqlite";
+import { searchDriftOps } from "@tila/ops-sqlite";
 import type { TilaSchemaToml } from "@tila/schemas";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
+import { createTestDb } from "./helpers/create-test-db";
 
 const { computeDrift } = searchDriftOps;
 
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_0001_TEST);
-  sqlite.exec(MIGRATION_0003);
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
-
 function insertPointer(
-  sqlite: InstanceType<typeof Database>,
+  sqlite: ReturnType<typeof createTestDb>["sqlite"],
   overrides: {
     r2_key: string;
     kind?: string;
@@ -67,7 +41,7 @@ function insertPointer(
 }
 
 function insertSearchDoc(
-  sqlite: InstanceType<typeof Database>,
+  sqlite: ReturnType<typeof createTestDb>["sqlite"],
   overrides: {
     artifact_key: string;
     kind?: string;

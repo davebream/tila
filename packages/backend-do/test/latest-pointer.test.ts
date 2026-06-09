@@ -1,54 +1,9 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  MIGRATION_0001,
-  MIGRATION_0003,
-  MIGRATION_0004,
-  MIGRATION_0011,
-  MIGRATION_0018,
-  artifactOps,
-  schema,
-} from "../../ops-sqlite/src";
+import { artifactOps, type schema } from "../../ops-sqlite/src";
+import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
 const { upsertPointer, getLatestPointer } = artifactOps;
-
-// Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-const MIGRATION_0001_TEST = MIGRATION_0001.replace(
-  "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",
-  "PRIMARY KEY (from_key, type)",
-);
-
-// Drop FK on resource -> entities(id) so we can insert pointers without entities
-const MIGRATION_FOR_TEST = MIGRATION_0001_TEST.replace(
-  ",\n  FOREIGN KEY (resource) REFERENCES entities(id)",
-  "",
-);
-
-interface TestDb {
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-  sqlite: InstanceType<typeof Database>;
-}
-
-function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(MIGRATION_FOR_TEST);
-  sqlite.exec(MIGRATION_0003); // artifact search docs + FTS5
-  sqlite.exec(MIGRATION_0004); // journal.token_id column
-  sqlite.exec(MIGRATION_0011); // content_inline column
-  sqlite.exec(
-    "ALTER TABLE journal ADD COLUMN source TEXT DEFAULT NULL; ALTER TABLE journal ADD COLUMN source_version TEXT DEFAULT NULL;",
-  );
-  sqlite.exec(MIGRATION_0018); // entity_tags + artifact_tags tables
-  const db = drizzle(sqlite, { schema }) as unknown as BaseSQLiteDatabase<
-    "sync",
-    unknown,
-    typeof schema
-  >;
-  return { db, sqlite };
-}
 
 let counter = 0;
 function makePointer(overrides?: Partial<Parameters<typeof upsertPointer>[1]>) {
@@ -68,18 +23,19 @@ function makePointer(overrides?: Partial<Parameters<typeof upsertPointer>[1]>) {
   };
 }
 
-let rawDb: InstanceType<typeof Database>;
+let testDb: TestDb;
+let rawDb: TestDb["sqlite"];
 let db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 
 beforeEach(() => {
   counter = 0;
-  const testDb = createTestDb();
+  testDb = createTestDb();
   rawDb = testDb.sqlite;
   db = testDb.db;
 });
 
 afterEach(() => {
-  rawDb.close();
+  testDb.sqlite.close();
 });
 
 describe("getLatestPointer", () => {
@@ -186,5 +142,24 @@ describe("getLatestPointer", () => {
     // Both ptr2 and ptr4 are chain heads; ptr4 has the higher produced_at
     const result = getLatestPointer(db, "plan", "task-1");
     expect(result?.r2_key).toBe("keys/chain-b-v2.md");
+  });
+
+  it("returns tags written via upsertPointer", () => {
+    const ptr = makePointer();
+    upsertPointer(db, ptr, { actor: "agent" }, undefined, null, false, [
+      "team:eng",
+      "env:prod",
+    ]);
+    const result = getLatestPointer(db, "plan", "task-1");
+    expect(result?.tags?.slice().sort()).toEqual(
+      ["env:prod", "team:eng"].sort(),
+    );
+  });
+
+  it("returns empty tags array when none were written", () => {
+    const ptr = makePointer();
+    upsertPointer(db, ptr, { actor: "agent" });
+    const result = getLatestPointer(db, "plan", "task-1");
+    expect(result?.tags).toEqual([]);
   });
 });
