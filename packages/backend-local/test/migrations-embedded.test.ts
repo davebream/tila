@@ -57,8 +57,7 @@ function appliedVersions(rawDb: Database): number[] {
 
 describe("embedded migration set on a fresh local DB (Step 4)", () => {
   let tempDir: string;
-  // biome-ignore lint/suspicious/noExplicitAny: test-only typed DB handle
-  let db: any;
+  let db: ReturnType<typeof createLocalConnection>;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "tila-emig-"));
@@ -303,8 +302,7 @@ describe("OLD-style local DB version-reshuffle (Step 4c — KNOWN LIMITATION)", 
 
 describe("real-driver schema parity: shared ops write `target` (Step 4d)", () => {
   let tempDir: string;
-  // biome-ignore lint/suspicious/noExplicitAny: test-only typed DB handle
-  let db: any;
+  let db: ReturnType<typeof createLocalConnection>;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "tila-emig-4d-"));

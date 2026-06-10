@@ -76,7 +76,7 @@ describe("createLocalConnection", () => {
       skipFilesystemCheck: true,
     });
 
-    // Verify entities table exists (from shared MIGRATION_0001)
+    // Verify entities table exists (from the embedded migration set)
     const entities = db.$client
       .query(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='entities'",
@@ -84,7 +84,7 @@ describe("createLocalConnection", () => {
       .get();
     expect(entities).toBeTruthy();
 
-    // Verify _idempotency table exists (from local MIGRATION_0005)
+    // Verify _idempotency table exists (from the embedded idempotency overlay, version 1000)
     const idempotency = db.$client
       .query(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='_idempotency'",
