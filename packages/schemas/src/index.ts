@@ -235,6 +235,8 @@ export {
   type RecordUnarchiveRequest,
   RecordItemSchema,
   type RecordItem,
+  RecordRowSchema,
+  type RecordRow,
   RecordGetResponseSchema,
   type RecordGetResponse,
   RecordMutateResponseSchema,

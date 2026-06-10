@@ -1,6 +1,9 @@
 import { assertFence } from "@tila/core";
 import {
   type RecordDefinition,
+  type RecordHistoryItem,
+  type RecordListItem,
+  type RecordRow,
   type RecordSearchResult,
   canonicalJson,
   canonicalJsonSha256,
@@ -63,45 +66,10 @@ export class RevisionNotFoundError extends Error {
 // Types
 // ---------------------------------------------------------------------------
 
-export type RecordRow = {
-  type: string;
-  key: string;
-  schema_version: number;
-  value: Record<string, unknown>;
-  value_sha256: string;
-  revision: number;
-  archived: number;
-  created_at: number;
-  updated_at: number;
-  updated_by: string;
-  tags: string[];
-  fence: number;
-};
-
-export type RecordListItem = {
-  type: string;
-  key: string;
-  revision: number;
-  updated_at: number;
-  updated_by: string;
-  archived: number;
-  tags: string[];
-};
-
-export type RecordHistoryItem = {
-  type: string;
-  key: string;
-  revision: number;
-  operation: string;
-  schema_version: number;
-  value_sha256: string;
-  canonical_artifact_key: string | null;
-  source_artifact_key: string | null;
-  actor: string;
-  created_at: number;
-  message: string | null;
-  value?: Record<string, unknown>;
-};
+// `RecordRow`, `RecordListItem`, and `RecordHistoryItem` are now defined
+// canonically in `@tila/schemas` (see `RecordRowSchema` etc.) and re-exported
+// here for backward compatibility with existing consumers of this module.
+export type { RecordRow, RecordListItem, RecordHistoryItem };
 
 // ---------------------------------------------------------------------------
 // FTS5 text extraction helper
@@ -1243,7 +1211,11 @@ export function listRecordHistory(
       type: r.type,
       key: r.key,
       revision: r.revision,
-      operation: r.operation,
+      // The DB column is typed as a plain string, but the
+      // `record_revisions_operation_check` CHECK constraint in schema.ts
+      // restricts it to the canonical operation literals at the storage layer,
+      // so narrowing to the enum here is sound.
+      operation: r.operation as RecordHistoryItem["operation"],
       schema_version: r.schema_version,
       value_sha256: r.value_sha256,
       canonical_artifact_key: r.canonical_artifact_key,

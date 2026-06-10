@@ -2,7 +2,7 @@
 
 The interfaces in this directory (`EntityBackend`, `CoordinationBackend`,
 `ArtifactBackend`, `GateBackend`, `JournalBackend`, `SignalBackend`, `SchemaBackend`,
-`SummaryBackend`) define the **CLI local/remote backend-swap contract**.
+`SummaryBackend`, `RecordBackend`) define the **CLI local/remote backend-swap contract**.
 
 ## What this seam is
 
@@ -22,9 +22,13 @@ These interfaces are **not** the Durable Object contract. The `ProjectDO`
 (`@tila/backend-do`) does **not** implement these interfaces; it calls `@tila/ops-sqlite`
 modules directly via Drizzle. The interface seam is purely for the CLI backend-swap path.
 
-## The intentionally missing `RecordBackend`
+## `RecordBackend`
 
-There is no `RecordBackend` interface here. This is intentional: typed mutable records
-(see `docs/08-RECORDS.md`) have no offline CLI path yet. Records are only accessible via
-the remote Worker. When offline record access is added, a `RecordBackend` interface
-should be added here alongside a corresponding `@tila/backend-local` implementation.
+`RecordBackend` (`record-backend.ts`) is the seam for typed mutable records
+(see `docs/08-RECORDS.md`). It is typed against the canonical record types in
+`@tila/schemas` (`RecordRow`, `RecordListItem`, `RecordHistoryItem`) — the same
+single source of truth consumed by `@tila/ops-sqlite`. Input plumbing the backend
+resolves itself (`schema_version`, `actor`, `origin`, `canonical_artifact_key`) is
+omitted from the input shapes; the return types preserve those as read-only output
+fields. A concrete `@tila/backend-local` implementation will follow in a subsequent
+task to provide the offline CLI record path.

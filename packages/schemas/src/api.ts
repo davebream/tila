@@ -1075,6 +1075,24 @@ export const RecordItemSchema = z.object({
 
 export type RecordItem = z.infer<typeof RecordItemSchema>;
 
+/**
+ * Internal record row as produced by backend ops modules (`@tila/ops-sqlite`,
+ * `@tila/backend-local`). Unlike `RecordItemSchema` (the HTTP wire shape), this
+ * adds the `fence` token, which destructive record mutations require.
+ *
+ * Defined as `RecordItemSchema.extend(...)` so the wire shape and the internal
+ * row stay structurally coupled by construction — any field added to the wire
+ * type flows into `RecordRow` automatically, preventing drift.
+ *
+ * Canonical home for the `RecordRow` type consumed by `RecordBackend`
+ * (`@tila/core`) and the ops modules — do not redefine it elsewhere.
+ */
+export const RecordRowSchema = RecordItemSchema.extend({
+  fence: z.number().int(),
+});
+
+export type RecordRow = z.infer<typeof RecordRowSchema>;
+
 export const RecordGetResponseSchema = z.object({
   ok: z.literal(true),
   record: RecordItemSchema,
@@ -1128,6 +1146,9 @@ export const RecordHistoryItemSchema = z.object({
   actor: z.string(),
   created_at: z.number().int(),
   message: z.string().nullable(),
+  // Populated only when the history is requested with `includeValues=true`
+  // (wire: `?values=true`). Optional so existing parsers stay compatible.
+  value: z.record(z.unknown()).optional(),
 });
 
 export type RecordHistoryItem = z.infer<typeof RecordHistoryItemSchema>;

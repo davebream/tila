@@ -43,6 +43,16 @@ export type {
   SummaryBackend,
   ProjectSummary,
 } from "./interfaces/summary-backend";
+export type {
+  RecordBackend,
+  CreateRecordInput,
+  SetRecordInput,
+  PatchRecordInput,
+  ArchiveRecordInput,
+  RecordListFilter,
+  RecordHistoryOptions,
+  RecordPage,
+} from "./interfaces/record-backend";
 
 // Fence validation utilities
 export { validateFence, assertFence, FenceError } from "./fence";
