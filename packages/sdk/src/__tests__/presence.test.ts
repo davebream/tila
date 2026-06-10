@@ -42,6 +42,37 @@ describe("createPresenceMethods", () => {
     expect(result).toEqual(responseBody);
   });
 
+  it("heartbeat() POSTs /projects/:id/presence/heartbeat with { machine, info }", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const presence = createPresenceMethods(client, "proj-1");
+    await presence.heartbeat("agent-1", { task: "coding" });
+
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.test/projects/proj-1/presence/heartbeat");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      machine: "agent-1",
+      info: { task: "coding" },
+    });
+  });
+
+  it("heartbeat() defaults info to {} when omitted", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const presence = createPresenceMethods(client, "proj-1");
+    await presence.heartbeat("agent-1");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ machine: "agent-1", info: {} });
+  });
+
   it("list() calls GET /projects/:id/presence", async () => {
     const responseBody = { ok: true, records: [] };
     mockFetch.mockResolvedValueOnce(

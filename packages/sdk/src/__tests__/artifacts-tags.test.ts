@@ -84,6 +84,51 @@ describe("artifact upload with tags (SDK)", () => {
     expect(body.get("tags")).toBeNull();
   });
 
+  it("writeText() POSTs /artifacts/text and includes tags in the JSON body when provided", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ ok: true, key: "k", bytes: 9, deduplicated: false }),
+        { status: 200 },
+      ),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    await artifacts.writeText("# plan", {
+      kind: "plan",
+      mimeType: "text/markdown",
+      tags: ["repo:api", "team:eng"],
+    });
+
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.test/projects/proj-1/artifacts/text");
+    expect(init.method).toBe("POST");
+    const reqBody = JSON.parse(init.body);
+    expect(reqBody.content).toBe("# plan");
+    expect(reqBody.kind).toBe("plan");
+    expect(reqBody.mime_type).toBe("text/markdown");
+    expect(reqBody.tags).toEqual(["repo:api", "team:eng"]);
+  });
+
+  it("writeText() omits tags from the body when not provided", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ ok: true, key: "k", bytes: 9, deduplicated: false }),
+        { status: 200 },
+      ),
+    );
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    await artifacts.writeText("# plan", { kind: "plan" });
+
+    const [, init] = mockFetch.mock.calls[0];
+    const reqBody = JSON.parse(init.body);
+    expect(reqBody.tags).toBeUndefined();
+  });
+
   // NOTE: read-side coverage is intentionally mock-confirms-mock — fetch is mocked to return a
   // body that already contains `tags`, so this asserts SDK pass-through, not a real read
   // round-trip. The real server→client tag round-trip is covered at the ops/integration layer

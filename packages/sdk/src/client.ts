@@ -69,7 +69,11 @@ export class TilaClient {
     return controller.signal;
   }
 
-  static fromConfig(config: TilaProjectConfig, token: string): TilaClient {
+  static fromConfig(
+    config: TilaProjectConfig,
+    token: string,
+    opts?: { extraHeaders?: Record<string, string> },
+  ): TilaClient {
     if (config.backend === "local") {
       throw new Error(
         "Cannot create an HTTP TilaClient for a local backend (backend = " +
@@ -84,7 +88,13 @@ export class TilaClient {
           "Use 'tila project create' or set backend = \"cloudflare\" in .tila/config.toml.",
       );
     }
-    return new TilaClient({ baseUrl: config.worker_url, token });
+    return new TilaClient({
+      baseUrl: config.worker_url,
+      token,
+      // Optional caller attribution (e.g. mcp-server/<version>). When omitted,
+      // the constructor's default X-Tila-Source (sdk/<version>) applies.
+      ...(opts?.extraHeaders ? { extraHeaders: opts.extraHeaders } : {}),
+    });
   }
 
   async request<T>(
@@ -492,10 +502,16 @@ function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
  * `__tests__/bundle-hygiene.test.ts`).
  *
  * @param token Required for the Cloudflare backend; ignored for local.
+ * @param opts  Optional Cloudflare-backend tuning. `opts.extraHeaders` is
+ *   forwarded to the underlying `TilaClient` (e.g. a caller-attribution
+ *   `X-Tila-Source: mcp-server/<version>` header). Ignored for the local
+ *   backend, which makes no HTTP requests. Additive/back-compat: existing
+ *   `createTila(config, token)` callers are unaffected.
  */
 export async function createTila(
   config: TilaProjectConfig,
   token?: string,
+  opts?: { extraHeaders?: Record<string, string> },
 ): Promise<TilaFacade> {
   if (config.backend === "local") {
     if (!config.local) {
@@ -537,6 +553,8 @@ export async function createTila(
       'createTila: the Cloudflare backend requires a token. Pass createTila(config, token), or set backend = "local".',
     );
   }
-  const client = TilaClient.fromConfig(config, token);
+  const client = TilaClient.fromConfig(config, token, {
+    extraHeaders: opts?.extraHeaders,
+  });
   return buildHttpFacade(client, config.project_id);
 }

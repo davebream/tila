@@ -268,6 +268,33 @@ describe("createTila — cloudflare backend", () => {
     expect(typeof tila.artifacts.writeText).toBe("function");
   });
 
+  it("forwards opts.extraHeaders (X-Tila-Source attribution) to the HTTP client", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({ ok: true, entity: { id: "task-1", type: "task" } }),
+    );
+    const tila = await createTila(
+      baseConfig({ backend: "cloudflare", worker_url: "https://api.test" }),
+      "tok",
+      { extraHeaders: { "X-Tila-Source": "mcp-server/9.9.9" } },
+    );
+    await tila.tasks.create("task-1", "task", {});
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers["X-Tila-Source"]).toBe("mcp-server/9.9.9");
+  });
+
+  it("defaults X-Tila-Source to sdk/<version> when no extraHeaders are passed", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({ ok: true, entity: { id: "task-1", type: "task" } }),
+    );
+    const tila = await createTila(
+      baseConfig({ backend: "cloudflare", worker_url: "https://api.test" }),
+      "tok",
+    );
+    await tila.tasks.create("task-1", "task", {});
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers["X-Tila-Source"]).toMatch(/^sdk\/\d+\.\d+\.\d+$/);
+  });
+
   it("tasks.create hits HTTP (mock fetch), same call site as local", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({ ok: true, entity: { id: "task-1", type: "task" } }),
