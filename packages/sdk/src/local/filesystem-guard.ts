@@ -1,6 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import {
+  NETWORK_FS_TYPES_LINUX,
+  NETWORK_FS_TYPES_MACOS,
+  findEnclosingMountFsType,
+} from "@tila/backend-embedded";
 
 /**
  * Raised when a local database path resolves to a network filesystem mount
@@ -55,32 +60,13 @@ export function assertLocalFilesystem(dbPath: string): void {
 function assertLocalFilesystemLinux(dir: string): void {
   try {
     const mounts = readFileSync("/proc/self/mounts", "utf-8");
-    const networkTypes = new Set(["nfs", "nfs4", "cifs", "smb", "smbfs"]);
-
-    // Match the longest mount point that prefixes `dir` so a nested local mount
-    // under a network root is not mis-flagged (and vice versa).
-    let bestMatch: { mountPoint: string; fsType: string } | null = null;
-    for (const line of mounts.split("\n")) {
-      const parts = line.split(" ");
-      if (parts.length < 3) continue;
-      const mountPoint = parts[1];
-      const fsType = parts[2];
-      if (
-        dir === mountPoint ||
-        dir.startsWith(mountPoint.endsWith("/") ? mountPoint : `${mountPoint}/`)
-      ) {
-        if (
-          bestMatch === null ||
-          mountPoint.length > bestMatch.mountPoint.length
-        ) {
-          bestMatch = { mountPoint, fsType };
-        }
-      }
-    }
-
-    if (bestMatch && networkTypes.has(bestMatch.fsType)) {
+    // Classify via the SHARED pure matcher (longest-prefix, boundary-safe), the
+    // same implementation the bun guard uses — so node and bun judge a path
+    // identically (C7).
+    const fsType = findEnclosingMountFsType(dir, mounts);
+    if (fsType !== null && NETWORK_FS_TYPES_LINUX.includes(fsType)) {
       throw new LocalFilesystemError(
-        `Database path is on a network filesystem (${bestMatch.fsType}). Local backend requires a local filesystem to guarantee SQLite locking semantics. Use a path under /home or a local SSD.`,
+        `Database path is on a network filesystem (${fsType}). Local backend requires a local filesystem to guarantee SQLite locking semantics. Use a path under /home or a local SSD.`,
       );
     }
   } catch (err) {
@@ -98,8 +84,7 @@ function assertLocalFilesystemMacOS(dir: string): void {
       .trim()
       .toLowerCase();
 
-    const networkTypes = ["smbfs", "nfs", "afpfs", "webdavfs"];
-    for (const netType of networkTypes) {
+    for (const netType of NETWORK_FS_TYPES_MACOS) {
       if (fsType.includes(netType)) {
         throw new LocalFilesystemError(
           `Database path is on a network filesystem (${fsType}). Local backend requires a local filesystem to guarantee SQLite locking semantics. Use a path under /Users or a local SSD.`,

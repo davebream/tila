@@ -2,7 +2,11 @@ import { Database } from "bun:sqlite";
 import { readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  EMBEDDED_PRAGMAS,
   type MigrationStorage,
+  NETWORK_FS_TYPES_LINUX,
+  NETWORK_FS_TYPES_MACOS,
+  findEnclosingMountFsType,
   runEmbeddedMigrations,
 } from "@tila/backend-embedded";
 import { schema } from "@tila/ops-sqlite";
@@ -50,16 +54,15 @@ export function createLocalConnection(
     readonly: opts?.readonly ?? false,
   });
 
-  // 3. PRAGMA initialization.
-  //    Set busy_timeout FIRST (before any write-requiring PRAGMA) so that
-  //    concurrent processes don't fail immediately with SQLITE_BUSY when the
-  //    default busy_timeout=0 is in effect. Then set journal_mode and foreign_keys.
-  //    These are correctness requirements, not performance hints.
-  rawDb.exec("PRAGMA busy_timeout=5000;");
-  rawDb.exec(`
-    PRAGMA journal_mode=WAL;
-    PRAGMA foreign_keys=ON;
-  `);
+  // 3. PRAGMA initialization — derived from the SHARED, ordered EMBEDDED_PRAGMAS
+  //    sequence (the single source of truth shared with the node connection, so
+  //    the two runtimes can never drift; R2). The order is fixed: busy_timeout
+  //    FIRST (before any write-requiring PRAGMA) so concurrent processes don't
+  //    fail immediately with SQLITE_BUSY under the default busy_timeout=0, then
+  //    journal_mode=WAL, then foreign_keys=ON. Bun keeps its batched apply (a
+  //    single exec of the joined statements) but iterates the same constant, so
+  //    it can never reorder or omit a pragma relative to the node path.
+  rawDb.exec(EMBEDDED_PRAGMAS.join("\n"));
 
   // 4. Run the shared embedded migration set against the raw Database
   //    (before Drizzle wrapping). The embedded runner is storage-agnostic; we
@@ -125,19 +128,15 @@ function assertLocalFilesystem(dbPath: string): void {
 function assertLocalFilesystemLinux(dir: string): void {
   try {
     const mounts = readFileSync("/proc/self/mounts", "utf-8");
-    const networkTypes = new Set(["nfs", "nfs4", "cifs", "smb", "smbfs"]);
-
-    for (const line of mounts.split("\n")) {
-      const parts = line.split(" ");
-      if (parts.length < 3) continue;
-      const mountPoint = parts[1];
-      const fsType = parts[2];
-
-      if (dir.startsWith(mountPoint) && networkTypes.has(fsType)) {
-        throw new LocalFilesystemError(
-          `Database path is on a network filesystem (${fsType}). Local backend requires a local filesystem to guarantee SQLite locking semantics. Use a path under /home or a local SSD.`,
-        );
-      }
+    // Classify via the SHARED pure matcher (longest-prefix, boundary-safe), the
+    // single implementation the node guard also uses — so bun and node judge a
+    // path identically (C7). Replaces the prior naive `dir.startsWith` which
+    // mis-matched `/mnt/nfs` against `/mnt/nfsdata` and was ordering-sensitive.
+    const fsType = findEnclosingMountFsType(dir, mounts);
+    if (fsType !== null && NETWORK_FS_TYPES_LINUX.includes(fsType)) {
+      throw new LocalFilesystemError(
+        `Database path is on a network filesystem (${fsType}). Local backend requires a local filesystem to guarantee SQLite locking semantics. Use a path under /home or a local SSD.`,
+      );
     }
   } catch (err) {
     if (err instanceof LocalFilesystemError) throw err;
@@ -150,8 +149,7 @@ function assertLocalFilesystemMacOS(dir: string): void {
     const result = Bun.spawnSync(["stat", "-f", "%T", dir]);
     const fsType = new TextDecoder().decode(result.stdout).trim().toLowerCase();
 
-    const networkTypes = ["smbfs", "nfs", "afpfs", "webdavfs"];
-    for (const netType of networkTypes) {
+    for (const netType of NETWORK_FS_TYPES_MACOS) {
       if (fsType.includes(netType)) {
         throw new LocalFilesystemError(
           `Database path is on a network filesystem (${fsType}). Local backend requires a local filesystem to guarantee SQLite locking semantics. Use a path under /Users or a local SSD.`,
