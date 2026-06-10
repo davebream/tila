@@ -36,6 +36,7 @@ import {
 } from "@tila/core";
 import {
   type RequestOrigin,
+  TemplateInstantiateError,
   constraintOps,
   coordinationOps,
   entityOps,
@@ -48,6 +49,7 @@ import {
   schemaOps,
   searchReindexOps,
   signalOps,
+  templateOps,
   validateRecordValue,
 } from "@tila/ops-sqlite";
 import type { TilaSchemaToml } from "@tila/schemas";
@@ -63,7 +65,7 @@ import type {
   RecordListItem,
   RecordRow,
 } from "@tila/schemas";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
   NotFoundError,
@@ -1013,18 +1015,18 @@ export class EmbeddedProject
   // ---------- Templates ----------
 
   /**
-   * Instantiate a schema template locally, creating its entities and
-   * relationships in a single transaction and appending a
-   * `template.instantiated` journal event. Reproduces the DO
-   * `/template/instantiate` route (schema-routes.ts ~112-295) guard-for-guard so
-   * CLI/SDK/MCP get the SAME validation + output locally as remote:
-   *   - no schema applied         -> TemplateError("no-schema")    (DO 422)
-   *   - root_id / computed id "/" -> TemplateError("invalid-id")   (DO 422)
-   *   - template not found        -> TemplateError("not-found")    (DO 404)
-   *   - undeclared work-unit type -> TemplateError("constraint-violation") (DO 422)
+   * Instantiate a schema template locally — a THIN wrapper over the shared
+   * `templateOps.instantiateTemplate` (the single source of truth, also used by
+   * the DO `/template/instantiate` route). This delegation eliminates the prior
+   * ~120-line copy of the route body and the actor-default drift it caused.
    *
-   * `{{var}}` placeholders in entity data are substituted from `vars` (unknown
-   * keys are left intact, matching the DO's `applyVar`).
+   * Per-caller difference is passed explicitly as the `origin`: a local actor
+   * (defaulting to "local", vs the DO's "system") with no token/source/version.
+   *
+   * The op's `TemplateInstantiateError` is mapped 1:1 to the embedded
+   * `TemplateError` (identical codes + messages) so CLI/SDK/MCP get the same
+   * clean errors locally as the Worker returns remote. The whole call is wrapped
+   * in `withBusyRetry` (SQLITE_BUSY), matching every other write method here.
    */
   instantiateTemplate(input: {
     template_name: string;
@@ -1036,134 +1038,25 @@ export class EmbeddedProject
     created_relationships: number;
     journal_seq: number;
   } {
-    const vars = input.vars ?? {};
-    const actor = input.actor ?? "local";
-
-    if (input.root_id.includes("/")) {
-      throw new TemplateError(
-        "invalid-id",
-        `root_id "${input.root_id}" contains '/' which is not allowed in entity IDs`,
-      );
-    }
-
-    const parsedSchema = constraintOps.resolveCurrentSchema(this.db);
-    if (!parsedSchema) {
-      throw new TemplateError("no-schema", "No schema applied to this project");
-    }
-
-    const templateDef = parsedSchema.templates?.[input.template_name];
-    if (!templateDef) {
-      throw new TemplateError(
-        "not-found",
-        `Template "${input.template_name}" not found in schema`,
-      );
-    }
-
-    // Validate every template entity's work-unit type is declared (DO ~156-166).
-    for (const [entityKey, entity] of Object.entries(templateDef.entities)) {
-      const typeCheck = constraintOps.checkEntityTypeDeclared(
-        parsedSchema,
-        entity.type,
-      );
-      if (!typeCheck.ok) {
-        throw new TemplateError(
-          "constraint-violation",
-          `Template entity "${entityKey}": ${typeCheck.message}`,
-        );
-      }
-    }
-
-    // Validate every computed entity ID (DO ~168-178).
-    for (const [entityKey, entity] of Object.entries(templateDef.entities)) {
-      const entityId = input.root_id + entity.id_suffix;
-      if (entityId.includes("/")) {
-        throw new TemplateError(
-          "invalid-id",
-          `Computed entity ID "${entityId}" (from entity "${entityKey}") contains '/'`,
-        );
-      }
-    }
-
-    const schemaVersion = schemaOps.getCurrentSchema(this.db)?.version ?? 1;
-    const now = Date.now();
-
-    const applyVar = (value: unknown): unknown => {
-      if (typeof value !== "string") return value;
-      return value.replace(
-        /\{\{(\w+)\}\}/g,
-        (_, k: string) => vars[k] ?? `{{${k}}}`,
-      );
-    };
-    const applyVarsToData = (
-      data: Record<string, unknown>,
-    ): Record<string, unknown> =>
-      Object.fromEntries(
-        Object.entries(data).map(([k, val]) => [k, applyVar(val)]),
-      );
-
-    return this.retry(() =>
-      this.db.transaction((tx) => {
-        const entityIds: string[] = [];
-        let relCount = 0;
-
-        for (const [, entity] of Object.entries(templateDef.entities)) {
-          const entityId = input.root_id + entity.id_suffix;
-          const data = applyVarsToData(entity.data as Record<string, unknown>);
-          tx.insert(opsSchema.entities)
-            .values({
-              id: entityId,
-              type: entity.type,
-              schema_version: schemaVersion,
-              data: JSON.stringify(data),
-              archived: 0,
-              created_at: now,
-              updated_at: now,
-              created_by: actor,
-            })
-            .run();
-          entityIds.push(entityId);
-        }
-
-        for (const rel of templateDef.relationships) {
-          const fromEntity = templateDef.entities[rel.from];
-          const toEntity = templateDef.entities[rel.to];
-          if (!fromEntity || !toEntity) continue;
-          const fromId = input.root_id + fromEntity.id_suffix;
-          const toId = input.root_id + toEntity.id_suffix;
-          tx.run(
-            sql`INSERT INTO entity_relationships (from_id, to_id, type, schema_version, created_at) VALUES (${fromId}, ${toId}, ${rel.type}, ${schemaVersion}, ${now})`,
-          );
-          relCount++;
-        }
-
-        journalOps.appendJournal(tx, {
-          kind: "template.instantiated",
-          resource: input.root_id,
-          actor,
-          tokenId: null,
-          source: null,
-          sourceVersion: null,
-          data: {
-            template_name: input.template_name,
-            created_entity_ids: entityIds,
-            vars_used: Object.keys(vars),
+    try {
+      return this.retry(() =>
+        templateOps.instantiateTemplate(this.db, {
+          templateName: input.template_name,
+          rootId: input.root_id,
+          vars: input.vars ?? {},
+          origin: {
+            actor: input.actor ?? "local",
+            tokenId: null,
+            source: null,
+            sourceVersion: null,
           },
-        });
-
-        const seqRow = tx
-          .select({ seq: opsSchema.journal.seq })
-          .from(opsSchema.journal)
-          .orderBy(sql`seq DESC`)
-          .limit(1)
-          .get();
-        const journalSeq = seqRow?.seq ?? 0;
-
-        return {
-          created_entities: entityIds,
-          created_relationships: relCount,
-          journal_seq: journalSeq,
-        };
-      }),
-    );
+        }),
+      );
+    } catch (err) {
+      if (err instanceof TemplateInstantiateError) {
+        throw new TemplateError(err.code, err.message);
+      }
+      throw err;
+    }
   }
 }

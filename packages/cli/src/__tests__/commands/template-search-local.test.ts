@@ -259,13 +259,17 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     expect(rels[0].to_id).toBe("sprint-1-child");
   });
 
-  it("template instantiate -> unknown template fails fast with a clean message", async () => {
+  // Error-SURFACE mapping: the exhaustive guard coverage lives at the ops level
+  // (template-ops.test.ts). These CLI tests only prove the wiring + that a
+  // TemplateError is surfaced as a clean message/code with no stack trace.
+
+  it("template instantiate -> not-found surfaces a clean message, no stack trace", async () => {
     await project.applySchema({ definition: SCHEMA_WITH_TEMPLATE });
     const cmd = await loadTemplate();
     await runCmd(getSubCommand(cmd, "instantiate"), {
       name: "missing",
       id: "x-1",
-      json: true,
+      json: false,
     });
     expect(exitSpy).toHaveBeenCalledWith(1);
     const stderr = errorSpy.mock.calls
@@ -273,6 +277,26 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
       .join("\n");
     expect(stderr).toMatch(/not found/i);
     // No stack trace leaked.
+    expect(stderr).not.toMatch(/at Object\.|node_modules/);
+  });
+
+  it("template instantiate -> no-schema surfaces clean message + NO_SCHEMA code (--json)", async () => {
+    // No schema applied → the op throws no-schema, mapped to TemplateError and
+    // surfaced by the CLI. --json proves the code-transform branch
+    // (no-schema -> NO_SCHEMA).
+    const cmd = await loadTemplate();
+    await runCmd(getSubCommand(cmd, "instantiate"), {
+      name: "sprint",
+      id: "s-1",
+      json: true,
+    });
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const stderr = errorSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    const payload = JSON.parse(stderr);
+    expect(payload.code).toBe("NO_SCHEMA");
+    expect(payload.error).toMatch(/no schema/i);
     expect(stderr).not.toMatch(/at Object\.|node_modules/);
   });
 
@@ -305,6 +329,29 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     expect(out).toMatch(/Reindex complete for entity/);
   });
 
+  it("search reindex (default = all) -> loops BOTH artifact and entity kinds", async () => {
+    await project.create({
+      id: "task-a",
+      type: "task",
+      data: { title: "alpha widget" },
+      created_by: "tester",
+    });
+    project.getDb().run(sql`DELETE FROM entity_search_docs`);
+    expect(project.searchAll({ q: "alpha" })).toHaveLength(0);
+
+    const cmd = await loadSearch();
+    // No --kind and no --all → default path reindexes both kinds.
+    await runCmd(getSubCommand(cmd, "reindex"), {});
+
+    expect(project.searchAll({ q: "alpha" }).length).toBeGreaterThan(0);
+    const out = logSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    // Both kinds were processed by the two-kind loop.
+    expect(out).toMatch(/Reindex complete for artifact/);
+    expect(out).toMatch(/Reindex complete for entity/);
+  });
+
   // --- schema diff (real backend) ---
 
   it("schema diff -> computes added field against the applied local schema", async () => {
@@ -333,6 +380,34 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
         fieldName: "priority",
       }),
     ]);
+  });
+
+  it("schema diff (human-readable) -> renders a field-removed (destructive) change", async () => {
+    // Current schema has a `priority` field; proposed drops it → field-removed.
+    // Non-JSON mode exercises the permissive-record renderer cast (schema.ts ~134)
+    // and the destructive-change branch (autoApplicable: No).
+    await project.applySchema({
+      definition:
+        'schema_version = 1\n\n[work_units.task]\nlabel = "Task"\n[work_units.task.fields.priority]\ntype = "string"\n',
+    });
+    mockLoadComposedSchema.mockReturnValue({
+      ok: true as const,
+      definition: 'schema_version = 2\n\n[work_units.task]\nlabel = "Task"\n',
+      schemaVersion: 2,
+      warnings: [],
+      fragmentCount: 1,
+    });
+
+    const cmd = await loadSchema();
+    await runCmd(getSubCommand(cmd, "diff"), { json: false });
+
+    const out = logSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(out).toMatch(/Removed field 'priority' from task/);
+    // Pure local diff → entityCount is 0, so no "(N entities affected)" suffix.
+    expect(out).not.toMatch(/affected\)/);
+    expect(out).toMatch(/Auto-applicable: No/);
   });
 });
 
