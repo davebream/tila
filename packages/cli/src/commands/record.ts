@@ -75,6 +75,25 @@ async function fetchRecordTypeDef(
   }
 }
 
+/**
+ * Read the record type keys DECLARED in the current schema (whether or not any
+ * records of that type exist yet). Backend-agnostic — parses the schema TOML
+ * from `SchemaBackend.getCurrentSchema()`, the same source `fetchRecordTypeDef`
+ * uses. Returns `[]` when no schema is applied or parsing fails.
+ */
+async function fetchDeclaredRecordTypes(
+  schemaBackend: SchemaBackend,
+): Promise<string[]> {
+  try {
+    const res = await schemaBackend.getCurrentSchema();
+    if (!res.definition) return [];
+    const schema = TilaSchemaTomlSchema.parse(parseTOML(res.definition));
+    return Object.keys(schema.records ?? {});
+  } catch {
+    return [];
+  }
+}
+
 export default defineCommand({
   meta: { name: "record", description: "Manage typed records" },
   subCommands: {
@@ -665,13 +684,23 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
 
-        // RecordBackend exposes a single types method (the in-use ∪ declared
-        // set, sorted). The `--in-use` flag is preserved for compatibility but
-        // resolves through the same backend method in both local and remote
-        // mode.
-        const typesToShow = await withSpinner("Fetching types...", () =>
+        // `ctx.record.listRecordTypesInUse()` returns the IN-USE subset only
+        // (types with at least one active record) — consistent across local and
+        // remote backends. Two display modes, both local-capable (no client):
+        //   --in-use : in-use subset only.
+        //   default  : merged "declared ∪ in-use" view. Declared types come from
+        //              the schema (ctx.schema), in-use from ctx.record.
+        const inUse = await withSpinner("Fetching types...", () =>
           ctx.record.listRecordTypesInUse(),
         );
+
+        let typesToShow: string[];
+        if (args["in-use"]) {
+          typesToShow = inUse;
+        } else {
+          const declared = await fetchDeclaredRecordTypes(ctx.schema);
+          typesToShow = [...new Set([...declared, ...inUse])].sort();
+        }
 
         if (args.json) {
           printJson({ ok: true, types: typesToShow });

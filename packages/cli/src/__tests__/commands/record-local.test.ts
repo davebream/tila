@@ -338,4 +338,45 @@ describe("record commands (local mode, real EmbeddedProject)", () => {
     // No record should have been written.
     expect(await project.getRecord("pipeline_config", "main")).toBeNull();
   });
+
+  // Regression (cross-backend parity): against a REAL local backend, the
+  // default `record types` listing must MERGE a schema-declared-but-unused type,
+  // while `--in-use` must EXCLUDE it (only types with active records).
+  it("types: default merges declared-but-unused type; --in-use excludes it", async () => {
+    await project.applySchema({
+      definition: `
+schema_version = 1
+
+[records.declared_only.fields.value]
+type = "string"
+
+[records.service.fields.value]
+type = "string"
+`,
+    });
+    // Create a record only for `service` -> `declared_only` is declared but unused.
+    fileContents.set("/tmp/value.json", JSON.stringify({ value: "1" }));
+    const cmd = await loadCommand();
+    await runCmd(getSubCommand(cmd, "set"), {
+      type: "service",
+      key: "api",
+      file: "/tmp/value.json",
+      json: false,
+    });
+
+    // Sanity: the backend's in-use-only method excludes the unused declared type.
+    expect(await project.listRecordTypesInUse()).toEqual(["service"]);
+
+    // Default (merged): declared_only IS present.
+    logSpy.mockClear();
+    await runCmd(getSubCommand(cmd, "types"), { json: true, "in-use": false });
+    const merged = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(merged.types).toEqual(["declared_only", "service"]);
+
+    // --in-use: declared_only is EXCLUDED.
+    logSpy.mockClear();
+    await runCmd(getSubCommand(cmd, "types"), { json: true, "in-use": true });
+    const inUse = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(inUse.types).toEqual(["service"]);
+  });
 });

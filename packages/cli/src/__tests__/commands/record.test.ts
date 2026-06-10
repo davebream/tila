@@ -732,4 +732,42 @@ describe("tila record types", () => {
     expect(output.ok).toBe(true);
     expect(output.types).toEqual(["service"]);
   });
+
+  // Regression: a declared-but-unused type must appear in the default (merged)
+  // listing but NOT in --in-use. This is the cross-backend parity bug — here
+  // exercised against the MOCKED remote backend, whose listRecordTypesInUse()
+  // returns the in-use subset only.
+  it("types (default) -> MERGES schema-declared types with in-use types", async () => {
+    mockGetCurrentSchema.mockResolvedValue({
+      version: 1,
+      definition:
+        'schema_version = 1\n[records.declared_only.fields.value]\ntype = "string"\n[records.service.fields.value]\ntype = "string"\n',
+    });
+    mockListRecordTypesInUse.mockResolvedValue(["service"]); // only service in use
+
+    const cmd = await loadCommand();
+    const sub = getSubCommand(cmd, "types");
+    await runCmd(sub, { json: true, "in-use": false });
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    // declared_only is declared but unused -> still listed in merged view.
+    expect(output.types).toEqual(["declared_only", "service"]);
+  });
+
+  it("types --in-use -> EXCLUDES declared-but-unused types", async () => {
+    mockGetCurrentSchema.mockResolvedValue({
+      version: 1,
+      definition:
+        'schema_version = 1\n[records.declared_only.fields.value]\ntype = "string"\n[records.service.fields.value]\ntype = "string"\n',
+    });
+    mockListRecordTypesInUse.mockResolvedValue(["service"]);
+
+    const cmd = await loadCommand();
+    const sub = getSubCommand(cmd, "types");
+    await runCmd(sub, { json: true, "in-use": true });
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    // Only types with active records -> declared_only is omitted.
+    expect(output.types).toEqual(["service"]);
+  });
 });

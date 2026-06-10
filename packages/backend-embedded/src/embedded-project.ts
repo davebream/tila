@@ -744,19 +744,15 @@ export class EmbeddedProject
   }
 
   /**
-   * Distinct record types in use, merged with schema-declared record types.
-   * Mirrors the Worker's `/records/_types` merge (in-use ∪ declared), sorted.
+   * Record types of CURRENTLY-IN-USE (active, non-archived) records, sorted
+   * and distinct. This is the IN-USE subset only — it deliberately does NOT
+   * merge in schema-declared-but-unused types (see the `RecordBackend`
+   * interface contract). Callers that want the merged "declared ∪ in-use" view
+   * (e.g. the CLI `record types` default) compose it themselves from the schema
+   * plus this method.
    */
   async listRecordTypesInUse(): Promise<string[]> {
-    const inUse = recordOps.listRecordTypesInUse(this.db);
-
-    let declared: string[] = [];
-    const current = constraintOps.resolveCurrentSchema(this.db);
-    if (current) {
-      declared = Object.keys(current.records ?? {}).sort();
-    }
-
-    return [...new Set([...declared, ...inUse])].sort();
+    return recordOps.listRecordTypesInUse(this.db);
   }
 
   // ---------- Idempotency (C2: Drizzle, not raw $client) ----------

@@ -107,5 +107,16 @@ export interface RecordBackend {
     key: string,
     opts?: RecordHistoryOptions,
   ): Promise<RecordPage<RecordHistoryItem>>;
+  /**
+   * Record types that are currently IN USE — i.e. types with at least one
+   * active (non-archived) record — sorted and distinct.
+   *
+   * This is the in-use subset ONLY. It does NOT include schema-declared types
+   * that have no records yet. Every implementation must honour this contract so
+   * local and remote backends agree (the remote backend returns the Worker's
+   * `in_use_types`). Callers that need the merged "declared ∪ in-use" view
+   * (e.g. CLI `record types` without `--in-use`) compose it from the schema's
+   * declared types unioned with this method's result.
+   */
   listRecordTypesInUse(): Promise<string[]>;
 }

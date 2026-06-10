@@ -435,7 +435,7 @@ type = "string"
       expect(u.fence).toBeGreaterThan(a.fence);
     });
 
-    it("listRecordTypesInUse merges in-use with schema-declared types", async () => {
+    it("listRecordTypesInUse returns only in-use types, not declared-but-unused", async () => {
       await project.applySchema({
         definition: `
 schema_version = 1
@@ -453,8 +453,10 @@ type = "string"
         value: { value: "1" },
       });
       const types = await project.listRecordTypesInUse();
-      // config is both declared + in-use; declared_only is declared but unused.
-      expect(types).toEqual(["config", "declared_only"]);
+      // In-use only: `config` has an active record, so it appears.
+      // `declared_only` is declared in the schema but has no record, so it is
+      // EXCLUDED — the merged "declared ∪ in-use" view is composed by callers.
+      expect(types).toEqual(["config"]);
     });
   });
 

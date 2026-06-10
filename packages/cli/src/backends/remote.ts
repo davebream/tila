@@ -92,8 +92,11 @@ const ArtifactListInternalSchema = z.object({
 
 const OkSchema = z.object({ ok: z.literal(true) }).passthrough();
 
-// /records/_types returns merged declared+in-use types plus the in_use_types
-// subset. RecordBackend.listRecordTypesInUse() returns the in-use subset.
+// /records/_types returns the merged declared∪in-use `types` plus the
+// `in_use_types` subset. Per the RecordBackend contract,
+// listRecordTypesInUse() returns the IN-USE subset only (`in_use_types`) —
+// consistent with EmbeddedProject. The CLI composes the merged view from the
+// schema's declared types when it needs it.
 const RecordTypesInternalSchema = z.object({
   ok: z.literal(true),
   types: z.array(z.string()),
