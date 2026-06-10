@@ -6,7 +6,7 @@ import {
 import { createNodeConnection } from "./connection";
 import { NodeBlobStore } from "./node-blob-store";
 
-export { MissingNativeDriverError } from "./connection";
+export { LocalDatabaseOpenError, MissingNativeDriverError } from "./connection";
 export { LocalFilesystemError } from "./filesystem-guard";
 export { NodeBlobStore } from "./node-blob-store";
 

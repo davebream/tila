@@ -13,7 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createNodeConnection } from "../../local/connection";
+import {
+  LocalDatabaseOpenError,
+  createNodeConnection,
+} from "../../local/connection";
 
 // Runtime view of the drizzle better-sqlite3 handle (the EmbeddedDb type erases
 // `$client`, but the better-sqlite3 adapter attaches it at runtime).
@@ -65,10 +68,12 @@ describe("createNodeConnection — corrupt file yields a clean error (R5)", () =
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("wraps a non-SQLite file open in a clean Error, not a raw native throw", async () => {
+  it("wraps a corrupt-DB failure in the CLEAN LocalDatabaseOpenError (not the raw native throw)", async () => {
     const badPath = join(dir, "not-a-db.db");
-    // Write a valid SQLite header magic but truncated/garbage body so the open
-    // (or first PRAGMA) fails with SQLITE_NOTADB rather than silently creating.
+    // Valid SQLite header magic + garbage body. better-sqlite3 opens LAZILY, so
+    // this does NOT throw at `new Database(...)` — it throws SQLITE_NOTADB at
+    // the first page-touching PRAGMA (journal_mode=WAL), which is exactly the
+    // case the wrap must cover.
     writeFileSync(
       badPath,
       Buffer.concat([
@@ -77,10 +82,27 @@ describe("createNodeConnection — corrupt file yields a clean error (R5)", () =
       ]),
     );
 
-    await expect(
-      createNodeConnection(badPath, { skipFilesystemCheck: true }),
-    ).rejects.toThrow(
-      /Failed to open local SQLite database|SQLITE_NOTADB|file is not a database/i,
+    // Capture the rejection so we can assert on the CONCRETE error, not a regex
+    // that would also match the raw native message (which would pass vacuously
+    // if the raw error escaped).
+    let caught: unknown;
+    try {
+      await createNodeConnection(badPath, { skipFilesystemCheck: true });
+    } catch (err) {
+      caught = err;
+    }
+
+    // It must be OUR clean wrapper type — proving the raw SqliteError did NOT
+    // escape past the PRAGMA line (the narrow open-only wrap would let it).
+    expect(caught).toBeInstanceOf(LocalDatabaseOpenError);
+    const e = caught as LocalDatabaseOpenError;
+    // Clean message: names the dbPath and uses the wrapper prefix.
+    expect(e.message).toContain("Failed to open local SQLite database at");
+    expect(e.message).toContain(badPath);
+    // The raw native error is preserved as the cause (not swallowed).
+    expect(e.cause).toBeInstanceOf(Error);
+    expect(String((e.cause as Error).message)).toMatch(
+      /SQLITE_NOTADB|not a database/i,
     );
   });
 });

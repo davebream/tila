@@ -1,5 +1,8 @@
 import type { EmbeddedDb, MigrationStorage } from "@tila/backend-embedded";
-import { runEmbeddedMigrations } from "@tila/backend-embedded";
+import {
+  EMBEDDED_PRAGMAS,
+  runEmbeddedMigrations,
+} from "@tila/backend-embedded";
 import { schema } from "@tila/ops-sqlite";
 
 import { assertLocalFilesystem } from "./filesystem-guard";
@@ -15,6 +18,30 @@ export class MissingNativeDriverError extends Error {
     );
     this.name = "MissingNativeDriverError";
     if (cause !== undefined) this.cause = cause;
+  }
+}
+
+/**
+ * Raised when opening/initializing the local SQLite database fails — a corrupt
+ * or locked file, an unreadable path, or a failed PRAGMA/migration. Wraps the
+ * raw native `SqliteError` (preserved as `cause`) in a clean, actionable error
+ * that names the offending `dbPath` (R5), so callers never see a bare native
+ * throw escape from `createNodeConnection`.
+ *
+ * Note: better-sqlite3 opens LAZILY — a corrupt file does NOT throw at
+ * `new Database(...)`; the first statement that touches pages (here, the
+ * `journal_mode=WAL` PRAGMA) throws `SQLITE_NOTADB`. The wrap therefore spans
+ * open + PRAGMAs + migrations, not just the constructor.
+ */
+export class LocalDatabaseOpenError extends Error {
+  constructor(dbPath: string, cause: unknown) {
+    super(
+      `Failed to open local SQLite database at ${dbPath}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    this.name = "LocalDatabaseOpenError";
+    this.cause = cause;
   }
 }
 
@@ -88,33 +115,40 @@ export async function createNodeConnection(
     throw new MissingNativeDriverError(err);
   }
 
-  // 3. Open the raw better-sqlite3 Database. A genuinely corrupt/locked/invalid
-  //    file throws a native SqliteError here — we wrap it in a clean error (R5)
-  //    rather than letting the raw native throw escape.
-  let rawDb: RawDatabase;
+  // 3-5. Open + PRAGMAs + migrations are wrapped in ONE try/catch so any native
+  //    failure becomes a CLEAN LocalDatabaseOpenError (R5). This must span the
+  //    PRAGMAs: better-sqlite3 opens LAZILY, so a corrupt/invalid file does NOT
+  //    throw at `new Database(...)` — it throws SQLITE_NOTADB at the first
+  //    page-touching statement (`PRAGMA journal_mode=WAL`). The dynamic-import
+  //    try/catch above already ran, so a MissingNativeDriverError cannot reach
+  //    here; only genuine open/init failures are wrapped.
+  let rawDb: RawDatabase | undefined;
   try {
+    // 3. Open the raw better-sqlite3 Database (lazy — see above).
     rawDb = new DatabaseCtor(dbPath, { readonly: opts?.readonly ?? false });
+
+    // 4. PRAGMA initialization — applied in the SHARED, ordered EMBEDDED_PRAGMAS
+    //    sequence (busy_timeout FIRST, then journal_mode=WAL, then
+    //    foreign_keys=ON), the single source of truth shared with the bun
+    //    connection so the two runtimes can never drift (R2).
+    for (const pragma of EMBEDDED_PRAGMAS) {
+      rawDb.exec(pragma);
+    }
+
+    // 5. Run the shared embedded migration set against the raw Database (before
+    //    Drizzle wrapping). The runner is storage-agnostic; we supply a
+    //    better-sqlite3-backed MigrationStorage shim.
+    runEmbeddedMigrations(createNodeMigrationStorage(rawDb));
   } catch (err) {
-    throw new Error(
-      `Failed to open local SQLite database at ${dbPath}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-      { cause: err },
-    );
+    // Best-effort close of a partially-opened handle before surfacing the
+    // clean error, so a failed open does not leak a file descriptor.
+    try {
+      rawDb?.close();
+    } catch {
+      // ignore — the original failure is what matters
+    }
+    throw new LocalDatabaseOpenError(dbPath, err);
   }
-
-  // 4. PRAGMA initialization — SAME ORDER as the bun connection (R2).
-  //    busy_timeout FIRST (before any write-requiring PRAGMA) so concurrent
-  //    processes wait instead of failing immediately with SQLITE_BUSY under the
-  //    default busy_timeout=0. Then journal_mode=WAL, then foreign_keys=ON.
-  rawDb.exec("PRAGMA busy_timeout=5000;");
-  rawDb.exec("PRAGMA journal_mode=WAL;");
-  rawDb.exec("PRAGMA foreign_keys=ON;");
-
-  // 5. Run the shared embedded migration set against the raw Database (before
-  //    Drizzle wrapping). The runner is storage-agnostic; we supply a
-  //    better-sqlite3-backed MigrationStorage shim.
-  runEmbeddedMigrations(createNodeMigrationStorage(rawDb));
 
   // 6. Wrap in Drizzle. The better-sqlite3 adapter returns
   //    BaseSQLiteDatabase<"sync", RunResult, …>; EmbeddedDb is
