@@ -31,6 +31,25 @@
   },
   "overrides": [
     {
+      "include": ["packages/backend-embedded/src/**"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "better-sqlite3": "backend-embedded must stay runtime-agnostic (no concrete sqlite driver). NOTE: this rule is INTENTIONALLY PARTIAL — it bans only the 3 npm-package specifiers below. The protocol-prefix bans (node:, bun:, @cloudflare/) are NOT expressible in biome noRestrictedImports; they (and these 3) are authoritatively enforced by tsconfig.json types:[] + packages/backend-embedded/test/no-runtime-imports.test.ts. Do not assume biome covers all six and weaken that fitness test.",
+                  "drizzle-orm/bun-sqlite": "backend-embedded must stay runtime-agnostic (no bun:sqlite binding)",
+                  "drizzle-orm/better-sqlite3": "backend-embedded must stay runtime-agnostic (no better-sqlite3 binding)"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "include": ["packages/ui/src/components/ui/command-palette.tsx"],
       "linter": {
         "rules": {
