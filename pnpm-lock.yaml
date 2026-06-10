@@ -123,6 +123,9 @@ importers:
 
   packages/backend-local:
     dependencies:
+      '@tila/backend-embedded':
+        specifier: workspace:*
+        version: link:../backend-embedded
       '@tila/core':
         specifier: workspace:*
         version: link:../core
