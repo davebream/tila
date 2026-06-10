@@ -414,15 +414,30 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@tila/backend-embedded':
+        specifier: workspace:*
+        version: link:../backend-embedded
       '@tila/core':
         specifier: workspace:*
         version: link:../core
+      '@tila/ops-sqlite':
+        specifier: workspace:*
+        version: link:../ops-sqlite
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.19
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@cloudflare/workers-types@4.20260602.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(bun-types@1.3.14)
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.0)(typescript@5.9.3)(yaml@2.9.0)

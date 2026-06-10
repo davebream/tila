@@ -33,4 +33,49 @@ const mainConfig = {
   external: ["zod"],
 };
 
-export default defineConfig([mainConfig]);
+// Local entry: the heavy `tila-sdk/local` surface (createTilaLocal + the
+// embedded better-sqlite3/node:fs backend bundle). The whole @tila/* SQLite
+// stack is bundled here (noExternal) so consumers install ONLY zod +
+// better-sqlite3, never the unpublished @tila/* packages. The native driver and
+// its drizzle adapter stay EXTERNAL (C6): they are dynamically imported at
+// runtime, kept out of dist/local.js, and surfaced as the optional peer dep.
+//
+// This is a SEPARATE config object (not a second entry on mainConfig) because
+// noExternal/external/dts.resolve are global per config — folding /local into
+// mainConfig would bleed the heavy stack into the zod-only main entry.
+const localConfig = {
+  entry: { local: "src/local/index.ts" },
+  format: ["esm", "cjs"] as const,
+  dts: {
+    compilerOptions: { composite: false, incremental: false },
+    // Inline ALL imported declarations so the rolled-up local.d.ts is fully
+    // self-contained — none of the @tila/* workspace packages is published, and
+    // the embedded backends' barrel d.ts re-export from sibling files that a
+    // package-name allow-list leaves DANGLING. `resolve: true` chases every
+    // import (including @tila/backend-embedded's `./embedded-project` siblings)
+    // so consumers never hit an unresolved relative path.
+    //
+    // The cost is that drizzle-orm's internal declarations get inlined too, and
+    // drizzle's intricate generics don't fully survive rollup-dts (a known
+    // limitation). That is benign in practice: consumers compile with
+    // `skipLibCheck: true` (the ecosystem default, including this monorepo), so
+    // library .d.ts internals are not re-checked. zod stays a real runtime dep
+    // consumers already install.
+    resolve: true,
+  },
+  // Do not `clean` here — that runs per-config and would wipe the main entry's
+  // freshly-built dist. mainConfig owns `clean: true`.
+  treeshake: true,
+  sourcemap: false,
+  noExternal: [
+    "@tila/schemas",
+    "@tila/core",
+    "@tila/backend-embedded",
+    "@tila/ops-sqlite",
+  ],
+  // zod is a real runtime dep; better-sqlite3 + its drizzle adapter are the
+  // dynamically-imported native stack and MUST stay external (never inlined).
+  external: ["zod", "better-sqlite3", "drizzle-orm/better-sqlite3"],
+};
+
+export default defineConfig([mainConfig, localConfig]);
