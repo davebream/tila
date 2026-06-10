@@ -6,6 +6,7 @@ export {
   NotFoundError,
   RecordConstraintError,
   ReferenceConstraintError,
+  TemplateError,
 } from "./errors";
 export {
   EMBEDDED_MIGRATIONS,

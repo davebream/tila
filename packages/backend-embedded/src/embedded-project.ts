@@ -46,6 +46,7 @@ import {
   relationshipOps,
   type schema,
   schemaOps,
+  searchReindexOps,
   signalOps,
   validateRecordValue,
 } from "@tila/ops-sqlite";
@@ -62,12 +63,13 @@ import type {
   RecordListItem,
   RecordRow,
 } from "@tila/schemas";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
   NotFoundError,
   RecordConstraintError,
   ReferenceConstraintError,
+  TemplateError,
 } from "./errors";
 
 import { schema as opsSchema } from "@tila/ops-sqlite";
@@ -961,5 +963,207 @@ export class EmbeddedProject
     tagFilter?: string[];
   }): ReturnType<typeof entityOps.searchAll> {
     return entityOps.searchAll(this.db, query);
+  }
+
+  /**
+   * Run a full local FTS reindex to completion. Mirrors the DO
+   * `/search/reindex` job (artifact-routes.ts ~486) but synchronously — there
+   * are no DO Alarms locally, so we loop `searchReindexOps.reindexBatch` until
+   * `done` rather than scheduling batches across alarm ticks.
+   *
+   * Entity reindex is a FULL REBUILD: `resetEntitySearchDocs` clears the docs
+   * first (DO parity, artifact-routes.ts ~501-503, issue #412) so the repopulate
+   * picks up the latest entity name/title text. Artifact reindex is incremental
+   * (only un-indexed pointers), matching the DO's artifact path which does NOT
+   * reset.
+   *
+   * Returns the per-kind processed-row counts.
+   */
+  reindexSearch(kind: "artifact" | "entity" | "all" = "all"): {
+    artifact: number;
+    entity: number;
+  } {
+    const result = { artifact: 0, entity: 0 };
+    const kinds: Array<"artifact" | "entity"> =
+      kind === "all" ? ["artifact", "entity"] : [kind];
+
+    return this.retry(() => {
+      for (const k of kinds) {
+        if (k === "entity") {
+          // Full rebuild: clear then repopulate (DO parity, issue #412).
+          searchReindexOps.resetEntitySearchDocs(this.db);
+        }
+        // Loop the batched op to completion. A generous batch keeps the local
+        // (single-process) rebuild to one pass for typical project sizes.
+        let total = 0;
+        for (;;) {
+          const batch = searchReindexOps.reindexBatch(this.db, {
+            kind: k,
+            batchSize: 500,
+          });
+          total += batch.processed;
+          if (batch.done) break;
+        }
+        result[k] = total;
+      }
+      return result;
+    });
+  }
+
+  // ---------- Templates ----------
+
+  /**
+   * Instantiate a schema template locally, creating its entities and
+   * relationships in a single transaction and appending a
+   * `template.instantiated` journal event. Reproduces the DO
+   * `/template/instantiate` route (schema-routes.ts ~112-295) guard-for-guard so
+   * CLI/SDK/MCP get the SAME validation + output locally as remote:
+   *   - no schema applied         -> TemplateError("no-schema")    (DO 422)
+   *   - root_id / computed id "/" -> TemplateError("invalid-id")   (DO 422)
+   *   - template not found        -> TemplateError("not-found")    (DO 404)
+   *   - undeclared work-unit type -> TemplateError("constraint-violation") (DO 422)
+   *
+   * `{{var}}` placeholders in entity data are substituted from `vars` (unknown
+   * keys are left intact, matching the DO's `applyVar`).
+   */
+  instantiateTemplate(input: {
+    template_name: string;
+    root_id: string;
+    vars?: Record<string, string>;
+    actor?: string;
+  }): {
+    created_entities: string[];
+    created_relationships: number;
+    journal_seq: number;
+  } {
+    const vars = input.vars ?? {};
+    const actor = input.actor ?? "local";
+
+    if (input.root_id.includes("/")) {
+      throw new TemplateError(
+        "invalid-id",
+        `root_id "${input.root_id}" contains '/' which is not allowed in entity IDs`,
+      );
+    }
+
+    const parsedSchema = constraintOps.resolveCurrentSchema(this.db);
+    if (!parsedSchema) {
+      throw new TemplateError("no-schema", "No schema applied to this project");
+    }
+
+    const templateDef = parsedSchema.templates?.[input.template_name];
+    if (!templateDef) {
+      throw new TemplateError(
+        "not-found",
+        `Template "${input.template_name}" not found in schema`,
+      );
+    }
+
+    // Validate every template entity's work-unit type is declared (DO ~156-166).
+    for (const [entityKey, entity] of Object.entries(templateDef.entities)) {
+      const typeCheck = constraintOps.checkEntityTypeDeclared(
+        parsedSchema,
+        entity.type,
+      );
+      if (!typeCheck.ok) {
+        throw new TemplateError(
+          "constraint-violation",
+          `Template entity "${entityKey}": ${typeCheck.message}`,
+        );
+      }
+    }
+
+    // Validate every computed entity ID (DO ~168-178).
+    for (const [entityKey, entity] of Object.entries(templateDef.entities)) {
+      const entityId = input.root_id + entity.id_suffix;
+      if (entityId.includes("/")) {
+        throw new TemplateError(
+          "invalid-id",
+          `Computed entity ID "${entityId}" (from entity "${entityKey}") contains '/'`,
+        );
+      }
+    }
+
+    const schemaVersion = schemaOps.getCurrentSchema(this.db)?.version ?? 1;
+    const now = Date.now();
+
+    const applyVar = (value: unknown): unknown => {
+      if (typeof value !== "string") return value;
+      return value.replace(
+        /\{\{(\w+)\}\}/g,
+        (_, k: string) => vars[k] ?? `{{${k}}}`,
+      );
+    };
+    const applyVarsToData = (
+      data: Record<string, unknown>,
+    ): Record<string, unknown> =>
+      Object.fromEntries(
+        Object.entries(data).map(([k, val]) => [k, applyVar(val)]),
+      );
+
+    return this.retry(() =>
+      this.db.transaction((tx) => {
+        const entityIds: string[] = [];
+        let relCount = 0;
+
+        for (const [, entity] of Object.entries(templateDef.entities)) {
+          const entityId = input.root_id + entity.id_suffix;
+          const data = applyVarsToData(entity.data as Record<string, unknown>);
+          tx.insert(opsSchema.entities)
+            .values({
+              id: entityId,
+              type: entity.type,
+              schema_version: schemaVersion,
+              data: JSON.stringify(data),
+              archived: 0,
+              created_at: now,
+              updated_at: now,
+              created_by: actor,
+            })
+            .run();
+          entityIds.push(entityId);
+        }
+
+        for (const rel of templateDef.relationships) {
+          const fromEntity = templateDef.entities[rel.from];
+          const toEntity = templateDef.entities[rel.to];
+          if (!fromEntity || !toEntity) continue;
+          const fromId = input.root_id + fromEntity.id_suffix;
+          const toId = input.root_id + toEntity.id_suffix;
+          tx.run(
+            sql`INSERT INTO entity_relationships (from_id, to_id, type, schema_version, created_at) VALUES (${fromId}, ${toId}, ${rel.type}, ${schemaVersion}, ${now})`,
+          );
+          relCount++;
+        }
+
+        journalOps.appendJournal(tx, {
+          kind: "template.instantiated",
+          resource: input.root_id,
+          actor,
+          tokenId: null,
+          source: null,
+          sourceVersion: null,
+          data: {
+            template_name: input.template_name,
+            created_entity_ids: entityIds,
+            vars_used: Object.keys(vars),
+          },
+        });
+
+        const seqRow = tx
+          .select({ seq: opsSchema.journal.seq })
+          .from(opsSchema.journal)
+          .orderBy(sql`seq DESC`)
+          .limit(1)
+          .get();
+        const journalSeq = seqRow?.seq ?? 0;
+
+        return {
+          created_entities: entityIds,
+          created_relationships: relCount,
+          journal_seq: journalSeq,
+        };
+      }),
+    );
   }
 }

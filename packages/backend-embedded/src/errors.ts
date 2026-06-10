@@ -52,3 +52,28 @@ export class ReferenceConstraintError extends Error {
     this.name = "ReferenceConstraintError";
   }
 }
+
+/**
+ * A template instantiation failed locally — no schema applied, template not
+ * found, an undeclared work-unit type, or an invalid computed entity ID.
+ * Mirrors the DO `/template/instantiate` route's error set (schema-routes.ts
+ * ~136-178): no-schema (422), not-found (404), constraint-violation (422),
+ * invalid-id (422). Carries a clean message so the CLI/SDK/MCP surface the same
+ * actionable error locally as remote, with no stack trace.
+ */
+export class TemplateError extends Error {
+  readonly code:
+    | "no-schema"
+    | "not-found"
+    | "constraint-violation"
+    | "invalid-id";
+
+  constructor(
+    code: "no-schema" | "not-found" | "constraint-violation" | "invalid-id",
+    message: string,
+  ) {
+    super(message);
+    this.name = "TemplateError";
+    this.code = code;
+  }
+}

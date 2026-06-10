@@ -94,7 +94,7 @@ export async function runStartupChecks(
     if (!config.local?.db_path || !config.local?.artifacts_path) {
       throw new Error(
         "Config has backend = 'local' but missing [local] section.\n" +
-          "Run 'tila init --local' to provision the local backend.",
+          "Run 'tila project create --local' to provision the local backend.",
       );
     }
     const org = config.local.org ?? deriveOrg(process.cwd());

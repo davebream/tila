@@ -43,6 +43,7 @@ export default defineCommand({
             );
           }
           process.exit(1);
+          return;
         }
         const client = requireClient(ctx);
         const name =
@@ -121,6 +122,7 @@ export default defineCommand({
             );
           }
           process.exit(1);
+          return;
         }
         const client = requireClient(ctx);
         const name = args.name as string;
@@ -189,6 +191,7 @@ export default defineCommand({
             );
           }
           process.exit(1);
+          return;
         }
         const client = requireClient(ctx);
         let result: TokenListResponse;
