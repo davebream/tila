@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { EmbeddedProject } from "../src/index";
+import {
+  type EmbeddedProject,
+  NotFoundError,
+  ReferenceConstraintError,
+} from "../src/index";
 import { type Harness, makeHarness } from "./harness.bun";
 
 describe("EmbeddedProject", () => {
@@ -272,6 +276,90 @@ describe("EmbeddedProject", () => {
 
       // Empty for an unrelated entity.
       expect(await project.listArtifactRefs("nope")).toEqual([]);
+    });
+
+    // --- addArtifactRef facade parity with the DO route (clean errors) ---
+
+    it("addArtifactRef on a MISSING entity throws a clean NotFoundError (DO 404 parity)", async () => {
+      // No raw SQLite string; same not-found semantics as the DO route ~552.
+      await expect(
+        project.addArtifactRef({
+          entity_id: "ghost",
+          artifact_key: "plans/ghost/x.md",
+          slot: "plan",
+        }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it("addArtifactRef with a MISSING artifact pointer throws a clean NotFoundError (FK translated, DO ~586)", async () => {
+      await project.create({
+        id: "ent-noart",
+        type: "task",
+        data: { status: "open" },
+        created_by: "cli",
+      });
+      // Entity exists, but no artifact_pointers row for this key -> FK failure.
+      let caught: unknown;
+      try {
+        await project.addArtifactRef({
+          entity_id: "ent-noart",
+          artifact_key: "plans/ent-noart/missing.md",
+          slot: "plan",
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(NotFoundError);
+      // Clean message, NOT a raw "FOREIGN KEY constraint failed" string.
+      expect((caught as Error).message).not.toMatch(/FOREIGN KEY/);
+      expect((caught as Error).message).toMatch(/not found/i);
+    });
+
+    it("addArtifactRef with an UNDECLARED slot throws a clean ReferenceConstraintError (DO 422 parity)", async () => {
+      // Schema declares entity type `doc` with a single reference slot `spec`.
+      await project.applySchema({
+        definition: `schema_version = 1
+
+[work_units.doc]
+
+[[work_units.doc.references]]
+name = "spec"
+kinds = ["document"]
+`,
+      });
+      await project.create({
+        id: "doc-1",
+        type: "doc",
+        data: { status: "open" },
+        created_by: "cli",
+      });
+      await h.artifacts.put({
+        key: "plans/doc-1/x.md",
+        body: "hello",
+        sha256: "deadbeef",
+        metadata: {},
+        contentType: "text/markdown",
+      });
+
+      let caught: unknown;
+      try {
+        await project.addArtifactRef({
+          entity_id: "doc-1",
+          artifact_key: "plans/doc-1/x.md",
+          slot: "undeclared-slot",
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(ReferenceConstraintError);
+      expect((caught as Error).message).toMatch(/not declared/i);
+      // The declared slot still works.
+      await project.addArtifactRef({
+        entity_id: "doc-1",
+        artifact_key: "plans/doc-1/x.md",
+        slot: "spec",
+      });
+      expect(await project.listArtifactRefs("doc-1")).toHaveLength(1);
     });
   });
 

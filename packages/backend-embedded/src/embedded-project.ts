@@ -64,7 +64,11 @@ import type {
 } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import { RecordConstraintError } from "./errors";
+import {
+  NotFoundError,
+  RecordConstraintError,
+  ReferenceConstraintError,
+} from "./errors";
 
 import { schema as opsSchema } from "@tila/ops-sqlite";
 import { type SleepSync, withBusyRetry } from "./retry";
@@ -329,22 +333,66 @@ export class EmbeddedProject
 
   /**
    * Attach an artifact reference to a task. Mirrors the DO
-   * `/entity/artifact-ref` route (entity-routes.ts ~534) via
-   * `relationshipOps.insertEntityArtifactReference`.
+   * `/entity/artifact-ref` route (entity-routes.ts ~534-604) guard-for-guard so
+   * CLI/SDK/MCP get the SAME clean errors locally as remote:
+   *  (a) entity-existence pre-check -> `NotFoundError` (DO 404, route ~552);
+   *  (b) `checkReferenceSlotDeclared` gated on a schema -> `ReferenceConstraintError`
+   *      (DO 422 `constraint-violation`, route ~561-570);
+   *  (c) FK/CHECK SQLite failures translated to clean errors (DO 404/400,
+   *      route ~584-602) — FK -> `NotFoundError` (missing artifact pointer),
+   *      CHECK -> `ReferenceConstraintError`.
    */
   async addArtifactRef(input: AddArtifactRefInput): Promise<void> {
-    this.retry(() =>
-      relationshipOps.insertEntityArtifactReference(
-        this.db,
-        {
-          entity_id: input.entity_id,
-          artifact_key: input.artifact_key,
-          slot: input.slot,
-          metadata: input.metadata,
-        },
-        "local",
-      ),
-    );
+    // (a) Entity must exist (DO route ~552).
+    const entity = entityOps.get(this.db, input.entity_id);
+    if (!entity) {
+      throw new NotFoundError(`Entity ${input.entity_id} not found`);
+    }
+
+    // (b) Slot must be declared when a schema declares reference slots
+    // (DO route ~561-570). No-op when no schema is applied (permissive).
+    const currentSchema = constraintOps.resolveCurrentSchema(this.db);
+    if (currentSchema) {
+      const slotCheck = constraintOps.checkReferenceSlotDeclared(
+        currentSchema,
+        entity.type,
+        input.slot,
+      );
+      if (!slotCheck.ok) {
+        throw new ReferenceConstraintError(slotCheck.message);
+      }
+    }
+
+    // (c) Insert, translating raw SQLite FK/CHECK failures into clean errors
+    // (DO route ~584-602). `this.retry(...)` runs synchronously (withBusyRetry
+    // is sync) and returns void here — not a floating promise.
+    try {
+      this.retry(() =>
+        relationshipOps.insertEntityArtifactReference(
+          this.db,
+          {
+            entity_id: input.entity_id,
+            artifact_key: input.artifact_key,
+            slot: input.slot,
+            metadata: input.metadata,
+          },
+          "local",
+        ),
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("FOREIGN KEY constraint failed")) {
+        throw new NotFoundError(
+          "Entity or artifact not found. Ensure both entity_id and artifact_key exist.",
+        );
+      }
+      if (msg.includes("CHECK constraint failed")) {
+        throw new ReferenceConstraintError(
+          "CHECK constraint failed on entity_id or artifact_key",
+        );
+      }
+      throw err;
+    }
   }
 
   /**
