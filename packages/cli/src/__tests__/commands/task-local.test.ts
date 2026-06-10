@@ -329,6 +329,81 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     ).toBe(true);
   });
 
+  it("tree (non-JSON) renders the multi-level nesting via buildSubtree/renderTree", async () => {
+    // grandparent -> parent -> child
+    await seedTask("gp", { status: "open", title: "Grandparent" });
+    await seedTask("par", { status: "open", title: "Parent" });
+    await seedTask("ch", { status: "open", title: "Child" });
+    await project.addRelationship({
+      from_id: "gp",
+      to_id: "par",
+      type: "parent-child",
+    });
+    await project.addRelationship({
+      from_id: "par",
+      to_id: "ch",
+      type: "parent-child",
+    });
+
+    const cmd = await loadCommand();
+    await runCmd(getSubCommand(cmd, "tree"), { json: false });
+
+    // Single console.log call carrying the treeified string (object-treeify).
+    const rendered = logSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    // All three labels present, and the nesting is exercised (tree branch glyphs).
+    expect(rendered).toContain("gp open Grandparent");
+    expect(rendered).toContain("par open Parent");
+    expect(rendered).toContain("ch open Child");
+    expect(rendered).toMatch(/[└├]─/); // object-treeify branch characters
+    // Child is indented deeper than parent (multi-level nesting, not flat).
+    const idx = (s: string) =>
+      rendered.split("\n").findIndex((line: string) => line.includes(s));
+    const parentIndent = rendered
+      .split("\n")
+      [idx("par open Parent")].search(/\S/);
+    const childIndent = rendered.split("\n")[idx("ch open Child")].search(/\S/);
+    expect(childIndent).toBeGreaterThan(parentIndent);
+  });
+
+  it("tree (non-JSON) terminates on a relationship cycle (cycle guard)", async () => {
+    // root -> A -> B -> A (cycle). The shared `seen` set must stop recursion.
+    await seedTask("rt", { status: "open", title: "Root" });
+    await seedTask("A", { status: "open", title: "A" });
+    await seedTask("B", { status: "open", title: "B" });
+    await project.addRelationship({
+      from_id: "rt",
+      to_id: "A",
+      type: "parent-child",
+    });
+    await project.addRelationship({
+      from_id: "A",
+      to_id: "B",
+      type: "parent-child",
+    });
+    await project.addRelationship({
+      from_id: "B",
+      to_id: "A",
+      type: "parent-child",
+    });
+
+    const cmd = await loadCommand();
+    // Must COMPLETE (no infinite recursion / RangeError) — the assertion is
+    // that the promise resolves and renders without throwing.
+    await expect(
+      runCmd(getSubCommand(cmd, "tree"), { json: false }),
+    ).resolves.toBeUndefined();
+    const rendered = logSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    // The reachable nodes were rendered (each label appears at least once).
+    expect(rendered).toContain("rt open Root");
+    expect(rendered).toContain("A open A");
+    expect(rendered).toContain("B open B");
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
   it("update --fence enforces the fence (stale fence is rejected)", async () => {
     await seedTask("T-fence", { status: "open", title: "Fenced" });
     const acq = await project.acquire(
