@@ -9,6 +9,10 @@ import { NodeBlobStore } from "./node-blob-store";
 export { LocalDatabaseOpenError, MissingNativeDriverError } from "./connection";
 export { LocalFilesystemError } from "./filesystem-guard";
 export { NodeBlobStore } from "./node-blob-store";
+export {
+  buildLocalResources,
+  LocalUnsupportedError,
+} from "./resource-adapters";
 
 /** Options for {@link createTilaLocal}. */
 export interface CreateTilaLocalOptions {

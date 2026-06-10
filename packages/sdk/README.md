@@ -49,6 +49,41 @@ const updated = await entities.update("task-1", {
 await entities.archive("task-1");
 ```
 
+### `createTila` — one facade, local or remote
+
+`createTila(config, token?)` returns a uniform facade exposing the same resource
+methods (`tasks`, `records`, `claims`, `artifacts`, `gates`, `signals`,
+`journal`, `presence`, `schema`, `summary`, `search`, `templates`, `tokens`)
+regardless of backend. Swap `config.backend` without changing any call site.
+
+```typescript
+import { createTila } from "tila-sdk";
+
+// Cloudflare (HTTP) — token required
+const tila = await createTila(
+  { project_id: "my-project", backend: "cloudflare", worker_url: process.env.TILA_URL!, schema_version: 1, tila_version: "0", created_at: "" },
+  process.env.TILA_TOKEN!,
+);
+
+// Local (in-process SQLite) — no token; requires the optional `better-sqlite3` peer dep
+const local = await createTila({
+  project_id: "my-project",
+  backend: "local",
+  local: { db_path: ".tila/project.db", artifacts_path: ".tila/artifacts" },
+  schema_version: 1,
+  tila_version: "0",
+  created_at: "",
+});
+
+await tila.tasks.create("task-1", "task", { title: "uniform call site" });
+await local.tasks.create("task-1", "task", { title: "uniform call site" });
+local.close(); // closes the SQLite connection (no-op for cloudflare)
+```
+
+> **`better-sqlite3` peer dep:** the local backend lazily loads `better-sqlite3`
+> (an optional peer dependency). Install it for local mode; cloudflare mode never
+> touches it. Token issuance (`tila.tokens.*`) is HTTP-only and throws in local.
+
 ### Constructor Options
 
 | Option | Type | Default | Description |

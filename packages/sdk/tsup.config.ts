@@ -31,6 +31,33 @@ const mainConfig = {
   // runtime dependency) to avoid duplicating it in consumer installs.
   noExternal: ["@tila/schemas"],
   external: ["zod"],
+  // `createTila`'s local branch does `await import("./local/index")` to load the
+  // heavy SQLite stack lazily. esbuild code-splits that for ESM but INLINES it
+  // for CJS — which would drag the native stack into the zod-only main CJS
+  // entry. This plugin marks the relative local specifier external and rewrites
+  // it to the sibling BUILT ESM entry (`./local.js`), so BOTH the ESM and CJS
+  // main bundles emit a literal runtime `import("./local.js")` to the separate
+  // file — keeping the main entry zod-only (enforced by bundle-hygiene.test.ts).
+  //
+  // Always targeting `./local.js` (ESM) is correct for both formats: a dynamic
+  // `import()` of an ESM module works from a CJS module too (Node async ESM
+  // interop), so CJS consumers load the local stack fine (verified end-to-end).
+  esbuildPlugins: [
+    {
+      name: "externalize-local-entry",
+      setup(build: {
+        onResolve: (
+          opts: { filter: RegExp },
+          cb: () => { path: string; external: boolean },
+        ) => void;
+      }) {
+        build.onResolve({ filter: /\.\/local\/index$/ }, () => ({
+          path: "./local.js",
+          external: true,
+        }));
+      },
+    },
+  ],
 };
 
 // Local entry: the heavy `tila-sdk/local` surface (createTilaLocal + the

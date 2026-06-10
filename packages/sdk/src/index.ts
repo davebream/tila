@@ -6,8 +6,9 @@ export {
   TilaApiError,
   isTilaApiError,
   exchangeGitHubToken,
+  createTila,
 } from "./client";
-export type { ClientOptions } from "./client";
+export type { ClientOptions, TilaFacade } from "./client";
 
 // Retry helper
 export { withRetry } from "./retry";
