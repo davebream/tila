@@ -1,34 +1,35 @@
-import type {
-  AcquireResult,
-  ApplySchemaInput,
-  ApplySchemaOutput,
-  ArchiveRecordInput,
-  CoordinationBackend,
-  CreateEntityInput,
-  CreateRecordInput,
-  EntityBackend,
-  EntityListFilter,
-  GateBackend,
-  GateFilter,
-  GateRecord,
-  JournalBackend,
-  JournalEvent,
-  JournalQuery,
-  PatchRecordInput,
-  ProjectSummary,
-  RecordBackend,
-  RecordHistoryOptions,
-  RecordListFilter,
-  RecordPage,
-  RelationshipFilter,
-  RelationshipInput,
-  SchemaBackend,
-  SchemaRecord,
-  SendSignalInput,
-  SetRecordInput,
-  SignalBackend,
-  SignalRecord,
-  SummaryBackend,
+import {
+  type AcquireResult,
+  type ApplySchemaInput,
+  type ApplySchemaOutput,
+  type ArchiveRecordInput,
+  type CoordinationBackend,
+  type CreateEntityInput,
+  type CreateRecordInput,
+  type EntityBackend,
+  type EntityListFilter,
+  type GateBackend,
+  type GateFilter,
+  type GateRecord,
+  type JournalBackend,
+  type JournalEvent,
+  type JournalQuery,
+  type PatchRecordInput,
+  type ProjectSummary,
+  type RecordBackend,
+  type RecordHistoryOptions,
+  type RecordListFilter,
+  type RecordPage,
+  type RelationshipFilter,
+  type RelationshipInput,
+  type SchemaBackend,
+  type SchemaRecord,
+  type SendSignalInput,
+  type SetRecordInput,
+  type SignalBackend,
+  type SignalRecord,
+  type SummaryBackend,
+  applyRecordLegacyDefaults,
 } from "@tila/core";
 import {
   type RequestOrigin,
@@ -43,7 +44,10 @@ import {
   type schema,
   schemaOps,
   signalOps,
+  validateRecordValue,
 } from "@tila/ops-sqlite";
+import type { TilaSchemaToml } from "@tila/schemas";
+
 import type {
   Claim,
   Entity,
@@ -55,6 +59,7 @@ import type {
 } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { RecordConstraintError } from "./errors";
 
 import { schema as opsSchema } from "@tila/ops-sqlite";
 import { type SleepSync, withBusyRetry } from "./retry";
@@ -103,11 +108,13 @@ export class EmbeddedProject
     RecordBackend
 {
   private readonly db: EmbeddedDb;
-  private readonly _org: string;
-  private readonly _project: string;
   private readonly sleepSync: SleepSync;
   private readonly _close: () => void;
 
+  // `org`/`project` are accepted in the constructor opts for symmetry with the
+  // wrapper API (and with EmbeddedArtifactBackend, which DOES use them for key
+  // derivation), but EmbeddedProject itself is scoped to a single project DB and
+  // never needs them — so they are intentionally not stored.
   constructor(opts: {
     db: EmbeddedDb;
     org: string;
@@ -116,8 +123,6 @@ export class EmbeddedProject
     close: () => void;
   }) {
     this.db = opts.db;
-    this._org = opts.org;
-    this._project = opts.project;
     this.sleepSync = opts.sleepSync;
     this._close = opts.close;
   }
@@ -522,12 +527,59 @@ export class EmbeddedProject
   // `canonicalArtifactKey`/`sourceArtifactKey` default to null because R2
   // snapshotting is Worker-only.
 
-  /** Resolve the record schema version the DO way: current schema's version, else 0. */
-  private resolveRecordSchemaVersion(): number {
+  /**
+   * Resolve the parsed current schema (or null) plus the record schema_version,
+   * the DO way: version is the current schema's version when a schema is
+   * applied, else 0. Resolving both together mirrors the DO route, which
+   * computes `currentSchema` once and reuses it for validation + version.
+   */
+  private resolveRecordSchema(): {
+    currentSchema: TilaSchemaToml | null;
+    schemaVersion: number;
+  } {
     const currentSchema = constraintOps.resolveCurrentSchema(this.db);
-    return currentSchema
+    const schemaVersion = currentSchema
       ? (schemaOps.getCurrentSchema(this.db)?.version ?? 0)
       : 0;
+    return { currentSchema, schemaVersion };
+  }
+
+  /**
+   * Schema-constraint check on the record TYPE. Mirrors the DO route's
+   * `checkRecordTypeDeclared(currentSchema, type)` guard (record-routes.ts
+   * ~92/173/253/301/348) — enforced on create/set/patch/archive/unarchive.
+   * No-op when no schema is applied (permissive, exactly like the DO).
+   */
+  private assertRecordTypeDeclared(
+    currentSchema: TilaSchemaToml | null,
+    type: string,
+  ): void {
+    if (!currentSchema) return;
+    const check = constraintOps.checkRecordTypeDeclared(currentSchema, type);
+    if (!check.ok) {
+      throw new RecordConstraintError(check.message);
+    }
+  }
+
+  /**
+   * Schema-constraint check on the record VALUE. Mirrors the DO route's
+   * `validateRecordValue(value, recordDef)` guard on the value-bearing paths
+   * (record-routes.ts ~99 create, ~180 set). Only runs when the current schema
+   * declares the record type (`currentSchema.records?.[type]`), exactly as the
+   * DO does. Patch does NOT validate (the DO only type-checks patch).
+   */
+  private assertRecordValueValid(
+    currentSchema: TilaSchemaToml | null,
+    type: string,
+    value: Record<string, unknown>,
+  ): void {
+    if (!currentSchema) return;
+    const recordDef = currentSchema.records?.[type];
+    if (!recordDef) return;
+    const result = validateRecordValue(value, recordDef);
+    if (!result.ok) {
+      throw new RecordConstraintError(result.errors.join("; "));
+    }
   }
 
   private localOrigin(): RequestOrigin {
@@ -540,7 +592,10 @@ export class EmbeddedProject
   }
 
   async createRecord(input: CreateRecordInput): Promise<RecordRow> {
-    const schemaVersion = this.resolveRecordSchemaVersion();
+    const { currentSchema, schemaVersion } = this.resolveRecordSchema();
+    // DO parity: record-routes.ts ~92 (type) + ~99 (value).
+    this.assertRecordTypeDeclared(currentSchema, input.type);
+    this.assertRecordValueValid(currentSchema, input.type, input.value);
     return this.retry(() =>
       recordOps.createRecord(
         this.db,
@@ -561,7 +616,10 @@ export class EmbeddedProject
   }
 
   async setRecord(input: SetRecordInput): Promise<RecordRow> {
-    const schemaVersion = this.resolveRecordSchemaVersion();
+    const { currentSchema, schemaVersion } = this.resolveRecordSchema();
+    // DO parity: record-routes.ts ~173 (type) + ~180 (value).
+    this.assertRecordTypeDeclared(currentSchema, input.type);
+    this.assertRecordValueValid(currentSchema, input.type, input.value);
     return this.retry(() =>
       recordOps.setRecord(
         this.db,
@@ -583,11 +641,27 @@ export class EmbeddedProject
   }
 
   async getRecord(type: string, key: string): Promise<RecordRow | null> {
-    return recordOps.getRecord(this.db, type, key);
+    const result = recordOps.getRecord(this.db, type, key);
+    if (!result) return result;
+
+    // DO parity: record-routes.ts ~536-539 — apply legacy default enrichment
+    // using the CURRENT schema (not the schema version the record was written
+    // against), because new fields with default_for_legacy only exist in the
+    // latest schema. The DO enriches only the GET path; list/history are NOT
+    // enriched, so listRecords/listRecordHistory deliberately skip this.
+    const currentSchema = constraintOps.resolveCurrentSchema(this.db);
+    const enrichedValue = currentSchema
+      ? applyRecordLegacyDefaults(result.value, currentSchema, result.type)
+      : result.value;
+
+    return { ...result, value: enrichedValue };
   }
 
   async patchRecord(input: PatchRecordInput): Promise<RecordRow> {
-    const schemaVersion = this.resolveRecordSchemaVersion();
+    const { currentSchema, schemaVersion } = this.resolveRecordSchema();
+    // DO parity: record-routes.ts ~253 type-checks patch; it does NOT validate
+    // the merged value (no validateRecordValue on the patch path).
+    this.assertRecordTypeDeclared(currentSchema, input.type);
     return this.retry(() =>
       recordOps.patchRecord(
         this.db,
@@ -606,7 +680,9 @@ export class EmbeddedProject
   }
 
   async archiveRecord(input: ArchiveRecordInput): Promise<RecordRow> {
-    const schemaVersion = this.resolveRecordSchemaVersion();
+    const { currentSchema, schemaVersion } = this.resolveRecordSchema();
+    // DO parity: record-routes.ts ~301 type-checks archive.
+    this.assertRecordTypeDeclared(currentSchema, input.type);
     return this.retry(() =>
       recordOps.archiveRecord(
         this.db,
@@ -624,7 +700,9 @@ export class EmbeddedProject
   }
 
   async unarchiveRecord(input: ArchiveRecordInput): Promise<RecordRow> {
-    const schemaVersion = this.resolveRecordSchemaVersion();
+    const { currentSchema, schemaVersion } = this.resolveRecordSchema();
+    // DO parity: record-routes.ts ~348 type-checks unarchive.
+    this.assertRecordTypeDeclared(currentSchema, input.type);
     return this.retry(() =>
       recordOps.unarchiveRecord(
         this.db,

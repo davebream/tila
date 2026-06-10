@@ -2,6 +2,7 @@ export type { BlobStore } from "./blob-store";
 export { EmbeddedArtifactBackend } from "./embedded-artifact-backend";
 export { EmbeddedProject } from "./embedded-project";
 export type { EmbeddedDb } from "./embedded-project";
+export { RecordConstraintError } from "./errors";
 export {
   EMBEDDED_MIGRATIONS,
   IDEMPOTENCY_MIGRATION_VERSION,
