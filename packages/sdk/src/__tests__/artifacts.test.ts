@@ -157,4 +157,65 @@ describe("createArtifactMethods", () => {
     expect(result.contentLength).toBe(11);
     expect(result.body).toBeInstanceOf(ReadableStream);
   });
+
+  it("getLatest returns null on a 404 (requestRaw throws first)", async () => {
+    // requestRaw throws TilaApiError before returning a Response, so the 404
+    // must be honored via the catch path, not a status check on a Response.
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: "NOT_FOUND",
+            message: "no latest artifact for kind/resource",
+            retryable: false,
+          },
+        }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    const result = await artifacts.getLatest("design", "homepage");
+    expect(result).toBeNull();
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it("getLatest returns the pointer on a 200", async () => {
+    const pointer = {
+      key: "design/homepage/abc123.md",
+      kind: "design",
+      resource: "homepage",
+      sha256: "abc123",
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, pointer }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    const result = await artifacts.getLatest("design", "homepage");
+    expect(result).toEqual(pointer);
+  });
+
+  it("getLatest rethrows non-404 errors", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: { code: "INTERNAL", message: "boom", retryable: false },
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const artifacts = createArtifactMethods(client, "proj-1");
+
+    await expect(artifacts.getLatest("design", "homepage")).rejects.toThrow();
+  });
 });

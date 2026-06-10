@@ -7,7 +7,7 @@ import type {
   ArtifactRelationshipOkResponse,
   ArtifactSearchResponse,
 } from "@tila/schemas";
-import type { TilaClient } from "./client";
+import { TilaApiError, type TilaClient } from "./client";
 
 export interface ArtifactUploadOpts {
   kind: string;
@@ -190,18 +190,17 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
       kind: string,
       resource: string,
     ): Promise<ArtifactPointer | null> {
-      const res = await client.requestRaw("GET", `${base}/latest`, {
-        query: { kind, resource },
-      });
-      if (res.status === 404) return null;
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as Record<
-          string,
-          unknown
-        >;
-        throw new Error(
-          `getLatest failed with status ${res.status}: ${JSON.stringify(body)}`,
-        );
+      // requestRaw throws TilaApiError on any non-2xx before returning, so a
+      // 404 surfaces as a thrown error rather than a Response. Catch it here to
+      // honor the documented ArtifactPointer | null contract (404 → null).
+      let res: Response;
+      try {
+        res = await client.requestRaw("GET", `${base}/latest`, {
+          query: { kind, resource },
+        });
+      } catch (err) {
+        if (err instanceof TilaApiError && err.status === 404) return null;
+        throw err;
       }
       const body = (await res.json()) as { ok: true; pointer: ArtifactPointer };
       return body.pointer;
