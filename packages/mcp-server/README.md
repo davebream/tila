@@ -56,6 +56,70 @@ Auto-detects your editor (Claude Code, Cursor, VS Code) and writes the config fi
 
 If your project has a `.tila/config.toml`, the server reads `worker_url` and `project_id` from it automatically. Otherwise, set them via environment variables (`TILA_API_URL`, `TILA_PROJECT_ID`).
 
+## Local mode (embedded SQLite, no network)
+
+The server runs against an embedded SQLite database + on-disk artifacts instead of a
+Cloudflare Worker when the backend is `local`. It runs under **plain Node** (no Bun
+required) via `tila-sdk/local`. No token and no `worker_url` are needed.
+
+Set the backend in `.tila/config.toml`:
+
+```toml
+backend = "local"
+project_id = "my-project"
+
+[local]
+db_path = ".tila/project.db"
+artifacts_path = ".tila/artifacts"
+org = "my-org"            # optional; defaults to the OS username
+```
+
+Or configure it entirely via environment variables (see below). Then point your MCP
+client at the server:
+
+```json
+{
+  "mcpServers": {
+    "tila": {
+      "command": "npx",
+      "args": ["-y", "tila-mcp-server"],
+      "env": {
+        "TILA_PROJECT_ID": "my-project",
+        "TILA_DB_PATH": ".tila/project.db",
+        "TILA_ARTIFACTS_PATH": ".tila/artifacts"
+      }
+    }
+  }
+}
+```
+
+> **`better-sqlite3` peer dep:** local mode lazily loads the optional peer dependency
+> `better-sqlite3`. Install it (`npm i better-sqlite3`) for local mode; remote mode
+> never touches it.
+
+### Local-mode environment variables
+
+For each value, precedence is **config value > environment variable > default**.
+`db_path` and `artifacts_path` are required in local mode (config or env); `org`
+defaults to the OS username.
+
+| Variable | Config key | Required | Default |
+|----------|-----------|----------|---------|
+| `TILA_PROJECT_ID` | `project_id` | Yes | — |
+| `TILA_DB_PATH` | `local.db_path` | Yes | — |
+| `TILA_ARTIFACTS_PATH` | `local.artifacts_path` | Yes | — |
+| `TILA_ORG` | `local.org` | No | OS username |
+
+### Remote-only tools in local mode
+
+Some tools have no local equivalent and require a remote (cloudflare) backend. In
+local mode they are still registered (so clients can discover them) but reject at
+invocation time with a clear error:
+
+| Tool | Local alternative |
+|------|-------------------|
+| `tila_artifact_put` (binary/base64 multipart upload to R2) | `tila_artifact_write_text` (content-addressed text artifacts) |
+
 ## Tools (43)
 
 ### Entities & Tasks
@@ -176,6 +240,9 @@ For `github-repo` mode, the `[github]` section (owner, repo) and `worker_url` mu
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `TILA_API_TOKEN` | Only for `tila-token` mode | API token for authentication |
-| `TILA_API_URL` | No | Worker URL (overrides config.toml `worker_url`) |
+| `TILA_API_TOKEN` | Only for `tila-token` mode | API token for authentication (remote) |
+| `TILA_API_URL` | No | Worker URL (overrides config.toml `worker_url`) (remote) |
 | `TILA_PROJECT_ID` | No | Project ID (overrides config.toml `project_id`) |
+| `TILA_DB_PATH` | Local mode only | SQLite DB path (config `local.db_path` wins) |
+| `TILA_ARTIFACTS_PATH` | Local mode only | Artifacts dir (config `local.artifacts_path` wins) |
+| `TILA_ORG` | No | Org slug for local mode (config `local.org` wins; defaults to OS username) |

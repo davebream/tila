@@ -8,6 +8,15 @@
         "TILA_API_URL": "http://localhost:8787",
         "TILA_PROJECT_ID": "your-project-id"
       }
+    },
+    "tila-local": {
+      "command": "npx",
+      "args": ["-y", "tila-mcp-server"],
+      "env": {
+        "TILA_PROJECT_ID": "your-project-id",
+        "TILA_DB_PATH": ".tila/project.db",
+        "TILA_ARTIFACTS_PATH": ".tila/artifacts"
+      }
     }
   }
 }

@@ -320,6 +320,23 @@ The Cloudflare path serializes writes via the Durable Object's single-threaded e
 
 **Fencing tokens** are monotonically incrementing integers, same as the DO path. First-writer-wins is preserved: stale fence -> `FenceError` from `@tila/core`'s `assertFence`.
 
+### 1.6a Embedded local persistence (CLI + Node SDK/MCP)
+
+Local mode is implemented by `@tila/backend-embedded` — a **runtime-agnostic** embedded SQLite core (`EmbeddedProject` + `EmbeddedArtifactBackend` + a `BlobStore` seam) that contains no `bun:*` / `node:*` runtime imports. Two host wrappers inject the concrete driver and primitives:
+
+- `@tila/backend-local` — the **Bun** host (`bun:sqlite`), used by the `tila` CLI.
+- `tila-sdk/local` — the **plain-Node** host (`better-sqlite3` + `node:fs`), used by the TypeScript SDK (`createTila({ backend: "local" })` / `createTilaLocal`) and by the `tila-mcp-server` when `backend = "local"`.
+
+Local mode therefore now runs under **plain Node**, not just Bun. There is no ADR file for this seam in the repo; this section is the canonical description.
+
+**Cross-runtime schema identity.** Both hosts run the *same* `EMBEDDED_MIGRATIONS` from `@tila/backend-embedded`, which reuse the canonical `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` *verbatim* (not a copy that can drift). Both apply the same ordered `EMBEDDED_PRAGMAS` (`busy_timeout=5000`, then `journal_mode=WAL`, then `foreign_keys=ON`) and the same network-filesystem matcher. The result: a Bun (CLI)-created DB file and a Node (SDK/MCP)-created DB file are byte-for-byte schema-identical, so **a DB file is portable between the CLI and a Node SDK/MCP consumer** (proven by a cross-runtime interop test: bun writes, node reads). Applied versions are tracked in the **`_migrations` table**, not `PRAGMA user_version`.
+
+**Schema versioning & cross-version compatibility.** The embedded migration set is the canonical versions **1–18 minus v15** (`_journal_archive_watermark`; journal archival to R2 is a DO-only feature with no embedded equivalent — skipping it touches no shared table), **plus an embedded-only idempotency table at version `1000`**. In Cloudflare mode idempotency lives in D1; in embedded mode it lives in the same project SQLite file (one fewer store to coordinate), as a standalone `INSERT OR IGNORE`. Version `1000` is deliberately *outside* the canonical 1–18 range so it is purely additive and never hijacks canonical **v5** (the `idx_er_to_id_type` index) — every canonical version, including v5, applies exactly as upstream. Because both hosts share one migration set keyed by version in `_migrations`, a CLI and an SDK/MCP of *different* releases interoperate on one file as long as they share that set: each applies only the versions it doesn't yet have, in ascending order.
+
+**Pre-feature local DB upgrade — a known limitation.** Local DBs created by the **old / pre-feature** CLI (which used the legacy `ALL_LOCAL_MIGRATIONS` with a *divergent* v1 and v5) do **not** fully upgrade to the canonical embedded schema. Because v1 and v5 are already recorded in that file's `_migrations`, the runner treats them as applied and skips them — so the `artifact_relationships.target` column and the canonical v5 `idx_er_to_id_type` index stay absent. (v14 *does* apply retroactively, since it was never recorded.) A partial in-place heal is intentionally **not** attempted: it cannot reproduce the canonical NOT-NULL primary-key `target` column, so it would yield a subtly non-identical schema — worse than a clean recreate. **Remedy:** recreate the local DB via `tila init --local`. Local mode is single-machine, disposable dev/edge state, so recreating is cheap and safe.
+
+**Concurrency limits.** Local mode is **single-machine** only. Concurrent writers (e.g. two CLI processes, or a CLI plus a Node MCP server on the same file) serialize via WAL + a 5 s `busy_timeout` + the `withBusyRetry` application-layer retry loop (proven by a cross-runtime concurrency test where a Bun and a Node writer contend on one file). A **network filesystem is rejected at connect** by `assertLocalFilesystem`, because SQLite's POSIX advisory locking is unreliable there: on Linux it parses `/proc/self/mounts` (longest-enclosing-mount match against `nfs`/`nfs4`/`cifs`/`smb`/`smbfs`); on macOS it shells out to `stat -f %T` (matching `smbfs`/`nfs`/`afpfs`/`webdavfs` substrings). On **Windows the guard is a no-op** (no `/proc`, no `stat -f`). Detection *failures* (unreadable mount table, missing `stat`, sandboxes) are treated as "can't tell" and skip the check rather than hard-failing.
+
 ---
 
 ## Section 2: Storage schemas

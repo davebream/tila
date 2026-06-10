@@ -9,8 +9,10 @@ The interfaces in this directory (`EntityBackend`, `CoordinationBackend`,
 The CLI (`tila-cli`) supports two execution modes:
 
 - **Remote mode** — forwards calls to the live Cloudflare Worker over HTTP.
-- **Local mode** — runs against `@tila/backend-local` (a `bun:sqlite`-backed SQLite
-  database on the developer's machine), without a network connection.
+- **Local mode** — runs against the embedded SQLite core (`@tila/backend-embedded`),
+  on the developer's machine, without a network connection. The CLI hosts it via
+  `@tila/backend-local` (`bun:sqlite`); the SDK/MCP host it via `tila-sdk/local`
+  (`better-sqlite3`).
 
 These interfaces are the boundary that makes the swap transparent. The CLI resolves a
 concrete backend implementation at startup and then calls the same interface methods
@@ -30,5 +32,7 @@ modules directly via Drizzle. The interface seam is purely for the CLI backend-s
 single source of truth consumed by `@tila/ops-sqlite`. Input plumbing the backend
 resolves itself (`schema_version`, `actor`, `origin`, `canonical_artifact_key`) is
 omitted from the input shapes; the return types preserve those as read-only output
-fields. A concrete `@tila/backend-local` implementation will follow in a subsequent
-task to provide the offline CLI record path.
+fields. The concrete offline implementation lives in `@tila/backend-embedded`
+(`EmbeddedProject` implements `RecordBackend`), which `@tila/backend-local` (Bun) and
+`tila-sdk/local` (Node) both delegate to — so records work in local mode across the
+CLI, SDK, and MCP server.
