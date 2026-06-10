@@ -391,6 +391,71 @@ describe("list", () => {
     expect(archived.entities).toHaveLength(1);
     expect(archived.entities[0].id).toBe("e-archived");
   });
+
+  // --- dataFilter (json_extract scalar comparison) ---
+  //
+  // REGRESSION GUARD: `json_extract(data, '$.k')` UNQUOTES scalars (returns
+  // `P1`, not `"P1"`), so equality must bind the raw primitive. The old code
+  // compared against `JSON.stringify(value)` (`"P1"`) and matched NOTHING —
+  // silently breaking `?status=`/`?parent=` entity filtering in the DO too.
+
+  function seed(id: string, data: Record<string, unknown>) {
+    create(testDb.db, { id, type: "task", data, created_by: "a" }, 1, {
+      actor: "a",
+    });
+  }
+
+  it("filters by a STRING data field (parent_id): only matching, excludes others", () => {
+    seed("c1", { name: "Child 1", parent_id: "P1" });
+    seed("c2", { name: "Child 2", parent_id: "P1" });
+    seed("c3", { name: "Child 3", parent_id: "P2" });
+    seed("orphan", { name: "Orphan" }); // no parent_id
+
+    const result = list(testDb.db, { dataFilter: { parent_id: "P1" } });
+    expect(result.entities.map((e) => e.id).sort()).toEqual(["c1", "c2"]);
+    expect(result.total).toBe(2);
+  });
+
+  it("filters by a STRING data field (status)", () => {
+    seed("s-open", { name: "Open one", status: "open" });
+    seed("s-closed", { name: "Closed one", status: "closed" });
+
+    const result = list(testDb.db, { dataFilter: { status: "open" } });
+    expect(result.entities.map((e) => e.id)).toEqual(["s-open"]);
+  });
+
+  it("filters by an ARRAY of string values (IN): returns the union, excludes others", () => {
+    seed("a-open", { name: "A", status: "open" });
+    seed("a-blocked", { name: "B", status: "blocked" });
+    seed("a-closed", { name: "C", status: "closed" });
+
+    const result = list(testDb.db, {
+      dataFilter: { status: ["open", "blocked"] },
+    });
+    expect(result.entities.map((e) => e.id).sort()).toEqual([
+      "a-blocked",
+      "a-open",
+    ]);
+  });
+
+  it("filters by a NUMBER data field", () => {
+    seed("p-low", { name: "Low", priority: 1 });
+    seed("p-high", { name: "High", priority: 5 });
+
+    const result = list(testDb.db, { dataFilter: { priority: 5 } });
+    expect(result.entities.map((e) => e.id)).toEqual(["p-high"]);
+  });
+
+  it("filters by a BOOLEAN data field (true -> 1, false -> 0)", () => {
+    seed("b-yes", { name: "Flagged", flagged: true });
+    seed("b-no", { name: "Unflagged", flagged: false });
+
+    const truthy = list(testDb.db, { dataFilter: { flagged: true } });
+    expect(truthy.entities.map((e) => e.id)).toEqual(["b-yes"]);
+
+    const falsy = list(testDb.db, { dataFilter: { flagged: false } });
+    expect(falsy.entities.map((e) => e.id)).toEqual(["b-no"]);
+  });
 });
 
 describe("entity tags", () => {
