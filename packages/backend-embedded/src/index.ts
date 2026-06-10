@@ -1,4 +1,5 @@
 export type { BlobStore } from "./blob-store";
+export { EmbeddedArtifactBackend } from "./embedded-artifact-backend";
 export { EmbeddedProject } from "./embedded-project";
 export type { EmbeddedDb } from "./embedded-project";
 export {
