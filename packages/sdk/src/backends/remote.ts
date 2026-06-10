@@ -85,17 +85,32 @@ import {
 import { z } from "zod";
 import { TilaApiError, type TilaClient } from "../client";
 
-// Internal schemas for artifact endpoints not exported from @tila/schemas
+// Internal schemas for artifact endpoints not exported from @tila/schemas.
+//
+// The Worker `/artifacts` list route forwards to the DO `/artifact/list`
+// handler, which returns the FULL pointer shape from `artifactOps.listPointers`
+// (every `ArtifactPointerRecord` field, plus `fence` + `tags`). This schema
+// validates all ten `ArtifactPointerRecord` fields so `listPointers`' cast to
+// `ArtifactPointerRecord[]` is backed by real validation, not an unchecked
+// `as unknown as`. `.passthrough()` retains the extra `fence`/`tags` fields.
+const ArtifactPointerInternalSchema = z
+  .object({
+    r2_key: z.string(),
+    resource: z.string().nullable(),
+    kind: z.string(),
+    sha256: z.string(),
+    bytes: z.number(),
+    mime_type: z.string(),
+    produced_at: z.number(),
+    produced_by: z.string(),
+    expires_at: z.number().nullable(),
+    tombstoned: z.number(),
+  })
+  .passthrough();
+
 const ArtifactListInternalSchema = z.object({
   ok: z.literal(true),
-  pointers: z.array(
-    z
-      .object({
-        r2_key: z.string(),
-        bytes: z.number(),
-      })
-      .passthrough(),
-  ),
+  pointers: z.array(ArtifactPointerInternalSchema),
 });
 
 const OkSchema = z.object({ ok: z.literal(true) }).passthrough();
@@ -860,7 +875,10 @@ export class RemoteArtifactBackend implements ArtifactBackend {
         query: q,
       },
     );
-    return result.pointers as unknown as ArtifactPointerRecord[];
+    // `ArtifactListInternalSchema` now validates all ten ArtifactPointerRecord
+    // fields, so this is a checked narrowing (the passthrough adds an index
+    // signature, hence the plain `as`), not an unchecked `as unknown as`.
+    return result.pointers as ArtifactPointerRecord[];
   }
 
   async addRelationship(

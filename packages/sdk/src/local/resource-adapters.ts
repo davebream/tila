@@ -82,6 +82,7 @@ import type {
   SummaryResponse,
   UnifiedSearchResponse,
 } from "@tila/schemas";
+import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
 
 /**
@@ -407,6 +408,12 @@ function createLocalClaimMethods(project: EmbeddedProject) {
       ttlMs: number,
       _opts?: { metadata?: Record<string, unknown>; idempotency_key?: string },
     ): Promise<AcquireSuccessResponse> {
+      // Local DIVERGENCE: `_opts.idempotency_key` is accepted (to keep the
+      // surface aligned with the HTTP factory) but NOT honored locally — remote
+      // dedups via D1, while local relies on primary-key-level dedup. The
+      // embedded `_idempotency` table + EmbeddedProject.check/storeIdempotency
+      // exist but are intentionally unwired here (single-machine-low-risk).
+      // See docs/02-ARCHITECTURE.md §1.6a and the SDK README divergence list.
       const result = await project.acquire(
         resource,
         "local",
@@ -488,11 +495,21 @@ function createLocalClaimMethods(project: EmbeddedProject) {
  */
 function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
   return {
-    upload(): never {
+    // These stubs carry the SAME EXPLICIT parameter shape as the HTTP facade's
+    // `upload`/`download` (the overloaded `upload` signature + the `download(key)`
+    // signature, written out so they MUST line up with the facade). A zero-param
+    // `(): never` would make `_assertLocalSurfaceMatchesFacade` pass VACUOUSLY for
+    // these methods (TS's fewer-params-assignable rule), so spelling the params out
+    // keeps the compile-time guard non-vacuous while the body still throws.
+    upload(
+      input: File | Blob | ReadableStream,
+      _opts: ArtifactUploadOpts,
+    ): never {
+      void input;
       throw new LocalUnsupportedError("artifacts.upload");
     },
 
-    download(): never {
+    download(_key: string): never {
       throw new LocalUnsupportedError("artifacts.download");
     },
 
@@ -965,10 +982,18 @@ function createLocalTemplateMethods(project: EmbeddedProject) {
  */
 function createLocalTokenMethods() {
   return {
-    async issue(): Promise<never> {
+    // `issue`/`revoke` carry the HTTP facade's explicit parameter shape (derived
+    // from `TilaFacade["tokens"]` so they cannot drift) — a zero-param stub would
+    // make `_assertLocalSurfaceMatchesFacade` pass vacuously for them. `list` is
+    // genuinely zero-param on the HTTP side too.
+    async issue(
+      ..._args: Parameters<TilaFacade["tokens"]["issue"]>
+    ): Promise<never> {
       throw new LocalUnsupportedError("tokens.issue");
     },
-    async revoke(): Promise<never> {
+    async revoke(
+      ..._args: Parameters<TilaFacade["tokens"]["revoke"]>
+    ): Promise<never> {
       throw new LocalUnsupportedError("tokens.revoke");
     },
     async list(): Promise<never> {
