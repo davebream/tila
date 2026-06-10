@@ -170,6 +170,11 @@ export function registerArtifactTools(
     async ({ key, max_chars = 10000 }) => {
       try {
         const { content: text, mimeType } = await artifacts.readText(key);
+        // Cross-backend text guard owned by THIS layer: the HTTP readText throws
+        // a TypeError for non-text MIME, but the LOCAL adapter's readText returns
+        // whatever is stored without a content-type check. This check makes the
+        // tool reject non-text uniformly (as a clean McpError) across both
+        // backends — it is NOT redundant for local mode.
         if (!mimeType.startsWith("text/")) {
           throw new McpError(
             ErrorCode.InvalidRequest,

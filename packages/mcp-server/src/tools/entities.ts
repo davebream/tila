@@ -218,7 +218,7 @@ function registerCrudTools(
 
   server.tool(
     `${namePrefix}_relationships_list`,
-    `List all relationships for a ${labelSingular}. Returns both incoming and outgoing relationships. Up to limit results (default 50); adds {truncated:true,total:n} when capped.`,
+    `List OUTBOUND relationships for a ${labelSingular} (edges where this ${labelSingular} is the source/from). Up to limit results (default 50); adds {truncated:true,total:n} when capped.`,
     {
       id: z
         .string()
