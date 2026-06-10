@@ -10,6 +10,13 @@ export interface CreateEntityInput {
   type: string;
   data: Record<string, unknown>;
   created_by: string;
+  /**
+   * Tags to attach at creation (case-folded, deduped by the ops layer). Both
+   * backends honor it: `EmbeddedProject` passes it to `entityOps.create`;
+   * `RemoteBackend` sends it in the create body, which the Worker persists.
+   * Omit (or pass `[]`) for an untagged entity.
+   */
+  tags?: string[];
 }
 
 export interface RelationshipInput {
@@ -39,6 +46,15 @@ export interface EntityListFilter {
    * `parent`, so the single shape works against both backends.
    */
   dataFilter?: Record<string, unknown>;
+  /**
+   * Filter to entities carrying ALL of these tags (AND semantics, case-folded).
+   * `EmbeddedProject` passes this straight to `entityOps.list`, which matches via
+   * the `entity_tags` join; `RemoteBackend` serializes it to the Worker's
+   * `tag_filter` query param (comma-joined), which the list route honors. Both
+   * impls apply it identically, so a single filter shape works against either
+   * backend.
+   */
+  tagFilter?: string[];
   sort?: "created_at" | "updated_at" | "type" | "title" | "status";
   order?: "asc" | "desc";
   limit?: number;

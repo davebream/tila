@@ -111,13 +111,14 @@ function createLocalTaskMethods(project: EmbeddedProject) {
       id: string,
       type: string,
       data?: Record<string, unknown>,
-      _tags?: string[],
+      tags?: string[],
     ): Promise<EntityResponse> {
       const entity = await project.create({
         id,
         type,
         data: data ?? {},
         created_by: "local",
+        tags,
       });
       return { ok: true, entity };
     },
@@ -136,14 +137,12 @@ function createLocalTaskMethods(project: EmbeddedProject) {
       cursor?: string;
       tagFilter?: string[];
     }): Promise<EntityListResponse> {
-      // `EntityListFilter` (the embedded `list` shape) has no tag-filter field,
-      // so `query.tagFilter` is intentionally not threaded here — it is a no-op
-      // locally (parity-limited; the HTTP backend supports it).
       const entities = await project.list({
         type: query?.type,
         archived: 0,
         limit: query?.limit ? Number(query.limit) : undefined,
         dataFilter: query?.status ? { status: query.status } : undefined,
+        tagFilter: query?.tagFilter,
       });
       return { ok: true, entities };
     },
@@ -600,6 +599,15 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
     },
 
     async listAll(): Promise<PresenceAllListResponse> {
+      // DIVERGENCE (deferred to Task 14): the remote `presence/all` returns ALL
+      // machines with a computed `active` (last_seen vs TTL cutoff), including
+      // stale ones. `EmbeddedProject` only exposes `listPresence()`, which
+      // already filters to active machines (last_seen > cutoff) — so every row
+      // returned here IS active, making `active: true` correct PER ROW, but
+      // stale machines are omitted (the remote would include them as
+      // active:false). Closing the gap needs a `listAllPresence` lift onto the
+      // CoordinationBackend interface + both impls (coordinationOps already has
+      // the op); that exceeds this method's scope.
       const presence = await project.listPresence();
       const machines = presence.map((p) => ({ ...p, active: true }));
       return { ok: true, machines } as unknown as PresenceAllListResponse;
@@ -635,8 +643,14 @@ function createLocalSchemaMethods(project: EmbeddedProject) {
       ok: true;
       entries: unknown[];
     }> {
-      // No local schema-history listing op; the embedded backend keeps only the
-      // current schema. Return an empty list rather than throwing.
+      // Schema history DATA exists locally — applySchema inserts a row per
+      // version into `_schema_history`, so every version is retained. It is not
+      // surfaced here because there is no matching REMOTE endpoint (the Worker
+      // exposes no schema-history route; the cloudflare branch's
+      // `schema.history` would 404). So this method is effectively unimplemented
+      // on BOTH sides; returning an empty list keeps the two branches at parity
+      // rather than diverging. (Tracked for Task 14 docs: whether to drop this
+      // dead method from the facade.)
       return { ok: true, entries: [] };
     },
   };

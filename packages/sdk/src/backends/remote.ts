@@ -216,14 +216,18 @@ export class RemoteBackend
   // --- EntityBackend ---
 
   async create(input: CreateEntityInput): Promise<Entity> {
+    const body: Record<string, unknown> = {
+      id: input.id,
+      type: input.type,
+      data: input.data,
+      created_by: input.created_by,
+    };
+    // Forward tags so create-time tagging is at parity with EmbeddedProject;
+    // the Worker create route persists them (CreateEntityRequestSchema.tags).
+    if (input.tags !== undefined) body.tags = input.tags;
     const result = await this.client.post(
       `/projects/${this.projectId}/tasks`,
-      {
-        id: input.id,
-        type: input.type,
-        data: input.data,
-        created_by: input.created_by,
-      },
+      body,
       { schema: EntityResponseSchema, validate: true },
     );
     return result.entity;
@@ -271,6 +275,12 @@ export class RemoteBackend
         }
       }
     }
+    // Tag filter: serialize to the Worker's `tag_filter` query param (comma-
+    // joined), which the list route honors (worker entities.ts ~196). Mirrors
+    // the SDK entities factory and keeps tasks.list tag filtering at parity with
+    // EmbeddedProject (which applies tagFilter via entityOps.list).
+    if (filter?.tagFilter?.length)
+      query.tag_filter = filter.tagFilter.join(",");
     // Pagination and sorting params
     if (filter?.sort) query.sort = filter.sort;
     if (filter?.order) query.order = filter.order;

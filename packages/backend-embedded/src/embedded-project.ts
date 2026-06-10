@@ -169,6 +169,7 @@ export class EmbeddedProject
           type: input.type,
           data: input.data,
           created_by: input.created_by,
+          tags: input.tags,
         },
         schemaVersion,
         { actor: input.created_by },

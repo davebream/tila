@@ -65,6 +65,25 @@ describe("createTila — local backend", () => {
     expect(got.entity.id).toBe("task-1");
   });
 
+  it("tasks.list honors tagFilter locally (only tagged tasks returned)", async () => {
+    // Create one tagged + one untagged task through the facade.
+    await tila.tasks.create("tagged-1", "task", { title: "has x" }, ["x"]);
+    await tila.tasks.create("untagged-1", "task", { title: "no tag" });
+
+    // Sanity: both exist when not filtering.
+    const all = await tila.tasks.list({ type: "task" });
+    expect(all.entities.map((e) => e.id).sort()).toEqual([
+      "tagged-1",
+      "untagged-1",
+    ]);
+
+    // Filtering by tag "x" returns ONLY the tagged task — proving tagFilter is
+    // threaded through to entityOps.list (not silently dropped).
+    const filtered = await tila.tasks.list({ tagFilter: ["x"] });
+    expect(filtered.entities.map((e) => e.id)).toEqual(["tagged-1"]);
+    expect(filtered.entities[0].tags).toContain("x");
+  });
+
   it("records.set + claims.acquire + artifacts.writeText round-trip locally", async () => {
     const created = await tila.records.create("note", {
       key: "k1",
