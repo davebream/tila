@@ -311,5 +311,36 @@ created_at = "2026-01-01T00:00:00Z"
       expect(config.artifactsPath).toBe("/env/artifacts");
       expect(config.org).toBe("env-org");
     });
+
+    it("resolves RELATIVE db/artifacts paths to absolute (cwd-deterministic)", async () => {
+      const { resolve } = await import("node:path");
+      const RELATIVE_PATHS_TOML = `
+project_id = "proj-local-rel"
+backend = "local"
+schema_version = 1
+tila_version = "0.1.0"
+created_at = "2026-01-01T00:00:00Z"
+
+[local]
+db_path = ".tila/project.db"
+artifacts_path = ".tila/artifacts"
+`;
+      vi.stubEnv("TILA_API_URL", "");
+      vi.stubEnv("TILA_API_TOKEN", "");
+      vi.stubEnv("TILA_PROJECT_ID", "");
+      vi.stubEnv("TILA_DB_PATH", "");
+      vi.stubEnv("TILA_ARTIFACTS_PATH", "");
+      vi.stubEnv("TILA_ORG", "");
+
+      mockLocalConfig(RELATIVE_PATHS_TOML);
+
+      const config = await resolveServerConfig();
+
+      expect(config.mode).toBe("local");
+      if (config.mode !== "local") throw new Error("expected local mode");
+      // Relative paths are resolved against the process cwd → absolute.
+      expect(config.dbPath).toBe(resolve(".tila/project.db"));
+      expect(config.artifactsPath).toBe(resolve(".tila/artifacts"));
+    });
   });
 });

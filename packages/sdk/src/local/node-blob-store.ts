@@ -8,7 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import type { BlobStore } from "@tila/backend-embedded";
 
@@ -33,7 +33,18 @@ export class NodeBlobStore implements BlobStore {
   constructor(private readonly artifactsRoot: string) {}
 
   private pathFor(key: string): string {
-    return join(this.artifactsRoot, key);
+    const full = join(this.artifactsRoot, key);
+    // Containment guard (defense-in-depth): keys are sha256-derived today, but
+    // the safety must live in the store, not its callers. Reject any key that
+    // (via `..`, an absolute path, etc.) would resolve outside artifactsRoot.
+    const root = resolve(this.artifactsRoot);
+    const resolved = resolve(full);
+    if (resolved !== root && !resolved.startsWith(root + sep)) {
+      throw new Error(
+        `Blob key escapes the artifacts root: ${JSON.stringify(key)}`,
+      );
+    }
+    return full;
   }
 
   async write(

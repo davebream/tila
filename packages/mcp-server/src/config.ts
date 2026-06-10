@@ -166,8 +166,11 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
     return {
       mode: "local",
       projectId,
-      dbPath,
-      artifactsPath,
+      // Resolve to absolute paths so a relative `db_path`/`artifacts_path` (from
+      // config or TILA_DB_PATH/TILA_ARTIFACTS_PATH) is deterministic regardless
+      // of the process cwd at open time.
+      dbPath: resolve(dbPath),
+      artifactsPath: resolve(artifactsPath),
       org,
     };
   }
