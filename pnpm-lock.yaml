@@ -347,19 +347,28 @@ importers:
       smol-toml:
         specifier: ^1.6.1
         version: 1.6.1
+      tila-sdk:
+        specifier: workspace:*
+        version: link:../sdk
       zod:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@tila/backend-embedded':
+        specifier: workspace:*
+        version: link:../backend-embedded
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.19
-      tila-sdk:
-        specifier: workspace:*
-        version: link:../sdk
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.0)(typescript@5.9.3)(yaml@2.9.0)
