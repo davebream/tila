@@ -32,6 +32,29 @@ async function createArtifactBackend(client: MockClient) {
   );
 }
 
+async function createRecordBackend(client: MockClient) {
+  const { RemoteRecordBackend } = await import("../../backends/remote");
+  return new RemoteRecordBackend(client as unknown as TilaClient, "proj-test");
+}
+
+/** A wire RecordItem (no fence) for record get/mutate response envelopes. */
+function recordItem(over: Record<string, unknown> = {}) {
+  return {
+    type: "service",
+    key: "api",
+    schema_version: 1,
+    value: { host: "localhost" },
+    value_sha256: "abc",
+    revision: 1,
+    archived: 0,
+    created_at: 1000,
+    updated_at: 1000,
+    updated_by: "cli",
+    tags: [],
+    ...over,
+  };
+}
+
 describe("RemoteBackend", () => {
   let client: ReturnType<typeof createMockClient>;
 
@@ -509,5 +532,224 @@ describe("RemoteArtifactBackend", () => {
       // No request body is passed to delete (the SDK delete has no body param).
       expect(opts).toEqual(expect.objectContaining({ validate: true }));
     });
+  });
+});
+
+describe("RemoteRecordBackend", () => {
+  let client: ReturnType<typeof createMockClient>;
+
+  beforeEach(() => {
+    client = createMockClient();
+  });
+
+  it("createRecord() POSTs to /records/:type and merges fence into RecordRow", async () => {
+    client.post.mockResolvedValue({
+      ok: true,
+      record: recordItem(),
+      fence: 7,
+      revision: 1,
+    });
+
+    const backend = await createRecordBackend(client);
+    const row = await backend.createRecord({
+      type: "service",
+      key: "api",
+      value: { host: "localhost" },
+    });
+
+    expect(client.post).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service",
+      expect.objectContaining({ key: "api", value: { host: "localhost" } }),
+      expect.anything(),
+    );
+    expect(row.fence).toBe(7);
+    expect(row.value).toEqual({ host: "localhost" });
+  });
+
+  it("setRecord() PUTs to /records/:type/:key with fence", async () => {
+    client.put.mockResolvedValue({
+      ok: true,
+      record: recordItem(),
+      fence: 8,
+      revision: 2,
+    });
+
+    const backend = await createRecordBackend(client);
+    await backend.setRecord({
+      type: "service",
+      key: "api",
+      value: { host: "h" },
+      fence: 5,
+    });
+
+    expect(client.put).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service/api",
+      expect.objectContaining({ value: { host: "h" }, fence: 5 }),
+      expect.anything(),
+    );
+  });
+
+  it("setRecord() encodes multi-segment keys per-segment", async () => {
+    client.put.mockResolvedValue({
+      ok: true,
+      record: recordItem({ key: "api/staging" }),
+      fence: 1,
+      revision: 1,
+    });
+
+    const backend = await createRecordBackend(client);
+    await backend.setRecord({
+      type: "service",
+      key: "api/staging",
+      value: {},
+      fence: 1,
+    });
+
+    expect(client.put).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service/api/staging",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("getRecord() returns null on 404", async () => {
+    client.get.mockRejectedValue(
+      new TilaApiError(404, "not-found", "missing", false),
+    );
+
+    const backend = await createRecordBackend(client);
+    expect(await backend.getRecord("service", "api")).toBeNull();
+  });
+
+  it("patchRecord() PATCHes /records/:type/:key", async () => {
+    client.patch.mockResolvedValue({
+      ok: true,
+      record: recordItem(),
+      fence: 3,
+      revision: 3,
+    });
+
+    const backend = await createRecordBackend(client);
+    await backend.patchRecord({
+      type: "service",
+      key: "api",
+      patch: { x: 1 },
+      fence: 2,
+    });
+
+    expect(client.patch).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service/api",
+      expect.objectContaining({ patch: { x: 1 }, fence: 2 }),
+      expect.anything(),
+    );
+  });
+
+  it("archiveRecord() POSTs to /records/:type/~/archive/:key", async () => {
+    client.post.mockResolvedValue({
+      ok: true,
+      record: recordItem({ archived: 1 }),
+      fence: 4,
+      revision: 4,
+    });
+
+    const backend = await createRecordBackend(client);
+    await backend.archiveRecord({ type: "service", key: "api", fence: 3 });
+
+    expect(client.post).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service/~/archive/api",
+      { fence: 3 },
+      expect.anything(),
+    );
+  });
+
+  it("unarchiveRecord() POSTs to /records/:type/~/unarchive/:key", async () => {
+    client.post.mockResolvedValue({
+      ok: true,
+      record: recordItem(),
+      fence: 5,
+      revision: 5,
+    });
+
+    const backend = await createRecordBackend(client);
+    await backend.unarchiveRecord({ type: "service", key: "api", fence: 4 });
+
+    expect(client.post).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service/~/unarchive/api",
+      { fence: 4 },
+      expect.anything(),
+    );
+  });
+
+  it("listRecords() GETs /records/:type and flattens meta into a RecordPage", async () => {
+    client.get.mockResolvedValue({
+      ok: true,
+      items: [
+        {
+          type: "service",
+          key: "api",
+          revision: 1,
+          updated_at: 1000,
+          updated_by: "cli",
+          archived: 0,
+          tags: [],
+        },
+      ],
+      meta: { total: 1, limit: 200, next_cursor: null },
+    });
+
+    const backend = await createRecordBackend(client);
+    const page = await backend.listRecords({
+      type: "service",
+      tag: "x",
+      includeArchived: true,
+    });
+
+    expect(client.get).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service",
+      expect.objectContaining({
+        query: expect.objectContaining({
+          tag: "x",
+          "include-archived": "true",
+        }),
+      }),
+    );
+    expect(page.total).toBe(1);
+    expect(page.items).toHaveLength(1);
+  });
+
+  it("listRecordHistory() GETs /records/:type/~/history/:key with values flag", async () => {
+    client.get.mockResolvedValue({
+      ok: true,
+      items: [],
+      meta: { total: 0, limit: 20, next_cursor: null },
+    });
+
+    const backend = await createRecordBackend(client);
+    await backend.listRecordHistory("service", "api", {
+      limit: 5,
+      includeValues: true,
+    });
+
+    expect(client.get).toHaveBeenCalledWith(
+      "/projects/proj-test/records/service/~/history/api",
+      expect.objectContaining({
+        query: { limit: "5", values: "true" },
+      }),
+    );
+  });
+
+  it("listRecordTypesInUse() GETs /records/_types and returns in_use_types", async () => {
+    client.get.mockResolvedValue({
+      ok: true,
+      types: ["service", "pipeline_config"],
+      in_use_types: ["service"],
+    });
+
+    const backend = await createRecordBackend(client);
+    expect(await backend.listRecordTypesInUse()).toEqual(["service"]);
+    expect(client.get).toHaveBeenCalledWith(
+      "/projects/proj-test/records/_types",
+      expect.anything(),
+    );
   });
 });

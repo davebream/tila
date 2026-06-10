@@ -6,6 +6,7 @@ import type {
   EntityBackend,
   GateBackend,
   JournalBackend,
+  RecordBackend,
   SchemaBackend,
   SignalBackend,
   SummaryBackend,
@@ -13,7 +14,11 @@ import type {
 import type { TilaProjectConfig } from "@tila/schemas";
 import type { TilaClient } from "tila-sdk";
 import { requireTokenAsync } from "./auth";
-import { RemoteArtifactBackend, RemoteBackend } from "./backends/remote";
+import {
+  RemoteArtifactBackend,
+  RemoteBackend,
+  RemoteRecordBackend,
+} from "./backends/remote";
 import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";
@@ -34,6 +39,7 @@ export interface CommandContext {
   signal: SignalBackend;
   schema: SchemaBackend;
   summary: SummaryBackend;
+  record: RecordBackend;
 }
 
 export function requireClient(ctx: CommandContext): TilaClient {
@@ -115,6 +121,7 @@ export async function runStartupChecks(
       signal: localProject,
       schema: localProject,
       summary: localProject,
+      record: localProject,
     };
   }
 
@@ -149,6 +156,7 @@ export async function runStartupChecks(
   // with incompatible return types; a single class cannot satisfy both.
   const remote = new RemoteBackend(client, config.project_id);
   const remoteArtifact = new RemoteArtifactBackend(client, config.project_id);
+  const remoteRecord = new RemoteRecordBackend(client, config.project_id);
   return {
     config,
     client,
@@ -161,6 +169,7 @@ export async function runStartupChecks(
     signal: remote,
     schema: remote,
     summary: remote,
+    record: remoteRecord,
   };
 }
 

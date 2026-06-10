@@ -17,39 +17,45 @@ vi.mock("yocto-spinner", () => ({
   })),
 }));
 
-const mockGet = vi.fn();
-const mockPost = vi.fn();
-const mockPut = vi.fn();
-const mockPatch = vi.fn();
+// RecordBackend method mocks (the seam record.ts now drives).
+const mockCreateRecord = vi.fn();
+const mockSetRecord = vi.fn();
+const mockGetRecord = vi.fn();
+const mockPatchRecord = vi.fn();
+const mockArchiveRecord = vi.fn();
+const mockUnarchiveRecord = vi.fn();
+const mockListRecords = vi.fn();
+const mockListRecordHistory = vi.fn();
+const mockListRecordTypesInUse = vi.fn();
+// SchemaBackend.getCurrentSchema -- drives fetchRecordTypeDef.
+const mockGetCurrentSchema = vi.fn();
+// Remote-only client (snapshot preupload). Null toggled per-test for local mode.
 const mockPostFormData = vi.fn();
+
+let mockClient: { postFormData: typeof mockPostFormData } | null = {
+  postFormData: mockPostFormData,
+};
 
 vi.mock("../../context", () => ({
   requireClient: (ctx: { client: unknown }) => ctx.client,
-  resolveContext: vi.fn().mockReturnValue({
-    client: {
-      get: mockGet,
-      post: mockPost,
-      put: mockPut,
-      patch: mockPatch,
-      postFormData: mockPostFormData,
-    },
+  resolveContext: () => ({
+    client: mockClient,
     config: { project_id: "proj-test" },
-    entity: {
-      create: vi.fn(),
-      get: vi.fn(),
-      list: vi.fn(),
-      update: vi.fn(),
-      archive: vi.fn(),
+    machine: "test-machine",
+    record: {
+      createRecord: mockCreateRecord,
+      setRecord: mockSetRecord,
+      getRecord: mockGetRecord,
+      patchRecord: mockPatchRecord,
+      archiveRecord: mockArchiveRecord,
+      unarchiveRecord: mockUnarchiveRecord,
+      listRecords: mockListRecords,
+      listRecordHistory: mockListRecordHistory,
+      listRecordTypesInUse: mockListRecordTypesInUse,
     },
-    coordination: {
-      acquire: vi.fn(),
-      renew: vi.fn(),
-      release: vi.fn(),
-      state: vi.fn(),
-      heartbeat: vi.fn(),
-      listPresence: vi.fn(),
+    schema: {
+      getCurrentSchema: mockGetCurrentSchema,
     },
-    artifact: { put: vi.fn(), get: vi.fn(), list: vi.fn(), delete: vi.fn() },
   }),
 }));
 
@@ -91,6 +97,32 @@ async function runCmd(
   });
 }
 
+/** A RecordRow-shaped mutate result. */
+function recordRow(over: Record<string, unknown> = {}) {
+  return {
+    type: "service",
+    key: "api",
+    value: { name: "test" },
+    value_sha256: "abc",
+    revision: 1,
+    archived: 0,
+    created_at: 1700000000000,
+    updated_at: 1700000000000,
+    updated_by: "cli",
+    tags: [],
+    schema_version: 1,
+    fence: 1,
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockClient = { postFormData: mockPostFormData };
+  // Default: no schema applied -> fetchRecordTypeDef returns null.
+  mockGetCurrentSchema.mockResolvedValue({ version: null, definition: null });
+});
+
 // ---------------------------------------------------------------------------
 // set subcommand
 // ---------------------------------------------------------------------------
@@ -102,14 +134,12 @@ describe("tila record set", () => {
   let exitSpy: any;
 
   beforeEach(async () => {
-    vi.clearAllMocks();
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     exitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never);
     const fs = await import("node:fs");
-    // Default: readFileSync returns JSON content (overridden per test)
     (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
       JSON.stringify({ name: "test" }),
     );
@@ -121,31 +151,12 @@ describe("tila record set", () => {
     exitSpy.mockRestore();
   });
 
-  it("set with JSON file, no fence -> POST to create", async () => {
+  it("set with JSON file, no fence -> createRecord", async () => {
     const fs = await import("node:fs");
     (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
       JSON.stringify({ name: "test" }),
     );
-    // fetchRecordTypeDef fails (no schema)
-    mockGet.mockRejectedValueOnce(new Error("no schema"));
-    mockPost.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: { name: "test" },
-        value_sha256: "abc",
-        revision: 1,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 1,
-      revision: 1,
-    });
+    mockCreateRecord.mockResolvedValue(recordRow());
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "set");
@@ -156,38 +167,24 @@ describe("tila record set", () => {
       json: false,
     });
 
-    expect(mockPost).toHaveBeenCalledWith(
-      "/projects/proj-test/records/service",
-      expect.objectContaining({ key: "api", value: { name: "test" } }),
-      expect.any(Object),
+    expect(mockCreateRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "service",
+        key: "api",
+        value: { name: "test" },
+      }),
     );
     expect(logSpy.mock.calls[0][0]).toContain("Set record service/api");
   });
 
-  it("set with JSON file, --fence 3 -> PUT to update", async () => {
+  it("set with JSON file, --fence 3 -> setRecord with fence", async () => {
     const fs = await import("node:fs");
     (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
       JSON.stringify({ name: "updated" }),
     );
-    mockGet.mockRejectedValueOnce(new Error("no schema"));
-    mockPut.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: { name: "updated" },
-        value_sha256: "abc",
-        revision: 2,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 4,
-      revision: 2,
-    });
+    mockSetRecord.mockResolvedValue(
+      recordRow({ value: { name: "updated" }, revision: 2, fence: 4 }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "set");
@@ -199,10 +196,8 @@ describe("tila record set", () => {
       json: false,
     });
 
-    expect(mockPut).toHaveBeenCalledWith(
-      "/projects/proj-test/records/service/api",
+    expect(mockSetRecord).toHaveBeenCalledWith(
       expect.objectContaining({ value: { name: "updated" }, fence: 3 }),
-      expect.any(Object),
     );
     expect(logSpy.mock.calls[0][0]).toContain("Set record service/api");
   });
@@ -212,25 +207,9 @@ describe("tila record set", () => {
     (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
       "name: from-yaml\ncount: 42\n",
     );
-    mockGet.mockRejectedValueOnce(new Error("no schema"));
-    mockPost.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: { name: "from-yaml", count: 42 },
-        value_sha256: "abc",
-        revision: 1,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 1,
-      revision: 1,
-    });
+    mockCreateRecord.mockResolvedValue(
+      recordRow({ value: { name: "from-yaml", count: 42 } }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "set");
@@ -241,16 +220,13 @@ describe("tila record set", () => {
       json: false,
     });
 
-    expect(mockPost).toHaveBeenCalledWith(
-      "/projects/proj-test/records/service",
+    expect(mockCreateRecord).toHaveBeenCalledWith(
       expect.objectContaining({ value: { name: "from-yaml", count: 42 } }),
-      expect.any(Object),
     );
   });
 
   it("set with YAML file containing custom tag -> exits non-zero", async () => {
     const fs = await import("node:fs");
-    // yaml.parse with { schema: "json" } rejects custom tags like !!python/object
     (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
       "name: !!python/object:__main__.Foo {bar: 1}\n",
     );
@@ -268,40 +244,20 @@ describe("tila record set", () => {
     expect(errorSpy.mock.calls[0][0]).toMatch(/error/i);
   });
 
-  it("set with snapshot-history type -> preupload artifact", async () => {
+  it("set with snapshot-history type (remote) -> preupload artifact then createRecord", async () => {
     const fs = await import("node:fs");
     (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
       JSON.stringify({ data: 1 }),
     );
-    // fetchRecordTypeDef returns snapshot type
-    mockGet.mockResolvedValueOnce({
-      ok: true,
-      schema: {
-        definition:
-          'schema_version = 1\n[records.pipeline_config]\nhistory = "snapshot"\n',
-        version: 1,
-      },
+    mockGetCurrentSchema.mockResolvedValue({
       version: 1,
+      definition:
+        'schema_version = 1\n[records.pipeline_config]\nhistory = "snapshot"\n',
     });
     mockPostFormData.mockResolvedValue({ key: "artifacts/snap-key" });
-    mockPost.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "pipeline_config",
-        key: "main",
-        value: { data: 1 },
-        value_sha256: "abc",
-        revision: 1,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 1,
-      revision: 1,
-    });
+    mockCreateRecord.mockResolvedValue(
+      recordRow({ type: "pipeline_config", key: "main", value: { data: 1 } }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "set");
@@ -313,11 +269,38 @@ describe("tila record set", () => {
     });
 
     expect(mockPostFormData).toHaveBeenCalled();
-    expect(mockPost).toHaveBeenCalledWith(
-      "/projects/proj-test/records/pipeline_config",
-      expect.objectContaining({ source_artifact_key: "artifacts/snap-key" }),
-      expect.any(Object),
+    expect(mockCreateRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceArtifactKey: "artifacts/snap-key" }),
     );
+  });
+
+  it("set with snapshot-history type in LOCAL mode -> errors, no createRecord", async () => {
+    mockClient = null; // local mode
+    const fs = await import("node:fs");
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
+      JSON.stringify({ data: 1 }),
+    );
+    mockGetCurrentSchema.mockResolvedValue({
+      version: 1,
+      definition:
+        'schema_version = 1\n[records.pipeline_config]\nhistory = "snapshot"\n',
+    });
+
+    const cmd = await loadCommand();
+    const sub = getSubCommand(cmd, "set");
+    await runCmd(sub, {
+      type: "pipeline_config",
+      key: "main",
+      file: "/tmp/value.json",
+      json: false,
+    });
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(
+      errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n"),
+    ).toMatch(/snapshot/i);
+    expect(mockCreateRecord).not.toHaveBeenCalled();
+    expect(mockPostFormData).not.toHaveBeenCalled();
   });
 
   it("set with non-snapshot type -> no preupload", async () => {
@@ -325,33 +308,11 @@ describe("tila record set", () => {
     (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
       JSON.stringify({ data: 1 }),
     );
-    // fetchRecordTypeDef returns revision type
-    mockGet.mockResolvedValueOnce({
-      ok: true,
-      schema: {
-        definition: '[records.service]\nhistory = "revision"\n',
-        version: 1,
-      },
+    mockGetCurrentSchema.mockResolvedValue({
       version: 1,
+      definition: '[records.service]\nhistory = "revision"\n',
     });
-    mockPost.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: { data: 1 },
-        value_sha256: "abc",
-        revision: 1,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 1,
-      revision: 1,
-    });
+    mockCreateRecord.mockResolvedValue(recordRow({ value: { data: 1 } }));
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "set");
@@ -375,7 +336,6 @@ describe("tila record get", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -383,25 +343,9 @@ describe("tila record get", () => {
   });
 
   it("get -> fetches record and outputs JSON by default", async () => {
-    mockGet
-      .mockResolvedValueOnce({
-        ok: true,
-        record: {
-          type: "service",
-          key: "api",
-          value: { host: "localhost" },
-          value_sha256: "abc123",
-          revision: 1,
-          archived: 0,
-          created_at: 1700000000000,
-          updated_at: 1700000000000,
-          updated_by: "cli",
-          tags: [],
-          schema_version: 1,
-        },
-        fence: 1,
-      })
-      .mockRejectedValueOnce(new Error("no schema")); // fetchRecordTypeDef
+    mockGetRecord.mockResolvedValue(
+      recordRow({ value: { host: "localhost" } }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "get");
@@ -412,23 +356,9 @@ describe("tila record get", () => {
   });
 
   it("get --format yaml -> outputs YAML", async () => {
-    mockGet.mockResolvedValueOnce({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: { host: "localhost" },
-        value_sha256: "abc123",
-        revision: 1,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 1,
-    });
+    mockGetRecord.mockResolvedValue(
+      recordRow({ value: { host: "localhost" } }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "get");
@@ -460,7 +390,6 @@ describe("tila record patch", () => {
     exitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never);
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -469,25 +398,10 @@ describe("tila record patch", () => {
     exitSpy.mockRestore();
   });
 
-  it("patch with --fence -> sends PATCH request", async () => {
-    mockPatch.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: { owner: "platform" },
-        value_sha256: "abc",
-        revision: 3,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 6,
-      revision: 3,
-    });
+  it("patch with --fence -> patchRecord", async () => {
+    mockPatchRecord.mockResolvedValue(
+      recordRow({ value: { owner: "platform" }, revision: 3, fence: 6 }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "patch");
@@ -498,10 +412,13 @@ describe("tila record patch", () => {
       fence: "5",
     });
 
-    expect(mockPatch).toHaveBeenCalledWith(
-      "/projects/proj-test/records/service/api",
-      { patch: { owner: "platform" }, fence: 5 },
-      expect.any(Object),
+    expect(mockPatchRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "service",
+        key: "api",
+        patch: { owner: "platform" },
+        fence: 5,
+      }),
     );
     expect(logSpy.mock.calls[0][0]).toContain("Patched record service/api");
   });
@@ -530,16 +447,14 @@ describe("tila record list", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
     logSpy.mockRestore();
   });
 
-  it("list -> GET request with table output", async () => {
-    mockGet.mockResolvedValue({
-      ok: true,
+  it("list -> listRecords with table output", async () => {
+    mockListRecords.mockResolvedValue({
       items: [
         {
           type: "service",
@@ -551,26 +466,25 @@ describe("tila record list", () => {
           tags: [],
         },
       ],
-      meta: { total: 1, limit: 200, next_cursor: null },
+      total: 1,
+      next_cursor: null,
     });
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "list");
     await runCmd(sub, { type: "service", json: false });
 
-    expect(mockGet).toHaveBeenCalledWith(
-      "/projects/proj-test/records/service",
-      expect.any(Object),
+    expect(mockListRecords).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "service" }),
     );
   });
 
   it("list --json -> prints full envelope", async () => {
-    const envelope = {
-      ok: true,
+    mockListRecords.mockResolvedValue({
       items: [],
-      meta: { total: 0, limit: 200, next_cursor: null },
-    };
-    mockGet.mockResolvedValue(envelope);
+      total: 0,
+      next_cursor: null,
+    });
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "list");
@@ -592,39 +506,34 @@ describe("tila record history", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
     logSpy.mockRestore();
   });
 
-  it("history -> GET with default limit=20 and values=false", async () => {
-    mockGet.mockResolvedValue({
-      ok: true,
+  it("history -> default limit=20 and includeValues=false", async () => {
+    mockListRecordHistory.mockResolvedValue({
       items: [],
-      meta: { total: 0, limit: 20, next_cursor: null },
+      total: 0,
+      next_cursor: null,
     });
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "history");
     await runCmd(sub, { type: "service", key: "api", json: false });
 
-    expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining("limit=20"),
-      expect.any(Object),
-    );
-    expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining("values=false"),
-      expect.any(Object),
-    );
+    expect(mockListRecordHistory).toHaveBeenCalledWith("service", "api", {
+      limit: 20,
+      includeValues: false,
+    });
   });
 
-  it("history --values --limit 5 -> correct query params", async () => {
-    mockGet.mockResolvedValue({
-      ok: true,
+  it("history --values --limit 5 -> correct options", async () => {
+    mockListRecordHistory.mockResolvedValue({
       items: [],
-      meta: { total: 0, limit: 5, next_cursor: null },
+      total: 0,
+      next_cursor: null,
     });
 
     const cmd = await loadCommand();
@@ -637,14 +546,10 @@ describe("tila record history", () => {
       json: false,
     });
 
-    expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining("limit=5"),
-      expect.any(Object),
-    );
-    expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining("values=true"),
-      expect.any(Object),
-    );
+    expect(mockListRecordHistory).toHaveBeenCalledWith("service", "api", {
+      limit: 5,
+      includeValues: true,
+    });
   });
 });
 
@@ -657,32 +562,16 @@ describe("tila record archive/unarchive", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
     logSpy.mockRestore();
   });
 
-  it("archive --fence 7 -> POST to ~/archive", async () => {
-    mockPost.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: {},
-        value_sha256: "abc",
-        revision: 4,
-        archived: 1,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 8,
-      revision: 4,
-    });
+  it("archive --fence 7 -> archiveRecord", async () => {
+    mockArchiveRecord.mockResolvedValue(
+      recordRow({ value: {}, revision: 4, archived: 1, fence: 8 }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "archive");
@@ -693,33 +582,18 @@ describe("tila record archive/unarchive", () => {
       json: false,
     });
 
-    expect(mockPost).toHaveBeenCalledWith(
-      "/projects/proj-test/records/service/~/archive/api",
-      { fence: 7 },
-      expect.any(Object),
-    );
+    expect(mockArchiveRecord).toHaveBeenCalledWith({
+      type: "service",
+      key: "api",
+      fence: 7,
+    });
     expect(logSpy.mock.calls[0][0]).toContain("Archived record service/api");
   });
 
-  it("unarchive --fence 8 -> POST to ~/unarchive", async () => {
-    mockPost.mockResolvedValue({
-      ok: true,
-      record: {
-        type: "service",
-        key: "api",
-        value: {},
-        value_sha256: "abc",
-        revision: 5,
-        archived: 0,
-        created_at: 1700000000000,
-        updated_at: 1700000000000,
-        updated_by: "cli",
-        tags: [],
-        schema_version: 1,
-      },
-      fence: 9,
-      revision: 5,
-    });
+  it("unarchive --fence 8 -> unarchiveRecord", async () => {
+    mockUnarchiveRecord.mockResolvedValue(
+      recordRow({ value: {}, revision: 5, archived: 0, fence: 9 }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "unarchive");
@@ -730,11 +604,11 @@ describe("tila record archive/unarchive", () => {
       json: false,
     });
 
-    expect(mockPost).toHaveBeenCalledWith(
-      "/projects/proj-test/records/service/~/unarchive/api",
-      { fence: 8 },
-      expect.any(Object),
-    );
+    expect(mockUnarchiveRecord).toHaveBeenCalledWith({
+      type: "service",
+      key: "api",
+      fence: 8,
+    });
     expect(logSpy.mock.calls[0][0]).toContain("Unarchived record service/api");
   });
 });
@@ -747,7 +621,6 @@ describe("tila record export", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    vi.clearAllMocks();
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const fs = await import("node:fs");
     (fs.mkdirSync as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
@@ -760,43 +633,24 @@ describe("tila record export", () => {
 
   it("export -> lists then gets each record, writes files", async () => {
     const fs = await import("node:fs");
-    mockGet
-      // CR-1 fix: fetchRecordTypeDef is called FIRST (schema fetch → rejection)
-      .mockRejectedValueOnce(new Error("no schema"))
-      // List response
-      .mockResolvedValueOnce({
-        ok: true,
-        items: [
-          {
-            type: "service",
-            key: "api",
-            revision: 1,
-            updated_at: 1700000000000,
-            updated_by: "cli",
-            archived: 0,
-            tags: [],
-          },
-        ],
-        meta: { total: 1, limit: 200, next_cursor: null },
-      })
-      // Get response
-      .mockResolvedValueOnce({
-        ok: true,
-        record: {
+    mockListRecords.mockResolvedValue({
+      items: [
+        {
           type: "service",
           key: "api",
-          value: { host: "localhost" },
-          value_sha256: "abc",
           revision: 1,
-          archived: 0,
-          created_at: 1700000000000,
           updated_at: 1700000000000,
           updated_by: "cli",
+          archived: 0,
           tags: [],
-          schema_version: 1,
         },
-        fence: 1,
-      });
+      ],
+      total: 1,
+      next_cursor: null,
+    });
+    mockGetRecord.mockResolvedValue(
+      recordRow({ value: { host: "localhost" } }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "export");
@@ -809,53 +663,34 @@ describe("tila record export", () => {
 
   it("export with slash key -> nested directory", async () => {
     const fs = await import("node:fs");
-    mockGet
-      // CR-1 fix: fetchRecordTypeDef schema fetch → rejection comes first
-      .mockRejectedValueOnce(new Error("no schema"))
-      .mockResolvedValueOnce({
-        ok: true,
-        items: [
-          {
-            type: "service",
-            key: "api/staging",
-            revision: 1,
-            updated_at: 1700000000000,
-            updated_by: "cli",
-            archived: 0,
-            tags: [],
-          },
-        ],
-        meta: { total: 1, limit: 200, next_cursor: null },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        record: {
+    mockListRecords.mockResolvedValue({
+      items: [
+        {
           type: "service",
           key: "api/staging",
-          value: { env: "staging" },
-          value_sha256: "abc",
           revision: 1,
-          archived: 0,
-          created_at: 1700000000000,
           updated_at: 1700000000000,
           updated_by: "cli",
+          archived: 0,
           tags: [],
-          schema_version: 1,
         },
-        fence: 1,
-      });
+      ],
+      total: 1,
+      next_cursor: null,
+    });
+    mockGetRecord.mockResolvedValue(
+      recordRow({ key: "api/staging", value: { env: "staging" } }),
+    );
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "export");
     await runCmd(sub, { type: "service", "output-dir": "./out", all: false });
 
-    // Verify mkdirSync was called with nested path containing "api"
     const mkdirCalls = (fs.mkdirSync as ReturnType<typeof vi.fn>).mock.calls;
     const nestedDir = mkdirCalls.find((call: unknown[]) =>
       (call[0] as string).includes("api"),
     );
     expect(nestedDir).toBeDefined();
-    // Also verify Exported log includes the key
     expect(logSpy.mock.calls[0][0]).toContain("service/api/staging");
   });
 });
@@ -869,20 +704,14 @@ describe("tila record types", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
     logSpy.mockRestore();
   });
 
-  it("types -> lists all types", async () => {
-    mockGet.mockResolvedValue({
-      ok: true,
-      types: ["pipeline_config", "service"],
-      declared_types: ["pipeline_config", "service"],
-      in_use_types: ["service"],
-    });
+  it("types -> lists types from the backend", async () => {
+    mockListRecordTypesInUse.mockResolvedValue(["pipeline_config", "service"]);
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "types");
@@ -892,19 +721,15 @@ describe("tila record types", () => {
     expect(logSpy).toHaveBeenCalledWith("service");
   });
 
-  it("types --in-use -> only in-use types", async () => {
-    mockGet.mockResolvedValue({
-      ok: true,
-      types: ["pipeline_config", "service"],
-      declared_types: ["pipeline_config", "service"],
-      in_use_types: ["service"],
-    });
+  it("types --json -> prints envelope", async () => {
+    mockListRecordTypesInUse.mockResolvedValue(["service"]);
 
     const cmd = await loadCommand();
     const sub = getSubCommand(cmd, "types");
-    await runCmd(sub, { json: false, "in-use": true });
+    await runCmd(sub, { json: true, "in-use": false });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    expect(logSpy).toHaveBeenCalledWith("service");
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.ok).toBe(true);
+    expect(output.types).toEqual(["service"]);
   });
 });

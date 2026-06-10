@@ -1,37 +1,22 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
+import type { SchemaBackend } from "@tila/core";
 import {
   RecordDefinitionSchema,
-  RecordGetResponseSchema,
-  RecordHistoryResponseSchema,
-  RecordListResponseSchema,
-  RecordMutateResponseSchema,
   type TilaSchemaToml,
   TilaSchemaTomlSchema,
 } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { parse as parseTOML } from "smol-toml";
-import type { TilaClient } from "tila-sdk";
 import yaml, { type YAMLWarning } from "yaml";
-import { z } from "zod";
-import { type CommandContext, requireClient, resolveContext } from "../context";
+import type { z } from "zod";
+import { resolveContext } from "../context";
 import {
   formatTimestamp,
   printJson,
   renderTable,
   withSpinner,
 } from "../lib/output";
-
-const SchemaCurrentResponseSchema = z.object({
-  ok: z.literal(true),
-  schema: z
-    .object({
-      definition: z.string(),
-      version: z.number().int(),
-    })
-    .nullable(),
-  version: z.number().int().nullable(),
-});
 
 /** Parse a file as JSON or YAML based on extension. */
 function parseInputFile(filePath: string): Record<string, unknown> {
@@ -69,19 +54,19 @@ function parseInputFile(filePath: string): Record<string, unknown> {
   }
 }
 
-/** Fetch schema TOML to check record type definition (format, history). */
+/**
+ * Fetch the schema definition to read a record type's `format`/`history`
+ * metadata. Backend-agnostic: reads through the `SchemaBackend` so it works in
+ * both local and remote mode.
+ */
 async function fetchRecordTypeDef(
-  client: TilaClient,
-  projectId: string,
+  schemaBackend: SchemaBackend,
   type: string,
 ): Promise<z.infer<typeof RecordDefinitionSchema> | null> {
   try {
-    const res = await client.get(`/projects/${projectId}/schema`, {
-      schema: SchemaCurrentResponseSchema,
-      validate: true,
-    });
-    if (!res.schema?.definition) return null;
-    const schema = TilaSchemaTomlSchema.parse(parseTOML(res.schema.definition));
+    const res = await schemaBackend.getCurrentSchema();
+    if (!res.definition) return null;
+    const schema = TilaSchemaTomlSchema.parse(parseTOML(res.definition));
     const records = schema.records;
     if (!records?.[type]) return null;
     return RecordDefinitionSchema.parse(records[type]);
@@ -124,7 +109,6 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         const { config } = ctx;
-        const client = requireClient(ctx);
         const recordType = args.type as string;
         const key = args.key as string;
         const filePath = args.file as string;
@@ -139,12 +123,19 @@ export default defineCommand({
 
         // Check if snapshot preupload is needed
         let sourceArtifactKey: string | null = null;
-        const typeDef = await fetchRecordTypeDef(
-          client,
-          config.project_id,
-          recordType,
-        );
+        const typeDef = await fetchRecordTypeDef(ctx.schema, recordType);
         if (typeDef?.history === "snapshot") {
+          // Snapshot source preupload writes to R2 via the Worker — remote-only.
+          // Local mode has no R2; surface a clear error rather than silently
+          // dropping the source artifact (the local backend would still write
+          // the record, but without the snapshot provenance the type promises).
+          if (!ctx.client) {
+            console.error(
+              `Error: record type "${recordType}" uses history = "snapshot", which requires a remote backend (snapshot source artifacts are uploaded to R2 via the Worker). It is not supported in local mode.`,
+            );
+            process.exit(1);
+            return;
+          }
           try {
             const content = readFileSync(filePath);
             const fileName = filePath.split("/").pop() ?? "file";
@@ -152,7 +143,7 @@ export default defineCommand({
             formData.append("file", new Blob([content]), fileName);
             formData.append("kind", "record-snapshot-source");
             formData.append("resource", `record:${recordType}/${key}`);
-            const uploadResult = await client.postFormData(
+            const uploadResult = await ctx.client.postFormData(
               `/projects/${config.project_id}/artifacts`,
               formData,
             );
@@ -168,15 +159,15 @@ export default defineCommand({
         const fence = args.fence ? Number(args.fence) : undefined;
 
         if (fence !== undefined) {
-          // Update existing record (PUT with fence)
-          const body: Record<string, unknown> = { value, fence };
-          if (sourceArtifactKey) body.source_artifact_key = sourceArtifactKey;
+          // Update existing record (set with fence)
           const result = await withSpinner("Setting record...", () =>
-            client.put(
-              `/projects/${config.project_id}/records/${recordType}/${key}`,
-              body,
-              { schema: RecordMutateResponseSchema, validate: true },
-            ),
+            ctx.record.setRecord({
+              type: recordType,
+              key,
+              value,
+              fence,
+              sourceArtifactKey,
+            }),
           );
           if (args.json) {
             printJson(result);
@@ -186,15 +177,14 @@ export default defineCommand({
             `Set record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
           );
         } else {
-          // Create new record (POST without fence)
-          const body: Record<string, unknown> = { key, value };
-          if (sourceArtifactKey) body.source_artifact_key = sourceArtifactKey;
+          // Create new record (no fence)
           const result = await withSpinner("Creating record...", () =>
-            client.post(
-              `/projects/${config.project_id}/records/${recordType}`,
-              body,
-              { schema: RecordMutateResponseSchema, validate: true },
-            ),
+            ctx.record.createRecord({
+              type: recordType,
+              key,
+              value,
+              sourceArtifactKey,
+            }),
           );
           if (args.json) {
             printJson(result);
@@ -232,38 +222,35 @@ export default defineCommand({
       },
       async run({ args }) {
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
         const recordType = args.type as string;
         const key = args.key as string;
 
-        const result = await withSpinner("Fetching record...", () =>
-          client.get(
-            `/projects/${config.project_id}/records/${recordType}/${key}`,
-            { schema: RecordGetResponseSchema, validate: true },
-          ),
+        const record = await withSpinner("Fetching record...", () =>
+          ctx.record.getRecord(recordType, key),
         );
 
+        if (!record) {
+          console.error(`Error: record ${recordType}/${key} not found`);
+          process.exit(1);
+          return;
+        }
+
         if (args.json) {
-          printJson(result);
+          printJson({ ok: true, record, fence: record.fence });
           return;
         }
 
         // Determine output format: --format flag wins; else fetch schema type def; else default "json"
         let outputFormat = args.format as string | undefined;
         if (!outputFormat) {
-          const typeDef = await fetchRecordTypeDef(
-            client,
-            config.project_id,
-            recordType,
-          );
+          const typeDef = await fetchRecordTypeDef(ctx.schema, recordType);
           outputFormat = typeDef?.format ?? "json";
         }
 
         if (outputFormat === "yaml") {
-          console.log(yaml.stringify(result.record.value).trimEnd());
+          console.log(yaml.stringify(record.value).trimEnd());
         } else {
-          console.log(JSON.stringify(result.record.value, null, 2));
+          console.log(JSON.stringify(record.value, null, 2));
         }
       },
     }),
@@ -292,33 +279,52 @@ export default defineCommand({
       },
       async run({ args }) {
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
         const recordType = args.type as string;
-        const params = new URLSearchParams();
-        if (args.tag) params.set("tag", args.tag as string);
-        if (args["include-archived"]) params.set("include-archived", "true");
-        if (args.filter) params.set("filter", args.filter as string);
-        if (args.limit) params.set("limit", args.limit as string);
 
-        const qs = params.toString();
-        const url = `/projects/${config.project_id}/records/${recordType}${qs ? `?${qs}` : ""}`;
-        const result = await withSpinner("Fetching records...", () =>
-          client.get(url, { schema: RecordListResponseSchema, validate: true }),
+        let dataFilter: Record<string, unknown> | undefined;
+        if (args.filter) {
+          try {
+            dataFilter = JSON.parse(args.filter as string) as Record<
+              string,
+              unknown
+            >;
+          } catch {
+            console.error("Error: --filter must be valid JSON");
+            process.exit(1);
+            return;
+          }
+        }
+
+        const page = await withSpinner("Fetching records...", () =>
+          ctx.record.listRecords({
+            type: recordType,
+            tag: args.tag ? (args.tag as string) : undefined,
+            includeArchived: Boolean(args["include-archived"]),
+            dataFilter,
+            limit: args.limit ? Number(args.limit) : undefined,
+          }),
         );
 
         if (args.json) {
-          printJson(result);
+          printJson({
+            ok: true,
+            items: page.items,
+            meta: {
+              total: page.total,
+              limit: args.limit ? Number(args.limit) : page.total,
+              next_cursor: page.next_cursor,
+            },
+          });
           return;
         }
 
-        if (result.items.length === 0) {
+        if (page.items.length === 0) {
           console.log("No records found.");
           return;
         }
 
         renderTable(
-          result.items.map((item) => ({
+          page.items.map((item) => ({
             key: item.key,
             revision: item.revision,
             updated: formatTimestamp(item.updated_at),
@@ -334,8 +340,8 @@ export default defineCommand({
           ],
         );
 
-        if (result.meta.next_cursor === "truncated") {
-          console.log(`(results truncated at ${result.meta.limit})`);
+        if (page.next_cursor === "truncated") {
+          console.log(`(results truncated at ${args.limit ?? page.total})`);
         }
       },
     }),
@@ -383,14 +389,13 @@ export default defineCommand({
         }
 
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
         const result = await withSpinner("Patching record...", () =>
-          client.patch(
-            `/projects/${config.project_id}/records/${recordType}/${key}`,
-            { patch, fence: Number(fenceStr) },
-            { schema: RecordMutateResponseSchema, validate: true },
-          ),
+          ctx.record.patchRecord({
+            type: recordType,
+            key,
+            patch,
+            fence: Number(fenceStr),
+          }),
         );
 
         console.log(
@@ -430,14 +435,12 @@ export default defineCommand({
         }
 
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
         const result = await withSpinner("Archiving record...", () =>
-          client.post(
-            `/projects/${config.project_id}/records/${recordType}/~/archive/${key}`,
-            { fence: Number(fenceStr) },
-            { schema: RecordMutateResponseSchema, validate: true },
-          ),
+          ctx.record.archiveRecord({
+            type: recordType,
+            key,
+            fence: Number(fenceStr),
+          }),
         );
 
         if (args.json) {
@@ -481,14 +484,12 @@ export default defineCommand({
         }
 
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
         const result = await withSpinner("Unarchiving record...", () =>
-          client.post(
-            `/projects/${config.project_id}/records/${recordType}/~/unarchive/${key}`,
-            { fence: Number(fenceStr) },
-            { schema: RecordMutateResponseSchema, validate: true },
-          ),
+          ctx.record.unarchiveRecord({
+            type: recordType,
+            key,
+            fence: Number(fenceStr),
+          }),
         );
 
         if (args.json) {
@@ -524,33 +525,37 @@ export default defineCommand({
       },
       async run({ args }) {
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
         const recordType = args.type as string;
         const key = args.key as string;
-        const params = new URLSearchParams();
-        params.set("limit", (args.limit as string) ?? "20");
-        params.set("values", args.values ? "true" : "false");
+        const limit = args.limit ? Number(args.limit) : 20;
 
-        const result = await withSpinner("Fetching history...", () =>
-          client.get(
-            `/projects/${config.project_id}/records/${recordType}/~/history/${key}?${params}`,
-            { schema: RecordHistoryResponseSchema, validate: true },
-          ),
+        const page = await withSpinner("Fetching history...", () =>
+          ctx.record.listRecordHistory(recordType, key, {
+            limit,
+            includeValues: Boolean(args.values),
+          }),
         );
 
         if (args.json) {
-          printJson(result);
+          printJson({
+            ok: true,
+            items: page.items,
+            meta: {
+              total: page.total,
+              limit,
+              next_cursor: page.next_cursor,
+            },
+          });
           return;
         }
 
-        if (result.items.length === 0) {
+        if (page.items.length === 0) {
           console.log("No history found.");
           return;
         }
 
         renderTable(
-          result.items.map((item) => ({
+          page.items.map((item) => ({
             revision: item.revision,
             operation: item.operation,
             actor: item.actor,
@@ -588,28 +593,18 @@ export default defineCommand({
       },
       async run({ args }) {
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
         const outputDir = (args["output-dir"] as string) ?? ".";
 
         // Determine types to export
         let types: string[];
         if (args.all) {
-          const typesResult = (await client.get(
-            `/projects/${config.project_id}/records/_types`,
-          )) as Record<string, unknown>;
-          if (!Array.isArray(typesResult.types)) {
-            console.error(
-              "Error: unexpected response from /_types: types field is not an array",
-            );
-            process.exit(1);
-          }
-          types = typesResult.types as string[];
+          types = await ctx.record.listRecordTypesInUse();
         } else {
           const recordType = args.type as string | undefined;
           if (!recordType) {
             console.error("Error: specify a record type or use --all");
             process.exit(1);
+            return;
           }
           types = [recordType];
         }
@@ -618,27 +613,18 @@ export default defineCommand({
           // Determine format for this type
           let outputFormat = args.format as string | undefined;
           if (!outputFormat) {
-            const typeDef = await fetchRecordTypeDef(
-              client,
-              config.project_id,
-              recordType,
-            );
+            const typeDef = await fetchRecordTypeDef(ctx.schema, recordType);
             outputFormat = typeDef?.format ?? "json";
           }
           const ext = outputFormat === "yaml" ? ".yaml" : ".json";
 
           // List all records of this type
-          const listResult = await client.get(
-            `/projects/${config.project_id}/records/${recordType}`,
-            { schema: RecordListResponseSchema, validate: true },
-          );
+          const listResult = await ctx.record.listRecords({ type: recordType });
 
           for (const item of listResult.items) {
             // Fetch full record
-            const getResult = await client.get(
-              `/projects/${config.project_id}/records/${recordType}/${item.key}`,
-              { schema: RecordGetResponseSchema, validate: true },
-            );
+            const record = await ctx.record.getRecord(recordType, item.key);
+            if (!record) continue;
 
             // Build output path from key segments using path.join for safety
             const segments = item.key.split("/");
@@ -652,8 +638,8 @@ export default defineCommand({
 
             const content =
               outputFormat === "yaml"
-                ? yaml.stringify(getResult.record.value)
-                : `${JSON.stringify(getResult.record.value, null, 2)}\n`;
+                ? yaml.stringify(record.value)
+                : `${JSON.stringify(record.value, null, 2)}\n`;
 
             writeFileSync(outPath, content, "utf-8");
             console.log(`Exported ${recordType}/${item.key} -> ${outPath}`);
@@ -678,26 +664,18 @@ export default defineCommand({
       },
       async run({ args }) {
         const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
 
-        // Fetch full response without schema validation — in_use_types not in RecordTypesResponseSchema
-        const result = (await withSpinner("Fetching types...", () =>
-          client.get(`/projects/${config.project_id}/records/_types`),
-        )) as Record<string, unknown>;
+        // RecordBackend exposes a single types method (the in-use ∪ declared
+        // set, sorted). The `--in-use` flag is preserved for compatibility but
+        // resolves through the same backend method in both local and remote
+        // mode.
+        const typesToShow = await withSpinner("Fetching types...", () =>
+          ctx.record.listRecordTypesInUse(),
+        );
 
         if (args.json) {
-          printJson(result);
+          printJson({ ok: true, types: typesToShow });
           return;
-        }
-
-        let typesToShow = (result.types ?? []) as string[];
-        if (args["in-use"]) {
-          const inUseTypes = result.in_use_types as string[] | undefined;
-          if (inUseTypes) {
-            typesToShow = inUseTypes;
-          }
-          // If in_use_types not present, show all types (backward compat)
         }
 
         if (typesToShow.length === 0) {

@@ -2,6 +2,7 @@ import type {
   AcquireResult,
   ApplySchemaInput,
   ApplySchemaOutput,
+  ArchiveRecordInput,
   ArtifactBackend,
   ArtifactIndexEntry,
   ArtifactPointerRecord,
@@ -10,6 +11,7 @@ import type {
   ArtifactSearchResultRecord,
   CoordinationBackend,
   CreateEntityInput,
+  CreateRecordInput,
   EntityBackend,
   EntityListFilter,
   GateBackend,
@@ -18,12 +20,18 @@ import type {
   JournalBackend,
   JournalEvent,
   JournalQuery,
+  PatchRecordInput,
   ProjectSummary,
+  RecordBackend,
+  RecordHistoryOptions,
+  RecordListFilter,
+  RecordPage,
   RelationshipFilter,
   RelationshipInput,
   SchemaBackend,
   SchemaRecord,
   SendSignalInput,
+  SetRecordInput,
   SignalBackend,
   SignalRecord,
   SummaryBackend,
@@ -34,6 +42,9 @@ import type {
   Entity,
   EntityRelationship,
   Presence,
+  RecordHistoryItem,
+  RecordListItem,
+  RecordRow,
 } from "@tila/schemas";
 import {
   AckSignalResponseSchema,
@@ -53,6 +64,10 @@ import {
   PaginatedEntityListResponseSchema,
   PresenceAllListResponseSchema,
   PresenceHeartbeatSuccessResponseSchema,
+  RecordGetResponseSchema,
+  RecordHistoryResponseSchema,
+  RecordListResponseSchema,
+  RecordMutateResponseSchema,
   ReleaseSuccessResponseSchema,
   RenewSuccessResponseSchema,
   SendSignalResponseSchema,
@@ -76,6 +91,14 @@ const ArtifactListInternalSchema = z.object({
 });
 
 const OkSchema = z.object({ ok: z.literal(true) }).passthrough();
+
+// /records/_types returns merged declared+in-use types plus the in_use_types
+// subset. RecordBackend.listRecordTypesInUse() returns the in-use subset.
+const RecordTypesInternalSchema = z.object({
+  ok: z.literal(true),
+  types: z.array(z.string()),
+  in_use_types: z.array(z.string()).optional(),
+});
 
 const SchemaShowResponseSchema = z.object({
   ok: z.literal(true),
@@ -884,5 +907,168 @@ export class RemoteArtifactBackend implements ArtifactBackend {
     }
     const text = await response.text();
     return { content: text, mimeType: contentType };
+  }
+}
+
+/**
+ * RemoteRecordBackend implements RecordBackend over the Worker record HTTP
+ * routes (see `packages/worker/src/routes/records.ts`). Paths mirror the SDK
+ * record methods (`packages/sdk/src/records.ts`) so the two stay in lockstep.
+ *
+ * Wire ↔ RecordRow mapping: the mutate/get responses return a `record`
+ * (`RecordItem`, no fence) plus a top-level `fence`. RecordBackend returns
+ * `RecordRow`, which is `RecordItem` extended with `fence`, so each method
+ * merges the two: `{ ...result.record, fence: result.fence }`.
+ *
+ * Like the SDK, multi-segment keys are encoded segment-by-segment so embedded
+ * slashes survive routing (the Worker matches `:key{.+}`).
+ */
+export class RemoteRecordBackend implements RecordBackend {
+  constructor(
+    private client: TilaClient,
+    private projectId: string,
+  ) {}
+
+  private base(): string {
+    return `/projects/${this.projectId}/records`;
+  }
+
+  /** Encode a record key per-segment so embedded `/` separators are preserved. */
+  private encodeKey(key: string): string {
+    return key.split("/").map(encodeURIComponent).join("/");
+  }
+
+  async createRecord(input: CreateRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = {
+      key: input.key,
+      value: input.value,
+    };
+    if (input.tags) body.tags = input.tags;
+    if (input.message != null) body.message = input.message;
+    if (input.sourceArtifactKey != null)
+      body.source_artifact_key = input.sourceArtifactKey;
+    const result = await this.client.post(
+      `${this.base()}/${input.type}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async setRecord(input: SetRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = {
+      value: input.value,
+      fence: input.fence,
+    };
+    if (input.tags) body.tags = input.tags;
+    if (input.message != null) body.message = input.message;
+    if (input.sourceArtifactKey != null)
+      body.source_artifact_key = input.sourceArtifactKey;
+    const result = await this.client.put(
+      `${this.base()}/${input.type}/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async getRecord(type: string, key: string): Promise<RecordRow | null> {
+    try {
+      const result = await this.client.get(
+        `${this.base()}/${type}/${this.encodeKey(key)}`,
+        { schema: RecordGetResponseSchema, validate: true },
+      );
+      return { ...result.record, fence: result.fence };
+    } catch (err) {
+      if (err instanceof TilaApiError && err.status === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async patchRecord(input: PatchRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = {
+      patch: input.patch,
+      fence: input.fence,
+    };
+    if (input.message != null) body.message = input.message;
+    const result = await this.client.patch(
+      `${this.base()}/${input.type}/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async archiveRecord(input: ArchiveRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = { fence: input.fence };
+    if (input.message != null) body.message = input.message;
+    const result = await this.client.post(
+      `${this.base()}/${input.type}/~/archive/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async unarchiveRecord(input: ArchiveRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = { fence: input.fence };
+    if (input.message != null) body.message = input.message;
+    const result = await this.client.post(
+      `${this.base()}/${input.type}/~/unarchive/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async listRecords(
+    filter: RecordListFilter,
+  ): Promise<RecordPage<RecordListItem>> {
+    const query: Record<string, string | undefined> = {};
+    if (filter.tag) query.tag = filter.tag;
+    if (filter.includeArchived) query["include-archived"] = "true";
+    if (filter.tagFilter?.length) query.tag_filter = filter.tagFilter.join(",");
+    if (filter.dataFilter) query.filter = JSON.stringify(filter.dataFilter);
+    if (filter.limit !== undefined) query.limit = String(filter.limit);
+    const result = await this.client.get(`${this.base()}/${filter.type}`, {
+      schema: RecordListResponseSchema,
+      validate: true,
+      query,
+    });
+    return {
+      items: result.items,
+      total: result.meta.total,
+      next_cursor: result.meta.next_cursor,
+    };
+  }
+
+  async listRecordHistory(
+    type: string,
+    key: string,
+    opts?: RecordHistoryOptions,
+  ): Promise<RecordPage<RecordHistoryItem>> {
+    const query: Record<string, string | undefined> = {};
+    if (opts?.limit !== undefined) query.limit = String(opts.limit);
+    if (opts?.includeValues !== undefined)
+      query.values = String(opts.includeValues);
+    const result = await this.client.get(
+      `${this.base()}/${type}/~/history/${this.encodeKey(key)}`,
+      { schema: RecordHistoryResponseSchema, validate: true, query },
+    );
+    return {
+      items: result.items,
+      total: result.meta.total,
+      next_cursor: result.meta.next_cursor,
+    };
+  }
+
+  async listRecordTypesInUse(): Promise<string[]> {
+    const result = await this.client.get(`${this.base()}/_types`, {
+      schema: RecordTypesInternalSchema,
+      validate: true,
+    });
+    return result.in_use_types ?? [];
   }
 }
