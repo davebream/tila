@@ -414,6 +414,9 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@tila/core':
+        specifier: workspace:*
+        version: link:../core
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas

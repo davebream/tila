@@ -1,6 +1,5 @@
-import type { TilaClient } from "tila-sdk";
-import { TilaApiError } from "tila-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { TilaApiError, type TilaClient } from "../../client";
 
 // Build a mock TilaClient. We only mock the methods RemoteBackend calls.
 function createMockClient() {

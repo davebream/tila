@@ -51,6 +51,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@tila/core": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@types/node": "^22.0.0",
     "tsup": "^8.3.0",

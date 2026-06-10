@@ -12,13 +12,13 @@ import type {
   SummaryBackend,
 } from "@tila/core";
 import type { TilaProjectConfig } from "@tila/schemas";
-import type { TilaClient } from "tila-sdk";
-import { requireTokenAsync } from "./auth";
 import {
   RemoteArtifactBackend,
   RemoteBackend,
   RemoteRecordBackend,
-} from "./backends/remote";
+  type TilaClient,
+} from "tila-sdk";
+import { requireTokenAsync } from "./auth";
 import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";

@@ -8,9 +8,8 @@
  * the Worker silently dropped it, returning ALL tasks.
  */
 
-import type { TilaClient } from "tila-sdk";
+import { RemoteBackend, type TilaClient } from "tila-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RemoteBackend } from "../../backends/remote";
 
 vi.mock("yocto-spinner", () => ({
   default: vi.fn().mockImplementation(() => ({

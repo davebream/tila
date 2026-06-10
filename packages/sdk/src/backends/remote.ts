@@ -81,8 +81,8 @@ import {
   StateResponseSchema,
   SummaryResponseSchema,
 } from "@tila/schemas";
-import { TilaApiError, type TilaClient } from "tila-sdk";
 import { z } from "zod";
+import { TilaApiError, type TilaClient } from "../client";
 
 // Internal schemas for artifact endpoints not exported from @tila/schemas
 const ArtifactListInternalSchema = z.object({
