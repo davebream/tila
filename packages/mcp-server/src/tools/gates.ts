@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
 export function registerGateTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/gates`;
+  const gates = facade.gates;
 
   server.tool(
     "tila_gate_create",
@@ -38,7 +38,7 @@ export function registerGateTools(
     },
     async ({ resource, await_type, fence, timeout_at, data }) => {
       try {
-        const result = await client.post(base, {
+        const result = await gates.create({
           resource,
           await_type,
           fence,
@@ -66,9 +66,7 @@ export function registerGateTools(
     },
     async ({ gate_id, resolution }) => {
       try {
-        const result = await client.post(`${base}/${gate_id}/resolve`, {
-          resolution,
-        });
+        const result = await gates.resolve(gate_id, { resolution });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -86,7 +84,7 @@ export function registerGateTools(
     },
     async ({ gate_id }) => {
       try {
-        const result = await client.delete(`${base}/${gate_id}`);
+        const result = await gates.remove(gate_id);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

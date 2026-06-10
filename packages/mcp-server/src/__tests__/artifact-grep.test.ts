@@ -1,65 +1,26 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
-import { describe, expect, it, vi } from "vitest";
-
-type MockServer = {
-  tool: ReturnType<typeof vi.fn>;
-};
-
-type MockClient = {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
-  patch: ReturnType<typeof vi.fn>;
-  postFormData: ReturnType<typeof vi.fn>;
-  requestRaw: ReturnType<typeof vi.fn>;
-};
-
-function createMockServer(): MockServer {
-  return { tool: vi.fn() };
-}
-
-function createMockClient(): MockClient {
-  return {
-    get: vi.fn(),
-    post: vi.fn(),
-    patch: vi.fn(),
-    postFormData: vi.fn(),
-    requestRaw: vi.fn(),
-  };
-}
-
-function asServer(s: MockServer): McpServer {
-  return s as unknown as McpServer;
-}
-
-function asClient(c: MockClient): TilaClient {
-  return c as unknown as TilaClient;
-}
-
+import { describe, expect, it } from "vitest";
 import { registerArtifactTools } from "../tools/artifacts";
+import {
+  type MockServer,
+  asFacade,
+  asServer,
+  createMockFacade,
+  createMockServer,
+  findToolHandler,
+} from "./helpers/mock-facade";
 
 const PROJECT_ID = "test-project";
 
 describe("tila_artifact_grep MCP tool", () => {
   function setupTools() {
     const server = createMockServer();
-    const client = createMockClient();
-    registerArtifactTools(asServer(server), asClient(client), PROJECT_ID);
-    return { server, client };
+    const facade = createMockFacade();
+    registerArtifactTools(asServer(server), asFacade(facade), PROJECT_ID);
+    return { server, facade };
   }
 
-  function findHandler(
-    server: MockServer,
-    name: string,
-  ): (
-    args: unknown,
-  ) => Promise<{ content: Array<{ type: string; text: string }> }> {
-    const call = server.tool.mock.calls.find((c: unknown[]) => c[0] === name);
-    if (!call) throw new Error(`Tool ${name} not found`);
-    return call[3] as (
-      args: unknown,
-    ) => Promise<{ content: Array<{ type: string; text: string }> }>;
-  }
+  const findHandler = (server: MockServer, name: string) =>
+    findToolHandler(server, name);
 
   it("is registered as tila_artifact_grep", () => {
     const { server } = setupTools();
@@ -75,35 +36,31 @@ describe("tila_artifact_grep MCP tool", () => {
     if (!call) throw new Error("tila_artifact_grep not registered");
     const description = call[1] as string;
     expect(description).toContain("col");
-    // Verify description steers toward exact/substring/regex use case
     expect(description.toLowerCase()).toMatch(/exact|substring|regex/);
   });
 
-  it("forwards grep request to GET .../grep endpoint", async () => {
-    const { server, client } = setupTools();
-    const mockResponse = {
+  it("forwards grep request to artifacts.grep", async () => {
+    const { server, facade } = setupTools();
+    facade.artifacts.grep.mockResolvedValue({
       ok: true,
       results: [],
       scanned: 0,
       skipped: 0,
       truncated: false,
-    };
-    client.get.mockResolvedValue(mockResponse);
+    });
 
     const handler = findHandler(server, "tila_artifact_grep");
     await handler({ pattern: "hello", limit: 20 });
 
-    expect(client.get).toHaveBeenCalledWith(
-      `/projects/${PROJECT_ID}/artifacts/grep`,
-      expect.objectContaining({
-        query: expect.objectContaining({ pattern: "hello" }),
-      }),
+    expect(facade.artifacts.grep).toHaveBeenCalledWith(
+      "hello",
+      expect.objectContaining({ limit: 20 }),
     );
   });
 
-  it("passes kind, resource, regex, and limit to query", async () => {
-    const { server, client } = setupTools();
-    client.get.mockResolvedValue({
+  it("passes kind, resource, regex, and limit to artifacts.grep", async () => {
+    const { server, facade } = setupTools();
+    facade.artifacts.grep.mockResolvedValue({
       ok: true,
       results: [],
       scanned: 0,
@@ -120,21 +77,16 @@ describe("tila_artifact_grep MCP tool", () => {
       limit: 10,
     });
 
-    expect(client.get).toHaveBeenCalledWith(
-      `/projects/${PROJECT_ID}/artifacts/grep`,
-      expect.objectContaining({
-        query: expect.objectContaining({
-          pattern: "x",
-          kind: "plan",
-          resource: "T-1",
-          limit: "10",
-        }),
-      }),
-    );
+    expect(facade.artifacts.grep).toHaveBeenCalledWith("x", {
+      kind: "plan",
+      resource: "T-1",
+      regex: true,
+      limit: 10,
+    });
   });
 
   it("returns JSON-stringified response as text content", async () => {
-    const { server, client } = setupTools();
+    const { server, facade } = setupTools();
     const mockResponse = {
       ok: true,
       results: [
@@ -149,7 +101,7 @@ describe("tila_artifact_grep MCP tool", () => {
       skipped: 0,
       truncated: false,
     };
-    client.get.mockResolvedValue(mockResponse);
+    facade.artifacts.grep.mockResolvedValue(mockResponse);
 
     const handler = findHandler(server, "tila_artifact_grep");
     const result = await handler({ pattern: "match" });
@@ -161,8 +113,10 @@ describe("tila_artifact_grep MCP tool", () => {
   });
 
   it("error message contains no platform-internal tokens (R2, DO, SQLite, isolate, Worker)", async () => {
-    const { server, client } = setupTools();
-    client.get.mockRejectedValue(new Error("artifact lookup failed"));
+    const { server, facade } = setupTools();
+    facade.artifacts.grep.mockRejectedValue(
+      new Error("artifact lookup failed"),
+    );
 
     const handler = findHandler(server, "tila_artifact_grep");
     let errorMessage = "";
@@ -172,7 +126,6 @@ describe("tila_artifact_grep MCP tool", () => {
       errorMessage = err instanceof Error ? err.message : String(err);
     }
 
-    // Error message must not expose platform internals
     expect(errorMessage).not.toMatch(/\bR2\b/);
     expect(errorMessage).not.toMatch(/\bDurable Object\b/i);
     expect(errorMessage).not.toMatch(/\bSQLite\b/i);

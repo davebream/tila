@@ -1,53 +1,25 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-type MockServer = {
-  tool: ReturnType<typeof vi.fn>;
-};
-
-type MockClient = {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
-  patch: ReturnType<typeof vi.fn>;
-  postFormData: ReturnType<typeof vi.fn>;
-  requestRaw: ReturnType<typeof vi.fn>;
-};
-
-function createMockServer(): MockServer {
-  return { tool: vi.fn() };
-}
-
-function createMockClient(): MockClient {
-  return {
-    get: vi.fn(),
-    post: vi.fn(),
-    patch: vi.fn(),
-    postFormData: vi.fn(),
-    requestRaw: vi.fn(),
-  };
-}
-
-function asServer(s: MockServer): McpServer {
-  return s as unknown as McpServer;
-}
-
-function asClient(c: MockClient): TilaClient {
-  return c as unknown as TilaClient;
-}
-
 import { registerArtifactTools } from "../tools/artifacts";
+import {
+  type MockFacade,
+  type MockServer,
+  asFacade,
+  asServer,
+  createMockFacade,
+  createMockServer,
+  findToolHandler,
+} from "./helpers/mock-facade";
 
 const PROJECT_ID = "test-project";
 
 describe("registerArtifactTools", () => {
   let server: MockServer;
-  let client: MockClient;
+  let facade: MockFacade;
 
   beforeEach(() => {
     server = createMockServer();
-    client = createMockClient();
-    registerArtifactTools(asServer(server), asClient(client), PROJECT_ID);
+    facade = createMockFacade();
+    registerArtifactTools(asServer(server), asFacade(facade), PROJECT_ID);
   });
 
   afterEach(() => {
@@ -71,26 +43,15 @@ describe("registerArtifactTools", () => {
     ]);
   });
 
-  // Helper to find a tool handler by name
-  function findHandler(
-    name: string,
-  ): (
-    args: unknown,
-  ) => Promise<{ content: Array<{ type: string; text: string }> }> {
-    const call = server.tool.mock.calls.find((c: unknown[]) => c[0] === name);
-    if (!call) throw new Error(`Tool ${name} not found`);
-    return call[3] as (
-      args: unknown,
-    ) => Promise<{ content: Array<{ type: string; text: string }> }>;
-  }
+  const findHandler = (name: string) => findToolHandler(server, name);
 
   describe("tila_artifact_put", () => {
-    it("calls client.postFormData with FormData containing file and metadata", async () => {
-      client.postFormData.mockResolvedValue({
+    it("calls artifacts.upload with a Blob and upload opts", async () => {
+      facade.artifacts.upload.mockResolvedValue({
         ok: true,
         key: "sources/abc.txt",
         bytes: 5,
-        dedup: false,
+        deduplicated: false,
       });
 
       const handler = findHandler("tila_artifact_put");
@@ -103,36 +64,27 @@ describe("registerArtifactTools", () => {
         fence: 42,
       });
 
-      expect(client.postFormData).toHaveBeenCalledTimes(1);
-      const [path, formData] = client.postFormData.mock.calls[0];
-      expect(path).toBe(`/projects/${PROJECT_ID}/artifacts`);
-      expect(formData).toBeInstanceOf(FormData);
-      expect(formData.get("kind")).toBe("log");
-      expect(formData.get("mime_type")).toBe("text/plain");
-      expect(formData.get("resource")).toBe("T-1");
-      expect(formData.get("fence")).toBe("42");
-      expect(result.content[0].text).toContain('"ok":true');
-    });
-
-    it("omits optional resource and fence from FormData when not provided", async () => {
-      client.postFormData.mockResolvedValue({ ok: true });
-
-      const handler = findHandler("tila_artifact_put");
-      await handler({
-        content: "aGVsbG8=",
+      expect(facade.artifacts.upload).toHaveBeenCalledTimes(1);
+      const [blob, opts] = facade.artifacts.upload.mock.calls[0];
+      expect(blob).toBeInstanceOf(Blob);
+      expect(opts).toEqual({
         kind: "log",
-        mime_type: "application/octet-stream",
+        mimeType: "text/plain",
+        resource: "T-1",
+        fence: 42,
+        tags: undefined,
       });
-
-      const formData = client.postFormData.mock.calls[0][1] as FormData;
-      expect(formData.get("resource")).toBeNull();
-      expect(formData.get("fence")).toBeNull();
+      expect(result.content[0].text).toContain('"ok":true');
     });
   });
 
   describe("tila_artifact_search", () => {
-    it("calls client.get with search query params", async () => {
-      client.get.mockResolvedValue({ ok: true, results: [], total: 0 });
+    it("calls artifacts.search with query opts", async () => {
+      facade.artifacts.search.mockResolvedValue({
+        ok: true,
+        results: [],
+        total: 0,
+      });
 
       const handler = findHandler("tila_artifact_search");
       await handler({
@@ -142,42 +94,30 @@ describe("registerArtifactTools", () => {
         limit: 10,
       });
 
-      expect(client.get).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/search`,
-        {
-          query: {
-            q: "deployment",
-            kind: "log",
-            resource: "T-1",
-            limit: "10",
-          },
-        },
-      );
+      expect(facade.artifacts.search).toHaveBeenCalledWith("deployment", {
+        kind: "log",
+        resource: "T-1",
+        limit: "10",
+      });
     });
 
     it("passes undefined for omitted optional filters", async () => {
-      client.get.mockResolvedValue({ ok: true, results: [] });
+      facade.artifacts.search.mockResolvedValue({ ok: true, results: [] });
 
       const handler = findHandler("tila_artifact_search");
       await handler({ q: "test", limit: 20 });
 
-      expect(client.get).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/search`,
-        {
-          query: {
-            q: "test",
-            kind: undefined,
-            resource: undefined,
-            limit: "20",
-          },
-        },
-      );
+      expect(facade.artifacts.search).toHaveBeenCalledWith("test", {
+        kind: undefined,
+        resource: undefined,
+        limit: "20",
+      });
     });
   });
 
   describe("tila_artifact_write_text", () => {
-    it("calls client.post with text content body", async () => {
-      client.post.mockResolvedValue({
+    it("calls artifacts.writeText with text content opts", async () => {
+      facade.artifacts.writeText.mockResolvedValue({
         ok: true,
         key: "sources/abc.md",
         bytes: 12,
@@ -192,44 +132,35 @@ describe("registerArtifactTools", () => {
         fence: 5,
       });
 
-      expect(client.post).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/text`,
-        {
-          content: "# My Plan",
-          kind: "plan",
-          mime_type: "text/markdown",
-          resource: "T-1",
-          fence: 5,
-        },
-      );
+      expect(facade.artifacts.writeText).toHaveBeenCalledWith("# My Plan", {
+        kind: "plan",
+        mimeType: "text/markdown",
+        resource: "T-1",
+        fence: 5,
+      });
       expect(result.content[0].text).toContain('"ok":true');
     });
   });
 
   describe("tila_artifact_read_text", () => {
-    it("calls client.requestRaw and returns text content", async () => {
-      const mockResponse = {
-        headers: new Headers({ "content-type": "text/markdown" }),
-        text: vi.fn().mockResolvedValue("# Hello"),
-      };
-      client.requestRaw.mockResolvedValue(mockResponse);
+    it("calls artifacts.readText and returns text content", async () => {
+      facade.artifacts.readText.mockResolvedValue({
+        content: "# Hello",
+        mimeType: "text/markdown",
+      });
 
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/abc.md" });
 
-      expect(client.requestRaw).toHaveBeenCalledWith(
-        "GET",
-        `/projects/${PROJECT_ID}/artifacts/sources%2Fabc.md`,
-      );
+      expect(facade.artifacts.readText).toHaveBeenCalledWith("sources/abc.md");
       expect(result.content[0].text).toBe("# Hello");
     });
 
     it("throws McpError for non-text content types", async () => {
-      const mockResponse = {
-        headers: new Headers({ "content-type": "image/png" }),
-        text: vi.fn(),
-      };
-      client.requestRaw.mockResolvedValue(mockResponse);
+      facade.artifacts.readText.mockResolvedValue({
+        content: "",
+        mimeType: "image/png",
+      });
 
       const handler = findHandler("tila_artifact_read_text");
       await expect(handler({ key: "sources/img.png" })).rejects.toThrow(
@@ -239,11 +170,10 @@ describe("registerArtifactTools", () => {
 
     it("truncates text over max_chars and appends marker with char/byte counts", async () => {
       const fullText = "a".repeat(20000);
-      const mockResponse = {
-        headers: new Headers({ "content-type": "text/plain" }),
-        text: vi.fn().mockResolvedValue(fullText),
-      };
-      client.requestRaw.mockResolvedValue(mockResponse);
+      facade.artifacts.readText.mockResolvedValue({
+        content: fullText,
+        mimeType: "text/plain",
+      });
 
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/big.txt", max_chars: 100 });
@@ -260,12 +190,10 @@ describe("registerArtifactTools", () => {
     });
 
     it("returns full text unchanged when under max_chars", async () => {
-      const shortText = "short content";
-      const mockResponse = {
-        headers: new Headers({ "content-type": "text/plain" }),
-        text: vi.fn().mockResolvedValue(shortText),
-      };
-      client.requestRaw.mockResolvedValue(mockResponse);
+      facade.artifacts.readText.mockResolvedValue({
+        content: "short content",
+        mimeType: "text/plain",
+      });
 
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({
@@ -273,16 +201,14 @@ describe("registerArtifactTools", () => {
         max_chars: 10000,
       });
 
-      expect(result.content[0].text).toBe(shortText);
+      expect(result.content[0].text).toBe("short content");
     });
 
     it("uses default max_chars of 10000 when not specified", async () => {
-      const overLimit = "x".repeat(15000);
-      const mockResponse = {
-        headers: new Headers({ "content-type": "text/plain" }),
-        text: vi.fn().mockResolvedValue(overLimit),
-      };
-      client.requestRaw.mockResolvedValue(mockResponse);
+      facade.artifacts.readText.mockResolvedValue({
+        content: "x".repeat(15000),
+        mimeType: "text/plain",
+      });
 
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/big.txt" });
@@ -295,21 +221,18 @@ describe("registerArtifactTools", () => {
     });
 
     it("reports bytes (not chars) in the marker for multibyte content", async () => {
-      // 200 emoji: 200 chars, but 800 bytes in UTF-8 (4 bytes each).
       const fullText = "😀".repeat(200);
-      const byteTotal = Buffer.byteLength(fullText, "utf8"); // 800
+      const byteTotal = Buffer.byteLength(fullText, "utf8");
       expect(byteTotal).toBe(800);
-      const mockResponse = {
-        headers: new Headers({ "content-type": "text/plain" }),
-        text: vi.fn().mockResolvedValue(fullText),
-      };
-      client.requestRaw.mockResolvedValue(mockResponse);
+      facade.artifacts.readText.mockResolvedValue({
+        content: fullText,
+        mimeType: "text/plain",
+      });
 
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/emoji.txt", max_chars: 50 });
 
       const text = result.content[0].text;
-      // Marker proves the byte count (800) diverges from the char count (50).
       expect(text).toContain(
         "...[truncated: returned 50 chars of 800 bytes total]",
       );
@@ -317,37 +240,44 @@ describe("registerArtifactTools", () => {
   });
 
   describe("tila_search", () => {
-    it("calls client.get on the unified search endpoint", async () => {
-      client.get.mockResolvedValue({ ok: true, results: [] });
+    it("calls search.search with limit", async () => {
+      facade.search.search.mockResolvedValue({ ok: true, results: [] });
 
       const handler = findHandler("tila_search");
       await handler({ q: "deploy", limit: 50 });
 
-      expect(client.get).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/search`,
-        { query: { q: "deploy", limit: "50" } },
-      );
+      expect(facade.search.search).toHaveBeenCalledWith("deploy", {
+        limit: 50,
+      });
     });
   });
 
   describe("tila_artifact_get_latest", () => {
-    it("calls client.get with kind and resource query params", async () => {
-      client.get.mockResolvedValue({ ok: true, artifact: { key: "abc.md" } });
+    it("calls artifacts.getLatest and wraps the pointer in an envelope", async () => {
+      facade.artifacts.getLatest.mockResolvedValue({ r2_key: "abc.md" });
 
       const handler = findHandler("tila_artifact_get_latest");
       const result = await handler({ kind: "plan", resource: "T-1" });
 
-      expect(client.get).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/latest`,
-        { query: { kind: "plan", resource: "T-1" } },
-      );
-      expect(result.content[0].text).toContain('"ok":true');
+      expect(facade.artifacts.getLatest).toHaveBeenCalledWith("plan", "T-1");
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed).toEqual({ ok: true, pointer: { r2_key: "abc.md" } });
+    });
+
+    it("returns ok:true with a null pointer when none exists", async () => {
+      facade.artifacts.getLatest.mockResolvedValue(null);
+
+      const handler = findHandler("tila_artifact_get_latest");
+      const result = await handler({ kind: "plan", resource: "T-9" });
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed).toEqual({ ok: true, pointer: null });
     });
   });
 
   describe("tila_artifact_relationships_add", () => {
-    it("calls client.post with to_key", async () => {
-      client.post.mockResolvedValue({ ok: true });
+    it("calls artifacts.addRelationship with to_key target", async () => {
+      facade.artifacts.addRelationship.mockResolvedValue({ ok: true });
 
       const handler = findHandler("tila_artifact_relationships_add");
       await handler({
@@ -356,14 +286,15 @@ describe("registerArtifactTools", () => {
         type: "derived-from",
       });
 
-      expect(client.post).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/sources%2Fa.md/relationships`,
-        { type: "derived-from", to_key: "sources/b.md" },
+      expect(facade.artifacts.addRelationship).toHaveBeenCalledWith(
+        "sources/a.md",
+        "sources/b.md",
+        "derived-from",
       );
     });
 
-    it("calls client.post with to_uri when to_key is absent", async () => {
-      client.post.mockResolvedValue({ ok: true });
+    it("calls artifacts.addRelationship with to_uri when to_key is absent", async () => {
+      facade.artifacts.addRelationship.mockResolvedValue({ ok: true });
 
       const handler = findHandler("tila_artifact_relationships_add");
       await handler({
@@ -372,9 +303,10 @@ describe("registerArtifactTools", () => {
         type: "entry-of",
       });
 
-      expect(client.post).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/sources%2Fa.md/relationships`,
-        { type: "entry-of", to_uri: "https://example.com/doc" },
+      expect(facade.artifacts.addRelationship).toHaveBeenCalledWith(
+        "sources/a.md",
+        "https://example.com/doc",
+        "entry-of",
       );
     });
 
@@ -387,21 +319,24 @@ describe("registerArtifactTools", () => {
   });
 
   describe("tila_artifact_relationships_list", () => {
-    it("calls client.get on the relationships endpoint", async () => {
-      client.get.mockResolvedValue({ ok: true, relationships: [] });
+    it("calls artifacts.listRelationships with the key", async () => {
+      facade.artifacts.listRelationships.mockResolvedValue({
+        ok: true,
+        relationships: [],
+      });
 
       const handler = findHandler("tila_artifact_relationships_list");
       await handler({ key: "sources/a.md" });
 
-      expect(client.get).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/sources%2Fa.md/relationships`,
+      expect(facade.artifacts.listRelationships).toHaveBeenCalledWith(
+        "sources/a.md",
       );
     });
   });
 
   describe("error handling", () => {
-    it("wraps client errors via toMcpError", async () => {
-      client.post.mockRejectedValue(new Error("server down"));
+    it("wraps facade errors via toMcpError", async () => {
+      facade.artifacts.writeText.mockRejectedValue(new Error("server down"));
 
       const handler = findHandler("tila_artifact_write_text");
       await expect(
@@ -411,29 +346,34 @@ describe("registerArtifactTools", () => {
   });
 
   describe("tila_artifact_search tag_filter", () => {
-    it("forwards tag_filter as comma-joined query param when provided", async () => {
-      client.get.mockResolvedValue({ ok: true, results: [], total: 0 });
+    it("forwards tag_filter as tagFilter when provided", async () => {
+      facade.artifacts.search.mockResolvedValue({
+        ok: true,
+        results: [],
+        total: 0,
+      });
 
       const handler = findHandler("tila_artifact_search");
       await handler({ q: "test", limit: 20, tag_filter: ["repo:a", "team:x"] });
 
-      expect(client.get).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/artifacts/search`,
-        expect.objectContaining({
-          query: expect.objectContaining({ tag_filter: "repo:a,team:x" }),
-        }),
+      expect(facade.artifacts.search).toHaveBeenCalledWith(
+        "test",
+        expect.objectContaining({ tagFilter: ["repo:a", "team:x"] }),
       );
     });
 
-    it("omits tag_filter query param when not provided", async () => {
-      client.get.mockResolvedValue({ ok: true, results: [], total: 0 });
+    it("omits tagFilter when not provided", async () => {
+      facade.artifacts.search.mockResolvedValue({
+        ok: true,
+        results: [],
+        total: 0,
+      });
 
       const handler = findHandler("tila_artifact_search");
       await handler({ q: "test", limit: 20 });
 
-      const callArgs = client.get.mock.calls[0];
-      const query = callArgs[1]?.query as Record<string, unknown>;
-      expect(query).not.toHaveProperty("tag_filter");
+      const callArg = facade.artifacts.search.mock.calls[0][1];
+      expect(callArg).not.toHaveProperty("tagFilter");
     });
 
     it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {
@@ -451,8 +391,8 @@ describe("registerArtifactTools", () => {
   });
 
   describe("tila_search tag_filter", () => {
-    it("forwards tag_filter as comma-joined query param when provided", async () => {
-      client.get.mockResolvedValue({ ok: true, results: [] });
+    it("forwards tag_filter as tagFilter when provided", async () => {
+      facade.search.search.mockResolvedValue({ ok: true, results: [] });
 
       const handler = findHandler("tila_search");
       await handler({
@@ -461,23 +401,20 @@ describe("registerArtifactTools", () => {
         tag_filter: ["repo:a", "team:x"],
       });
 
-      expect(client.get).toHaveBeenCalledWith(
-        `/projects/${PROJECT_ID}/search`,
-        expect.objectContaining({
-          query: expect.objectContaining({ tag_filter: "repo:a,team:x" }),
-        }),
+      expect(facade.search.search).toHaveBeenCalledWith(
+        "deploy",
+        expect.objectContaining({ tagFilter: ["repo:a", "team:x"] }),
       );
     });
 
-    it("omits tag_filter query param when not provided", async () => {
-      client.get.mockResolvedValue({ ok: true, results: [] });
+    it("omits tagFilter when not provided", async () => {
+      facade.search.search.mockResolvedValue({ ok: true, results: [] });
 
       const handler = findHandler("tila_search");
       await handler({ q: "deploy", limit: 50 });
 
-      const callArgs = client.get.mock.calls[0];
-      const query = callArgs[1]?.query as Record<string, unknown>;
-      expect(query).not.toHaveProperty("tag_filter");
+      const callArg = facade.search.search.mock.calls[0][1];
+      expect(callArg).not.toHaveProperty("tagFilter");
     });
 
     it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {

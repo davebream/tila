@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
 export function registerSignalTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/signals`;
+  const signals = facade.signals;
 
   server.tool(
     "tila_signal_send",
@@ -35,11 +35,13 @@ export function registerSignalTools(
     },
     async ({ target, kind, resource, payload, ttl_ms }) => {
       try {
-        const body: Record<string, unknown> = { target, kind };
-        if (resource) body.resource = resource;
-        if (payload) body.payload = payload;
-        if (ttl_ms !== undefined) body.ttl_ms = ttl_ms;
-        const result = await client.post(`${base}/send`, body);
+        const result = await signals.send({
+          target,
+          kind,
+          resource,
+          payload,
+          ttl_ms,
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -55,7 +57,7 @@ export function registerSignalTools(
     {},
     async () => {
       try {
-        const result = await client.get(base);
+        const result = await signals.inbox();
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -73,7 +75,7 @@ export function registerSignalTools(
     },
     async ({ id }) => {
       try {
-        const result = await client.post(`${base}/${id}/ack`, {});
+        const result = await signals.ack(id);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

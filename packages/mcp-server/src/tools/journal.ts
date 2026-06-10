@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
 export function registerJournalTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/journal`;
+  const journal = facade.journal;
 
   server.tool(
     "tila_journal_list",
@@ -36,11 +36,12 @@ export function registerJournalTools(
     },
     async ({ resource, kind, after_seq, limit }) => {
       try {
-        const query: Record<string, string> = { limit: String(limit) };
-        if (resource) query.resource = resource;
-        if (kind) query.kind = kind;
-        if (after_seq !== undefined) query.after_seq = String(after_seq);
-        const result = await client.get(base, { query });
+        const result = await journal.query({
+          resource,
+          kind,
+          after_seq: after_seq !== undefined ? String(after_seq) : undefined,
+          limit: String(limit),
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

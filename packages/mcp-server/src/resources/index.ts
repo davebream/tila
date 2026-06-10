@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { TilaSchemaTomlSchema } from "@tila/schemas";
 import { parse } from "smol-toml";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { toMcpError } from "../errors";
 
 /**
@@ -11,14 +11,13 @@ import { toMcpError } from "../errors";
  */
 async function registerRecordResources(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
 ): Promise<void> {
   try {
-    const schemaResult = await client.get<{
+    const schemaResult = (await facade.schema.get()) as {
       ok: boolean;
-      schema: { definition: string } | null;
-    }>(`/projects/${projectId}/schema`);
+      schema: { definition?: string } | null;
+    };
 
     const toml = schemaResult?.schema?.definition;
     if (!toml) return;
@@ -45,9 +44,7 @@ async function registerRecordResources(
         async (uri, variables) => {
           const rawKey = variables.key as string;
           try {
-            const result = await client.get(
-              `/projects/${projectId}/records/${type}/${rawKey}`,
-            );
+            const result = await facade.records.get(type, rawKey);
             return {
               contents: [
                 {
@@ -71,11 +68,9 @@ async function registerRecordResources(
 
 export async function registerAllResources(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): Promise<void> {
-  const projectBase = `/projects/${projectId}`;
-
   server.resource(
     "project-summary",
     "tila://project/summary",
@@ -86,7 +81,7 @@ export async function registerAllResources(
     },
     async (uri) => {
       try {
-        const result = await client.get(`${projectBase}/summary`);
+        const result = await facade.summary.get();
         return {
           contents: [
             {
@@ -112,7 +107,7 @@ export async function registerAllResources(
     },
     async (uri) => {
       try {
-        const result = await client.get(`${projectBase}/entities/ready`);
+        const result = await facade.tasks.ready();
         return {
           contents: [
             {
@@ -138,7 +133,7 @@ export async function registerAllResources(
     },
     async (uri) => {
       try {
-        const result = await client.get(`${projectBase}/presence/all`);
+        const result = await facade.presence.listAll();
         return {
           contents: [
             {
@@ -163,7 +158,7 @@ export async function registerAllResources(
     },
     async (uri) => {
       try {
-        const result = await client.get(`${projectBase}/schema`);
+        const result = await facade.schema.get();
         return {
           contents: [
             {
@@ -180,5 +175,5 @@ export async function registerAllResources(
   );
 
   // Register opt-in record resources (async -- fetches schema at startup)
-  await registerRecordResources(server, client, projectId);
+  await registerRecordResources(server, facade);
 }

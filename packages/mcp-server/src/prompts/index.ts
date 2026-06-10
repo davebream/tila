@@ -1,38 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 
 export function registerAllPrompts(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const projectBase = `/projects/${projectId}`;
-
   server.prompt(
     "tila_status_report",
     "Generate a Markdown status report of the tila project: summary stats and ready-work list.",
     async () => {
       try {
         const [summary, ready] = await Promise.all([
-          client.get<{
-            ok: boolean;
-            project: {
-              entity_count: number;
-              active_claims: number;
-              ready_count: number;
-              status_counts: Record<string, number>;
-              online_machines: string[];
-            };
-          }>(`${projectBase}/summary`),
-          client.get<{
-            ok: boolean;
-            entities: Array<{
-              id: string;
-              type: string;
-              data: Record<string, unknown>;
-            }>;
-          }>(`${projectBase}/entities/ready`),
+          facade.summary.get(),
+          facade.tasks.ready(),
         ]);
 
         const p = summary.project;
@@ -43,7 +25,7 @@ export function registerAllPrompts(
           ready.entities.length > 0
             ? ready.entities
                 .map(
-                  (e) =>
+                  (e: (typeof ready.entities)[number]) =>
                     `  - **${e.id}** (${e.type})${e.data.title ? `: ${e.data.title}` : ""}`,
                 )
                 .join("\n")
@@ -103,16 +85,7 @@ ${readyLines}`;
     },
     async ({ type }) => {
       try {
-        const ready = await client.get<{
-          ok: boolean;
-          entities: Array<{
-            id: string;
-            type: string;
-            data: Record<string, unknown>;
-          }>;
-        }>(`${projectBase}/entities/ready`, {
-          query: { type: type ?? undefined },
-        });
+        const ready = await facade.tasks.ready({ type });
 
         if (ready.entities.length === 0) {
           return {

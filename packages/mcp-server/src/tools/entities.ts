@@ -1,12 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
+type TaskMethods = TilaFacade["tasks"];
+
 function registerCrudTools(
   server: McpServer,
-  client: TilaClient,
-  basePath: string,
+  tasks: TaskMethods,
   namePrefix: string,
   labelSingular: string,
   labelPlural: string,
@@ -34,9 +35,7 @@ function registerCrudTools(
     },
     async ({ id, type, data, tags }) => {
       try {
-        const body: Record<string, unknown> = { id, type, data };
-        if (tags !== undefined) body.tags = tags;
-        const result = await client.post(basePath, body);
+        const result = await tasks.create(id, type, data, tags);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -61,13 +60,12 @@ function registerCrudTools(
     },
     async ({ type, status, tag_filter }) => {
       try {
-        const query: Record<string, string | undefined> = {
-          compact: "true",
+        const result = await tasks.list({
           type,
           status,
-        };
-        if (tag_filter?.length) query.tag_filter = tag_filter.join(",");
-        const result = await client.get(basePath, { query });
+          compact: true,
+          ...(tag_filter?.length ? { tagFilter: tag_filter } : {}),
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -89,7 +87,7 @@ function registerCrudTools(
     },
     async ({ id }) => {
       try {
-        const result = await client.get(`${basePath}/${id}`);
+        const result = await tasks.get(id);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -120,7 +118,7 @@ function registerCrudTools(
     },
     async ({ id, data, fence }) => {
       try {
-        const result = await client.patch(`${basePath}/${id}`, { data, fence });
+        const result = await tasks.update(id, data, fence);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -145,9 +143,7 @@ function registerCrudTools(
     },
     async ({ type, limit = 50 }) => {
       try {
-        const result = await client.get(`${basePath}/ready`, {
-          query: { type },
-        });
+        const result = await tasks.ready({ type });
         // Defensive: if entities array is missing, return result unchanged
         const arr = (result as Record<string, unknown>).entities;
         if (!Array.isArray(arr) || arr.length <= limit) {
@@ -188,9 +184,7 @@ function registerCrudTools(
     },
     async ({ id, fence }) => {
       try {
-        const result = await client.post(`${basePath}/${id}/archive`, {
-          fence,
-        });
+        const result = await tasks.archive(id, fence);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -212,13 +206,7 @@ function registerCrudTools(
     },
     async ({ from_id, to_id, type }) => {
       try {
-        const result = await client.post(
-          `${basePath}/${from_id}/relationships`,
-          {
-            to_id,
-            type,
-          },
-        );
+        const result = await tasks.addRelationship(from_id, to_id, type);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -247,7 +235,7 @@ function registerCrudTools(
     },
     async ({ id, limit = 50 }) => {
       try {
-        const result = await client.get(`${basePath}/${id}/relationships`);
+        const result = await tasks.listRelationships({ fromId: id });
         // Defensive: if relationships array is missing, return result unchanged
         const arr = (result as Record<string, unknown>).relationships;
         if (!Array.isArray(arr) || arr.length <= limit) {
@@ -273,10 +261,8 @@ function registerCrudTools(
 
 export function registerEntityTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const taskBase = `/projects/${projectId}/tasks`;
-
-  registerCrudTools(server, client, taskBase, "tila_task", "task", "tasks");
+  registerCrudTools(server, facade.tasks, "tila_task", "task", "tasks");
 }

@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
 export function registerTemplateTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/templates`;
+  const templates = facade.templates;
 
   server.tool(
     "tila_template_list",
@@ -16,7 +16,7 @@ export function registerTemplateTools(
     {},
     async () => {
       try {
-        const result = await client.get(base);
+        const result = await templates.list();
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -42,12 +42,11 @@ export function registerTemplateTools(
     },
     async ({ template, id, variables }) => {
       try {
-        const body: Record<string, unknown> = {
+        const result = await templates.instantiate({
           template_name: template,
           root_id: id ?? `T-${Date.now().toString(36)}`,
           vars: variables,
-        };
-        const result = await client.post(`${base}/instantiate`, body);
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

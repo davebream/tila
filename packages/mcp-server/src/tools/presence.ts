@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
 export function registerPresenceTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/presence`;
+  const presence = facade.presence;
 
   server.tool(
     "tila_presence_heartbeat",
@@ -21,10 +21,7 @@ export function registerPresenceTools(
     },
     async ({ info }) => {
       try {
-        const result = await client.post(`${base}/heartbeat`, {
-          machine: "mcp-agent",
-          info,
-        });
+        const result = await presence.heartbeat("mcp-agent", info);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

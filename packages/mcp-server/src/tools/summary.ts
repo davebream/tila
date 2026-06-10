@@ -1,13 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { toMcpError } from "../errors";
 
 export function registerSummaryTool(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/summary`;
+  const summary = facade.summary;
 
   server.tool(
     "tila_summary",
@@ -15,7 +15,7 @@ export function registerSummaryTool(
     {},
     async () => {
       try {
-        const result = await client.get(base);
+        const result = await summary.get();
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

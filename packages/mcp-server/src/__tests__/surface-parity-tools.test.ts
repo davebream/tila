@@ -1,40 +1,13 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import {
+  asFacade,
+  asServer,
+  createMockFacade,
+  createMockServer,
+} from "./helpers/mock-facade";
 
-type MockServer = {
-  tool: ReturnType<typeof vi.fn>;
-};
-
-type MockClient = {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
-  patch: ReturnType<typeof vi.fn>;
-  postFormData: ReturnType<typeof vi.fn>;
-};
-
-function createMockServer(): MockServer {
-  return { tool: vi.fn() };
-}
-
-function createMockClient(): MockClient {
-  return {
-    get: vi.fn(),
-    post: vi.fn(),
-    delete: vi.fn(),
-    patch: vi.fn(),
-    postFormData: vi.fn(),
-  };
-}
-
-function asServer(s: MockServer): McpServer {
-  return s as unknown as McpServer;
-}
-
-function asClient(c: MockClient): TilaClient {
-  return c as unknown as TilaClient;
-}
+const createMockClient = createMockFacade;
+const asClient = asFacade;
 
 import { registerArtifactTools } from "../tools/artifacts";
 import { registerClaimTools } from "../tools/claims";

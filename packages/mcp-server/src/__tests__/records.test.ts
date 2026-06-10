@@ -1,76 +1,22 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// Mock the SDK module before importing the function under test
-vi.mock("tila-sdk", () => ({
-  createRecordMethods: vi.fn(),
-}));
-
-import { createRecordMethods } from "tila-sdk";
 import { registerAllResources } from "../resources/index";
 import { registerRecordTools } from "../tools/records";
-
-const mockCreateRecordMethods = vi.mocked(createRecordMethods);
-
-type MockServer = {
-  tool: ReturnType<typeof vi.fn>;
-  resource: ReturnType<typeof vi.fn>;
-};
-
-type MockClient = {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
-  put: ReturnType<typeof vi.fn>;
-  patch: ReturnType<typeof vi.fn>;
-  postFormData: ReturnType<typeof vi.fn>;
-};
-
-function createMockServer(): MockServer {
-  return {
-    tool: vi.fn(),
-    resource: vi.fn(),
-  };
-}
-
-function createMockClient(): MockClient {
-  return {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    patch: vi.fn(),
-    postFormData: vi.fn(),
-  };
-}
-
-function asServer(s: MockServer): McpServer {
-  return s as unknown as McpServer;
-}
-
-function asClient(c: MockClient): TilaClient {
-  return c as unknown as TilaClient;
-}
+import {
+  type MockFacade,
+  type MockServer,
+  asFacade,
+  asServer,
+  createMockFacade,
+  createMockServer,
+} from "./helpers/mock-facade";
 
 describe("registerRecordTools", () => {
   let server: MockServer;
-  let client: MockClient;
-  let mockRecords: Record<string, ReturnType<typeof vi.fn>>;
+  let facade: MockFacade;
 
   beforeEach(() => {
     server = createMockServer();
-    client = createMockClient();
-    mockRecords = {
-      get: vi.fn(),
-      set: vi.fn(),
-      patch: vi.fn(),
-      list: vi.fn(),
-      archive: vi.fn(),
-      unarchive: vi.fn(),
-      history: vi.fn(),
-    };
-    mockCreateRecordMethods.mockReturnValue(
-      mockRecords as unknown as ReturnType<typeof createRecordMethods>,
-    );
+    facade = createMockFacade();
   });
 
   afterEach(() => {
@@ -78,7 +24,7 @@ describe("registerRecordTools", () => {
   });
 
   it("registers exactly 7 tools with correct names", () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
 
     expect(server.tool).toHaveBeenCalledTimes(7);
 
@@ -95,26 +41,25 @@ describe("registerRecordTools", () => {
   });
 
   it("tila_record_get calls records.get with type and key", async () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
-    mockRecords.get.mockResolvedValue({
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.get.mockResolvedValue({
       ok: true,
       record: { type: "config", key: "main", value: {} },
       fence: 1,
     });
 
-    // Extract the handler (4th argument of the first server.tool call)
     const handler = server.tool.mock.calls[0][3] as (
       args: unknown,
     ) => Promise<{ content: Array<{ text: string }> }>;
     const result = await handler({ type: "config", key: "main" });
 
-    expect(mockRecords.get).toHaveBeenCalledWith("config", "main");
+    expect(facade.records.get).toHaveBeenCalledWith("config", "main");
     expect(result.content[0].text).toContain('"ok":true');
   });
 
   it("tila_record_set calls records.set with value and fence", async () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
-    mockRecords.set.mockResolvedValue({ ok: true, fence: 2 });
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.set.mockResolvedValue({ ok: true, fence: 2 });
 
     const handler = server.tool.mock.calls[1][3] as (
       args: unknown,
@@ -126,15 +71,15 @@ describe("registerRecordTools", () => {
       fence: 1,
     });
 
-    expect(mockRecords.set).toHaveBeenCalledWith("config", "main", {
+    expect(facade.records.set).toHaveBeenCalledWith("config", "main", {
       value: { env: "prod" },
       fence: 1,
     });
   });
 
   it("tila_record_patch calls records.patch with patch and fence", async () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
-    mockRecords.patch.mockResolvedValue({ ok: true, fence: 3 });
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.patch.mockResolvedValue({ ok: true, fence: 3 });
 
     const handler = server.tool.mock.calls[2][3] as (
       args: unknown,
@@ -146,15 +91,15 @@ describe("registerRecordTools", () => {
       fence: 2,
     });
 
-    expect(mockRecords.patch).toHaveBeenCalledWith("config", "main", {
+    expect(facade.records.patch).toHaveBeenCalledWith("config", "main", {
       patch: { env: "staging" },
       fence: 2,
     });
   });
 
   it("tila_record_list converts include_archived boolean to string", async () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
-    mockRecords.list.mockResolvedValue({
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.list.mockResolvedValue({
       ok: true,
       records: [],
       total: 0,
@@ -169,7 +114,7 @@ describe("registerRecordTools", () => {
       include_archived: true,
     });
 
-    expect(mockRecords.list).toHaveBeenCalledWith("config", {
+    expect(facade.records.list).toHaveBeenCalledWith("config", {
       tag: "stable",
       filter: undefined,
       "include-archived": "true",
@@ -177,36 +122,36 @@ describe("registerRecordTools", () => {
   });
 
   it("tila_record_archive calls records.archive with fence", async () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
-    mockRecords.archive.mockResolvedValue({ ok: true, fence: 4 });
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.archive.mockResolvedValue({ ok: true, fence: 4 });
 
     const handler = server.tool.mock.calls[4][3] as (
       args: unknown,
     ) => Promise<unknown>;
     await handler({ type: "config", key: "main", fence: 3 });
 
-    expect(mockRecords.archive).toHaveBeenCalledWith("config", "main", {
+    expect(facade.records.archive).toHaveBeenCalledWith("config", "main", {
       fence: 3,
     });
   });
 
   it("tila_record_unarchive calls records.unarchive with fence", async () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
-    mockRecords.unarchive.mockResolvedValue({ ok: true, fence: 5 });
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.unarchive.mockResolvedValue({ ok: true, fence: 5 });
 
     const handler = server.tool.mock.calls[5][3] as (
       args: unknown,
     ) => Promise<unknown>;
     await handler({ type: "config", key: "main", fence: 4 });
 
-    expect(mockRecords.unarchive).toHaveBeenCalledWith("config", "main", {
+    expect(facade.records.unarchive).toHaveBeenCalledWith("config", "main", {
       fence: 4,
     });
   });
 
   it("tila_record_history passes limit and values opts", async () => {
-    registerRecordTools(asServer(server), asClient(client), "proj-1");
-    mockRecords.history.mockResolvedValue({
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.history.mockResolvedValue({
       ok: true,
       history: [],
     });
@@ -221,7 +166,7 @@ describe("registerRecordTools", () => {
       values: true,
     });
 
-    expect(mockRecords.history).toHaveBeenCalledWith("config", "main", {
+    expect(facade.records.history).toHaveBeenCalledWith("config", "main", {
       limit: 10,
       values: true,
     });
@@ -229,36 +174,44 @@ describe("registerRecordTools", () => {
 
   describe("tila_record_list tag_filter", () => {
     it("forwards tag_filter array as tagFilter to records.list when provided", async () => {
-      registerRecordTools(asServer(server), asClient(client), "proj-1");
-      mockRecords.list.mockResolvedValue({ ok: true, records: [], total: 0 });
+      registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+      facade.records.list.mockResolvedValue({
+        ok: true,
+        records: [],
+        total: 0,
+      });
 
       const handler = server.tool.mock.calls[3][3] as (
         args: unknown,
       ) => Promise<unknown>;
       await handler({ type: "config", tag_filter: ["repo:a", "team:x"] });
 
-      expect(mockRecords.list).toHaveBeenCalledWith(
+      expect(facade.records.list).toHaveBeenCalledWith(
         "config",
         expect.objectContaining({ tagFilter: ["repo:a", "team:x"] }),
       );
     });
 
     it("omits tagFilter from records.list when tag_filter is not provided", async () => {
-      registerRecordTools(asServer(server), asClient(client), "proj-1");
-      mockRecords.list.mockResolvedValue({ ok: true, records: [], total: 0 });
+      registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+      facade.records.list.mockResolvedValue({
+        ok: true,
+        records: [],
+        total: 0,
+      });
 
       const handler = server.tool.mock.calls[3][3] as (
         args: unknown,
       ) => Promise<unknown>;
       await handler({ type: "config" });
 
-      const callArgs = mockRecords.list.mock.calls[0];
+      const callArgs = facade.records.list.mock.calls[0];
       const query = callArgs[1] as Record<string, unknown>;
       expect(query).not.toHaveProperty("tagFilter");
     });
 
     it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {
-      registerRecordTools(asServer(server), asClient(client), "proj-1");
+      registerRecordTools(asServer(server), asFacade(facade), "proj-1");
       const { z } = require("zod");
       const listCall = server.tool.mock.calls[3];
       const schema = listCall[2] as Record<string, import("zod").ZodTypeAny>;
@@ -272,11 +225,11 @@ describe("registerRecordTools", () => {
 
 describe("registerAllResources (record resources)", () => {
   let server: MockServer;
-  let client: MockClient;
+  let facade: MockFacade;
 
   beforeEach(() => {
     server = createMockServer();
-    client = createMockClient();
+    facade = createMockFacade();
   });
 
   afterEach(() => {
@@ -293,12 +246,12 @@ describe("registerAllResources (record resources)", () => {
       'env = { type = "string" }',
     ].join("\n");
 
-    client.get.mockResolvedValue({
+    facade.schema.get.mockResolvedValue({
       ok: true,
       schema: { definition: schemaDef },
     });
 
-    await registerAllResources(asServer(server), asClient(client), "proj-1");
+    await registerAllResources(asServer(server), asFacade(facade), "proj-1");
 
     // 4 static resources + 1 record resource
     const resourceCalls = server.resource.mock.calls;
@@ -321,12 +274,12 @@ describe("registerAllResources (record resources)", () => {
       'status = { type = "string" }',
     ].join("\n");
 
-    client.get.mockResolvedValue({
+    facade.schema.get.mockResolvedValue({
       ok: true,
       schema: { definition: schemaDef },
     });
 
-    await registerAllResources(asServer(server), asClient(client), "proj-1");
+    await registerAllResources(asServer(server), asFacade(facade), "proj-1");
 
     const resourceCalls = server.resource.mock.calls;
     const recordResourceCall = resourceCalls.find(
@@ -338,11 +291,11 @@ describe("registerAllResources (record resources)", () => {
   });
 
   it("silently handles schema fetch failure", async () => {
-    client.get.mockRejectedValue(new Error("Network error"));
+    facade.schema.get.mockRejectedValue(new Error("Network error"));
 
     // Should not throw -- schema fetch failure is non-fatal
     await expect(
-      registerAllResources(asServer(server), asClient(client), "proj-1"),
+      registerAllResources(asServer(server), asFacade(facade), "proj-1"),
     ).resolves.not.toThrow();
 
     // Static resources are still registered (synchronous, before the async fetch)
@@ -353,13 +306,13 @@ describe("registerAllResources (record resources)", () => {
   });
 
   it("silently handles null schema", async () => {
-    client.get.mockResolvedValue({
+    facade.schema.get.mockResolvedValue({
       ok: true,
       schema: null,
     });
 
     await expect(
-      registerAllResources(asServer(server), asClient(client), "proj-1"),
+      registerAllResources(asServer(server), asFacade(facade), "proj-1"),
     ).resolves.not.toThrow();
   });
 });
