@@ -311,21 +311,42 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20260602.1
         version: 4.20260602.1
+      '@tila/backend-embedded':
+        specifier: workspace:*
+        version: link:../backend-embedded
+      '@tila/backend-local':
+        specifier: workspace:*
+        version: link:../backend-local
       '@tila/backend-r2':
         specifier: workspace:*
         version: link:../backend-r2
+      '@tila/ops-sqlite':
+        specifier: workspace:*
+        version: link:../ops-sqlite
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.19
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@cloudflare/workers-types@4.20260602.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(bun-types@1.3.14)
       hono:
         specifier: ^4.12.23
         version: 4.12.23
       tila-cli:
         specifier: workspace:*
         version: link:../cli
+      tila-mcp-server:
+        specifier: workspace:*
+        version: link:../mcp-server
       tila-sdk:
         specifier: workspace:*
         version: link:../sdk
@@ -377,7 +398,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
+        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
 
   packages/ops-sqlite:
     dependencies:
@@ -455,7 +476,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
+        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
 
   packages/ui:
     dependencies:
