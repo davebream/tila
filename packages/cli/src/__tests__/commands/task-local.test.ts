@@ -258,6 +258,35 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it("list --parent filters to children (both compact and non-compact) in local mode", async () => {
+    await seedTask("P", { status: "open", title: "Parent" });
+    await seedTask("C1", { status: "open", title: "Child 1", parent_id: "P" });
+    await seedTask("C2", { status: "open", title: "Child 2", parent_id: "P" });
+    await seedTask("U", { status: "open", title: "Unrelated" });
+
+    const cmd = await loadCommand();
+
+    // Non-compact --parent: only the two children.
+    await runCmd(getSubCommand(cmd, "list"), { parent: "P", json: true });
+    const nonCompact = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(nonCompact.entities.map((e: { id: string }) => e.id).sort()).toEqual(
+      ["C1", "C2"],
+    );
+
+    // Compact --parent: same two children.
+    logSpy.mockClear();
+    await runCmd(getSubCommand(cmd, "list"), {
+      compact: true,
+      parent: "P",
+      json: true,
+    });
+    const compact = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(compact.entities.map((e: { id: string }) => e.id).sort()).toEqual([
+      "C1",
+      "C2",
+    ]);
+  });
+
   it("ready returns unblocked tasks from the local backend", async () => {
     await seedTask("blocker", { status: "open", title: "Blocker" });
     await seedTask("blocked", { status: "open", title: "Blocked" });

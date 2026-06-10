@@ -125,15 +125,42 @@ describe("RemoteBackend", () => {
       const backend = await createBackend(client);
       await backend.list({
         type: "task",
-        dataFilter: { status: "open", parent: "P-1" },
+        dataFilter: { status: "open" },
       });
 
       expect(client.get).toHaveBeenCalledWith(
         "/projects/proj-test/tasks",
         expect.objectContaining({
-          query: { type: "task", status: "open", parent: "P-1" },
+          query: { type: "task", status: "open" },
         }),
       );
+    });
+
+    it("list() translates the parent_id data-field key to the Worker's `parent` query param", async () => {
+      // REGRESSION GUARD: EntityBackend.list dataFilter keys are DATA-FIELD
+      // names (parent_id). The Worker list route only reads `parent` (the DO
+      // maps it back to dataFilter.parent_id). Sending `parent_id` verbatim
+      // would be silently ignored -> ALL tasks returned. Assert the outgoing
+      // query carries `parent`, NOT `parent_id`.
+      client.get.mockResolvedValue({
+        ok: true,
+        entities: [],
+        total: 0,
+        limit: null,
+        offset: 0,
+        has_more: false,
+      });
+
+      const backend = await createBackend(client);
+      await backend.list({
+        type: "task",
+        dataFilter: { parent_id: "P-1" },
+      });
+
+      const [, opts] = client.get.mock.calls[0];
+      const query = (opts as { query: Record<string, string> }).query;
+      expect(query.parent).toBe("P-1");
+      expect(query).not.toHaveProperty("parent_id");
     });
 
     it("list() serializes sort, order, limit, offset to query params", async () => {

@@ -249,12 +249,25 @@ export class RemoteBackend
     if (filter?.type) query.type = filter.type;
     if (filter?.archived !== undefined)
       query.archived = String(filter.archived);
-    // Flatten known dataFilter keys to top-level query params.
-    // Unknown keys are dropped (logged in debug mode in future).
+    // Flatten dataFilter keys to the Worker's list query params.
+    //
+    // CONTRACT: `EntityBackend.list` dataFilter keys are DATA-FIELD names
+    // (e.g. `parent_id`, `status`) — the same names EmbeddedProject applies
+    // directly via `json_extract(data, '$.<key>')`. The Worker list route
+    // (packages/worker/src/routes/entities.ts) only reads a fixed set of
+    // query params and the DO maps some of them onto data fields, so a few
+    // data-field names differ from their query-param name. Translate those:
+    //   - `parent_id` (data field) -> `parent` (query param the Worker reads,
+    //     which the DO maps back to `dataFilter.parent_id`).
+    //   - `status` is identical on both sides; all other keys pass through.
+    const DATA_FIELD_TO_QUERY_PARAM: Record<string, string> = {
+      parent_id: "parent",
+    };
     if (filter?.dataFilter) {
       for (const [key, value] of Object.entries(filter.dataFilter)) {
         if (value !== undefined && value !== null) {
-          query[key] = String(value);
+          const param = DATA_FIELD_TO_QUERY_PARAM[key] ?? key;
+          query[param] = String(value);
         }
       }
     }

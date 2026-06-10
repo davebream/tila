@@ -510,14 +510,18 @@ export default defineCommand({
           return;
         }
 
-        // Non-compact path: use EntityBackend interface (backward compatible)
+        // Non-compact path: use EntityBackend interface (backward compatible).
+        // dataFilter keys are DATA-FIELD names (parent_id, status) — the single
+        // shape that works for both EmbeddedProject (json_extract directly) and
+        // RemoteBackend (which translates parent_id -> the Worker's `parent`
+        // query param). Mirrors the --compact path above.
         const { entity } = await resolveContext();
         const result = await withSpinner("Fetching tasks...", () =>
           entity.list({
             type: "task",
             dataFilter: {
               ...(args.status ? { status: args.status as string } : {}),
-              ...(args.parent ? { parent: args.parent as string } : {}),
+              ...(args.parent ? { parent_id: args.parent as string } : {}),
             },
           }),
         );
