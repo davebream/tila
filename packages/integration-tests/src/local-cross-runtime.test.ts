@@ -607,38 +607,101 @@ describe("concurrent writers on one file (withBusyRetry second-layer retry)", ()
 // 6. Cross-runtime grep parity
 // ---------------------------------------------------------------------------
 
-describe("cross-runtime grep parity (chunk-boundary flush agrees across drivers)", () => {
-  it("a multi-chunk text artifact greps identically from bun and node paths", async () => {
+describe("cross-runtime grep parity (multi-chunk streaming + UTF-8 boundary flush)", () => {
+  it("a >inline-threshold blob greps identically from bun and node via the streaming path", async () => {
     const tmp = makeTmp();
     const dbPath = join(tmp, "grep.db");
     const artifactsPath = join(tmp, "artifacts");
 
-    // Build a multi-line / multi-KB body whose lines straddle stream-chunk
-    // boundaries, so the TextDecoder flush + splitChunkIntoLines logic is what
-    // determines line numbering. Some lines contain the search token "NEEDLE".
-    const lines: string[] = [];
-    for (let i = 0; i < 400; i++) {
-      lines.push(
-        i % 7 === 0
-          ? `line ${i} contains NEEDLE here ${"x".repeat(40)}`
-          : `line ${i} ordinary content ${"y".repeat(40)}`,
-      );
-    }
-    const content = `${lines.join("\n")}\n`;
+    // --- Build a blob that GENUINELY exercises the streaming/multi-chunk grep
+    // path on BOTH runtimes:
+    //
+    //  * The embedded `put` never sets `content_inline` (it always stores blobs
+    //    on disk and leaves the column NULL), so `grepArtifacts` ALWAYS takes
+    //    the streaming branch (`blobs.readStream` → chunked `reader.read()` →
+    //    `TextDecoder({ stream })` flush) — never the inline single-string
+    //    branch. We assert that NULL below to make the path explicit.
+    //  * The blob is ~512 KiB — comfortably above the ≤64 KiB inline fast-path
+    //    threshold AND large enough to span MANY native read chunks (node's
+    //    fs.createReadStream and bun's Bun.file().stream() both chunk at
+    //    ~64 KiB), so the cross-chunk TextDecoder flush is repeatedly stressed.
+    //  * A 4-byte UTF-8 emoji ("🧪") sits on a NEEDLE line engineered so its
+    //    bytes STRADDLE the first 64 KiB chunk boundary (offset 65536). If the
+    //    two drivers chunked the read differently and the decoder failed to
+    //    reassemble the split code point, that line would decode/match
+    //    differently — the parity assertion would catch it.
+    const CHUNK = 65536;
+    const EMOJI = "🧪"; // 4 UTF-8 bytes (U+1F9EA)
+    // A filler line of EXACTLY 64 bytes including its trailing "\n" (so byte
+    // offsets are predictable). 63 visible chars + "\n".
+    const fillerBody = `filler ${"z".repeat(56)}`; // 7 + 56 = 63 bytes
+    const fillerLine = `${fillerBody}\n`; // 64 bytes
+    expect(Buffer.byteLength(fillerLine, "utf8")).toBe(64);
 
-    // Write via the BUN path so the blob exists on disk for both readers.
+    // Compose the body byte-accurately so the emoji on a NEEDLE line crosses the
+    // 65536-byte boundary. Strategy: emit filler lines until we are a few bytes
+    // short of the boundary, then emit a NEEDLE line whose emoji begins 2 bytes
+    // before the boundary (so 2 of its 4 bytes are in chunk 0 and 2 in chunk 1).
+    let bytes = 0;
+    const parts: string[] = [];
+    const targetEmojiStart = CHUNK - 2; // emoji's first byte at 65534
+    // Prefix that places the emoji's first byte exactly at targetEmojiStart.
+    // We'll pad the boundary NEEDLE line's prefix to hit it precisely.
+    while (bytes + 64 <= targetEmojiStart - 40) {
+      parts.push(fillerLine);
+      bytes += 64;
+    }
+    // Now top up with ASCII bytes so the next emitted emoji starts at
+    // targetEmojiStart. The boundary line looks like:
+    //   "<pad>BOUNDARY NEEDLE <EMOJI> tail...\n"
+    // Compute the pad so the EMOJI's first byte lands at targetEmojiStart.
+    const boundaryPrefix = "BOUNDARY NEEDLE ";
+    const padLen = targetEmojiStart - bytes - boundaryPrefix.length;
+    expect(padLen).toBeGreaterThanOrEqual(0);
+    const boundaryLine = `${"p".repeat(padLen)}${boundaryPrefix}${EMOJI} tail-after-emoji\n`;
+    parts.push(boundaryLine);
+    bytes += Buffer.byteLength(boundaryLine, "utf8");
+
+    // Sanity: the emoji's first byte is at the boundary-1..boundary span.
+    const preEmojiBytes =
+      bytes -
+      Buffer.byteLength(" tail-after-emoji\n", "utf8") -
+      Buffer.byteLength(EMOJI, "utf8");
+    expect(preEmojiBytes).toBe(targetEmojiStart);
+
+    // Fill out to ~512 KiB total with a mix of NEEDLE and ordinary lines so the
+    // stream spans ~8 native chunks and many lines straddle chunk boundaries.
+    let n = 0;
+    while (bytes < 512 * 1024) {
+      const line =
+        n % 9 === 0
+          ? `line ${n} contains NEEDLE with accent café ${"x".repeat(30)}\n`
+          : `line ${n} ordinary content ${"y".repeat(40)}\n`;
+      parts.push(line);
+      bytes += Buffer.byteLength(line, "utf8");
+      n++;
+    }
+    const content = parts.join("");
+    const totalBytes = Buffer.byteLength(content, "utf8");
+    expect(totalBytes).toBeGreaterThan(8 * CHUNK); // spans many read chunks
+
+    // Write via the BUN path so the on-disk blob is produced by the bun runtime.
+    // The ~512 KiB body is passed through a temp FILE (not an env var, which
+    // would overflow) read by the bun fixture.
+    const { writeFileSync } = await import("node:fs");
+    const contentFile = join(tmp, "grep-content.txt");
+    writeFileSync(contentFile, content, "utf-8");
     const wrote = runBun("write-artifact", {
       DB: dbPath,
       ARTIFACTS: artifactsPath,
       ORG,
       PROJECT,
       KIND: "log",
-      // Resource-less (source) artifact — no entity FK needed; grep doesn't
-      // depend on the resource.
-      RESOURCE: "",
-      CONTENT: content,
+      RESOURCE: "", // resource-less source artifact (no entity FK)
+      CONTENT_FILE: contentFile,
     });
-    expect(typeof wrote.json.key).toBe("string");
+    const artifactKey = wrote.json.key as string;
+    expect(typeof artifactKey).toBe("string");
 
     // Grep from the BUN path.
     const bunGrep = runBun("grep-artifact", {
@@ -654,7 +717,8 @@ describe("cross-runtime grep parity (chunk-boundary flush agrees across drivers)
       text: string;
     }>;
 
-    // Grep from the NODE path over the SAME blob.
+    // Grep from the NODE path over the SAME blob, and confirm via a raw query
+    // that `content_inline` is NULL (i.e. grep MUST use the streaming branch).
     const node = await createTilaLocal({
       dbPath,
       artifactsPath,
@@ -663,16 +727,41 @@ describe("cross-runtime grep parity (chunk-boundary flush agrees across drivers)
       skipFilesystemCheck: true,
     });
     let nodeLines: Array<{ key: string; line: number; text: string }>;
+    let inlineIsNull: boolean;
+    let storedBytes: number;
+    const rawCheck = new Database(dbPath, { readonly: true });
     try {
+      const row = rawCheck
+        .prepare(
+          "SELECT content_inline AS inline, bytes FROM artifact_pointers WHERE r2_key = ?",
+        )
+        .get(artifactKey) as { inline: string | null; bytes: number };
+      inlineIsNull = row.inline === null;
+      storedBytes = row.bytes;
+
       const res = await node.artifacts.grepArtifacts({ pattern: "NEEDLE" });
       nodeLines = res.results.flatMap((r) =>
         r.lines.map((l) => ({ key: r.key, line: l.line, text: l.text })),
       );
     } finally {
+      rawCheck.close();
       node.close();
     }
 
-    // Identical matches (same keys, line numbers, and text) across drivers.
+    // The streaming path is genuinely taken: content_inline is NULL and the blob
+    // is well above the inline threshold.
+    expect(inlineIsNull).toBe(true);
+    expect(storedBytes).toBe(totalBytes);
+    expect(storedBytes).toBeGreaterThan(64 * 1024);
+
+    // The boundary-straddling emoji line was matched (and decoded intact).
+    const boundaryMatch = bunLines.find((l) => l.text.includes("BOUNDARY"));
+    expect(boundaryMatch).toBeDefined();
+    expect(boundaryMatch?.text).toContain(EMOJI);
+    expect(boundaryMatch?.text).toContain("tail-after-emoji");
+
+    // Identical matches (same keys, line numbers, and full text — including the
+    // boundary emoji and the accented "café" lines) across BOTH runtimes.
     expect(bunLines.length).toBeGreaterThan(0);
     const norm = (
       arr: Array<{ key: string; line: number; text: string }>,

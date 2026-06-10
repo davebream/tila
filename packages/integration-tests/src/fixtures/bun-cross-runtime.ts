@@ -23,6 +23,7 @@
  *  - `grep-artifact`    grepArtifacts($PATTERN) over $DB; print {lines:[{key,line,text}]}
  */
 
+import { readFileSync } from "node:fs";
 import {
   LocalArtifactBackend,
   LocalProject,
@@ -111,7 +112,12 @@ async function main(): Promise<void> {
       // RESOURCE is optional: when set it FK-references an existing entity, so
       // leave it unset for a source (resource-less) artifact.
       const resource = process.env.RESOURCE || undefined;
-      const content = requireEnv("CONTENT");
+      // Content comes from CONTENT_FILE (preferred for large blobs that would
+      // overflow an env var) or inline CONTENT.
+      const contentFile = process.env.CONTENT_FILE;
+      const content = contentFile
+        ? readFileSync(contentFile, "utf-8")
+        : requireEnv("CONTENT");
       const db = createLocalConnection(DB, ORG, PROJECT, {
         skipFilesystemCheck: true,
       });
