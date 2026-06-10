@@ -1,4 +1,10 @@
 export type { BlobStore } from "./blob-store";
+export {
+  EMBEDDED_PRAGMAS,
+  NETWORK_FS_TYPES_LINUX,
+  NETWORK_FS_TYPES_MACOS,
+  findEnclosingMountFsType,
+} from "./connection-config";
 export { EmbeddedArtifactBackend } from "./embedded-artifact-backend";
 export { EmbeddedProject } from "./embedded-project";
 export type { EmbeddedDb } from "./embedded-project";
