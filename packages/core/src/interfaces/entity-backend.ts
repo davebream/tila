@@ -27,6 +27,17 @@ export interface RelationshipFilter {
 export interface EntityListFilter {
   type?: string;
   archived?: 0 | 1;
+  /**
+   * Filter on entity `data` fields. CONTRACT: keys are DATA-FIELD names (the
+   * stored JSON keys, e.g. `parent_id`, `status`) — NOT Worker query-param
+   * names. Each key is matched server-side via `json_extract(data, '$.<key>')`
+   * against the scalar value (string/number/boolean; an array value means
+   * `IN (...)`). `EmbeddedProject` applies these directly; `RemoteBackend`
+   * translates the data-field names that differ from the Worker's list
+   * query-param names (currently only `parent_id` -> the `parent` query param,
+   * which the DO maps back to `dataFilter.parent_id`). Use `parent_id`, never
+   * `parent`, so the single shape works against both backends.
+   */
   dataFilter?: Record<string, unknown>;
   sort?: "created_at" | "updated_at" | "type" | "title" | "status";
   order?: "asc" | "desc";
@@ -65,6 +76,7 @@ export interface EntityTree {
 export interface EntityBackend {
   create(input: CreateEntityInput): Promise<Entity>;
   get(id: string): Promise<Entity | null>;
+  /** List entities. See {@link EntityListFilter.dataFilter} for the data-field filter contract. */
   list(filter?: EntityListFilter): Promise<Entity[]>;
   update(id: string, data: Partial<Entity["data"]>): Promise<Entity>;
   archive(id: string): Promise<void>;

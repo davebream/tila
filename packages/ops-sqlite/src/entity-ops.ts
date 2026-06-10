@@ -49,7 +49,11 @@ function jsonExtractValue(value: unknown): string | number {
   if (typeof value === "boolean") return value ? 1 : 0;
   if (typeof value === "number") return value;
   if (typeof value === "string") return value;
-  // null/object/array: fall back to JSON text (callers should pass scalars)
+  // null/object/array are not supported scalars for `json_extract` equality —
+  // `json_extract` returns a SQLite NULL for a JSON `null` (so `= 'null'` never
+  // matches) and a JSON *text* for objects/arrays (so deep equality won't hold).
+  // We fall back to JSON text, which intentionally MATCHES NOTHING for these
+  // shapes; callers should pass scalar dataFilter values.
   return JSON.stringify(value);
 }
 

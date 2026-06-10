@@ -452,9 +452,18 @@ export default defineCommand({
       async run({ args }) {
         if (args.compact) {
           // Compact path: a client-side projection of the EntityBackend list()
-          // (+ active claims for claimed_by) so it works in local AND remote
-          // mode. Reproduces the same columns/fields as the old remote
-          // ?compact=true payload: id, status, title, claimed_by.
+          // (+ active claims for claimed_by) so it works IDENTICALLY in local
+          // AND remote mode (both go through entity.list() now). Fields:
+          // id, type, title, status, claimed_by.
+          //
+          // INTENTIONAL REDUCTION vs the server-side CompactEntity shape: the
+          // old SQL-backed remote ?compact=true also returned `blockers` and
+          // `artifacts` counts, which the DO computes for free in one query.
+          // Reproducing them client-side would require a per-entity fan-out
+          // (one listArtifactRefs() call per task — N HTTP round-trips in remote
+          // mode), so they are deliberately omitted to keep --compact a single
+          // cheap call. The omission is consistent across both backends. If a
+          // future bulk endpoint exposes these counts, add them in both modes.
           const { entity, coordination } = await resolveContext();
           const [tasks, claims] = await withSpinner(
             "Fetching tasks...",
@@ -901,11 +910,16 @@ export default defineCommand({
           if (!n) return id;
           return `${n.id} ${n.status ?? ""} ${n.title ?? "(untitled)"}`.trim();
         };
+        // `seen` is shared across the whole render (not per-branch): it both
+        // guards against relationship cycles (A->B->A) AND means a multi-parent
+        // node renders only under its FIRST-visited parent. This is an
+        // intentional spanning-tree projection that prevents duplicate /
+        // exponential rendering of diamond-shaped graphs.
         const buildSubtree = (
           id: string,
           seen: Set<string>,
         ): Record<string, unknown> | null => {
-          if (seen.has(id)) return null; // cycle guard
+          if (seen.has(id)) return null; // cycle guard (see `seen` note above)
           seen.add(id);
           const kids = childrenOf.get(id) ?? [];
           if (kids.length === 0) return null;
