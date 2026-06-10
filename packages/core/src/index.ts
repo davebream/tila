@@ -12,6 +12,7 @@ export type {
 export type {
   CoordinationBackend,
   AcquireResult,
+  RenewResult,
 } from "./interfaces/coordination-backend";
 export type {
   ArtifactBackend,

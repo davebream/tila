@@ -25,6 +25,7 @@ import {
   type RecordPage,
   type RelationshipFilter,
   type RelationshipInput,
+  type RenewResult,
   type SchemaBackend,
   type SchemaRecord,
   type SendSignalInput,
@@ -430,11 +431,14 @@ export class EmbeddedProject
     user: string,
     fence: number,
     ttlMs: number,
-  ): Promise<boolean> {
-    const result = this.retry(() =>
+  ): Promise<RenewResult> {
+    // Return the FULL result (not a bare boolean): `renewed` distinguishes
+    // loss-of-claim (missing / expired / holder mismatch) from success, and
+    // `expires_at` is the REAL stored expiry — callers must not recompute it.
+    // Mirrors the DO `/coord/renew` contract (409 `renew-failed` on !renewed).
+    return this.retry(() =>
       coordinationOps.renew(this.db, resource, machine, user, fence, ttlMs),
     );
-    return result.renewed;
   }
 
   async release(resource: string, fence: number): Promise<void> {

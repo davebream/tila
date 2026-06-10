@@ -1,3 +1,7 @@
+import type {
+  EmbeddedArtifactBackend,
+  EmbeddedProject,
+} from "@tila/backend-embedded";
 /**
  * Local resource adapters — present the SAME public method surface the HTTP
  * resource-method factories expose (`createTaskMethods`, `createRecordMethods`,
@@ -27,10 +31,7 @@
  * HTTP-only resources (token issuance — a D1 global-store concern with no local
  * equivalent) throw `LocalUnsupportedError` rather than silently no-op.
  */
-import type {
-  EmbeddedArtifactBackend,
-  EmbeddedProject,
-} from "@tila/backend-embedded";
+import { type GateRecord, parseTilaSchemaToml } from "@tila/core";
 import type {
   AckSignalResponse,
   AcquireSuccessResponse,
@@ -39,6 +40,8 @@ import type {
   ArtifactListResponse,
   ArtifactPointer,
   ArtifactPutResponse,
+  ArtifactRelationshipListResponse,
+  ArtifactRelationshipOkResponse,
   ArtifactSearchResponse,
   ClaimMode,
   CreateEntityRelationshipResponse,
@@ -47,6 +50,7 @@ import type {
   EntityDetailResponse,
   EntityListResponse,
   EntityResponse,
+  Gate,
   GateListResponse,
   GateResponse,
   InboxResponse,
@@ -71,11 +75,13 @@ import type {
   RenewSuccessResponse,
   SendSignalRequest,
   SendSignalResponse,
+  Signal,
   StateListResponse,
   StateResponse,
   SummaryResponse,
   UnifiedSearchResponse,
 } from "@tila/schemas";
+import { TilaApiError, type TilaFacade } from "../client";
 
 /**
  * Thrown when a consumer calls a facade method that has no local equivalent
@@ -137,6 +143,13 @@ function createLocalTaskMethods(project: EmbeddedProject) {
       cursor?: string;
       tagFilter?: string[];
     }): Promise<EntityListResponse> {
+      // DIVERGENCE (Task 14): `cursor` is accepted by the factory signature but
+      // the wire `EntityListResponse` carries NO pagination meta (no
+      // next_cursor/total) — unlike the wire `RecordListResponse`. So this
+      // adapter cannot return a cursor without breaking the shared return shape;
+      // `cursor` is a no-op here, matching the factory's non-paginated tasks.list
+      // contract. (Lifting tasks.list to a paginated response is a wire-shape
+      // change tracked for Task 14.)
       const entities = await project.list({
         type: query?.type,
         archived: 0,
@@ -367,6 +380,17 @@ function createLocalClaimMethods(project: EmbeddedProject) {
         mode,
         ttlMs,
       );
+      // coordinationOps returns {acquired:false} (no throw) on conflict; the DO
+      // maps that to 409 `already-held` (coordination-routes.ts ~43-50). Match
+      // it so isTilaApiError(err) branches identically across backends.
+      if (!result.acquired) {
+        throw new TilaApiError(
+          409,
+          "already-held",
+          `Resource ${resource} already held`,
+          false,
+        );
+      }
       return { ok: true, fence: result.fence, expires_at: result.expires_at };
     },
 
@@ -375,8 +399,29 @@ function createLocalClaimMethods(project: EmbeddedProject) {
       fence: number,
       ttlMs: number,
     ): Promise<RenewSuccessResponse> {
-      await project.renew(resource, "local", "local", fence, ttlMs);
-      return { ok: true, expires_at: Date.now() + ttlMs };
+      const result = await project.renew(
+        resource,
+        "local",
+        "local",
+        fence,
+        ttlMs,
+      );
+      // coordinationOps returns {renewed:false} (no throw) when the claim is
+      // missing / expired / held by a different holder; the DO maps that to 409
+      // `renew-failed` (coordination-routes.ts ~86-94). Without this guard, local
+      // renew would silently report success after the caller LOST the claim —
+      // breaking the fencing contract. Throw the SAME TilaApiError so
+      // isTilaApiError(err)/err.status===409 work identically across backends.
+      if (!result.renewed) {
+        throw new TilaApiError(
+          409,
+          "renew-failed",
+          "Claim not found, expired, or holder mismatch",
+          false,
+        );
+      }
+      // Return the REAL stored expiry, not a recomputed Date.now()+ttlMs.
+      return { ok: true, expires_at: result.expires_at };
     },
 
     async release(
@@ -451,7 +496,13 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
         resource: query?.resource,
         kind: query?.kind,
       });
-      return { ok: true, pointers } as ArtifactListResponse;
+      // `listPointers` returns `ArtifactPointerRecord` (no `fence`/`tags`); the
+      // wire pointer carries both. Local DIVERGENCE (Task 14): fence/tags are
+      // not surfaced for list locally — default them so the shape matches.
+      return {
+        ok: true,
+        pointers: pointers.map((p) => ({ ...p, fence: null, tags: [] })),
+      };
     },
 
     async search(
@@ -464,7 +515,26 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
         resource: opts?.resource,
         limit: opts?.limit ? Number(opts.limit) : undefined,
       });
-      return { ok: true, results } as ArtifactSearchResponse;
+      // The embedded `searchArtifacts` returns the minimal
+      // `ArtifactSearchResultRecord` (r2_key/kind/title/snippet); the wire
+      // `ArtifactSearchResult` additionally requires
+      // resource/mime_type/produced_at/indexed_at. Local DIVERGENCE (Task 14):
+      // those fields aren't available from the embedded search index, so they
+      // are defaulted (null/0) to satisfy the wire shape.
+      return {
+        ok: true,
+        results: results.map((r) => ({
+          r2_key: r.r2_key,
+          kind: r.kind,
+          resource: null,
+          mime_type: "",
+          produced_at: 0,
+          title: r.title,
+          snippet: r.snippet,
+          indexed_at: 0,
+        })),
+        total: results.length,
+      };
     },
 
     async grep(
@@ -483,16 +553,66 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
       kind: string,
       resource: string,
     ): Promise<ArtifactPointer | null> {
-      return (await artifacts.getLatest(
-        kind,
-        resource,
-      )) as ArtifactPointer | null;
+      const ptr = await artifacts.getLatest(kind, resource);
+      if (!ptr) return null;
+      // The embedded backend's `getLatest` returns `ArtifactPointerRecord`,
+      // which omits `fence`/`tags` (the wire `ArtifactPointer` has both). Local
+      // DIVERGENCE (Task 14): `fence`/`tags` are not surfaced for getLatest
+      // locally; default them so the wire shape is satisfied exactly.
+      return { ...ptr, fence: null, tags: [] };
+    },
+
+    async addRelationship(
+      fromKey: string,
+      toKeyOrUri: string,
+      type: string,
+      _metadata?: Record<string, unknown>,
+    ): Promise<ArtifactRelationshipOkResponse> {
+      // HTTP factory disambiguates to_key vs to_uri by the `://` heuristic; the
+      // embedded backend takes a `{to_key?, to_uri?}` discriminated object.
+      const isUri = toKeyOrUri.includes("://");
+      await artifacts.addRelationship(
+        fromKey,
+        isUri ? { to_uri: toKeyOrUri } : { to_key: toKeyOrUri },
+        type,
+      );
+      return { ok: true };
+    },
+
+    async listRelationships(
+      key: string,
+    ): Promise<ArtifactRelationshipListResponse> {
+      const rels = await artifacts.listRelationships(key);
+      // The embedded `ArtifactRelationship` omits `metadata` (the wire shape
+      // requires it). Local DIVERGENCE (Task 14): relationship metadata is not
+      // surfaced locally; default to `{}` so the wire shape is satisfied.
+      const relationships = rels.map((r) => ({ ...r, metadata: {} }));
+      return { ok: true, relationships };
     },
   };
 }
 
 /** Gate methods (mirrors `createGateMethods` in `gates.ts`). */
 function createLocalGateMethods(project: EmbeddedProject) {
+  // Map the embedded `GateRecord` (await_type/status typed as `string`, no
+  // `data`) to the wire `Gate`. The enum fields are narrowed with a typed
+  // assertion (the values ARE valid enum members; the embedded type is just
+  // widened to string), and `data` defaults to `{}` (the embedded GateRecord
+  // carries none — a minor local divergence, harmless for gate semantics).
+  const toGate = (g: GateRecord): Gate => ({
+    id: g.id,
+    resource: g.resource,
+    await_type: g.await_type as Gate["await_type"],
+    status: g.status as Gate["status"],
+    fence: g.fence,
+    timeout_at: g.timeout_at,
+    resolved_at: g.resolved_at,
+    resolution: g.resolution,
+    created_at: g.created_at,
+    created_by: g.created_by,
+    data: {},
+  });
+
   return {
     async list(query?: {
       resource?: string;
@@ -501,9 +621,9 @@ function createLocalGateMethods(project: EmbeddedProject) {
     }): Promise<GateListResponse> {
       const gates = await project.listGates({
         resource: query?.resource,
-        status: query?.status as never,
+        status: query?.status as GateRecord["status"] | undefined,
       });
-      return { ok: true, gates } as GateListResponse;
+      return { ok: true, gates: gates.map(toGate) };
     },
 
     async create(req: CreateGateRequest): Promise<GateResponse> {
@@ -513,7 +633,7 @@ function createLocalGateMethods(project: EmbeddedProject) {
         req.fence,
         req.timeout_at,
       );
-      return { ok: true, gate } as GateResponse;
+      return { ok: true, gate: toGate(gate) };
     },
 
     async resolve(
@@ -524,7 +644,7 @@ function createLocalGateMethods(project: EmbeddedProject) {
       const gates = await project.listGates();
       const gate = gates.find((g) => g.id === gateId);
       if (!gate) throw new Error(`Gate not found: ${gateId}`);
-      return { ok: true, gate } as GateResponse;
+      return { ok: true, gate: toGate(gate) };
     },
 
     async remove(gateId: string): Promise<{ ok: true }> {
@@ -539,7 +659,16 @@ function createLocalSignalMethods(project: EmbeddedProject) {
   return {
     async inbox(): Promise<InboxResponse> {
       const signals = await project.listSignals("local");
-      return { ok: true, signals } as InboxResponse;
+      // SignalRecord.kind is widened to `string`; the wire Signal.kind is the
+      // SignalKind enum. The stored kinds ARE valid members (written via the
+      // same enum on send), so narrow with a typed assertion per row.
+      return {
+        ok: true,
+        signals: signals.map((s) => ({
+          ...s,
+          kind: s.kind as Signal["kind"],
+        })),
+      };
     },
 
     async send(req: SendSignalRequest): Promise<SendSignalResponse> {
@@ -556,9 +685,12 @@ function createLocalSignalMethods(project: EmbeddedProject) {
       return { ok: true, id };
     },
 
-    async ack(signalId: string): Promise<AckSignalResponse> {
-      const { found } = await project.ackSignal(signalId);
-      return { ok: true, found } as AckSignalResponse;
+    async ack(_signalId: string): Promise<AckSignalResponse> {
+      // The wire AckSignalResponse is just `{ ok: true }`; the embedded ack's
+      // `found` flag is not part of the wire shape, so it is intentionally
+      // dropped (the HTTP factory's `ack` also returns only `{ ok: true }`).
+      await project.ackSignal(_signalId);
+      return { ok: true };
     },
   };
 }
@@ -577,7 +709,20 @@ function createLocalJournalMethods(project: EmbeddedProject) {
         kind: opts?.event_kind,
         limit: opts?.limit ? Number(opts.limit) : undefined,
       });
-      return { ok: true, events } as unknown as JournalResponse;
+      // The embedded `JournalEvent` is the minimal projection (no token_id /
+      // data / source / source_version, which the DO journal route returns).
+      // Local DIVERGENCE (Task 14): those are defaulted (null/{}) so the wire
+      // shape matches exactly.
+      return {
+        ok: true,
+        events: events.map((e) => ({
+          ...e,
+          token_id: null,
+          data: {},
+          source: null,
+          source_version: null,
+        })),
+      };
     },
   };
 }
@@ -590,12 +735,15 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
       _ttlMs?: number,
     ): Promise<PresenceHeartbeatSuccessResponse> {
       await project.heartbeat(machine);
-      return { ok: true } as PresenceHeartbeatSuccessResponse;
+      return { ok: true };
     },
 
     async list(): Promise<PresenceListResponse> {
-      const presence = await project.listPresence();
-      return { ok: true, presence } as unknown as PresenceListResponse;
+      // Wire shape: `{ ok, machines: [{ machine, last_seen, info }] }` — the key
+      // is `machines`, not `presence`. (The prior `as unknown as` cast hid this
+      // mislabel.) `Presence` matches the item shape exactly.
+      const machines = await project.listPresence();
+      return { ok: true, machines };
     },
 
     async listAll(): Promise<PresenceAllListResponse> {
@@ -610,7 +758,7 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
       // the op); that exceeds this method's scope.
       const presence = await project.listPresence();
       const machines = presence.map((p) => ({ ...p, active: true }));
-      return { ok: true, machines } as unknown as PresenceAllListResponse;
+      return { ok: true, machines };
     },
   };
 }
@@ -620,9 +768,12 @@ function createLocalSchemaMethods(project: EmbeddedProject) {
   return {
     async get(): Promise<{ ok: true; schema: unknown; version: number }> {
       const current = await project.getCurrentSchema();
+      // Mirror the DO `/schema/current` shape: `schema` is the schema RECORD
+      // (`{ version, definition }`, with `definition` the raw TOML string) — the
+      // stored definition is TOML, NOT JSON, so it must not be JSON.parsed.
       return {
         ok: true,
-        schema: current.definition ? JSON.parse(current.definition) : null,
+        schema: current,
         version: current.version ?? 0,
       };
     },
@@ -634,7 +785,7 @@ function createLocalSchemaMethods(project: EmbeddedProject) {
       const result = await project.applySchema({
         definition:
           typeof schema === "string" ? schema : JSON.stringify(schema),
-        strategy: strategy as never,
+        strategy,
       });
       return { ok: true, version: result.version ?? 0, diff: result.changes };
     },
@@ -660,8 +811,9 @@ function createLocalSchemaMethods(project: EmbeddedProject) {
 function createLocalSummaryMethods(project: EmbeddedProject) {
   return {
     async get(): Promise<SummaryResponse> {
-      const project_ = await project.getSummary();
-      return { ok: true, project: project_ } as unknown as SummaryResponse;
+      const summary = await project.getSummary();
+      // `ProjectSummary` is structurally identical to the wire `project` shape.
+      return { ok: true, project: summary };
     },
   };
 }
@@ -678,7 +830,9 @@ function createLocalSearchMethods(project: EmbeddedProject) {
         limit: opts?.limit,
         tagFilter: opts?.tagFilter,
       });
-      return { ok: true, results } as unknown as UnifiedSearchResponse;
+      // `searchAll` returns `UnifiedSearchResult[]` — the exact element type of
+      // the wire `results`. The wire response also requires `total`.
+      return { ok: true, results, total: results.length };
     },
   };
 }
@@ -694,12 +848,13 @@ function createLocalTemplateMethods(project: EmbeddedProject) {
         root_id: req.root_id,
         vars: req.vars,
       });
+      // The op result is structurally identical to the wire response.
       return {
         ok: true,
         created_entities: result.created_entities,
         created_relationships: result.created_relationships,
         journal_seq: result.journal_seq,
-      } as unknown as InstantiateTemplateResponse;
+      };
     },
 
     async list(): Promise<{
@@ -712,21 +867,48 @@ function createLocalTemplateMethods(project: EmbeddedProject) {
       }>;
     }> {
       // Templates are declared in the applied schema; the embedded backend has
-      // no list op, so derive from the current schema definition.
+      // no list op, so derive from the current schema definition. The stored
+      // definition is TOML (mirroring the DO `/template/list`, which parses via
+      // `constraintOps.resolveCurrentSchema`), so parse it with the core TOML
+      // parser — NOT JSON.parse.
       const current = await project.getCurrentSchema();
       if (!current.definition) return { ok: true, templates: [] };
-      const parsed = JSON.parse(current.definition) as {
+      const parsed = parseTilaSchemaToml(current.definition) as {
         templates?: Record<
           string,
-          { description?: string; entities?: Record<string, { type: string }> }
+          {
+            description?: string;
+            entities?: Record<string, { type: string; data?: unknown }>;
+          }
         >;
+      };
+      // Derive `variables` by scanning each template's entity `data` for
+      // `{{name}}` placeholders — the same `/\{\{(\w+)\}\}/` substitution
+      // `templateOps.instantiateTemplate` applies (#5). This gives consumers a
+      // real, non-empty variable list to drive `instantiate(vars)` locally,
+      // rather than the previous silent `[]`.
+      const extractVars = (def: {
+        entities?: Record<string, { data?: unknown }>;
+      }): string[] => {
+        const found = new Set<string>();
+        const walk = (v: unknown): void => {
+          if (typeof v === "string") {
+            for (const m of v.matchAll(/\{\{(\w+)\}\}/g)) found.add(m[1]);
+          } else if (Array.isArray(v)) {
+            for (const item of v) walk(item);
+          } else if (v && typeof v === "object") {
+            for (const item of Object.values(v)) walk(item);
+          }
+        };
+        for (const ent of Object.values(def.entities ?? {})) walk(ent.data);
+        return [...found].sort();
       };
       const templates = Object.entries(parsed.templates ?? {}).map(
         ([name, def]) => ({
           name,
           type: Object.values(def.entities ?? {})[0]?.type ?? "",
           description: def.description ?? null,
-          variables: [],
+          variables: extractVars(def),
         }),
       );
       return { ok: true, templates };
@@ -779,3 +961,45 @@ export function buildLocalResources(
     tokens: createLocalTokenMethods(),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Compile-time contract: the local resource surface MUST be structurally
+// assignable to the HTTP facade surface (minus `close`, which createTila adds).
+// This is the highest-leverage guard — if any adapter's method NAME, ARG shape,
+// or RETURN shape drifts from the HTTP factory it mirrors, this line becomes a
+// build error instead of a silent runtime divergence. Do NOT satisfy it by
+// widening the adapter return types or re-adding `as unknown as` casts in the
+// method bodies; fix the body to return the correct wire shape.
+// A per-resource mapped check: each adapter resource must be assignable to the
+// matching facade resource. A mapped type (vs a single `extends`) makes a drift
+// name the OFFENDING resource key at the failing property, instead of an opaque
+// whole-object `'true' is not assignable to 'never'`.
+type _SurfaceMatch<
+  Local extends Record<string, unknown>,
+  Facade extends Record<string, unknown>,
+> = {
+  [K in keyof Facade]: K extends keyof Local
+    ? Local[K] extends Facade[K]
+      ? true
+      : never
+    : never;
+};
+const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
+  ReturnType<typeof buildLocalResources>,
+  Omit<TilaFacade, "close">
+> = {
+  tasks: true,
+  records: true,
+  claims: true,
+  artifacts: true,
+  gates: true,
+  signals: true,
+  journal: true,
+  presence: true,
+  schema: true,
+  summary: true,
+  search: true,
+  templates: true,
+  tokens: true,
+};
+void _assertLocalSurfaceMatchesFacade;

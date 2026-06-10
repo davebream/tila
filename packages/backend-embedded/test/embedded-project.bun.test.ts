@@ -399,7 +399,8 @@ kinds = ["document"]
         60000,
       );
       expect(
-        await project.renew("task-1", "agent-a", "agent-a", acq.fence, 120000),
+        (await project.renew("task-1", "agent-a", "agent-a", acq.fence, 120000))
+          .renewed,
       ).toBe(true);
       await project.release("task-1", acq.fence);
       expect(await project.state("task-1")).toBeNull();

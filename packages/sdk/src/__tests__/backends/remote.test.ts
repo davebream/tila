@@ -308,7 +308,7 @@ describe("RemoteBackend", () => {
       });
     });
 
-    it("renew() returns true on success", async () => {
+    it("renew() returns {renewed:true, expires_at} on success", async () => {
       client.post.mockResolvedValue({ ok: true, expires_at: 9999 });
 
       const backend = await createBackend(client);
@@ -320,7 +320,8 @@ describe("RemoteBackend", () => {
         300_000,
       );
 
-      expect(result).toBe(true);
+      // Returns the REAL stored expires_at from the response, not a recompute.
+      expect(result).toEqual({ renewed: true, expires_at: 9999 });
       // machine/user are NOT forwarded to the Worker endpoint
       expect(client.post).toHaveBeenCalledWith(
         "/projects/proj-test/claims/renew",

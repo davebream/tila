@@ -178,7 +178,7 @@ describe("InMemoryCoordinationBackend", () => {
       fence,
       60_000,
     );
-    expect(renewed).toBe(true);
+    expect(renewed.renewed).toBe(true);
 
     const claim = await backend.state("task:T-1");
     if (!claim) throw new Error("claim should not be null after renew");

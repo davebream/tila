@@ -523,9 +523,12 @@ export async function createTila(
     });
 
     const resources = buildLocalResources(project, artifacts);
-    // `resources` mirrors the HTTP facade shape by construction; the cast pins
-    // that contract (the same-surface test guards it at runtime).
-    return { ...resources, close } as unknown as TilaFacade;
+    // No `as unknown as` cast: `buildLocalResources` is compile-time asserted to
+    // be structurally assignable to `Omit<TilaFacade, "close">` (see the
+    // `_assertLocalSurfaceMatchesFacade` contract in resource-adapters.ts), so
+    // adding `close` yields a checked `TilaFacade`. Any adapter drift is now a
+    // build error here, not a silent runtime divergence.
+    return { ...resources, close };
   }
 
   // Cloudflare (HTTP) backend.

@@ -31,6 +31,7 @@ import type {
   RecordPage,
   RelationshipFilter,
   RelationshipInput,
+  RenewResult,
   SchemaBackend,
   SchemaRecord,
   SendSignalInput,
@@ -476,13 +477,17 @@ export class RemoteBackend
     _user: string,
     fence: number,
     ttlMs: number,
-  ): Promise<boolean> {
-    await this.client.post(
+  ): Promise<RenewResult> {
+    // The Worker returns 409 `renew-failed` (→ TilaApiError thrown by the HTTP
+    // layer) on loss-of-claim, so a resolved response always means renewed:true.
+    // Return the REAL stored `expires_at` from the response, matching
+    // EmbeddedProject (which returns coordinationOps' stored expiry).
+    const result = await this.client.post(
       `/projects/${this.projectId}/claims/renew`,
       { resource, fence, ttl_ms: ttlMs },
       { schema: RenewSuccessResponseSchema, validate: true },
     );
-    return true;
+    return { renewed: true, expires_at: result.expires_at };
   }
 
   async release(resource: string, fence: number): Promise<void> {

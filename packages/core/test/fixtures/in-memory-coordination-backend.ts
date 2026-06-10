@@ -2,6 +2,7 @@ import type { Claim, Presence } from "@tila/schemas";
 import type {
   AcquireResult,
   CoordinationBackend,
+  RenewResult,
 } from "../../src/interfaces/coordination-backend";
 
 const PRESENCE_TTL_MS = 60_000;
@@ -71,18 +72,20 @@ export class InMemoryCoordinationBackend implements CoordinationBackend {
     user: string,
     fence: number,
     ttlMs: number,
-  ): Promise<boolean> {
+  ): Promise<RenewResult> {
     const claim = this.claims.get(resource);
-    if (!claim) return false;
-    if (claim.machine !== machine || claim.user !== user) return false;
-    if (claim.fence !== fence) return false;
+    if (!claim) return { renewed: false, expires_at: 0 };
+    if (claim.machine !== machine || claim.user !== user)
+      return { renewed: false, expires_at: 0 };
+    if (claim.fence !== fence) return { renewed: false, expires_at: 0 };
 
+    const expires_at = Date.now() + ttlMs;
     const renewed: Claim = {
       ...claim,
-      expires_at: Date.now() + ttlMs,
+      expires_at,
     };
     this.claims.set(resource, renewed);
-    return true;
+    return { renewed: true, expires_at };
   }
 
   async release(resource: string, fence: number): Promise<void> {
