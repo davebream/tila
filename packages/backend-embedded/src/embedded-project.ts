@@ -904,6 +904,15 @@ export class EmbeddedProject
   }
 
   // ---------- Idempotency (C2: Drizzle, not raw $client) ----------
+  //
+  // AVAILABLE-BUT-UNWIRED (parity/future): these methods + the `_idempotency`
+  // table exist so the embedded backend CAN honor an idempotency key, but NO
+  // local resource adapter currently calls them — local mode relies on
+  // primary-key-level dedup instead (a retried create of an existing id fails
+  // rather than duplicating). This is a documented local divergence vs remote
+  // (which honors `idempotency_key` via D1); see docs/02-ARCHITECTURE.md §1.6a
+  // and the SDK README divergence list. Kept (not deleted) for parity and so a
+  // future full-idempotency wiring has the storage already in place.
 
   /**
    * Check for a stored idempotent response. Returns null if the key is absent.

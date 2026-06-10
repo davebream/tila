@@ -107,8 +107,8 @@ never loads from the main (zod-only) entry:
 import { createTilaLocal } from "tila-sdk/local";
 
 const { project, artifacts, close } = await createTilaLocal({
-  db_path: ".tila/project.db",       // SQLite file (created if absent)
-  artifacts_path: ".tila/artifacts", // blob root directory
+  dbPath: ".tila/project.db",        // SQLite file (created if absent)
+  artifactsPath: ".tila/artifacts",  // blob root directory
   project: "my-project",             // required — scopes artifact keys
   org: "my-org",                     // optional, defaults to "local"
 });
@@ -118,8 +118,10 @@ const { project, artifacts, close } = await createTilaLocal({
 close(); // closes the underlying better-sqlite3 connection
 ```
 
-> Note: the `createTilaLocal` option keys are `db_path`, `artifacts_path`, `org`,
-> `project` (snake_case to mirror the `[local]` config section).
+> Note: the `createTilaLocal` option keys are camelCase — `dbPath`, `artifactsPath`,
+> `org`, `project`. (The `createTila` facade's `config.local` section uses snake_case
+> `db_path` / `artifacts_path` to mirror the `[local]` config file; the direct
+> `createTilaLocal` options object is camelCase.)
 
 ### `better-sqlite3` — optional peer dependency
 
@@ -172,6 +174,7 @@ HTTP backend. These are intentional and called out so consumers are not surprise
 | `artifacts.writeText` | Returns `deduplicated: false` and drops `tags` | The embedded artifacts table has no `tags` column, and the local write path does not report dedup. |
 | `tasks.list` | Ignores `compact`, emits no pagination cursor | `compact` is an HTTP-only projection; the local list is non-paginated (no `next_cursor`/`total`). |
 | `templates.list` | `variables` derived from `{{placeholders}}` | Local derives variables by scanning each template's entity data for `{{name}}` placeholders (`/\{\{(\w+)\}\}/`). |
+| `idempotency_key` (e.g. on `claims.acquire`) | Accepted but **not honored** | Remote dedups retries via D1; local relies on primary-key-level dedup instead — a retried create of an existing id fails rather than duplicating. Full idempotency is single-machine-low-risk and remote-only. (The embedded `_idempotency` table + `check/storeIdempotency` exist but are intentionally unwired.) |
 
 ### Constructor Options
 
