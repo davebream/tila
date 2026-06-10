@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EMBEDDED_MIGRATIONS,
   IDEMPOTENCY_MIGRATION_VERSION,
   type Migration,
   type MigrationStorage,
+  isStalePreFeatureSchema,
   runEmbeddedMigrations,
+  warnIfStalePreFeatureSchema,
 } from "../src/index";
 
 /**
@@ -50,8 +52,8 @@ function createFakeStorage(): {
           };
         }
 
-        // Record a newly-applied version.
-        if (/^INSERT\s+INTO\s+_migrations/i.test(trimmed)) {
+        // Record a newly-applied version (bare INSERT or INSERT OR IGNORE).
+        if (/^INSERT(\s+OR\s+IGNORE)?\s+INTO\s+_migrations/i.test(trimmed)) {
           const version = bindings[0] as number;
           const appliedAt = bindings[1] as number;
           migrationsTable.set(version, appliedAt);
@@ -117,6 +119,60 @@ describe("EMBEDDED_MIGRATIONS", () => {
     const countAfterFirst = appliedOrder.length;
     runEmbeddedMigrations(storage);
     expect(appliedOrder.length).toBe(countAfterFirst);
+  });
+});
+
+describe("runEmbeddedMigrations concurrent-first-open race (INSERT OR IGNORE)", () => {
+  it("does not throw when a _migrations bookkeeping row already exists (PK-enforcing storage)", () => {
+    // Storage that enforces `version INTEGER PRIMARY KEY`: a bare INSERT of a
+    // duplicate version throws SQLITE_CONSTRAINT_PRIMARYKEY, while INSERT OR
+    // IGNORE silently no-ops. This simulates two runtimes opening the SAME FRESH
+    // DB concurrently — both pass the applied-versions snapshot, both run a
+    // migration, and the loser would throw on the bookkeeping insert if it were
+    // a bare INSERT.
+    const migrationsTable = new Map<number, number>();
+    let snapshotRead = false;
+
+    const storage: MigrationStorage = {
+      sql: {
+        exec(statement: string, ...bindings: unknown[]) {
+          const trimmed = statement.trim();
+          if (/^SELECT\s+version\s+FROM\s+_migrations/i.test(trimmed)) {
+            // First (snapshot) read sees an EMPTY table, so the runner attempts
+            // every migration. Immediately after, a racing runtime records v1 —
+            // simulated here by seeding the table once the snapshot is taken.
+            const rows = [...migrationsTable.keys()].map((version) => ({
+              version,
+            }));
+            if (!snapshotRead) {
+              snapshotRead = true;
+              migrationsTable.set(1, Date.now()); // racer wins v1
+            }
+            return { toArray: () => rows };
+          }
+          if (/^INSERT(\s+OR\s+IGNORE)?\s+INTO\s+_migrations/i.test(trimmed)) {
+            const orIgnore = /OR\s+IGNORE/i.test(trimmed);
+            const version = bindings[0] as number;
+            const appliedAt = bindings[1] as number;
+            if (migrationsTable.has(version)) {
+              // PK conflict: bare INSERT throws, OR IGNORE no-ops.
+              if (!orIgnore) {
+                throw new Error("SQLITE_CONSTRAINT_PRIMARYKEY");
+              }
+              return { toArray: () => [] };
+            }
+            migrationsTable.set(version, appliedAt);
+            return { toArray: () => [] };
+          }
+          return { toArray: () => [] };
+        },
+      },
+    };
+
+    expect(() => runEmbeddedMigrations(storage)).not.toThrow();
+    // The full set is recorded (v1 left as the racer's row, the rest inserted).
+    expect(migrationsTable.has(1)).toBe(true);
+    expect(migrationsTable.has(IDEMPOTENCY_MIGRATION_VERSION)).toBe(true);
   });
 });
 
@@ -197,5 +253,78 @@ describe("runEmbeddedMigrations partial-failure consistency (R4)", () => {
     expect(migrationsTable.has(100)).toBe(true);
     // v1 applied exactly once.
     expect(appliedOrder.filter((v) => v === 1)).toEqual([1]);
+  });
+});
+
+describe("pre-feature stale-schema detection", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /**
+   * Build a fake MigrationStorage that reports a fixed set of `_migrations`
+   * versions and a fixed set of `artifact_relationships` column names.
+   */
+  function fakeStorage(opts: {
+    versions: number[];
+    arColumns: string[] | null; // null = table absent
+  }): MigrationStorage {
+    return {
+      sql: {
+        exec(statement: string) {
+          const trimmed = statement.trim();
+          if (/SELECT\s+version\s+FROM\s+_migrations/i.test(trimmed)) {
+            return {
+              toArray: () => opts.versions.map((version) => ({ version })),
+            };
+          }
+          if (/PRAGMA\s+table_info\(artifact_relationships\)/i.test(trimmed)) {
+            return {
+              toArray: () => (opts.arColumns ?? []).map((name) => ({ name })),
+            };
+          }
+          return { toArray: () => [] };
+        },
+      },
+    };
+  }
+
+  it("flags a pre-feature DB: v1+v5 recorded but artifact_relationships lacks `target`", () => {
+    const storage = fakeStorage({
+      versions: [1, 5, 14],
+      arColumns: ["from_key", "to_key", "type", "created_at"], // no `target`
+    });
+    expect(isStalePreFeatureSchema(storage)).toBe(true);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    warnIfStalePreFeatureSchema(storage);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/tila init --local/);
+  });
+
+  it("does NOT flag a canonical DB: artifact_relationships has `target`", () => {
+    const storage = fakeStorage({
+      versions: [1, 5, 14],
+      arColumns: ["from_key", "target", "type", "created_at"],
+    });
+    expect(isStalePreFeatureSchema(storage)).toBe(false);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    warnIfStalePreFeatureSchema(storage);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("does NOT flag when v1/v5 are not both recorded", () => {
+    expect(
+      isStalePreFeatureSchema(
+        fakeStorage({ versions: [1], arColumns: ["from_key"] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does NOT flag when the artifact_relationships table is absent (no rows)", () => {
+    expect(
+      isStalePreFeatureSchema(
+        fakeStorage({ versions: [1, 5], arColumns: null }),
+      ),
+    ).toBe(false);
   });
 });

@@ -122,8 +122,15 @@ export function runEmbeddedMigrations(storage: MigrationStorage): void {
     }
     // Record only AFTER the migration succeeds — a throw above leaves this
     // version unrecorded so a re-run resumes cleanly (R4).
+    //
+    // INSERT OR IGNORE (not a bare INSERT): if two runtimes open the SAME FRESH
+    // DB concurrently, both can run a given migration before either records it,
+    // and the loser would otherwise throw SQLITE_CONSTRAINT_PRIMARYKEY here
+    // (`version` is INTEGER PRIMARY KEY) — a spurious open failure. Migration
+    // bodies are already idempotent (CREATE TABLE/INDEX IF NOT EXISTS), so
+    // ignoring the duplicate bookkeeping row is safe.
     storage.sql.exec(
-      "INSERT INTO _migrations (version, applied_at) VALUES (?, ?)",
+      "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
       migration.version,
       now,
     );
