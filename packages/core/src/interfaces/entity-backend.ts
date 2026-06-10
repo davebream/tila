@@ -1,4 +1,9 @@
-import type { Entity, EntityRelationship } from "@tila/schemas";
+import type {
+  CompactEntity,
+  Entity,
+  EntityArtifactReference,
+  EntityRelationship,
+} from "@tila/schemas";
 
 export interface CreateEntityInput {
   id: string;
@@ -29,6 +34,34 @@ export interface EntityListFilter {
   offset?: number;
 }
 
+/** Options for {@link EntityBackend.listReady}, mirroring `readyOps.computeReadyEntities`. */
+export interface ReadyFilter {
+  type?: string;
+  /** Matches `json_extract(data, '$.parent_id')`. */
+  parent?: string;
+  limit?: number;
+  /** Include soft-blocked entities (default: false, i.e. excluded). */
+  includeSoftBlocked?: boolean;
+}
+
+/** Input for {@link EntityBackend.addArtifactRef}. */
+export interface AddArtifactRefInput {
+  entity_id: string;
+  artifact_key: string;
+  slot: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * The relationship tree for a project (or a sub-tree rooted at `rootId`).
+ * `nodes` are compact entities; `edges` are the parent-child relationships
+ * that connect them. Callers build the nesting from the edges.
+ */
+export interface EntityTree {
+  nodes: CompactEntity[];
+  edges: EntityRelationship[];
+}
+
 export interface EntityBackend {
   create(input: CreateEntityInput): Promise<Entity>;
   get(id: string): Promise<Entity | null>;
@@ -38,4 +71,22 @@ export interface EntityBackend {
   addRelationship(input: RelationshipInput): Promise<{ created: boolean }>;
   listRelationships(filter?: RelationshipFilter): Promise<EntityRelationship[]>;
   removeRelationship(input: RelationshipInput): Promise<{ removed: boolean }>;
+
+  /** Tasks whose blockers are all resolved (ready to work). */
+  listReady(filter?: ReadyFilter): Promise<Entity[]>;
+  /** Parent-child relationship tree (compact nodes + parent-child edges). */
+  tree(rootId?: string): Promise<EntityTree>;
+  /**
+   * Fenced entity update: validates `fence` against the entity's claim like any
+   * destructive write. Throws a fence-conflict when `fence` is stale.
+   */
+  updateWithFence(
+    id: string,
+    data: Partial<Entity["data"]>,
+    fence: number,
+  ): Promise<Entity>;
+  /** Attach an artifact reference (entity_id, artifact_key, slot) to a task. */
+  addArtifactRef(input: AddArtifactRefInput): Promise<void>;
+  /** List artifact references for a task. */
+  listArtifactRefs(entityId: string): Promise<EntityArtifactReference[]>;
 }

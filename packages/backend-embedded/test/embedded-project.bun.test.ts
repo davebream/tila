@@ -136,6 +136,145 @@ describe("EmbeddedProject", () => {
     });
   });
 
+  // --- EntityBackend: ready / tree / fenced update / artifact-refs (Task 6) ---
+
+  describe("EntityBackend ready/tree/fence/artifact-refs", () => {
+    it("listReady returns only unblocked tasks", async () => {
+      for (const id of ["blocker", "blocked", "free"]) {
+        await project.create({
+          id,
+          type: "task",
+          data: { status: "open", title: id },
+          created_by: "cli",
+        });
+      }
+      // blocker --blocks--> blocked
+      await project.addRelationship({
+        from_id: "blocker",
+        to_id: "blocked",
+        type: "blocks",
+      });
+
+      const ready = await project.listReady({ type: "task" });
+      const ids = ready.map((e) => e.id).sort();
+      // blocker (no open blocker) + free are ready; blocked is not.
+      expect(ids).toEqual(["blocker", "free"]);
+
+      // Closing the blocker unblocks "blocked".
+      const acq = await project.acquire(
+        "task:blocker",
+        "local",
+        "local",
+        "exclusive",
+        60000,
+      );
+      await project.updateWithFence("blocker", { status: "closed" }, acq.fence);
+      const readyAfter = (await project.listReady({ type: "task" }))
+        .map((e) => e.id)
+        .sort();
+      expect(readyAfter).toEqual(["blocked", "free"]);
+    });
+
+    it("tree returns compact nodes + parent-child edges", async () => {
+      await project.create({
+        id: "root",
+        type: "task",
+        data: { status: "open", title: "Root" },
+        created_by: "cli",
+      });
+      await project.create({
+        id: "child",
+        type: "task",
+        data: { status: "open", title: "Child" },
+        created_by: "cli",
+      });
+      await project.addRelationship({
+        from_id: "root",
+        to_id: "child",
+        type: "parent-child",
+      });
+
+      const { nodes, edges } = await project.tree();
+      const nodeIds = nodes.map((n) => n.id).sort();
+      expect(nodeIds).toEqual(["child", "root"]);
+      // Compact node shape carries title/status.
+      const rootNode = nodes.find((n) => n.id === "root");
+      expect(rootNode?.title).toBe("Root");
+      expect(edges).toHaveLength(1);
+      expect(edges[0]).toMatchObject({
+        from_id: "root",
+        to_id: "child",
+        type: "parent-child",
+      });
+    });
+
+    it("updateWithFence enforces the fence (stale fence throws)", async () => {
+      await project.create({
+        id: "fenced",
+        type: "task",
+        data: { status: "open" },
+        created_by: "cli",
+      });
+      const acq = await project.acquire(
+        "task:fenced",
+        "local",
+        "local",
+        "exclusive",
+        60000,
+      );
+
+      // Valid fence updates.
+      const updated = await project.updateWithFence(
+        "fenced",
+        { status: "in-progress" },
+        acq.fence,
+      );
+      expect(updated.data.status).toBe("in-progress");
+
+      // Stale fence is rejected.
+      expect(
+        project.updateWithFence("fenced", { status: "done" }, acq.fence - 1),
+      ).rejects.toThrow();
+    });
+
+    it("addArtifactRef / listArtifactRefs round-trip", async () => {
+      await project.create({
+        id: "withref",
+        type: "task",
+        data: { status: "open" },
+        created_by: "cli",
+      });
+      // The artifact_key FK references artifact_pointers(r2_key), so the blob
+      // must exist before it can be referenced (mirrors the DO 404 guard).
+      await h.artifacts.put({
+        key: "plans/withref/abc.md",
+        body: "hello",
+        sha256: "deadbeef",
+        metadata: {},
+        contentType: "text/markdown",
+      });
+      await project.addArtifactRef({
+        entity_id: "withref",
+        artifact_key: "plans/withref/abc.md",
+        slot: "plan",
+        metadata: { note: "hi" },
+      });
+
+      const refs = await project.listArtifactRefs("withref");
+      expect(refs).toHaveLength(1);
+      expect(refs[0]).toMatchObject({
+        entity_id: "withref",
+        artifact_key: "plans/withref/abc.md",
+        slot: "plan",
+        metadata: { note: "hi" },
+      });
+      expect(typeof refs[0].created_at).toBe("number");
+
+      // Empty for an unrelated entity.
+      expect(await project.listArtifactRefs("nope")).toEqual([]);
+    });
+  });
+
   // --- CoordinationBackend ---
 
   describe("CoordinationBackend", () => {

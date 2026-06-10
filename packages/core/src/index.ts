@@ -5,6 +5,9 @@ export type {
   EntityListFilter,
   RelationshipInput,
   RelationshipFilter,
+  ReadyFilter,
+  AddArtifactRefInput,
+  EntityTree,
 } from "./interfaces/entity-backend";
 export type {
   CoordinationBackend,

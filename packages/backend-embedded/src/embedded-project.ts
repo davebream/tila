@@ -1,5 +1,6 @@
 import {
   type AcquireResult,
+  type AddArtifactRefInput,
   type ApplySchemaInput,
   type ApplySchemaOutput,
   type ArchiveRecordInput,
@@ -8,6 +9,7 @@ import {
   type CreateRecordInput,
   type EntityBackend,
   type EntityListFilter,
+  type EntityTree,
   type GateBackend,
   type GateFilter,
   type GateRecord,
@@ -16,6 +18,7 @@ import {
   type JournalQuery,
   type PatchRecordInput,
   type ProjectSummary,
+  type ReadyFilter,
   type RecordBackend,
   type RecordHistoryOptions,
   type RecordListFilter,
@@ -50,7 +53,9 @@ import type { TilaSchemaToml } from "@tila/schemas";
 
 import type {
   Claim,
+  CompactEntity,
   Entity,
+  EntityArtifactReference,
   EntityRelationship,
   Presence,
   RecordHistoryItem,
@@ -264,6 +269,92 @@ export class EmbeddedProject
         "local",
       ),
     );
+  }
+
+  /**
+   * Tasks whose blockers are all resolved. Mirrors the DO `/entity/ready`
+   * route (entity-routes.ts ~225): delegates to `readyOps.computeReadyEntities`
+   * with the same option mapping. Read-only.
+   */
+  async listReady(filter?: ReadyFilter): Promise<Entity[]> {
+    return readyOps.computeReadyEntities(this.db, {
+      type: filter?.type,
+      parent: filter?.parent,
+      limit: filter?.limit,
+      includeSoftBlocked: filter?.includeSoftBlocked,
+    });
+  }
+
+  /**
+   * Parent-child relationship tree: compact nodes (mirroring the DO compact
+   * list, entity-routes.ts ~200, via `entityOps.compactEntity` over the active
+   * claims) plus the parent-child edges (`relationshipOps`). The caller builds
+   * the nesting from `edges`. `rootId` is accepted for parity but the full set
+   * of nodes/edges is returned so the caller can scope the render locally.
+   * Read-only.
+   */
+  async tree(_rootId?: string): Promise<EntityTree> {
+    const activeClaims = coordinationOps.listClaims(this.db);
+    const { entities } = entityOps.list(this.db, { archived: 0 });
+    const nodes: CompactEntity[] = entities.map((e) =>
+      entityOps.compactEntity(this.db, e, activeClaims),
+    );
+    const edges = relationshipOps.listEntityRelationships(this.db, {
+      type: "parent-child",
+    });
+    return { nodes, edges };
+  }
+
+  /**
+   * Fenced entity update. Mirrors the DO `/entity/update/:id` route
+   * (entity-routes.ts ~250): passes the caller-supplied `fence` straight to
+   * `entityOps.update`, which validates it via `assertResourceFence` and throws
+   * a fence-conflict on a stale fence. Unlike `update()`, this does NOT
+   * auto-acquire a claim — the caller owns the fence.
+   */
+  async updateWithFence(
+    id: string,
+    data: Partial<Entity["data"]>,
+    fence: number,
+  ): Promise<Entity> {
+    return this.retry(() =>
+      entityOps.update(this.db, id, data as Record<string, unknown>, fence, {
+        actor: "local",
+        tokenId: null,
+        source: null,
+        sourceVersion: null,
+      }),
+    );
+  }
+
+  /**
+   * Attach an artifact reference to a task. Mirrors the DO
+   * `/entity/artifact-ref` route (entity-routes.ts ~534) via
+   * `relationshipOps.insertEntityArtifactReference`.
+   */
+  async addArtifactRef(input: AddArtifactRefInput): Promise<void> {
+    this.retry(() =>
+      relationshipOps.insertEntityArtifactReference(
+        this.db,
+        {
+          entity_id: input.entity_id,
+          artifact_key: input.artifact_key,
+          slot: input.slot,
+          metadata: input.metadata,
+        },
+        "local",
+      ),
+    );
+  }
+
+  /**
+   * List artifact references for a task. Mirrors the DO
+   * `/entity/artifact-refs` route (entity-routes.ts ~607). Read-only.
+   */
+  async listArtifactRefs(entityId: string): Promise<EntityArtifactReference[]> {
+    return relationshipOps.listEntityArtifactReferences(this.db, {
+      entity_id: entityId,
+    });
   }
 
   // ---------- CoordinationBackend ----------

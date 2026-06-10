@@ -1,5 +1,6 @@
 import type {
   AcquireResult,
+  AddArtifactRefInput,
   ApplySchemaInput,
   ApplySchemaOutput,
   ArchiveRecordInput,
@@ -14,6 +15,7 @@ import type {
   CreateRecordInput,
   EntityBackend,
   EntityListFilter,
+  EntityTree,
   GateBackend,
   GateFilter,
   GateRecord,
@@ -22,6 +24,7 @@ import type {
   JournalQuery,
   PatchRecordInput,
   ProjectSummary,
+  ReadyFilter,
   RecordBackend,
   RecordHistoryOptions,
   RecordListFilter,
@@ -40,6 +43,7 @@ import type {
   ArtifactGrepResponse,
   Claim,
   Entity,
+  EntityArtifactReference,
   EntityRelationship,
   Presence,
   RecordHistoryItem,
@@ -54,6 +58,7 @@ import {
   ArtifactPutResponseSchema,
   CreateEntityRelationshipResponseSchema,
   DeleteEntityRelationshipResponseSchema,
+  EntityArtifactReferenceListResponseSchema,
   EntityDetailResponseSchema,
   EntityResponseSchema,
   GateListResponseSchema,
@@ -61,6 +66,8 @@ import {
   InboxResponseSchema,
   JournalResponseSchema,
   ListEntityRelationshipsResponseSchema,
+  ListReadyEntitiesResponseSchema,
+  PaginatedCompactEntityListResponseSchema,
   PaginatedEntityListResponseSchema,
   PresenceAllListResponseSchema,
   PresenceHeartbeatSuccessResponseSchema,
@@ -339,6 +346,84 @@ export class RemoteBackend
       { schema: DeleteEntityRelationshipResponseSchema, validate: true },
     );
     return { removed: result.removed };
+  }
+
+  // GET /projects/:projectId/tasks/ready (worker entities.ts ~129 -> DO /entity/ready)
+  async listReady(filter?: ReadyFilter): Promise<Entity[]> {
+    const query: Record<string, string | undefined> = {};
+    if (filter?.type) query.type = filter.type;
+    if (filter?.parent) query.parent = filter.parent;
+    if (filter?.limit !== undefined) query.limit = String(filter.limit);
+    if (filter?.includeSoftBlocked) query["include-soft-blocked"] = "true";
+    const result = await this.client.get(
+      `/projects/${this.projectId}/tasks/ready`,
+      { schema: ListReadyEntitiesResponseSchema, validate: true, query },
+    );
+    // The ready response omits `tags` (parity with readyOps.computeReadyEntities,
+    // which returns tags: []). Backfill so each item satisfies `Entity`.
+    return result.entities.map((e) => ({ ...e, tags: [] }));
+  }
+
+  // Tree = compact list (GET /tasks?compact=true) + parent-child edges
+  // (GET /tasks/relationships?type=parent-child). The Worker has no dedicated
+  // tree endpoint; these are the two routes the DO/worker already expose.
+  async tree(_rootId?: string): Promise<EntityTree> {
+    const listResult = await this.client.get(
+      `/projects/${this.projectId}/tasks`,
+      {
+        schema: PaginatedCompactEntityListResponseSchema,
+        validate: true,
+        query: { compact: "true" },
+      },
+    );
+    const relResult = await this.client.get(
+      `/projects/${this.projectId}/tasks/relationships`,
+      {
+        schema: ListEntityRelationshipsResponseSchema,
+        validate: true,
+        query: { type: "parent-child" },
+      },
+    );
+    return { nodes: listResult.entities, edges: relResult.relationships };
+  }
+
+  // PATCH /projects/:projectId/tasks/:id with a caller-supplied fence.
+  // Unlike update() (which auto-acquires), the caller owns the fence here, so a
+  // stale fence surfaces the Worker's fence-conflict error verbatim.
+  async updateWithFence(
+    id: string,
+    data: Partial<Entity["data"]>,
+    fence: number,
+  ): Promise<Entity> {
+    const result = await this.client.patch(
+      `/projects/${this.projectId}/tasks/${encodeURIComponent(id)}`,
+      { data, fence },
+      { schema: EntityResponseSchema, validate: true },
+    );
+    return result.entity;
+  }
+
+  // POST /projects/:projectId/tasks/:entityId/artifact-refs (worker entities.ts ~264)
+  async addArtifactRef(input: AddArtifactRefInput): Promise<void> {
+    const body: Record<string, unknown> = {
+      artifact_key: input.artifact_key,
+      slot: input.slot,
+    };
+    if (input.metadata !== undefined) body.metadata = input.metadata;
+    await this.client.post(
+      `/projects/${this.projectId}/tasks/${encodeURIComponent(input.entity_id)}/artifact-refs`,
+      body,
+      { schema: OkSchema, validate: true },
+    );
+  }
+
+  // GET /projects/:projectId/tasks/:entityId/artifact-refs (worker entities.ts ~340)
+  async listArtifactRefs(entityId: string): Promise<EntityArtifactReference[]> {
+    const result = await this.client.get(
+      `/projects/${this.projectId}/tasks/${encodeURIComponent(entityId)}/artifact-refs`,
+      { schema: EntityArtifactReferenceListResponseSchema, validate: true },
+    );
+    return result.references;
   }
 
   // --- CoordinationBackend ---
