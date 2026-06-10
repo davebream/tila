@@ -12,7 +12,12 @@ export function createSchemaMethods(client: TilaClient, projectId: string) {
       schema: unknown,
       strategy?: string,
     ): Promise<{ ok: true; version: number; diff: unknown }> {
-      return client.post(`${base}/apply`, { schema, strategy });
+      // The Worker mounts schema apply at POST /schema (NOT /schema/apply), and
+      // reads the TOML from the `definition` body field (NOT `schema`). The DO
+      // hop behind it is /schema/apply, but the public Worker route is /schema.
+      const definition =
+        typeof schema === "string" ? schema : JSON.stringify(schema);
+      return client.post(base, { definition, strategy });
     },
 
     async history(opts?: { limit?: string }): Promise<{

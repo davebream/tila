@@ -57,6 +57,7 @@ import type {
   InstantiateTemplateRequest,
   InstantiateTemplateResponse,
   JournalResponse,
+  ListEntityRelationshipsResponse,
   PresenceAllListResponse,
   PresenceHeartbeatSuccessResponse,
   PresenceListResponse,
@@ -142,6 +143,11 @@ function createLocalTaskMethods(project: EmbeddedProject) {
       limit?: string;
       cursor?: string;
       tagFilter?: string[];
+      // Local DIVERGENCE: `compact` is an HTTP-only projection (the Worker's
+      // compact list). The embedded backend has no compact list, so this is
+      // accepted (surface parity) but ignored — local always returns full
+      // entities.
+      compact?: boolean;
     }): Promise<EntityListResponse> {
       // DIVERGENCE (Task 14): `cursor` is accepted by the factory signature but
       // the wire `EntityListResponse` carries NO pagination meta (no
@@ -185,6 +191,34 @@ function createLocalTaskMethods(project: EmbeddedProject) {
         type,
       });
       return { ok: true, created };
+    },
+
+    async listRelationships(filter?: {
+      fromId?: string;
+      toId?: string;
+      type?: string;
+    }): Promise<ListEntityRelationshipsResponse> {
+      const relationships = await project.listRelationships({
+        from_id: filter?.fromId,
+        to_id: filter?.toId,
+        type: filter?.type,
+      });
+      return { ok: true, relationships };
+    },
+
+    async ready(query?: {
+      type?: string;
+      parent?: string;
+      limit?: number;
+      includeSoftBlocked?: boolean;
+    }): Promise<EntityListResponse> {
+      const entities = await project.listReady({
+        type: query?.type,
+        parent: query?.parent,
+        limit: query?.limit,
+        includeSoftBlocked: query?.includeSoftBlocked,
+      });
+      return { ok: true, entities };
     },
 
     async addArtifactRef(
@@ -469,9 +503,15 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
         mimeType?: string;
         resource?: string;
         fence?: number;
+        tags?: string[];
       },
     ): Promise<ArtifactPutResponse> {
-      const { key, bytes } = await artifacts.writeText(content, opts);
+      // Local DIVERGENCE (Task 14): the embedded artifact backend's writeText /
+      // put / upsertPointer chain carries no `tags` column, so artifact tags are
+      // not persisted locally. The opt is accepted (to keep the surface aligned
+      // with the HTTP factory) but is a no-op here.
+      const { tags: _tags, ...writeOpts } = opts;
+      const { key, bytes } = await artifacts.writeText(content, writeOpts);
       // The embedded backend's put is INSERT-OR-IGNORE on the content-addressed
       // key, so it does not surface a dedup flag; report false (the response
       // contract requires the field).
@@ -699,14 +739,15 @@ function createLocalSignalMethods(project: EmbeddedProject) {
 function createLocalJournalMethods(project: EmbeddedProject) {
   return {
     async query(opts?: {
-      entity_id?: string;
-      event_kind?: string;
+      resource?: string;
+      kind?: string;
+      after_seq?: string;
       limit?: string;
-      cursor?: string;
     }): Promise<JournalResponse> {
       const events = await project.listJournal({
-        resource: opts?.entity_id,
-        kind: opts?.event_kind,
+        resource: opts?.resource,
+        kind: opts?.kind,
+        after_seq: opts?.after_seq ? Number(opts.after_seq) : undefined,
         limit: opts?.limit ? Number(opts.limit) : undefined,
       });
       // The embedded `JournalEvent` is the minimal projection (no token_id /
@@ -732,9 +773,9 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
   return {
     async heartbeat(
       machine: string,
-      _ttlMs?: number,
+      info?: Record<string, unknown>,
     ): Promise<PresenceHeartbeatSuccessResponse> {
-      await project.heartbeat(machine);
+      await project.heartbeat(machine, info);
       return { ok: true };
     },
 
