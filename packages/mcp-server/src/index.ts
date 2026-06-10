@@ -18,6 +18,14 @@ async function main(): Promise<void> {
   // Fail-fast: resolve config before starting transport.
   // Throws with actionable error if token, URL, or project ID is missing.
   const config = await resolveServerConfig();
+
+  // Local backend wiring lands in a later task; remote is the only mode wired today.
+  if (config.mode === "local") {
+    throw new Error(
+      "Local backend (backend = local) is not yet supported by the MCP server.",
+    );
+  }
+
   const token = await config.getToken();
 
   const client = new TilaClient({
