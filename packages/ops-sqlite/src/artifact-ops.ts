@@ -149,7 +149,13 @@ export function getLatestPointer(
   kind: string,
   resource: string,
 ): ArtifactPointer | null {
-  const row = db.get<{
+  // NOTE: use `db.all(...)[0]` rather than `db.get(...)`. Under
+  // `drizzle-orm/bun-sqlite`, `db.get(sql\`raw\`)` returns a POSITIONAL array
+  // (not a column-keyed object), so `row.r2_key` would be undefined in the
+  // embedded backend. `db.all(...)` returns column-keyed objects across every
+  // sync driver (DO cf-workers, bun:sqlite, better-sqlite3). `LIMIT 1` keeps it
+  // single-row.
+  const rows = db.all<{
     r2_key: string;
     resource: string | null;
     kind: string;
@@ -177,6 +183,7 @@ export function getLatestPointer(
         LIMIT 1`,
   );
 
+  const row = rows[0];
   if (!row) return null;
 
   // Read tags for this pointer (single query)
