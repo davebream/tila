@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,7 +7,11 @@ import {
   findEnclosingMountFsType,
 } from "@tila/backend-embedded";
 import { afterEach, describe, expect, it } from "vitest";
-import { LocalFilesystemError, createLocalConnection } from "../src/connection";
+import {
+  LocalDatabaseOpenError,
+  LocalFilesystemError,
+  createLocalConnection,
+} from "../src/connection";
 
 describe("createLocalConnection", () => {
   let tempDir: string;
@@ -125,6 +129,47 @@ describe("createLocalConnection", () => {
       .all() as { version: number }[];
     expect(migrations.length).toBeGreaterThanOrEqual(2);
     db2.$client.close();
+  });
+});
+
+describe("createLocalConnection — corrupt file yields a clean error (R5)", () => {
+  let tempDir: string;
+
+  afterEach(() => {
+    if (tempDir && existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("wraps a corrupt-DB failure in the CLEAN LocalDatabaseOpenError (not the raw bun:sqlite throw)", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "tila-corrupt-"));
+    const badPath = join(tempDir, "not-a-db.db");
+    // Valid SQLite header magic + garbage body. The failure surfaces when a
+    // page-touching PRAGMA/migration runs — which the open+PRAGMA+migration wrap
+    // must cover, mirroring the Node connection.
+    writeFileSync(
+      badPath,
+      Buffer.concat([
+        Buffer.from("SQLite format 3\0", "utf-8"),
+        Buffer.from("garbage-not-a-real-database-file-body"),
+      ]),
+    );
+
+    let caught: unknown;
+    try {
+      createLocalConnection(badPath, "test-org", "test-project", {
+        skipFilesystemCheck: true,
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(LocalDatabaseOpenError);
+    const e = caught as LocalDatabaseOpenError;
+    expect(e.message).toContain("Failed to open local SQLite database at");
+    expect(e.message).toContain(badPath);
+    // The raw native error is preserved as the cause (not swallowed).
+    expect(e.cause).toBeInstanceOf(Error);
   });
 });
 

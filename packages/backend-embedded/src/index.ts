@@ -21,5 +21,10 @@ export {
   runEmbeddedMigrations,
 } from "./migrations";
 export type { Migration, MigrationStorage } from "./migrations";
+export {
+  PRE_FEATURE_SCHEMA_WARNING,
+  isStalePreFeatureSchema,
+  warnIfStalePreFeatureSchema,
+} from "./pre-feature-check";
 export type { SleepSync } from "./retry";
 export { withBusyRetry } from "./retry";

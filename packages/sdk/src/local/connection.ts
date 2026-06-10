@@ -2,6 +2,7 @@ import type { EmbeddedDb, MigrationStorage } from "@tila/backend-embedded";
 import {
   EMBEDDED_PRAGMAS,
   runEmbeddedMigrations,
+  warnIfStalePreFeatureSchema,
 } from "@tila/backend-embedded";
 import { schema } from "@tila/ops-sqlite";
 
@@ -138,7 +139,13 @@ export async function createNodeConnection(
     // 5. Run the shared embedded migration set against the raw Database (before
     //    Drizzle wrapping). The runner is storage-agnostic; we supply a
     //    better-sqlite3-backed MigrationStorage shim.
-    runEmbeddedMigrations(createNodeMigrationStorage(rawDb));
+    const migrationStorage = createNodeMigrationStorage(rawDb);
+    runEmbeddedMigrations(migrationStorage);
+
+    // 5b. One-time, best-effort warning if this is a pre-feature DB that did not
+    //     fully upgrade (canonical v1+v5 recorded but artifact_relationships
+    //     lacks `target`). Shared detection with the Bun path; never throws.
+    warnIfStalePreFeatureSchema(migrationStorage);
   } catch (err) {
     // Best-effort close of a partially-opened handle before surfacing the
     // clean error, so a failed open does not leak a file descriptor.

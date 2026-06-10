@@ -8,6 +8,7 @@ import {
   NETWORK_FS_TYPES_MACOS,
   findEnclosingMountFsType,
   runEmbeddedMigrations,
+  warnIfStalePreFeatureSchema,
 } from "@tila/backend-embedded";
 import { schema } from "@tila/ops-sqlite";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
@@ -17,6 +18,26 @@ export class LocalFilesystemError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "LocalFilesystemError";
+  }
+}
+
+/**
+ * Raised when opening/initializing the local SQLite database fails — a corrupt
+ * or locked file, an unreadable path, or a failed PRAGMA/migration. Wraps the
+ * raw `bun:sqlite` throw (preserved as `cause`) in a clean, actionable error
+ * that names the offending `dbPath`, so callers never see a bare native throw
+ * escape from `createLocalConnection`. This mirrors the Node connection's
+ * `LocalDatabaseOpenError` (R5) so both runtimes fail identically.
+ */
+export class LocalDatabaseOpenError extends Error {
+  constructor(dbPath: string, cause: unknown) {
+    super(
+      `Failed to open local SQLite database at ${dbPath}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    this.name = "LocalDatabaseOpenError";
+    this.cause = cause;
   }
 }
 
@@ -48,26 +69,47 @@ export function createLocalConnection(
     assertLocalFilesystem(dbPath);
   }
 
-  // 2. Open raw bun:sqlite Database
-  const rawDb = new Database(dbPath, {
-    create: true,
-    readonly: opts?.readonly ?? false,
-  });
+  // 2-4. Open + PRAGMAs + migrations are wrapped in ONE try/catch so any native
+  //    failure (corrupt/locked file, failed PRAGMA, failed migration) becomes a
+  //    CLEAN LocalDatabaseOpenError (R5) — mirroring the Node connection. On
+  //    failure we best-effort close the partially-opened handle so a failed open
+  //    does not leak a file descriptor.
+  let rawDb: Database | undefined;
+  try {
+    // 2. Open raw bun:sqlite Database
+    rawDb = new Database(dbPath, {
+      create: true,
+      readonly: opts?.readonly ?? false,
+    });
 
-  // 3. PRAGMA initialization — derived from the SHARED, ordered EMBEDDED_PRAGMAS
-  //    sequence (the single source of truth shared with the node connection, so
-  //    the two runtimes can never drift; R2). The order is fixed: busy_timeout
-  //    FIRST (before any write-requiring PRAGMA) so concurrent processes don't
-  //    fail immediately with SQLITE_BUSY under the default busy_timeout=0, then
-  //    journal_mode=WAL, then foreign_keys=ON. Bun keeps its batched apply (a
-  //    single exec of the joined statements) but iterates the same constant, so
-  //    it can never reorder or omit a pragma relative to the node path.
-  rawDb.exec(EMBEDDED_PRAGMAS.join("\n"));
+    // 3. PRAGMA initialization — derived from the SHARED, ordered EMBEDDED_PRAGMAS
+    //    sequence (the single source of truth shared with the node connection, so
+    //    the two runtimes can never drift; R2). The order is fixed: busy_timeout
+    //    FIRST (before any write-requiring PRAGMA) so concurrent processes don't
+    //    fail immediately with SQLITE_BUSY under the default busy_timeout=0, then
+    //    journal_mode=WAL, then foreign_keys=ON. Bun keeps its batched apply (a
+    //    single exec of the joined statements) but iterates the same constant, so
+    //    it can never reorder or omit a pragma relative to the node path.
+    rawDb.exec(EMBEDDED_PRAGMAS.join("\n"));
 
-  // 4. Run the shared embedded migration set against the raw Database
-  //    (before Drizzle wrapping). The embedded runner is storage-agnostic; we
-  //    supply a bun:sqlite-backed MigrationStorage shim.
-  runEmbeddedMigrations(createBunMigrationStorage(rawDb));
+    // 4. Run the shared embedded migration set against the raw Database
+    //    (before Drizzle wrapping). The embedded runner is storage-agnostic; we
+    //    supply a bun:sqlite-backed MigrationStorage shim.
+    const migrationStorage = createBunMigrationStorage(rawDb);
+    runEmbeddedMigrations(migrationStorage);
+
+    // 4b. One-time, best-effort warning if this is a pre-feature DB that did
+    //     not fully upgrade (canonical v1+v5 recorded but artifact_relationships
+    //     lacks `target`). Shared detection with the Node path; never throws.
+    warnIfStalePreFeatureSchema(migrationStorage);
+  } catch (err) {
+    try {
+      rawDb?.close();
+    } catch {
+      // ignore — the original failure is what matters
+    }
+    throw new LocalDatabaseOpenError(dbPath, err);
+  }
 
   // 5. Wrap in Drizzle
   const db = drizzle(rawDb, { schema });
