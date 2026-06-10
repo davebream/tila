@@ -583,6 +583,169 @@ type = "string"
     });
   });
 
+  // --- RecordBackend schema-constraint parity with the DO route ---
+
+  describe("RecordBackend constraint validation (DO parity)", () => {
+    const SCHEMA_REQUIRED = `
+schema_version = 1
+
+[records.config.fields.region]
+type = "string"
+required = true
+`;
+
+    it("createRecord rejects an undeclared record type (matches DO 422)", async () => {
+      await project.applySchema({ definition: SCHEMA_REQUIRED });
+      await expect(
+        project.createRecord({
+          type: "not_declared",
+          key: "k",
+          value: { region: "us" },
+        }),
+      ).rejects.toThrow(/not declared/);
+    });
+
+    it("createRecord rejects a value missing a required field (matches DO 422)", async () => {
+      await project.applySchema({ definition: SCHEMA_REQUIRED });
+      await expect(
+        project.createRecord({
+          type: "config",
+          key: "missing",
+          value: { other: "x" },
+        }),
+      ).rejects.toThrow(/Required field "region"/);
+    });
+
+    it("createRecord ACCEPTS a valid value (positive case)", async () => {
+      await project.applySchema({ definition: SCHEMA_REQUIRED });
+      const r = await project.createRecord({
+        type: "config",
+        key: "ok",
+        value: { region: "us" },
+      });
+      expect(r.value).toEqual({ region: "us" });
+      expect(r.revision).toBe(1);
+    });
+
+    it("setRecord rejects a value missing a required field (matches DO 422)", async () => {
+      await project.applySchema({ definition: SCHEMA_REQUIRED });
+      const created = await project.createRecord({
+        type: "config",
+        key: "s1",
+        value: { region: "us" },
+      });
+      await expect(
+        project.setRecord({
+          type: "config",
+          key: "s1",
+          value: { other: "y" },
+          fence: created.fence,
+        }),
+      ).rejects.toThrow(/Required field "region"/);
+    });
+
+    it("setRecord rejects an undeclared record type (matches DO 422)", async () => {
+      await project.applySchema({ definition: SCHEMA_REQUIRED });
+      await expect(
+        project.setRecord({
+          type: "not_declared",
+          key: "k",
+          value: { region: "us" },
+          fence: 1,
+        }),
+      ).rejects.toThrow(/not declared/);
+    });
+
+    it("patchRecord type-checks but does NOT value-validate (DO parity)", async () => {
+      await project.applySchema({ definition: SCHEMA_REQUIRED });
+      const created = await project.createRecord({
+        type: "config",
+        key: "p1",
+        value: { region: "us" },
+      });
+      // patch that drops the required field via null still succeeds — the DO
+      // patch path does not run validateRecordValue on the merged result.
+      const patched = await project.patchRecord({
+        type: "config",
+        key: "p1",
+        patch: { region: null },
+        fence: created.fence,
+      });
+      expect(patched.value).toEqual({});
+      // but an undeclared type IS rejected on patch
+      await expect(
+        project.patchRecord({
+          type: "not_declared",
+          key: "p1",
+          patch: { a: 1 },
+          fence: 1,
+        }),
+      ).rejects.toThrow(/not declared/);
+    });
+
+    it("no validation when no schema is applied (permissive, DO parity)", async () => {
+      const r = await project.createRecord({
+        type: "anything",
+        key: "k",
+        value: { whatever: true },
+      });
+      expect(r.revision).toBe(1);
+    });
+  });
+
+  describe("RecordBackend legacy-default enrichment on getRecord (DO parity)", () => {
+    it("getRecord enriches missing fields with default_for_legacy", async () => {
+      // v1: config has only `region`.
+      await project.applySchema({
+        definition: `
+schema_version = 1
+
+[records.config.fields.region]
+type = "string"
+required = true
+`,
+      });
+      const created = await project.createRecord({
+        type: "config",
+        key: "legacy",
+        value: { region: "us" },
+      });
+      expect(created.value).toEqual({ region: "us" });
+
+      // v2: add `tier` with default_for_legacy.
+      const apply = await project.applySchema({
+        definition: `
+schema_version = 2
+
+[records.config.fields.region]
+type = "string"
+required = true
+
+[records.config.fields.tier]
+type = "string"
+required = true
+default_for_legacy = "standard"
+`,
+      });
+      expect(apply.ok).toBe(true);
+
+      // getRecord applies the legacy default for the missing `tier` field,
+      // exactly as the DO GET route does (record-routes.ts ~536-539).
+      const enriched = await project.getRecord("config", "legacy");
+      expect(enriched?.value).toEqual({ region: "us", tier: "standard" });
+
+      // list/history are NOT enriched (DO parity): the stored value is raw.
+      const list = await project.listRecords({ type: "config" });
+      expect(list.items[0].key).toBe("legacy");
+      const history = await project.listRecordHistory("config", "legacy", {
+        includeValues: true,
+      });
+      // revision 1 was written under v1 with only `region`; not enriched.
+      const rev1 = history.items.find((i) => i.revision === 1);
+      expect(rev1?.value).toEqual({ region: "us" });
+    });
+  });
+
   // --- Search (tagFilter pass-through) ---
 
   describe("search", () => {

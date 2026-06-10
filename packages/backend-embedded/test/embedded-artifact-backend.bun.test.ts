@@ -117,6 +117,55 @@ describe("EmbeddedArtifactBackend", () => {
       const list = await backend.list("test-org/test-project/");
       expect(list.filter((e) => e.key === key)).toHaveLength(1);
     });
+
+    it("persists fence + expiresAt + resource routing fields on the pointer", async () => {
+      // A fence-carrying put validates the fence against the resource's claim,
+      // so acquire a real claim first and use its fence.
+      const claim = await h.project.acquire(
+        "task-1",
+        "agent",
+        "agent",
+        "exclusive",
+        60_000,
+      );
+
+      const content = "routed";
+      const hash = await sha256Hex(content);
+      const key = `test-org/test-project/${hash}.txt`;
+      const expiresAt = Date.now() + 60_000;
+      await backend.put({
+        key,
+        body: content,
+        sha256: hash,
+        metadata: {},
+        contentType: "text/plain",
+        kind: "snapshot",
+        resource: "task-1",
+        fence: claim.fence,
+        expiresAt,
+      });
+      // listPointers surfaces expires_at; getLatest confirms (kind, resource).
+      const pointers = await backend.listPointers?.({
+        resource: "task-1",
+        kind: "snapshot",
+      });
+      const pointer = pointers?.find((p) => p.r2_key === key);
+      expect(pointer).toBeTruthy();
+      expect(pointer?.expires_at).toBe(expiresAt);
+      expect(pointer?.kind).toBe("snapshot");
+      expect(pointer?.resource).toBe("task-1");
+
+      const latest = await backend.getLatest("snapshot", "task-1");
+      expect(latest?.r2_key).toBe(key);
+      expect(latest?.expires_at).toBe(expiresAt);
+
+      // `fence` is not surfaced by the ArtifactBackend read shapes, so assert it
+      // landed on the row directly to prove `put` persists the routing fence.
+      const row = h.rawDb
+        .query("SELECT fence FROM artifact_pointers WHERE r2_key = ?")
+        .get(key) as { fence: number | null } | null;
+      expect(row?.fence).toBe(claim.fence);
+    });
   });
 
   describe("get", () => {
