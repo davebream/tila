@@ -14,7 +14,8 @@
     "check": "biome check --write . && pnpm run version:check",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean",
-    "version:check": "node scripts/check-public-versions.mjs"
+    "version:check": "node scripts/check-public-versions.mjs",
+    "version:test": "node --test scripts/version-policy.test.mjs"
   },
   "pnpm": {
     "overrides": {
