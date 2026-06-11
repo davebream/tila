@@ -49,8 +49,10 @@ The backend interfaces (EntityBackend, CoordinationBackend, ArtifactBackend) all
 The non-negotiable correctness property. Two machines must not silently both believe they hold the same claim.
 
 - **Every claim returns a monotonic `fence` token.** Per-resource counter, incremented on each acquire.
+- **Entity coordination keys canonicalize at the boundary.** Entity claims, renewals, releases, and state reads normalize to the canonical `<type>:<id>` resource before touching claim or fence rows. Bare ids are a caller convenience, not a second storage form.
 - **Every destructive operation downstream of the claim carries the fence.** Artifact writes, status updates, completion markers — all include the fence.
 - **The action site validates the fence.** If a write arrives with a fence lower than the current fence for that resource, it is rejected. This catches stale leases that expired during work.
+- **Missing fence rows fail closed.** Required-fence write paths reject when the canonical fence row is absent; there is no silent "best effort" fallback for entity resources.
 - **Lock acquisition is single-threaded inside the DO.** The DO itself is the serialization primitive — no Redlock-style multi-instance correctness needed at this scale. DO serialization is the *primary* correctness mechanism; fencing tokens are the secondary defense.
 - **Why fencing tokens exist when the DO already serializes.** Three scenarios where DO serialization alone is insufficient:
   1. Long-running agent operations where the claim TTL expires between read-claim and write-result (the autopilot scenario). The DO doesn't know the in-flight work; fence-on-write catches it.
@@ -434,5 +436,11 @@ This document is the constitution. It changes when reality requires it, not when
 - Token routes enforce this policy via an inline `requireTokenAdmin()` guard that rejects non-`"full"` tokens with HTTP 403 and error code `TOKEN_AUTHZ_DENIED`. In v0.1 this guard never fires — it is a forward-compatibility hook.
 
 **Known limitation:** The `/_internal/sweep` route follows the same flat-admin pattern (any full token can trigger sweep). This is acceptable for v0.1 and may be gated separately in v0.2.
+
+## 22. Session JWT migration: issuer/audience are required on newly minted tokens, optional on legacy tokens
+
+**Decision:** Newly minted workspace session JWTs carry `iss="tila"` and `aud="tila"`. Verification remains backward-compatible for legacy tokens that predate those claims, but tokens that present `iss` or `aud` with the wrong value are rejected.
+
+**Rationale:** This tightens token audience binding without forcing an all-at-once logout during rollout. Soft migration is acceptable because signature verification and expiry checks already exist; `iss`/`aud` hardening only narrows acceptance.
 
 **Cross-references:** §14 (platform: Cloudflare-native), §16 (growth path: scoped tokens in v0.2).
