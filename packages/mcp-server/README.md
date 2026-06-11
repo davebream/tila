@@ -94,9 +94,11 @@ client at the server:
 }
 ```
 
-> **`better-sqlite3` peer dep:** local mode lazily loads the optional peer dependency
-> `better-sqlite3`. Install it (`npm i better-sqlite3`) for local mode; remote mode
-> never touches it.
+> **`better-sqlite3` driver:** local mode lazily loads `better-sqlite3`, declared as an
+> `optionalDependency`. `npx -y tila-mcp-server` (and a normal `npm i`) pulls it
+> automatically, so local mode works out of the box. If the native build is skipped or
+> fails on your platform, install it manually (`npm i better-sqlite3`) for local mode;
+> remote mode never touches it.
 
 ### Local-mode environment variables
 
