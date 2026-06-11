@@ -50,13 +50,17 @@ const FORBIDDEN_IDENTIFIERS = [
 ];
 
 beforeAll(() => {
-  // Build the SDK so the main-entry bundle exists. Self-contained: works under
-  // `pnpm test` in CI even though turbo's `test` task does not build tila-sdk's
-  // own dist beforehand.
-  execSync("pnpm --filter tila-sdk build", {
-    cwd: resolve(sdkRoot, "..", ".."),
-    stdio: "ignore",
-  });
+  // Build the SDK on demand ONLY when its dist is missing (e.g. a standalone
+  // `pnpm --filter tila-sdk test`). Under `pnpm test`, turbo's `test` task
+  // `dependsOn` `build`, so dist is already present and we MUST NOT rebuild:
+  // tila-sdk's tsup `clean:true` wipes dist mid-run and would race other
+  // packages' tests (e.g. integration-tests resolving `tila-sdk`).
+  if (!existsSync(resolve(distDir, "index.js"))) {
+    execSync("pnpm --filter tila-sdk build", {
+      cwd: resolve(sdkRoot, "..", ".."),
+      stdio: "ignore",
+    });
+  }
 }, 120_000);
 
 describe("main entry bundle stays zod-only", () => {

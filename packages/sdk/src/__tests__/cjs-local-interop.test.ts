@@ -17,7 +17,7 @@
  * `bundle-hygiene.test.ts`), so the CJS bundle always exists.
  */
 import { execSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -30,12 +30,17 @@ const sdkRoot = resolve(here, "..", "..");
 const distCjs = resolve(sdkRoot, "dist", "index.cjs");
 
 beforeAll(() => {
-  // Build on demand so the CJS bundle (and its sibling local.js) always exist,
-  // even under `pnpm test` where turbo does not pre-build tila-sdk's own dist.
-  execSync("pnpm --filter tila-sdk build", {
-    cwd: resolve(sdkRoot, "..", ".."),
-    stdio: "ignore",
-  });
+  // Build on demand ONLY when the CJS bundle is missing (standalone
+  // `pnpm --filter tila-sdk test`). Under `pnpm test`, turbo's `test` task
+  // `dependsOn` `build`, so dist is already present and we MUST NOT rebuild:
+  // tila-sdk's tsup `clean:true` wipes dist mid-run and would race other
+  // packages' tests resolving `tila-sdk`/`tila-sdk/local`.
+  if (!existsSync(distCjs)) {
+    execSync("pnpm --filter tila-sdk build", {
+      cwd: resolve(sdkRoot, "..", ".."),
+      stdio: "ignore",
+    });
+  }
 }, 120_000);
 
 describe("dist/index.cjs loads the local stack via the ./local.js rewrite", () => {
