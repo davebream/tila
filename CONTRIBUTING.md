@@ -59,6 +59,20 @@ pnpm lint         # read-only check (CI-safe)
 
 Pre-commit hooks (via Lefthook) run Biome and gitleaks automatically on staged files.
 
+## Release Versioning
+
+tila uses one product version for public release artifacts. When cutting a release, bump
+the root `package.json` marker, `tila-cli`, all `tila-cli-*` platform packages,
+`tila-sdk`, `tila-mcp-server`, and `packages/mcp-server/server.json` together:
+
+```bash
+./scripts/bump-version.sh 0.2.0
+pnpm version:check
+```
+
+Private workspace packages such as `@tila/core`, `@tila/schemas`, backend packages,
+worker, and UI are implementation modules. They do not need product-version bumps.
+
 ## Commits
 
 Use Conventional Commits for every commit:
