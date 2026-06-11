@@ -1,6 +1,6 @@
 {
   "name": "tila-cli-darwin-x64",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Darwin x64 binary for tila-cli",
   "os": ["darwin"],
   "cpu": ["x64"],
