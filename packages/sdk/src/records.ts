@@ -6,6 +6,7 @@ import type {
   RecordListResponse,
   RecordMutateResponse,
   RecordPatchRequest,
+  RecordPutRequest,
   RecordSetRequest,
   RecordTypesResponse,
   RecordUnarchiveRequest,
@@ -34,6 +35,17 @@ export function createRecordMethods(client: TilaClient, projectId: string) {
     ): Promise<RecordMutateResponse> {
       return client.put<RecordMutateResponse>(
         `${base}/${type}/${encodeKey(key)}`,
+        req,
+      );
+    },
+
+    async put(
+      type: string,
+      key: string,
+      req: RecordPutRequest,
+    ): Promise<RecordMutateResponse> {
+      return client.post<RecordMutateResponse>(
+        `${base}/${type}/~/put/${encodeKey(key)}`,
         req,
       );
     },

@@ -235,6 +235,41 @@ describe("createRecordMethods", () => {
     expect(body.fence).toBe(2);
   });
 
+  it("put issues POST to ~/put/:key with per-segment encoding (slash stays literal)", async () => {
+    const responseBody = {
+      ok: true,
+      record: {
+        type: "cfg",
+        key: "env/staging",
+        value: { region: "us-east" },
+        status: "active",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        revision: 1,
+        tags: [],
+      },
+      fence: 1,
+      revision: 1,
+    };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const records = createRecordMethods(client, "proj-1");
+
+    const result = await records.put("cfg", "env/staging", {
+      value: { region: "us-east" },
+    });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = mockFetch.mock.calls[0];
+    // Key segments are NOT percent-encoded: env/staging stays literal.
+    expect(url).toContain("/projects/proj-1/records/cfg/~/put/env/staging");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body);
+    expect(body.value).toEqual({ region: "us-east" });
+    expect(body.fence).toBeUndefined();
+  });
+
   it("history issues GET to ~/history/:key with query params", async () => {
     const responseBody = {
       ok: true,
