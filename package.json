@@ -1,6 +1,6 @@
 {
   "name": "tila",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -10,10 +10,12 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "test": "turbo test",
-    "lint": "biome check .",
-    "check": "biome check --write .",
+    "lint": "biome check . && pnpm run version:check",
+    "check": "biome check --write . && pnpm run version:check",
     "typecheck": "turbo typecheck",
-    "clean": "turbo clean"
+    "clean": "turbo clean",
+    "version:check": "node scripts/check-public-versions.mjs",
+    "version:test": "node --test scripts/version-policy.test.mjs"
   },
   "pnpm": {
     "overrides": {
