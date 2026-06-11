@@ -1,8 +1,8 @@
 {
   "name": "tila-cli",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "license": "MIT",
-  "description": "tila CLI \u2014 durable state & coordination for multi-machine agentic work",
+  "description": "tila CLI — durable state & coordination for multi-machine agentic work",
   "keywords": [
     "tila",
     "cli",
@@ -13,7 +13,7 @@
     "mcp",
     "state-management"
   ],
-  "author": "Dawid Leszczy\u0144ski (https://github.com/davebream)",
+  "author": "Dawid Leszczyński (https://github.com/davebream)",
   "homepage": "https://github.com/davebream/tila#readme",
   "bugs": "https://github.com/davebream/tila/issues",
   "repository": {
@@ -48,14 +48,14 @@
     "gen:version": "node scripts/gen-version.mjs"
   },
   "optionalDependencies": {
-    "tila-cli-darwin-arm64": "0.1.2",
-    "tila-cli-darwin-x64": "0.1.2",
-    "tila-cli-linux-arm64": "0.1.2",
-    "tila-cli-linux-arm64-musl": "0.1.2",
-    "tila-cli-linux-x64": "0.1.2",
-    "tila-cli-linux-x64-musl": "0.1.2",
-    "tila-cli-windows-arm64": "0.1.2",
-    "tila-cli-windows-x64": "0.1.2"
+    "tila-cli-darwin-arm64": "0.2.0",
+    "tila-cli-darwin-x64": "0.2.0",
+    "tila-cli-linux-arm64": "0.2.0",
+    "tila-cli-linux-arm64-musl": "0.2.0",
+    "tila-cli-linux-x64": "0.2.0",
+    "tila-cli-linux-x64-musl": "0.2.0",
+    "tila-cli-windows-arm64": "0.2.0",
+    "tila-cli-windows-x64": "0.2.0"
   },
   "devDependencies": {
     "@clack/prompts": "^1.4.0",

@@ -1,8 +1,8 @@
 {
   "name": "tila-sdk",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "license": "MIT",
-  "description": "TypeScript SDK for tila \u2014 durable state & coordination for multi-machine agentic work",
+  "description": "TypeScript SDK for tila — durable state & coordination for multi-machine agentic work",
   "keywords": [
     "tila",
     "sdk",
@@ -12,7 +12,7 @@
     "state-management",
     "typescript"
   ],
-  "author": "Dawid Leszczy\u0144ski (https://github.com/davebream)",
+  "author": "Dawid Leszczyński (https://github.com/davebream)",
   "homepage": "https://github.com/davebream/tila#readme",
   "bugs": "https://github.com/davebream/tila/issues",
   "repository": {

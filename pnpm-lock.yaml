@@ -171,28 +171,28 @@ importers:
   packages/cli:
     optionalDependencies:
       tila-cli-darwin-arm64:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-darwin-arm64
       tila-cli-darwin-x64:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-darwin-x64
       tila-cli-linux-arm64:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-linux-arm64
       tila-cli-linux-arm64-musl:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-linux-arm64-musl
       tila-cli-linux-x64:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-linux-x64
       tila-cli-linux-x64-musl:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-linux-x64-musl
       tila-cli-windows-arm64:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-windows-arm64
       tila-cli-windows-x64:
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../cli-windows-x64
     devDependencies:
       '@clack/prompts':
@@ -398,7 +398,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
+        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
 
   packages/ops-sqlite:
     dependencies:
@@ -476,7 +476,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
+        version: 4.1.8(@types/node@22.19.19)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(vite@8.0.16(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.0)(yaml@2.9.0))
 
   packages/ui:
     dependencies:

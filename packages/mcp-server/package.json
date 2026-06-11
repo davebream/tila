@@ -1,8 +1,8 @@
 {
   "name": "tila-mcp-server",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "license": "MIT",
-  "description": "MCP server for tila \u2014 enables Claude Code, Cursor, and VS Code Copilot integration",
+  "description": "MCP server for tila — enables Claude Code, Cursor, and VS Code Copilot integration",
   "keywords": [
     "tila",
     "mcp",
@@ -13,7 +13,7 @@
     "cursor",
     "agentic"
   ],
-  "author": "Dawid Leszczy\u0144ski (https://github.com/davebream)",
+  "author": "Dawid Leszczyński (https://github.com/davebream)",
   "homepage": "https://github.com/davebream/tila#readme",
   "bugs": "https://github.com/davebream/tila/issues",
   "repository": {
