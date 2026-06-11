@@ -1035,6 +1035,15 @@ export const RecordSetRequestSchema = z.object({
 
 export type RecordSetRequest = z.infer<typeof RecordSetRequestSchema>;
 
+export const RecordPutRequestSchema = z.object({
+  value: z.record(z.unknown()),
+  tags: RecordTagSchema.optional(),
+  message: z.string().optional(),
+  source_artifact_key: z.string().nullable().optional(),
+});
+
+export type RecordPutRequest = z.infer<typeof RecordPutRequestSchema>;
+
 export const RecordPatchRequestSchema = z.object({
   patch: z.record(z.unknown()),
   fence: z.number().int(),
