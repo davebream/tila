@@ -118,7 +118,9 @@ export function TaskDetailPage() {
   const [expanded, setExpanded] = useState(false);
   const entity = entityData?.entity;
   const relationships = entityData?.relationships ?? [];
-  const entityClaim = claimsData?.claims.find((c) => c.resource === entityId);
+  const entityClaim = claimsData?.claims.find((c) =>
+    claimResourceMatchesEntity(c.resource, entityId, entity?.type),
+  );
   const references = artifactData?.references ?? [];
 
   return (
