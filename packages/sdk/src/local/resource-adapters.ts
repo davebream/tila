@@ -68,6 +68,7 @@ import type {
   RecordListResponse,
   RecordMutateResponse,
   RecordPatchRequest,
+  RecordPutRequest,
   RecordRow,
   RecordSetRequest,
   RecordTypesResponse,
@@ -278,6 +279,22 @@ function createLocalRecordMethods(project: EmbeddedProject) {
         key,
         value: req.value,
         fence: req.fence,
+        tags: req.tags,
+        message: req.message ?? null,
+        sourceArtifactKey: req.source_artifact_key ?? null,
+      });
+      return toRecordMutateResponse(row);
+    },
+
+    async put(
+      type: string,
+      key: string,
+      req: RecordPutRequest,
+    ): Promise<RecordMutateResponse> {
+      const row = await project.putRecord({
+        type,
+        key,
+        value: req.value,
         tags: req.tags,
         message: req.message ?? null,
         sourceArtifactKey: req.source_artifact_key ?? null,

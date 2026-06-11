@@ -11,7 +11,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { type TilaLocal, createTilaLocal } from "../../local/index";
+import {
+  type TilaLocal,
+  buildLocalResources,
+  createTilaLocal,
+} from "../../local/index";
 
 describe("createTilaLocal — full local round-trip", () => {
   let dir: string;
@@ -75,6 +79,33 @@ describe("createTilaLocal — full local round-trip", () => {
     const journal = await local.project.listJournal({ limit: 50 });
     expect(journal.length).toBeGreaterThan(0);
     expect(journal.some((e) => e.kind.length > 0)).toBe(true);
+  });
+
+  it("records.put adapter creates then replaces fencelessly via the local surface", async () => {
+    // Drive the local records adapter (the same surface createTila wires for
+    // backend:"local") rather than EmbeddedProject directly, so the adapter's
+    // put delegation + wire-shape mapping is exercised. Runtime put semantics
+    // are also covered by EmbeddedProject.putRecord's Bun tests.
+    const records = buildLocalResources(local.project, local.artifacts).records;
+
+    const created = await records.put("note", "cfg/main", {
+      value: { body: "v1" },
+    });
+    expect(created.ok).toBe(true);
+    expect(created.revision).toBe(1);
+    expect(created.fence).toBeGreaterThan(0);
+    expect(created.record.value).toEqual({ body: "v1" });
+
+    // Replace the same key with NO fence — the upsert bumps revision.
+    const replaced = await records.put("note", "cfg/main", {
+      value: { body: "v2" },
+    });
+    expect(replaced.revision).toBe(2);
+    expect(replaced.record.value).toEqual({ body: "v2" });
+    expect(replaced.fence).toBeGreaterThan(created.fence);
+
+    const got = await records.get("note", "cfg/main");
+    expect(got.record.value).toEqual({ body: "v2" });
   });
 
   it("persists across reopen (same db file, schema-identical)", async () => {
