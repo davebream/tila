@@ -171,28 +171,28 @@ importers:
   packages/cli:
     optionalDependencies:
       tila-cli-darwin-arm64:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-darwin-arm64
       tila-cli-darwin-x64:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-darwin-x64
       tila-cli-linux-arm64:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-linux-arm64
       tila-cli-linux-arm64-musl:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-linux-arm64-musl
       tila-cli-linux-x64:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-linux-x64
       tila-cli-linux-x64-musl:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-linux-x64-musl
       tila-cli-windows-arm64:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-windows-arm64
       tila-cli-windows-x64:
-        specifier: 0.2.2
+        specifier: 0.2.3
         version: link:../cli-windows-x64
     devDependencies:
       '@clack/prompts':

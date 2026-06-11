@@ -1,6 +1,6 @@
 {
   "name": "tila-sdk",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "license": "MIT",
   "description": "TypeScript SDK for tila — durable state & coordination for multi-machine agentic work",
   "keywords": [
