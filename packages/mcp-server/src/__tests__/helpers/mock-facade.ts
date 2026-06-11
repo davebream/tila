@@ -64,6 +64,7 @@ export type MockFacadeShape = {
   records: Record<
     | "create"
     | "set"
+    | "put"
     | "get"
     | "patch"
     | "archive"
@@ -123,6 +124,7 @@ export function createMockFacade(): MockFacadeShape {
     records: fns(
       "create",
       "set",
+      "put",
       "get",
       "patch",
       "archive",

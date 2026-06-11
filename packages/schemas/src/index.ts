@@ -227,6 +227,8 @@ export {
   type RecordCreateRequest,
   RecordSetRequestSchema,
   type RecordSetRequest,
+  RecordPutRequestSchema,
+  type RecordPutRequest,
   RecordPatchRequestSchema,
   type RecordPatchRequest,
   RecordArchiveRequestSchema,

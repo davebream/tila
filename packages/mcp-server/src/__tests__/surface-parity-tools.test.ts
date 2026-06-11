@@ -264,7 +264,7 @@ describe("registerPresenceTools", () => {
 });
 
 describe("registerAllTools — group gating", () => {
-  it("registers all 39 tools when groups is omitted (no env var)", () => {
+  it("registers all 40 tools when groups is omitted (no env var)", () => {
     process.env.TILA_MCP_COMPAT_ALIASES = "";
     process.env.TILA_MCP_TOOLS = "";
     const server = createMockServer();
@@ -273,7 +273,7 @@ describe("registerAllTools — group gating", () => {
       asClient(createMockClient()),
       PROJECT_ID,
     );
-    expect(server.tool).toHaveBeenCalledTimes(39);
+    expect(server.tool).toHaveBeenCalledTimes(40);
   });
 
   it("registers only tasks+claims tools (11) when groups=['tasks','claims']", () => {

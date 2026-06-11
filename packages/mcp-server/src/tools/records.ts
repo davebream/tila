@@ -56,6 +56,34 @@ export function registerRecordTools(
   );
 
   server.tool(
+    "tila_record_put",
+    "Fenceless create-or-replace of a record's value -- creates the record if the key is missing, otherwise fully replaces its value. Does NOT require a fencing token. Intended for single-writer canonical writes where one agent owns the key. Contrast with tila_record_set, which REQUIRES a fence (from tila_record_get) and is collaborative-safe under concurrent writers. WARNING: tila_record_put is last-writer-wins and silently clobbers concurrent updates -- do NOT use it on a key that another writer mutates via tila_record_set or tila_record_patch.",
+    {
+      type: z.string().describe("Record type"),
+      key: z.string().describe("Record key (e.g. 'prod' or 'env/staging')"),
+      value: z.record(z.unknown()).describe("Complete JSON value to write"),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe("Tags to set on the record"),
+      message: z
+        .string()
+        .optional()
+        .describe("Optional message recorded in revision history"),
+    },
+    async ({ type, key, value, tags, message }) => {
+      try {
+        const result = await records.put(type, key, { value, tags, message });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        throw toMcpError(err);
+      }
+    },
+  );
+
+  server.tool(
     "tila_record_patch",
     "Apply a JSON Merge Patch (RFC 7396) to a record's value. Requires a fencing token from tila_record_get. Returns the new fencing token.",
     {

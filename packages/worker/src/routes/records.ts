@@ -3,6 +3,7 @@ import {
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
   RecordPatchRequestSchema,
+  RecordPutRequestSchema,
   RecordSetRequestSchema,
   RecordUnarchiveRequestSchema,
   RecordValueSchema,
@@ -290,6 +291,111 @@ records.post(
     );
   },
 );
+
+// POST /records/:type/~/put/:key -> DO POST /record/:type/:key/put
+// Fenceless create-or-replace (upsert). CRITICAL: must be registered before
+// /:type/:key{.+} (to avoid "~/put" matching as a key) and before the
+// POST /:type create catch-all.
+records.post("/:type/~/put/:key{.+}", requirePermission("write"), async (c) => {
+  const { type, key } = c.req.param();
+  const raw = await c.req.json();
+  const parsed = RecordPutRequestSchema.safeParse(raw);
+  if (!parsed.success) return zodValidationError(c, parsed.error);
+
+  // 64 KiB boundary guard -- fires before DO call
+  const sizeCheck = RecordValueSchema.safeParse(parsed.data.value);
+  if (!sizeCheck.success) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "payload-too-large",
+          message: "Value exceeds 64 KiB canonical JSON limit",
+          retryable: false,
+        },
+      },
+      413,
+    );
+  }
+
+  const stub = c.get("doStub");
+  const tokenResult = c.get("tokenResult");
+  const actor = tokenResult.name;
+  const analyticsCtx = analyticsCtxFrom(c);
+
+  // Snapshot artifact flow: resolve history mode before DO call
+  const historyMode = await resolveRecordHistoryMode(stub, type, analyticsCtx);
+
+  // Validate source_artifact_key if present
+  if (parsed.data.source_artifact_key) {
+    if (historyMode !== "snapshot") {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "validation-error",
+            message:
+              "source_artifact_key is only valid for history=snapshot record types",
+            retryable: false,
+          },
+        },
+        422,
+      );
+    }
+    const sourceCheck = await validateSourceArtifactKey(
+      stub,
+      parsed.data.source_artifact_key,
+      type,
+      key,
+      analyticsCtx,
+    );
+    if (!sourceCheck.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "validation-error",
+            message: sourceCheck.message,
+            retryable: false,
+          },
+        },
+        422,
+      );
+    }
+  }
+
+  // For snapshot types: write R2 BEFORE DO call (R2-before-DO invariant)
+  let canonicalArtifactKey: string | null = null;
+  if (historyMode === "snapshot") {
+    const canonical = canonicalJson(parsed.data.value);
+    const sha256 = await canonicalJsonSha256(parsed.data.value);
+    const snapshot = await writeCanonicalSnapshot(
+      c.env,
+      type,
+      key,
+      canonical,
+      sha256,
+      actor,
+    );
+    canonicalArtifactKey = snapshot.r2Key;
+  }
+
+  return forwardToDO(
+    stub,
+    `/record/${type}/${key}/put`,
+    "POST",
+    {
+      ...parsed.data,
+      canonical_artifact_key: canonicalArtifactKey,
+      actor,
+      actor_token_id: tokenResult.tokenId,
+      source: c.get("source"),
+      source_version: c.get("sourceVersion"),
+    },
+    undefined,
+    analyticsCtx,
+  );
+});
 
 // GET /records/:type/:key -> DO GET /record/:type/:key
 records.get("/:type/:key{.+}", async (c) => {

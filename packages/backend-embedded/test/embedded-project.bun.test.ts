@@ -688,6 +688,96 @@ type = "string"
     });
   });
 
+  // --- RecordBackend putRecord (fenceless create-or-replace upsert) ---
+
+  describe("RecordBackend putRecord (fenceless upsert)", () => {
+    it("put creates on a missing key (revision 1, returns fence)", async () => {
+      const put = await project.putRecord({
+        type: "config",
+        key: "put-new",
+        value: { region: "us-east" },
+        tags: ["env:prod"],
+        message: "via put",
+      });
+      expect(put.revision).toBe(1);
+      expect(put.fence).toBeGreaterThan(0);
+      expect(put.value).toEqual({ region: "us-east" });
+      expect(put.tags).toEqual(["env:prod"]);
+    });
+
+    it("put replaces an existing key without a fence (revision 2, value replaced)", async () => {
+      const first = await project.putRecord({
+        type: "config",
+        key: "put-existing",
+        value: { region: "us-east", replicas: 2 },
+      });
+      expect(first.revision).toBe(1);
+      const second = await project.putRecord({
+        type: "config",
+        key: "put-existing",
+        value: { region: "eu-west" },
+      });
+      expect(second.revision).toBe(2);
+      expect(second.value).toEqual({ region: "eu-west" });
+      expect(second.fence).toBeGreaterThan(first.fence);
+
+      const got = await project.getRecord("config", "put-existing");
+      expect(got?.value).toEqual({ region: "eu-west" });
+      expect(got?.revision).toBe(2);
+    });
+
+    it("put on an archived key replaces value, preserves archived, stays out of the active list", async () => {
+      const c = await project.createRecord({
+        type: "config",
+        key: "put-archived",
+        value: { a: 1 },
+      });
+      const archived = await project.archiveRecord({
+        type: "config",
+        key: "put-archived",
+        fence: c.fence,
+      });
+      expect(archived.archived).toBe(1);
+
+      const replaced = await project.putRecord({
+        type: "config",
+        key: "put-archived",
+        value: { a: 2 },
+      });
+      // archived flag preserved across the fenceless replace
+      expect(replaced.archived).toBe(1);
+      expect(replaced.value).toEqual({ a: 2 });
+
+      // still excluded from the active list; visible only with includeArchived
+      const active = await project.listRecords({ type: "config" });
+      expect(active.items.some((r) => r.key === "put-archived")).toBe(false);
+      const all = await project.listRecords({
+        type: "config",
+        includeArchived: true,
+      });
+      expect(all.items.some((r) => r.key === "put-archived")).toBe(true);
+    });
+
+    it("put rejects a schema-invalid value (RecordConstraintError, DO parity)", async () => {
+      await project.applySchema({
+        definition: `
+schema_version = 1
+
+[records.config.fields.region]
+type = "string"
+required = true
+`,
+      });
+      await expect(
+        project.putRecord({
+          type: "config",
+          key: "put-invalid",
+          value: { other: "x" },
+        }),
+      ).rejects.toThrow(/Required field "region"/);
+    });
+  });
+
   // --- RecordBackend (rejection paths — R3) ---
 
   describe("RecordBackend rejection paths", () => {

@@ -24,6 +24,7 @@ import type {
   JournalQuery,
   PatchRecordInput,
   ProjectSummary,
+  PutRecordInput,
   ReadyFilter,
   RecordBackend,
   RecordHistoryOptions,
@@ -1100,6 +1101,22 @@ export class RemoteRecordBackend implements RecordBackend {
       body.source_artifact_key = input.sourceArtifactKey;
     const result = await this.client.put(
       `${this.base()}/${input.type}/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async putRecord(input: PutRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = {
+      value: input.value,
+    };
+    if (input.tags) body.tags = input.tags;
+    if (input.message != null) body.message = input.message;
+    if (input.sourceArtifactKey != null)
+      body.source_artifact_key = input.sourceArtifactKey;
+    const result = await this.client.post(
+      `${this.base()}/${input.type}/~/put/${this.encodeKey(input.key)}`,
       body,
       { schema: RecordMutateResponseSchema, validate: true },
     );
