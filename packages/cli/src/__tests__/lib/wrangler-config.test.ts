@@ -284,7 +284,7 @@ describe("assertAssetLimits", () => {
     expect(() => assertAssetLimits(tmpDir)).toThrow(/25 MiB/);
   });
 
-  it("throws when file count exceeds 20,000", () => {
+  it("throws when file count exceeds 20,000", { timeout: 20_000 }, () => {
     // Write 20,001 files — use a subdirectory to keep FS clean
     const subDir = path.join(tmpDir, "files");
     fs.mkdirSync(subDir);

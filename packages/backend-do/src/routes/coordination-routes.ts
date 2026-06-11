@@ -2,27 +2,58 @@ import {
   type RequestOrigin,
   coordinationOps,
   journalOps,
+  resolveEntityResource,
 } from "@tila/ops-sqlite";
+import {
+  AcquireRequestSchema,
+  PresenceHeartbeatRequestSchema,
+  ReleaseRequestSchema,
+  RenewRequestSchema,
+} from "@tila/schemas";
 import { Hono } from "hono";
-import { jsonError } from "./responses";
+import { z } from "zod";
+import { formatZodIssues, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
+
+const DoAcquireRequestSchema = AcquireRequestSchema.extend({
+  machine: z.string().min(1),
+  user: z.string().min(1),
+  actor_token_id: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
+  source_version: z.string().nullable().optional(),
+});
+
+const DoRenewRequestSchema = RenewRequestSchema.extend({
+  machine: z.string().min(1),
+  user: z.string().min(1),
+  actor_token_id: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
+  source_version: z.string().nullable().optional(),
+});
+
+const DoReleaseRequestSchema = ReleaseRequestSchema.extend({
+  actor: z.string().min(1),
+  actor_token_id: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
+  source_version: z.string().nullable().optional(),
+});
 
 export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
 
   app.post("/coord/acquire", async (c) => {
     const { db } = deps;
-    const body = (await c.req.json()) as {
-      resource: string;
-      machine: string;
-      user: string;
-      mode: "exclusive" | "owner" | "presence";
-      ttl_ms: number;
-      metadata?: Record<string, unknown>;
-      actor_token_id?: string | null;
-      source?: string | null;
-      source_version?: string | null;
-    };
+    const parsed = DoAcquireRequestSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return jsonError(
+        c,
+        400,
+        "validation-error",
+        formatZodIssues(parsed.error.issues),
+      );
+    }
+    const body = parsed.data;
+    const resource = resolveEntityResource(db, body.resource) ?? body.resource;
     const origin: RequestOrigin = {
       actor: body.user,
       tokenId: body.actor_token_id ?? null,
@@ -31,7 +62,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     };
     const result = coordinationOps.acquire(
       db,
-      body.resource,
+      resource,
       body.machine,
       body.user,
       body.mode,
@@ -45,7 +76,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
         c,
         409,
         "already-held",
-        `Resource ${body.resource} already held`,
+        `Resource ${resource} already held`,
       );
     }
     return c.json({
@@ -57,16 +88,17 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.post("/coord/renew", async (c) => {
     const { db } = deps;
-    const body = (await c.req.json()) as {
-      resource: string;
-      machine: string;
-      user: string;
-      fence: number;
-      ttl_ms: number;
-      actor_token_id?: string | null;
-      source?: string | null;
-      source_version?: string | null;
-    };
+    const parsed = DoRenewRequestSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return jsonError(
+        c,
+        400,
+        "validation-error",
+        formatZodIssues(parsed.error.issues),
+      );
+    }
+    const body = parsed.data;
+    const resource = resolveEntityResource(db, body.resource) ?? body.resource;
     const renewOrigin: RequestOrigin = {
       actor: body.user,
       tokenId: body.actor_token_id ?? null,
@@ -75,7 +107,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     };
     const result = coordinationOps.renew(
       db,
-      body.resource,
+      resource,
       body.machine,
       body.user,
       body.fence,
@@ -96,21 +128,24 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.post("/coord/release", async (c) => {
     const { db } = deps;
-    const body = (await c.req.json()) as {
-      resource: string;
-      fence: number;
-      actor: string;
-      actor_token_id?: string | null;
-      source?: string | null;
-      source_version?: string | null;
-    };
+    const parsed = DoReleaseRequestSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return jsonError(
+        c,
+        400,
+        "validation-error",
+        formatZodIssues(parsed.error.issues),
+      );
+    }
+    const body = parsed.data;
+    const resource = resolveEntityResource(db, body.resource) ?? body.resource;
     const releaseOrigin: RequestOrigin = {
       actor: body.actor,
       tokenId: body.actor_token_id ?? null,
       source: body.source ?? null,
       sourceVersion: body.source_version ?? null,
     };
-    coordinationOps.release(db, body.resource, body.fence, releaseOrigin);
+    coordinationOps.release(db, resource, body.fence, releaseOrigin);
     return c.json({ ok: true });
   });
 
@@ -126,16 +161,23 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     if (!resource) {
       return jsonError(c, 400, "bad-request", "resource query param required");
     }
-    const claim = coordinationOps.state(db, resource);
+    const canonicalResource = resolveEntityResource(db, resource) ?? resource;
+    const claim = coordinationOps.state(db, canonicalResource);
     return c.json({ ok: true, claim });
   });
 
   app.post("/coord/heartbeat", async (c) => {
     const { db } = deps;
-    const body = (await c.req.json()) as {
-      machine: string;
-      info?: Record<string, unknown>;
-    };
+    const parsed = PresenceHeartbeatRequestSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return jsonError(
+        c,
+        400,
+        "validation-error",
+        formatZodIssues(parsed.error.issues),
+      );
+    }
+    const body = parsed.data;
     coordinationOps.heartbeat(db, body.machine, body.info);
     return c.json({ ok: true });
   });

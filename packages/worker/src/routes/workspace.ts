@@ -6,6 +6,7 @@ import {
   RepoAllowlistStore,
 } from "@tila/backend-d1";
 import { Hono } from "hono";
+import { z } from "zod";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import {
@@ -29,6 +30,9 @@ const WORKSPACE_DEADLINE_MS = 25_000;
 const SELECT_RATE_LIMIT_MAX = 20;
 const SELECT_RATE_LIMIT_WINDOW_MS = 60_000;
 const PROJECT_SESSION_TTL_MS = COOKIE_SESSION_TTL_SECONDS * 1000;
+const WorkspaceSelectRequestSchema = z.object({
+  project_id: z.string().min(1).max(128),
+});
 
 const PERMISSION_HIERARCHY: Record<string, number> = {
   none: 0,
@@ -187,14 +191,14 @@ workspace.post("/select", async (c) => {
     );
   }
 
-  const parsed = body as Record<string, unknown> | null;
-  if (!parsed || typeof parsed.project_id !== "string" || !parsed.project_id) {
+  const parsed = WorkspaceSelectRequestSchema.safeParse(body);
+  if (!parsed.success) {
     return c.json(
       {
         ok: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "Missing required field: project_id",
+          message: "Invalid project_id",
           retryable: false,
         },
       },
@@ -202,7 +206,7 @@ workspace.post("/select", async (c) => {
     );
   }
 
-  const projectId = parsed.project_id as string;
+  const { project_id: projectId } = parsed.data;
 
   // Check GitHub App config
   if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {

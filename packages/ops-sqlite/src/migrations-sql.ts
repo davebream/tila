@@ -584,6 +584,14 @@ CREATE TABLE IF NOT EXISTS artifact_tags (
 CREATE INDEX IF NOT EXISTS idx_artifact_tags_tag ON artifact_tags(tag);
 `;
 
+export const MIGRATION_0019 = `
+CREATE INDEX IF NOT EXISTS idx_entity_relationships_to_id_type
+ON entity_relationships(to_id, type);
+
+CREATE INDEX IF NOT EXISTS idx_presence_last_seen
+ON presence(last_seen);
+`;
+
 /**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
@@ -608,4 +616,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 16, run: runMigration0016 },
   { version: 17, run: runMigration0017 },
   { version: 18, sql: MIGRATION_0018 },
+  { version: 19, sql: MIGRATION_0019 },
 ];

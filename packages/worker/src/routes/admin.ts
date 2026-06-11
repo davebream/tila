@@ -2,6 +2,7 @@ import { D1ProjectRegistry, D1RevokedJtiStore } from "@tila/backend-d1";
 import { R2ArtifactBackend } from "@tila/backend-r2";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { z } from "zod";
 import { forwardToDO } from "../lib/do-forward";
 import { revokeJtiInCache } from "../middleware/auth";
 import { requirePermission } from "../middleware/permission";
@@ -90,6 +91,9 @@ async function writeJournalArchiveToR2(
 }
 
 export const admin = new Hono<AdminEnv>();
+const RevokeSessionRequestSchema = z.object({
+  jti: z.string().uuid().max(64),
+});
 
 admin.post("/restart", requirePermission("admin"), async (c) => {
   const stub = c.get("doStub");
@@ -426,18 +430,14 @@ admin.post("/sessions/revoke", requirePermission("admin"), async (c) => {
     );
   }
 
-  if (
-    typeof body !== "object" ||
-    body === null ||
-    typeof (body as Record<string, unknown>).jti !== "string" ||
-    !(body as Record<string, unknown>).jti
-  ) {
+  const parsed = RevokeSessionRequestSchema.safeParse(body);
+  if (!parsed.success) {
     return c.json(
       {
         ok: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "Body must include a non-empty jti string",
+          message: "Body must include a UUID jti no longer than 64 characters",
           retryable: false,
         },
       },
@@ -445,7 +445,7 @@ admin.post("/sessions/revoke", requirePermission("admin"), async (c) => {
     );
   }
 
-  const jti = (body as { jti: string }).jti;
+  const { jti } = parsed.data;
   const projectId = c.get("projectId") ?? "";
 
   // 1. Persist to D1

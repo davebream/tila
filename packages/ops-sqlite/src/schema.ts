@@ -36,6 +36,7 @@ export const entityRelationships = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.from_id, table.to_id, table.type] }),
+    index("idx_entity_relationships_to_id_type").on(table.to_id, table.type),
     check(
       "entity_relationships_from_id_no_slash",
       sql`${table.from_id} NOT LIKE '%/%'`,
@@ -173,11 +174,15 @@ export const fences = sqliteTable("fences", {
 });
 
 // --- presence ---
-export const presence = sqliteTable("presence", {
-  machine: text("machine").primaryKey(),
-  last_seen: integer("last_seen").notNull(),
-  info: text("info").notNull().default("{}"),
-});
+export const presence = sqliteTable(
+  "presence",
+  {
+    machine: text("machine").primaryKey(),
+    last_seen: integer("last_seen").notNull(),
+    info: text("info").notNull().default("{}"),
+  },
+  (table) => [index("idx_presence_last_seen").on(table.last_seen)],
+);
 
 // --- _schema_history ---
 export const schemaHistory = sqliteTable("_schema_history", {

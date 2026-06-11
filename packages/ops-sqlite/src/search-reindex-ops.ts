@@ -73,17 +73,19 @@ function reindexArtifactBatch(
   }
 
   const indexedAt = Date.now();
-  for (const row of rows) {
-    db.run(sql`
-      INSERT OR REPLACE INTO artifact_search_docs(
-        artifact_key, kind, mime_type, resource, title, body_text,
-        indexed_at, source_sha256, tombstoned
-      ) VALUES(
-        ${row.r2_key}, ${row.kind}, ${row.mime_type}, ${row.resource},
-        NULL, '', ${indexedAt}, ${row.sha256}, 0
-      )
-    `);
-  }
+  db.transaction((tx) => {
+    for (const row of rows) {
+      tx.run(sql`
+        INSERT OR REPLACE INTO artifact_search_docs(
+          artifact_key, kind, mime_type, resource, title, body_text,
+          indexed_at, source_sha256, tombstoned
+        ) VALUES(
+          ${row.r2_key}, ${row.kind}, ${row.mime_type}, ${row.resource},
+          NULL, '', ${indexedAt}, ${row.sha256}, 0
+        )
+      `);
+    }
+  });
 
   // Check if more work remains
   const remaining = db.get<{ cnt: number }>(sql`
@@ -124,23 +126,25 @@ function reindexEntityBatch(
   }
 
   const indexedAt = Date.now();
-  for (const row of rows) {
-    let name: string | null = null;
-    try {
-      const parsed = JSON.parse(row.data) as Record<string, unknown>;
-      name = entitySearchText(parsed);
-    } catch {
-      // malformed data -- skip name extraction
-    }
+  db.transaction((tx) => {
+    for (const row of rows) {
+      let name: string | null = null;
+      try {
+        const parsed = JSON.parse(row.data) as Record<string, unknown>;
+        name = entitySearchText(parsed);
+      } catch {
+        // malformed data -- skip name extraction
+      }
 
-    db.run(sql`
-      INSERT OR REPLACE INTO entity_search_docs(
-        entity_id, entity_type, name, indexed_at
-      ) VALUES(
-        ${row.id}, ${row.type}, ${name}, ${indexedAt}
-      )
-    `);
-  }
+      tx.run(sql`
+        INSERT OR REPLACE INTO entity_search_docs(
+          entity_id, entity_type, name, indexed_at
+        ) VALUES(
+          ${row.id}, ${row.type}, ${name}, ${indexedAt}
+        )
+      `);
+    }
+  });
 
   // Check if more work remains
   const remaining = db.get<{ cnt: number }>(sql`

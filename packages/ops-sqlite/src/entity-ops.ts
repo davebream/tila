@@ -64,6 +64,11 @@ export type EnrichOpts = {
   ) => { ok: true; schema: TilaSchemaToml } | { ok: false; errors: unknown[] };
 };
 
+export type CompactEntityStats = {
+  blockersByEntityId: ReadonlyMap<string, number>;
+  artifactsByEntityId: ReadonlyMap<string, number>;
+};
+
 function enrichEntity(
   entity: Entity,
   entitySchemaCache: Map<number, TilaSchemaToml | null>,
@@ -351,22 +356,14 @@ export function compactEntity(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   entity: Entity,
   activeClaims: Array<{ resource: string; machine: string; user: string }>,
+  stats?: CompactEntityStats,
 ): CompactEntity {
   const data = entity.data as Record<string, unknown>;
   const resource = `${entity.type}:${entity.id}`;
   const claim = activeClaims.find((c) => c.resource === resource) ?? null;
-
-  const blockerRows = db.all<{ cnt: number }>(sql`
-    SELECT COUNT(*) as cnt FROM entity_relationships
-    WHERE to_id = ${entity.id} AND type IN ('blocks', 'soft-blocks')
-  `);
-  const blockers = blockerRows[0]?.cnt ?? 0;
-
-  const artifactRows = db.all<{ cnt: number }>(sql`
-    SELECT COUNT(*) as cnt FROM entity_artifact_references
-    WHERE entity_id = ${entity.id}
-  `);
-  const artifacts = artifactRows[0]?.cnt ?? 0;
+  const fallbackStats = stats ?? getCompactEntityStats(db, [entity.id]);
+  const blockers = fallbackStats.blockersByEntityId.get(entity.id) ?? 0;
+  const artifacts = fallbackStats.artifactsByEntityId.get(entity.id) ?? 0;
 
   return {
     id: entity.id,
@@ -377,6 +374,53 @@ export function compactEntity(
     blockers,
     artifacts,
   };
+}
+
+export function getCompactEntityStats(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  entityIds: readonly string[],
+): CompactEntityStats {
+  if (entityIds.length === 0) {
+    return {
+      blockersByEntityId: new Map(),
+      artifactsByEntityId: new Map(),
+    };
+  }
+
+  const blockersByEntityId = new Map<string, number>();
+  const blockerRows = db
+    .select({
+      entity_id: schema.entityRelationships.to_id,
+      count: sql<number>`count(*)`,
+    })
+    .from(schema.entityRelationships)
+    .where(
+      and(
+        inArray(schema.entityRelationships.to_id, [...entityIds]),
+        inArray(schema.entityRelationships.type, ["blocks", "soft-blocks"]),
+      ),
+    )
+    .groupBy(schema.entityRelationships.to_id)
+    .all();
+  for (const row of blockerRows) {
+    blockersByEntityId.set(row.entity_id, row.count);
+  }
+
+  const artifactsByEntityId = new Map<string, number>();
+  const artifactRows = db
+    .select({
+      entity_id: schema.entityArtifactReferences.entity_id,
+      count: sql<number>`count(*)`,
+    })
+    .from(schema.entityArtifactReferences)
+    .where(inArray(schema.entityArtifactReferences.entity_id, [...entityIds]))
+    .groupBy(schema.entityArtifactReferences.entity_id)
+    .all();
+  for (const row of artifactRows) {
+    artifactsByEntityId.set(row.entity_id, row.count);
+  }
+
+  return { blockersByEntityId, artifactsByEntityId };
 }
 
 export function update(
@@ -505,12 +549,8 @@ export function archive(
     // The entity's claim remains valid; caller can retry after resolving gates.
     checkPendingGates(tx, id, Date.now());
 
-    // Delete claim rows atomically inside the archive transaction.
-    // Handles both bare-id and typed-resource claim conventions.
-    tx.delete(schema.claims).where(eq(schema.claims.resource, id)).run();
-    const entityType = existing.type;
     tx.delete(schema.claims)
-      .where(eq(schema.claims.resource, `${entityType}:${id}`))
+      .where(eq(schema.claims.resource, `${existing.type}:${id}`))
       .run();
 
     const now = Date.now();

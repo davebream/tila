@@ -12,6 +12,7 @@ import {
 import { type SQL, and, desc, eq, or, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { SearchQueryError, validateFtsQuery } from "./artifact-ops";
+import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 import { tagExistsConditions } from "./tag-filter-ops";
@@ -512,14 +513,7 @@ export async function setRecord(
     }
 
     // Validate fence
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    if (fenceRow) {
-      assertFence(fenceRow.current_fence, input.fence);
-    }
+    assertResourceFence(tx, resource, input.fence);
 
     const newRevision = existing.revision + 1;
 
@@ -940,14 +934,7 @@ export async function patchRecord(
     }
 
     // Fence check
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    if (fenceRow) {
-      assertFence(fenceRow.current_fence, input.fence);
-    }
+    assertResourceFence(tx, resource, input.fence);
 
     const newRevision = existing.revision + 1;
 
@@ -1092,14 +1079,7 @@ export function archiveRecord(
     }
 
     // Fence check
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    if (fenceRow) {
-      assertFence(fenceRow.current_fence, input.fence);
-    }
+    assertResourceFence(tx, resource, input.fence);
 
     const newRevision = existing.revision + 1;
 
@@ -1230,14 +1210,7 @@ export function unarchiveRecord(
     }
 
     // Fence check
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    if (fenceRow) {
-      assertFence(fenceRow.current_fence, input.fence);
-    }
+    assertResourceFence(tx, resource, input.fence);
 
     const newRevision = existing.revision + 1;
 

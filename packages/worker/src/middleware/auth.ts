@@ -157,6 +157,11 @@ function getJtiFromCache(jti: string): boolean | null {
   return entry.revoked;
 }
 
+function isExpectedAudience(aud: unknown, expected: string): boolean {
+  if (aud === undefined) return true;
+  return Array.isArray(aud) ? aud.includes(expected) : aud === expected;
+}
+
 async function getHmacKey(rawKey: string): Promise<CryptoKey> {
   if (cachedHmacKeyRaw === rawKey && cachedHmacKey) {
     return cachedHmacKey;
@@ -470,6 +475,35 @@ export function createAuthMiddleware(
       }
 
       const payload = parsed.data;
+      const rawPayload = payloadObj as { iss?: unknown; aud?: unknown };
+
+      if (rawPayload.iss !== undefined && rawPayload.iss !== "tila") {
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "UNAUTHORIZED",
+              message: "Invalid session token issuer",
+              retryable: false,
+            },
+          },
+          401,
+        );
+      }
+
+      if (!isExpectedAudience(rawPayload.aud, "tila")) {
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "UNAUTHORIZED",
+              message: "Invalid session token audience",
+              retryable: false,
+            },
+          },
+          401,
+        );
+      }
 
       // Check expiry
       if (payload.expires_at <= Date.now() / 1000) {

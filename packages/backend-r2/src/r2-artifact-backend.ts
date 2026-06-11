@@ -108,16 +108,32 @@ export class R2ArtifactBackend implements ArtifactBackend {
   ): Promise<
     { key: string; size: number; metadata: Record<string, string> }[]
   > {
-    const listed = await this.bucket.list({
-      prefix,
-      include: ["customMetadata"],
-    } as R2ListOptions);
-    return listed.objects.map((o) => ({
-      key: o.key,
-      size: o.size,
-      metadata:
-        (o as unknown as { customMetadata?: Record<string, string> })
-          .customMetadata ?? {},
-    }));
+    const objects: {
+      key: string;
+      size: number;
+      metadata: Record<string, string>;
+    }[] = [];
+    let cursor: string | undefined = undefined;
+
+    while (true) {
+      const listed = await this.bucket.list({
+        prefix,
+        cursor,
+        include: ["customMetadata"],
+      } as R2ListOptions);
+      objects.push(
+        ...listed.objects.map((o) => ({
+          key: o.key,
+          size: o.size,
+          metadata:
+            (o as unknown as { customMetadata?: Record<string, string> })
+              .customMetadata ?? {},
+        })),
+      );
+      if (!listed.truncated) break;
+      cursor = (listed as unknown as { cursor?: string }).cursor;
+    }
+
+    return objects;
   }
 }

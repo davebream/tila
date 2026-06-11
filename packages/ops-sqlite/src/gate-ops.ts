@@ -22,7 +22,7 @@ export class GateAlreadySettledError extends Error {
 }
 
 export class GateFenceError extends Error {
-  public readonly code = "no-fence";
+  public readonly code = "gate-fence-conflict";
   constructor(resource: string) {
     super(
       `No fence row for resource ${resource} — claim must be acquired before creating a gate`,

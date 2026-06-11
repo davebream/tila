@@ -30,6 +30,8 @@ const {
   resolveCurrentSchema,
 } = constraintOps;
 
+const MAX_ENTITY_LIST_LIMIT = 500;
+
 export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
 
@@ -171,7 +173,10 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       | undefined;
     const order = c.req.query("order") as "asc" | "desc" | undefined;
     const limitParam = c.req.query("limit");
-    const limit = limitParam !== undefined ? Number(limitParam) : undefined;
+    const limit =
+      limitParam !== undefined
+        ? Math.min(Number(limitParam), MAX_ENTITY_LIST_LIMIT)
+        : undefined;
     const offsetParam = c.req.query("offset");
     const offset = offsetParam !== undefined ? Number(offsetParam) : 0;
 
@@ -200,10 +205,14 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     const compact = c.req.query("compact") === "true";
     if (compact) {
       const activeClaims = coordinationOps.listClaims(db);
+      const stats = entityOps.getCompactEntityStats(
+        db,
+        entities.map((entity) => entity.id),
+      );
       return c.json({
         ok: true as const,
         entities: entities.map((e) =>
-          entityOps.compactEntity(db, e, activeClaims),
+          entityOps.compactEntity(db, e, activeClaims, stats),
         ),
         ...paginationMeta,
       });

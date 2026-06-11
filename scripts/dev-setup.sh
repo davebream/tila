@@ -15,6 +15,11 @@ DEV_PROJECT="dev-project"
 echo "=== tila dev setup ==="
 echo ""
 
+if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+  echo "Error: refusing to run with CLOUDFLARE_ACCOUNT_ID set. This script is local-only and always uses --local." >&2
+  exit 1
+fi
+
 # 1. Generate wrangler.dev.toml
 echo "→ Generating $WORKER_DIR/wrangler.dev.toml"
 sed 's/database_id = ""/database_id = "local-dev"/' \

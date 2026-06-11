@@ -138,6 +138,26 @@ describe("validateGrepPattern", () => {
     });
   });
 
+  describe("regex mode — ambiguous alternation rejected", () => {
+    it("rejects (a|aa)+", () => {
+      expect(() => validateGrepPattern("(a|aa)+", { regex: true })).toThrow(
+        GrepQueryError,
+      );
+    });
+
+    it("rejects identical alternatives in an unbounded group", () => {
+      expect(() => validateGrepPattern("(foo|foo)+", { regex: true })).toThrow(
+        GrepQueryError,
+      );
+    });
+
+    it("accepts disjoint alternatives in an unbounded group", () => {
+      expect(() =>
+        validateGrepPattern("(foo|bar)+", { regex: true }),
+      ).not.toThrow();
+    });
+  });
+
   describe("regex mode — safe patterns accepted", () => {
     it("accepts simple literal-like regex", () => {
       expect(() =>

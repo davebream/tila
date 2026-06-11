@@ -16,6 +16,7 @@ export type PitrStorage = TransactionalMigrationStorage & {
 
 export async function runMigrationsWithPitrRollback(
   storage: PitrStorage,
+  onFatal: () => void = () => {},
   now?: number,
 ): Promise<void> {
   const bookmark = await storage.getCurrentBookmark();
@@ -23,6 +24,7 @@ export async function runMigrationsWithPitrRollback(
     runProjectMigrations(storage, now);
   } catch (err) {
     await storage.onNextSessionRestoreBookmark(bookmark);
+    onFatal();
     throw err;
   }
 }
@@ -186,6 +188,7 @@ export function runProjectMigrations(
   storage: TransactionalMigrationStorage,
   now = Date.now(),
 ): void {
+  let ranAny = false;
   storage.sql.exec(MIGRATION_BOOTSTRAP);
 
   const applied = new Set(
@@ -211,6 +214,7 @@ export function runProjectMigrations(
           now,
         );
       });
+      ranAny = true;
       applied.add(1);
       applied.add(2);
       applied.add(3);
@@ -227,10 +231,13 @@ export function runProjectMigrations(
         now,
       );
     });
+    ranAny = true;
     applied.add(migration.version);
   }
 
-  validateProjectSchema(storage);
+  if (ranAny) {
+    validateProjectSchema(storage);
+  }
 }
 
 export function validateProjectSchema(storage: MigrationStorage): void {

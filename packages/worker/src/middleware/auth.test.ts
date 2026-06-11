@@ -54,6 +54,8 @@ async function mintSessionToken(
     permission: "write",
     expires_at: Math.floor(Date.now() / 1000) + 3600,
     issued_at: Math.floor(Date.now() / 1000),
+    iss: "tila",
+    aud: "tila",
     ...overrides,
   };
 
@@ -1065,6 +1067,28 @@ describe("auth middleware", () => {
       expect(res.status).toBe(200);
       // D1 should NOT be queried for a token with no jti
       expect(mockRevokedJtiIsRevoked).not.toHaveBeenCalled();
+    });
+
+    it("accepts a legacy session token without iss/aud", async () => {
+      const token = await mintSessionToken({ iss: undefined, aud: undefined });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it("rejects a session token with the wrong audience", async () => {
+      const token = await mintSessionToken({ aud: "evil-app" });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("UNAUTHORIZED");
     });
 
     it("uses cached not-revoked result (no D1 on second request)", async () => {

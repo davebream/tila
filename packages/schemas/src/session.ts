@@ -12,6 +12,8 @@ export const SessionPayloadSchema = z.object({
   permission: SessionPermissionSchema,
   expires_at: z.number().int(),
   issued_at: z.number().int(),
+  iss: z.string().optional(),
+  aud: z.union([z.string(), z.array(z.string())]).optional(),
   /**
    * JWT ID — a random nonce added to every newly minted session token (C9).
    * Optional for backward compatibility with tokens minted before this field

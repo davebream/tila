@@ -183,6 +183,49 @@ describe("R2ArtifactBackend", () => {
 
       expect(result[0].metadata).toEqual({});
     });
+
+    it("paginates until the full prefix has been listed", async () => {
+      const list = vi
+        .fn()
+        .mockResolvedValueOnce({
+          objects: [
+            {
+              key: "produced/task:T-1/a.md",
+              size: 100,
+              customMetadata: { page: "1" },
+            },
+          ],
+          truncated: true,
+          cursor: "cursor-2",
+        })
+        .mockResolvedValueOnce({
+          objects: [
+            {
+              key: "produced/task:T-1/b.md",
+              size: 200,
+              customMetadata: { page: "2" },
+            },
+          ],
+          truncated: false,
+        });
+      const bucket = createMockBucket({ list });
+      const backend = new R2ArtifactBackend(bucket);
+
+      const result = await backend.listWithMetadata("produced/");
+
+      expect(result).toEqual([
+        {
+          key: "produced/task:T-1/a.md",
+          size: 100,
+          metadata: { page: "1" },
+        },
+        {
+          key: "produced/task:T-1/b.md",
+          size: 200,
+          metadata: { page: "2" },
+        },
+      ]);
+    });
   });
 
   describe("deleteMany()", () => {

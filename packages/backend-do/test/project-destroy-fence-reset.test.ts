@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { coordinationOps, schema } from "../../ops-sqlite/src";
 import { runProjectMigrations } from "../src/migration-runner";
 
-const { acquire } = coordinationOps;
+const { acquire, release } = coordinationOps;
 
 // Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
 function patchMigration(sql: string): string {
@@ -62,7 +62,7 @@ function createTestDb(): {
 }
 
 describe("AC-1: fence resets to 1 on project destroy + slug reuse", () => {
-  it("DB-A: first acquire returns fence=1, second acquire returns fence=2 (stale prior-life state)", () => {
+  it("DB-A: first holder gets fence=1, next holder gets fence=2 after release", () => {
     const { db: dbA } = createTestDb();
 
     // First acquire — fence is created at 1
@@ -77,12 +77,14 @@ describe("AC-1: fence resets to 1 on project destroy + slug reuse", () => {
     expect(first.acquired).toBe(true);
     expect(first.fence).toBe(1);
 
-    // Second acquire (same machine/user to avoid exclusive conflict) — fence bumps to 2
+    release(dbA, "task:T-1", first.fence, { actor: "machine-a/user-a" });
+
+    // A new holder on the same DB gets the next fence.
     const second = acquire(
       dbA,
       "task:T-1",
-      "machine-a",
-      "user-a",
+      "machine-b",
+      "user-b",
       "exclusive",
       60_000,
     );
@@ -122,12 +124,20 @@ describe("AC-1: fence resets to 1 on project destroy + slug reuse", () => {
   it("end-to-end invariant: DB-A reaches fence=2; DB-B (reconstruction) starts at fence=1 for the same resource", () => {
     // DB-A: simulate two acquires on the same resource (prior-life state)
     const { db: dbA } = createTestDb();
-    acquire(dbA, "task:T-1", "machine-a", "user-a", "exclusive", 60_000);
-    const staleResult = acquire(
+    const first = acquire(
       dbA,
       "task:T-1",
       "machine-a",
       "user-a",
+      "exclusive",
+      60_000,
+    );
+    release(dbA, "task:T-1", first.fence, { actor: "machine-a/user-a" });
+    const staleResult = acquire(
+      dbA,
+      "task:T-1",
+      "machine-b",
+      "user-b",
       "exclusive",
       60_000,
     );

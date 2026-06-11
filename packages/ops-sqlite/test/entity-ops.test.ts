@@ -5,8 +5,10 @@ import {
   EntityAlreadyExistsError,
   EntityNotFoundError,
   archive,
+  compactEntity,
   create,
   get,
+  getCompactEntityStats,
   list,
   searchEntities,
   update,
@@ -957,5 +959,98 @@ describe("list tagFilter (multi-tag AND)", () => {
     });
     expect(result.entities).toHaveLength(1);
     expect(result.entities[0].id).toBe("e-tf-7");
+  });
+});
+
+describe("compactEntity stats batching", () => {
+  it("preserves blocker and artifact counts when reusing precomputed stats", () => {
+    create(
+      testDb.db,
+      {
+        id: "dep-1",
+        type: "task",
+        data: { title: "Dependency 1" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "dep-2",
+        type: "task",
+        data: { title: "Dependency 2" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    create(
+      testDb.db,
+      {
+        id: "dep-3",
+        type: "task",
+        data: { title: "Dependency 3" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    const first = create(
+      testDb.db,
+      {
+        id: "compact-batch-1",
+        type: "task",
+        data: { title: "First", status: "open" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    const second = create(
+      testDb.db,
+      {
+        id: "compact-batch-2",
+        type: "task",
+        data: { title: "Second", status: "open" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO entity_relationships(from_id, to_id, type, schema_version, created_at)
+         VALUES (?, ?, 'blocks', 1, 1000), (?, ?, 'soft-blocks', 1, 1001), (?, ?, 'blocks', 1, 1002)`,
+      )
+      .run("dep-1", first.id, "dep-2", first.id, "dep-3", second.id);
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, tombstoned)
+         VALUES ('produced/a1.txt', NULL, 'report', 'sha1', 10, NULL, 'text/plain', 1000, 'actor', 0),
+                ('produced/a2.txt', NULL, 'report', 'sha2', 10, NULL, 'text/plain', 1000, 'actor', 0),
+                ('produced/a3.txt', NULL, 'report', 'sha3', 10, NULL, 'text/plain', 1000, 'actor', 0)`,
+      )
+      .run();
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO entity_artifact_references(entity_id, artifact_key, slot, metadata, created_at)
+         VALUES (?, 'produced/a1.txt', 'primary', '{}', 1000),
+                (?, 'produced/a2.txt', 'secondary', '{}', 1001),
+                (?, 'produced/a3.txt', 'primary', '{}', 1002)`,
+      )
+      .run(first.id, first.id, second.id);
+
+    const stats = getCompactEntityStats(testDb.db, [first.id, second.id]);
+
+    expect(compactEntity(testDb.db, first, [], stats)).toEqual(
+      compactEntity(testDb.db, first, []),
+    );
+    expect(compactEntity(testDb.db, second, [], stats)).toEqual(
+      compactEntity(testDb.db, second, []),
+    );
   });
 });

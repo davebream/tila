@@ -3,6 +3,8 @@ import { runMigrationsWithPitrRollback } from "../src/migration-runner";
 
 type SqlExecResult = { toArray: () => unknown[] };
 
+const ALL_MIGRATION_VERSIONS = Array.from({ length: 19 }, (_, i) => i + 1);
+
 function makeMockStorage(opts: {
   failOnSql?: string;
   bookmark?: string;
@@ -34,6 +36,67 @@ function makeMockStorage(opts: {
   };
 
   return { storage, onNextSessionRestoreBookmark };
+}
+
+function makeStatefulStorage(opts: {
+  appliedVersions?: number[];
+  failOnVersionInsert?: number;
+  bookmark?: string;
+  invalidSchemaOnPragma?: boolean;
+}) {
+  const {
+    appliedVersions = [],
+    failOnVersionInsert,
+    bookmark = "test-bookmark-001",
+    invalidSchemaOnPragma = false,
+  } = opts;
+  const versions = [...appliedVersions];
+  const onNextSessionRestoreBookmark = vi
+    .fn<[string], Promise<string>>()
+    .mockResolvedValue(bookmark);
+
+  const storage = {
+    sql: {
+      exec(statement: string, ...bindings: unknown[]): SqlExecResult {
+        if (statement.includes("SELECT version FROM _migrations")) {
+          return {
+            toArray: () => versions.map((version) => ({ version })),
+          };
+        }
+
+        if (statement.includes("INSERT INTO _migrations")) {
+          const version = Number(bindings[0]);
+          if (version === failOnVersionInsert) {
+            throw new Error(`Deliberate migration insert failure: ${version}`);
+          }
+          versions.push(version);
+          return { toArray: () => [] };
+        }
+
+        if (/PRAGMA\s+table_info/i.test(statement)) {
+          return {
+            toArray: () =>
+              invalidSchemaOnPragma ? [] : [{ name: "placeholder" }],
+          };
+        }
+
+        if (/^\s*SELECT\b/i.test(statement)) {
+          return { toArray: () => [] };
+        }
+
+        return { toArray: () => [] };
+      },
+    },
+    transactionSync<T>(callback: () => T): T {
+      return callback();
+    },
+    getCurrentBookmark(): Promise<string> {
+      return Promise.resolve(bookmark);
+    },
+    onNextSessionRestoreBookmark,
+  };
+
+  return { storage, versions, onNextSessionRestoreBookmark };
 }
 
 describe("runMigrationsWithPitrRollback", () => {
@@ -277,5 +340,35 @@ describe("runMigrationsWithPitrRollback", () => {
     await expect(runMigrationsWithPitrRollback(storage)).rejects.toThrow();
 
     expect(onNextSessionRestoreBookmark).toHaveBeenCalledWith(customBookmark);
+  });
+
+  it("calls the fatal-abort hook and leaves the failing migration version unapplied", async () => {
+    const { storage, versions, onNextSessionRestoreBookmark } =
+      makeStatefulStorage({
+        appliedVersions: [1, 2, 3],
+        failOnVersionInsert: 4,
+      });
+    const onFatal = vi.fn();
+
+    await expect(
+      runMigrationsWithPitrRollback(storage, onFatal),
+    ).rejects.toThrow(/Deliberate migration insert failure: 4/);
+
+    expect(onFatal).toHaveBeenCalledOnce();
+    expect(onNextSessionRestoreBookmark).toHaveBeenCalledOnce();
+    expect(versions).not.toContain(4);
+  });
+
+  it("skips schema validation entirely when no migration ran", async () => {
+    const { storage, onNextSessionRestoreBookmark } = makeStatefulStorage({
+      appliedVersions: ALL_MIGRATION_VERSIONS,
+      invalidSchemaOnPragma: true,
+    });
+
+    await expect(
+      runMigrationsWithPitrRollback(storage),
+    ).resolves.toBeUndefined();
+
+    expect(onNextSessionRestoreBookmark).not.toHaveBeenCalled();
   });
 });

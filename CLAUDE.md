@@ -164,6 +164,8 @@ Defined in `packages/worker/wrangler.toml`: `PROJECT` (DO), `DB` (D1), `ARTIFACT
 - DO: Co-locate entity and claim writes in single DO SQLite transactions
 - DO: Content-address all artifacts by sha256 — key format: `<prefix>/<id>/<sha256>.<ext>`
 - DO: Validate fencing tokens on every destructive operation downstream of a claim
+- DO: Canonicalize entity coordination resources to `<type>:<id>` at the route or facade boundary before reading claim/fence state
+- DO: Fail closed when a required fence row is missing; do not add `if (fenceRow)` best-effort guards on required-fence paths
 - DO: Add new ops modules to `@tila/ops-sqlite`, not to `backend-do` directly
 - DON'T: Create circular dependencies between workspace packages
 - DON'T: Import Cloudflare Workers types in packages that don't run on Workers (schemas, core, ops-sqlite, cli, sdk)

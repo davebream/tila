@@ -87,6 +87,8 @@ async function mintSessionToken(
 
   const jwt = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer("tila")
+    .setAudience("tila")
     .sign(secret);
 
   return `tila_s.${jwt}`;

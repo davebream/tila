@@ -12,11 +12,16 @@ const REINDEX_KV_KEY = "_reindex_state";
 
 /** Delay between alarm-driven batches (ms) */
 const REINDEX_ALARM_DELAY_MS = 100;
+const REINDEX_DEADLINE_MS = 5 * 60_000;
+const MAX_REINDEX_ATTEMPTS = 50;
+const REINDEX_FAILED_KV_KEY = "_reindex_failed";
 
 export type ReindexState = {
   kind: "artifact" | "entity";
   batchSize: number;
   processed: number;
+  startedAt: number;
+  attempts: number;
 };
 
 export class ProjectDO extends DurableObject {
@@ -28,7 +33,7 @@ export class ProjectDO extends DurableObject {
     this.db = drizzle(ctx.storage, { schema });
 
     ctx.blockConcurrencyWhile(async () => {
-      await runMigrationsWithPitrRollback(ctx.storage);
+      await runMigrationsWithPitrRollback(ctx.storage, () => ctx.abort());
     });
 
     this.router = createProjectRouter({
@@ -73,16 +78,35 @@ export class ProjectDO extends DurableObject {
     });
 
     const totalProcessed = state.processed + result.processed;
+    const nextAttempts = state.attempts + 1;
+    const deadlineExceeded = Date.now() - state.startedAt > REINDEX_DEADLINE_MS;
+    const attemptsExceeded = nextAttempts > MAX_REINDEX_ATTEMPTS;
 
     if (result.done) {
       // All rows indexed -- clean up KV state
       await this.ctx.storage.delete(REINDEX_KV_KEY);
+      await this.ctx.storage.delete(REINDEX_FAILED_KV_KEY);
+    } else if (deadlineExceeded || attemptsExceeded) {
+      const reason = attemptsExceeded
+        ? "attempt-cap-exceeded"
+        : "deadline-exceeded";
+      await this.ctx.storage.delete(REINDEX_KV_KEY);
+      await this.ctx.storage.put(REINDEX_FAILED_KV_KEY, {
+        kind: state.kind,
+        processed: totalProcessed,
+        attempts: nextAttempts,
+        startedAt: state.startedAt,
+        failedAt: Date.now(),
+        reason,
+      });
     } else {
       // Update cumulative processed count and schedule next batch
       await this.ctx.storage.put<ReindexState>(REINDEX_KV_KEY, {
         ...state,
         processed: totalProcessed,
+        attempts: nextAttempts,
       });
+      // Reserve the DO's single alarm slot for the active reindex loop.
       await this.ctx.storage.setAlarm(Date.now() + REINDEX_ALARM_DELAY_MS);
     }
   }

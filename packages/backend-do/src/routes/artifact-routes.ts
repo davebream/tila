@@ -509,6 +509,8 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       kind: body.kind,
       batchSize: 50,
       processed: 0,
+      startedAt: Date.now(),
+      attempts: 0,
     };
 
     await ctx.storage.put("_reindex_state", state);

@@ -77,6 +77,7 @@ import {
 } from "./errors";
 
 import { schema as opsSchema } from "@tila/ops-sqlite";
+import { resolveEntityResource } from "@tila/ops-sqlite";
 import { type SleepSync, withBusyRetry } from "./retry";
 
 /**
@@ -189,7 +190,7 @@ export class EmbeddedProject
 
   async update(id: string, data: Partial<Entity["data"]>): Promise<Entity> {
     const entity = await this.retry(() => entityOps.get(this.db, id));
-    if (!entity) throw new Error(`Entity not found: ${id}`);
+    if (!entity) throw new NotFoundError(`Entity ${id} not found`);
     const resource = `${entity.type}:${id}`;
     const acquired = this.retry(() =>
       coordinationOps.acquire(
@@ -214,7 +215,7 @@ export class EmbeddedProject
     try {
       this.retry(() =>
         coordinationOps.release(this.db, resource, acquired.fence, {
-          actor: "local",
+          actor: "local/local",
         }),
       );
     } catch {
@@ -225,7 +226,7 @@ export class EmbeddedProject
 
   async archive(id: string): Promise<void> {
     const entity = await this.retry(() => entityOps.get(this.db, id));
-    if (!entity) throw new Error(`Entity not found: ${id}`);
+    if (!entity) throw new NotFoundError(`Entity ${id} not found`);
     const resource = `${entity.type}:${id}`;
     const acquired = this.retry(() =>
       coordinationOps.acquire(
@@ -307,8 +308,12 @@ export class EmbeddedProject
   async tree(_rootId?: string): Promise<EntityTree> {
     const activeClaims = coordinationOps.listClaims(this.db);
     const { entities } = entityOps.list(this.db, { archived: 0 });
+    const stats = entityOps.getCompactEntityStats(
+      this.db,
+      entities.map((entity) => entity.id),
+    );
     const nodes: CompactEntity[] = entities.map((e) =>
-      entityOps.compactEntity(this.db, e, activeClaims),
+      entityOps.compactEntity(this.db, e, activeClaims, stats),
     );
     const edges = relationshipOps.listEntityRelationships(this.db, {
       type: "parent-child",
@@ -421,8 +426,17 @@ export class EmbeddedProject
     mode: "exclusive" | "owner" | "presence",
     ttlMs: number,
   ): Promise<AcquireResult> {
+    const canonicalResource =
+      resolveEntityResource(this.db, resource) ?? resource;
     return this.retry(() =>
-      coordinationOps.acquire(this.db, resource, machine, user, mode, ttlMs),
+      coordinationOps.acquire(
+        this.db,
+        canonicalResource,
+        machine,
+        user,
+        mode,
+        ttlMs,
+      ),
     );
   }
 
@@ -437,19 +451,37 @@ export class EmbeddedProject
     // loss-of-claim (missing / expired / holder mismatch) from success, and
     // `expires_at` is the REAL stored expiry — callers must not recompute it.
     // Mirrors the DO `/coord/renew` contract (409 `renew-failed` on !renewed).
+    const canonicalResource =
+      resolveEntityResource(this.db, resource) ?? resource;
     return this.retry(() =>
-      coordinationOps.renew(this.db, resource, machine, user, fence, ttlMs),
+      coordinationOps.renew(
+        this.db,
+        canonicalResource,
+        machine,
+        user,
+        fence,
+        ttlMs,
+      ),
     );
   }
 
   async release(resource: string, fence: number): Promise<void> {
+    const canonicalResource =
+      resolveEntityResource(this.db, resource) ?? resource;
+    const claim = coordinationOps.state(this.db, canonicalResource);
+    const actor = claim ? `${claim.machine}/${claim.user}` : "local/local";
+
     this.retry(() =>
-      coordinationOps.release(this.db, resource, fence, { actor: "local" }),
+      coordinationOps.release(this.db, canonicalResource, fence, {
+        actor,
+      }),
     );
   }
 
   async state(resource: string): Promise<Claim | null> {
-    return coordinationOps.state(this.db, resource);
+    const canonicalResource =
+      resolveEntityResource(this.db, resource) ?? resource;
+    return coordinationOps.state(this.db, canonicalResource);
   }
 
   async heartbeat(
