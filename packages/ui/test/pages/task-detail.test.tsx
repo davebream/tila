@@ -185,6 +185,23 @@ describe("TaskDetailPage claim state", () => {
     expect(within(claimTable).getAllByText("agent-sonnet")).toHaveLength(2);
   });
 
+  test("resolves a canonical milestone:<id> resource via the shared drawer", async () => {
+    const expiresAt = Date.now() + 3_600_000;
+    server.use(
+      entityHandler("m1", "milestone"),
+      claimsHandler([activeClaim("milestone:m1", expiresAt)]),
+    );
+
+    renderDrawer("/p/test-project/tasks/m1");
+
+    await waitFor(() =>
+      expect(screen.getByText("test-user")).toBeInTheDocument(),
+    );
+
+    const claimTable = screen.getByRole("table", { name: "Claim state" });
+    expect(within(claimTable).getAllByText("agent-sonnet")).toHaveLength(2);
+  });
+
   test("shows 'Not claimed.' when there is no active claim (AC-2)", async () => {
     server.use(entityHandler("task.ingest-worker", "task"), claimsHandler([]));
 
