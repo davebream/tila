@@ -15,6 +15,8 @@ pnpm test             # Run all tests (turbo)
 pnpm lint             # Biome check (read-only, CI-safe)
 pnpm run check        # Biome check --write (auto-fixes formatting + imports)
 pnpm run typecheck    # TypeScript type checking (turbo)
+pnpm version:check    # Verify public release version lockstep
+pnpm version:test     # Test version policy scripts
 ```
 
 ### Single-package commands
@@ -68,7 +70,18 @@ pnpm --filter @tila/worker exec wrangler dev --remote
 
 ### Pre-commit hooks
 
-Lefthook runs Biome auto-fix and gitleaks secret detection on staged files.
+Lefthook runs Biome auto-fix, gitleaks secret detection, and targeted version lockstep checks on staged files.
+
+### Release versioning
+
+tila uses one product version for public release artifacts. Bump the root `package.json` marker, `tila-cli`, all `tila-cli-*` platform packages, `tila-sdk`, `tila-mcp-server`, and `packages/mcp-server/server.json` together:
+
+```bash
+./scripts/bump-version.sh <version>
+pnpm version:check
+```
+
+Private workspace packages such as `@tila/core`, `@tila/schemas`, backend packages, worker, and UI are implementation modules. They do not need product-version bumps.
 
 ### Git workflow
 
