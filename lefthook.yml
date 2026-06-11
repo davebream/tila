@@ -7,3 +7,6 @@ pre-commit:
       stage_fixed: true
     gitleaks:
       run: gitleaks protect --staged --redact
+    version-check:
+      glob: "{package.json,packages/cli/package.json,packages/cli-*/package.json,packages/sdk/package.json,packages/mcp-server/package.json,packages/mcp-server/server.json,scripts/bump-version.*,scripts/check-public-versions.mjs,scripts/version-policy*.mjs}"
+      run: pnpm version:check
