@@ -34,6 +34,12 @@
       "description": "tila project ID to scope all operations",
       "isRequired": false,
       "isSecret": false
+    },
+    {
+      "name": "TILA_MCP_TOOLS",
+      "description": "Comma-separated tool groups to register. Unset = all groups. Recommended lean profile for coordination-only agents: 'core' (tasks, claims, gates, signals, summary, presence, journal - 20 tools, ~47% fewer always-on tokens). Valid groups: tasks, claims, gates, signals, artifacts, records, presence, journal, schema, templates, summary, core.",
+      "isRequired": false,
+      "isSecret": false
     }
   ]
 }
