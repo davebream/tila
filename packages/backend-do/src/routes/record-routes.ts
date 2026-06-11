@@ -11,8 +11,10 @@ import {
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
   RecordPatchRequestSchema,
+  RecordPutRequestSchema,
   RecordSetRequestSchema,
   RecordUnarchiveRequestSchema,
+  RecordValueSchema,
   formatRecordResource,
   parseTagFilter,
 } from "@tila/schemas";
@@ -67,6 +69,58 @@ function upsertCanonicalSnapshot(
   );
 }
 
+type ValidateRecordWriteResult =
+  | { ok: true; schemaVersion: number }
+  | { ok: false; status: 422; code: "constraint-violation"; message: string };
+
+/**
+ * Shared record-write validation for the create/set/put handlers.
+ *
+ * Resolves the record's `schema_version` from the current schema and, when a
+ * schema is declared, gates on record-type-declared + record-value validation
+ * exactly as the create/set handlers did inline. Returns the resolved
+ * `schema_version` on success, or a structured rejection the caller maps to a
+ * `jsonError` 422. Keeping this DRY across create/set/put avoids a third copy of
+ * the validation block (DO rule).
+ */
+function validateRecordWrite(
+  deps: RouterDeps,
+  type: string,
+  value: Record<string, unknown>,
+): ValidateRecordWriteResult {
+  const currentSchema = resolveCurrentSchema(deps.db);
+  const schemaVersion = currentSchema
+    ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
+    : 0;
+
+  if (currentSchema) {
+    const typeCheck = checkRecordTypeDeclared(currentSchema, type);
+    if (!typeCheck.ok) {
+      return {
+        ok: false,
+        status: 422,
+        code: "constraint-violation",
+        message: typeCheck.message,
+      };
+    }
+
+    const recordDef = currentSchema.records?.[type];
+    if (recordDef) {
+      const valResult = validateRecordValue(value, recordDef);
+      if (!valResult.ok) {
+        return {
+          ok: false,
+          status: 422,
+          code: "constraint-violation",
+          message: valResult.errors.join("; "),
+        };
+      }
+    }
+  }
+
+  return { ok: true, schemaVersion };
+}
+
 export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
 
@@ -83,30 +137,16 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         (rawBody.source_version as string | null | undefined) ?? null,
     };
 
-    const currentSchema = resolveCurrentSchema(deps.db);
-    const schemaVersion = currentSchema
-      ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
-      : 0;
-
-    if (currentSchema) {
-      const typeCheck = checkRecordTypeDeclared(currentSchema, type);
-      if (!typeCheck.ok) {
-        return jsonError(c, 422, "constraint-violation", typeCheck.message);
-      }
-
-      const recordDef = currentSchema.records?.[type];
-      if (recordDef) {
-        const valResult = validateRecordValue(body.value, recordDef);
-        if (!valResult.ok) {
-          return jsonError(
-            c,
-            422,
-            "constraint-violation",
-            valResult.errors.join("; "),
-          );
-        }
-      }
+    const validation = validateRecordWrite(deps, type, body.value);
+    if (!validation.ok) {
+      return jsonError(
+        c,
+        validation.status,
+        validation.code,
+        validation.message,
+      );
     }
+    const schemaVersion = validation.schemaVersion;
 
     const canonicalArtifactKey =
       ((rawBody as Record<string, unknown>).canonical_artifact_key as
@@ -164,30 +204,16 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         (rawSetBody.source_version as string | null | undefined) ?? null,
     };
 
-    const currentSchema = resolveCurrentSchema(deps.db);
-    const schemaVersion = currentSchema
-      ? (schemaOps.getCurrentSchema(deps.db)?.version ?? 0)
-      : 0;
-
-    if (currentSchema) {
-      const typeCheck = checkRecordTypeDeclared(currentSchema, type);
-      if (!typeCheck.ok) {
-        return jsonError(c, 422, "constraint-violation", typeCheck.message);
-      }
-
-      const recordDef = currentSchema.records?.[type];
-      if (recordDef) {
-        const valResult = validateRecordValue(body.value, recordDef);
-        if (!valResult.ok) {
-          return jsonError(
-            c,
-            422,
-            "constraint-violation",
-            valResult.errors.join("; "),
-          );
-        }
-      }
+    const validation = validateRecordWrite(deps, type, body.value);
+    if (!validation.ok) {
+      return jsonError(
+        c,
+        validation.status,
+        validation.code,
+        validation.message,
+      );
     }
+    const schemaVersion = validation.schemaVersion;
 
     const canonicalArtifactKey =
       ((rawSetBody as Record<string, unknown>).canonical_artifact_key as
@@ -209,6 +235,85 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         actor,
       },
       setProvenance,
+    );
+
+    if (canonicalArtifactKey !== null) {
+      upsertCanonicalSnapshot(
+        deps,
+        type,
+        key,
+        canonicalArtifactKey,
+        result.value_sha256,
+        actor,
+      );
+    }
+
+    return c.json({
+      ok: true,
+      record: serializeRecord(result),
+      fence: result.fence,
+      revision: result.revision,
+    });
+  });
+
+  // Fenceless create-or-replace (upsert). Registered before the generic
+  // `:key{.+}` catch-alls. HTTP 200 on both create and replace branches.
+  app.post("/record/:type/:key{.+}/put", async (c) => {
+    const { type, key } = c.req.param();
+    const rawPutBody = (await c.req.json()) as Record<string, unknown>;
+    const body = RecordPutRequestSchema.parse(rawPutBody);
+
+    // 64 KiB boundary guard — fires before the write.
+    const sizeCheck = RecordValueSchema.safeParse(body.value);
+    if (!sizeCheck.success) {
+      return jsonError(
+        c,
+        413,
+        "payload-too-large",
+        "Value exceeds 64 KiB canonical JSON limit",
+      );
+    }
+
+    // Provenance: read actor from the body (worker forwards it), falling back
+    // to the x-actor header then "anonymous" (mirror the stamp handler).
+    const actor =
+      (rawPutBody.actor as string | undefined) ??
+      c.req.header("x-actor") ??
+      "anonymous";
+    const putProvenance: RequestOrigin = {
+      actor,
+      tokenId: (rawPutBody.actor_token_id as string | null | undefined) ?? null,
+      source: (rawPutBody.source as string | null | undefined) ?? null,
+      sourceVersion:
+        (rawPutBody.source_version as string | null | undefined) ?? null,
+    };
+
+    const validation = validateRecordWrite(deps, type, body.value);
+    if (!validation.ok) {
+      return jsonError(
+        c,
+        validation.status,
+        validation.code,
+        validation.message,
+      );
+    }
+
+    const canonicalArtifactKey =
+      (rawPutBody.canonical_artifact_key as string | null | undefined) ?? null;
+    const result = await recordOps.putRecord(
+      deps.db,
+      {
+        type,
+        key,
+        value: body.value,
+        tags: body.tags,
+        message: body.message,
+        source_artifact_key: body.source_artifact_key,
+        canonical_artifact_key: canonicalArtifactKey,
+        schema_version: validation.schemaVersion,
+        actor,
+      },
+      putProvenance,
     );
 
     if (canonicalArtifactKey !== null) {
