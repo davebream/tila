@@ -46,6 +46,9 @@ const _impl: RecordBackend = {
   async setRecord(_input) {
     return row;
   },
+  async putRecord(_input) {
+    return row;
+  },
   async getRecord(_type, _key) {
     return null;
   },

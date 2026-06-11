@@ -25,6 +25,15 @@ export interface SetRecordInput {
   sourceArtifactKey?: string | null;
 }
 
+export interface PutRecordInput {
+  type: string;
+  key: string;
+  value: Record<string, unknown>;
+  tags?: string[];
+  message?: string | null;
+  sourceArtifactKey?: string | null;
+}
+
 export interface PatchRecordInput {
   type: string;
   key: string;
@@ -97,6 +106,7 @@ export interface RecordPage<T> {
 export interface RecordBackend {
   createRecord(input: CreateRecordInput): Promise<RecordRow>;
   setRecord(input: SetRecordInput): Promise<RecordRow>;
+  putRecord(input: PutRecordInput): Promise<RecordRow>;
   getRecord(type: string, key: string): Promise<RecordRow | null>;
   patchRecord(input: PatchRecordInput): Promise<RecordRow>;
   archiveRecord(input: ArchiveRecordInput): Promise<RecordRow>;

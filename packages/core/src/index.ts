@@ -51,6 +51,7 @@ export type {
   RecordBackend,
   CreateRecordInput,
   SetRecordInput,
+  PutRecordInput,
   PatchRecordInput,
   ArchiveRecordInput,
   RecordListFilter,
