@@ -18,6 +18,7 @@ import {
   type JournalQuery,
   type PatchRecordInput,
   type ProjectSummary,
+  type PutRecordInput,
   type ReadyFilter,
   type RecordBackend,
   type RecordHistoryOptions,
@@ -776,6 +777,34 @@ export class EmbeddedProject
           key: input.key,
           value: input.value,
           fence: input.fence,
+          tags: input.tags,
+          message: input.message ?? null,
+          source_artifact_key: input.sourceArtifactKey ?? null,
+          canonical_artifact_key: null,
+          schema_version: schemaVersion,
+          actor: "local",
+        },
+        this.localOrigin(),
+      ),
+    );
+  }
+
+  async putRecord(input: PutRecordInput): Promise<RecordRow> {
+    const { currentSchema, schemaVersion } = this.resolveRecordSchema();
+    // DO parity: validateRecordWrite (record-routes.ts) — type + value gate.
+    // Same assert helpers create/set use; conditional on a declared schema.
+    this.assertRecordTypeDeclared(currentSchema, input.type);
+    this.assertRecordValueValid(currentSchema, input.type, input.value);
+    // The embedded backend has NO snapshot/R2 handling — create/set pass
+    // canonical_artifact_key: null unconditionally, so put has nothing to
+    // mirror (design C6/RC-3).
+    return this.retry(() =>
+      recordOps.putRecord(
+        this.db,
+        {
+          type: input.type,
+          key: input.key,
+          value: input.value,
           tags: input.tags,
           message: input.message ?? null,
           source_artifact_key: input.sourceArtifactKey ?? null,
