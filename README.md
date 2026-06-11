@@ -44,6 +44,12 @@ tila handles both. Artifact storage is content-addressed with deduplication, lif
 
 ## 🔬 What it looks like
 
+<p align="center">
+  <img src="docs/assets/tila-dashboard.png" width="100%" alt="tila's read-only dashboard showing a fleet of coding agents coordinating on one shared task graph — an epic broken into milestones and tasks, with per-task status (done, in-progress, blocked, failed, queued) and per-agent ownership across agent-sonnet, agent-opus, agent-haiku, and a human reviewer">
+  <br>
+  <sub>The read-only dashboard: a fleet of agents coordinating on shared state — task hierarchy, live status, and per-agent ownership.</sub>
+</p>
+
 ### Content-addressed artifacts: immutable and deduplicated
 
 ```bash
