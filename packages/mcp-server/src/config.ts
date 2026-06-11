@@ -111,6 +111,10 @@ function envOr(name: string): string | undefined {
  *   - "local":  when config.toml has backend = "local" (no worker_url/token needed)
  *   - "remote": otherwise (existing tila-token / github-repo behavior)
  *
+ * Backend mode priority (issue #24):
+ *   backendMode: TILA_BACKEND env ("local" | "cloudflare") -> config.toml `backend` -> default "cloudflare"
+ *                An invalid TILA_BACKEND value throws an actionable error.
+ *
  * Remote priority:
  *   apiUrl:    TILA_API_URL env -> config.toml worker_url
  *   projectId: TILA_PROJECT_ID env -> config.toml project_id
@@ -135,11 +139,23 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
     envOr("TILA_PROJECT_ID") ??
     (config?.success ? config.data.project_id : undefined);
 
-  // Backend mode from config (default: cloudflare/remote). Local backend never
-  // requires worker_url or a token.
-  const backendMode = config?.success
-    ? (config.data.backend ?? "cloudflare")
-    : "cloudflare";
+  // Backend mode: TILA_BACKEND env overrides config.toml `backend`, else defaults
+  // to "cloudflare". The env override lets an env-only embedder select local mode
+  // with no .tila/config.toml present (issue #24). Local backend never requires a
+  // worker_url or a token.
+  const backendEnv = envOr("TILA_BACKEND");
+  if (
+    backendEnv !== undefined &&
+    backendEnv !== "local" &&
+    backendEnv !== "cloudflare"
+  ) {
+    throw new Error(
+      `Invalid TILA_BACKEND value "${backendEnv}". Expected "local" or "cloudflare".`,
+    );
+  }
+  const backendMode =
+    backendEnv ??
+    (config?.success ? (config.data.backend ?? "cloudflare") : "cloudflare");
 
   if (backendMode === "local") {
     if (!projectId) {

@@ -343,4 +343,103 @@ artifacts_path = ".tila/artifacts"
       expect(config.artifactsPath).toBe(resolve(".tila/artifacts"));
     });
   });
+
+  describe("TILA_BACKEND env selector (issue #24)", () => {
+    function mockConfig(toml: string): void {
+      mockExistsSync.mockImplementation((path: unknown) =>
+        String(path).endsWith("config.toml"),
+      );
+      mockReadFileSync.mockImplementation((path: unknown) =>
+        String(path).endsWith("config.toml") ? toml : "",
+      );
+    }
+
+    it("AC-1: TILA_BACKEND=local selects local backend with NO config.toml present", async () => {
+      vi.stubEnv("TILA_BACKEND", "local");
+      vi.stubEnv("TILA_PROJECT_ID", "proj-env-local");
+      vi.stubEnv("TILA_DB_PATH", "/env/local.db");
+      vi.stubEnv("TILA_ARTIFACTS_PATH", "/env/artifacts");
+      // existsSync defaults to false (afterEach reset) → no config.toml on disk.
+
+      const config = await resolveServerConfig();
+
+      expect(config.mode).toBe("local");
+      if (config.mode !== "local") throw new Error("expected local mode");
+      expect(config.projectId).toBe("proj-env-local");
+      expect(config.dbPath).toBe("/env/local.db");
+      expect(config.artifactsPath).toBe("/env/artifacts");
+    });
+
+    it("AC-2: unset TILA_BACKEND + no config.toml keeps the default (cloudflare/remote) path", async () => {
+      vi.stubEnv("TILA_BACKEND", "");
+      vi.stubEnv("TILA_API_URL", "");
+      vi.stubEnv("TILA_API_TOKEN", "");
+      vi.stubEnv("TILA_PROJECT_ID", "");
+      // Backward-compatible: with no config.toml and no TILA_API_URL the remote arm
+      // throws its pre-existing error — behavior is unchanged from before issue #24.
+      await expect(resolveServerConfig()).rejects.toThrow("TILA_API_URL");
+    });
+
+    it("AC-3: TILA_BACKEND=local overrides config.toml backend = cloudflare", async () => {
+      const CLOUDFLARE_CONFIG_TOML = `
+project_id = "proj-cf-config"
+backend = "cloudflare"
+worker_url = "https://tila.example.com"
+schema_version = 1
+tila_version = "0.1.0"
+created_at = "2026-01-01T00:00:00Z"
+`;
+      vi.stubEnv("TILA_BACKEND", "local");
+      vi.stubEnv("TILA_API_URL", "");
+      vi.stubEnv("TILA_API_TOKEN", "");
+      vi.stubEnv("TILA_PROJECT_ID", "");
+      vi.stubEnv("TILA_DB_PATH", "/env/over.db");
+      vi.stubEnv("TILA_ARTIFACTS_PATH", "/env/over-artifacts");
+      vi.stubEnv("TILA_ORG", "");
+      mockConfig(CLOUDFLARE_CONFIG_TOML);
+
+      const config = await resolveServerConfig();
+
+      expect(config.mode).toBe("local");
+      if (config.mode !== "local") throw new Error("expected local mode");
+      // projectId still resolves from config.toml (no TILA_PROJECT_ID env set).
+      expect(config.projectId).toBe("proj-cf-config");
+      expect(config.dbPath).toBe("/env/over.db");
+    });
+
+    it("AC-3/AC-4: TILA_BACKEND=cloudflare overrides config.toml backend = local", async () => {
+      const LOCAL_CONFIG_TOML = `
+project_id = "proj-local-config"
+backend = "local"
+worker_url = "https://tila.example.com"
+schema_version = 1
+tila_version = "0.1.0"
+created_at = "2026-01-01T00:00:00Z"
+
+[local]
+db_path = "/tmp/tila/local.db"
+artifacts_path = "/tmp/tila/artifacts"
+`;
+      vi.stubEnv("TILA_BACKEND", "cloudflare");
+      vi.stubEnv("TILA_API_URL", "https://tila.example.com");
+      vi.stubEnv("TILA_API_TOKEN", "test-token");
+      vi.stubEnv("TILA_PROJECT_ID", "");
+      mockConfig(LOCAL_CONFIG_TOML);
+
+      const config = await resolveServerConfig();
+
+      expect(config.mode).toBe("remote");
+      if (config.mode !== "remote") throw new Error("expected remote mode");
+      expect(config.apiUrl).toBe("https://tila.example.com");
+      expect(config.projectId).toBe("proj-local-config");
+      expect(config.authMode).toBe("tila-token");
+    });
+
+    it("throws an actionable error on an invalid TILA_BACKEND value", async () => {
+      vi.stubEnv("TILA_BACKEND", "prod");
+      await expect(resolveServerConfig()).rejects.toThrow(
+        /Invalid TILA_BACKEND/,
+      );
+    });
+  });
 });
