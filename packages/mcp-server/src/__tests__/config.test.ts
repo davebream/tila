@@ -441,5 +441,13 @@ artifacts_path = "/tmp/tila/artifacts"
         /Invalid TILA_BACKEND/,
       );
     });
+
+    it('is case-sensitive: a non-lowercase value (e.g. "Local") is rejected', async () => {
+      // The schema enum is lowercase; the documented contract is exact-match.
+      vi.stubEnv("TILA_BACKEND", "Local");
+      await expect(resolveServerConfig()).rejects.toThrow(
+        /Invalid TILA_BACKEND/,
+      );
+    });
   });
 });
