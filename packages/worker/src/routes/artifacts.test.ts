@@ -503,3 +503,59 @@ describe("GET /search (artifact search) tag_filter", () => {
     expect(parsed.searchParams.get("tag_filter")).toBe("repo:a,team:x");
   });
 });
+
+describe("artifact download and bounds routes", () => {
+  it("returns 404 when the DO has no pointer for the key", async () => {
+    const { app, mockEnv, mockExecutionCtx } = buildTestApp([
+      new Response(JSON.stringify({ ok: false }), { status: 404 }),
+    ]);
+
+    const res = await app.fetch(
+      new Request("http://localhost/sources/missing.txt"),
+      mockEnv,
+      mockExecutionCtx,
+    );
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 when relationship metadata exceeds the cap", async () => {
+    const { app, mockEnv, mockExecutionCtx } = buildTestApp([]);
+
+    const res = await app.fetch(
+      new Request("http://localhost/relationship", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          from_key: "sources/a.txt",
+          to_key: "sources/b.txt",
+          type: "rel",
+          metadata: { note: "x".repeat(9_000) },
+        }),
+      }),
+      mockEnv,
+      mockExecutionCtx,
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when text content exceeds the cap", async () => {
+    const { app, mockEnv, mockExecutionCtx } = buildTestApp([]);
+
+    const res = await app.fetch(
+      new Request("http://localhost/text", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          content: "x".repeat(1_000_001),
+          kind: "note",
+        }),
+      }),
+      mockEnv,
+      mockExecutionCtx,
+    );
+
+    expect(res.status).toBe(400);
+  });
+});

@@ -10,12 +10,12 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–18 minus 15
+ * Canonical shared versions present in the embedded set: 1–19 minus 15
  * (v15 = DO-only journal-archive watermark). The embedded-only idempotency
  * overlay is appended at IDEMPOTENCY_MIGRATION_VERSION, above the shared range.
  */
 const CANONICAL_VERSIONS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,
@@ -74,7 +74,7 @@ function createFakeStorage(): {
 describe("EMBEDDED_MIGRATIONS", () => {
   const versions = EMBEDDED_MIGRATIONS.map((m) => m.version);
 
-  it("includes every canonical version 1–18 except 15 (v14 present, v15 absent), plus the idempotency overlay", () => {
+  it("includes every canonical version 1–19 except 15 (v14 present, v15 absent), plus the idempotency overlay", () => {
     expect(versions).toEqual(EXPECTED_VERSIONS);
     expect(versions).toContain(14);
     expect(versions).not.toContain(15);

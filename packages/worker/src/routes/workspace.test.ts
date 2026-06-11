@@ -517,6 +517,24 @@ describe("POST /api/workspace/select", () => {
     expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
+  it("returns 400 when project_id exceeds the size cap", async () => {
+    const app = createApp();
+    const res = await app.request(
+      "/api/workspace/select",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: "p".repeat(129) }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
   it("returns read scopes when user has only read permission", async () => {
     mockCheckUserMembership.mockResolvedValue("read");
 

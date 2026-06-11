@@ -218,6 +218,11 @@ describe("OLD-style local DB version-reshuffle (Step 4c — KNOWN LIMITATION)", 
         data TEXT NOT NULL DEFAULT '{}', archived INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, created_by TEXT NOT NULL
       );
+      CREATE TABLE presence (
+        machine TEXT NOT NULL, user TEXT NOT NULL, status TEXT NOT NULL,
+        status_message TEXT, last_seen INTEGER NOT NULL, metadata TEXT,
+        PRIMARY KEY (machine, user)
+      );
       CREATE TABLE entity_relationships (
         from_id TEXT NOT NULL, to_id TEXT NOT NULL, type TEXT NOT NULL,
         schema_version INTEGER NOT NULL, created_at INTEGER NOT NULL,

@@ -463,6 +463,8 @@ describe("project admin routes", () => {
   // C9 — admin session revoke route
   // ---------------------------------------------------------------------------
   describe("POST /admin/sessions/revoke", () => {
+    const validJti = "123e4567-e89b-12d3-a456-426614174000";
+
     beforeEach(() => {
       mockRevokedJtiRevoke.mockReset().mockResolvedValue(undefined);
       mockRevokeJtiInCache.mockReset();
@@ -475,7 +477,7 @@ describe("project admin routes", () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jti: "some-jti" }),
+          body: JSON.stringify({ jti: validJti }),
         },
         mockEnv as Env,
       );
@@ -521,22 +523,36 @@ describe("project admin routes", () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jti: "test-jti-to-revoke" }),
+          body: JSON.stringify({ jti: validJti }),
         },
         mockEnv as Env,
       );
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean; jti: string };
       expect(body.ok).toBe(true);
-      expect(body.jti).toBe("test-jti-to-revoke");
+      expect(body.jti).toBe(validJti);
 
       // D1 store revoke was called
       expect(mockRevokedJtiRevoke).toHaveBeenCalledWith(
-        "test-jti-to-revoke",
+        validJti,
         "proj-target",
       );
       // In-isolate cache was immediately invalidated
-      expect(mockRevokeJtiInCache).toHaveBeenCalledWith("test-jti-to-revoke");
+      expect(mockRevokeJtiInCache).toHaveBeenCalledWith(validJti);
+    });
+
+    it("returns 400 when jti is not a UUID", async () => {
+      const app = createApp("full");
+      const res = await app.request(
+        "/admin/sessions/revoke",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jti: "not-a-uuid" }),
+        },
+        mockEnv as Env,
+      );
+      expect(res.status).toBe(400);
     });
 
     it("requires admin permission (write scope is insufficient)", async () => {
@@ -546,7 +562,7 @@ describe("project admin routes", () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jti: "some-jti" }),
+          body: JSON.stringify({ jti: validJti }),
         },
         mockEnv as Env,
       );

@@ -38,11 +38,11 @@ describe("Gate primitives", () => {
       expect(true).toBe(true);
     });
 
-    it("rejects create with no fence row (409 no-fence)", () => {
+    it("rejects create with no fence row (409 gate-fence-conflict)", () => {
       // Setup: Create entity E1, but do NOT acquire any claim on it
       // Request: POST /projects/:pid/gates
       //   Body: { resource: "E1", await_type: "ci", fence: 1 }
-      // Expected: 409 { ok: false, error: { code: "no-fence" } }
+      // Expected: 409 { ok: false, error: { code: "gate-fence-conflict" } }
       expect(true).toBe(true);
     });
   });

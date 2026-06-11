@@ -62,13 +62,23 @@ function columns(
   ).map((r) => r.name);
 }
 
+function indexes(sqlite: InstanceType<typeof Database>): string[] {
+  return (
+    sqlite
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
+      )
+      .all() as { name: string }[]
+  ).map((r) => r.name);
+}
+
 describe("migration runner", () => {
   it("applies all migrations on a fresh database", () => {
     const sqlite = new Database(":memory:");
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ]);
 
     const tableNames = (
@@ -91,6 +101,12 @@ describe("migration runner", () => {
     expect(tableNames).toContain("record_revisions");
     expect(tableNames).toContain("record_search_docs");
     expect(tableNames).toContain("_journal_archive_watermark");
+    expect(indexes(sqlite)).toEqual(
+      expect.arrayContaining([
+        "idx_entity_relationships_to_id_type",
+        "idx_presence_last_seen",
+      ]),
+    );
   });
 
   it("skips already-applied migrations on repeated cold starts", () => {
@@ -100,7 +116,7 @@ describe("migration runner", () => {
     runProjectMigrations(storage);
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ]);
   });
 
@@ -112,7 +128,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ]);
   });
 
@@ -131,7 +147,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ]);
   });
 
@@ -144,7 +160,7 @@ describe("migration runner", () => {
 
     expect(() => runProjectMigrations(createStorage(sqlite))).not.toThrow();
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ]);
     expect(columns(sqlite, "claims")).toEqual(
       expect.arrayContaining(["holder", "machine", "user"]),
