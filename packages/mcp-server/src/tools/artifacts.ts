@@ -83,7 +83,7 @@ export function registerArtifactTools(
         .array(z.string())
         .optional()
         .describe(
-          'Filter by tags using AND semantics — only artifacts carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+          'AND filter: return only artifacts with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
     async ({ q, kind, resource, limit, tag_filter }) => {
@@ -215,7 +215,7 @@ export function registerArtifactTools(
         .array(z.string())
         .optional()
         .describe(
-          'Filter by tags using AND semantics — only results carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+          'AND filter: return only results with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
     async ({ q, limit, tag_filter }) => {

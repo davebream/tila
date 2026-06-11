@@ -55,7 +55,7 @@ function registerCrudTools(
         .array(z.string())
         .optional()
         .describe(
-          'Filter by tags using AND semantics — only items carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+          'AND filter: return only tasks with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
     async ({ type, status, tag_filter }) => {
