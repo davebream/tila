@@ -129,7 +129,7 @@ export function registerRecordTools(
         .array(z.string())
         .optional()
         .describe(
-          'Filter by tags using AND semantics — only records carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+          'AND filter: return only records with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
     async ({ type, tag, filter, include_archived, tag_filter }) => {
