@@ -57,6 +57,22 @@ function claimExpiryLabel(expiresAt: number): string {
   return formatDateTime(expiresAt);
 }
 
+// A task's bare route id (e.g. "task.ingest-worker") must match a claim whose
+// `resource` is either the bare id or the canonical typed form "<type>:<id>"
+// (produced by ops-sqlite/fence-ops.ts, returned by GET /claims). The type prefix
+// is the entity's actual type — "task" for tasks, "epic"/"milestone" for those
+// entity kinds, all reachable via the shared /tasks/:id drawer.
+export function claimResourceMatchesEntity(
+  resource: string,
+  entityId: string,
+  entityType?: string,
+): boolean {
+  if (entityId === "") return false;
+  if (resource === entityId) return true;
+  if (entityType && resource === `${entityType}:${entityId}`) return true;
+  return false;
+}
+
 function CollapsibleData({ data }: { data: Record<string, unknown> }) {
   const [open, setOpen] = useState(false);
   return (
@@ -102,7 +118,9 @@ export function TaskDetailPage() {
   const [expanded, setExpanded] = useState(false);
   const entity = entityData?.entity;
   const relationships = entityData?.relationships ?? [];
-  const entityClaim = claimsData?.claims.find((c) => c.resource === entityId);
+  const entityClaim = claimsData?.claims.find((c) =>
+    claimResourceMatchesEntity(c.resource, entityId, entity?.type),
+  );
   const references = artifactData?.references ?? [];
 
   return (
