@@ -188,8 +188,9 @@ Distribution channels:
 | Method | Command | Status |
 |--------|---------|--------|
 | npm | `npm install -g tila-cli` | ✅ Available (v0.2.0) |
-| curl (Unix) | `curl -fsSL https://github.com/davebream/tila/releases/latest/download/install.sh \| sh` | Release assets pending |
-| PowerShell (Windows) | `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 \| iex` | Release assets pending |
+| Direct download | Grab `tila-<platform>` (+ `checksums.txt`) from the [latest release](https://github.com/davebream/tila/releases/latest) | ✅ Available (v0.2.0) |
+| curl (Unix) | `curl -fsSL https://github.com/davebream/tila/releases/latest/download/install.sh \| sh` | Installer script pending |
+| PowerShell (Windows) | `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 \| iex` | Installer script pending |
 | Homebrew | `brew install davebream/tap/tila` | Tap pending |
 
 **Run from source (for development):**
