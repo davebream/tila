@@ -55,7 +55,7 @@ function registerCrudTools(
         .array(z.string())
         .optional()
         .describe(
-          'Filter by tags using AND semantics — only items carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+          'AND filter: return only tasks with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
     async ({ type, status, tag_filter }) => {
@@ -77,19 +77,39 @@ function registerCrudTools(
 
   server.tool(
     `${namePrefix}_show`,
-    `Get detailed information about a single ${labelSingular}, including its relationships. Returns the full ${labelSingular} object and relationship list.`,
+    `Get detailed information about a single ${labelSingular}, including its relationships. Returns the full ${labelSingular} object and up to limit relationships (default 50); adds {truncated:true,total:n} when capped.`,
     {
       id: z
         .string()
         .describe(
           `${labelSingular[0].toUpperCase()}${labelSingular.slice(1)} ID to retrieve`,
         ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .default(50)
+        .describe("Maximum number of relationships to return (default 50)"),
     },
-    async ({ id }) => {
+    async ({ id, limit = 50 }) => {
       try {
         const result = await tasks.get(id);
+        const arr = (result as Record<string, unknown>).relationships;
+        if (!Array.isArray(arr) || arr.length <= limit) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          };
+        }
+
+        const capped = {
+          ...(result as Record<string, unknown>),
+          relationships: arr.slice(0, limit),
+          truncated: true,
+          total: arr.length,
+        };
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          content: [{ type: "text" as const, text: JSON.stringify(capped) }],
         };
       } catch (err) {
         throw toMcpError(err);

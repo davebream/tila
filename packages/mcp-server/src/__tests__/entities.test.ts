@@ -150,6 +150,64 @@ describe("registerEntityTools", () => {
       expect(facade.tasks.get).toHaveBeenCalledWith("T-1");
       expect(result.content[0].text).toContain('"T-1"');
     });
+
+    it("caps tila_task_show relationships at limit with a truncation marker", async () => {
+      const rels = Array.from({ length: 4 }, (_, i) => ({
+        from_id: "t",
+        to_id: `x${i}`,
+        type: "blocks",
+      }));
+      facade.tasks.get.mockResolvedValue({
+        ok: true,
+        entity: {
+          id: "t",
+          type: "task",
+          schema_version: 1,
+          data: {},
+          archived: 0,
+          created_at: 0,
+          updated_at: 0,
+          created_by: "u",
+          tags: [],
+        },
+        relationships: rels,
+      });
+
+      const handler = findHandler("tila_task_show");
+      const result = await handler({ id: "t", limit: 2 });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed.relationships).toHaveLength(2);
+      expect(parsed.truncated).toBe(true);
+      expect(parsed.total).toBe(4);
+      expect(parsed.entity.id).toBe("t");
+    });
+
+    it("tila_task_show returns the result unchanged when relationships are under limit", async () => {
+      facade.tasks.get.mockResolvedValue({
+        ok: true,
+        entity: {
+          id: "t",
+          type: "task",
+          schema_version: 1,
+          data: {},
+          archived: 0,
+          created_at: 0,
+          updated_at: 0,
+          created_by: "u",
+          tags: [],
+        },
+        relationships: [{ from_id: "t", to_id: "x", type: "blocks" }],
+      });
+
+      const handler = findHandler("tila_task_show");
+      const result = await handler({ id: "t", limit: 50 });
+      const parsed = JSON.parse(result.content[0].text);
+
+      expect(parsed).not.toHaveProperty("truncated");
+      expect(parsed).not.toHaveProperty("total");
+      expect(parsed.entity.id).toBe("t");
+    });
   });
 
   describe("tila_task_update", () => {
@@ -297,22 +355,13 @@ describe("registerEntityTools", () => {
     });
   });
 
-  describe("tila_task_list — no limit param (CRUD tools excluded)", () => {
+  describe("tila_task_list — no limit param", () => {
     it("tila_task_list has no limit key in its input schema", () => {
       const listCall = server.tool.mock.calls.find(
         (c: unknown[]) => c[0] === "tila_task_list",
       );
       if (!listCall) throw new Error("tila_task_list not found");
       const schema = listCall[2] as Record<string, unknown>;
-      expect(schema).not.toHaveProperty("limit");
-    });
-
-    it("tila_task_show has no limit key in its input schema", () => {
-      const showCall = server.tool.mock.calls.find(
-        (c: unknown[]) => c[0] === "tila_task_show",
-      );
-      if (!showCall) throw new Error("tila_task_show not found");
-      const schema = showCall[2] as Record<string, unknown>;
       expect(schema).not.toHaveProperty("limit");
     });
   });

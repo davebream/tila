@@ -21,6 +21,12 @@ Stale fencing tokens (from an expired or superseded claim) are rejected with a 4
 - Use tila_artifact_search only when you already know the target is an artifact and need
   an artifact-specific filter (kind or associated task).
 
+## Lean tool profile
+
+If you only need coordination (claim -> fence -> write -> ready -> signal), the host can set
+TILA_MCP_TOOLS=core to register a 20-tool coordination subset instead of the full catalog -
+this drops the artifact, record, schema, and template tools. Leave it unset to expose everything.
+
 ## Tasks vs records
 
 - Tasks are units of work with status, claims, blockers, gates, and a ready-set

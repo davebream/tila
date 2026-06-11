@@ -131,7 +131,7 @@ invocation time with a clear error:
 | `tila_task_list` | List entities (compact format) |
 | `tila_task_show` | Get entity details with relationships |
 | `tila_task_update` | Update entity data (requires fence) |
-| `tila_ready` | List entities ready for work |
+| `tila_task_ready` | List entities ready for work |
 
 ### Work Units
 
@@ -158,8 +158,8 @@ invocation time with a clear error:
 
 | Tool | Description |
 |------|-------------|
-| `tila_task_claim` | Acquire exclusive or shared claim, returns fencing token |
-| `tila_task_release` | Release a claim (requires fence) |
+| `tila_claim_acquire` | Acquire exclusive or shared claim, returns fencing token |
+| `tila_claim_release` | Release a claim (requires fence) |
 | `tila_claim_list` | List all active claims |
 
 ### Records

@@ -83,7 +83,7 @@ export function registerArtifactTools(
         .array(z.string())
         .optional()
         .describe(
-          'Filter by tags using AND semantics — only artifacts carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+          'AND filter: return only artifacts with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
     async ({ q, kind, resource, limit, tag_filter }) => {
@@ -215,7 +215,7 @@ export function registerArtifactTools(
         .array(z.string())
         .optional()
         .describe(
-          'Filter by tags using AND semantics — only results carrying ALL listed tags are returned. Tags are facet-namespaced (e.g. ["repo:tila", "team:platform"]).',
+          'AND filter: return only results with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
     async ({ q, limit, tag_filter }) => {
@@ -317,7 +317,7 @@ export function registerArtifactTools(
   // Content grep tool
   server.tool(
     "tila_artifact_grep",
-    "Exact substring / bounded-regex line-level matching over raw artifact bytes, returning {line,text,col} per match (col is a character offset, ASCII-accurate). Use this for precise content checks (does an artifact contain X? does a patch contain a forbidden token?). For ranked discovery use tila_search / tila_artifact_search.",
+    "Exact substring / bounded-regex line-level matching over raw artifact bytes, returning {line,text,col} per match (col is a character offset, ASCII-accurate). Returns up to max_matches lines (default 200) across all matched artifacts; when capped the response sets matches_truncated:true and matches_total:n. Use this for precise content checks (does an artifact contain X? does a patch contain a forbidden token?). For ranked discovery use tila_search / tila_artifact_search.",
     {
       pattern: z
         .string()
@@ -346,8 +346,17 @@ export function registerArtifactTools(
         .describe(
           "Maximum number of candidate artifacts to scan (default 50, max 100)",
         ),
+      max_matches: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .default(200)
+        .describe(
+          "Maximum total match lines returned across all artifacts (1-1000, default 200). When exceeded, the response is truncated and adds matches_truncated:true and matches_total:n. Independent of the response's request-level truncated field (backend candidate/byte cap).",
+        ),
     },
-    async ({ pattern, kind, resource, regex, limit }) => {
+    async ({ pattern, kind, resource, regex, limit, max_matches = 200 }) => {
       try {
         const result = await artifacts.grep(pattern, {
           kind,
@@ -355,8 +364,33 @@ export function registerArtifactTools(
           regex,
           limit,
         });
+        const total = result.results.reduce(
+          (n: number, r: (typeof result.results)[number]) => n + r.lines.length,
+          0,
+        );
+        if (total <= max_matches) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          };
+        }
+
+        let remaining = max_matches;
+        const cappedResults: typeof result.results = [];
+        for (const entry of result.results) {
+          if (remaining <= 0) break;
+          const lines = entry.lines.slice(0, remaining);
+          remaining -= lines.length;
+          cappedResults.push({ ...entry, lines });
+        }
+
+        const capped = {
+          ...result,
+          results: cappedResults,
+          matches_truncated: true,
+          matches_total: total,
+        };
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          content: [{ type: "text" as const, text: JSON.stringify(capped) }],
         };
       } catch (err) {
         throw toMcpError(err);

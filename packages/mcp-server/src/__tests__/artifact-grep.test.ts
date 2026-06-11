@@ -112,6 +112,130 @@ describe("tila_artifact_grep MCP tool", () => {
     expect(parsed.results).toHaveLength(1);
   });
 
+  it("caps total match lines at max_matches and marks truncation", async () => {
+    const { server, facade } = setupTools();
+    const five = Array.from({ length: 5 }, (_, i) => ({
+      line: i + 1,
+      text: "m",
+      col: 1,
+    }));
+    facade.artifacts.grep.mockResolvedValue({
+      ok: true,
+      results: [
+        { key: "a", kind: "plan", resource: null, lines: five },
+        { key: "b", kind: "plan", resource: null, lines: five },
+      ],
+      scanned: 2,
+      skipped: 0,
+      truncated: false,
+    });
+
+    const handler = findHandler(server, "tila_artifact_grep");
+    const result = await handler({ pattern: "m", max_matches: 7 });
+    const parsed = JSON.parse(result.content[0].text);
+    const returned = parsed.results.reduce(
+      (n: number, r: { lines: unknown[] }) => n + r.lines.length,
+      0,
+    );
+
+    expect(returned).toBe(7);
+    expect(parsed.matches_truncated).toBe(true);
+    expect(parsed.matches_total).toBe(10);
+  });
+
+  it("does not add a truncation marker when under max_matches", async () => {
+    const { server, facade } = setupTools();
+    facade.artifacts.grep.mockResolvedValue({
+      ok: true,
+      results: [
+        {
+          key: "a",
+          kind: "plan",
+          resource: null,
+          lines: [{ line: 1, text: "m", col: 1 }],
+        },
+      ],
+      scanned: 1,
+      skipped: 0,
+      truncated: false,
+    });
+
+    const handler = findHandler(server, "tila_artifact_grep");
+    const result = await handler({ pattern: "m" });
+    const parsed = JSON.parse(result.content[0].text);
+
+    expect(parsed.matches_truncated).toBeUndefined();
+  });
+
+  it("returns results unchanged when total equals max_matches", async () => {
+    const { server, facade } = setupTools();
+    const five = Array.from({ length: 5 }, (_, i) => ({
+      line: i + 1,
+      text: "m",
+      col: 1,
+    }));
+    facade.artifacts.grep.mockResolvedValue({
+      ok: true,
+      results: [{ key: "a", kind: "plan", resource: null, lines: five }],
+      scanned: 1,
+      skipped: 0,
+      truncated: false,
+    });
+
+    const handler = findHandler(server, "tila_artifact_grep");
+    const result = await handler({ pattern: "m", max_matches: 5 });
+    const parsed = JSON.parse(result.content[0].text);
+
+    expect(parsed.matches_truncated).toBeUndefined();
+    expect(parsed.results[0].lines).toHaveLength(5);
+  });
+
+  it("passes through empty results untouched", async () => {
+    const { server, facade } = setupTools();
+    facade.artifacts.grep.mockResolvedValue({
+      ok: true,
+      results: [],
+      scanned: 0,
+      skipped: 0,
+      truncated: false,
+    });
+
+    const handler = findHandler(server, "tila_artifact_grep");
+    const result = await handler({ pattern: "m", max_matches: 10 });
+    const parsed = JSON.parse(result.content[0].text);
+
+    expect(parsed.results).toHaveLength(0);
+    expect(parsed.matches_truncated).toBeUndefined();
+  });
+
+  it("drops an entire result when max_matches is exhausted before it", async () => {
+    const { server, facade } = setupTools();
+    const five = Array.from({ length: 5 }, (_, i) => ({
+      line: i + 1,
+      text: "m",
+      col: 1,
+    }));
+    facade.artifacts.grep.mockResolvedValue({
+      ok: true,
+      results: [
+        { key: "a", kind: "plan", resource: null, lines: five },
+        { key: "b", kind: "plan", resource: null, lines: five },
+      ],
+      scanned: 2,
+      skipped: 0,
+      truncated: false,
+    });
+
+    const handler = findHandler(server, "tila_artifact_grep");
+    const result = await handler({ pattern: "m", max_matches: 5 });
+    const parsed = JSON.parse(result.content[0].text);
+
+    expect(parsed.results).toHaveLength(1);
+    expect(parsed.results[0].key).toBe("a");
+    expect(parsed.matches_truncated).toBe(true);
+    expect(parsed.matches_total).toBe(10);
+  });
+
   it("error message contains no platform-internal tokens (R2, DO, SQLite, isolate, Worker)", async () => {
     const { server, facade } = setupTools();
     facade.artifacts.grep.mockRejectedValue(
