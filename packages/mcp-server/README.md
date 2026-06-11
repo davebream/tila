@@ -121,7 +121,7 @@ invocation time with a clear error:
 |------|-------------------|
 | `tila_artifact_put` (binary/base64 multipart upload to R2) | `tila_artifact_write_text` (content-addressed text artifacts) |
 
-## Tools (43)
+## Tools (41)
 
 ### Entities & Tasks
 

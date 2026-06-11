@@ -9,7 +9,7 @@ Coordination primitives that prevent races.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.1 in development. APIs are stable enough to build against; expect breaking changes before v1.0.
+> **Status:** v0.2.0 released. APIs are stable enough to build against; expect breaking changes before v1.0.
 
 </div>
 
@@ -152,11 +152,7 @@ These projects solve adjacent problems and work well alongside tila:
 
 ## For AI coding agents
 
-> **Pre-release:** the `tila-mcp-server` and `tila-sdk` packages are not on npm yet.
-> Until the first release, run the MCP server from source (`pnpm --filter tila-mcp-server dev`).
-> The MCP Registry listing and the `npx`/`npm install` instructions below apply once published.
-
-Once published, tila will be listed on the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.davebream/tila`. Three ways to connect:
+The `tila-mcp-server` and `tila-sdk` packages are published on npm (current: v0.2.0). The MCP Registry id is `io.github.davebream/tila` (see the [MCP Registry](https://registry.modelcontextprotocol.io)). Three ways to connect:
 
 **1. One command** (auto-detects your editor)
 ```sh
@@ -180,19 +176,23 @@ Full setup (auth modes, env vars, resources): [`packages/mcp-server/README.md`](
 
 ## 📥 Installation
 
-tila is not published yet. The unscoped `tila` npm package name is already
-used by an unrelated project, so do not install `tila` from npm for this CLI.
+The CLI is published on npm as `tila-cli` (the unscoped `tila` name is taken by an
+unrelated project, so it is not used for this CLI). Install it globally:
 
-Planned distribution channels:
+```bash
+npm install -g tila-cli
+```
 
-| Method | Intended command | Status |
-|--------|------------------|--------|
-| npm | `npm install -g tila-cli` | Not published yet |
-| curl (Unix) | `curl -fsSL https://github.com/davebream/tila/releases/latest/download/install.sh \| sh` | Release pending |
-| PowerShell (Windows) | `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 \| iex` | Release pending |
-| Homebrew | `brew install davebream/tap/tila` | Tap and release pending |
+Distribution channels:
 
-**Run from source (current):**
+| Method | Command | Status |
+|--------|---------|--------|
+| npm | `npm install -g tila-cli` | ✅ Available (v0.2.0) |
+| curl (Unix) | `curl -fsSL https://github.com/davebream/tila/releases/latest/download/install.sh \| sh` | Release assets pending |
+| PowerShell (Windows) | `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 \| iex` | Release assets pending |
+| Homebrew | `brew install davebream/tap/tila` | Tap pending |
+
+**Run from source (for development):**
 
 ```bash
 git clone https://github.com/davebream/tila.git
@@ -201,8 +201,8 @@ pnpm install
 pnpm --filter tila-cli dev -- --help
 ```
 
-Use `pnpm --filter tila-cli dev -- <command>` in place of `tila <command>`
-until packaged binaries are published.
+Use `pnpm --filter tila-cli dev -- <command>` in place of `tila <command>` when
+working from a source checkout.
 
 ---
 
@@ -236,7 +236,7 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 ## 📄 Documentation
 
 - [CLI Reference](packages/cli/README.md): all commands and workflows
-- [MCP Server](packages/mcp-server/README.md): 43 tools, auth modes, resources
+- [MCP Server](packages/mcp-server/README.md): 41 tools, auth modes, resources
 - [TypeScript SDK](packages/sdk/README.md): client API, claims, artifacts, error handling
 - [Getting Started Tutorial](docs/tutorial-getting-started.md): from `tila init` to the UI dashboard
 - [Architecture](docs/02-ARCHITECTURE.md): full technical spec
@@ -341,7 +341,7 @@ Your Cloudflare account holds the durable state. Backups are your responsibility
 <details>
 <summary><b>Is this stable?</b></summary>
 
-v0.1 is in development and not yet tagged. APIs are stable enough to build against, but expect breaking changes before v1.0. Pin to specific versions.
+v0.2.0 is released and tagged. APIs are stable enough to build against, but expect breaking changes before v1.0. Pin to specific versions.
 </details>
 
 <details>

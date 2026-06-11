@@ -50,10 +50,11 @@ This is a Turborepo monorepo with packages under `packages/`:
 |---|---|
 | `@tila/schemas` | Zod schemas, single source of truth for all types |
 | `@tila/core` | Backend interfaces, fence logic, schema-as-config parser |
-| `@tila/ops-sqlite` | Shared SQLite ops modules, Drizzle schema, and migrations. Used by both `backend-do` and `backend-local` |
+| `@tila/ops-sqlite` | Shared SQLite ops modules, Drizzle schema, and migrations. Used by both `backend-do` and `backend-embedded` |
+| `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by `backend-local` (Bun) and `tila-sdk/local` (Node) |
 | `@tila/backend-d1` | D1 global store for tokens, idempotency, project registry, sessions |
 | `@tila/backend-do` | Durable Object wrapper — runs migrations, delegates to `ops-sqlite` |
-| `@tila/backend-local` | Local SQLite backend for CLI offline mode (`bun:sqlite`), shares ops via `ops-sqlite` |
+| `@tila/backend-local` | Local SQLite backend for CLI offline mode (`bun:sqlite`). Delegates to `@tila/backend-embedded`; shares ops via `ops-sqlite` |
 | `@tila/backend-r2` | R2 artifact storage |
 | `@tila/worker` | Cloudflare Worker with Hono routing and Smart Placement |
 | `tila-sdk` | TypeScript SDK for tila consumers |
@@ -65,10 +66,11 @@ This is a Turborepo monorepo with packages under `packages/`:
 Package dependency flow:
 
 ```text
-schemas -> core -> ops-sqlite -> backend-do  -> worker
-                              -> backend-local
-          core -> backend-d1                 -> worker
-          core -> backend-r2                 -> worker
+schemas -> core -> ops-sqlite -> backend-do        -> worker
+                              -> backend-embedded -> backend-local   (Bun, bun:sqlite)
+                                                  -> tila-sdk/local  (Node, better-sqlite3)
+          core -> backend-d1                      -> worker
+          core -> backend-r2                      -> worker
 schemas -> sdk -> mcp-server
                                        worker <- ui
 cli (standalone, imports schemas only)
