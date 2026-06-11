@@ -129,11 +129,44 @@ workspaceRoutes.use("/*", csrfGuard);
 workspaceRoutes.route("/", workspace);
 app.route("/api/workspace", workspaceRoutes);
 
+async function hmacDigest(input: string): Promise<Uint8Array> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode("tila-sweep-compare"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, encoder.encode(input)),
+  );
+}
+
+async function constantTimeSecretMatch(
+  provided: string | undefined,
+  expected: string,
+): Promise<boolean> {
+  const left = await hmacDigest(provided ?? "");
+  const right = await hmacDigest(expected);
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) {
+    diff |= left[i] ^ right[i];
+  }
+  return diff === 0;
+}
+
 // Sweep route — secret-header auth (no bearer token)
 const sweepRoutes = new Hono<AppEnv>();
 sweepRoutes.post("/sweep", async (c) => {
   const secret = c.env.SWEEP_SECRET;
-  if (!secret || c.req.header("X-Sweep-Secret") !== secret) {
+  if (
+    !secret ||
+    !(await constantTimeSecretMatch(
+      c.req.header("X-Sweep-Secret") ?? undefined,
+      secret,
+    ))
+  ) {
     return c.json(
       {
         ok: false,

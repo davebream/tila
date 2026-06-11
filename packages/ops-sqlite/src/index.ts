@@ -25,6 +25,7 @@ export {
   MIGRATION_0015,
   MIGRATION_0016,
   MIGRATION_0018,
+  MIGRATION_0019,
   runMigration0002,
   runMigration0004,
   runMigration0010,
@@ -52,6 +53,7 @@ export * as readyOps from "./ready-ops";
 export * as gateOps from "./gate-ops";
 export * as signalOps from "./signal-ops";
 export * as recordOps from "./record-ops";
+export * as errorMap from "./error-map";
 export * as fenceOps from "./fence-ops";
 export * as searchReindexOps from "./search-reindex-ops";
 export * as storeCountsOps from "./store-counts-ops";
@@ -89,7 +91,12 @@ export { entitySearchText } from "./entity-search-text";
 // Error classes (re-exported for consumer use)
 export { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
 export { SearchQueryError, validateFtsQuery } from "./artifact-ops";
-export { FenceNotFoundError } from "./fence-ops";
+export {
+  ClaimOwnershipError,
+  FenceNotFoundError,
+  resolveEntityResource,
+} from "./fence-ops";
+export { mapProjectError, projectErrorResponses } from "./error-map";
 export {
   GateNotFoundError,
   GateAlreadySettledError,

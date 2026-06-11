@@ -901,7 +901,7 @@ export type UnifiedSearchQuery = z.infer<typeof UnifiedSearchQuerySchema>;
 // --- Artifact response schemas (promoted from CLI) ---
 
 export const ArtifactTextWriteRequestSchema = z.object({
-  content: z.string().min(1),
+  content: z.string().min(1).max(1_000_000),
   kind: z.string().min(1),
   mime_type: z.string().default("text/markdown"),
   resource: z.string().optional(),

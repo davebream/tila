@@ -3,7 +3,7 @@
  * runtime-agnostic embedded backend (and, once Task 4 re-points it, by
  * `@tila/backend-local`).
  *
- * SCHEMA IDENTITY IS THE #1 INVARIANT. Versions 1–18 reuse the canonical DO
+ * SCHEMA IDENTITY IS THE #1 INVARIANT. Versions 1–19 reuse the canonical DO
  * `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` VERBATIM, so an
  * embedded SQLite file is byte-for-byte schema-identical to a DO project for
  * every shared version. There is NO embedded-specific variant of `MIGRATION_0001`:
@@ -28,7 +28,7 @@
  *     operation's own transaction.
  *     The `project_id` column is omitted because each embedded DB file is
  *     scoped to exactly one project. It is given a version OUTSIDE the canonical
- *     1–18 range (rather than hijacking canonical slot 5, which the DO uses for
+ *     1–19 range (rather than hijacking canonical slot 5, which the DO uses for
  *     the `idx_er_to_id_type` index) so it is purely additive and never shadows
  *     or collides with a canonical migration. Every canonical version, including
  *     v5, applies exactly as upstream.
@@ -53,7 +53,7 @@ export type { Migration, MigrationStorage } from "@tila/ops-sqlite";
 const SKIPPED_VERSIONS = new Set<number>([15]);
 
 /** Version assigned to the embedded-only idempotency overlay (outside the
- *  canonical 1–18 range so it is purely additive). */
+ *  canonical 1–19 range so it is purely additive). */
 export const IDEMPOTENCY_MIGRATION_VERSION = 1000;
 
 /**

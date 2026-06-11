@@ -14,6 +14,13 @@ export class FenceNotFoundError extends Error {
   }
 }
 
+export class ClaimOwnershipError extends Error {
+  constructor(resource: string) {
+    super(`Only the current holder may release claim ${resource}`);
+    this.name = "ClaimOwnershipError";
+  }
+}
+
 /**
  * Resolve the canonical `<type>:<id>` resource string for an entity.
  *
@@ -92,8 +99,6 @@ function lookupFence(
  *   1. Entity-existence check: if `resource` names a known entity (bare id or
  *      canonical typed form), resolve the fence against the canonical `<type>:<id>`
  *      row. Both bare-id and typed callers converge on the same row.
- *      Fallback to a bare-id fence row when the canonical typed row is absent
- *      (pre-migration window — harmless after migration 17 runs).
  *   2. Exact-match fallback: for non-entity resources (records, arbitrary
  *      coordination keys) look up the fence row directly.
  */
@@ -105,27 +110,13 @@ export function assertResourceFence(
   const canonical = resolveEntityResource(db, resource);
 
   if (canonical !== null) {
-    // Entity resource path: always prefer the canonical typed row.
+    // Entity resource path: canonical typed row only.
     const canonicalFence = lookupFence(db, canonical);
-    if (canonicalFence) {
-      assertFence(canonicalFence.current_fence, fence);
-      return;
+    if (!canonicalFence) {
+      throw new FenceNotFoundError(resource);
     }
-
-    // Canonical typed row absent — fall back to bare-id row if present.
-    // This path exists only during the window between a bare-id acquire and
-    // the first migration-17 run. After migration 17, all bare-id fence rows
-    // are promoted to typed rows and this fallback is a no-op.
-    if (canonical !== resource) {
-      // resource was a bare id; check bare-id fence row
-      const bareFence = lookupFence(db, resource);
-      if (bareFence) {
-        assertFence(bareFence.current_fence, fence);
-        return;
-      }
-    }
-
-    throw new FenceNotFoundError(resource);
+    assertFence(canonicalFence.current_fence, fence);
+    return;
   }
 
   // Non-entity resource — exact match only.

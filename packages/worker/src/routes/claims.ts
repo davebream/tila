@@ -16,7 +16,7 @@ export const claims = new Hono<{
 }>();
 
 // GET /projects/:projectId/claims -> DO GET /coord/claims
-claims.get("/", async (c) => {
+claims.get("/", requirePermission("read"), async (c) => {
   const stub = c.get("doStub");
   return forwardToDO(
     stub,
@@ -78,7 +78,7 @@ claims.post("/acquire", requirePermission("write"), async (c) => {
 });
 
 // POST /projects/:projectId/claims/renew -> DO POST /coord/renew
-claims.post("/renew", async (c) => {
+claims.post("/renew", requirePermission("write"), async (c) => {
   const raw = await c.req.json();
   const parsed = RenewRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
@@ -102,7 +102,7 @@ claims.post("/renew", async (c) => {
 });
 
 // POST /projects/:projectId/claims/release -> DO POST /coord/release
-claims.post("/release", async (c) => {
+claims.post("/release", requirePermission("write"), async (c) => {
   const raw = await c.req.json();
   const parsed = ReleaseRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
@@ -125,7 +125,7 @@ claims.post("/release", async (c) => {
 });
 
 // GET /projects/:projectId/claims/state/:resource -> DO GET /coord/state?resource=
-claims.get("/state/:resource", async (c) => {
+claims.get("/state/:resource", requirePermission("read"), async (c) => {
   const resource = c.req.param("resource");
   const stub = c.get("doStub");
   return forwardToDO(

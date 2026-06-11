@@ -48,7 +48,7 @@ export const GREP_MAX_LINE_TEXT = 512;
  * Maximum number of UTF-16 code units of a line fed to a regex engine.
  * Bounds worst-case backtracking input.
  */
-export const GREP_REGEX_LINE_INPUT_CAP = 4096;
+export const GREP_REGEX_LINE_INPUT_CAP = 2048;
 
 /** Request deadline in milliseconds. */
 export const GREP_DEADLINE_MS = 20_000;
@@ -131,6 +131,7 @@ export function validateGrepPattern(
   //    limits worst-case backtracking input to GREP_REGEX_LINE_INPUT_CAP
   //    UTF-16 code units, and the per-request deadline.
   detectNestedUnboundedQuantifiers(pattern);
+  detectAmbiguousAlternation(pattern);
 }
 
 /**
@@ -267,6 +268,125 @@ function extractBraceContent(pattern: string, pos: number): string | null {
 function isUnboundedBrace(content: string): boolean {
   // Match {n,} but not {n,m}
   return /^\d+,$/.test(content);
+}
+
+function detectAmbiguousAlternation(pattern: string): void {
+  const len = pattern.length;
+  let i = 0;
+
+  while (i < len) {
+    if (pattern[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (pattern[i] === "[") {
+      i++;
+      while (i < len && pattern[i] !== "]") {
+        if (pattern[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (pattern[i] !== "(") {
+      i++;
+      continue;
+    }
+
+    let depth = 1;
+    i++;
+    const bodyStart = i;
+    while (i < len && depth > 0) {
+      if (pattern[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (pattern[i] === "[") {
+        i++;
+        while (i < len && pattern[i] !== "]") {
+          if (pattern[i] === "\\") i++;
+          i++;
+        }
+        i++;
+        continue;
+      }
+      if (pattern[i] === "(") depth++;
+      if (pattern[i] === ")") depth--;
+      i++;
+    }
+    const body = pattern.slice(bodyStart, i - 1);
+    const quantifier = pattern[i] ?? "";
+    const braceContent =
+      quantifier === "{" ? extractBraceContent(pattern, i) : null;
+    const hasOuterUnbounded =
+      quantifier === "*" ||
+      quantifier === "+" ||
+      (braceContent !== null && isUnboundedBrace(braceContent));
+    if (!hasOuterUnbounded || !body.includes("|")) {
+      continue;
+    }
+
+    const alternatives = splitTopLevelAlternatives(body)
+      .map(normalizeSimpleLiteralAlternative)
+      .filter((value): value is string => value !== null);
+    for (let left = 0; left < alternatives.length; left++) {
+      for (let right = left + 1; right < alternatives.length; right++) {
+        const a = alternatives[left];
+        const b = alternatives[right];
+        if (a === b || a.startsWith(b) || b.startsWith(a)) {
+          throw new GrepQueryError(
+            "Ambiguous alternation inside an unbounded group is not permitted in regex patterns.",
+          );
+        }
+      }
+    }
+  }
+}
+
+function splitTopLevelAlternatives(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (body[i] === "[") {
+      i++;
+      while (i < body.length && body[i] !== "]") {
+        if (body[i] === "\\") i++;
+        i++;
+      }
+      continue;
+    }
+    if (body[i] === "(") depth++;
+    if (body[i] === ")") depth--;
+    if (body[i] === "|" && depth === 0) {
+      parts.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(body.slice(start));
+  return parts;
+}
+
+function normalizeSimpleLiteralAlternative(value: string): string | null {
+  let result = "";
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (char === "\\") {
+      i++;
+      if (i >= value.length) return null;
+      result += value[i];
+      continue;
+    }
+    if ("()[]{}*+?.^$|".includes(char)) {
+      return null;
+    }
+    result += char;
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

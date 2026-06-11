@@ -20,7 +20,7 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import TOML from "smol-toml";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import { SWEEP_BATCH_SIZE } from "../config";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
@@ -34,11 +34,33 @@ import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
 
 const INLINE_THRESHOLD = 64 * 1024;
+const ARTIFACT_METADATA_MAX_BYTES = 8_192;
+const RECONCILE_ENRICH_BATCH_SIZE = 50;
+const ARTIFACT_TEXT_CONTENT_MAX_CHARS = 1_000_000;
+
+const ArtifactRelationshipRequestSchema = z.object({
+  from_key: z.string().min(1),
+  to_key: z.string().min(1),
+  type: z.string().min(1),
+  metadata: z.record(z.unknown()).optional(),
+});
 
 export const artifacts = new Hono<{
   Bindings: Env;
   Variables: HonoVariables;
 }>();
+
+function jsonByteLength(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function sanitizeArtifactExtension(ext: string | null | undefined): string {
+  const cleaned = (ext ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 10);
+  return cleaned || "bin";
+}
 
 // ---------------------------------------------------------------------------
 // Retry + compensation helpers for the artifact upload route
@@ -171,6 +193,25 @@ export async function compensateAndRespond(
 // POST /projects/:projectId/artifacts/text -- text-first artifact write (JSON body)
 artifacts.post("/text", requirePermission("write"), async (c) => {
   const raw = await c.req.json();
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    typeof (raw as { content?: unknown }).content === "string" &&
+    (raw as { content: string }).content.length >
+      ARTIFACT_TEXT_CONTENT_MAX_CHARS
+  ) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "content is too large",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
   const parsed = ArtifactTextWriteRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
 
@@ -212,7 +253,7 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
       ? "md"
       : mimeType === "text/plain"
         ? "txt"
-        : (mimeType.split("/").pop() ?? "bin");
+        : sanitizeArtifactExtension(mimeType.split("/").pop());
 
   let r2Key: string;
   if (resource) {
@@ -373,7 +414,9 @@ artifacts.post("/", requirePermission("write"), async (c) => {
   const normalizedText = normalizeArtifactText(fileBytes, mimeType);
 
   // Derive extension from filename or mime_type
-  const ext = file.name?.split(".").pop() ?? mimeType.split("/").pop() ?? "bin";
+  const ext = sanitizeArtifactExtension(
+    file.name?.split(".").pop() ?? mimeType.split("/").pop(),
+  );
   // Key derivation:
   //   flavor=index  -> indexes/<sha256>.<ext>  (lifecycle-exempt: expires_at stays null)
   //   resource set  -> produced/<resource>/<sha256>.<ext>
@@ -905,19 +948,21 @@ artifacts.get("/search", requirePermission("read"), async (c) => {
 // POST /projects/:projectId/artifacts/relationship -- add artifact relationship
 // Note: must be registered BEFORE the /:key{.+$} catch-all
 artifacts.post("/relationship", requirePermission("write"), async (c) => {
-  const body = (await c.req.json()) as {
-    from_key: string;
-    to_key: string;
-    type: string;
-    metadata?: Record<string, unknown>;
-  };
-  if (!body.from_key || !body.to_key || !body.type) {
+  const parsed = ArtifactRelationshipRequestSchema.safeParse(
+    await c.req.json(),
+  );
+  if (!parsed.success) return zodValidationError(c, parsed.error);
+  const body = parsed.data;
+  if (
+    body.metadata !== undefined &&
+    jsonByteLength(body.metadata) > ARTIFACT_METADATA_MAX_BYTES
+  ) {
     return c.json(
       {
         ok: false,
         error: {
           code: "validation-error",
-          message: "from_key, to_key, and type are required",
+          message: "metadata is too large",
           retryable: false,
         },
       },
@@ -1058,26 +1103,36 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
   // Mirrors the search-rebuild pattern (buildRebuildCandidates).
   // Non-searchable and oversized blobs are returned unchanged.
   const SEARCHABLE_MIMES = new Set(["text/markdown", "text/plain"]);
-  const enrichedBlobs = await Promise.all(
-    allBlobs.map(async (blob) => {
-      const mimeType = blob.metadata["tila-mime"] ?? "";
-      if (!SEARCHABLE_MIMES.has(mimeType)) return blob;
-      try {
-        const obj = await r2.get(blob.key);
-        if (!obj) return blob;
-        const arrayBuf = await new Response(obj.body).arrayBuffer();
-        const normalized = normalizeArtifactText(arrayBuf, mimeType);
-        if (!normalized) return blob;
-        return {
-          ...blob,
-          search_title: normalized.title,
-          search_body_text: normalized.body_text,
-        };
-      } catch {
-        return blob; // R2 read failure: treat as non-searchable
-      }
-    }),
-  );
+  const enrichedBlobs: Array<
+    (typeof allBlobs)[number] & {
+      search_title?: string | null;
+      search_body_text?: string | null;
+    }
+  > = [];
+  for (let i = 0; i < allBlobs.length; i += RECONCILE_ENRICH_BATCH_SIZE) {
+    const chunk = allBlobs.slice(i, i + RECONCILE_ENRICH_BATCH_SIZE);
+    const enrichedChunk = await Promise.all(
+      chunk.map(async (blob) => {
+        const mimeType = blob.metadata["tila-mime"] ?? "";
+        if (!SEARCHABLE_MIMES.has(mimeType)) return blob;
+        try {
+          const obj = await r2.get(blob.key);
+          if (!obj) return blob;
+          const arrayBuf = await new Response(obj.body).arrayBuffer();
+          const normalized = normalizeArtifactText(arrayBuf, mimeType);
+          if (!normalized) return blob;
+          return {
+            ...blob,
+            search_title: normalized.title,
+            search_body_text: normalized.body_text,
+          };
+        } catch {
+          return blob;
+        }
+      }),
+    );
+    enrichedBlobs.push(...enrichedChunk);
+  }
 
   const tokenResult = c.get("tokenResult");
   const stub = c.get("doStub");
@@ -1288,16 +1343,40 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
     { key },
     analyticsCtxFrom(c),
   );
-  if (metaRes.ok) {
-    const meta = (await metaRes.json()) as {
-      ok: boolean;
-      pointer?: { content_inline: string | null; mime_type: string };
-    };
-    if (meta.ok && meta.pointer?.content_inline != null) {
-      return new Response(meta.pointer.content_inline, {
-        headers: { "Content-Type": meta.pointer.mime_type },
-      });
-    }
+  if (!metaRes.ok) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "not-found",
+          message: `Artifact ${key} not found`,
+          retryable: false,
+        },
+      },
+      404,
+    );
+  }
+  const meta = (await metaRes.json()) as {
+    ok: boolean;
+    pointer?: { content_inline: string | null; mime_type: string } | null;
+  };
+  if (!meta.ok || !meta.pointer) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "not-found",
+          message: `Artifact ${key} not found`,
+          retryable: false,
+        },
+      },
+      404,
+    );
+  }
+  if (meta.pointer.content_inline != null) {
+    return new Response(meta.pointer.content_inline, {
+      headers: { "Content-Type": meta.pointer.mime_type },
+    });
   }
 
   // R2 fallback
