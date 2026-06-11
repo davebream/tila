@@ -58,6 +58,7 @@
     "gen:version": "node scripts/gen-version.mjs"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "zod": "^3.24.0"
   },
   "peerDependencies": {
@@ -76,7 +77,6 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
     "better-sqlite3": "^12.10.0",
-    "drizzle-orm": "^0.45.2",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.0"
