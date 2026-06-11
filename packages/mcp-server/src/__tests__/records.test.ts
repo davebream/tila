@@ -23,15 +23,16 @@ describe("registerRecordTools", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers exactly 7 tools with correct names", () => {
+  it("registers exactly 8 tools with correct names", () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
 
-    expect(server.tool).toHaveBeenCalledTimes(7);
+    expect(server.tool).toHaveBeenCalledTimes(8);
 
     const toolNames = server.tool.mock.calls.map((call: unknown[]) => call[0]);
     expect(toolNames).toEqual([
       "tila_record_get",
       "tila_record_set",
+      "tila_record_put",
       "tila_record_patch",
       "tila_record_list",
       "tila_record_archive",
@@ -77,11 +78,73 @@ describe("registerRecordTools", () => {
     });
   });
 
+  it("tila_record_put creates on a missing key and returns fence/revision", async () => {
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.put.mockResolvedValue({ ok: true, fence: 1, revision: 1 });
+
+    const handler = server.tool.mock.calls[2][3] as (
+      args: unknown,
+    ) => Promise<{ content: Array<{ text: string }> }>;
+    const result = await handler({
+      type: "config",
+      key: "env/staging",
+      value: { env: "staging" },
+    });
+
+    expect(facade.records.put).toHaveBeenCalledWith("config", "env/staging", {
+      value: { env: "staging" },
+      tags: undefined,
+      message: undefined,
+    });
+    expect(result.content[0].text).toContain('"revision":1');
+    expect(result.content[0].text).toContain('"fence":1');
+  });
+
+  it("tila_record_put replaces on an existing key (no fence required)", async () => {
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.put.mockResolvedValue({ ok: true, fence: 7, revision: 2 });
+
+    const handler = server.tool.mock.calls[2][3] as (
+      args: unknown,
+    ) => Promise<{ content: Array<{ text: string }> }>;
+    const result = await handler({
+      type: "config",
+      key: "main",
+      value: { env: "prod" },
+      tags: ["stable"],
+      message: "promote",
+    });
+
+    expect(facade.records.put).toHaveBeenCalledWith("config", "main", {
+      value: { env: "prod" },
+      tags: ["stable"],
+      message: "promote",
+    });
+    expect(result.content[0].text).toContain('"revision":2');
+  });
+
+  it("tila_record_put maps a schema-invalid value through toMcpError", async () => {
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    facade.records.put.mockRejectedValue(
+      Object.assign(new Error("record value invalid"), {
+        code: "record_value_invalid",
+      }),
+    );
+
+    const handler = server.tool.mock.calls[2][3] as (
+      args: unknown,
+    ) => Promise<unknown>;
+
+    await expect(
+      handler({ type: "config", key: "main", value: { bad: true } }),
+    ).rejects.toThrow();
+  });
+
   it("tila_record_patch calls records.patch with patch and fence", async () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
     facade.records.patch.mockResolvedValue({ ok: true, fence: 3 });
 
-    const handler = server.tool.mock.calls[2][3] as (
+    const handler = server.tool.mock.calls[3][3] as (
       args: unknown,
     ) => Promise<unknown>;
     await handler({
@@ -105,7 +168,7 @@ describe("registerRecordTools", () => {
       total: 0,
     });
 
-    const handler = server.tool.mock.calls[3][3] as (
+    const handler = server.tool.mock.calls[4][3] as (
       args: unknown,
     ) => Promise<unknown>;
     await handler({
@@ -125,7 +188,7 @@ describe("registerRecordTools", () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
     facade.records.archive.mockResolvedValue({ ok: true, fence: 4 });
 
-    const handler = server.tool.mock.calls[4][3] as (
+    const handler = server.tool.mock.calls[5][3] as (
       args: unknown,
     ) => Promise<unknown>;
     await handler({ type: "config", key: "main", fence: 3 });
@@ -139,7 +202,7 @@ describe("registerRecordTools", () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
     facade.records.unarchive.mockResolvedValue({ ok: true, fence: 5 });
 
-    const handler = server.tool.mock.calls[5][3] as (
+    const handler = server.tool.mock.calls[6][3] as (
       args: unknown,
     ) => Promise<unknown>;
     await handler({ type: "config", key: "main", fence: 4 });
@@ -156,7 +219,7 @@ describe("registerRecordTools", () => {
       history: [],
     });
 
-    const handler = server.tool.mock.calls[6][3] as (
+    const handler = server.tool.mock.calls[7][3] as (
       args: unknown,
     ) => Promise<unknown>;
     await handler({
@@ -181,7 +244,7 @@ describe("registerRecordTools", () => {
         total: 0,
       });
 
-      const handler = server.tool.mock.calls[3][3] as (
+      const handler = server.tool.mock.calls[4][3] as (
         args: unknown,
       ) => Promise<unknown>;
       await handler({ type: "config", tag_filter: ["repo:a", "team:x"] });
@@ -200,7 +263,7 @@ describe("registerRecordTools", () => {
         total: 0,
       });
 
-      const handler = server.tool.mock.calls[3][3] as (
+      const handler = server.tool.mock.calls[4][3] as (
         args: unknown,
       ) => Promise<unknown>;
       await handler({ type: "config" });
@@ -213,7 +276,7 @@ describe("registerRecordTools", () => {
     it("accepts tag_filter with invalid grammar (permissive — validation is worker's job)", () => {
       registerRecordTools(asServer(server), asFacade(facade), "proj-1");
       const { z } = require("zod");
-      const listCall = server.tool.mock.calls[3];
+      const listCall = server.tool.mock.calls[4];
       const schema = listCall[2] as Record<string, import("zod").ZodTypeAny>;
       const result = z
         .object(schema)
