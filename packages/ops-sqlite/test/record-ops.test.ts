@@ -10,6 +10,7 @@ import {
   listRecordHistory,
   listRecords,
   patchRecord,
+  putRecord,
   setRecord,
   unarchiveRecord,
 } from "../src/record-ops";
@@ -177,6 +178,183 @@ describe("setRecord", () => {
         testOrigin("test"),
       ),
     ).rejects.toThrow(RecordNotFoundError);
+  });
+});
+
+describe("putRecord", () => {
+  function querySearchDoc(type: string, key: string) {
+    return testDb.rawDb
+      .prepare(
+        "SELECT tombstoned, value_sha256 FROM record_search_docs WHERE record_type = ? AND record_key = ?",
+      )
+      .get(type, key) as
+      | { tombstoned: number; value_sha256: string }
+      | undefined;
+  }
+
+  it("creates a record on a new key with revision 1 and returns a fence", async () => {
+    const result = await putRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "main",
+        value: { env: "production" },
+        schema_version: 1,
+        actor: "putter",
+      },
+      testOrigin("putter"),
+    );
+
+    expect(result.revision).toBe(1);
+    expect(result.fence).toBe(1);
+    expect(result.archived).toBe(0);
+    expect(result.value).toEqual({ env: "production" });
+    expect(result.updated_by).toBe("putter");
+
+    const doc = querySearchDoc("config", "main");
+    expect(doc?.tombstoned).toBe(0);
+  });
+
+  it("replaces an existing key: revision bumps to 2, value replaced, fence bumped", async () => {
+    const created = await putRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "main",
+        value: { v: 1 },
+        schema_version: 1,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+
+    const replaced = await putRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "main",
+        value: { v: 2 },
+        schema_version: 1,
+        actor: "putter",
+      },
+      testOrigin("putter"),
+    );
+
+    expect(replaced.revision).toBe(2);
+    expect(replaced.value).toEqual({ v: 2 });
+    expect(replaced.fence).toBe(created.fence + 1);
+    expect(replaced.updated_by).toBe("putter");
+
+    const fetched = getRecord(testDb.db, "config", "main");
+    expect(fetched?.value).toEqual({ v: 2 });
+  });
+
+  it("replacing an ARCHIVED key preserves archived AND keeps the FTS doc tombstoned (set-vs-put asymmetry)", async () => {
+    const created = await createRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "api",
+        value: { status: "running" },
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+    const archived = archiveRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "api",
+        fence: created.fence,
+        schema_version: 0,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+    expect(archived.archived).toBe(1);
+    // sanity: archive tombstoned the FTS doc
+    expect(querySearchDoc("svc", "api")?.tombstoned).toBe(1);
+
+    const replaced = await putRecord(
+      testDb.db,
+      {
+        type: "svc",
+        key: "api",
+        value: { status: "draining" },
+        schema_version: 0,
+        actor: "putter",
+      },
+      testOrigin("putter"),
+    );
+
+    expect(replaced.value).toEqual({ status: "draining" });
+    expect(replaced.archived).toBe(1);
+
+    // THE guard: put must NOT resurrect the search doc — tombstoned stays 1.
+    // Query record_search_docs directly (NOT via listRecords, which filters on
+    // records.archived, not tombstoned, and would false-green).
+    expect(querySearchDoc("svc", "api")?.tombstoned).toBe(1);
+  });
+
+  it("idempotent re-put of an identical value still increments revision without error", async () => {
+    await putRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "same",
+        value: { a: 1 },
+        schema_version: 1,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+
+    const second = await putRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "same",
+        value: { a: 1 },
+        schema_version: 1,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+
+    expect(second.revision).toBe(2);
+    expect(second.value).toEqual({ a: 1 });
+  });
+
+  it("writes a revision-history row each call with operation created then set", async () => {
+    await putRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "hist",
+        value: { v: 1 },
+        schema_version: 1,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+    await putRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "hist",
+        value: { v: 2 },
+        schema_version: 1,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
+
+    const history = listRecordHistory(testDb.db, "config", "hist", {
+      includeValues: false,
+    });
+    const ops = history.items.map((h) => h.operation).sort();
+    expect(ops).toEqual(["created", "set"]);
   });
 });
 

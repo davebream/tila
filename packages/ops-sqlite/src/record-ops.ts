@@ -221,6 +221,131 @@ export function validateRecordValue(
 }
 
 // ---------------------------------------------------------------------------
+// Shared write helpers — reused by createRecord / setRecord / putRecord.
+// All operate on an open transaction handle (`tx`) and are synchronous, so
+// callers can invoke them inside `db.transaction((tx) => {…})` with no `await`
+// in the transaction body (atomicity invariant; see putRecord/setRecord).
+// ---------------------------------------------------------------------------
+
+type RecordWriteTx = Parameters<
+  Parameters<
+    BaseSQLiteDatabase<"sync", unknown, typeof schema>["transaction"]
+  >[0]
+>[0];
+
+/** Bump the resource fence (insert-or-increment) and return the new value. */
+function bumpFence(tx: RecordWriteTx, resource: string): number {
+  tx.run(
+    sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
+  );
+  const fenceRow = tx
+    .select()
+    .from(schema.fences)
+    .where(eq(schema.fences.resource, resource))
+    .get();
+  return fenceRow?.current_fence ?? 1;
+}
+
+/** Insert a record_revisions row. */
+function insertRevisionRow(
+  tx: RecordWriteTx,
+  args: {
+    type: string;
+    key: string;
+    revision: number;
+    operation: string;
+    schema_version: number;
+    value_json: string;
+    value_sha256: string;
+    canonical_artifact_key?: string | null;
+    source_artifact_key?: string | null;
+    actor: string;
+    created_at: number;
+    message?: string | null;
+    origin: RequestOrigin;
+  },
+): void {
+  tx.insert(schema.recordRevisions)
+    .values({
+      type: args.type,
+      key: args.key,
+      revision: args.revision,
+      operation: args.operation,
+      schema_version: args.schema_version,
+      value_json: args.value_json,
+      value_sha256: args.value_sha256,
+      canonical_artifact_key: args.canonical_artifact_key ?? null,
+      source_artifact_key: args.source_artifact_key ?? null,
+      actor: args.actor,
+      created_at: args.created_at,
+      message: args.message ?? null,
+      token_id: args.origin.tokenId ?? null,
+      source: args.origin.source ?? null,
+      source_version: args.origin.sourceVersion ?? null,
+    })
+    .run();
+}
+
+/**
+ * Replace the tag set for a record with `tags` (delete-then-insert).
+ * Used when an explicit tag set is provided.
+ */
+function replaceTags(
+  tx: RecordWriteTx,
+  type: string,
+  key: string,
+  tags: string[],
+): void {
+  tx.delete(schema.recordTags)
+    .where(
+      and(eq(schema.recordTags.type, type), eq(schema.recordTags.key, key)),
+    )
+    .run();
+  for (const tag of tags) {
+    tx.insert(schema.recordTags).values({ type, key, tag }).run();
+  }
+}
+
+/** Read the current tag list for a record. */
+function readTags(tx: RecordWriteTx, type: string, key: string): string[] {
+  return tx
+    .select()
+    .from(schema.recordTags)
+    .where(
+      and(eq(schema.recordTags.type, type), eq(schema.recordTags.key, key)),
+    )
+    .all()
+    .map((r) => r.tag);
+}
+
+/**
+ * Write the FTS search doc for a record, skipping the rewrite when the stored
+ * sha256 is unchanged (idempotent-resave guard). `tombstoned` controls search
+ * visibility — pass `existing.archived` to preserve lifecycle on replace.
+ */
+function writeSearchDoc(
+  tx: RecordWriteTx,
+  args: {
+    type: string;
+    key: string;
+    bodyText: string;
+    sha256: string;
+    tombstoned: number;
+  },
+): void {
+  const existingSearchDoc = tx.get<{ value_sha256: string }>(
+    sql`SELECT value_sha256 FROM record_search_docs WHERE record_type = ${args.type} AND record_key = ${args.key}`,
+  );
+  if (existingSearchDoc && existingSearchDoc.value_sha256 === args.sha256) {
+    return;
+  }
+  const indexedAt = Date.now();
+  tx.run(
+    sql`INSERT OR REPLACE INTO record_search_docs(record_type, record_key, body_text, indexed_at, value_sha256, tombstoned) VALUES(${args.type}, ${args.key}, ${args.bodyText}, ${indexedAt}, ${args.sha256}, ${args.tombstoned})`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // createRecord — fenceless, first-writer-wins
 // ---------------------------------------------------------------------------
 
@@ -275,36 +400,24 @@ export async function createRecord(
     }
 
     // Upsert fence
-    tx.run(
-      sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
-    );
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    const fence = fenceRow?.current_fence ?? 1;
+    const fence = bumpFence(tx, resource);
 
     // Insert revision row
-    tx.insert(schema.recordRevisions)
-      .values({
-        type: input.type,
-        key: input.key,
-        revision: 1,
-        operation: "created",
-        schema_version: input.schema_version,
-        value_json: canonical,
-        value_sha256: sha256,
-        canonical_artifact_key: input.canonical_artifact_key ?? null,
-        source_artifact_key: input.source_artifact_key ?? null,
-        actor: input.actor,
-        created_at: now,
-        message: input.message ?? null,
-        token_id: origin.tokenId ?? null,
-        source: origin.source ?? null,
-        source_version: origin.sourceVersion ?? null,
-      })
-      .run();
+    insertRevisionRow(tx, {
+      type: input.type,
+      key: input.key,
+      revision: 1,
+      operation: "created",
+      schema_version: input.schema_version,
+      value_json: canonical,
+      value_sha256: sha256,
+      canonical_artifact_key: input.canonical_artifact_key,
+      source_artifact_key: input.source_artifact_key,
+      actor: input.actor,
+      created_at: now,
+      message: input.message,
+      origin,
+    });
 
     // Insert tags
     for (const tag of tags) {
@@ -329,10 +442,13 @@ export async function createRecord(
     });
 
     // Index into record_search_docs (FTS5 trigger fires automatically)
-    const indexedAt = Date.now();
-    tx.run(
-      sql`INSERT OR REPLACE INTO record_search_docs(record_type, record_key, body_text, indexed_at, value_sha256, tombstoned) VALUES(${input.type}, ${input.key}, ${bodyText}, ${indexedAt}, ${sha256}, 0)`,
-    );
+    writeSearchDoc(tx, {
+      type: input.type,
+      key: input.key,
+      bodyText,
+      sha256,
+      tombstoned: 0,
+    });
 
     return {
       type: input.type,
@@ -426,73 +542,35 @@ export async function setRecord(
       .run();
 
     // Increment fence
-    tx.run(
-      sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
-    );
-    const newFenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    const newFence = newFenceRow?.current_fence ?? 1;
+    const newFence = bumpFence(tx, resource);
 
     // Insert revision row
-    tx.insert(schema.recordRevisions)
-      .values({
-        type: input.type,
-        key: input.key,
-        revision: newRevision,
-        operation: "set",
-        schema_version: input.schema_version,
-        value_json: canonical,
-        value_sha256: sha256,
-        canonical_artifact_key: input.canonical_artifact_key ?? null,
-        source_artifact_key: input.source_artifact_key ?? null,
-        actor: input.actor,
-        created_at: now,
-        message: input.message ?? null,
-        token_id: origin.tokenId ?? null,
-        source: origin.source ?? null,
-        source_version: origin.sourceVersion ?? null,
-      })
-      .run();
+    insertRevisionRow(tx, {
+      type: input.type,
+      key: input.key,
+      revision: newRevision,
+      operation: "set",
+      schema_version: input.schema_version,
+      value_json: canonical,
+      value_sha256: sha256,
+      canonical_artifact_key: input.canonical_artifact_key,
+      source_artifact_key: input.source_artifact_key,
+      actor: input.actor,
+      created_at: now,
+      message: input.message,
+      origin,
+    });
 
     // Replace tags (if provided)
     if (input.tags !== undefined) {
-      tx.delete(schema.recordTags)
-        .where(
-          and(
-            eq(schema.recordTags.type, input.type),
-            eq(schema.recordTags.key, input.key),
-          ),
-        )
-        .run();
-      for (const tag of input.tags) {
-        tx.insert(schema.recordTags)
-          .values({
-            type: input.type,
-            key: input.key,
-            tag,
-          })
-          .run();
-      }
+      replaceTags(tx, input.type, input.key, input.tags);
     }
 
     // Determine final tags for return value
     const finalTags =
       input.tags !== undefined
         ? input.tags
-        : tx
-            .select()
-            .from(schema.recordTags)
-            .where(
-              and(
-                eq(schema.recordTags.type, input.type),
-                eq(schema.recordTags.key, input.key),
-              ),
-            )
-            .all()
-            .map((r) => r.tag);
+        : readTags(tx, input.type, input.key);
 
     // Journal event
     appendJournal(tx, {
@@ -505,16 +583,222 @@ export async function setRecord(
       sourceVersion: origin.sourceVersion,
     });
 
-    // Update record_search_docs (sha256 guard to skip unchanged content)
-    const existingSearchDoc = tx.get<{ value_sha256: string }>(
-      sql`SELECT value_sha256 FROM record_search_docs WHERE record_type = ${input.type} AND record_key = ${input.key}`,
-    );
-    if (!existingSearchDoc || existingSearchDoc.value_sha256 !== sha256) {
-      const indexedAt = Date.now();
-      tx.run(
-        sql`INSERT OR REPLACE INTO record_search_docs(record_type, record_key, body_text, indexed_at, value_sha256, tombstoned) VALUES(${input.type}, ${input.key}, ${bodyText}, ${indexedAt}, ${sha256}, 0)`,
-      );
+    // Update record_search_docs (sha256 guard to skip unchanged content).
+    // NOTE: setRecord unconditionally writes tombstoned=0 — this is the
+    // pre-existing archived-resurrection inconsistency (record-ops.ts) that
+    // putRecord deliberately does NOT inherit (it preserves existing.archived).
+    writeSearchDoc(tx, {
+      type: input.type,
+      key: input.key,
+      bodyText,
+      sha256,
+      tombstoned: 0,
+    });
+
+    return {
+      type: input.type,
+      key: input.key,
+      schema_version: input.schema_version,
+      value: input.value,
+      value_sha256: sha256,
+      revision: newRevision,
+      archived: existing.archived,
+      created_at: existing.created_at,
+      updated_at: now,
+      updated_by: input.actor,
+      tags: finalTags,
+      fence: newFence,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// putRecord — fenceless create-or-replace (upsert), single-writer canonical
+// ---------------------------------------------------------------------------
+
+export async function putRecord(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  input: {
+    type: string;
+    key: string;
+    value: Record<string, unknown>;
+    tags?: string[];
+    message?: string | null;
+    source_artifact_key?: string | null;
+    canonical_artifact_key?: string | null;
+    schema_version: number;
+    actor: string;
+  },
+  origin: RequestOrigin,
+): Promise<RecordRow> {
+  // Compute canonical form + sha256 BEFORE the transaction — they do not depend
+  // on `existing`, so hoisting them keeps the txn body free of `await` (RC-1).
+  const canonical = canonicalJson(input.value);
+  const sha256 = await canonicalJsonSha256(input.value);
+  const now = Date.now();
+  const resource = formatRecordResource(input.type, input.key);
+  // Extract search text BEFORE transaction to avoid holding lock during string ops
+  const bodyText = extractSearchText(input.value);
+
+  return db.transaction((tx) => {
+    // Read existing row INSIDE the transaction — this is the create/replace
+    // discriminator AND the basis for `existing.revision + 1`. Both MUST be
+    // read in-txn for atomicity (mirror setRecord, NOT patchRecord). No `await`
+    // anywhere in this callback. (RC-1, binding.)
+    const existing = tx
+      .select()
+      .from(schema.records)
+      .where(
+        and(
+          eq(schema.records.type, input.type),
+          eq(schema.records.key, input.key),
+        ),
+      )
+      .get();
+
+    if (!existing) {
+      // ---- Create branch ----
+      tx.insert(schema.records)
+        .values({
+          type: input.type,
+          key: input.key,
+          schema_version: input.schema_version,
+          value_json: canonical,
+          value_sha256: sha256,
+          revision: 1,
+          archived: 0,
+          created_at: now,
+          updated_at: now,
+          updated_by: input.actor,
+        })
+        .run();
+
+      const fence = bumpFence(tx, resource);
+
+      insertRevisionRow(tx, {
+        type: input.type,
+        key: input.key,
+        revision: 1,
+        operation: "created",
+        schema_version: input.schema_version,
+        value_json: canonical,
+        value_sha256: sha256,
+        canonical_artifact_key: input.canonical_artifact_key,
+        source_artifact_key: input.source_artifact_key,
+        actor: input.actor,
+        created_at: now,
+        message: input.message,
+        origin,
+      });
+
+      const tags = input.tags ?? [];
+      for (const tag of tags) {
+        tx.insert(schema.recordTags)
+          .values({ type: input.type, key: input.key, tag })
+          .run();
+      }
+
+      appendJournal(tx, {
+        kind: "record.created",
+        resource,
+        actor: input.actor,
+        fence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
+
+      writeSearchDoc(tx, {
+        type: input.type,
+        key: input.key,
+        bodyText,
+        sha256,
+        tombstoned: 0,
+      });
+
+      return {
+        type: input.type,
+        key: input.key,
+        schema_version: input.schema_version,
+        value: input.value,
+        value_sha256: sha256,
+        revision: 1,
+        archived: 0,
+        created_at: now,
+        updated_at: now,
+        updated_by: input.actor,
+        tags,
+        fence,
+      };
     }
+
+    // ---- Replace branch ----
+    const newRevision = existing.revision + 1;
+
+    tx.update(schema.records)
+      .set({
+        schema_version: input.schema_version,
+        value_json: canonical,
+        value_sha256: sha256,
+        revision: newRevision,
+        updated_at: now,
+        updated_by: input.actor,
+      })
+      .where(
+        and(
+          eq(schema.records.type, input.type),
+          eq(schema.records.key, input.key),
+        ),
+      )
+      .run();
+
+    const newFence = bumpFence(tx, resource);
+
+    insertRevisionRow(tx, {
+      type: input.type,
+      key: input.key,
+      revision: newRevision,
+      operation: "set",
+      schema_version: input.schema_version,
+      value_json: canonical,
+      value_sha256: sha256,
+      canonical_artifact_key: input.canonical_artifact_key,
+      source_artifact_key: input.source_artifact_key,
+      actor: input.actor,
+      created_at: now,
+      message: input.message,
+      origin,
+    });
+
+    if (input.tags !== undefined) {
+      replaceTags(tx, input.type, input.key, input.tags);
+    }
+    const finalTags =
+      input.tags !== undefined
+        ? input.tags
+        : readTags(tx, input.type, input.key);
+
+    appendJournal(tx, {
+      kind: "record.updated",
+      resource,
+      actor: input.actor,
+      fence: newFence,
+      tokenId: origin.tokenId,
+      source: origin.source,
+      sourceVersion: origin.sourceVersion,
+    });
+
+    // Preserve search-visibility lifecycle: tombstoned = existing.archived.
+    // A fenceless put must NEVER resurrect an archived record into search —
+    // this is the deliberate divergence from setRecord (which writes
+    // tombstoned=0 unconditionally). Preserves the sha256-skip guard.
+    writeSearchDoc(tx, {
+      type: input.type,
+      key: input.key,
+      bodyText,
+      sha256,
+      tombstoned: existing.archived,
+    });
 
     return {
       type: input.type,
