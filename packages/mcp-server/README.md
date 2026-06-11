@@ -84,6 +84,7 @@ client at the server:
       "command": "npx",
       "args": ["-y", "tila-mcp-server"],
       "env": {
+        "TILA_BACKEND": "local",
         "TILA_PROJECT_ID": "my-project",
         "TILA_DB_PATH": ".tila/project.db",
         "TILA_ARTIFACTS_PATH": ".tila/artifacts"
@@ -240,6 +241,7 @@ For `github-repo` mode, the `[github]` section (owner, repo) and `worker_url` mu
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `TILA_BACKEND` | No | Backend mode: `"local"` or `"cloudflare"`. Overrides config.toml `backend`; default `cloudflare`. Lets local mode be selected with no `.tila/config.toml` present. Invalid values error. |
 | `TILA_API_TOKEN` | Only for `tila-token` mode | API token for authentication (remote) |
 | `TILA_API_URL` | No | Worker URL (overrides config.toml `worker_url`) (remote) |
 | `TILA_PROJECT_ID` | No | Project ID (overrides config.toml `project_id`) |
