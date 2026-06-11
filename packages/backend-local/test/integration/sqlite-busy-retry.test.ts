@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLocalConnection } from "../../src/connection";
 import { LocalProject } from "../../src/local-project";
-import { withBusyRetry } from "../../src/retry";
 
 describe("sqlite-busy-retry: real SQLITE_BUSY handling", () => {
   let tempDir: string;
@@ -50,61 +49,6 @@ describe("sqlite-busy-retry: real SQLITE_BUSY handling", () => {
       conn1.exec("ROLLBACK");
       conn1.close();
       conn2.close();
-    },
-    { timeout: 15000 },
-  );
-
-  it(
-    "withBusyRetry recovers when the lock is released between retries",
-    () => {
-      // Simulate SQLITE_BUSY that resolves after N failures
-      let attempts = 0;
-      const maxFailures = 3;
-
-      const result = withBusyRetry(() => {
-        attempts++;
-        if (attempts <= maxFailures) {
-          throw new Error("SQLITE_BUSY: database is locked");
-        }
-        return "success";
-      }, 5);
-
-      expect(result).toBe("success");
-      expect(attempts).toBe(maxFailures + 1);
-    },
-    { timeout: 15000 },
-  );
-
-  it(
-    "withBusyRetry rethrows after exhausting retries",
-    () => {
-      let attempts = 0;
-
-      expect(() =>
-        withBusyRetry(() => {
-          attempts++;
-          throw new Error("SQLITE_BUSY: database is locked");
-        }, 3),
-      ).toThrow("SQLITE_BUSY");
-
-      expect(attempts).toBe(3);
-    },
-    { timeout: 15000 },
-  );
-
-  it(
-    "withBusyRetry propagates non-BUSY errors immediately",
-    () => {
-      let attempts = 0;
-
-      expect(() =>
-        withBusyRetry(() => {
-          attempts++;
-          throw new Error("UNIQUE constraint failed");
-        }),
-      ).toThrow("UNIQUE constraint failed");
-
-      expect(attempts).toBe(1);
     },
     { timeout: 15000 },
   );

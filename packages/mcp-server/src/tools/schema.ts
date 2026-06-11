@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
 export function registerSchemaTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/schema`;
+  const schema = facade.schema;
 
   server.tool(
     "tila_schema_update",
@@ -22,9 +22,7 @@ export function registerSchemaTools(
     },
     async ({ definition, strategy }) => {
       try {
-        const body: Record<string, unknown> = { definition };
-        if (strategy) body.strategy = strategy;
-        const result = await client.post(base, body);
+        const result = await schema.apply(definition, strategy);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

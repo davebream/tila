@@ -10,14 +10,17 @@
  * from the upstream service, so error-text hygiene is upstream-owned and out of
  * tila-mcp-server scope.
  */
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
 import { describe, expect, it } from "vitest";
-import { vi } from "vitest";
 import { SERVER_INSTRUCTIONS } from "../instructions";
 import { registerAllPrompts } from "../prompts/index";
 import { registerAllResources } from "../resources/index";
 import { registerAllTools } from "../tools/index";
+import {
+  asFacade,
+  asServer,
+  createMockFacade,
+  createMockServer,
+} from "./helpers/mock-facade";
 
 /** Platform-internal terms that must never appear in agent-visible authored text. */
 const BANNED_TERMS = [
@@ -39,51 +42,11 @@ const STALE_CLAIM_NAMES = ["tila_task_claim", "tila_task_release"] as const;
 
 const PROJECT_ID = "test-project";
 
-type MockServer = {
-  tool: ReturnType<typeof vi.fn>;
-  resource: ReturnType<typeof vi.fn>;
-  prompt: ReturnType<typeof vi.fn>;
-};
-
-type MockClient = {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
-  patch: ReturnType<typeof vi.fn>;
-  postFormData: ReturnType<typeof vi.fn>;
-  requestRaw: ReturnType<typeof vi.fn>;
-};
-
-function createMockServer(): MockServer {
-  return {
-    tool: vi.fn(),
-    resource: vi.fn(),
-    prompt: vi.fn(),
-  };
-}
-
-function createMockClient(): MockClient {
-  return {
-    get: vi.fn().mockResolvedValue({ ok: true, schema: null }),
-    post: vi.fn(),
-    delete: vi.fn(),
-    patch: vi.fn(),
-    postFormData: vi.fn(),
-    requestRaw: vi.fn(),
-  };
-}
-
-function asServer(s: MockServer): McpServer {
-  return s as unknown as McpServer;
-}
-
-function asClient(c: MockClient): TilaClient {
-  return c as unknown as TilaClient;
-}
-
 async function collectCorpus(): Promise<string[]> {
   const server = createMockServer();
-  const client = createMockClient();
+  const facade = createMockFacade();
+  // Schema fetch is non-fatal; resolve to null so no record resources register.
+  facade.schema.get.mockResolvedValue({ ok: true, schema: null });
 
   // Ensure no compat aliases are active (default-off)
   process.env.TILA_MCP_COMPAT_ALIASES = "";
@@ -91,13 +54,13 @@ async function collectCorpus(): Promise<string[]> {
   process.env.TILA_MCP_TOOLS = "";
 
   // Register all tools — captures tool descriptions via server.tool(name, desc, ...)
-  registerAllTools(asServer(server), asClient(client), PROJECT_ID);
+  registerAllTools(asServer(server), asFacade(facade), PROJECT_ID);
 
   // Register all resources — captures resource descriptions via server.resource(name, uri, opts, ...)
-  await registerAllResources(asServer(server), asClient(client), PROJECT_ID);
+  await registerAllResources(asServer(server), asFacade(facade), PROJECT_ID);
 
   // Register all prompts — captures prompt descriptions via server.prompt(name, desc, ...)
-  registerAllPrompts(asServer(server), asClient(client), PROJECT_ID);
+  registerAllPrompts(asServer(server), asFacade(facade), PROJECT_ID);
 
   const corpus: string[] = [];
 

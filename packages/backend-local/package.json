@@ -14,6 +14,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@tila/backend-embedded": "workspace:*",
     "@tila/core": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@tila/ops-sqlite": "workspace:*",

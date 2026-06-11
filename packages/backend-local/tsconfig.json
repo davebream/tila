@@ -10,6 +10,7 @@
   "references": [
     { "path": "../schemas" },
     { "path": "../core" },
-    { "path": "../ops-sqlite" }
+    { "path": "../ops-sqlite" },
+    { "path": "../backend-embedded" }
   ]
 }

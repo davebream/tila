@@ -1,5 +1,18 @@
 import { ErrorEnvelopeSchema, type TilaProjectConfig } from "@tila/schemas";
 import type { z } from "zod";
+import { createArtifactMethods } from "./artifacts";
+import { createClaimMethods } from "./claims";
+import { createTaskMethods } from "./entities";
+import { createGateMethods } from "./gates";
+import { createJournalMethods } from "./journal";
+import { createPresenceMethods } from "./presence";
+import { createRecordMethods } from "./records";
+import { createSchemaMethods } from "./schema";
+import { createSearchMethods } from "./search";
+import { createSignalMethods } from "./signals";
+import { createSummaryMethods } from "./summary";
+import { createTemplateMethods } from "./templates";
+import { createTokenMethods } from "./tokens";
 import { SDK_VERSION } from "./version";
 
 export interface ClientOptions {
@@ -56,14 +69,32 @@ export class TilaClient {
     return controller.signal;
   }
 
-  static fromConfig(config: TilaProjectConfig, token: string): TilaClient {
+  static fromConfig(
+    config: TilaProjectConfig,
+    token: string,
+    opts?: { extraHeaders?: Record<string, string> },
+  ): TilaClient {
+    if (config.backend === "local") {
+      throw new Error(
+        "Cannot create an HTTP TilaClient for a local backend (backend = " +
+          '"local"). The local backend runs in-process on SQLite — use ' +
+          "createTila(config) (which routes to the in-process backend) or " +
+          "import createTilaLocal from 'tila-sdk/local' directly.",
+      );
+    }
     if (!config.worker_url) {
       throw new Error(
         "Cannot create TilaClient: config has no worker_url. " +
           "Use 'tila project create' or set backend = \"cloudflare\" in .tila/config.toml.",
       );
     }
-    return new TilaClient({ baseUrl: config.worker_url, token });
+    return new TilaClient({
+      baseUrl: config.worker_url,
+      token,
+      // Optional caller attribution (e.g. mcp-server/<version>). When omitted,
+      // the constructor's default X-Tila-Source (sdk/<version>) applies.
+      ...(opts?.extraHeaders ? { extraHeaders: opts.extraHeaders } : {}),
+    });
   }
 
   async request<T>(
@@ -392,4 +423,138 @@ export async function exchangeGitHubToken(
     expiresAt: body.expires_at,
     permission: body.permission ?? "read",
   };
+}
+
+// ---------------------------------------------------------------------------
+// createTila — uniform resource-method facade over local + HTTP backends
+// ---------------------------------------------------------------------------
+
+/**
+ * The HTTP resource-method surface. Built from the zod-only factories
+ * (`createTaskMethods`, `createRecordMethods`, …) so the type is derived from a
+ * single source of truth and never drifts from the factory signatures.
+ *
+ * The LOCAL branch's `buildLocalResources` (in `./local/resource-adapters`)
+ * presents the SAME shape, so consumers swap backends without changing call
+ * sites. `tokens.issue` etc. throw `LocalUnsupportedError` under the local
+ * backend (HTTP-only — D1 global token store).
+ */
+export interface TilaFacade {
+  tasks: ReturnType<typeof createTaskMethods>;
+  records: ReturnType<typeof createRecordMethods>;
+  claims: ReturnType<typeof createClaimMethods>;
+  artifacts: ReturnType<typeof createArtifactMethods>;
+  gates: ReturnType<typeof createGateMethods>;
+  signals: ReturnType<typeof createSignalMethods>;
+  journal: ReturnType<typeof createJournalMethods>;
+  presence: ReturnType<typeof createPresenceMethods>;
+  schema: ReturnType<typeof createSchemaMethods>;
+  summary: ReturnType<typeof createSummaryMethods>;
+  search: ReturnType<typeof createSearchMethods>;
+  templates: ReturnType<typeof createTemplateMethods>;
+  tokens: ReturnType<typeof createTokenMethods>;
+  /**
+   * Release backend resources. No-op for the HTTP backend; closes the SQLite
+   * connection for the local backend. Always safe (and idempotent) to call.
+   */
+  close: () => void;
+}
+
+/** Build the HTTP-backed facade from a configured `TilaClient`. */
+function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
+  return {
+    tasks: createTaskMethods(client, projectId),
+    records: createRecordMethods(client, projectId),
+    claims: createClaimMethods(client, projectId),
+    artifacts: createArtifactMethods(client, projectId),
+    gates: createGateMethods(client, projectId),
+    signals: createSignalMethods(client, projectId),
+    journal: createJournalMethods(client, projectId),
+    presence: createPresenceMethods(client, projectId),
+    schema: createSchemaMethods(client, projectId),
+    summary: createSummaryMethods(client, projectId),
+    search: createSearchMethods(client, projectId),
+    templates: createTemplateMethods(client, projectId),
+    tokens: createTokenMethods(client),
+    close: () => {},
+  };
+}
+
+/**
+ * Create a uniform tila facade over either the local (in-process SQLite) or the
+ * Cloudflare (HTTP) backend, selected by `config.backend`. Both branches expose
+ * the EXACT same resource-method surface ({@link TilaFacade}); a consumer can
+ * swap backends without touching any call site.
+ *
+ * - `backend: "cloudflare"` (default) → constructs a {@link TilaClient} from
+ *   `config.worker_url` + `token` and wires the zod-only HTTP factories.
+ * - `backend: "local"` → DYNAMICALLY imports `tila-sdk/local`'s
+ *   `createTilaLocal` (the better-sqlite3 + node:fs stack) and the local
+ *   resource adapters, then presents them through the same facade.
+ *
+ * ## Entry / bundle hygiene
+ *
+ * `createTila` lives in the MAIN (zod-only) entry. Its local branch must NOT be
+ * statically reachable from the main bundle — the heavy SQLite stack belongs to
+ * `tila-sdk/local`. So the local branch uses dynamic `import()` (mirroring how
+ * `createTilaLocal` itself dynamically imports the native driver). Nothing heavy
+ * is statically imported here, keeping `dist/index.js` zod-only (enforced by
+ * `__tests__/bundle-hygiene.test.ts`).
+ *
+ * @param token Required for the Cloudflare backend; ignored for local.
+ * @param opts  Optional Cloudflare-backend tuning. `opts.extraHeaders` is
+ *   forwarded to the underlying `TilaClient` (e.g. a caller-attribution
+ *   `X-Tila-Source: mcp-server/<version>` header). Ignored for the local
+ *   backend, which makes no HTTP requests. Additive/back-compat: existing
+ *   `createTila(config, token)` callers are unaffected.
+ */
+export async function createTila(
+  config: TilaProjectConfig,
+  token?: string,
+  opts?: { extraHeaders?: Record<string, string> },
+): Promise<TilaFacade> {
+  if (config.backend === "local") {
+    if (!config.local) {
+      throw new Error(
+        'createTila: backend = "local" requires a [local] config section ' +
+          "with db_path and artifacts_path.",
+      );
+    }
+    // Dynamic import keeps the heavy SQLite stack out of the zod-only main
+    // bundle (see bundle-hygiene note above). The main tsup config marks
+    // `./local/index` EXTERNAL and rewrites it to the sibling built entry
+    // (`./local.js` / `./local.cjs`), so esbuild emits a literal runtime
+    // `import()` in BOTH the ESM and CJS main bundles — never inlining the
+    // native/SQLite stack. (ESM alone would code-split this, but CJS would
+    // otherwise inline it; the external rewrite fixes both formats uniformly.)
+    const { createTilaLocal, buildLocalResources } = await import(
+      "./local/index"
+    );
+
+    const { project, artifacts, close } = await createTilaLocal({
+      dbPath: config.local.db_path,
+      artifactsPath: config.local.artifacts_path,
+      org: config.local.org,
+      project: config.project_id,
+    });
+
+    const resources = buildLocalResources(project, artifacts);
+    // No `as unknown as` cast: `buildLocalResources` is compile-time asserted to
+    // be structurally assignable to `Omit<TilaFacade, "close">` (see the
+    // `_assertLocalSurfaceMatchesFacade` contract in resource-adapters.ts), so
+    // adding `close` yields a checked `TilaFacade`. Any adapter drift is now a
+    // build error here, not a silent runtime divergence.
+    return { ...resources, close };
+  }
+
+  // Cloudflare (HTTP) backend.
+  if (token === undefined) {
+    throw new Error(
+      'createTila: the Cloudflare backend requires a token. Pass createTila(config, token), or set backend = "local".',
+    );
+  }
+  const client = TilaClient.fromConfig(config, token, {
+    extraHeaders: opts?.extraHeaders,
+  });
+  return buildHttpFacade(client, config.project_id);
 }

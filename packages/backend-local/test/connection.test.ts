@@ -1,9 +1,17 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  NETWORK_FS_TYPES_LINUX,
+  findEnclosingMountFsType,
+} from "@tila/backend-embedded";
 import { afterEach, describe, expect, it } from "vitest";
-import { LocalFilesystemError, createLocalConnection } from "../src/connection";
+import {
+  LocalDatabaseOpenError,
+  LocalFilesystemError,
+  createLocalConnection,
+} from "../src/connection";
 
 describe("createLocalConnection", () => {
   let tempDir: string;
@@ -76,7 +84,7 @@ describe("createLocalConnection", () => {
       skipFilesystemCheck: true,
     });
 
-    // Verify entities table exists (from shared MIGRATION_0001)
+    // Verify entities table exists (from the embedded migration set)
     const entities = db.$client
       .query(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='entities'",
@@ -84,7 +92,7 @@ describe("createLocalConnection", () => {
       .get();
     expect(entities).toBeTruthy();
 
-    // Verify _idempotency table exists (from local MIGRATION_0005)
+    // Verify _idempotency table exists (from the embedded idempotency overlay, version 1000)
     const idempotency = db.$client
       .query(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='_idempotency'",
@@ -124,11 +132,89 @@ describe("createLocalConnection", () => {
   });
 });
 
+describe("createLocalConnection — corrupt file yields a clean error (R5)", () => {
+  let tempDir: string;
+
+  afterEach(() => {
+    if (tempDir && existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("wraps a corrupt-DB failure in the CLEAN LocalDatabaseOpenError (not the raw bun:sqlite throw)", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "tila-corrupt-"));
+    const badPath = join(tempDir, "not-a-db.db");
+    // Valid SQLite header magic + garbage body. The failure surfaces when a
+    // page-touching PRAGMA/migration runs — which the open+PRAGMA+migration wrap
+    // must cover, mirroring the Node connection.
+    writeFileSync(
+      badPath,
+      Buffer.concat([
+        Buffer.from("SQLite format 3\0", "utf-8"),
+        Buffer.from("garbage-not-a-real-database-file-body"),
+      ]),
+    );
+
+    let caught: unknown;
+    try {
+      createLocalConnection(badPath, "test-org", "test-project", {
+        skipFilesystemCheck: true,
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(LocalDatabaseOpenError);
+    const e = caught as LocalDatabaseOpenError;
+    expect(e.message).toContain("Failed to open local SQLite database at");
+    expect(e.message).toContain(badPath);
+    // The raw native error is preserved as the cause (not swallowed).
+    expect(e.cause).toBeInstanceOf(Error);
+  });
+});
+
 describe("LocalFilesystemError", () => {
   it("is an exported error class", () => {
     const err = new LocalFilesystemError("test message");
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe("LocalFilesystemError");
     expect(err.message).toBe("test message");
+  });
+});
+
+describe("filesystem-guard mount matching (shared with node; C7)", () => {
+  // Synthetic /proc/self/mounts: an NFS mount at /mnt/nfs alongside the local
+  // ext4 root. The bun and node guards both classify via this same pure helper.
+  const mounts = [
+    "server:/export /mnt/nfs nfs rw,relatime 0 0",
+    "/dev/sda1 / ext4 rw,relatime 0 0",
+    "",
+  ].join("\n");
+
+  it("does NOT mis-match /mnt/nfsdata against the /mnt/nfs mount (boundary-safe)", () => {
+    // The prior naive `dir.startsWith('/mnt/nfs')` bug would classify
+    // /mnt/nfsdata as nfs. The boundary-safe matcher must fall through to the
+    // ext4 root instead.
+    const fsType = findEnclosingMountFsType("/mnt/nfsdata/project", mounts);
+    expect(fsType).toBe("ext4");
+    expect(NETWORK_FS_TYPES_LINUX.includes(fsType ?? "")).toBe(false);
+  });
+
+  it("DOES match a path genuinely under /mnt/nfs", () => {
+    const fsType = findEnclosingMountFsType("/mnt/nfs/project", mounts);
+    expect(fsType).toBe("nfs");
+    expect(NETWORK_FS_TYPES_LINUX.includes(fsType ?? "")).toBe(true);
+  });
+
+  it("picks the LONGEST enclosing mount regardless of table order", () => {
+    // A nested local mount under an nfs root must win (the dir lives on the
+    // nested mount). Order is deliberately parent-before-child.
+    const nested = [
+      "server:/export /mnt/data nfs rw 0 0",
+      "/dev/sdb1 /mnt/data/local ext4 rw 0 0",
+      "",
+    ].join("\n");
+    expect(findEnclosingMountFsType("/mnt/data/local/db", nested)).toBe("ext4");
+    expect(findEnclosingMountFsType("/mnt/data/other/db", nested)).toBe("nfs");
   });
 });

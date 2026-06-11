@@ -113,12 +113,6 @@ const reindexCommand = defineCommand({
   async run({ args }) {
     const ctx = await resolveContext();
 
-    if (ctx.config.backend === "local") {
-      console.error("Error: search reindex requires remote backend");
-      process.exit(1);
-    }
-
-    const remote = requireClient(ctx);
     const kindsToReindex: Array<"artifact" | "entity"> = [];
 
     if (args.kind === "artifact") {
@@ -133,7 +127,37 @@ const reindexCommand = defineCommand({
         `Error: invalid kind '${args.kind}'. Use 'artifact' or 'entity'.`,
       );
       process.exit(1);
+      return;
     }
+
+    if (ctx.config.backend === "local") {
+      // Local mode: run a synchronous full FTS reindex via the EmbeddedProject
+      // backend (no DO Alarms locally). `ctx.entity` is the EmbeddedProject;
+      // duck-type to its `reindexSearch` method (same pattern as `searchAll`).
+      const local = ctx.entity as unknown as {
+        reindexSearch?: (kind: "artifact" | "entity" | "all") => {
+          artifact: number;
+          entity: number;
+        };
+      };
+      if (typeof local.reindexSearch !== "function") {
+        console.error(
+          "Error: search reindex requires local backend with reindex support",
+        );
+        process.exit(1);
+        return;
+      }
+      for (const kind of kindsToReindex) {
+        console.log(`Starting reindex for kind: ${kind}...`);
+        const counts = local.reindexSearch(kind);
+        console.log(
+          `Reindex complete for ${kind}. Indexed ${counts[kind]} rows.`,
+        );
+      }
+      return;
+    }
+
+    const remote = requireClient(ctx);
 
     for (const kind of kindsToReindex) {
       console.log(`Starting reindex for kind: ${kind}...`);

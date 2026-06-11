@@ -37,6 +37,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./local": {
+      "import": {
+        "types": "./dist/local.d.ts",
+        "default": "./dist/local.js"
+      },
+      "require": {
+        "types": "./dist/local.d.cts",
+        "default": "./dist/local.cjs"
+      }
     }
   },
   "files": ["dist"],
@@ -50,9 +60,23 @@
   "dependencies": {
     "zod": "^3.24.0"
   },
+  "peerDependencies": {
+    "better-sqlite3": ">=11 <13"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@tila/backend-embedded": "workspace:*",
+    "@tila/core": "workspace:*",
+    "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",
+    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
+    "better-sqlite3": "^12.10.0",
+    "drizzle-orm": "^0.45.2",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.0"

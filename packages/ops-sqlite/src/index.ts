@@ -55,6 +55,7 @@ export * as recordOps from "./record-ops";
 export * as fenceOps from "./fence-ops";
 export * as searchReindexOps from "./search-reindex-ops";
 export * as storeCountsOps from "./store-counts-ops";
+export * as templateOps from "./template-ops";
 
 // Named type exports for downstream consumers
 export type { EnrichOpts } from "./entity-ops";
@@ -102,3 +103,9 @@ export {
   RevisionNotFoundError,
   validateRecordValue,
 } from "./record-ops";
+export { TemplateInstantiateError } from "./template-ops";
+export type {
+  TemplateInstantiateErrorCode,
+  InstantiateTemplateParams,
+  InstantiateTemplateResult,
+} from "./template-ops";

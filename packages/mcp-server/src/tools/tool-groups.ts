@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { registerArtifactTools } from "./artifacts";
 import { registerClaimTools } from "./claims";
 import { registerEntityTools } from "./entities";
@@ -14,7 +14,7 @@ import { registerTemplateTools } from "./templates";
 
 export type RegisterFn = (
   server: McpServer,
-  client: TilaClient,
+  facade: TilaFacade,
   projectId: string,
 ) => void;
 

@@ -89,9 +89,10 @@ Turborepo monorepo under `packages/`:
 | `@tila/schemas` | Zod schemas — single source of truth for all types |
 | `@tila/core` | Backend interfaces, fence logic, schema-as-config parser |
 | `@tila/ops-sqlite` | Shared SQLite ops modules (entity-ops, artifact-ops, etc.), Drizzle schema, migrations. Used by both `backend-do` and `backend-local` |
+| `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by `backend-local` (Bun) and `tila-sdk/local` (Node) |
 | `@tila/backend-d1` | D1 global store (tokens, idempotency, project registry, sessions) |
 | `@tila/backend-do` | Durable Object wrapper — constructs `ProjectDO`, runs migrations via `blockConcurrencyWhile`, delegates to `ops-sqlite` |
-| `@tila/backend-local` | Local SQLite backend for CLI offline mode (`bun:sqlite`). Shares ops via `ops-sqlite` |
+| `@tila/backend-local` | Local SQLite backend for CLI offline mode (`bun:sqlite`). Delegates to `@tila/backend-embedded`; shares ops via `ops-sqlite` |
 | `@tila/backend-r2` | R2 artifact storage (content-addressed, sha256-keyed) |
 | `@tila/worker` | Cloudflare Worker with Hono routing, Smart Placement |
 | `tila-sdk` | TypeScript SDK for tila consumers (client, resource methods, retry, error codes) |
@@ -111,8 +112,9 @@ that reference "entity" are referring to the table-level concept.
 ### Package dependency flow
 
 ```
-schemas → core → ops-sqlite → backend-do  → worker
-                            → backend-local
+schemas → core → ops-sqlite → backend-do        → worker
+                            → backend-embedded → backend-local   (Bun, bun:sqlite)
+                                               → tila-sdk/local  (Node, better-sqlite3)
          core → backend-d1                → worker
          core → backend-r2                → worker
 schemas → sdk → mcp-server
@@ -120,7 +122,7 @@ schemas → sdk → mcp-server
 cli (standalone, imports schemas only)
 ```
 
-`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` and `backend-local` both consume `ops-sqlite` but provide different SQLite drivers (DO SQLite vs `bun:sqlite`).
+`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by `backend-local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK + MCP server), not just Bun. The DB file is portable between the CLI and a Node SDK/MCP consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
 
 ### Request flow
 

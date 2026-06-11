@@ -1,7 +1,9 @@
 import type {
   AcquireResult,
+  AddArtifactRefInput,
   ApplySchemaInput,
   ApplySchemaOutput,
+  ArchiveRecordInput,
   ArtifactBackend,
   ArtifactIndexEntry,
   ArtifactPointerRecord,
@@ -10,20 +12,30 @@ import type {
   ArtifactSearchResultRecord,
   CoordinationBackend,
   CreateEntityInput,
+  CreateRecordInput,
   EntityBackend,
   EntityListFilter,
+  EntityTree,
   GateBackend,
   GateFilter,
   GateRecord,
   JournalBackend,
   JournalEvent,
   JournalQuery,
+  PatchRecordInput,
   ProjectSummary,
+  ReadyFilter,
+  RecordBackend,
+  RecordHistoryOptions,
+  RecordListFilter,
+  RecordPage,
   RelationshipFilter,
   RelationshipInput,
+  RenewResult,
   SchemaBackend,
   SchemaRecord,
   SendSignalInput,
+  SetRecordInput,
   SignalBackend,
   SignalRecord,
   SummaryBackend,
@@ -32,8 +44,12 @@ import type {
   ArtifactGrepResponse,
   Claim,
   Entity,
+  EntityArtifactReference,
   EntityRelationship,
   Presence,
+  RecordHistoryItem,
+  RecordListItem,
+  RecordRow,
 } from "@tila/schemas";
 import {
   AckSignalResponseSchema,
@@ -43,6 +59,7 @@ import {
   ArtifactPutResponseSchema,
   CreateEntityRelationshipResponseSchema,
   DeleteEntityRelationshipResponseSchema,
+  EntityArtifactReferenceListResponseSchema,
   EntityDetailResponseSchema,
   EntityResponseSchema,
   GateListResponseSchema,
@@ -50,32 +67,64 @@ import {
   InboxResponseSchema,
   JournalResponseSchema,
   ListEntityRelationshipsResponseSchema,
+  ListReadyEntitiesResponseSchema,
+  PaginatedCompactEntityListResponseSchema,
   PaginatedEntityListResponseSchema,
   PresenceAllListResponseSchema,
   PresenceHeartbeatSuccessResponseSchema,
+  RecordGetResponseSchema,
+  RecordHistoryResponseSchema,
+  RecordListResponseSchema,
+  RecordMutateResponseSchema,
   ReleaseSuccessResponseSchema,
   RenewSuccessResponseSchema,
   SendSignalResponseSchema,
   StateResponseSchema,
   SummaryResponseSchema,
 } from "@tila/schemas";
-import { TilaApiError, type TilaClient } from "tila-sdk";
 import { z } from "zod";
+import { TilaApiError, type TilaClient } from "../client";
 
-// Internal schemas for artifact endpoints not exported from @tila/schemas
+// Internal schemas for artifact endpoints not exported from @tila/schemas.
+//
+// The Worker `/artifacts` list route forwards to the DO `/artifact/list`
+// handler, which returns the FULL pointer shape from `artifactOps.listPointers`
+// (every `ArtifactPointerRecord` field, plus `fence` + `tags`). This schema
+// validates all ten `ArtifactPointerRecord` fields so `listPointers`' cast to
+// `ArtifactPointerRecord[]` is backed by real validation, not an unchecked
+// `as unknown as`. `.passthrough()` retains the extra `fence`/`tags` fields.
+const ArtifactPointerInternalSchema = z
+  .object({
+    r2_key: z.string(),
+    resource: z.string().nullable(),
+    kind: z.string(),
+    sha256: z.string(),
+    bytes: z.number(),
+    mime_type: z.string(),
+    produced_at: z.number(),
+    produced_by: z.string(),
+    expires_at: z.number().nullable(),
+    tombstoned: z.number(),
+  })
+  .passthrough();
+
 const ArtifactListInternalSchema = z.object({
   ok: z.literal(true),
-  pointers: z.array(
-    z
-      .object({
-        r2_key: z.string(),
-        bytes: z.number(),
-      })
-      .passthrough(),
-  ),
+  pointers: z.array(ArtifactPointerInternalSchema),
 });
 
 const OkSchema = z.object({ ok: z.literal(true) }).passthrough();
+
+// /records/_types returns the merged declared∪in-use `types` plus the
+// `in_use_types` subset. Per the RecordBackend contract,
+// listRecordTypesInUse() returns the IN-USE subset only (`in_use_types`) —
+// consistent with EmbeddedProject. The CLI composes the merged view from the
+// schema's declared types when it needs it.
+const RecordTypesInternalSchema = z.object({
+  ok: z.literal(true),
+  types: z.array(z.string()),
+  in_use_types: z.array(z.string()).optional(),
+});
 
 const SchemaShowResponseSchema = z.object({
   ok: z.literal(true),
@@ -183,14 +232,18 @@ export class RemoteBackend
   // --- EntityBackend ---
 
   async create(input: CreateEntityInput): Promise<Entity> {
+    const body: Record<string, unknown> = {
+      id: input.id,
+      type: input.type,
+      data: input.data,
+      created_by: input.created_by,
+    };
+    // Forward tags so create-time tagging is at parity with EmbeddedProject;
+    // the Worker create route persists them (CreateEntityRequestSchema.tags).
+    if (input.tags !== undefined) body.tags = input.tags;
     const result = await this.client.post(
       `/projects/${this.projectId}/tasks`,
-      {
-        id: input.id,
-        type: input.type,
-        data: input.data,
-        created_by: input.created_by,
-      },
+      body,
       { schema: EntityResponseSchema, validate: true },
     );
     return result.entity;
@@ -216,15 +269,34 @@ export class RemoteBackend
     if (filter?.type) query.type = filter.type;
     if (filter?.archived !== undefined)
       query.archived = String(filter.archived);
-    // Flatten known dataFilter keys to top-level query params.
-    // Unknown keys are dropped (logged in debug mode in future).
+    // Flatten dataFilter keys to the Worker's list query params.
+    //
+    // CONTRACT: `EntityBackend.list` dataFilter keys are DATA-FIELD names
+    // (e.g. `parent_id`, `status`) — the same names EmbeddedProject applies
+    // directly via `json_extract(data, '$.<key>')`. The Worker list route
+    // (packages/worker/src/routes/entities.ts) only reads a fixed set of
+    // query params and the DO maps some of them onto data fields, so a few
+    // data-field names differ from their query-param name. Translate those:
+    //   - `parent_id` (data field) -> `parent` (query param the Worker reads,
+    //     which the DO maps back to `dataFilter.parent_id`).
+    //   - `status` is identical on both sides; all other keys pass through.
+    const DATA_FIELD_TO_QUERY_PARAM: Record<string, string> = {
+      parent_id: "parent",
+    };
     if (filter?.dataFilter) {
       for (const [key, value] of Object.entries(filter.dataFilter)) {
         if (value !== undefined && value !== null) {
-          query[key] = String(value);
+          const param = DATA_FIELD_TO_QUERY_PARAM[key] ?? key;
+          query[param] = String(value);
         }
       }
     }
+    // Tag filter: serialize to the Worker's `tag_filter` query param (comma-
+    // joined), which the list route honors (worker entities.ts ~196). Mirrors
+    // the SDK entities factory and keeps tasks.list tag filtering at parity with
+    // EmbeddedProject (which applies tagFilter via entityOps.list).
+    if (filter?.tagFilter?.length)
+      query.tag_filter = filter.tagFilter.join(",");
     // Pagination and sorting params
     if (filter?.sort) query.sort = filter.sort;
     if (filter?.order) query.order = filter.order;
@@ -315,6 +387,84 @@ export class RemoteBackend
     return { removed: result.removed };
   }
 
+  // GET /projects/:projectId/tasks/ready (worker entities.ts ~129 -> DO /entity/ready)
+  async listReady(filter?: ReadyFilter): Promise<Entity[]> {
+    const query: Record<string, string | undefined> = {};
+    if (filter?.type) query.type = filter.type;
+    if (filter?.parent) query.parent = filter.parent;
+    if (filter?.limit !== undefined) query.limit = String(filter.limit);
+    if (filter?.includeSoftBlocked) query["include-soft-blocked"] = "true";
+    const result = await this.client.get(
+      `/projects/${this.projectId}/tasks/ready`,
+      { schema: ListReadyEntitiesResponseSchema, validate: true, query },
+    );
+    // The ready response omits `tags` (parity with readyOps.computeReadyEntities,
+    // which returns tags: []). Backfill so each item satisfies `Entity`.
+    return result.entities.map((e) => ({ ...e, tags: [] }));
+  }
+
+  // Tree = compact list (GET /tasks?compact=true) + parent-child edges
+  // (GET /tasks/relationships?type=parent-child). The Worker has no dedicated
+  // tree endpoint; these are the two routes the DO/worker already expose.
+  async tree(_rootId?: string): Promise<EntityTree> {
+    const listResult = await this.client.get(
+      `/projects/${this.projectId}/tasks`,
+      {
+        schema: PaginatedCompactEntityListResponseSchema,
+        validate: true,
+        query: { compact: "true" },
+      },
+    );
+    const relResult = await this.client.get(
+      `/projects/${this.projectId}/tasks/relationships`,
+      {
+        schema: ListEntityRelationshipsResponseSchema,
+        validate: true,
+        query: { type: "parent-child" },
+      },
+    );
+    return { nodes: listResult.entities, edges: relResult.relationships };
+  }
+
+  // PATCH /projects/:projectId/tasks/:id with a caller-supplied fence.
+  // Unlike update() (which auto-acquires), the caller owns the fence here, so a
+  // stale fence surfaces the Worker's fence-conflict error verbatim.
+  async updateWithFence(
+    id: string,
+    data: Partial<Entity["data"]>,
+    fence: number,
+  ): Promise<Entity> {
+    const result = await this.client.patch(
+      `/projects/${this.projectId}/tasks/${encodeURIComponent(id)}`,
+      { data, fence },
+      { schema: EntityResponseSchema, validate: true },
+    );
+    return result.entity;
+  }
+
+  // POST /projects/:projectId/tasks/:entityId/artifact-refs (worker entities.ts ~264)
+  async addArtifactRef(input: AddArtifactRefInput): Promise<void> {
+    const body: Record<string, unknown> = {
+      artifact_key: input.artifact_key,
+      slot: input.slot,
+    };
+    if (input.metadata !== undefined) body.metadata = input.metadata;
+    await this.client.post(
+      `/projects/${this.projectId}/tasks/${encodeURIComponent(input.entity_id)}/artifact-refs`,
+      body,
+      { schema: OkSchema, validate: true },
+    );
+  }
+
+  // GET /projects/:projectId/tasks/:entityId/artifact-refs (worker entities.ts ~340)
+  async listArtifactRefs(entityId: string): Promise<EntityArtifactReference[]> {
+    const result = await this.client.get(
+      `/projects/${this.projectId}/tasks/${encodeURIComponent(entityId)}/artifact-refs`,
+      { schema: EntityArtifactReferenceListResponseSchema, validate: true },
+    );
+    return result.references;
+  }
+
   // --- CoordinationBackend ---
 
   async acquire(
@@ -342,13 +492,17 @@ export class RemoteBackend
     _user: string,
     fence: number,
     ttlMs: number,
-  ): Promise<boolean> {
-    await this.client.post(
+  ): Promise<RenewResult> {
+    // The Worker returns 409 `renew-failed` (→ TilaApiError thrown by the HTTP
+    // layer) on loss-of-claim, so a resolved response always means renewed:true.
+    // Return the REAL stored `expires_at` from the response, matching
+    // EmbeddedProject (which returns coordinationOps' stored expiry).
+    const result = await this.client.post(
       `/projects/${this.projectId}/claims/renew`,
       { resource, fence, ttl_ms: ttlMs },
       { schema: RenewSuccessResponseSchema, validate: true },
     );
-    return true;
+    return { renewed: true, expires_at: result.expires_at };
   }
 
   async release(resource: string, fence: number): Promise<void> {
@@ -721,7 +875,10 @@ export class RemoteArtifactBackend implements ArtifactBackend {
         query: q,
       },
     );
-    return result.pointers as unknown as ArtifactPointerRecord[];
+    // `ArtifactListInternalSchema` now validates all ten ArtifactPointerRecord
+    // fields, so this is a checked narrowing (the passthrough adds an index
+    // signature, hence the plain `as`), not an unchecked `as unknown as`.
+    return result.pointers as ArtifactPointerRecord[];
   }
 
   async addRelationship(
@@ -884,5 +1041,168 @@ export class RemoteArtifactBackend implements ArtifactBackend {
     }
     const text = await response.text();
     return { content: text, mimeType: contentType };
+  }
+}
+
+/**
+ * RemoteRecordBackend implements RecordBackend over the Worker record HTTP
+ * routes (see `packages/worker/src/routes/records.ts`). Paths mirror the SDK
+ * record methods (`packages/sdk/src/records.ts`) so the two stay in lockstep.
+ *
+ * Wire ↔ RecordRow mapping: the mutate/get responses return a `record`
+ * (`RecordItem`, no fence) plus a top-level `fence`. RecordBackend returns
+ * `RecordRow`, which is `RecordItem` extended with `fence`, so each method
+ * merges the two: `{ ...result.record, fence: result.fence }`.
+ *
+ * Like the SDK, multi-segment keys are encoded segment-by-segment so embedded
+ * slashes survive routing (the Worker matches `:key{.+}`).
+ */
+export class RemoteRecordBackend implements RecordBackend {
+  constructor(
+    private client: TilaClient,
+    private projectId: string,
+  ) {}
+
+  private base(): string {
+    return `/projects/${this.projectId}/records`;
+  }
+
+  /** Encode a record key per-segment so embedded `/` separators are preserved. */
+  private encodeKey(key: string): string {
+    return key.split("/").map(encodeURIComponent).join("/");
+  }
+
+  async createRecord(input: CreateRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = {
+      key: input.key,
+      value: input.value,
+    };
+    if (input.tags) body.tags = input.tags;
+    if (input.message != null) body.message = input.message;
+    if (input.sourceArtifactKey != null)
+      body.source_artifact_key = input.sourceArtifactKey;
+    const result = await this.client.post(
+      `${this.base()}/${input.type}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async setRecord(input: SetRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = {
+      value: input.value,
+      fence: input.fence,
+    };
+    if (input.tags) body.tags = input.tags;
+    if (input.message != null) body.message = input.message;
+    if (input.sourceArtifactKey != null)
+      body.source_artifact_key = input.sourceArtifactKey;
+    const result = await this.client.put(
+      `${this.base()}/${input.type}/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async getRecord(type: string, key: string): Promise<RecordRow | null> {
+    try {
+      const result = await this.client.get(
+        `${this.base()}/${type}/${this.encodeKey(key)}`,
+        { schema: RecordGetResponseSchema, validate: true },
+      );
+      return { ...result.record, fence: result.fence };
+    } catch (err) {
+      if (err instanceof TilaApiError && err.status === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async patchRecord(input: PatchRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = {
+      patch: input.patch,
+      fence: input.fence,
+    };
+    if (input.message != null) body.message = input.message;
+    const result = await this.client.patch(
+      `${this.base()}/${input.type}/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async archiveRecord(input: ArchiveRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = { fence: input.fence };
+    if (input.message != null) body.message = input.message;
+    const result = await this.client.post(
+      `${this.base()}/${input.type}/~/archive/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async unarchiveRecord(input: ArchiveRecordInput): Promise<RecordRow> {
+    const body: Record<string, unknown> = { fence: input.fence };
+    if (input.message != null) body.message = input.message;
+    const result = await this.client.post(
+      `${this.base()}/${input.type}/~/unarchive/${this.encodeKey(input.key)}`,
+      body,
+      { schema: RecordMutateResponseSchema, validate: true },
+    );
+    return { ...result.record, fence: result.fence };
+  }
+
+  async listRecords(
+    filter: RecordListFilter,
+  ): Promise<RecordPage<RecordListItem>> {
+    const query: Record<string, string | undefined> = {};
+    if (filter.tag) query.tag = filter.tag;
+    if (filter.includeArchived) query["include-archived"] = "true";
+    if (filter.tagFilter?.length) query.tag_filter = filter.tagFilter.join(",");
+    if (filter.dataFilter) query.filter = JSON.stringify(filter.dataFilter);
+    if (filter.limit !== undefined) query.limit = String(filter.limit);
+    const result = await this.client.get(`${this.base()}/${filter.type}`, {
+      schema: RecordListResponseSchema,
+      validate: true,
+      query,
+    });
+    return {
+      items: result.items,
+      total: result.meta.total,
+      next_cursor: result.meta.next_cursor,
+    };
+  }
+
+  async listRecordHistory(
+    type: string,
+    key: string,
+    opts?: RecordHistoryOptions,
+  ): Promise<RecordPage<RecordHistoryItem>> {
+    const query: Record<string, string | undefined> = {};
+    if (opts?.limit !== undefined) query.limit = String(opts.limit);
+    if (opts?.includeValues !== undefined)
+      query.values = String(opts.includeValues);
+    const result = await this.client.get(
+      `${this.base()}/${type}/~/history/${this.encodeKey(key)}`,
+      { schema: RecordHistoryResponseSchema, validate: true, query },
+    );
+    return {
+      items: result.items,
+      total: result.meta.total,
+      next_cursor: result.meta.next_cursor,
+    };
+  }
+
+  async listRecordTypesInUse(): Promise<string[]> {
+    const result = await this.client.get(`${this.base()}/_types`, {
+      schema: RecordTypesInternalSchema,
+      validate: true,
+    });
+    return result.in_use_types ?? [];
   }
 }

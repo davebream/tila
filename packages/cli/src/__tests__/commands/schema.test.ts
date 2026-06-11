@@ -302,34 +302,52 @@ describe("tila schema diff", () => {
     logSpy.mockRestore();
   });
 
-  it("(a) passes composed definition to schema preview endpoint", async () => {
-    mockLoadComposedSchema.mockReturnValue(COMPOSED_OK);
-
-    // Re-mock context to capture the client.post call
-    const { resolveContext } = await import("../../context");
-    const mockPost = vi.fn().mockResolvedValue({
-      ok: true,
-      changes: [],
-      autoApplicable: true,
+  it("(a) computes the diff LOCALLY against getCurrentSchema (no client.post)", async () => {
+    // Proposed schema adds a `priority` field to the existing `task` work-unit.
+    mockLoadComposedSchema.mockReturnValue({
+      ok: true as const,
+      definition:
+        'schema_version = 2\n\n[work_units.task]\nlabel = "Task"\n[work_units.task.fields.priority]\ntype = "string"\n',
+      schemaVersion: 2,
+      warnings: [],
+      fragmentCount: 1,
     });
+
+    // Current applied schema: just `task` with no fields (TOML definition).
+    const mockPost = vi.fn();
+    const { resolveContext } = await import("../../context");
     (resolveContext as ReturnType<typeof vi.fn>).mockResolvedValue({
       client: { post: mockPost },
-      config: { project_id: "test-project" },
+      config: { project_id: "test-project", backend: "local" },
       schema: {
         applySchema: mockApplySchema,
-        getCurrentSchema: mockGetCurrentSchema,
+        getCurrentSchema: vi.fn().mockResolvedValue({
+          version: 1,
+          definition:
+            'schema_version = 1\n\n[work_units.task]\nlabel = "Task"\n',
+        }),
       },
     });
 
     const cmd = await loadCommand();
     const diff = getSubCommand(cmd, "diff");
-    await runCmd(diff, { json: false });
+    await runCmd(diff, { json: true });
 
-    expect(mockPost).toHaveBeenCalledWith(
-      expect.stringContaining("schema/preview"),
-      expect.objectContaining({ definition: COMPOSED_OK.definition }),
-      expect.anything(),
-    );
+    // No HTTP call — diff is computed locally via @tila/core diffSchemas.
+    expect(mockPost).not.toHaveBeenCalled();
+
+    const out = JSON.parse(logSpy.mock.calls[0][0] as string) as {
+      changes: { kind: string; unitType?: string; fieldName?: string }[];
+      autoApplicable: boolean;
+    };
+    expect(out.autoApplicable).toBe(true);
+    expect(out.changes).toEqual([
+      expect.objectContaining({
+        kind: "field-added",
+        unitType: "task",
+        fieldName: "priority",
+      }),
+    ]);
   });
 
   it("(b) FILE_NOT_FOUND in --json mode → JSON error, no extra human-readable stderr", async () => {

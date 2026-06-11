@@ -6,8 +6,9 @@ export {
   TilaApiError,
   isTilaApiError,
   exchangeGitHubToken,
+  createTila,
 } from "./client";
-export type { ClientOptions } from "./client";
+export type { ClientOptions, TilaFacade } from "./client";
 
 // Retry helper
 export { withRetry } from "./retry";
@@ -50,6 +51,18 @@ export {
 // Coordination primitives
 export { ClaimHandle, withClaim } from "./claim-handle";
 export type { ClaimHandleOptions } from "./claim-handle";
+
+// HTTP backend seam — RemoteBackend implements the @tila/core EntityBackend +
+// CoordinationBackend + journal/gate/signal/schema/summary interfaces over the
+// TilaClient. RemoteArtifactBackend (ArtifactBackend) and RemoteRecordBackend
+// (RecordBackend) are SEPARATE classes by design: EntityBackend and
+// ArtifactBackend both declare get/list with incompatible return types, so a
+// single class cannot satisfy both. Shared by the CLI's remote-mode context.
+export {
+  RemoteBackend,
+  RemoteArtifactBackend,
+  RemoteRecordBackend,
+} from "./backends/remote";
 
 // Re-export key types consumers need
 export type {

@@ -37,6 +37,26 @@ export class EntityAlreadyExistsError extends Error {
   }
 }
 
+/**
+ * Convert a JSON scalar dataFilter value into the value `json_extract` returns,
+ * so equality comparisons match. `json_extract(data, '$.k')` UNQUOTES scalars
+ * (returns `P`, not `"P"`), so the bound value must be the raw primitive — NOT
+ * `JSON.stringify(value)` (which would compare against `"P"` and never match).
+ * Booleans map to SQLite's 1/0 (json_extract yields integers for JSON booleans).
+ * Objects/arrays are stringified as a last resort (deep equality is unsupported).
+ */
+function jsonExtractValue(value: unknown): string | number {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return value;
+  // null/object/array are not supported scalars for `json_extract` equality —
+  // `json_extract` returns a SQLite NULL for a JSON `null` (so `= 'null'` never
+  // matches) and a JSON *text* for objects/arrays (so deep equality won't hold).
+  // We fall back to JSON text, which intentionally MATCHES NOTHING for these
+  // shapes; callers should pass scalar dataFilter values.
+  return JSON.stringify(value);
+}
+
 export type EnrichOpts = {
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
   parseSchemaToml: (
@@ -214,13 +234,13 @@ export function list(
   if (filter?.dataFilter) {
     for (const [key, value] of Object.entries(filter.dataFilter)) {
       if (Array.isArray(value)) {
-        const placeholders = value.map((v) => sql`${JSON.stringify(v)}`);
+        const placeholders = value.map((v) => sql`${jsonExtractValue(v)}`);
         conditions.push(
           sql`json_extract(${schema.entities.data}, ${`$.${key}`}) IN (${sql.join(placeholders, sql.raw(", "))})`,
         );
       } else {
         conditions.push(
-          sql`json_extract(${schema.entities.data}, ${`$.${key}`}) = ${JSON.stringify(value)}`,
+          sql`json_extract(${schema.entities.data}, ${`$.${key}`}) = ${jsonExtractValue(value)}`,
         );
       }
     }

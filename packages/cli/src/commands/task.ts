@@ -1,13 +1,7 @@
-import {
-  EntityRelationshipTypeSchema,
-  EntityResponseSchema,
-  ListReadyEntitiesResponseSchema,
-  PaginatedCompactEntityListResponseSchema,
-} from "@tila/schemas";
+import { EntityRelationshipTypeSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { TilaApiError } from "tila-sdk";
-import { z } from "zod";
-import { requireClient, resolveContext } from "../context";
+import { resolveContext } from "../context";
 import {
   formatStatus,
   formatTimestamp,
@@ -50,9 +44,6 @@ function relationshipVerb(type: string): string {
       return type;
   }
 }
-
-// Schemas for artifact-ref subcommand responses (carved out — no interface equivalent)
-const OkResponseSchema = z.object({ ok: z.literal(true) });
 
 // --- relationship / rel subcommand group (defined once, referenced twice) ---
 const relationshipCommand = defineCommand({
@@ -290,19 +281,6 @@ const relationshipCommand = defineCommand({
   },
 });
 
-const ArtifactRefListResponseSchema = z.object({
-  ok: z.literal(true),
-  references: z.array(
-    z.object({
-      entity_id: z.string(),
-      artifact_key: z.string(),
-      slot: z.string(),
-      metadata: z.record(z.unknown()),
-      created_at: z.number(),
-    }),
-  ),
-});
-
 export default defineCommand({
   meta: { name: "task", description: "Manage tasks" },
   subCommands: {
@@ -473,36 +451,61 @@ export default defineCommand({
       },
       async run({ args }) {
         if (args.compact) {
-          // Compact path: use raw HTTP client to forward ?compact=true
-          const ctx = await resolveContext();
-          const { config } = ctx;
-          const client = requireClient(ctx);
-          const params = new URLSearchParams();
-          params.set("type", "task");
-          if (args.status) params.set("status", args.status as string);
-          if (args.parent) params.set("parent", args.parent as string);
-          params.set("compact", "true");
-          const result = await withSpinner("Fetching tasks...", () =>
-            client.get(`/projects/${config.project_id}/tasks?${params}`, {
-              schema: PaginatedCompactEntityListResponseSchema,
-              validate: true,
-            }),
+          // Compact path: a client-side projection of the EntityBackend list()
+          // (+ active claims for claimed_by) so it works IDENTICALLY in local
+          // AND remote mode (both go through entity.list() now). Fields:
+          // id, type, title, status, claimed_by.
+          //
+          // INTENTIONAL REDUCTION vs the server-side CompactEntity shape: the
+          // old SQL-backed remote ?compact=true also returned `blockers` and
+          // `artifacts` counts, which the DO computes for free in one query.
+          // Reproducing them client-side would require a per-entity fan-out
+          // (one listArtifactRefs() call per task — N HTTP round-trips in remote
+          // mode), so they are deliberately omitted to keep --compact a single
+          // cheap call. The omission is consistent across both backends. If a
+          // future bulk endpoint exposes these counts, add them in both modes.
+          const { entity, coordination } = await resolveContext();
+          const [tasks, claims] = await withSpinner(
+            "Fetching tasks...",
+            async () =>
+              Promise.all([
+                entity.list({
+                  type: "task",
+                  dataFilter: {
+                    ...(args.status ? { status: args.status as string } : {}),
+                    ...(args.parent
+                      ? { parent_id: args.parent as string }
+                      : {}),
+                  },
+                }),
+                coordination.listClaims(),
+              ]),
           );
+          const claimByResource = new Map(
+            claims.map((c) => [c.resource, `${c.machine}/${c.user}`]),
+          );
+          const entities = tasks.map((e) => {
+            const data = e.data as Record<string, unknown>;
+            return {
+              id: e.id,
+              type: e.type,
+              title: (data.title as string | undefined) ?? null,
+              status: (data.status as string | undefined) ?? null,
+              claimed_by: claimByResource.get(`${e.type}:${e.id}`) ?? null,
+            };
+          });
           if (args.json) {
-            printJson({
-              entities: result.entities,
-              count: result.entities.length,
-            });
+            printJson({ entities, count: entities.length });
             return;
           }
-          if (result.entities.length === 0) {
+          if (entities.length === 0) {
             console.log("No tasks found.");
             return;
           }
           renderTable(
-            result.entities.map((e) => ({
+            entities.map((e) => ({
               id: e.id,
-              status: formatStatus(e.status),
+              status: formatStatus(e.status ?? undefined),
               title: e.title ?? "(untitled)",
               claimed_by: e.claimed_by ?? "-",
             })),
@@ -516,14 +519,18 @@ export default defineCommand({
           return;
         }
 
-        // Non-compact path: use EntityBackend interface (backward compatible)
+        // Non-compact path: use EntityBackend interface (backward compatible).
+        // dataFilter keys are DATA-FIELD names (parent_id, status) — the single
+        // shape that works for both EmbeddedProject (json_extract directly) and
+        // RemoteBackend (which translates parent_id -> the Worker's `parent`
+        // query param). Mirrors the --compact path above.
         const { entity } = await resolveContext();
         const result = await withSpinner("Fetching tasks...", () =>
           entity.list({
             type: "task",
             dataFilter: {
               ...(args.status ? { status: args.status as string } : {}),
-              ...(args.parent ? { parent: args.parent as string } : {}),
+              ...(args.parent ? { parent_id: args.parent as string } : {}),
             },
           }),
         );
@@ -585,29 +592,25 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
-        const params = new URLSearchParams();
-        params.set("type", (args.type as string | undefined) ?? "task");
-        if (args.parent) params.set("parent", args.parent as string);
-        if (args.limit) params.set("limit", args.limit as string);
-        if (args["include-soft-blocked"])
-          params.set("include-soft-blocked", "true");
-        const result = await client.get(
-          `/projects/${config.project_id}/tasks/ready?${params}`,
-          { schema: ListReadyEntitiesResponseSchema, validate: true },
+        const { entity } = await resolveContext();
+        const entities = await withSpinner("Fetching ready tasks...", () =>
+          entity.listReady({
+            type: (args.type as string | undefined) ?? "task",
+            ...(args.parent ? { parent: args.parent as string } : {}),
+            ...(args.limit ? { limit: Number(args.limit) } : {}),
+            includeSoftBlocked: args["include-soft-blocked"] === true,
+          }),
         );
         if (args.json) {
-          console.log(JSON.stringify(result, null, 2));
+          console.log(JSON.stringify({ ok: true, entities }, null, 2));
           return;
         }
-        if (result.entities.length === 0) {
+        if (entities.length === 0) {
           console.log("No ready tasks found.");
           return;
         }
         renderTable(
-          result.entities.map((e) => {
+          entities.map((e) => {
             const data = e.data as Record<string, unknown>;
             return {
               id: e.id,
@@ -690,26 +693,23 @@ export default defineCommand({
           default: false,
         },
       },
-      // Carved out: EntityBackend.update() has no fence parameter.
-      // Retain client.patch to preserve --fence flag support.
       async run({ args }) {
-        const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
+        const { entity } = await resolveContext();
         const [key, ...rest] = (args.field as string).split("=");
         const value = rest.join("=");
-        const body: Record<string, unknown> = { data: { [key]: value } };
-        if (args.fence) body.fence = Number(args.fence);
-        const result = await client.patch(
-          `/projects/${config.project_id}/tasks/${args.id}`,
-          body,
-          { schema: EntityResponseSchema, validate: true },
-        );
+        const data = { [key]: value };
+        const id = args.id as string;
+        // --fence supplied: caller owns the fence; a stale fence is rejected by
+        // the backend (updateWithFence). Without --fence, update() auto-acquires
+        // a transient claim and validates its own fence.
+        const updated = args.fence
+          ? await entity.updateWithFence(id, data, Number(args.fence))
+          : await entity.update(id, data);
         if (args.json) {
-          printJson({ ok: true, entity: result.entity });
+          printJson({ ok: true, entity: updated });
           return;
         }
-        console.log(`Updated task ${result.entity.id}`);
+        console.log(`Updated task ${updated.id}`);
       },
     }),
     close: defineCommand({
@@ -868,34 +868,74 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        const ctx = await resolveContext();
-        const { config } = ctx;
-        const client = requireClient(ctx);
-        const params = new URLSearchParams();
-        if (args.type) params.set("type", args.type as string);
-        params.set("compact", "true");
-        const result = await withSpinner("Fetching tasks...", () =>
-          client.get(`/projects/${config.project_id}/tasks?${params}`, {
-            schema: PaginatedCompactEntityListResponseSchema,
-            validate: true,
-          }),
+        const { entity } = await resolveContext();
+        const { nodes, edges } = await withSpinner("Fetching tasks...", () =>
+          entity.tree(args.parent as string | undefined),
         );
-        if (result.entities.length === 0) {
+
+        // Optional --type filter (client-side): the EntityTree carries all node
+        // types; narrow to the requested type before rendering.
+        const filteredNodes = args.type
+          ? nodes.filter((n) => n.type === (args.type as string))
+          : nodes;
+
+        if (filteredNodes.length === 0) {
           console.log("No tasks found.");
           return;
         }
         if (args.json) {
           printJson({
-            entities: result.entities,
-            count: result.entities.length,
+            entities: filteredNodes,
+            relationships: edges,
+            count: filteredNodes.length,
           });
           return;
         }
+
+        // Build a parent->children index from the parent-child edges, then
+        // render the nesting. Roots are nodes with no incoming parent-child edge
+        // (or the requested --parent root).
+        const byId = new Map(filteredNodes.map((n) => [n.id, n]));
+        const childrenOf = new Map<string, string[]>();
+        const hasParent = new Set<string>();
+        for (const edge of edges) {
+          if (!byId.has(edge.from_id) || !byId.has(edge.to_id)) continue;
+          const kids = childrenOf.get(edge.from_id) ?? [];
+          kids.push(edge.to_id);
+          childrenOf.set(edge.from_id, kids);
+          hasParent.add(edge.to_id);
+        }
+        const label = (id: string): string => {
+          const n = byId.get(id);
+          if (!n) return id;
+          return `${n.id} ${n.status ?? ""} ${n.title ?? "(untitled)"}`.trim();
+        };
+        // `seen` is shared across the whole render (not per-branch): it both
+        // guards against relationship cycles (A->B->A) AND means a multi-parent
+        // node renders only under its FIRST-visited parent. This is an
+        // intentional spanning-tree projection that prevents duplicate /
+        // exponential rendering of diamond-shaped graphs.
+        const buildSubtree = (
+          id: string,
+          seen: Set<string>,
+        ): Record<string, unknown> | null => {
+          if (seen.has(id)) return null; // cycle guard (see `seen` note above)
+          seen.add(id);
+          const kids = childrenOf.get(id) ?? [];
+          if (kids.length === 0) return null;
+          const out: Record<string, unknown> = {};
+          for (const kid of kids) {
+            out[label(kid)] = buildSubtree(kid, seen);
+          }
+          return out;
+        };
+        const roots = (args.parent as string | undefined)
+          ? filteredNodes.filter((n) => n.id === (args.parent as string))
+          : filteredNodes.filter((n) => !hasParent.has(n.id));
         const treeData: Record<string, unknown> = {};
-        for (const e of result.entities) {
-          const label =
-            `${e.id} ${e.status ?? ""} ${e.title ?? "(untitled)"}`.trim();
-          treeData[label] = null;
+        const seen = new Set<string>();
+        for (const root of roots) {
+          treeData[label(root.id)] = buildSubtree(root.id, seen);
         }
         renderTree(treeData);
       },
@@ -935,19 +975,13 @@ export default defineCommand({
               default: false,
             },
           },
-          // Carved out: no interface equivalent for artifact references
           async run({ args }) {
-            const ctx = await resolveContext();
-            const { config } = ctx;
-            const client = requireClient(ctx);
-            await client.post(
-              `/projects/${config.project_id}/tasks/${encodeURIComponent(args.entityId as string)}/artifact-refs`,
-              {
-                artifact_key: args.artifactKey as string,
-                slot: args.slot as string,
-              },
-              { schema: OkResponseSchema, validate: true },
-            );
+            const { entity } = await resolveContext();
+            await entity.addArtifactRef({
+              entity_id: args.entityId as string,
+              artifact_key: args.artifactKey as string,
+              slot: args.slot as string,
+            });
             if (args.json) {
               printJson({ ok: true });
               return;
@@ -974,19 +1008,15 @@ export default defineCommand({
               default: false,
             },
           },
-          // Carved out: no interface equivalent for artifact references
           async run({ args }) {
-            const ctx = await resolveContext();
-            const { config } = ctx;
-            const client = requireClient(ctx);
-            const result = await client.get(
-              `/projects/${config.project_id}/tasks/${encodeURIComponent(args.entityId as string)}/artifact-refs`,
-              { schema: ArtifactRefListResponseSchema, validate: true },
+            const { entity } = await resolveContext();
+            const references = await entity.listArtifactRefs(
+              args.entityId as string,
             );
 
             if (args.json) {
               printJson({
-                references: result.references.map((ref) => ({
+                references: references.map((ref) => ({
                   ...ref,
                   created_at: tsToIso(ref.created_at),
                 })),
@@ -994,11 +1024,11 @@ export default defineCommand({
               return;
             }
 
-            if (result.references.length === 0) {
+            if (references.length === 0) {
               console.log("No artifact references found.");
               return;
             }
-            for (const ref of result.references) {
+            for (const ref of references) {
               console.log(
                 `${ref.slot}  ${ref.artifact_key}  ${new Date(ref.created_at).toISOString()}`,
               );

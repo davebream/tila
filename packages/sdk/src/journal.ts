@@ -6,12 +6,22 @@ export function createJournalMethods(client: TilaClient, projectId: string) {
 
   return {
     async query(opts?: {
-      entity_id?: string;
-      event_kind?: string;
+      // Worker GET /journal query params: resource (entity id), kind (event
+      // kind), after_seq (cursor), limit. These are the names the Worker route
+      // actually reads — `entity_id`/`event_kind` were silently ignored.
+      resource?: string;
+      kind?: string;
+      after_seq?: string;
       limit?: string;
-      cursor?: string;
     }): Promise<JournalResponse> {
-      return client.get<JournalResponse>(base, { query: opts });
+      return client.get<JournalResponse>(base, {
+        query: {
+          resource: opts?.resource,
+          kind: opts?.kind,
+          after_seq: opts?.after_seq,
+          limit: opts?.limit,
+        },
+      });
     },
   };
 }

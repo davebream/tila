@@ -1,17 +1,30 @@
 import {
   type RequestOrigin,
+  type TemplateInstantiateErrorCode,
   constraintOps,
-  journalOps,
-  schema,
   schemaOps,
+  templateOps,
 } from "@tila/ops-sqlite";
 import { InstantiateTemplateRequestSchema } from "@tila/schemas";
-import { sql } from "drizzle-orm";
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { formatZodIssues, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
-const { checkEntityTypeDeclared, resolveCurrentSchema } = constraintOps;
+/**
+ * HTTP status for each template-instantiate failure code. Preserves EXACTLY the
+ * statuses the route returned before the shared `templateOps.instantiateTemplate`
+ * extraction: invalid-id/no-schema/constraint-violation → 422, not-found → 404.
+ */
+const TEMPLATE_ERROR_STATUS: Record<
+  TemplateInstantiateErrorCode,
+  ContentfulStatusCode
+> = {
+  "invalid-id": 422,
+  "no-schema": 422,
+  "not-found": 404,
+  "constraint-violation": 422,
+};
 
 export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
@@ -92,7 +105,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.get("/template/list", async (c) => {
     const { db } = deps;
-    const parsedSchema = resolveCurrentSchema(db);
+    const parsedSchema = constraintOps.resolveCurrentSchema(db);
     if (!parsedSchema?.templates) {
       return c.json({ ok: true, templates: [] });
     }
@@ -124,174 +137,36 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
 
     const { template_name, root_id, vars } = parsed.data;
 
-    if (root_id.includes("/")) {
-      return jsonError(
-        c,
-        422,
-        "invalid-id",
-        `root_id "${root_id}" contains '/' which is not allowed in entity IDs`,
-      );
-    }
-
-    const parsedSchema = resolveCurrentSchema(db);
-    if (!parsedSchema) {
-      return jsonError(
-        c,
-        422,
-        "no-schema",
-        "No schema applied to this project",
-      );
-    }
-
-    const templateDef = parsedSchema.templates?.[template_name];
-    if (!templateDef) {
-      return jsonError(
-        c,
-        404,
-        "not-found",
-        `Template "${template_name}" not found in schema`,
-      );
-    }
-
-    for (const [entityKey, entity] of Object.entries(templateDef.entities)) {
-      const typeCheck = checkEntityTypeDeclared(parsedSchema, entity.type);
-      if (!typeCheck.ok) {
-        return jsonError(
-          c,
-          422,
-          typeCheck.code,
-          `Template entity "${entityKey}": ${typeCheck.message}`,
-        );
-      }
-    }
-
-    for (const [entityKey, entity] of Object.entries(templateDef.entities)) {
-      const entityId = root_id + entity.id_suffix;
-      if (entityId.includes("/")) {
-        return jsonError(
-          c,
-          422,
-          "invalid-id",
-          `Computed entity ID "${entityId}" (from entity "${entityKey}") contains '/'`,
-        );
-      }
-    }
-
-    const schemaVersion = schemaOps.getCurrentSchema(db)?.version ?? 1;
-    const actor =
-      ((raw as Record<string, unknown>).actor as string | undefined) ??
-      "system";
-    const templateOrigin: RequestOrigin = {
-      actor,
-      tokenId:
-        ((raw as Record<string, unknown>).actor_token_id as
-          | string
-          | null
-          | undefined) ?? null,
-      source:
-        ((raw as Record<string, unknown>).source as
-          | string
-          | null
-          | undefined) ?? null,
+    // Request origin (defaults actor to "system" — unchanged behavior). Passed
+    // explicitly to the shared op so the per-caller actor/origin is deliberate.
+    const rawRecord = raw as Record<string, unknown>;
+    const origin: RequestOrigin = {
+      actor: (rawRecord.actor as string | undefined) ?? "system",
+      tokenId: (rawRecord.actor_token_id as string | null | undefined) ?? null,
+      source: (rawRecord.source as string | null | undefined) ?? null,
       sourceVersion:
-        ((raw as Record<string, unknown>).source_version as
-          | string
-          | null
-          | undefined) ?? null,
+        (rawRecord.source_version as string | null | undefined) ?? null,
     };
-    const now = Date.now();
 
-    function applyVar(value: unknown, v: Record<string, string>): unknown {
-      if (typeof value !== "string") return value;
-      return value.replace(
-        /\{\{(\w+)\}\}/g,
-        (_, k: string) => v[k] ?? `{{${k}}}`,
-      );
+    try {
+      const result = templateOps.instantiateTemplate(db, {
+        templateName: template_name,
+        rootId: root_id,
+        vars,
+        origin,
+      });
+      return c.json({
+        ok: true,
+        created_entities: result.created_entities,
+        created_relationships: result.created_relationships,
+        journal_seq: result.journal_seq,
+      });
+    } catch (e) {
+      if (e instanceof templateOps.TemplateInstantiateError) {
+        return jsonError(c, TEMPLATE_ERROR_STATUS[e.code], e.code, e.message);
+      }
+      throw e;
     }
-
-    function applyVarsToData(
-      data: Record<string, unknown>,
-      v: Record<string, string>,
-    ): Record<string, unknown> {
-      return Object.fromEntries(
-        Object.entries(data).map(([k, val]) => [k, applyVar(val, v)]),
-      );
-    }
-
-    const { createdEntityIds, relationshipCount, journalSeq } = db.transaction(
-      (tx) => {
-        const entityIds: string[] = [];
-        let relCount = 0;
-
-        for (const [, entity] of Object.entries(templateDef.entities)) {
-          const entityId = root_id + entity.id_suffix;
-          const data = applyVarsToData(
-            entity.data as Record<string, unknown>,
-            vars,
-          );
-          tx.insert(schema.entities)
-            .values({
-              id: entityId,
-              type: entity.type,
-              schema_version: schemaVersion,
-              data: JSON.stringify(data),
-              archived: 0,
-              created_at: now,
-              updated_at: now,
-              created_by: actor,
-            })
-            .run();
-          entityIds.push(entityId);
-        }
-
-        for (const rel of templateDef.relationships) {
-          const fromEntity = templateDef.entities[rel.from];
-          const toEntity = templateDef.entities[rel.to];
-          if (!fromEntity || !toEntity) continue;
-          const fromId = root_id + fromEntity.id_suffix;
-          const toId = root_id + toEntity.id_suffix;
-          tx.run(
-            sql`INSERT INTO entity_relationships (from_id, to_id, type, schema_version, created_at) VALUES (${fromId}, ${toId}, ${rel.type}, ${schemaVersion}, ${now})`,
-          );
-          relCount++;
-        }
-
-        journalOps.appendJournal(tx, {
-          kind: "template.instantiated",
-          resource: root_id,
-          actor: templateOrigin.actor,
-          tokenId: templateOrigin.tokenId,
-          source: templateOrigin.source,
-          sourceVersion: templateOrigin.sourceVersion,
-          data: {
-            template_name,
-            created_entity_ids: entityIds,
-            vars_used: Object.keys(vars),
-          },
-        });
-
-        const seqRow = tx
-          .select({ seq: schema.journal.seq })
-          .from(schema.journal)
-          .orderBy(sql`seq DESC`)
-          .limit(1)
-          .get();
-        const journalSeq = seqRow?.seq ?? 0;
-
-        return {
-          createdEntityIds: entityIds,
-          relationshipCount: relCount,
-          journalSeq,
-        };
-      },
-    );
-
-    return c.json({
-      ok: true,
-      created_entities: createdEntityIds,
-      created_relationships: relationshipCount,
-      journal_seq: journalSeq,
-    });
   });
 
   return app;

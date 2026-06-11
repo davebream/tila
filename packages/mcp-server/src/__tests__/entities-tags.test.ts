@@ -1,68 +1,32 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-type MockServer = {
-  tool: ReturnType<typeof vi.fn>;
-};
-
-type MockClient = {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
-  patch: ReturnType<typeof vi.fn>;
-  postFormData: ReturnType<typeof vi.fn>;
-};
-
-function createMockServer(): MockServer {
-  return { tool: vi.fn() };
-}
-
-function createMockClient(): MockClient {
-  return {
-    get: vi.fn(),
-    post: vi.fn(),
-    patch: vi.fn(),
-    postFormData: vi.fn(),
-  };
-}
-
-function asServer(s: MockServer): McpServer {
-  return s as unknown as McpServer;
-}
-
-function asClient(c: MockClient): TilaClient {
-  return c as unknown as TilaClient;
-}
-
 import { registerEntityTools } from "../tools/entities";
+import {
+  type MockFacade,
+  type MockServer,
+  asFacade,
+  asServer,
+  createMockFacade,
+  createMockServer,
+  findToolHandler,
+} from "./helpers/mock-facade";
 
 const PROJECT_ID = "test-project";
 
 describe("registerEntityTools — tags", () => {
   let server: MockServer;
-  let client: MockClient;
+  let facade: MockFacade;
 
   beforeEach(() => {
     server = createMockServer();
-    client = createMockClient();
-    registerEntityTools(asServer(server), asClient(client), PROJECT_ID);
+    facade = createMockFacade();
+    registerEntityTools(asServer(server), asFacade(facade), PROJECT_ID);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  function findHandler(
-    name: string,
-  ): (
-    args: unknown,
-  ) => Promise<{ content: Array<{ type: string; text: string }> }> {
-    const call = server.tool.mock.calls.find((c: unknown[]) => c[0] === name);
-    if (!call) throw new Error(`Tool ${name} not found`);
-    return call[3] as (
-      args: unknown,
-    ) => Promise<{ content: Array<{ type: string; text: string }> }>;
-  }
+  const findHandler = (name: string) => findToolHandler(server, name);
 
   it("tila_task_create schema includes an optional tags field", () => {
     const createCall = server.tool.mock.calls.find(
@@ -73,8 +37,8 @@ describe("registerEntityTools — tags", () => {
     expect(schema).toHaveProperty("tags");
   });
 
-  it("tila_task_create passes tags to client.post when provided", async () => {
-    client.post.mockResolvedValue({
+  it("tila_task_create passes tags to tasks.create when provided", async () => {
+    facade.tasks.create.mockResolvedValue({
       ok: true,
       entity: { id: "T-1", tags: ["team:eng"] },
     });
@@ -87,17 +51,17 @@ describe("registerEntityTools — tags", () => {
       tags: ["team:eng"],
     });
 
-    expect(client.post).toHaveBeenCalledWith(`/projects/${PROJECT_ID}/tasks`, {
-      id: "T-1",
-      type: "task",
-      data: { title: "Build it" },
-      tags: ["team:eng"],
-    });
+    expect(facade.tasks.create).toHaveBeenCalledWith(
+      "T-1",
+      "task",
+      { title: "Build it" },
+      ["team:eng"],
+    );
     expect(result.content[0].text).toContain('"team:eng"');
   });
 
-  it("tila_task_create omits tags from body when not provided", async () => {
-    client.post.mockResolvedValue({
+  it("tila_task_create passes undefined tags when not provided", async () => {
+    facade.tasks.create.mockResolvedValue({
       ok: true,
       entity: { id: "T-2", tags: [] },
     });
@@ -105,17 +69,16 @@ describe("registerEntityTools — tags", () => {
     const handler = findHandler("tila_task_create");
     await handler({ id: "T-2", type: "task", data: {} });
 
-    expect(client.post).toHaveBeenCalledWith(`/projects/${PROJECT_ID}/tasks`, {
-      id: "T-2",
-      type: "task",
-      data: {},
-    });
-    const callBody = client.post.mock.calls[0][1] as Record<string, unknown>;
-    expect(callBody.tags).toBeUndefined();
+    expect(facade.tasks.create).toHaveBeenCalledWith(
+      "T-2",
+      "task",
+      {},
+      undefined,
+    );
   });
 
   it("tila_task_show response surfaces tags returned by the server", async () => {
-    client.get.mockResolvedValue({
+    facade.tasks.get.mockResolvedValue({
       ok: true,
       entity: {
         id: "T-1",

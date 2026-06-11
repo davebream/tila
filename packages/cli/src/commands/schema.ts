@@ -1,15 +1,33 @@
+import { diffSchemas, parseSchemaToml } from "@tila/core";
+import { type TilaSchemaToml, TilaSchemaTomlSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
-import { TilaApiError } from "tila-sdk";
-import { z } from "zod";
+import { parse as parseTOML } from "smol-toml";
 import { resolveContext } from "../context";
 import { printJson, printJsonError } from "../lib/output";
 import { loadComposedSchema } from "../lib/schema-loader";
 
-const PreviewSchemaResponseSchema = z.object({
-  ok: z.literal(true),
-  changes: z.array(z.record(z.unknown())),
-  autoApplicable: z.boolean(),
-});
+/**
+ * Parse the current applied schema definition into a TilaSchemaToml.
+ *
+ * `SchemaBackend.getCurrentSchema().definition` is TOML for the local backend
+ * (stored verbatim by `schemaOps.applySchema`) but a JSON string for the remote
+ * backend (`RemoteBackend.getCurrentSchema` JSON-stringifies the Worker's
+ * parsed schema). Try JSON first, then fall back to TOML — mirroring
+ * `template.ts`'s `fetchSchemaToml`. Returns null when no schema is applied.
+ */
+function parseCurrentDefinition(definition: string | null): TilaSchemaToml {
+  if (!definition) {
+    // No schema applied yet → diff against an empty schema (everything is "added").
+    return TilaSchemaTomlSchema.parse({ schema_version: 0, work_units: {} });
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(definition);
+  } catch {
+    raw = parseTOML(definition);
+  }
+  return TilaSchemaTomlSchema.parse(raw);
+}
 
 export default defineCommand({
   meta: { name: "schema", description: "Manage project schema" },
@@ -27,12 +45,13 @@ export default defineCommand({
         },
       },
       async run({ args }) {
+        // Schema diff is computed LOCALLY via the @tila/core `diffSchemas`
+        // helper against the current applied schema (`ctx.schema.getCurrentSchema()`),
+        // so it works in BOTH local and remote mode with no HTTP round-trip.
+        // The DB-aware server-side variant (entityCount enrichment via the Worker
+        // /schema/preview route) stays remote-only and is out of scope here; the
+        // pure-diff counts are 0 (see @tila/core `diffSchemas`).
         const ctx = await resolveContext();
-
-        if (!ctx.client) {
-          console.error("Error: tila schema diff requires a remote backend.");
-          process.exit(1);
-        }
 
         // Discover and compose *.schema.toml fragments from current directory
         const loaded = loadComposedSchema();
@@ -75,24 +94,25 @@ export default defineCommand({
           console.warn(`Schema composition warnings:\n${warningLines}`);
         }
 
-        let result: z.infer<typeof PreviewSchemaResponseSchema>;
-        try {
-          result = await ctx.client.post(
-            `/projects/${ctx.config.project_id}/schema/preview`,
-            { definition },
-            { schema: PreviewSchemaResponseSchema, validate: true },
-          );
-        } catch (err) {
-          if (err instanceof TilaApiError && err.status === 400) {
-            if (args.json) {
-              printJsonError(err.message, "SCHEMA_PARSE_ERROR");
-            } else {
-              console.error(`Schema parse error: ${err.message}`);
-            }
-            process.exit(1);
+        // Parse the proposed schema. Surface parse errors the same way the old
+        // remote 400 path did (SCHEMA_PARSE_ERROR), so callers see no change in
+        // error shape.
+        const proposed = parseSchemaToml(definition);
+        if (!proposed.ok) {
+          const msgs = proposed.errors.map((e) => e.message).join("; ");
+          if (args.json) {
+            printJsonError(`Schema parse error: ${msgs}`, "SCHEMA_PARSE_ERROR");
+          } else {
+            console.error(`Schema parse error: ${msgs}`);
           }
-          throw err;
+          process.exit(1);
+          return;
         }
+
+        // Diff the proposed schema against the current applied schema.
+        const current = await ctx.schema.getCurrentSchema();
+        const previous = parseCurrentDefinition(current.definition);
+        const result = diffSchemas(previous, proposed.schema);
 
         if (args.json) {
           printJson({
@@ -108,7 +128,13 @@ export default defineCommand({
         }
 
         console.log("Changes:");
-        for (const change of result.changes) {
+        for (const rawChange of result.changes) {
+          // `diffSchemas` returns a discriminated union; the renderer reads
+          // fields across variants (and the optional `entityCount`/`recordCount`
+          // present only in the DB-enriched remote variant, which is 0 here).
+          // A permissive record view keeps the human-readable output byte-for-byte
+          // identical to the old remote rendering.
+          const change = rawChange as Record<string, unknown>;
           const kind = change.kind as string;
           switch (kind) {
             case "work-unit-added":

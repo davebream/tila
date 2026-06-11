@@ -6,14 +6,19 @@ import type {
   EntityBackend,
   GateBackend,
   JournalBackend,
+  RecordBackend,
   SchemaBackend,
   SignalBackend,
   SummaryBackend,
 } from "@tila/core";
 import type { TilaProjectConfig } from "@tila/schemas";
-import type { TilaClient } from "tila-sdk";
+import {
+  RemoteArtifactBackend,
+  RemoteBackend,
+  RemoteRecordBackend,
+  type TilaClient,
+} from "tila-sdk";
 import { requireTokenAsync } from "./auth";
-import { RemoteArtifactBackend, RemoteBackend } from "./backends/remote";
 import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";
@@ -34,6 +39,7 @@ export interface CommandContext {
   signal: SignalBackend;
   schema: SchemaBackend;
   summary: SummaryBackend;
+  record: RecordBackend;
 }
 
 export function requireClient(ctx: CommandContext): TilaClient {
@@ -88,7 +94,7 @@ export async function runStartupChecks(
     if (!config.local?.db_path || !config.local?.artifacts_path) {
       throw new Error(
         "Config has backend = 'local' but missing [local] section.\n" +
-          "Run 'tila init --local' to provision the local backend.",
+          "Run 'tila project create --local' to provision the local backend.",
       );
     }
     const org = config.local.org ?? deriveOrg(process.cwd());
@@ -115,6 +121,7 @@ export async function runStartupChecks(
       signal: localProject,
       schema: localProject,
       summary: localProject,
+      record: localProject,
     };
   }
 
@@ -149,6 +156,7 @@ export async function runStartupChecks(
   // with incompatible return types; a single class cannot satisfy both.
   const remote = new RemoteBackend(client, config.project_id);
   const remoteArtifact = new RemoteArtifactBackend(client, config.project_id);
+  const remoteRecord = new RemoteRecordBackend(client, config.project_id);
   return {
     config,
     client,
@@ -161,6 +169,7 @@ export async function runStartupChecks(
     signal: remote,
     schema: remote,
     summary: remote,
+    record: remoteRecord,
   };
 }
 

@@ -232,7 +232,7 @@ describe("LocalProject", () => {
         acq.fence,
         120000,
       );
-      expect(renewed).toBe(true);
+      expect(renewed.renewed).toBe(true);
     });
 
     it("release frees the claim", async () => {

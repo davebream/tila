@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { registerArtifactTools } from "./artifacts";
 import { registerClaimTools } from "./claims";
 import { registerEntityTools } from "./entities";
@@ -37,7 +37,7 @@ const ALL_REGISTER_FNS = [
  */
 export function registerAllTools(
   server: McpServer,
-  client: TilaClient,
+  facade: TilaFacade,
   projectId: string,
   groups?: string[],
 ): void {
@@ -46,7 +46,7 @@ export function registerAllTools(
   if (resolved === undefined) {
     // Register all groups in default order
     for (const fn of ALL_REGISTER_FNS) {
-      fn(server, client, projectId);
+      fn(server, facade, projectId);
     }
     return;
   }
@@ -54,6 +54,6 @@ export function registerAllTools(
   // Resolve group names to register functions (throws on unknown groups)
   const fns = resolveGroups(resolved);
   for (const fn of fns) {
-    fn(server, client, projectId);
+    fn(server, facade, projectId);
   }
 }

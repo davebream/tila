@@ -189,16 +189,72 @@ export default defineCommand({
           }
         }
 
-        // TODO T8: template instantiate requires entity creation -- remote-only for now
-        const result = await requireClient(ctx).post(
-          `/projects/${ctx.config.project_id}/templates/instantiate`,
-          {
-            template_name: args.name as string,
-            root_id: args.id as string,
-            vars,
-          },
-          { schema: InstantiateTemplateResponseSchema, validate: true },
-        );
+        let result: {
+          created_entities: string[];
+          created_relationships: number;
+          journal_seq: number;
+        };
+
+        if (ctx.config.backend === "local") {
+          // Local mode: instantiate via the EmbeddedProject backend (no HTTP).
+          // `ctx.schema` is the EmbeddedProject; duck-type to its
+          // `instantiateTemplate` method (mirrors the `search` command's pattern
+          // of casting the local backend for search-specific methods).
+          const local = ctx.schema as unknown as {
+            instantiateTemplate?: (input: {
+              template_name: string;
+              root_id: string;
+              vars?: Record<string, string>;
+              actor?: string;
+            }) => {
+              created_entities: string[];
+              created_relationships: number;
+              journal_seq: number;
+            };
+          };
+          if (typeof local.instantiateTemplate !== "function") {
+            console.error(
+              "Error: template instantiate requires local backend with template support",
+            );
+            process.exit(1);
+            return;
+          }
+          try {
+            result = local.instantiateTemplate({
+              template_name: args.name as string,
+              root_id: args.id as string,
+              vars,
+              actor: ctx.machine,
+            });
+          } catch (err) {
+            // TemplateError carries a clean message + code (no-schema/not-found/
+            // invalid-id/constraint-violation) — surface it without a stack trace,
+            // matching the remote Worker's error responses.
+            const message = err instanceof Error ? err.message : String(err);
+            const code =
+              (err as { code?: string }).code
+                ?.toUpperCase()
+                .replace(/-/g, "_") ?? "ERROR";
+            if (args.json) {
+              printJsonError(message, code);
+            } else {
+              console.error(`Error: ${message}`);
+            }
+            process.exit(1);
+            return;
+          }
+        } else {
+          // Remote mode: delegate to the Worker template instantiate route.
+          result = await requireClient(ctx).post(
+            `/projects/${ctx.config.project_id}/templates/instantiate`,
+            {
+              template_name: args.name as string,
+              root_id: args.id as string,
+              vars,
+            },
+            { schema: InstantiateTemplateResponseSchema, validate: true },
+          );
+        }
 
         if (args.json) {
           printJson(result);

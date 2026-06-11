@@ -47,6 +47,49 @@ describe("TilaClient", () => {
     expect(init.headers["X-Tila-Source"]).toBe("cli/1.0.0");
   });
 
+  it("fromConfig forwards opts.extraHeaders (X-Tila-Source) to the client", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = TilaClient.fromConfig(
+      {
+        project_id: "p",
+        backend: "cloudflare",
+        worker_url: "https://api.test",
+        schema_version: 1,
+        tila_version: "0.0.0",
+        created_at: "1970-01-01T00:00:00Z",
+      },
+      "t",
+      { extraHeaders: { "X-Tila-Source": "mcp-server/2.3.4" } },
+    );
+    await client.get("/test");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers["X-Tila-Source"]).toBe("mcp-server/2.3.4");
+  });
+
+  it("fromConfig keeps the default sdk X-Tila-Source when no opts are passed", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = TilaClient.fromConfig(
+      {
+        project_id: "p",
+        backend: "cloudflare",
+        worker_url: "https://api.test",
+        schema_version: 1,
+        tila_version: "0.0.0",
+        created_at: "1970-01-01T00:00:00Z",
+      },
+      "t",
+    );
+    await client.get("/test");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers["X-Tila-Source"]).toMatch(/^sdk\/\d+\.\d+\.\d+$/);
+  });
+
   it("sets Authorization header from constructor token", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),

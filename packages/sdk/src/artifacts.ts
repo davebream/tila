@@ -213,15 +213,18 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         mimeType?: string;
         resource?: string;
         fence?: number;
+        tags?: string[];
       },
     ): Promise<ArtifactPutResponse> {
-      return client.post<ArtifactPutResponse>(`${base}/text`, {
+      const body: Record<string, unknown> = {
         content,
         kind: opts.kind,
         mime_type: opts.mimeType ?? "text/markdown",
         resource: opts.resource,
         fence: opts.fence,
-      });
+      };
+      if (opts.tags !== undefined) body.tags = opts.tags;
+      return client.post<ArtifactPutResponse>(`${base}/text`, body);
     },
 
     async readText(

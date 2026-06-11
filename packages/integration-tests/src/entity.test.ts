@@ -1,14 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createTilaLocal } from "tila-sdk/local";
+import { afterEach, describe, expect, it } from "vitest";
 
 /**
  * Entity CRUD integration tests.
  *
- * These tests require @cloudflare/vitest-pool-workers to be configured
- * with a DO binding (ProjectDO). The test worker must have the DO
- * migration applied (MIGRATION_0001) and a valid project token.
+ * Most cases here are documentation stubs awaiting @cloudflare/vitest-pool-workers
+ * (a DO binding + project token), which is not yet wired into this package's
+ * plain-Node vitest config.
  *
- * Until the pool-workers vitest config is set up, these tests document
- * the expected behavior and can be run once the infrastructure exists.
+ * The two `dataFilter` cases (status / parent) are REAL: they exercise the shared
+ * `entityOps.list` `json_extract` dataFilter path — the exact code the DO list
+ * route delegates to — through the embedded local backend (`tila-sdk/local`,
+ * better-sqlite3 under node). This is the same ops module the DO uses, so these
+ * assertions cover the json_extract dataFilter bug (fixed in Task 6) that the
+ * previous `expect(true).toBe(true)` stubs let slip through. The backend is
+ * runtime-agnostic, so local-mode coverage of `entityOps.list` is equivalent to
+ * DO coverage for this filter logic.
  *
  * Routes under test:
  * - POST /projects/:projectId/entities -> DO /entity/create
@@ -17,6 +27,27 @@ import { describe, expect, it } from "vitest";
  * - PATCH /projects/:projectId/entities/:id -> DO /entity/update/:id
  * - POST /projects/:projectId/entities/:id/archive -> DO /entity/archive/:id
  */
+
+/** Spin up an isolated local backend; auto-cleaned in afterEach. */
+const _localTmpDirs: string[] = [];
+afterEach(() => {
+  while (_localTmpDirs.length > 0) {
+    const dir = _localTmpDirs.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
+async function openLocalBackend() {
+  const dir = mkdtempSync(join(tmpdir(), "tila-entity-"));
+  _localTmpDirs.push(dir);
+  return createTilaLocal({
+    dbPath: join(dir, "entities.db"),
+    artifactsPath: join(dir, "artifacts"),
+    org: "test-org",
+    project: "entity-filter-proj",
+    skipFilesystemCheck: true,
+  });
+}
+
 describe("Entity CRUD lifecycle", () => {
   it("POST /entities creates entity and returns id + type", async () => {
     // Request: POST /projects/:pid/entities
@@ -36,20 +67,73 @@ describe("Entity CRUD lifecycle", () => {
   });
 
   it("GET /entities filters by status via dataFilter", async () => {
-    // After creating entity with data.status === "open":
-    // Request: GET /projects/:pid/entities?type=task&status=open
-    // Expected: 200, body.entities includes T-test1
-    // Request: GET /projects/:pid/entities?type=task&status=closed
-    // Expected: 200, body.entities does NOT include T-test1
-    expect(true).toBe(true);
+    // Real assertion (was a stub): exercise entityOps.list json_extract dataFilter
+    // on data.status — the exact path the DO list route uses.
+    const { project, close } = await openLocalBackend();
+    try {
+      await project.create({
+        id: "T-test1",
+        type: "task",
+        data: { title: "Test", status: "open" },
+        created_by: "cli",
+      });
+      await project.create({
+        id: "T-test2",
+        type: "task",
+        data: { title: "Done", status: "closed" },
+        created_by: "cli",
+      });
+
+      // status=open includes T-test1, excludes the closed one.
+      const open = await project.list({
+        type: "task",
+        dataFilter: { status: "open" },
+      });
+      const openIds = open.map((e) => e.id);
+      expect(openIds).toContain("T-test1");
+      expect(openIds).not.toContain("T-test2");
+
+      // status=closed excludes T-test1.
+      const closed = await project.list({
+        type: "task",
+        dataFilter: { status: "closed" },
+      });
+      const closedIds = closed.map((e) => e.id);
+      expect(closedIds).not.toContain("T-test1");
+      expect(closedIds).toContain("T-test2");
+    } finally {
+      close();
+    }
   });
 
   it("GET /entities filters by parent via dataFilter", async () => {
-    // Create parent: { id: "T-parent", type: "task", data: { title: "Parent", status: "open" } }
-    // Create child:  { id: "T-child", type: "task", data: { title: "Child", status: "open", parent_id: "T-parent" } }
-    // Request: GET /projects/:pid/entities?type=task&parent=T-parent
-    // Expected: 200, body.entities includes T-child but NOT T-parent
-    expect(true).toBe(true);
+    // Real assertion (was a stub): filter children by data.parent_id via the
+    // shared entityOps.list json_extract dataFilter.
+    const { project, close } = await openLocalBackend();
+    try {
+      await project.create({
+        id: "T-parent",
+        type: "task",
+        data: { title: "Parent", status: "open" },
+        created_by: "cli",
+      });
+      await project.create({
+        id: "T-child",
+        type: "task",
+        data: { title: "Child", status: "open", parent_id: "T-parent" },
+        created_by: "cli",
+      });
+
+      const children = await project.list({
+        type: "task",
+        dataFilter: { parent_id: "T-parent" },
+      });
+      const ids = children.map((e) => e.id);
+      expect(ids).toContain("T-child");
+      expect(ids).not.toContain("T-parent");
+    } finally {
+      close();
+    }
   });
 
   it("GET /entities/:id returns entity with relationships array", async () => {

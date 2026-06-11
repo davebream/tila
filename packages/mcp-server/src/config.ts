@@ -1,15 +1,30 @@
 import { existsSync, readFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { TilaProjectConfigSchema } from "@tila/schemas";
 import { parse } from "smol-toml";
 import { createGithubTokenProvider } from "./github-auth";
 
-export interface McpServerConfig {
-  apiUrl: string;
-  projectId: string;
-  authMode: "tila-token" | "github-repo";
-  getToken: () => Promise<string>;
-}
+/**
+ * Resolved MCP server config. Discriminated union keyed on `mode`:
+ *   - "remote": talks to a tila Worker over HTTP (apiUrl + token auth).
+ *   - "local":  reads/writes a local SQLite DB + artifacts dir, no token.
+ */
+export type McpServerConfig =
+  | {
+      mode: "remote";
+      apiUrl: string;
+      projectId: string;
+      authMode: "tila-token" | "github-repo";
+      getToken: () => Promise<string>;
+    }
+  | {
+      mode: "local";
+      projectId: string;
+      dbPath: string;
+      artifactsPath: string;
+      org: string;
+    };
 
 const CONFIG_DIR = ".tila";
 const CONFIG_FILENAME = "config.toml";
@@ -82,15 +97,31 @@ function resolveToken(tilaDir: string | null): string | null {
   return null;
 }
 
+/** Read an env var, treating empty/whitespace-only as unset. */
+function envOr(name: string): string | undefined {
+  const v = process.env[name]?.trim();
+  return v && v.length > 0 ? v : undefined;
+}
+
 /**
  * Resolve MCP server config from environment and .tila/config.toml.
  * Throws with actionable error messages on missing required values.
  *
- * Priority:
+ * Returns a discriminated union keyed on `mode`:
+ *   - "local":  when config.toml has backend = "local" (no worker_url/token needed)
+ *   - "remote": otherwise (existing tila-token / github-repo behavior)
+ *
+ * Remote priority:
  *   apiUrl:    TILA_API_URL env -> config.toml worker_url
  *   projectId: TILA_PROJECT_ID env -> config.toml project_id
  *   getToken:  tila-token mode: static TILA_API_TOKEN / .tila/.env
  *              github-repo mode: session cache -> OIDC -> error
+ *
+ * Local priority (config value -> TILA_* env -> default):
+ *   dbPath:        config.local.db_path     -> TILA_DB_PATH
+ *   artifactsPath: config.local.artifacts_path -> TILA_ARTIFACTS_PATH
+ *   org:           config.local.org         -> TILA_ORG -> OS username
+ *   projectId:     config.project_id        -> TILA_PROJECT_ID
  */
 export async function resolveServerConfig(): Promise<McpServerConfig> {
   const rawConfig = findConfigRaw();
@@ -98,6 +129,51 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
   const config = rawConfig
     ? TilaProjectConfigSchema.safeParse(rawConfig)
     : null;
+
+  // Resolve projectId early (shared by both local and remote arms; treat empty as unset)
+  const projectId =
+    envOr("TILA_PROJECT_ID") ??
+    (config?.success ? config.data.project_id : undefined);
+
+  // Backend mode from config (default: cloudflare/remote). Local backend never
+  // requires worker_url or a token.
+  const backendMode = config?.success
+    ? (config.data.backend ?? "cloudflare")
+    : "cloudflare";
+
+  if (backendMode === "local") {
+    if (!projectId) {
+      throw new Error(
+        "No project ID found. Set TILA_PROJECT_ID environment variable or add project_id to .tila/config.toml.",
+      );
+    }
+
+    const local = config?.success ? config.data.local : undefined;
+    const dbPath = local?.db_path ?? envOr("TILA_DB_PATH");
+    if (!dbPath) {
+      throw new Error(
+        "Backend is local but no database path found. Set TILA_DB_PATH environment variable or add db_path to the [local] section of .tila/config.toml.",
+      );
+    }
+    const artifactsPath = local?.artifacts_path ?? envOr("TILA_ARTIFACTS_PATH");
+    if (!artifactsPath) {
+      throw new Error(
+        "Backend is local but no artifacts path found. Set TILA_ARTIFACTS_PATH environment variable or add artifacts_path to the [local] section of .tila/config.toml.",
+      );
+    }
+    const org = local?.org ?? envOr("TILA_ORG") ?? defaultOrg();
+
+    return {
+      mode: "local",
+      projectId,
+      // Resolve to absolute paths so a relative `db_path`/`artifacts_path` (from
+      // config or TILA_DB_PATH/TILA_ARTIFACTS_PATH) is deterministic regardless
+      // of the process cwd at open time.
+      dbPath: resolve(dbPath),
+      artifactsPath: resolve(artifactsPath),
+      org,
+    };
+  }
 
   // Determine auth mode from config (default: tila-token)
   const authMode: "tila-token" | "github-repo" = config?.success
@@ -116,12 +192,7 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
     );
   }
 
-  // Resolve projectId (treat empty string as unset)
-  const projectIdEnv = process.env.TILA_PROJECT_ID?.trim().length
-    ? process.env.TILA_PROJECT_ID.trim()
-    : undefined;
-  const projectId =
-    projectIdEnv ?? (config?.success ? config.data.project_id : undefined);
+  // projectId resolved above (shared with local arm); require it for remote too.
   if (!projectId) {
     throw new Error(
       "No project ID found. Set TILA_PROJECT_ID environment variable or add project_id to .tila/config.toml.",
@@ -147,6 +218,7 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
     const githubTilaDir = tilaDir ?? join(process.cwd(), CONFIG_DIR);
 
     return {
+      mode: "remote",
       apiUrl,
       projectId,
       authMode: "github-repo",
@@ -166,9 +238,22 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
   }
 
   return {
+    mode: "remote",
     apiUrl,
     projectId,
     authMode: "tila-token",
     getToken: () => Promise.resolve(apiToken),
   };
+}
+
+/**
+ * Default org when neither config.local.org nor TILA_ORG is set.
+ * Mirrors the CLI's local fallback chain; the OS username is the final default.
+ */
+function defaultOrg(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    return "local";
+  }
 }

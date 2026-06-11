@@ -49,6 +49,133 @@ const updated = await entities.update("task-1", {
 await entities.archive("task-1");
 ```
 
+### `createTila` — one facade, local or remote
+
+`createTila(config, token?)` returns a uniform facade exposing the same resource
+methods (`tasks`, `records`, `claims`, `artifacts`, `gates`, `signals`,
+`journal`, `presence`, `schema`, `summary`, `search`, `templates`, `tokens`)
+regardless of backend. Swap `config.backend` without changing any call site.
+
+```typescript
+import { createTila } from "tila-sdk";
+
+// Cloudflare (HTTP) — token required
+const tila = await createTila(
+  { project_id: "my-project", backend: "cloudflare", worker_url: process.env.TILA_URL!, schema_version: 1, tila_version: "0", created_at: "" },
+  process.env.TILA_TOKEN!,
+);
+
+// Local (in-process SQLite) — no token; requires the optional `better-sqlite3` peer dep
+const local = await createTila({
+  project_id: "my-project",
+  backend: "local",
+  local: { db_path: ".tila/project.db", artifacts_path: ".tila/artifacts" },
+  schema_version: 1,
+  tila_version: "0",
+  created_at: "",
+});
+
+await tila.tasks.create("task-1", "task", { title: "uniform call site" });
+await local.tasks.create("task-1", "task", { title: "uniform call site" });
+local.close(); // closes the SQLite connection (no-op for cloudflare)
+```
+
+> **`better-sqlite3` peer dep:** the local backend lazily loads `better-sqlite3`
+> (an optional peer dependency). Install it for local mode; cloudflare mode never
+> touches it. Token issuance (`tila.tokens.*`) is HTTP-only and throws in local.
+
+The `close()` method is the canonical lifecycle handle for both backends: it is a
+no-op for cloudflare and closes the SQLite connection for local. It is safe to call
+more than once (double-close safe).
+
+In local mode, a few facade methods have no in-process equivalent and throw
+`LocalUnsupportedError` instead of silently no-op'ing:
+
+- `tokens.issue` / `tokens.revoke` / `tokens.list` (the D1 global token store is a
+  Worker/Cloudflare concern).
+- `artifacts.upload` and `artifacts.download` (binary R2 multipart upload/download —
+  local consumers use the content-addressed text primitives `artifacts.writeText` /
+  `artifacts.readText` instead).
+
+### `tila-sdk/local` — direct local backend
+
+For full control over the local stack (without the `createTila` facade), import the
+heavy entry directly. It is a separate package export so the SQLite/`node:fs` stack
+never loads from the main (zod-only) entry:
+
+```typescript
+import { createTilaLocal } from "tila-sdk/local";
+
+const { project, artifacts, close } = await createTilaLocal({
+  dbPath: ".tila/project.db",        // SQLite file (created if absent)
+  artifactsPath: ".tila/artifacts",  // blob root directory
+  project: "my-project",             // required — scopes artifact keys
+  org: "my-org",                     // optional, defaults to "local"
+});
+
+// `project` is the full @tila/core backend surface (Entity/Coordination/Journal/
+// Gate/Signal/Schema/Summary/Record); `artifacts` is the ArtifactBackend.
+close(); // closes the underlying better-sqlite3 connection
+```
+
+> Note: the `createTilaLocal` option keys are camelCase — `dbPath`, `artifactsPath`,
+> `org`, `project`. (The `createTila` facade's `config.local` section uses snake_case
+> `db_path` / `artifacts_path` to mirror the `[local]` config file; the direct
+> `createTilaLocal` options object is camelCase.)
+
+### `better-sqlite3` — optional peer dependency
+
+`better-sqlite3` is an **optional peer dependency** with range **`>=11 <13`**. The
+**tested / CI-exercised** version is **12.x (currently `12.10.0`)**; 11.x is declared
+supported but is *not* exercised in CI. Install it only when you use the local
+backend:
+
+```bash
+npm i better-sqlite3
+```
+
+If it (or its drizzle adapter) is missing, calling into the local backend throws
+`MissingNativeDriverError` with the exact message:
+
+```
+tila-sdk/local requires the optional peer dependency 'better-sqlite3'. Run: npm i better-sqlite3
+```
+
+Importing `tila-sdk/local` never loads the native binary — only *calling*
+`createTilaLocal` (or `createTila({ backend: "local" })`) does.
+
+> **No prebuilt binaries for musl/Alpine or Windows-arm64.** `better-sqlite3` ships
+> prebuilt binaries for common platforms but **not** musl-libc (Alpine) or
+> Windows-arm64. On those, the consumer needs a build toolchain (Python + make + a C
+> compiler) so `better-sqlite3` can compile from source on install.
+
+> **`skipLibCheck: true` required** in your `tsconfig.json` when consuming
+> `tila-sdk/local` types. The bundled `better-sqlite3` / `drizzle-orm` declarations
+> do not fully round-trip through the dts rollup (a known rollup-dts limitation). This
+> does **not** affect type-checking of *your own* code — `skipLibCheck` only skips
+> re-checking library `.d.ts` internals (the ecosystem default, also used in this
+> monorepo).
+
+### Browser / HTTP-only consumers
+
+The main `tila-sdk` entry stays zod-only — no native stack is statically reachable
+from it (enforced by a bundle-hygiene test). Browsers and any HTTP-only environment
+use the cloudflare backend; they never touch `better-sqlite3` or `node:fs`.
+
+### Local-mode behavior divergences vs remote
+
+Local mode presents the same facade shape, but a handful of methods diverge from the
+HTTP backend. These are intentional and called out so consumers are not surprised:
+
+| Method | Local behavior | Why |
+|--------|----------------|-----|
+| `schema.history` | Returns `[]` | Dead on **both** sides — the Worker exposes no schema-history route either, so the cloudflare branch would 404. (The data exists in `_schema_history`; it is simply not surfaced.) |
+| `presence.listAll` | Returns only **active** machines (every row `active: true`) | The embedded backend's `listPresence()` already filters to active machines by TTL; remote additionally includes stale machines as `active: false`. |
+| `artifacts.writeText` | Returns `deduplicated: false` and drops `tags` | The embedded artifacts table has no `tags` column, and the local write path does not report dedup. |
+| `tasks.list` | Ignores `compact`, emits no pagination cursor | `compact` is an HTTP-only projection; the local list is non-paginated (no `next_cursor`/`total`). |
+| `templates.list` | `variables` derived from `{{placeholders}}` | Local derives variables by scanning each template's entity data for `{{name}}` placeholders (`/\{\{(\w+)\}\}/`). |
+| `idempotency_key` (e.g. on `claims.acquire`) | Accepted but **not honored** | Remote dedups retries via D1; local relies on primary-key-level dedup instead — a retried create of an existing id fails rather than duplicating. Full idempotency is single-machine-low-risk and remote-only. (The embedded `_idempotency` table + `check/storeIdempotency` exist but are intentionally unwired.) |
+
 ### Constructor Options
 
 | Option | Type | Default | Description |

@@ -5,10 +5,14 @@ export type {
   EntityListFilter,
   RelationshipInput,
   RelationshipFilter,
+  ReadyFilter,
+  AddArtifactRefInput,
+  EntityTree,
 } from "./interfaces/entity-backend";
 export type {
   CoordinationBackend,
   AcquireResult,
+  RenewResult,
 } from "./interfaces/coordination-backend";
 export type {
   ArtifactBackend,
@@ -43,6 +47,16 @@ export type {
   SummaryBackend,
   ProjectSummary,
 } from "./interfaces/summary-backend";
+export type {
+  RecordBackend,
+  CreateRecordInput,
+  SetRecordInput,
+  PatchRecordInput,
+  ArchiveRecordInput,
+  RecordListFilter,
+  RecordHistoryOptions,
+  RecordPage,
+} from "./interfaces/record-backend";
 
 // Fence validation utilities
 export { validateFence, assertFence, FenceError } from "./fence";

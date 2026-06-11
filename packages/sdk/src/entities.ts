@@ -5,6 +5,7 @@ import type {
   EntityDetailResponse,
   EntityListResponse,
   EntityResponse,
+  ListEntityRelationshipsResponse,
 } from "@tila/schemas";
 import type { TilaClient } from "./client";
 
@@ -34,10 +35,17 @@ function _createMethods(client: TilaClient, base: string) {
       limit?: string;
       cursor?: string;
       tagFilter?: string[];
+      /**
+       * Request the Worker's compact projection (id/type/title/status/...). HTTP
+       * only — the embedded backend has no compact list, so the local adapter
+       * ignores this and returns full entities (a documented local divergence).
+       */
+      compact?: boolean;
     }): Promise<EntityListResponse> {
-      const { tagFilter, ...rest } = query ?? {};
+      const { tagFilter, compact, ...rest } = query ?? {};
       const q: Record<string, string | undefined> = { ...rest };
       if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
+      if (compact) q.compact = "true";
       return client.get<EntityListResponse>(base, { query: q });
     },
 
@@ -60,13 +68,49 @@ function _createMethods(client: TilaClient, base: string) {
       toId: string,
       type: string,
     ): Promise<CreateEntityRelationshipResponse> {
+      // The Worker exposes a COLLECTION relationship route
+      // (POST /tasks/relationships with {from_id,to_id,type} in the body) — NOT
+      // a per-id /tasks/:id/relationships route. `from_id` goes in the body.
       return client.post<CreateEntityRelationshipResponse>(
-        `${base}/${fromId}/relationships`,
+        `${base}/relationships`,
         {
+          from_id: fromId,
           to_id: toId,
           type,
         },
       );
+    },
+
+    async listRelationships(filter?: {
+      fromId?: string;
+      toId?: string;
+      type?: string;
+    }): Promise<ListEntityRelationshipsResponse> {
+      // GET /tasks/relationships with from_id/to_id/type filter query params.
+      const query: Record<string, string | undefined> = {
+        from_id: filter?.fromId,
+        to_id: filter?.toId,
+        type: filter?.type,
+      };
+      return client.get<ListEntityRelationshipsResponse>(
+        `${base}/relationships`,
+        { query },
+      );
+    },
+
+    async ready(query?: {
+      type?: string;
+      parent?: string;
+      limit?: number;
+      includeSoftBlocked?: boolean;
+    }): Promise<EntityListResponse> {
+      const q: Record<string, string | undefined> = {
+        type: query?.type,
+        parent: query?.parent,
+        limit: query?.limit !== undefined ? String(query.limit) : undefined,
+      };
+      if (query?.includeSoftBlocked) q["include-soft-blocked"] = "true";
+      return client.get<EntityListResponse>(`${base}/ready`, { query: q });
     },
 
     async addArtifactRef(

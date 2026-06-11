@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "composite": true,
+    "lib": ["ES2022", "DOM"],
+    "types": []
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../schemas" },
+    { "path": "../core" },
+    { "path": "../ops-sqlite" }
+  ]
+}

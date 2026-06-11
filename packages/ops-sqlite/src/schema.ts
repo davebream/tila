@@ -388,3 +388,24 @@ export const recordSearchDocs = sqliteTable(
     index("idx_rsd_tombstoned").on(table.tombstoned),
   ],
 );
+
+// --- _idempotency ---
+// Embedded-only idempotency overlay. In Cloudflare mode, idempotency lives in D1
+// (`@tila/backend-d1`); in embedded mode it lives in the same project SQLite file
+// (one fewer store to coordinate). The store is a standalone INSERT OR IGNORE,
+// NOT folded into the mutating operation's own transaction. This Drizzle model
+// mirrors the DDL in `@tila/backend-embedded`'s MIGRATION_IDEMPOTENCY
+// (version 1000) so the embedded backend reads/writes idempotency rows via
+// Drizzle instead of raw SQL.
+// The table does not exist in DO SQLite (DO idempotency is D1-backed), so no
+// canonical migration creates it; only the embedded migration set does.
+export const idempotency = sqliteTable(
+  "_idempotency",
+  {
+    key: text("key").primaryKey(),
+    created_at: integer("created_at").notNull(),
+    response_json: text("response_json").notNull(),
+    status_code: integer("status_code").notNull(),
+  },
+  (table) => [index("idx_idempotency_created").on(table.created_at)],
+);

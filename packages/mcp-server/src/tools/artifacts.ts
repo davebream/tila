@@ -1,16 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import type { TilaClient } from "tila-sdk";
+import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
 
 export function registerArtifactTools(
   server: McpServer,
-  client: TilaClient,
-  projectId: string,
+  facade: TilaFacade,
+  _projectId: string,
 ): void {
-  const base = `/projects/${projectId}/artifacts`;
-  const projectBase = `/projects/${projectId}`;
+  const artifacts = facade.artifacts;
+  const search = facade.search;
 
   server.tool(
     "tila_artifact_put",
@@ -42,14 +42,17 @@ export function registerArtifactTools(
       try {
         const bytes = Buffer.from(content, "base64");
         const blob = new Blob([bytes], { type: mime_type });
-        const formData = new FormData();
-        formData.append("file", blob);
-        formData.append("kind", kind);
-        formData.append("mime_type", mime_type);
-        if (resource) formData.append("resource", resource);
-        if (fence !== undefined) formData.append("fence", String(fence));
-        if (tags !== undefined) formData.append("tags", JSON.stringify(tags));
-        const result = await client.postFormData(base, formData);
+        // Remote-only: `artifacts.upload` posts a multipart form to the Worker's
+        // R2 store. In local mode the REMOTE_ONLY_TOOLS guard short-circuits
+        // this tool before the handler runs (see remote-only.ts); the facade
+        // would otherwise throw LocalUnsupportedError here.
+        const result = await artifacts.upload(blob, {
+          kind,
+          mimeType: mime_type,
+          resource,
+          fence,
+          tags,
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -85,14 +88,12 @@ export function registerArtifactTools(
     },
     async ({ q, kind, resource, limit, tag_filter }) => {
       try {
-        const query: Record<string, string | undefined> = {
-          q,
+        const result = await artifacts.search(q, {
           kind,
           resource,
           limit: String(limit),
-        };
-        if (tag_filter?.length) query.tag_filter = tag_filter.join(",");
-        const result = await client.get(`${base}/search`, { query });
+          ...(tag_filter?.length ? { tagFilter: tag_filter } : {}),
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -132,15 +133,13 @@ export function registerArtifactTools(
     },
     async ({ content, kind, mime_type, resource, fence, tags }) => {
       try {
-        const body: Record<string, unknown> = {
-          content,
+        const result = await artifacts.writeText(content, {
           kind,
-          mime_type,
+          mimeType: mime_type,
           resource,
           fence,
-        };
-        if (tags !== undefined) body.tags = tags;
-        const result = await client.post(`${base}/text`, body);
+          ...(tags !== undefined ? { tags } : {}),
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -170,18 +169,18 @@ export function registerArtifactTools(
     },
     async ({ key, max_chars = 10000 }) => {
       try {
-        const res = await client.requestRaw(
-          "GET",
-          `${base}/${encodeURIComponent(key)}`,
-        );
-        const contentType = res.headers.get("content-type") ?? "";
-        if (!contentType.startsWith("text/")) {
+        const { content: text, mimeType } = await artifacts.readText(key);
+        // Cross-backend text guard owned by THIS layer: the HTTP readText throws
+        // a TypeError for non-text MIME, but the LOCAL adapter's readText returns
+        // whatever is stored without a content-type check. This check makes the
+        // tool reject non-text uniformly (as a clean McpError) across both
+        // backends — it is NOT redundant for local mode.
+        if (!mimeType.startsWith("text/")) {
           throw new McpError(
             ErrorCode.InvalidRequest,
-            `Artifact ${key} has MIME type ${contentType} — tila_artifact_read_text only supports text/* artifacts`,
+            `Artifact ${key} has MIME type ${mimeType} — tila_artifact_read_text only supports text/* artifacts`,
           );
         }
-        const text = await res.text();
         if (text.length > max_chars) {
           const byteLength = Buffer.byteLength(text, "utf8");
           const truncated = `${text.slice(0, max_chars)}\n\n...[truncated: returned ${max_chars} chars of ${byteLength} bytes total]`;
@@ -221,9 +220,10 @@ export function registerArtifactTools(
     },
     async ({ q, limit, tag_filter }) => {
       try {
-        const query: Record<string, string> = { q, limit: String(limit) };
-        if (tag_filter?.length) query.tag_filter = tag_filter.join(",");
-        const result = await client.get(`${projectBase}/search`, { query });
+        const result = await search.search(q, {
+          limit,
+          ...(tag_filter?.length ? { tagFilter: tag_filter } : {}),
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -242,11 +242,14 @@ export function registerArtifactTools(
     },
     async ({ kind, resource }) => {
       try {
-        const result = await client.get(`${base}/latest`, {
-          query: { kind, resource },
-        });
+        const pointer = await artifacts.getLatest(kind, resource);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ ok: true, pointer }),
+            },
+          ],
         };
       } catch (err) {
         throw toMcpError(err);
@@ -280,13 +283,10 @@ export function registerArtifactTools(
         );
       }
       try {
-        const body: Record<string, unknown> = { type };
-        if (to_key) body.to_key = to_key;
-        if (to_uri) body.to_uri = to_uri;
-        const result = await client.post(
-          `${base}/${encodeURIComponent(from_key)}/relationships`,
-          body,
-        );
+        // The facade takes a single target and disambiguates to_key vs to_uri by
+        // the `://` heuristic. Prefer the explicit key; fall back to the URI.
+        const target = to_key ?? (to_uri as string);
+        const result = await artifacts.addRelationship(from_key, target, type);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -304,9 +304,7 @@ export function registerArtifactTools(
     },
     async ({ key }) => {
       try {
-        const result = await client.get(
-          `${base}/${encodeURIComponent(key)}/relationships`,
-        );
+        const result = await artifacts.listRelationships(key);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
@@ -351,12 +349,12 @@ export function registerArtifactTools(
     },
     async ({ pattern, kind, resource, regex, limit }) => {
       try {
-        const query: Record<string, string> = { pattern };
-        if (kind !== undefined) query.kind = kind;
-        if (resource !== undefined) query.resource = resource;
-        if (regex) query.regex = "true";
-        query.limit = String(limit);
-        const result = await client.get(`${base}/grep`, { query });
+        const result = await artifacts.grep(pattern, {
+          kind,
+          resource,
+          regex,
+          limit,
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
