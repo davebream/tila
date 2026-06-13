@@ -14,6 +14,30 @@ export type PitrStorage = TransactionalMigrationStorage & {
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
 };
 
+/**
+ * Run all pending project migrations with PITR (point-in-time recovery) as the
+ * cross-migration atomicity boundary.
+ *
+ * ## Atomicity model (load-bearing — read before changing migration commits)
+ *
+ * `runProjectMigrations` commits **each** migration in its own
+ * `storage.transactionSync` and records it in `_migrations` immediately. There
+ * is deliberately **no single SQLite transaction spanning the whole pending
+ * set**: DO SQLite cannot reliably wrap the full multi-statement DDL sequence
+ * (and the per-migration `transactionSync` calls do not nest), so SQLite-level
+ * atomicity across the set is not available. Cross-migration atomicity is
+ * provided **here** instead — capture a PITR bookmark first, and on ANY
+ * migration error schedule a restore-to-bookmark for the next session and
+ * re-throw (the caller aborts the DO → an intentional crash loop until an
+ * operator intervenes). **PITR is therefore the sole cross-migration atomicity
+ * boundary.** It is production-only (30-day window); in local/dev there is no
+ * bookmark and a failed migration simply throws.
+ *
+ * Partial-failure recovery has two independent layers: (1) PITR restore returns
+ * the DO to the pre-migration snapshot; (2) even without PITR the routine is
+ * idempotent and resumable — `runProjectMigrations` skips versions already in
+ * `_migrations`, so a retry continues from the last committed migration.
+ */
 export async function runMigrationsWithPitrRollback(
   storage: PitrStorage,
   onFatal: () => void = () => {},
@@ -184,6 +208,17 @@ function runMigration(storage: MigrationStorage, migration: Migration): void {
   storage.sql.exec(migration.sql);
 }
 
+/**
+ * Apply every not-yet-applied migration from MIGRATIONS, in order.
+ *
+ * Each migration runs in its OWN `transactionSync`, committing its DDL together
+ * with its `_migrations` row atomically. A mid-sequence failure therefore
+ * leaves earlier migrations committed — this is intentional; cross-migration
+ * atomicity is the caller's PITR boundary (see `runMigrationsWithPitrRollback`),
+ * not a single wrapping transaction. The applied-version guard makes the whole
+ * routine **idempotent and resumable**: re-running skips already-committed
+ * migrations and continues from the first pending one.
+ */
 export function runProjectMigrations(
   storage: TransactionalMigrationStorage,
   now = Date.now(),
