@@ -1,6 +1,10 @@
 import { FenceError } from "@tila/core";
 import { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
-import { ClaimOwnershipError, FenceNotFoundError } from "./fence-ops";
+import {
+  ClaimOwnershipError,
+  ExpiredClaimError,
+  FenceNotFoundError,
+} from "./fence-ops";
 import {
   GateAlreadySettledError,
   GateBlockedError,
@@ -17,6 +21,7 @@ import {
 type ProjectErrorConstructor =
   | typeof FenceError
   | typeof ClaimOwnershipError
+  | typeof ExpiredClaimError
   | typeof GateNotFoundError
   | typeof GateAlreadySettledError
   | typeof FenceNotFoundError
@@ -38,6 +43,9 @@ export type ProjectErrorResponse = {
 
 export const projectErrorResponses: ProjectErrorResponse[] = [
   { errorClass: FenceError, status: 409, code: "stale-fence" },
+  // An expired/released entity lease is a stale-fence condition from the
+  // client's perspective: the remedy is to re-acquire, same as FenceError.
+  { errorClass: ExpiredClaimError, status: 409, code: "stale-fence" },
   {
     errorClass: ClaimOwnershipError,
     status: 403,
