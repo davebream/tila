@@ -163,8 +163,9 @@ describe("createIdempotencyMiddleware", () => {
     const fake = new FakeIdempotencyStore();
     const { app, getHandlerCount } = makeApp(fake);
 
-    // Pre-seed a stored entry with requestHash: null (legacy pre-migration row)
-    const legacyKey = "dp:p1:POST:/:key-legacy";
+    // Pre-seed a stored entry with requestHash: null (legacy pre-migration row).
+    // The key is caller-scoped; the test stub sets no tokenResult, so caller="anon".
+    const legacyKey = "dp:p1:anon:POST:/:key-legacy";
     await fake.store(
       legacyKey,
       "p1",
@@ -286,7 +287,7 @@ describe("createIdempotencyMiddleware", () => {
     expect(json.ok).toBe(true);
   });
 
-  it("fail-open: store check throws, request still succeeds", async () => {
+  it("fail-closed: store check throws, returns 503 retryable WITHOUT running the handler", async () => {
     const throwingStore: IdempotencyStoreLike = {
       async check() {
         throw new Error("D1 unavailable");
@@ -300,11 +301,46 @@ describe("createIdempotencyMiddleware", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": "key-fail-open",
+        "Idempotency-Key": "key-fail-closed",
       },
       body: JSON.stringify({ a: 1 }),
     });
 
+    // The client opted into exactly-once on a mutating request; if the store is
+    // unreachable we must NOT run the handler (which could double-apply a write).
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as {
+      ok: boolean;
+      error: { code: string; retryable: boolean };
+    };
+    expect(body.error.code).toBe("idempotency-unavailable");
+    expect(body.error.retryable).toBe(true);
+    expect(getHandlerCount()).toBe(0);
+  });
+
+  it("store write failure after a 2xx is best-effort: the response still succeeds", async () => {
+    const writeThrowingStore: IdempotencyStoreLike = {
+      async check() {
+        return null;
+      },
+      async store() {
+        throw new Error("D1 write failed");
+      },
+    };
+
+    const { app, getHandlerCount } = makeApp(writeThrowingStore);
+
+    const res = await app.request("/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "key-write-fail",
+      },
+      body: JSON.stringify({ a: 1 }),
+    });
+
+    // The handler ran and committed; failing to persist the idempotency record
+    // must not turn a successful write into an error.
     expect(res.status).toBe(200);
     expect(getHandlerCount()).toBe(1);
   });
