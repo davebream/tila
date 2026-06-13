@@ -84,7 +84,7 @@ describe("createGithubTokenProvider", () => {
 
       // No OIDC env vars and no device flow → should throw error
       const getToken = createGithubTokenProvider(TEST_CONFIG, TEST_TILA_DIR);
-      await expect(getToken()).rejects.toThrow("tila auth login");
+      await expect(getToken()).rejects.toThrow("tila init");
     });
 
     it("does NOT use cached token when project_id does not match", async () => {
@@ -106,7 +106,7 @@ describe("createGithubTokenProvider", () => {
       });
 
       const getToken = createGithubTokenProvider(TEST_CONFIG, TEST_TILA_DIR);
-      await expect(getToken()).rejects.toThrow("tila auth login");
+      await expect(getToken()).rejects.toThrow("tila init");
     });
   });
 
@@ -263,7 +263,7 @@ describe("createGithubTokenProvider", () => {
       const getToken = createGithubTokenProvider(TEST_CONFIG, TEST_TILA_DIR);
 
       await expect(getToken()).rejects.toThrow(
-        "No valid GitHub session. Run `tila auth login` to authenticate.",
+        "No valid GitHub session. Run `tila init` to authenticate.",
       );
     });
 
@@ -279,7 +279,7 @@ describe("createGithubTokenProvider", () => {
       });
 
       const getToken = createGithubTokenProvider(TEST_CONFIG, TEST_TILA_DIR);
-      await expect(getToken()).rejects.toThrow("tila auth login");
+      await expect(getToken()).rejects.toThrow("tila init");
     });
   });
 });

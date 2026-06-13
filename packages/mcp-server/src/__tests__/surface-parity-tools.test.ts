@@ -103,6 +103,29 @@ describe("registerClaimTools", () => {
     expect(toolNames).not.toContain("tila_task_release");
   });
 
+  it("advertises the canonical claim modes (exclusive/owner/presence), not the nonexistent 'shared'", () => {
+    const server = createMockServer();
+    registerClaimTools(
+      asServer(server),
+      asClient(createMockClient()),
+      PROJECT_ID,
+    );
+    const acquireCall = server.tool.mock.calls.find(
+      (c: unknown[]) => c[0] === "tila_claim_acquire",
+    );
+    expect(acquireCall).toBeDefined();
+    const mode = (
+      (acquireCall as unknown[])[2] as Record<
+        string,
+        { parse: (v: unknown) => unknown }
+      >
+    ).mode;
+    expect(mode.parse("exclusive")).toBe("exclusive");
+    expect(mode.parse("owner")).toBe("owner");
+    expect(mode.parse("presence")).toBe("presence");
+    expect(() => mode.parse("shared")).toThrow();
+  });
+
   it("registers 5 tools (3 canonical + 2 compat aliases) when TILA_MCP_COMPAT_ALIASES=1", () => {
     process.env.TILA_MCP_COMPAT_ALIASES = "1";
     try {

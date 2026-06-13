@@ -134,7 +134,7 @@ async function resolveOidcToken(
  * 3. Error with actionable message (no interactive device flow in MCP server)
  *
  * The MCP server runs as a stdio subprocess and cannot perform interactive
- * terminal prompts. Users must run `tila auth login` first to populate the
+ * terminal prompts. Users must run `tila init` first to populate the
  * session cache.
  */
 export function createGithubTokenProvider(
@@ -158,7 +158,7 @@ export function createGithubTokenProvider(
 
     // 3. No session and no OIDC — throw with actionable error
     throw new Error(
-      "No valid GitHub session. Run `tila auth login` to authenticate.",
+      "No valid GitHub session. Run `tila init` to authenticate.",
     );
   };
 }

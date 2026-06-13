@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type ClaimMode, ClaimModeSchema } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
@@ -22,7 +23,7 @@ export function registerClaimTools(
     ttl_ms,
   }: {
     resource: string;
-    mode: "exclusive" | "shared";
+    mode: ClaimMode;
     ttl_ms: number;
   }) {
     try {
@@ -54,10 +55,9 @@ export function registerClaimTools(
 
   const acquireSchema = {
     resource: z.string().describe("Task ID to claim"),
-    mode: z
-      .enum(["exclusive", "shared"])
-      .default("exclusive")
-      .describe("Claim mode"),
+    mode: ClaimModeSchema.default("exclusive").describe(
+      "Claim mode: exclusive (single holder), owner (one user across machines), or presence (advisory, non-exclusive)",
+    ),
     ttl_ms: z
       .number()
       .int()
@@ -74,7 +74,7 @@ export function registerClaimTools(
   // Canonical tools (always registered)
   server.tool(
     "tila_claim_acquire",
-    "Acquire an exclusive or shared claim on a task. Returns a fencing token and expiration time. The fencing token is REQUIRED for subsequent tila_task_update, tila_claim_release, and tila_gate_create calls.",
+    "Acquire an exclusive, owner, or presence claim on a task. Returns a fencing token and expiration time. The fencing token is REQUIRED for subsequent tila_task_update, tila_claim_release, and tila_gate_create calls.",
     acquireSchema,
     acquireHandler,
   );
@@ -106,7 +106,7 @@ export function registerClaimTools(
   if (isCompatAliasEnabled()) {
     server.tool(
       "tila_task_claim",
-      "[DEPRECATED] Use tila_claim_acquire instead. Acquire an exclusive or shared claim on a task.",
+      "[DEPRECATED] Use tila_claim_acquire instead. Acquire an exclusive, owner, or presence claim on a task.",
       acquireSchema,
       acquireHandler,
     );
