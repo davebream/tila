@@ -8,6 +8,9 @@ export interface Env {
   CORS_ALLOWED_ORIGINS?: string;
   UI_ORIGIN?: string;
   GITHUB_SESSION_HMAC_KEY?: string;
+  // Optional secret: when set, bearer/session tokens are hashed with keyed
+  // HMAC-SHA-256 instead of plain SHA-256 (see lib/hash-token.ts).
+  HASH_PEPPER?: string;
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_CLIENT_ID?: string;
