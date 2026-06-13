@@ -129,6 +129,34 @@ describe("POST /record/:type/:key/put", () => {
     expect(body.record.updated_by).toBe("alice");
   });
 
+  it("create and set attribute the actor from the request body (not anonymous)", async () => {
+    const created = await app.request("/record/config/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: "attr",
+        value: { env: "a" },
+        actor: "alice",
+      }),
+    });
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as MutateBody;
+    expect(createdBody.record.updated_by).toBe("alice");
+
+    const set = await app.request("/record/config/attr/set", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        value: { env: "b" },
+        fence: createdBody.fence,
+        actor: "bob",
+      }),
+    });
+    expect(set.status).toBe(200);
+    const setBody = (await set.json()) as MutateBody;
+    expect(setBody.record.updated_by).toBe("bob");
+  });
+
   it("rejects a value exceeding 64 KiB with HTTP 413", async () => {
     const res = await put("config", "big", {
       value: { blob: "x".repeat(70_000) },

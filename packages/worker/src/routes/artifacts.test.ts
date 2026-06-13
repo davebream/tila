@@ -5,6 +5,7 @@ import {
   artifacts,
   callPointerWithRetry,
   compensateAndRespond,
+  isUnsafeArtifactResource,
 } from "./artifacts";
 
 function mockStub(responses: Array<Response | Error>): DurableObjectStub {
@@ -41,6 +42,21 @@ const POINTER_PAYLOAD = {
   search_body_text: null,
   actor_token_id: "tok_123",
 };
+
+describe("isUnsafeArtifactResource", () => {
+  it("rejects resources containing a slash or '..' (R2 key-prefix break-out)", () => {
+    expect(isUnsafeArtifactResource("../../sources/evil")).toBe(true);
+    expect(isUnsafeArtifactResource("produced/../x")).toBe(true);
+    expect(isUnsafeArtifactResource("a/b")).toBe(true);
+    expect(isUnsafeArtifactResource("..")).toBe(true);
+  });
+
+  it("accepts canonical entity resources (<type>:<id>)", () => {
+    expect(isUnsafeArtifactResource("task:abc-123")).toBe(false);
+    expect(isUnsafeArtifactResource("milestone:m1")).toBe(false);
+    expect(isUnsafeArtifactResource("epic:E-42")).toBe(false);
+  });
+});
 
 describe("callPointerWithRetry", () => {
   it("retries on throw and succeeds", async () => {
