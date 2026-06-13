@@ -62,6 +62,18 @@ function sanitizeArtifactExtension(ext: string | null | undefined): string {
   return cleaned || "bin";
 }
 
+/**
+ * A produced-artifact R2 key is `produced/<resource>/<sha256>.<ext>`. R2 keys
+ * are opaque strings — R2 does not normalize `/` or `..` — so a `resource`
+ * containing a slash or `..` could break out of its key prefix
+ * (e.g. `produced/../../sources/...`). Entity resources are `<type>:<id>` with
+ * no slash, so reject those characters at the Worker boundary, mirroring the
+ * entity-id DB constraint.
+ */
+export function isUnsafeArtifactResource(resource: string): boolean {
+  return resource.includes("/") || resource.includes("..");
+}
+
 // ---------------------------------------------------------------------------
 // Retry + compensation helpers for the artifact upload route
 // ---------------------------------------------------------------------------
@@ -238,6 +250,20 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     );
   }
 
+  if (resource && isUnsafeArtifactResource(resource)) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "resource must not contain '/' or '..'",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
   const encoder = new TextEncoder();
   const fileBytes = encoder.encode(content);
 
@@ -371,6 +397,19 @@ artifacts.post("/", requirePermission("write"), async (c) => {
   }
 
   const resource = formData.get("resource") as string | null;
+  if (resource && isUnsafeArtifactResource(resource)) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "resource must not contain '/' or '..'",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
   const fenceStr = formData.get("fence") as string | null;
   const fence = fenceStr ? Number.parseInt(fenceStr, 10) : null;
   // Extract tags from FormData -- sent as a JSON-encoded array string

@@ -128,7 +128,13 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
     const { type } = c.req.param();
     const rawBody = (await c.req.json()) as Record<string, unknown>;
     const body = RecordCreateRequestSchema.parse(rawBody);
-    const actor = c.req.header("x-actor") ?? "anonymous";
+    // Provenance: the Worker forwards the caller identity in the body; read it
+    // body-first (mirror put/stamp) so HTTP-written records are attributed to
+    // the real actor instead of "anonymous".
+    const actor =
+      (rawBody.actor as string | undefined) ??
+      c.req.header("x-actor") ??
+      "anonymous";
     const provenance: RequestOrigin = {
       actor,
       tokenId: (rawBody.actor_token_id as string | null | undefined) ?? null,
@@ -195,7 +201,10 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
     const { type, key } = c.req.param();
     const rawSetBody = (await c.req.json()) as Record<string, unknown>;
     const body = RecordSetRequestSchema.parse(rawSetBody);
-    const actor = c.req.header("x-actor") ?? "anonymous";
+    const actor =
+      (rawSetBody.actor as string | undefined) ??
+      c.req.header("x-actor") ??
+      "anonymous";
     const setProvenance: RequestOrigin = {
       actor,
       tokenId: (rawSetBody.actor_token_id as string | null | undefined) ?? null,
@@ -339,7 +348,10 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
     const { type, key } = c.req.param();
     const rawPatchBody = (await c.req.json()) as Record<string, unknown>;
     const body = RecordPatchRequestSchema.parse(rawPatchBody);
-    const actor = c.req.header("x-actor") ?? "anonymous";
+    const actor =
+      (rawPatchBody.actor as string | undefined) ??
+      c.req.header("x-actor") ??
+      "anonymous";
     const patchProvenance: RequestOrigin = {
       actor,
       tokenId:
@@ -387,7 +399,10 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
     const { type, key } = c.req.param();
     const rawArchiveBody = (await c.req.json()) as Record<string, unknown>;
     const body = RecordArchiveRequestSchema.parse(rawArchiveBody);
-    const actor = c.req.header("x-actor") ?? "anonymous";
+    const actor =
+      (rawArchiveBody.actor as string | undefined) ??
+      c.req.header("x-actor") ??
+      "anonymous";
     const archiveProvenance: RequestOrigin = {
       actor,
       tokenId:
@@ -434,7 +449,10 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
     const { type, key } = c.req.param();
     const rawUnarchiveBody = (await c.req.json()) as Record<string, unknown>;
     const body = RecordUnarchiveRequestSchema.parse(rawUnarchiveBody);
-    const actor = c.req.header("x-actor") ?? "anonymous";
+    const actor =
+      (rawUnarchiveBody.actor as string | undefined) ??
+      c.req.header("x-actor") ??
+      "anonymous";
     const unarchiveProvenance: RequestOrigin = {
       actor,
       tokenId:
