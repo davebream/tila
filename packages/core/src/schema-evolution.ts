@@ -214,7 +214,14 @@ export function diffSchemas(
     for (const fieldName of nextFieldNames) {
       if (!prevFieldNames.has(fieldName)) {
         const decl = nextFields[fieldName];
-        if (decl.required) {
+        // A required field added WITH default_for_legacy is non-destructive:
+        // legacy rows are tolerated and the default is materialized at read
+        // time (applyLegacyDefaults / tolerantRead). Only a required field
+        // WITHOUT a legacy default is destructive. Use a presence check
+        // (`=== undefined`) so a legitimate default of false/0/"" still counts.
+        // Mirrors the record branch and the v0.1 "auto-apply with default"
+        // success criterion.
+        if (decl.required && decl.default_for_legacy === undefined) {
           changes.push({
             kind: "field-required-added",
             unitType,
@@ -326,7 +333,10 @@ export function diffSchemas(
     for (const fieldName of nextFieldNames) {
       if (!prevFieldNames.has(fieldName)) {
         const decl = nextFields[fieldName];
-        if (decl.required && !decl.default_for_legacy) {
+        // Presence check (`=== undefined`) so a legitimate default of
+        // false/0/"" still counts as "has a default" (consistent with the
+        // entity branch above and applyLegacyDefaults).
+        if (decl.required && decl.default_for_legacy === undefined) {
           changes.push({
             kind: "record-field-required-added",
             typeName,

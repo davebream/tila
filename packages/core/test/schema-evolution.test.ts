@@ -303,6 +303,39 @@ describe("diffSchemas", () => {
     expect(result.autoApplicable).toBe(false);
   });
 
+  it("treats a required field added WITH default_for_legacy as non-destructive (auto-applicable)", () => {
+    const next: TilaSchemaToml = {
+      schema_version: 2,
+      work_units: {
+        task: {
+          fields: {
+            ...baseSchema.work_units.task.fields,
+            priority: {
+              type: "string",
+              required: true,
+              default_for_legacy: "medium",
+            },
+          },
+        },
+      },
+    };
+    const result = diffSchemas(baseSchema, next);
+    expect(result.changes).toContainEqual({
+      kind: "field-added",
+      unitType: "task",
+      fieldName: "priority",
+      declaration: {
+        type: "string",
+        required: true,
+        default_for_legacy: "medium",
+      },
+    });
+    expect(result.changes).not.toContainEqual(
+      expect.objectContaining({ kind: "field-required-added" }),
+    );
+    expect(result.autoApplicable).toBe(true);
+  });
+
   it("detects field-removed (destructive)", () => {
     const next: TilaSchemaToml = {
       schema_version: 2,

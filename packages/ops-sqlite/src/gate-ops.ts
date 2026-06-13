@@ -57,9 +57,10 @@ export class GateBlockedError extends Error {
  * Calling listGates(db) from within a transaction would create a nested
  * db.transaction() call which is problematic in DO SQLite.
  *
- * Note: Write-path timer resolution does NOT produce gate.timed_out journal
- * entries. This is an accepted v0.1 gap -- the gate's status/resolved_at fields
- * are correct; only the journal record is missing for write-path-only resolutions.
+ * Write-path timer resolution emits a gate.timed_out journal entry in the same
+ * transaction as the status mutation (identically to listGates' read-path
+ * resolution), so the append-only journal stays complete on every resolution
+ * path -- no journal-vs-state drift.
  */
 export function checkPendingGates(
   tx: Parameters<
@@ -72,7 +73,7 @@ export function checkPendingGates(
 ): void {
   // Step 1: Resolve expired timer gates (write-on-read)
   const expiredTimerGates = tx
-    .select({ id: schema.gates.id })
+    .select({ id: schema.gates.id, fence: schema.gates.fence })
     .from(schema.gates)
     .where(
       sql`${schema.gates.resource} = ${resource}
@@ -87,6 +88,16 @@ export function checkPendingGates(
       .set({ status: "timed_out", resolved_at: now })
       .where(eq(schema.gates.id, gate.id))
       .run();
+
+    // Journal in the SAME transaction as the mutation (mirrors listGates) so
+    // the append-only journal is complete on the write path too.
+    appendJournal(tx, {
+      kind: "gate.timed_out" as JournalEventKind,
+      resource,
+      actor: "system",
+      fence: gate.fence,
+      data: { gate_id: gate.id },
+    });
   }
 
   // Step 2: Query remaining pending non-expired gates
