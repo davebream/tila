@@ -196,7 +196,14 @@ export function release(
       .from(schema.claims)
       .where(eq(schema.claims.resource, canonicalResource))
       .get();
-    if (claimRow && claimRow.holder !== origin.actor) {
+    if (!claimRow) {
+      // The claim was already released or swept. Releasing an absent claim is
+      // an idempotent no-op -- crucially, do NOT emit a claim.released journal
+      // row, since the caller may not be (or never was) the holder and the
+      // holder check below is skipped when there is no claim row.
+      return;
+    }
+    if (claimRow.holder !== origin.actor) {
       throw new ClaimOwnershipError(resource);
     }
 

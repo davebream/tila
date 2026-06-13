@@ -54,15 +54,23 @@ export function upsertPointer(
   searchText?: { title: string | null; body_text: string } | null,
   autoSupersedes?: boolean,
   tags?: string[],
+  // Reconcile replays an already-committed historical blob whose fence may have
+  // since advanced; it must record the historical fence verbatim WITHOUT a
+  // live-fence equality gate. Only the reconcile path sets this.
+  skipFenceValidation = false,
 ): void {
   // Validate + normalize tags outside the transaction to avoid holding the lock
   const normalizedTags =
     tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
 
   db.transaction((tx) => {
-    // Fence validation is skipped only for source artifacts (resource=null)
-    // and explicitly unfenced uploads.
-    if (pointer.fence !== null && pointer.resource !== null) {
+    // Fence validation is skipped for source artifacts (resource=null),
+    // explicitly unfenced uploads, and reconcile replays (skipFenceValidation).
+    if (
+      pointer.fence !== null &&
+      pointer.resource !== null &&
+      !skipFenceValidation
+    ) {
       assertResourceFence(tx, pointer.resource, pointer.fence);
     }
 
@@ -855,6 +863,9 @@ export function reconcilePointers(
         origin,
         "artifact.reconciled",
         searchText,
+        undefined, // autoSupersedes
+        undefined, // tags
+        true, // skipFenceValidation: replaying a committed historical blob
       );
       result.orphans_recovered++;
       result.details.push({ key: orphan.key, status: "recovered" });
