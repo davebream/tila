@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.12",
+    "@cloudflare/vitest-pool-workers": "^0.16.14",
     "@cloudflare/workers-types": "^4.20260602.1",
     "@tila/backend-embedded": "workspace:*",
     "@tila/backend-local": "workspace:*",
