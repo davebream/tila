@@ -477,7 +477,10 @@ export function createAuthMiddleware(
       const payload = parsed.data;
       const rawPayload = payloadObj as { iss?: unknown; aud?: unknown };
 
-      if (rawPayload.iss !== undefined && rawPayload.iss !== "tila") {
+      // Require iss to be present AND correct. mintSessionToken always sets
+      // iss="tila"; accepting an absent iss would let an unsigned-claims token
+      // (or a token minted for another purpose with the shared HMAC key) pass.
+      if (rawPayload.iss !== "tila") {
         return c.json(
           {
             ok: false,
@@ -491,7 +494,13 @@ export function createAuthMiddleware(
         );
       }
 
-      if (!isExpectedAudience(rawPayload.aud, "tila")) {
+      // Require aud to be present AND correct (mintSessionToken always sets
+      // aud="tila"). isExpectedAudience returns true for an absent aud, so the
+      // explicit undefined check closes that gap.
+      if (
+        rawPayload.aud === undefined ||
+        !isExpectedAudience(rawPayload.aud, "tila")
+      ) {
         return c.json(
           {
             ok: false,

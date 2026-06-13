@@ -190,11 +190,15 @@ export async function verifyOidcToken(
     );
   }
 
-  // Validate audience
-  if (payload.aud !== expectedAudience) {
+  // Validate audience. Per RFC 7519, aud may be a single string OR an array of
+  // strings; accept either form (and reject an absent aud) for forward-compat
+  // with multi-audience OIDC providers.
+  const audClaim = payload.aud as unknown;
+  const audiences = Array.isArray(audClaim) ? audClaim : [audClaim];
+  if (!audiences.includes(expectedAudience)) {
     throw new OidcVerificationError(
       "OIDC_INVALID_AUDIENCE",
-      `Invalid audience: ${payload.aud} (expected ${expectedAudience})`,
+      `Invalid audience: ${JSON.stringify(audClaim)} (expected ${expectedAudience})`,
     );
   }
 

@@ -123,6 +123,19 @@ describe("verifyOidcToken", () => {
     });
   }
 
+  it("accepts a token whose aud is an array containing the expected audience", async () => {
+    await setupMockJwks();
+
+    const token = await signTestJwt({
+      ...VALID_CLAIMS,
+      aud: ["https://other.example.com", "https://tila.example.com"],
+    });
+    // RFC 7519 allows aud to be a string or an array; the array form must be
+    // accepted as long as it contains the expected audience.
+    const claims = await verifyOidcToken(token, "https://tila.example.com");
+    expect(claims.iss).toBe("https://token.actions.githubusercontent.com");
+  });
+
   it("returns OidcClaims for a valid token", async () => {
     await setupMockJwks();
 

@@ -589,6 +589,30 @@ describe("auth middleware", () => {
       expect(body.error.code).toBe("SESSION_EXPIRED");
     });
 
+    it("returns 401 UNAUTHORIZED for a session token with no iss claim", async () => {
+      const token = await mintSessionToken({ iss: undefined });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("UNAUTHORIZED");
+    });
+
+    it("returns 401 UNAUTHORIZED for a session token with no aud claim", async () => {
+      const token = await mintSessionToken({ aud: undefined });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("UNAUTHORIZED");
+    });
+
     it("returns 401 UNAUTHORIZED for a tampered HMAC signature", async () => {
       const token = await mintSessionToken();
       // Replace last 4 chars of token to corrupt the signature
@@ -656,6 +680,8 @@ describe("auth middleware", () => {
         permission: "read" as const,
         expires_at: Math.floor(Date.now() / 1000) + 7200,
         issued_at: Math.floor(Date.now() / 1000),
+        iss: "tila",
+        aud: "tila",
       };
 
       const keyBytes = base64UrlDecode(TEST_HMAC_KEY);
@@ -1069,14 +1095,18 @@ describe("auth middleware", () => {
       expect(mockRevokedJtiIsRevoked).not.toHaveBeenCalled();
     });
 
-    it("accepts a legacy session token without iss/aud", async () => {
+    it("rejects a session token without iss/aud (1h-TTL tokens always carry them now)", async () => {
+      // mintSessionToken (auth-github.ts) always sets iss="tila"/aud="tila", and
+      // session tokens are 1-hour TTL, so no live token lacks them. Requiring
+      // them closes the gap where a token minted for another purpose with the
+      // shared HMAC key (without iss/aud) would pass the session check.
       const token = await mintSessionToken({ iss: undefined, aud: undefined });
       const app = createTestApp();
       const res = await fetchWithSessionEnv(
         app,
         makeReq("/test", { Authorization: `Bearer ${token}` }),
       );
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
     });
 
     it("rejects a session token with the wrong audience", async () => {
