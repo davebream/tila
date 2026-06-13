@@ -149,6 +149,39 @@ describe("coordination ops regressions", () => {
     expect(listClaims(testDb.db)).toHaveLength(1);
   });
 
+  it("release of an absent (already-released) claim is a no-op and emits no journal", () => {
+    const claim = acquire(
+      testDb.db,
+      "task:abc-123",
+      "agent-a",
+      "agent-a",
+      "exclusive",
+      60_000,
+    );
+    // The owner releases: claim deleted, one claim.released journal row.
+    release(testDb.db, "task:abc-123", claim.fence, {
+      actor: "agent-a/agent-a",
+    });
+
+    const countReleased = () =>
+      (
+        testDb.rawDb
+          .prepare("SELECT COUNT(*) AS c FROM journal WHERE kind = ?")
+          .get("claim.released") as { c: number }
+      ).c;
+    expect(countReleased()).toBe(1);
+
+    // A second release -- now by a different actor, with the claim already
+    // gone -- must be an idempotent no-op: no throw and, crucially, no extra
+    // claim.released journal row attributed to a non-holder.
+    expect(() =>
+      release(testDb.db, "task:abc-123", claim.fence, {
+        actor: "agent-b/agent-b",
+      }),
+    ).not.toThrow();
+    expect(countReleased()).toBe(1);
+  });
+
   it("still renews successfully after self-reacquire reuses the same fence", () => {
     const claim = acquire(
       testDb.db,
