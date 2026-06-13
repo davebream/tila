@@ -74,7 +74,7 @@
     "console-table-printer": "^2.15.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "object-treeify": "^5.0.1",
     "smol-toml": "^1.6.1",
     "tsx": "^4.19.0",
