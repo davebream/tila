@@ -36,7 +36,8 @@ this drops the artifact, record, schema, and template tools. Leave it unset to e
 
 ## Editing an artifact
 
-Artifacts are addressed by key. To revise an artifact: read it with
-tila_artifact_read_text, modify the content, write the new version with
-tila_artifact_write_text, then optionally delete the old key.
+Artifacts are content-addressed and immutable. To revise an artifact: read it
+with tila_artifact_read_text, modify the content, and write the new version
+with tila_artifact_write_text. Point consumers at the current version via
+tila_artifact_get_latest (artifacts are superseded, not deleted).
 `.trim();
