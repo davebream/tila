@@ -27,7 +27,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
     "lefthook": "^1.7.0",
-    "turbo": "^2.9.16",
+    "turbo": "^2.9.18",
     "typescript": "^5.7.0",
     "vitest": "^4.1.0"
   }
