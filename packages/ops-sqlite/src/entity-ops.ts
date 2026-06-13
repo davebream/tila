@@ -446,8 +446,11 @@ export function update(
       throw new EntityNotFoundError(id);
     }
 
-    // Fence validation: always required -- caller must hold a valid claim.
-    assertResourceFence(tx, id, fence);
+    // Fence validation: always required -- caller must hold a LIVE claim.
+    // requireLiveClaim closes the zombie-write window where an expired lease's
+    // fence still numerically matches current_fence (entity fences do not bump
+    // on write).
+    assertResourceFence(tx, id, fence, { requireLiveClaim: true });
 
     // Gate enforcement: block terminal transitions if pending gates exist.
     // Non-terminal status changes and updates without a status field are unaffected.
@@ -541,8 +544,11 @@ export function archive(
       throw new EntityNotFoundError(id);
     }
 
-    // Fence validation: always required -- caller must hold a valid claim.
-    assertResourceFence(tx, id, fence);
+    // Fence validation: always required -- caller must hold a LIVE claim.
+    // requireLiveClaim closes the zombie-write window where an expired lease's
+    // fence still numerically matches current_fence (entity fences do not bump
+    // on write).
+    assertResourceFence(tx, id, fence, { requireLiveClaim: true });
 
     // Gate enforcement: archive is a terminal operation -- always check gates.
     // If GateBlockedError is thrown, the transaction rolls back cleanly.

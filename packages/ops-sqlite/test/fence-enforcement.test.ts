@@ -2,7 +2,11 @@ import { FenceError } from "@tila/core";
 import { describe, expect, it } from "vitest";
 import { acquire } from "../src/coordination-ops";
 import { update } from "../src/entity-ops";
-import { FenceNotFoundError } from "../src/fence-ops";
+import {
+  ExpiredClaimError,
+  FenceNotFoundError,
+  assertResourceFence,
+} from "../src/fence-ops";
 import { createEntity, createTestDb } from "./helpers";
 
 // Real fence-enforcement coverage for the destructive entity-write path,
@@ -34,6 +38,42 @@ describe("fence enforcement on entity writes", () => {
         actor: "m1/u1",
       }),
     ).toThrow(FenceError);
+  });
+
+  it("rejects a zombie write: an expired lease whose fence still matches current_fence", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "task-z" });
+
+    const T = 1_000_000;
+    // Acquire a 1s lease. No competing re-acquire happens, so current_fence
+    // stays equal to claim.fence even after the lease expires.
+    const claim = acquire(
+      db,
+      "task:task-z",
+      "m1",
+      "u1",
+      "exclusive",
+      1_000,
+      undefined,
+      T,
+    );
+
+    // Within the lease the matching fence is accepted...
+    expect(() =>
+      assertResourceFence(db, "task:task-z", claim.fence, {
+        now: T + 500,
+        requireLiveClaim: true,
+      }),
+    ).not.toThrow();
+
+    // ...but once the lease has expired the same (still-numerically-valid)
+    // fence is rejected — the zombie-write window is closed.
+    expect(() =>
+      assertResourceFence(db, "task:task-z", claim.fence, {
+        now: T + 2_000,
+        requireLiveClaim: true,
+      }),
+    ).toThrow(ExpiredClaimError);
   });
 
   it("fails closed when no fence row exists (no claim was ever acquired)", () => {

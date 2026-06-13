@@ -22,6 +22,22 @@ export class ClaimOwnershipError extends Error {
 }
 
 /**
+ * Thrown when a required-fence destructive write targets an entity resource
+ * whose claim has expired or been released. The fence number alone can still
+ * match `current_fence` (entity fences do not bump on write), so without this
+ * check an expired-lease late write — a "zombie write" — would be silently
+ * accepted. Maps to HTTP 409 `stale-fence`: the caller must re-acquire.
+ */
+export class ExpiredClaimError extends Error {
+  constructor(resource: string) {
+    super(
+      `No live claim for resource ${resource} -- the lease has expired or been released; re-acquire before writing`,
+    );
+    this.name = "ExpiredClaimError";
+  }
+}
+
+/**
  * Resolve the canonical `<type>:<id>` resource string for an entity.
  *
  * Performs an entity-existence lookup (not a separator heuristic) to handle
@@ -88,6 +104,20 @@ function lookupFence(
 }
 
 /**
+ * Look up the (single) claim row for a canonical resource, or undefined.
+ */
+function lookupClaim(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  resource: string,
+) {
+  return db
+    .select()
+    .from(schema.claims)
+    .where(eq(schema.claims.resource, resource))
+    .get();
+}
+
+/**
  * Validate a fence for a resource.
  *
  * Canonical entity claim+fence resource is `<type>:<id>`. Disambiguation is
@@ -102,11 +132,29 @@ function lookupFence(
  *   2. Exact-match fallback: for non-entity resources (records, arbitrary
  *      coordination keys) look up the fence row directly.
  */
+export interface AssertResourceFenceOptions {
+  /** Clock for claim-liveness evaluation (injectable for tests). */
+  now?: number;
+  /**
+   * When true, an entity-resource write additionally requires a LIVE claim
+   * (not just a matching fence). Entity fences are claim-based and do not bump
+   * on write, so a stale fence can still equal `current_fence` after a lease
+   * expires with no competing re-acquire — the zombie-write window. Callers on
+   * the entity destructive-write path (entity update/archive) pass true to
+   * close it. Defaults to false to preserve the fence-only contract for the
+   * other fenced paths (records use fence-bump CAS; gate/artifact liveness is
+   * tracked as a follow-up).
+   */
+  requireLiveClaim?: boolean;
+}
+
 export function assertResourceFence(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   resource: string,
   fence: number,
+  opts: AssertResourceFenceOptions = {},
 ): void {
+  const { now = Date.now(), requireLiveClaim = false } = opts;
   const canonical = resolveEntityResource(db, resource);
 
   if (canonical !== null) {
@@ -116,6 +164,13 @@ export function assertResourceFence(
       throw new FenceNotFoundError(resource);
     }
     assertFence(canonicalFence.current_fence, fence);
+
+    if (requireLiveClaim) {
+      const claim = lookupClaim(db, canonical);
+      if (!claim || claim.expires_at <= now) {
+        throw new ExpiredClaimError(resource);
+      }
+    }
     return;
   }
 
