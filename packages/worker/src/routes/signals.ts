@@ -48,14 +48,18 @@ signals.post("/send", requirePermission("write"), async (c) => {
 });
 
 // POST /projects/:projectId/signals/:id/ack -> DO POST /signal/:id/ack
-signals.post("/:id/ack", async (c) => {
+signals.post("/:id/ack", requirePermission("write"), async (c) => {
   const signalId = c.req.param("id");
   const stub = c.get("doStub");
+  const tokenResult = c.get("tokenResult");
+  // Forward the caller identity so the DO can authorize the ack against the
+  // signal's addressee. Without this, any token could consume another
+  // machine's signal (silent coordination loss).
   return forwardToDO(
     stub,
     `/signal/${signalId}/ack`,
     "POST",
-    {},
+    { acker: tokenResult.name },
     undefined,
     analyticsCtxFrom(c),
   );

@@ -1,4 +1,4 @@
-import { and, eq, gt, or } from "drizzle-orm";
+import { and, eq, gt, isNull, or } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
 
@@ -17,6 +17,13 @@ export interface SendSignalResult {
 
 export interface AckSignalResult {
   found: boolean;
+  /**
+   * Whether the caller was authorized to ack this signal. A signal may be
+   * acked only by its addressee (`target`), the original sender (`created_by`),
+   * or anyone for a broadcast (`target === "*"`). When `false`, the signal is
+   * left untouched so the real recipient still sees it.
+   */
+  authorized: boolean;
 }
 
 const DEFAULT_TTL_MS = 300_000; // 5 minutes
@@ -63,6 +70,10 @@ export function inbox(
           eq(schema.signals.target, "*"),
         ),
         gt(schema.signals.expires_at, now),
+        // Acked signals are consumed: an "inbox" returns only unacknowledged
+        // signals. Filtering here (server-side) keeps SDK/MCP consumers
+        // consistent with the CLI, which already drops acked rows.
+        isNull(schema.signals.acked_at),
       ),
     )
     .all()
@@ -72,9 +83,20 @@ export function inbox(
     }));
 }
 
+/**
+ * Acknowledge (consume) a signal on behalf of `acker`.
+ *
+ * Authorization: a signal may be acked only by its addressee (`target`), the
+ * original sender (`created_by`), or anyone when it is a broadcast
+ * (`target === "*"`). An unauthorized ack is a no-op — the signal is left
+ * unacknowledged so the real recipient still receives it — and returns
+ * `{ found: true, authorized: false }`. This closes the coordination-integrity
+ * hole where any project token could silently consume another machine's signal.
+ */
 export function ack(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   signalId: string,
+  acker: string,
   now: number = Date.now(),
 ): AckSignalResult {
   const existing = db
@@ -84,7 +106,16 @@ export function ack(
     .get();
 
   if (!existing) {
-    return { found: false };
+    return { found: false, authorized: false };
+  }
+
+  const authorized =
+    existing.target === acker ||
+    existing.target === "*" ||
+    existing.created_by === acker;
+
+  if (!authorized) {
+    return { found: true, authorized: false };
   }
 
   db.update(schema.signals)
@@ -92,5 +123,5 @@ export function ack(
     .where(eq(schema.signals.id, signalId))
     .run();
 
-  return { found: true };
+  return { found: true, authorized: true };
 }

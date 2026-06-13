@@ -701,13 +701,19 @@ export class RemoteBackend
     }));
   }
 
-  async ackSignal(signalId: string): Promise<{ found: boolean }> {
+  async ackSignal(
+    signalId: string,
+    _acker: string,
+  ): Promise<{ found: boolean; authorized: boolean }> {
+    // The Worker derives the acker from the bearer token identity (the `_acker`
+    // arg is ignored here so a client cannot spoof it); an unauthorized ack
+    // returns 403 and surfaces as a thrown error from `post`.
     await this.client.post(
       `/projects/${this.projectId}/signals/${signalId}/ack`,
       {},
       { schema: AckSignalResponseSchema, validate: true },
     );
-    return { found: true };
+    return { found: true, authorized: true };
   }
 
   // --- SchemaBackend ---

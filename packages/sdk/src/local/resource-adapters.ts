@@ -761,9 +761,11 @@ function createLocalSignalMethods(project: EmbeddedProject) {
 
     async ack(_signalId: string): Promise<AckSignalResponse> {
       // The wire AckSignalResponse is just `{ ok: true }`; the embedded ack's
-      // `found` flag is not part of the wire shape, so it is intentionally
-      // dropped (the HTTP factory's `ack` also returns only `{ ok: true }`).
-      await project.ackSignal(_signalId);
+      // `found`/`authorized` flags are not part of the wire shape, so they are
+      // intentionally dropped (the HTTP factory's `ack` also returns only
+      // `{ ok: true }`). Local mode is single-machine: the acker is "local",
+      // matching the inbox identity used in `listSignals("local")`.
+      await project.ackSignal(_signalId, "local");
       return { ok: true };
     },
   };

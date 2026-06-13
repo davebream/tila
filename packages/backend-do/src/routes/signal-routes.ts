@@ -41,12 +41,25 @@ export function createSignalRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({ ok: true, signals });
   });
 
-  app.post("/signal/:id/ack", (c) => {
+  app.post("/signal/:id/ack", async (c) => {
     const { db } = deps;
     const signalId = c.req.param("id");
-    const result = signalOps.ack(db, signalId);
+    const raw = await c.req.json().catch(() => ({}));
+    const acker = (raw as { acker?: unknown }).acker;
+    if (typeof acker !== "string" || acker.length === 0) {
+      return jsonError(c, 400, "validation-error", "acker required");
+    }
+    const result = signalOps.ack(db, signalId, acker);
     if (!result.found) {
       return jsonError(c, 404, "not-found", "Signal not found");
+    }
+    if (!result.authorized) {
+      return jsonError(
+        c,
+        403,
+        "forbidden",
+        "Only the signal's addressee or sender may acknowledge it",
+      );
     }
     return c.json({ ok: true });
   });
