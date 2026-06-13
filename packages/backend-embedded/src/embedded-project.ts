@@ -610,8 +610,11 @@ export class EmbeddedProject
     }));
   }
 
-  async ackSignal(signalId: string): Promise<{ found: boolean }> {
-    return this.retry(() => signalOps.ack(this.db, signalId));
+  async ackSignal(
+    signalId: string,
+    acker: string,
+  ): Promise<{ found: boolean; authorized: boolean }> {
+    return this.retry(() => signalOps.ack(this.db, signalId, acker));
   }
 
   // ---------- SchemaBackend ----------

@@ -401,12 +401,13 @@ describe("LocalProject", () => {
         { target: "*", kind: "test-ack" },
         "local",
       );
-      const ackResult = await project.ackSignal(result.id);
+      const ackResult = await project.ackSignal(result.id, "local");
       expect(ackResult.found).toBe(true);
+      expect(ackResult.authorized).toBe(true);
     });
 
     it("ackSignal returns found=false for missing signal", async () => {
-      const result = await project.ackSignal("sig_nonexistent");
+      const result = await project.ackSignal("sig_nonexistent", "local");
       expect(result.found).toBe(false);
     });
   });

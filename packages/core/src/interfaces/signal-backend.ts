@@ -26,5 +26,13 @@ export interface SignalBackend {
     createdBy: string,
   ): Promise<{ id: string }>;
   listSignals(tokenName: string): Promise<SignalRecord[]>;
-  ackSignal(signalId: string): Promise<{ found: boolean }>;
+  /**
+   * Acknowledge (consume) a signal on behalf of `acker`. Only the signal's
+   * addressee, its original sender, or any caller for a broadcast may ack it;
+   * an unauthorized ack is a no-op and returns `authorized: false`.
+   */
+  ackSignal(
+    signalId: string,
+    acker: string,
+  ): Promise<{ found: boolean; authorized: boolean }>;
 }

@@ -134,7 +134,9 @@ const ackCommand = defineCommand({
   async run({ args }) {
     const { signal } = await resolveContext();
     try {
-      await signal.ackSignal(args.id as string);
+      // The acker identity must match the inbox identity used in
+      // `listSignals("cli")` so the CLI can ack signals addressed to it.
+      await signal.ackSignal(args.id as string, "cli");
       if (args.json) {
         printJson({ ok: true });
         return;
