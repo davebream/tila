@@ -29,4 +29,27 @@ describe("hashToken", () => {
   it("hashes empty string without error", async () => {
     await expect(hashToken("")).resolves.not.toThrow();
   });
+
+  describe("with a HASH_PEPPER", () => {
+    it("returns a deterministic HMAC digest that differs from the unpeppered hash", async () => {
+      const plain = await hashToken("tila_secret");
+      const peppered = await hashToken("tila_secret", "pepper-1");
+      const again = await hashToken("tila_secret", "pepper-1");
+      expect(peppered).toMatch(/^[0-9a-f]{64}$/);
+      expect(peppered).toBe(again);
+      expect(peppered).not.toBe(plain);
+    });
+
+    it("different peppers produce different digests for the same token", async () => {
+      const a = await hashToken("tila_secret", "pepper-1");
+      const b = await hashToken("tila_secret", "pepper-2");
+      expect(a).not.toBe(b);
+    });
+
+    it("treats an empty-string pepper as no pepper (SHA-256 fallback)", async () => {
+      const plain = await hashToken("tila_secret");
+      const empty = await hashToken("tila_secret", "");
+      expect(empty).toBe(plain);
+    });
+  });
 });

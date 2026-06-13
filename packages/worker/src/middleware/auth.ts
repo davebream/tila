@@ -299,7 +299,7 @@ export function createAuthMiddleware(
       "tila_session",
     );
     if (sessionCookie) {
-      const sessionHash = await hashToken(sessionCookie);
+      const sessionHash = await hashToken(sessionCookie, c.env.HASH_PEPPER);
       const cached = getSessionFromCache(sessionHash);
 
       if (cached === false) {
@@ -611,7 +611,7 @@ export function createAuthMiddleware(
     // --- D1 token path (existing, unchanged) ---
 
     // 3. Hash
-    const tokenHash = await hashToken(rawToken);
+    const tokenHash = await hashToken(rawToken, c.env.HASH_PEPPER);
 
     // 4. Cache lookup
     const cached = getFromCache(tokenHash);

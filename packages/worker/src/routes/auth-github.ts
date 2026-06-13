@@ -273,7 +273,7 @@ async function handleAppExchange(
   }
 
   // Idempotency check (keyed by project_id + sha256 of user token)
-  const tokenHash = await hashToken(user_token);
+  const tokenHash = await hashToken(user_token, c.env.HASH_PEPPER);
   const idempotencyKey = `exchange:${project_id}:${tokenHash}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 

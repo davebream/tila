@@ -314,7 +314,7 @@ workspace.post("/select", async (c) => {
 
   // Create project-scoped session
   const newSessionToken = crypto.randomUUID();
-  const newSessionHash = await hashToken(newSessionToken);
+  const newSessionHash = await hashToken(newSessionToken, c.env.HASH_PEPPER);
   const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
   const scopes = permissionToScope(bestPermission);
 
@@ -369,7 +369,7 @@ workspace.post("/deselect", async (c) => {
   invalidateSession(session.sessionHash);
 
   const newSessionToken = crypto.randomUUID();
-  const newSessionHash = await hashToken(newSessionToken);
+  const newSessionHash = await hashToken(newSessionToken, c.env.HASH_PEPPER);
   const expiresAt = Date.now() + WORKSPACE_SESSION_TTL_MS;
 
   await sessionStore.create({
