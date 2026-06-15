@@ -776,7 +776,7 @@ export class RemoteArtifactBackend implements ArtifactBackend {
 
   async put(
     options: ArtifactPutOptions,
-  ): Promise<{ key: string; bytes: number }> {
+  ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
     // Convert body to Blob for FormData
     let bodyBlob: Blob;
     if (typeof options.body === "string") {
@@ -802,7 +802,11 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       formData,
       { schema: ArtifactPutResponseSchema, validate: true },
     );
-    return { key: result.key, bytes: result.bytes };
+    return {
+      key: result.key,
+      bytes: result.bytes,
+      deduplicated: result.deduplicated,
+    };
   }
 
   async get(key: string): Promise<{

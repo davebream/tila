@@ -3,6 +3,7 @@ import { defineCommand } from "citty";
 import { TilaApiError } from "tila-sdk";
 import { resolveContext } from "../context";
 import {
+  failWithCliError,
   formatStatus,
   formatTimestamp,
   printJson,
@@ -701,15 +702,20 @@ export default defineCommand({
         const id = args.id as string;
         // --fence supplied: caller owns the fence; a stale fence is rejected by
         // the backend (updateWithFence). Without --fence, update() auto-acquires
-        // a transient claim and validates its own fence.
-        const updated = args.fence
-          ? await entity.updateWithFence(id, data, Number(args.fence))
-          : await entity.update(id, data);
-        if (args.json) {
-          printJson({ ok: true, entity: updated });
-          return;
+        // a transient claim and validates its own fence. A stale-fence rejection
+        // is surfaced as a clean one-line error (no bundled stack trace leak).
+        try {
+          const updated = args.fence
+            ? await entity.updateWithFence(id, data, Number(args.fence))
+            : await entity.update(id, data);
+          if (args.json) {
+            printJson({ ok: true, entity: updated });
+            return;
+          }
+          console.log(`Updated task ${updated.id}`);
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
         }
-        console.log(`Updated task ${updated.id}`);
       },
     }),
     close: defineCommand({

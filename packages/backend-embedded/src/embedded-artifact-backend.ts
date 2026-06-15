@@ -13,10 +13,16 @@ import {
   GREP_TOTAL_BYTE_CAP,
   compileGrepMatcher,
   matchLine,
+  normalizeArtifactText,
   splitChunkIntoLines,
   validateGrepPattern,
 } from "@tila/core";
-import { artifactOps, relationshipOps, schema } from "@tila/ops-sqlite";
+import {
+  artifactOps,
+  constraintOps,
+  relationshipOps,
+  schema,
+} from "@tila/ops-sqlite";
 import type { ArtifactGrepResponse } from "@tila/schemas";
 import { and, eq, like } from "drizzle-orm";
 
@@ -68,7 +74,7 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
 
   async put(
     options: ArtifactPutOptions,
-  ): Promise<{ key: string; bytes: number }> {
+  ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
     // 1. Resolve body to bytes (content-addressing stays above BlobStore)
     let bytes: Uint8Array;
 
@@ -84,14 +90,37 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     // 2. Write blob via the injected store
     const { bytes: written } = await this.blobs.write(options.key, bytes);
 
-    // 3. Write metadata to SQLite (idempotent via INSERT OR IGNORE in upsertPointer)
-    this.retry(() =>
+    const kind = options.kind ?? this.deriveKind(options.contentType);
+
+    // 2.5. Derive searchable text for FTS, mirroring the Cloudflare path: the
+    // Worker normalizes text and the DO stores a search doc only for kinds the
+    // project schema declares searchable. Without this, local artifacts have no
+    // search doc and full-text search returns nothing.
+    let searchText: { title: string | null; body_text: string } | null = null;
+    const parsedSchema = constraintOps.resolveCurrentSchema(this.db);
+    if (
+      parsedSchema &&
+      constraintOps.checkArtifactKindSearchable(parsedSchema, kind).searchable
+    ) {
+      const normalized = normalizeArtifactText(bytes, options.contentType);
+      if (normalized) {
+        searchText = {
+          title: normalized.title,
+          body_text: normalized.body_text,
+        };
+      }
+    }
+
+    // 3. Write metadata to SQLite (idempotent via INSERT OR IGNORE in upsertPointer).
+    // `deduplicated` flags a no-op re-put of an already-stored content-addressed
+    // artifact, so the CLI can show "Deduplicated" instead of "Uploaded".
+    const { deduplicated } = this.retry(() =>
       artifactOps.upsertPointer(
         this.db,
         {
           r2_key: options.key,
           resource: options.resource ?? null,
-          kind: options.kind ?? this.deriveKind(options.contentType),
+          kind,
           sha256: options.sha256,
           bytes: written,
           fence: options.fence ?? null,
@@ -101,10 +130,12 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
           expires_at: options.expiresAt ?? null,
         },
         { actor: "local" },
+        undefined, // journalKind -- default artifact.produced
+        searchText,
       ),
     );
 
-    return { key: options.key, bytes: written };
+    return { key: options.key, bytes: written, deduplicated };
   }
 
   async get(key: string): Promise<{

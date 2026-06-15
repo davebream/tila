@@ -58,7 +58,14 @@ export interface ArtifactPutOptions {
 import type { ArtifactGrepResponse } from "@tila/schemas";
 
 export interface ArtifactBackend {
-  put(options: ArtifactPutOptions): Promise<{ key: string; bytes: number }>;
+  // `deduplicated` is true when the put was a no-op because a content-addressed
+  // artifact with the same key already existed. Optional so older backends that
+  // do not report it still satisfy the interface.
+  put(options: ArtifactPutOptions): Promise<{
+    key: string;
+    bytes: number;
+    deduplicated?: boolean;
+  }>;
   get(key: string): Promise<{
     body: ReadableStream;
     contentType: string;

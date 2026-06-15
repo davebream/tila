@@ -404,7 +404,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("update --fence enforces the fence (stale fence is rejected)", async () => {
+  it("update --fence rejects a stale fence with a clean one-line error (no stack trace)", async () => {
     await seedTask("T-fence", { status: "open", title: "Fenced" });
     const acq = await project.acquire(
       "task:T-fence",
@@ -426,17 +426,57 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     expect((await project.get("T-fence"))?.data.status).toBe("in-progress");
     expect(errorSpy).not.toHaveBeenCalled();
 
-    // Stale fence throws.
+    // Stale fence: the command resolves (does NOT throw a raw error up to the
+    // citty top-level handler, which would dump the bundled stack trace).
+    // Instead it prints a clean one-line message to stderr and exits 1.
+    logSpy.mockClear();
+    errorSpy.mockClear();
     await expect(
       runCmd(getSubCommand(cmd, "update"), {
         id: "T-fence",
         field: "status=done",
         fence: String(acq.fence - 1),
-        json: true,
+        json: false,
       }),
-    ).rejects.toThrow();
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const msg = String(errorSpy.mock.calls[0][0]);
+    expect(msg).toMatch(/fence/i); // mentions the cause
+    expect(msg).not.toContain("\n"); // single line
+    expect(msg).not.toMatch(/\s+at\s+\S+:\d+/); // no stack frames leaked
+    // Success line never printed on the rejected path.
+    expect(logSpy).not.toHaveBeenCalled();
     // Value unchanged after the rejected update.
     expect((await project.get("T-fence"))?.data.status).toBe("in-progress");
+  });
+
+  it("update --fence (JSON mode) emits a structured stale-fence error, not a stack trace", async () => {
+    await seedTask("T-fence-json", { status: "open", title: "Fenced" });
+    const acq = await project.acquire(
+      "task:T-fence-json",
+      "local",
+      "local",
+      "exclusive",
+      60000,
+    );
+
+    const cmd = await loadCommand();
+    await expect(
+      runCmd(getSubCommand(cmd, "update"), {
+        id: "T-fence-json",
+        field: "status=done",
+        fence: String(acq.fence - 1),
+        json: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
+    expect(payload.code).toBe("stale-fence");
+    expect(typeof payload.error).toBe("string");
   });
 
   it("artifact-ref add -> list round-trips against the local backend", async () => {

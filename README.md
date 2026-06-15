@@ -117,7 +117,7 @@ tila deploys to your own Cloudflare account (Worker + DO + D1 + R2). There is no
 
 - **$5/month Cloudflare paid plan covers most small teams.** Worker, Durable Object, D1, and R2 with included quotas
 - **Free tier works for evaluation and light usage.** The 10ms CPU-per-request limit constrains sustained workloads
-- **Local mode.** `tila init --local` stores everything in `~/.tila/` via bun:sqlite. No account needed. Core task, claim, and presence workflows work locally; full CLI parity is still in progress
+- **Local mode.** `tila project create --local` stores everything in `~/.tila/` via bun:sqlite. No account needed. Core task, claim, and presence workflows work locally; full CLI parity is still in progress
 - **No per-seat pricing.** Costs are Cloudflare usage costs in your account
 - **Smart Placement** is enabled by default on the Cloudflare path. Both paths share `@tila/ops-sqlite` for entity, coordination, artifact, journal, gate, and signal logic
 
@@ -212,19 +212,19 @@ working from a source checkout.
 ### Cloudflare path
 
 ```bash
-tila init --cloudflare          # provision Worker + DO + D1 + R2
+tila project create             # provision Worker + DO + D1 + R2
 tila task new "Migrate auth"    # create a work unit
 tila task claim T-abc123        # acquire a fencing token
 tila artifact put plan.md --kind=plan --resource=T-abc123 --fence=1
 tila artifact search "auth"     # full-text search across artifacts
 ```
 
-> GitHub auth is configured automatically during `tila init --cloudflare`. Teammates join via `tila init --inherit` — no shared API token needed.
+> GitHub auth is configured automatically during `tila project create`. Teammates join via `tila init` — no shared API token needed.
 
 ### Local path
 
 ```bash
-tila init --local               # no Cloudflare account needed
+tila project create --local     # no Cloudflare account needed
 tila record set service api ./api.yaml
 tila task new "Migrate auth"
 # State lives in ~/.tila/<org>/<project>.db, artifacts in ~/.tila/artifacts/
@@ -312,7 +312,7 @@ Serializable per-project state, geographic edge placement, and zero ops starting
 <details>
 <summary><b>Can I use tila without a Cloudflare account?</b></summary>
 
-Yes. `tila init --local` — see [Self-hosted](#-self-hosted) for details.
+Yes. `tila project create --local` — see [Self-hosted](#-self-hosted) for details.
 </details>
 
 <details>

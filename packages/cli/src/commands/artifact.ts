@@ -57,15 +57,19 @@ export default defineCommand({
           fence: args.fence ? Number(args.fence) : undefined,
         });
 
+        const deduplicated = result.deduplicated === true;
+
         if (args.json) {
           printJson({
             ok: true,
             key: result.key,
             bytes: result.bytes,
+            deduplicated,
           });
           return;
         }
-        console.log(`Uploaded artifact: ${result.key} (${result.bytes} bytes)`);
+        const verb = deduplicated ? "Deduplicated" : "Uploaded";
+        console.log(`${verb} artifact: ${result.key} (${result.bytes} bytes)`);
       },
     }),
     get: defineCommand({
