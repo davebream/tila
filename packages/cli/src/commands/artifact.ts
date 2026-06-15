@@ -2,7 +2,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { printJson, renderTable, tsToIso } from "../lib/output";
+import {
+  failWithCliError,
+  printJson,
+  renderTable,
+  tsToIso,
+} from "../lib/output";
 
 export default defineCommand({
   meta: { name: "artifact", description: "Manage artifacts" },
@@ -46,30 +51,39 @@ export default defineCommand({
         };
         const contentType = contentTypeMap[ext] ?? "application/octet-stream";
 
-        const result = await ctx.artifact.put({
-          key: fileName, // placeholder -- Worker derives the canonical key
-          body: content.buffer as ArrayBuffer,
-          sha256: "", // Worker recomputes SHA-256
-          metadata: {},
-          contentType,
-          kind: args.kind as string,
-          resource: args.resource as string | undefined,
-          fence: args.fence ? Number(args.fence) : undefined,
-        });
-
-        const deduplicated = result.deduplicated === true;
-
-        if (args.json) {
-          printJson({
-            ok: true,
-            key: result.key,
-            bytes: result.bytes,
-            deduplicated,
+        // A stale/invalid fence is rejected by the backend (FenceError locally,
+        // stale-fence TilaApiError remotely). Surface it as a clean one-line
+        // error instead of leaking a bundled stack trace.
+        try {
+          const result = await ctx.artifact.put({
+            key: fileName, // placeholder -- Worker derives the canonical key
+            body: content.buffer as ArrayBuffer,
+            sha256: "", // Worker recomputes SHA-256
+            metadata: {},
+            contentType,
+            kind: args.kind as string,
+            resource: args.resource as string | undefined,
+            fence: args.fence ? Number(args.fence) : undefined,
           });
-          return;
+
+          const deduplicated = result.deduplicated === true;
+
+          if (args.json) {
+            printJson({
+              ok: true,
+              key: result.key,
+              bytes: result.bytes,
+              deduplicated,
+            });
+            return;
+          }
+          const verb = deduplicated ? "Deduplicated" : "Uploaded";
+          console.log(
+            `${verb} artifact: ${result.key} (${result.bytes} bytes)`,
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
         }
-        const verb = deduplicated ? "Deduplicated" : "Uploaded";
-        console.log(`${verb} artifact: ${result.key} (${result.bytes} bytes)`);
       },
     }),
     get: defineCommand({

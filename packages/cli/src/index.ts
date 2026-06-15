@@ -1,5 +1,17 @@
-import { defineCommand, runMain } from "citty";
+import { type CommandDef, defineCommand, runMain } from "citty";
+import { withErrorBoundary } from "./lib/error-boundary";
 import { VERSION as version } from "./version";
+
+// Wrap each lazily-loaded command tree so an uncaught backend error (e.g. a
+// stale-fence rejection) is rendered as a clean one-line message instead of
+// citty dumping the full error object + bundled stack trace.
+//
+// citty's CommandDef generic is invariant; each command module exports a
+// distinct ParsedArgs shape, so the loader result is typed loosely.
+// biome-ignore lint/suspicious/noExplicitAny: see note above
+type CommandModule = { default: CommandDef<any> };
+const load = (loader: () => Promise<CommandModule>): Promise<CommandDef> =>
+  loader().then((m) => withErrorBoundary(m.default));
 
 const main = defineCommand({
   meta: {
@@ -8,33 +20,33 @@ const main = defineCommand({
     description: "State and coordination engine for multi-machine agentic work",
   },
   subCommands: {
-    task: () => import("./commands/task").then((m) => m.default),
+    task: () => load(() => import("./commands/task")),
     // @deprecated -- prefer "work-unit" for new usage
-    entity: () => import("./commands/entity").then((m) => m.default),
-    "work-unit": () => import("./commands/work-unit").then((m) => m.default),
-    record: () => import("./commands/record").then((m) => m.default),
-    disconnect: () => import("./commands/disconnect").then((m) => m.default),
-    init: () => import("./commands/init").then((m) => m.default),
-    mcp: () => import("./commands/mcp").then((m) => m.default),
-    open: () => import("./commands/open").then((m) => m.default),
-    doctor: () => import("./commands/doctor").then((m) => m.default),
-    index: () => import("./commands/index").then((m) => m.default),
-    state: () => import("./commands/state").then((m) => m.default),
-    presence: () => import("./commands/presence").then((m) => m.default),
-    signal: () => import("./commands/signal").then((m) => m.default),
-    artifact: () => import("./commands/artifact").then((m) => m.default),
-    schema: () => import("./commands/schema").then((m) => m.default),
-    journal: () => import("./commands/journal").then((m) => m.default),
-    config: () => import("./commands/config").then((m) => m.default),
-    deploy: () => import("./commands/deploy").then((m) => m.default),
-    reset: () => import("./commands/reset").then((m) => m.default),
-    token: () => import("./commands/token").then((m) => m.default),
-    summary: () => import("./commands/summary").then((m) => m.default),
-    gate: () => import("./commands/gate").then((m) => m.default),
-    template: () => import("./commands/template").then((m) => m.default),
-    search: () => import("./commands/search").then((m) => m.default),
-    infra: () => import("./commands/infra").then((m) => m.default),
-    project: () => import("./commands/project").then((m) => m.default),
+    entity: () => load(() => import("./commands/entity")),
+    "work-unit": () => load(() => import("./commands/work-unit")),
+    record: () => load(() => import("./commands/record")),
+    disconnect: () => load(() => import("./commands/disconnect")),
+    init: () => load(() => import("./commands/init")),
+    mcp: () => load(() => import("./commands/mcp")),
+    open: () => load(() => import("./commands/open")),
+    doctor: () => load(() => import("./commands/doctor")),
+    index: () => load(() => import("./commands/index")),
+    state: () => load(() => import("./commands/state")),
+    presence: () => load(() => import("./commands/presence")),
+    signal: () => load(() => import("./commands/signal")),
+    artifact: () => load(() => import("./commands/artifact")),
+    schema: () => load(() => import("./commands/schema")),
+    journal: () => load(() => import("./commands/journal")),
+    config: () => load(() => import("./commands/config")),
+    deploy: () => load(() => import("./commands/deploy")),
+    reset: () => load(() => import("./commands/reset")),
+    token: () => load(() => import("./commands/token")),
+    summary: () => load(() => import("./commands/summary")),
+    gate: () => load(() => import("./commands/gate")),
+    template: () => load(() => import("./commands/template")),
+    search: () => load(() => import("./commands/search")),
+    infra: () => load(() => import("./commands/infra")),
+    project: () => load(() => import("./commands/project")),
   },
 });
 

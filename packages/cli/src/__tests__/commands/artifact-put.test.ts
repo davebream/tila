@@ -58,13 +58,23 @@ async function runCmd(
 describe("artifact put output", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
 
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  // biome-ignore lint/suspicious/noExplicitAny: vitest spy types
+  let exitSpy: any;
+
   beforeEach(() => {
     vi.clearAllMocks();
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation(() => undefined as never);
   });
 
   afterEach(() => {
     logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 
   it('prints "Uploaded" for a fresh artifact', async () => {
@@ -124,5 +134,58 @@ describe("artifact put output", () => {
       bytes: 42,
       deduplicated: true,
     });
+  });
+
+  it("renders a stale-fence rejection as a clean one-line error (no stack trace)", async () => {
+    // Local mode throws a FenceError (name "FenceError") on a stale fence;
+    // remote throws a stale-fence TilaApiError. Either must surface cleanly,
+    // not as a bundled stack trace dumped by citty's top-level handler.
+    const fenceErr = Object.assign(
+      new Error("Fence mismatch: current=3, claimed=0"),
+      { name: "FenceError", currentFence: 3, claimedFence: 0 },
+    );
+    mockPut.mockRejectedValue(fenceErr);
+
+    const cmd = await loadCommand();
+    await expect(
+      runCmd(getSubCommand(cmd, "put"), {
+        file: "plan.md",
+        kind: "plan",
+        resource: "T-1",
+        fence: "0",
+        json: false,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const msg = String(errorSpy.mock.calls[0][0]);
+    expect(msg).toMatch(/fence/i);
+    expect(msg).not.toContain("\n");
+    expect(msg).not.toMatch(/\s+at\s+\S+:\d+/);
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it("emits a structured stale-fence error in --json mode", async () => {
+    const fenceErr = Object.assign(
+      new Error("Fence mismatch: current=3, claimed=0"),
+      { name: "FenceError", currentFence: 3, claimedFence: 0 },
+    );
+    mockPut.mockRejectedValue(fenceErr);
+
+    const cmd = await loadCommand();
+    await expect(
+      runCmd(getSubCommand(cmd, "put"), {
+        file: "plan.md",
+        kind: "plan",
+        resource: "T-1",
+        fence: "0",
+        json: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
+    expect(payload.code).toBe("stale-fence");
   });
 });
