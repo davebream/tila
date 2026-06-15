@@ -1,6 +1,6 @@
 {
   "name": "tila-cli-darwin-arm64",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Darwin arm64 binary for tila-cli",
   "os": ["darwin"],
   "cpu": ["arm64"],
