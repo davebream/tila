@@ -51,6 +51,67 @@ export function tsToIso(epochMs: number): string {
   return new Date(epochMs).toISOString();
 }
 
+/**
+ * Collapse a backend/coordination error into a stable `{ code, message }` pair
+ * suitable for a single-line CLI error.
+ *
+ * Fence rejections reach the CLI as either a local `FenceError` (name
+ * "FenceError", carries `currentFence`/`claimedFence`) or a remote
+ * `TilaApiError` with code "stale-fence". Both are normalized to the
+ * "stale-fence" code with one actionable sentence. Any other error is reduced
+ * to its first line so the bundled stack trace never reaches the user.
+ *
+ * Structural duck-typing (not `instanceof`) keeps this helper free of a
+ * dependency on `tila-sdk` / `@tila/core`.
+ */
+export function describeCliError(err: unknown): {
+  code: string;
+  message: string;
+} {
+  const e = err as {
+    name?: string;
+    code?: string;
+    message?: string;
+    currentFence?: number;
+    claimedFence?: number;
+  };
+  const isStaleFence =
+    e?.name === "FenceError" ||
+    (e?.name === "TilaApiError" && e?.code === "stale-fence");
+  if (isStaleFence) {
+    const detail =
+      typeof e.currentFence === "number" && typeof e.claimedFence === "number"
+        ? ` (current=${e.currentFence}, presented=${e.claimedFence})`
+        : "";
+    return {
+      code: "stale-fence",
+      message: `Stale fence: the claim was superseded${detail}. Re-acquire the claim and retry.`,
+    };
+  }
+  const code = typeof e?.code === "string" && e.code ? e.code : "ERROR";
+  const raw =
+    typeof e?.message === "string" && e.message ? e.message : String(err);
+  return { code, message: raw.split("\n")[0].trim() };
+}
+
+/**
+ * Render a backend/coordination error as a clean one-line message and exit 1.
+ *
+ * Without this, an uncaught `TilaApiError`/`FenceError` bubbles to citty's
+ * top-level handler, which dumps the full error object and bundled stack trace.
+ * In `--json` mode the error is emitted as structured JSON via
+ * {@link printJsonError}; otherwise a single line is written to stderr.
+ */
+export function failWithCliError(err: unknown, json: boolean): never {
+  const { code, message } = describeCliError(err);
+  if (json) {
+    printJsonError(message, code);
+  } else {
+    console.error(message);
+    process.exit(1);
+  }
+}
+
 // --- New formatter utilities ---
 
 /**
