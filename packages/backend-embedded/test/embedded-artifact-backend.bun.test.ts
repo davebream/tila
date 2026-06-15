@@ -118,6 +118,85 @@ describe("EmbeddedArtifactBackend", () => {
       expect(list.filter((e) => e.key === key)).toHaveLength(1);
     });
 
+    it("reports deduplicated=false on first put and deduplicated=true on a second identical put", async () => {
+      const content = "dedup me";
+      const hash = await sha256Hex(content);
+      const opts = {
+        key: `test-org/test-project/${hash}.txt`,
+        body: content,
+        sha256: hash,
+        metadata: {},
+        contentType: "text/plain",
+      };
+      const first = await backend.put(opts);
+      expect(first.deduplicated).toBe(false);
+
+      const second = await backend.put(opts);
+      expect(second.deduplicated).toBe(true);
+      // Byte count is still reported for the deduplicated put.
+      expect(second.bytes).toBe(new TextEncoder().encode(content).byteLength);
+    });
+
+    it("indexes a searchable text artifact at put time so it is findable via searchArtifacts", async () => {
+      // Declare a searchable artifact kind, mirroring the Cloudflare path where
+      // the Worker normalizes text and the DO stores a search doc for searchable
+      // kinds. Local mode must achieve the same so FTS works offline.
+      await h.project.applySchema({
+        definition: `schema_version = 1
+
+[work_units.task]
+
+[artifacts.note]
+mime_types = ["text/markdown"]
+searchable = true
+search_mode = "full_text"
+`,
+      });
+
+      const content =
+        "# Auth flow\n\nThe quick brown fox handles zzqunique auth.";
+      const hash = await sha256Hex(content);
+      const key = `test-org/test-project/${hash}.md`;
+      await backend.put({
+        key,
+        body: content,
+        sha256: hash,
+        metadata: {},
+        contentType: "text/markdown",
+        kind: "note",
+      });
+
+      const results = await backend.searchArtifacts({ q: "zzqunique" });
+      expect(results.map((r) => r.r2_key)).toContain(key);
+    });
+
+    it("does NOT index an artifact whose kind is not declared searchable", async () => {
+      await h.project.applySchema({
+        definition: `schema_version = 1
+
+[work_units.task]
+
+[artifacts.blob]
+mime_types = ["text/markdown"]
+`,
+      });
+
+      const content = "plain unsearchable yyqunique content";
+      const hash = await sha256Hex(content);
+      const key = `test-org/test-project/${hash}.md`;
+      await backend.put({
+        key,
+        body: content,
+        sha256: hash,
+        metadata: {},
+        contentType: "text/markdown",
+        kind: "blob",
+      });
+
+      const results = await backend.searchArtifacts({ q: "yyqunique" });
+      expect(results.map((r) => r.r2_key)).not.toContain(key);
+    });
+
     it("persists fence + expiresAt + resource routing fields on the pointer", async () => {
       // A fence-carrying put validates the fence against the resource's claim,
       // so acquire a real claim first and use its fence.

@@ -89,6 +89,12 @@ export {
   type SchemaParseError,
 } from "./schema-parser";
 
+// Artifact text normalization for full-text search indexing
+export {
+  normalizeArtifactText,
+  MAX_BYTES_FOR_NORMALIZATION,
+} from "./normalize-text";
+
 // Semver utilities
 export { compareSemver } from "./semver";
 

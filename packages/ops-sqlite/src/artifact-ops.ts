@@ -58,12 +58,12 @@ export function upsertPointer(
   // since advanced; it must record the historical fence verbatim WITHOUT a
   // live-fence equality gate. Only the reconcile path sets this.
   skipFenceValidation = false,
-): void {
+): { deduplicated: boolean } {
   // Validate + normalize tags outside the transaction to avoid holding the lock
   const normalizedTags =
     tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
 
-  db.transaction((tx) => {
+  return db.transaction((tx) => {
     // Fence validation is skipped for source artifacts (resource=null),
     // explicitly unfenced uploads, and reconcile replays (skipFenceValidation).
     if (
@@ -73,6 +73,15 @@ export function upsertPointer(
     ) {
       assertResourceFence(tx, pointer.resource, pointer.fence);
     }
+
+    // Deduplication oracle: artifacts are content-addressed, so an identical
+    // r2_key means identical content. If a row already exists, the INSERT OR
+    // IGNORE below is a no-op and this is a deduplicated put -- we must NOT emit
+    // a second artifact.produced journal event for it.
+    const existing = tx.all<{ r2_key: string }>(
+      sql`SELECT r2_key FROM artifact_pointers WHERE r2_key = ${pointer.r2_key} LIMIT 1`,
+    );
+    const deduplicated = existing.length > 0;
 
     // INSERT OR IGNORE -- idempotent for content-addressed artifacts
     tx.run(
@@ -127,15 +136,21 @@ export function upsertPointer(
       }
     }
 
-    appendJournal(tx, {
-      kind: journalKind ?? "artifact.produced",
-      resource: pointer.resource ?? "source",
-      actor: origin.actor,
-      fence: pointer.fence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
-    });
+    // A deduplicated put records no new event: the artifact was already
+    // produced. This keeps the journal a true log of distinct artifacts.
+    if (!deduplicated) {
+      appendJournal(tx, {
+        kind: journalKind ?? "artifact.produced",
+        resource: pointer.resource ?? "source",
+        actor: origin.actor,
+        fence: pointer.fence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
+    }
+
+    return { deduplicated };
   });
 }
 

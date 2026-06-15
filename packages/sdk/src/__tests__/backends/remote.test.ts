@@ -372,7 +372,7 @@ describe("RemoteArtifactBackend", () => {
   });
 
   describe("ArtifactBackend", () => {
-    it("put() calls postFormData and returns key + bytes", async () => {
+    it("put() calls postFormData and returns key + bytes + deduplicated", async () => {
       client.postFormData.mockResolvedValue({
         ok: true,
         key: "produced/T-1/abc123.md",
@@ -392,7 +392,11 @@ describe("RemoteArtifactBackend", () => {
         fence: 5,
       });
 
-      expect(result).toEqual({ key: "produced/T-1/abc123.md", bytes: 42 });
+      expect(result).toEqual({
+        key: "produced/T-1/abc123.md",
+        bytes: 42,
+        deduplicated: false,
+      });
       expect(client.postFormData).toHaveBeenCalledWith(
         "/projects/proj-test/artifacts",
         expect.any(FormData),

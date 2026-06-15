@@ -490,3 +490,33 @@ describe("listPointers tagFilter (multi-tag AND)", () => {
     expect(result[0].r2_key).toBe("artifacts/tf3/p1.txt");
   });
 });
+
+describe("upsertPointer deduplication signal", () => {
+  function countProducedEvents(): number {
+    const rows = testDb.rawDb
+      .prepare(
+        "SELECT COUNT(*) AS n FROM journal WHERE kind = 'artifact.produced'",
+      )
+      .get() as { n: number };
+    return rows.n;
+  }
+
+  it("returns deduplicated=false on first insert and logs one artifact.produced", () => {
+    const ptr = makePointer("artifacts/dedup/abc123.txt");
+    const res = upsertPointer(testDb.db, ptr, origin);
+    expect(res).toEqual({ deduplicated: false });
+    expect(countProducedEvents()).toBe(1);
+  });
+
+  it("returns deduplicated=true on a second identical put and logs NO second event", () => {
+    const ptr = makePointer("artifacts/dedup/abc123.txt");
+    upsertPointer(testDb.db, ptr, origin);
+    expect(countProducedEvents()).toBe(1);
+
+    // Second identical content-addressed put: same r2_key/sha256.
+    const res = upsertPointer(testDb.db, ptr, origin);
+    expect(res).toEqual({ deduplicated: true });
+    // The deduplicated put must not emit a duplicate artifact.produced event.
+    expect(countProducedEvents()).toBe(1);
+  });
+});
