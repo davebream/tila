@@ -73,6 +73,38 @@ async function createFixture(version = "1.2.3") {
     private: true,
   });
 
+  // Seed the homebrew formula so bump-version.mjs can rewrite it.
+  // Must contain realistic structure matching publish-tap.yml's sed patterns.
+  await mkdir(join(fixture, "homebrew/Formula"), { recursive: true });
+  await writeFile(
+    join(fixture, "homebrew/Formula/tila.rb"),
+    [
+      "class Tila < Formula",
+      `  version "${version}"`,
+      "  on_macos do",
+      "    on_arm do",
+      `      url "https://github.com/davebream/tila/releases/download/v${version}/tila-darwin-arm64"`,
+      `      sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`,
+      "    end",
+      "    on_intel do",
+      `      url "https://github.com/davebream/tila/releases/download/v${version}/tila-darwin-x64"`,
+      `      sha256 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"`,
+      "    end",
+      "  end",
+      "  on_linux do",
+      "    on_arm do",
+      `      url "https://github.com/davebream/tila/releases/download/v${version}/tila-linux-arm64"`,
+      `      sha256 "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"`,
+      "    end",
+      "    on_intel do",
+      `      url "https://github.com/davebream/tila/releases/download/v${version}/tila-linux-x64"`,
+      `      sha256 "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"`,
+      "    end",
+      "  end",
+      "end",
+    ].join("\n") + "\n",
+  );
+
   return fixture;
 }
 
@@ -123,7 +155,7 @@ test("check-public-versions accepts aligned public metadata and ignores private 
   assert.match(result.stdout, /Public release versions aligned at 1\.2\.3/);
 });
 
-test("bump-version updates only public release metadata and the root product marker", async () => {
+test("bump-version updates public release metadata, root product marker, and homebrew formula version/URL", async () => {
   const root = await createFixture();
 
   const result = runScript("bump-version.mjs", ["2.0.0", "--root", root]);
@@ -156,6 +188,45 @@ test("bump-version updates only public release metadata and the root product mar
       "2.0.0",
     );
   }
+});
+
+test("bump-version rewrites homebrew formula version and URL tags, leaving sha256 values unchanged", async () => {
+  const root = await createFixture();
+  const formulaPath = join(root, "homebrew/Formula/tila.rb");
+
+  // Capture sha256 values BEFORE the bump
+  const beforeContent = await readFile(formulaPath, "utf8");
+  const beforeShas = [...beforeContent.matchAll(/^\s*sha256\s+"([^"]+)"/gm)].map(
+    (m) => m[1],
+  );
+  assert.equal(beforeShas.length, 4, "fixture formula must have exactly 4 sha256 lines");
+
+  const result = runScript("bump-version.mjs", ["2.0.0", "--root", root]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const afterContent = await readFile(formulaPath, "utf8");
+
+  // (a) version line is rewritten
+  const versionMatch = afterContent.match(/^\s*version\s+"([^"]+)"/m);
+  assert.ok(versionMatch, "formula must still have a version line");
+  assert.equal(versionMatch[1], "2.0.0", "formula version must be bumped to 2.0.0");
+
+  // (b) all four URL tags are rewritten
+  const urlMatches = [...afterContent.matchAll(/releases\/download\/v([^/]+)\/tila-/g)];
+  assert.equal(urlMatches.length, 4, "formula must have exactly 4 URL lines with the tag");
+  for (const m of urlMatches) {
+    assert.equal(m[1], "2.0.0", `URL tag must be 2.0.0, got ${m[1]}`);
+  }
+
+  // (c) sha256 values are byte-for-byte unchanged (REQUIRED guard)
+  const afterShas = [...afterContent.matchAll(/^\s*sha256\s+"([^"]+)"/gm)].map(
+    (m) => m[1],
+  );
+  assert.deepEqual(
+    afterShas,
+    beforeShas,
+    "sha256 values must not be changed by bumpHomebrewFormula",
+  );
 });
 
 test("bump-version rejects invalid semver", async () => {
