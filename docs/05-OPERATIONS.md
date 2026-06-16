@@ -2,6 +2,8 @@
 
 > Production procedures for running tila on Cloudflare. Covers observability, maintenance, troubleshooting, and recovery.
 
+> **Install distribution runbook** (enabling curl/PowerShell/Homebrew one-liners, creating the tap repo, cutting the first verified release): see [docs/12-INSTALL-DISTRIBUTION.md](./12-INSTALL-DISTRIBUTION.md).
+
 ## Contents
 
 1. [Log Streaming (wrangler tail)](#log-streaming-wrangler-tail)
