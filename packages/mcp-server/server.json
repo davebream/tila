@@ -6,7 +6,7 @@
     "source": "github",
     "subfolder": "packages/mcp-server"
   },
-  "version": "0.2.6",
+  "version": "0.2.7",
   "packages": [
     {
       "registryType": "npm",

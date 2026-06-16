@@ -1,6 +1,6 @@
 {
   "name": "tila-cli-linux-arm64",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Linux arm64 binary for tila-cli",
   "os": ["linux"],
   "cpu": ["arm64"],
