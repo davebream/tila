@@ -593,6 +593,39 @@ ON presence(last_seen);
 `;
 
 /**
+ * Add `blob_deleted_at` to artifact_pointers so the tombstoned-pointer
+ * hard-delete (`deleteTombstonedPointers`) can be gated on CONFIRMED R2 blob
+ * deletion rather than the time-based grace alone. Without it, a tombstoned
+ * pointer whose R2 blob delete permanently failed would be hard-deleted after
+ * the grace window, stranding the orphan blob.
+ *
+ * Backfill: existing tombstoned rows predate the confirmation signal. The old
+ * sweep already hard-deleted them at the grace boundary regardless of blob
+ * state, so treat them as blob-deletion-presumed-done (blob_deleted_at =
+ * tombstoned_at). This preserves GC progress for legacy rows; only NEW
+ * tombstones are subject to the stricter confirmed-delete gate.
+ */
+export function runMigration0020(storage: MigrationStorage): void {
+  if (!columnExists(storage, "artifact_pointers", "blob_deleted_at")) {
+    storage.sql.exec(
+      "ALTER TABLE artifact_pointers ADD COLUMN blob_deleted_at INTEGER",
+    );
+  }
+  // Backfill only when tombstoned_at exists. On a reshuffled OLD-style local DB
+  // where v16 is recorded-but-not-applied, the column can be absent — guard so
+  // the migration never references a missing column.
+  if (columnExists(storage, "artifact_pointers", "tombstoned_at")) {
+    storage.sql.exec(
+      `UPDATE artifact_pointers
+         SET blob_deleted_at = tombstoned_at
+         WHERE tombstoned = 1
+           AND tombstoned_at IS NOT NULL
+           AND blob_deleted_at IS NULL`,
+    );
+  }
+}
+
+/**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
  * The runner executes only versions not yet recorded in _migrations.
@@ -617,4 +650,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 17, run: runMigration0017 },
   { version: 18, sql: MIGRATION_0018 },
   { version: 19, sql: MIGRATION_0019 },
+  { version: 20, run: runMigration0020 },
 ];

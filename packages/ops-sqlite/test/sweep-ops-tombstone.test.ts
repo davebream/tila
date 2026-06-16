@@ -29,12 +29,15 @@ function insertTombstonedPointer(
   r2Key: string,
   tombstonedAt: number | null,
 ): void {
+  // blob_deleted_at mirrors tombstoned_at: these rows represent the normal
+  // successful-sweep case (blob delete confirmed), which is what makes them
+  // eligible for the time-grace hard-delete under test here.
   db.rawDb
     .prepare(
-      `INSERT INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, tombstoned_at)
-       VALUES(?, NULL, 'output', 'deadbeef', 100, NULL, 'text/plain', ${Date.now()}, 'test-actor', NULL, 1, ?)`,
+      `INSERT INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, tombstoned_at, blob_deleted_at)
+       VALUES(?, NULL, 'output', 'deadbeef', 100, NULL, 'text/plain', ${Date.now()}, 'test-actor', NULL, 1, ?, ?)`,
     )
-    .run(r2Key, tombstonedAt);
+    .run(r2Key, tombstonedAt, tombstonedAt);
 }
 
 describe("TOMBSTONE_GRACE_MS constant", () => {

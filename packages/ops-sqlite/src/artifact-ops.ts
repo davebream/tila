@@ -486,6 +486,23 @@ export function tombstonePointer(
 }
 
 /**
+ * Records confirmation that a tombstoned pointer's R2 blob has been deleted,
+ * stamping `blob_deleted_at`. Called by the sweep after a SUCCESSFUL R2 blob
+ * delete. Only confirmed rows are eligible for `deleteTombstonedPointers` —
+ * this is what prevents a failed blob delete from stranding an orphan blob
+ * (Finding #2). Idempotent and a no-op when the r2_key is unknown.
+ */
+export function confirmBlobDeleted(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  r2Key: string,
+  now: number = Date.now(),
+): void {
+  db.run(
+    sql`UPDATE artifact_pointers SET blob_deleted_at = ${now} WHERE r2_key = ${r2Key}`,
+  );
+}
+
+/**
  * Hard-deletes artifact pointer rows that have been tombstoned past the grace window.
  *
  * Rows are only deleted when:
@@ -513,14 +530,20 @@ export function deleteTombstonedPointers(
             WHERE tombstoned = 1
               AND tombstoned_at IS NOT NULL
               AND tombstoned_at < ${cutoff}
+              AND blob_deleted_at IS NOT NULL
           )`,
     );
 
+    // blob_deleted_at IS NOT NULL gates the hard-delete on a CONFIRMED R2 blob
+    // deletion. A tombstoned pointer whose blob delete permanently failed keeps
+    // blob_deleted_at NULL and is retained, so the orphan blob stays
+    // reconcilable rather than being silently stranded (Finding #2).
     tx.run(
       sql`DELETE FROM artifact_pointers
           WHERE tombstoned = 1
             AND tombstoned_at IS NOT NULL
-            AND tombstoned_at < ${cutoff}`,
+            AND tombstoned_at < ${cutoff}
+            AND blob_deleted_at IS NOT NULL`,
     );
     return tx.get<{ n: number }>(sql`SELECT changes() AS n`)?.n ?? 0;
   });

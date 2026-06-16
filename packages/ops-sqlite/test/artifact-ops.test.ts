@@ -285,12 +285,13 @@ describe("deleteTombstonedPointers: no orphan artifact_tags (FK-OFF)", () => {
       ["env:prod", "team:alpha"],
     );
 
-    // Manually set tombstoned=1 + tombstoned_at past the cutoff
+    // Manually set tombstoned=1 + tombstoned_at past the cutoff, with the blob
+    // deletion confirmed (blob_deleted_at) so the row is eligible for hard-delete.
     testDb.rawDb
       .prepare(
-        "UPDATE artifact_pointers SET tombstoned = 1, tombstoned_at = ? WHERE r2_key = ?",
+        "UPDATE artifact_pointers SET tombstoned = 1, tombstoned_at = ?, blob_deleted_at = ? WHERE r2_key = ?",
       )
-      .run(cutoff - 1000, r2KeyOld);
+      .run(cutoff - 1000, cutoff - 1000, r2KeyOld);
 
     // Insert a LIVE pointer with tags — must NOT be affected
     const r2KeyLive = "artifacts/gc1/live.bin";

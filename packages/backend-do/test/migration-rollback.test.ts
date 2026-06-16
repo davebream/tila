@@ -3,7 +3,7 @@ import { runMigrationsWithPitrRollback } from "../src/migration-runner";
 
 type SqlExecResult = { toArray: () => unknown[] };
 
-const ALL_MIGRATION_VERSIONS = Array.from({ length: 19 }, (_, i) => i + 1);
+const ALL_MIGRATION_VERSIONS = Array.from({ length: 20 }, (_, i) => i + 1);
 
 function makeMockStorage(opts: {
   failOnSql?: string;

@@ -288,6 +288,13 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({ ok: true });
   });
 
+  app.post("/artifact/confirm-blob-deleted", async (c) => {
+    const { db } = deps;
+    const body = (await c.req.json()) as { r2_key: string };
+    artifactOps.confirmBlobDeleted(db, body.r2_key);
+    return c.json({ ok: true });
+  });
+
   app.post("/artifact/reconcile", async (c) => {
     const { db } = deps;
     const body = (await c.req.json()) as {
