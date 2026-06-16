@@ -15,7 +15,8 @@ import { describe, it } from "vitest";
 import { expect } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const packageRoot = join(__dirname, "..", "..", "..");
+// src/__tests__ → src → packages/cli
+const packageRoot = join(__dirname, "..", "..");
 
 describe("compile:installers", () => {
   it("copies install.sh and install.ps1 into dist/binaries/ for release asset upload", () => {
