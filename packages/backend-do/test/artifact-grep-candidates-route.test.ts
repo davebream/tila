@@ -1,7 +1,11 @@
 import type Database from "better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { artifactOps, type schema } from "../../ops-sqlite/src";
+import {
+  artifactOps,
+  coordinationOps,
+  type schema,
+} from "../../ops-sqlite/src";
 import type { GrepCandidate } from "../../ops-sqlite/src/artifact-ops";
 import { createArtifactRoutes } from "../src/routes/artifact-routes";
 import type { RouterDeps } from "../src/routes/types";
@@ -135,9 +139,9 @@ describe("GET /artifact/grep-candidates route", () => {
         "INSERT INTO entities (id, type, schema_version, data, archived, created_at, updated_at, created_by) VALUES (?, ?, 1, '{}', 0, ?, ?, 'test')",
       )
       .run("task-1", "task", Date.now(), Date.now());
-    rawDb
-      .prepare("INSERT INTO fences (resource, current_fence) VALUES (?, ?)")
-      .run("task:task-1", 1);
+    // Establish a live claim (creates the fence row at current_fence=1 and a
+    // live lease) so the artifact write satisfies the requireLiveClaim contract.
+    coordinationOps.acquire(db, "task:task-1", "m1", "u1", "exclusive", 60_000);
 
     artifactOps.upsertPointer(
       db,

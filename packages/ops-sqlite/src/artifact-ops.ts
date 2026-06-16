@@ -71,7 +71,14 @@ export function upsertPointer(
       pointer.resource !== null &&
       !skipFenceValidation
     ) {
-      assertResourceFence(tx, pointer.resource, pointer.fence);
+      // requireLiveClaim closes the zombie-write window: artifact fences bump
+      // only on acquire, so after a lease expires with no competing re-acquire
+      // the stale fence still equals current_fence. The flag additionally
+      // requires a LIVE claim and is a no-op for non-entity resources
+      // (records/source), which keep the fence-only contract.
+      assertResourceFence(tx, pointer.resource, pointer.fence, {
+        requireLiveClaim: true,
+      });
     }
 
     // Deduplication oracle: artifacts are content-addressed, so an identical
