@@ -852,6 +852,27 @@ export function reconcilePointers(
       continue;
     }
 
+    // Finding #3: do not resurrect a blob that was deliberately tombstoned.
+    // The tombstone/expiry journal event is keyed by r2_key. If one exists, the
+    // pointer was hard-deleted after tombstoning (its R2 blob delete had likely
+    // failed); recovering it would reverse a committed tombstone decision.
+    // `db.all(...).length` is used (not db.get) for cross-driver correctness.
+    const priorTombstone = db.all(
+      sql`SELECT seq FROM journal
+          WHERE resource = ${orphan.key}
+            AND kind IN ('artifact.tombstoned', 'artifact.expired')
+          LIMIT 1`,
+    );
+    if (priorTombstone.length > 0) {
+      result.orphans_unrecoverable++;
+      result.details.push({
+        key: orphan.key,
+        status: "unrecoverable",
+        reason: "previously tombstoned -- not resurrected",
+      });
+      continue;
+    }
+
     // Recover: build pointer from R2 metadata
     const sha256 = orphan.metadata["tila-sha256"] ?? "";
     const mimeType = orphan.metadata["tila-mime"] ?? "application/octet-stream";
