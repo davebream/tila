@@ -166,3 +166,29 @@ test("bump-version rejects invalid semver", async () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /version must match semver/);
 });
+
+test("homebrew formula has no PLACEHOLDER tokens and version matches product version", async () => {
+  const formulaPath = join(scriptDir, "..", "homebrew/Formula/tila.rb");
+  const rootPackageJsonPath = join(scriptDir, "..", "package.json");
+
+  const formulaContent = await readFile(formulaPath, "utf8");
+  const rootPackageJson = JSON.parse(await readFile(rootPackageJsonPath, "utf8"));
+  const productVersion = rootPackageJson.version;
+
+  assert.doesNotMatch(
+    formulaContent,
+    /PLACEHOLDER/,
+    "homebrew/Formula/tila.rb must not contain any PLACEHOLDER token",
+  );
+
+  const versionMatch = formulaContent.match(/^\s*version\s+"([^"]+)"/m);
+  assert.ok(
+    versionMatch,
+    'homebrew/Formula/tila.rb must contain a version "..." line',
+  );
+  assert.equal(
+    versionMatch[1],
+    productVersion,
+    `homebrew formula version "${versionMatch[1]}" must match product version "${productVersion}"`,
+  );
+});
