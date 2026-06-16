@@ -19,17 +19,23 @@ afterEach(() => {
 function insertPointer(
   db: TestDb,
   r2Key: string,
-  opts?: { tombstoned?: number; tombstoned_at?: number | null },
+  opts?: {
+    tombstoned?: number;
+    tombstoned_at?: number | null;
+    blob_deleted_at?: number | null;
+  },
 ): void {
   const tombstoned = opts?.tombstoned ?? 0;
   const tombstoned_at =
     opts?.tombstoned_at !== undefined ? opts.tombstoned_at : null;
+  const blob_deleted_at =
+    opts?.blob_deleted_at !== undefined ? opts.blob_deleted_at : null;
   db.rawDb
     .prepare(
-      `INSERT INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, tombstoned_at)
-       VALUES(?, NULL, 'output', 'deadbeef', 100, NULL, 'text/plain', ${Date.now()}, 'test-actor', NULL, ?, ?)`,
+      `INSERT INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, tombstoned_at, blob_deleted_at)
+       VALUES(?, NULL, 'output', 'deadbeef', 100, NULL, 'text/plain', ${Date.now()}, 'test-actor', NULL, ?, ?, ?)`,
     )
-    .run(r2Key, tombstoned, tombstoned_at);
+    .run(r2Key, tombstoned, tombstoned_at, blob_deleted_at);
 }
 
 describe("deleteTombstonedPointers", () => {
@@ -38,10 +44,11 @@ describe("deleteTombstonedPointers", () => {
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     const cutoff = now - sevenDaysMs;
 
-    // tombstoned past grace (should be deleted)
+    // tombstoned past grace WITH confirmed blob deletion (should be deleted)
     insertPointer(testDb, "produced/a/old.bin", {
       tombstoned: 1,
       tombstoned_at: cutoff - 1000,
+      blob_deleted_at: cutoff - 1000,
     });
     // tombstoned within grace (should NOT be deleted)
     insertPointer(testDb, "produced/b/fresh.bin", {

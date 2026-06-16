@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artifactOps } from "../../ops-sqlite/src";
+import { artifactOps, coordinationOps } from "../../ops-sqlite/src";
 import { createTestDb } from "./helpers/create-test-db";
 
 const { upsertPointer } = artifactOps;
@@ -100,9 +100,9 @@ describe("upsertPointer with searchText", () => {
         "INSERT INTO entities (id, type, schema_version, data, archived, created_at, updated_at, created_by) VALUES (?, ?, 1, '{}', 0, ?, ?, 'test')",
       )
       .run("task-1", "task", now, now);
-    sqlite
-      .prepare("INSERT INTO fences (resource, current_fence) VALUES (?, ?)")
-      .run("task:task-1", 1);
+    // Establish a live claim (creates the fence row at current_fence=1 and a
+    // live lease) so the artifact write satisfies the requireLiveClaim contract.
+    coordinationOps.acquire(db, "task:task-1", "m1", "u1", "exclusive", 60_000);
     const pointer = makePointer({
       r2_key: "produced/task-1/def456.md",
       resource: "task-1",

@@ -71,7 +71,14 @@ export function upsertPointer(
       pointer.resource !== null &&
       !skipFenceValidation
     ) {
-      assertResourceFence(tx, pointer.resource, pointer.fence);
+      // requireLiveClaim closes the zombie-write window: artifact fences bump
+      // only on acquire, so after a lease expires with no competing re-acquire
+      // the stale fence still equals current_fence. The flag additionally
+      // requires a LIVE claim and is a no-op for non-entity resources
+      // (records/source), which keep the fence-only contract.
+      assertResourceFence(tx, pointer.resource, pointer.fence, {
+        requireLiveClaim: true,
+      });
     }
 
     // Deduplication oracle: artifacts are content-addressed, so an identical
@@ -479,6 +486,23 @@ export function tombstonePointer(
 }
 
 /**
+ * Records confirmation that a tombstoned pointer's R2 blob has been deleted,
+ * stamping `blob_deleted_at`. Called by the sweep after a SUCCESSFUL R2 blob
+ * delete. Only confirmed rows are eligible for `deleteTombstonedPointers` —
+ * this is what prevents a failed blob delete from stranding an orphan blob
+ * (Finding #2). Idempotent and a no-op when the r2_key is unknown.
+ */
+export function confirmBlobDeleted(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  r2Key: string,
+  now: number = Date.now(),
+): void {
+  db.run(
+    sql`UPDATE artifact_pointers SET blob_deleted_at = ${now} WHERE r2_key = ${r2Key}`,
+  );
+}
+
+/**
  * Hard-deletes artifact pointer rows that have been tombstoned past the grace window.
  *
  * Rows are only deleted when:
@@ -506,14 +530,20 @@ export function deleteTombstonedPointers(
             WHERE tombstoned = 1
               AND tombstoned_at IS NOT NULL
               AND tombstoned_at < ${cutoff}
+              AND blob_deleted_at IS NOT NULL
           )`,
     );
 
+    // blob_deleted_at IS NOT NULL gates the hard-delete on a CONFIRMED R2 blob
+    // deletion. A tombstoned pointer whose blob delete permanently failed keeps
+    // blob_deleted_at NULL and is retained, so the orphan blob stays
+    // reconcilable rather than being silently stranded (Finding #2).
     tx.run(
       sql`DELETE FROM artifact_pointers
           WHERE tombstoned = 1
             AND tombstoned_at IS NOT NULL
-            AND tombstoned_at < ${cutoff}`,
+            AND tombstoned_at < ${cutoff}
+            AND blob_deleted_at IS NOT NULL`,
     );
     return tx.get<{ n: number }>(sql`SELECT changes() AS n`)?.n ?? 0;
   });
@@ -842,6 +872,27 @@ export function reconcilePointers(
 
     if (!apply) {
       result.details.push({ key: orphan.key, status: "skipped" });
+      continue;
+    }
+
+    // Finding #3: do not resurrect a blob that was deliberately tombstoned.
+    // The tombstone/expiry journal event is keyed by r2_key. If one exists, the
+    // pointer was hard-deleted after tombstoning (its R2 blob delete had likely
+    // failed); recovering it would reverse a committed tombstone decision.
+    // `db.all(...).length` is used (not db.get) for cross-driver correctness.
+    const priorTombstone = db.all(
+      sql`SELECT seq FROM journal
+          WHERE resource = ${orphan.key}
+            AND kind IN ('artifact.tombstoned', 'artifact.expired')
+          LIMIT 1`,
+    );
+    if (priorTombstone.length > 0) {
+      result.orphans_unrecoverable++;
+      result.details.push({
+        key: orphan.key,
+        status: "unrecoverable",
+        reason: "previously tombstoned -- not resurrected",
+      });
       continue;
     }
 

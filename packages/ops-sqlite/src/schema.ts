@@ -64,6 +64,7 @@ export const artifactPointers = sqliteTable(
     expires_at: integer("expires_at"),
     tombstoned: integer("tombstoned").notNull().default(0),
     tombstoned_at: integer("tombstoned_at"),
+    blob_deleted_at: integer("blob_deleted_at"),
     content_inline: text("content_inline"),
   },
   (table) => [

@@ -175,7 +175,14 @@ export function createGate(
   now: number = Date.now(),
 ): GateRow {
   return db.transaction((tx) => {
-    assertResourceFence(tx, params.resource, params.fence);
+    // requireLiveClaim closes the zombie-write window: gate fences bump only on
+    // acquire, so after a lease expires with no competing re-acquire the stale
+    // fence still equals current_fence. The flag additionally requires a LIVE
+    // claim and is a no-op for non-entity resources (resolveEntityResource null).
+    assertResourceFence(tx, params.resource, params.fence, {
+      requireLiveClaim: true,
+      now,
+    });
 
     // Insert gate
     tx.insert(schema.gates)

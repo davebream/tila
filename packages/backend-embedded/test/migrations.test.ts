@@ -10,12 +10,12 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–19 minus 15
+ * Canonical shared versions present in the embedded set: 1–20 minus 15
  * (v15 = DO-only journal-archive watermark). The embedded-only idempotency
  * overlay is appended at IDEMPOTENCY_MIGRATION_VERSION, above the shared range.
  */
 const CANONICAL_VERSIONS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,
