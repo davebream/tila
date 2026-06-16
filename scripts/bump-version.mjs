@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  bumpHomebrewFormula,
   mcpServerJsonPath,
   parseVersionAndRoot,
   platformPackages,
@@ -28,6 +29,8 @@ async function main() {
   const serverJson = await readJson(root, mcpServerJsonPath);
   serverJson.version = version;
   await writeJson(root, mcpServerJsonPath, serverJson);
+
+  await bumpHomebrewFormula(root, version);
 
   console.log(`Bumped public release version to ${version}.`);
 }
