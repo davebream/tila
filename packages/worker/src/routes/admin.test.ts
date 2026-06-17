@@ -493,6 +493,51 @@ describe("project admin routes", () => {
       return { ...mockEnv, ARTIFACTS: { put } as unknown as R2Bucket };
     }
 
+    it("returns 403 for admin session token (non-d1-token)", async () => {
+      const putMock = vi.fn();
+      const app = createApp("full", "session");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(403);
+      // No DO forward, no R2 write — rejected before orchestration
+      expect(forwardToDOMock).not.toHaveBeenCalled();
+      expect(putMock).not.toHaveBeenCalled();
+    });
+
+    it("accepts a full-scope d1-token", async () => {
+      const putMock = vi.fn().mockResolvedValue(undefined);
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, _method: string) => {
+          if (path === "/journal/archive") {
+            return Promise.resolve(
+              Response.json({
+                ok: true,
+                events: [],
+                throughSeq: 0,
+                count: 0,
+              }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true, watermark: null }));
+        },
+      );
+
+      const app = createApp("full", "d1-token");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(200);
+    });
+
     it("(1) early-returns archived:0 without writing R2 or confirming when count is 0", async () => {
       const putMock = vi.fn();
       forwardToDOMock.mockImplementation(
@@ -703,6 +748,41 @@ describe("project admin routes", () => {
         mockEnv as Env,
       );
       expect(res.status).toBe(403);
+    });
+
+    it("returns 403 for admin session token (non-d1-token)", async () => {
+      const app = createApp("full", "session");
+      const res = await app.request(
+        "/admin/sessions/revoke",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jti: validJti }),
+        },
+        mockEnv as Env,
+      );
+      expect(res.status).toBe(403);
+      // Rejected before the global jti kill-switch fires
+      expect(mockRevokedJtiRevoke).not.toHaveBeenCalled();
+      expect(mockRevokeJtiInCache).not.toHaveBeenCalled();
+    });
+
+    it("accepts a full-scope d1-token", async () => {
+      const app = createApp("full", "d1-token");
+      const res = await app.request(
+        "/admin/sessions/revoke",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jti: validJti }),
+        },
+        mockEnv as Env,
+      );
+      expect(res.status).toBe(200);
+      expect(mockRevokedJtiRevoke).toHaveBeenCalledWith(
+        validJti,
+        "proj-target",
+      );
     });
 
     it("returns 400 on missing jti field", async () => {

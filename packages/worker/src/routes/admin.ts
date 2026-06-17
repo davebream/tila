@@ -101,85 +101,90 @@ admin.post("/restart", requirePermission("admin"), async (c) => {
   return forwardToDO(stub, "/admin/restart", "POST");
 });
 
-admin.post("/archive/journal", requirePermission("admin"), async (c) => {
-  const stub = c.get("doStub");
-  const projectId = c.get("projectId");
+admin.post(
+  "/archive/journal",
+  requirePermission("admin"),
+  requireD1Token,
+  async (c) => {
+    const stub = c.get("doStub");
+    const projectId = c.get("projectId");
 
-  // Step 1: Get archivable events from the DO
-  const archiveRes = await forwardToDO(stub, "/journal/archive", "POST");
-  if (!archiveRes.ok) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "DO_ERROR",
-          message: "Failed to fetch archivable events",
+    // Step 1: Get archivable events from the DO
+    const archiveRes = await forwardToDO(stub, "/journal/archive", "POST");
+    if (!archiveRes.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "DO_ERROR",
+            message: "Failed to fetch archivable events",
+          },
         },
-      },
-      502,
-    );
-  }
+        502,
+      );
+    }
 
-  const archiveData = (await archiveRes.json()) as ArchiveResponse;
+    const archiveData = (await archiveRes.json()) as ArchiveResponse;
 
-  // Step 2: If nothing to archive, return early
-  if (archiveData.count === 0) {
-    return c.json({ ok: true, archived: 0 });
-  }
+    // Step 2: If nothing to archive, return early
+    if (archiveData.count === 0) {
+      return c.json({ ok: true, archived: 0 });
+    }
 
-  // Step 3: Write events to R2 grouped by year/month
-  try {
-    await writeJournalArchiveToR2(
-      c.env.ARTIFACTS,
-      archiveData.events,
-      projectId,
-    );
-  } catch (err) {
-    console.error(`[archive] R2 write failed for project ${projectId}:`, err);
-    return c.json(
+    // Step 3: Write events to R2 grouped by year/month
+    try {
+      await writeJournalArchiveToR2(
+        c.env.ARTIFACTS,
+        archiveData.events,
+        projectId,
+      );
+    } catch (err) {
+      console.error(`[archive] R2 write failed for project ${projectId}:`, err);
+      return c.json(
+        {
+          ok: false,
+          error: { code: "R2_ERROR", message: "Failed to write archive to R2" },
+        },
+        502,
+      );
+    }
+
+    // Step 4: Confirm archival on DO (watermark advances + rows deleted)
+    const confirmRes = await forwardToDO(
+      stub,
+      "/journal/archive/confirm",
+      "POST",
       {
-        ok: false,
-        error: { code: "R2_ERROR", message: "Failed to write archive to R2" },
+        throughSeq: archiveData.throughSeq,
       },
-      502,
     );
-  }
 
-  // Step 4: Confirm archival on DO (watermark advances + rows deleted)
-  const confirmRes = await forwardToDO(
-    stub,
-    "/journal/archive/confirm",
-    "POST",
-    {
+    if (!confirmRes.ok) {
+      console.error(
+        `[archive] confirm failed for project ${projectId}, R2 already written`,
+      );
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "CONFIRM_ERROR",
+            message: "R2 write succeeded but DO confirm failed",
+          },
+        },
+        502,
+      );
+    }
+
+    const confirmData = (await confirmRes.json()) as ConfirmResponse;
+
+    return c.json({
+      ok: true,
+      archived: archiveData.count,
       throughSeq: archiveData.throughSeq,
-    },
-  );
-
-  if (!confirmRes.ok) {
-    console.error(
-      `[archive] confirm failed for project ${projectId}, R2 already written`,
-    );
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "CONFIRM_ERROR",
-          message: "R2 write succeeded but DO confirm failed",
-        },
-      },
-      502,
-    );
-  }
-
-  const confirmData = (await confirmRes.json()) as ConfirmResponse;
-
-  return c.json({
-    ok: true,
-    archived: archiveData.count,
-    throughSeq: archiveData.throughSeq,
-    watermark: confirmData.watermark,
-  });
-});
+      watermark: confirmData.watermark,
+    });
+  },
+);
 
 /**
  * GET /admin/store-counts
@@ -229,48 +234,54 @@ admin.post(
  * invalidates the per-isolate cache entry in the revoking isolate.
  * Cross-isolate staleness: ≤ JTI_REVCHECK_TTL_MS (default 60s).
  */
-admin.post("/sessions/revoke", requirePermission("admin"), async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid JSON body",
-          retryable: false,
+admin.post(
+  "/sessions/revoke",
+  requirePermission("admin"),
+  requireD1Token,
+  async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+            retryable: false,
+          },
         },
-      },
-      400,
-    );
-  }
+        400,
+      );
+    }
 
-  const parsed = RevokeSessionRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Body must include a UUID jti no longer than 64 characters",
-          retryable: false,
+    const parsed = RevokeSessionRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message:
+              "Body must include a UUID jti no longer than 64 characters",
+            retryable: false,
+          },
         },
-      },
-      400,
-    );
-  }
+        400,
+      );
+    }
 
-  const { jti } = parsed.data;
-  const projectId = c.get("projectId") ?? "";
+    const { jti } = parsed.data;
+    const projectId = c.get("projectId") ?? "";
 
-  // 1. Persist to D1
-  const store = new D1RevokedJtiStore(c.env.DB);
-  await store.revoke(jti, projectId);
+    // 1. Persist to D1
+    const store = new D1RevokedJtiStore(c.env.DB);
+    await store.revoke(jti, projectId);
 
-  // 2. Immediately invalidate in the revoking isolate's cache
-  revokeJtiInCache(jti);
+    // 2. Immediately invalidate in the revoking isolate's cache
+    revokeJtiInCache(jti);
 
-  return c.json({ ok: true, jti, revoked_at: Date.now() });
-});
+    return c.json({ ok: true, jti, revoked_at: Date.now() });
+  },
+);
