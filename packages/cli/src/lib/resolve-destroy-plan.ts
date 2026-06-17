@@ -7,7 +7,7 @@ import type { TilaInfraConfig, TilaProjectConfig } from "@tila/schemas";
  * the prompts and network calls based on this plan.
  *
  *   - slug given        → infra mode: wipe by slug using infra-global config +
- *                          the INFRA_DESTROY_TOKEN (no local .tila/ required).
+ *                          the INFRA_ADMIN_TOKEN (no local .tila/ required).
  *   - no slug + local   → local mode: today's per-project path.
  *   - no slug + neither → needs-picker: shell lists projects and asks.
  */
@@ -64,18 +64,18 @@ export function resolveDestroyPlan(input: {
 }
 
 /**
- * Resolve the infra destroy token, preferring the environment over infra.toml
+ * Resolve the infra admin token, preferring the environment over infra.toml
  * (mirrors how the per-project token is read env-first). Returns null when
  * neither source provides one — the caller fails closed, never silently skips.
  */
-export function resolveInfraDestroyToken(
+export function resolveInfraAdminToken(
   infraConfig: TilaInfraConfig | null,
   envToken: string | undefined,
 ): string | null {
   if (envToken && envToken.trim().length > 0) {
     return envToken.trim();
   }
-  const fileToken = infraConfig?.infra_destroy_token;
+  const fileToken = infraConfig?.infra_admin_token;
   if (fileToken && fileToken.trim().length > 0) {
     return fileToken.trim();
   }

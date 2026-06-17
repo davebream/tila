@@ -707,7 +707,7 @@ describe("tila project destroy", () => {
       d1_database_id: "d1-infra",
       worker_url: "https://tila-infra.workers.dev",
     });
-    vi.stubEnv("INFRA_DESTROY_TOKEN", "infra-secret");
+    vi.stubEnv("INFRA_ADMIN_TOKEN", "infra-secret");
 
     await invokeProjectDestroy({ slug: "remote-proj" });
 
@@ -738,8 +738,8 @@ describe("tila project destroy", () => {
       d1_database_id: "d1-infra",
       worker_url: "https://tila-infra.workers.dev",
     });
-    // Empty env value is treated as unset by resolveInfraDestroyToken.
-    vi.stubEnv("INFRA_DESTROY_TOKEN", "");
+    // Empty env value is treated as unset by resolveInfraAdminToken.
+    vi.stubEnv("INFRA_ADMIN_TOKEN", "");
 
     await expect(invokeProjectDestroy({ slug: "remote-proj" })).rejects.toThrow(
       "process.exit(1)",

@@ -795,7 +795,7 @@ describe("wipeProjectViaInfraToken", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, init] = mockFetch.mock.calls[0];
     expect(url).toBe(
-      "https://worker.example.com/_internal/projects/my-project/destroy",
+      "https://worker.example.com/_internal/admin/projects/my-project/destroy",
     );
     expect(init.method).toBe("POST");
     expect(init.headers.Authorization).toBe("Bearer infra-secret");

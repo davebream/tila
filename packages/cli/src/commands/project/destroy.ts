@@ -11,7 +11,7 @@ import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import {
   type DestroyPlan,
   resolveDestroyPlan,
-  resolveInfraDestroyToken,
+  resolveInfraAdminToken,
 } from "../../lib/resolve-destroy-plan";
 import {
   cleanD1NonTokenRecords,
@@ -58,8 +58,8 @@ function readTilaApiToken(tilaDir: string): string | null {
 
 /**
  * Infra-owner destroy: wipe a project by slug with no local .tila/ config.
- * Remote state (DO + R2) is wiped through the Worker's /_internal destroy
- * endpoint using INFRA_DESTROY_TOKEN; D1 records are cleaned via the CF SDK.
+ * Remote state (DO + R2) is wiped through the Worker's /_internal/admin destroy
+ * endpoint using INFRA_ADMIN_TOKEN; D1 records are cleaned via the CF SDK.
  * Trust the endpoint's internal doWiped read-back instead of the per-project
  * store-counts verify (which needs a per-project token we do not hold here).
  */
@@ -70,13 +70,13 @@ async function runInfraDestroy(
 ): Promise<void> {
   const { slug, workerUrl, accountId, databaseId } = plan;
 
-  const infraToken = resolveInfraDestroyToken(
+  const infraToken = resolveInfraAdminToken(
     infraConfig,
-    process.env.INFRA_DESTROY_TOKEN,
+    process.env.INFRA_ADMIN_TOKEN,
   );
   if (!infraToken) {
     p.cancel(
-      "No INFRA_DESTROY_TOKEN available.\n\nSet it in the environment or add infra_destroy_token to ~/.tila/infra.toml.\nThis secret authorizes destroying a project you have no local config for.",
+      "No INFRA_ADMIN_TOKEN available.\n\nSet it in the environment or add infra_admin_token to ~/.tila/infra.toml.\nThis secret authorizes destroying a project you have no local config for.",
     );
     process.exit(1);
   }
@@ -193,7 +193,7 @@ export default defineCommand({
     const tilaDir = join(cwd, ".tila");
 
     // Step 1: Resolve the destroy plan — local (.tila/ in cwd) vs infra-owner
-    // (target a slug using ~/.tila/infra.toml + INFRA_DESTROY_TOKEN).
+    // (target a slug using ~/.tila/infra.toml + INFRA_ADMIN_TOKEN).
     const slugArg =
       typeof args.slug === "string" && args.slug.length > 0
         ? args.slug

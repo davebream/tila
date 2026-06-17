@@ -345,7 +345,7 @@ export async function wipeProjectViaWorker(
 
 /**
  * Call the infra-owner destroy endpoint for a project by slug, authenticated by
- * the INFRA_DESTROY_TOKEN secret rather than a per-project token. Echoes the
+ * the INFRA_ADMIN_TOKEN secret rather than a per-project token. Echoes the
  * slug in X-Confirm-Slug (the Worker rejects a mismatch). Used when an admin
  * destroys a project they have no local .tila/ config for.
  * NEVER logs the token — error messages contain only HTTP status + error code.
@@ -355,11 +355,14 @@ export async function wipeProjectViaInfraToken(
   infraToken: string,
   slug: string,
 ): Promise<WipeProjectResult> {
-  return wipeViaEndpoint(`${workerUrl}/_internal/projects/${slug}/destroy`, {
-    Authorization: `Bearer ${infraToken}`,
-    "X-Confirm-Slug": slug,
-    "Content-Type": "application/json",
-  });
+  return wipeViaEndpoint(
+    `${workerUrl}/_internal/admin/projects/${slug}/destroy`,
+    {
+      Authorization: `Bearer ${infraToken}`,
+      "X-Confirm-Slug": slug,
+      "Content-Type": "application/json",
+    },
+  );
 }
 
 /**
