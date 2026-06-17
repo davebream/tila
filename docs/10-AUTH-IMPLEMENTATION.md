@@ -82,10 +82,27 @@ export const tokens = sqliteTable("_tokens", {
 
 ### Hashing
 
-Raw tokens are **never** stored. Only SHA-256 hashes persist in D1.
+Raw tokens are **never** stored. Only token hashes persist in D1.
 
 - Implementation: `packages/worker/src/lib/hash-token.ts`
-- Algorithm: UTF-8 encode → SHA-256 → hex string
+- Algorithm (default): UTF-8 encode → SHA-256 → hex string
+- Algorithm (hardened): when the optional `HASH_PEPPER` Worker secret is set, the
+  token is hashed with keyed **HMAC-SHA-256** (pepper as key) instead of bare
+  SHA-256, so a leaked digest is useless without the secret.
+
+`HASH_PEPPER` is threaded into **every** mint and lookup callsite for both D1 API
+tokens and cookie/workspace sessions (SEC-1), so mint and lookup always compute the
+same digest. The auth middleware logs a one-time-per-isolate warning plus an
+Analytics datapoint (`hash-pepper-unset`) on the first authenticated request when the
+secret is not configured.
+
+> **Activation caveat — enabling `HASH_PEPPER` does NOT re-hash existing credentials.**
+> Turning the secret on changes the digest of every token. Pre-existing bare-SHA-256
+> D1 API tokens stop validating and must be re-issued; cookie/workspace sessions
+> re-authenticate within their TTL (1h GitHub sessions, 8h cookie sessions). The
+> bare-SHA-256 fallback is retained intentionally so the secret is a no-op until set.
+> A zero-downtime dual-verify re-hash migration (verify against both the peppered and
+> bare digest during a rollover window) is a separate tracked follow-up.
 
 ### LRU Cache
 

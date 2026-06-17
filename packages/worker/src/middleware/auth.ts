@@ -42,6 +42,37 @@ export { invalidate } from "../lib/token-cache";
 // --- Debounce state ---
 const lastWriteMap = new Map<string, number>();
 
+// --- SEC-1: HASH_PEPPER unset warning (once per isolate) ---
+// When HASH_PEPPER is not configured, token/session hashes fall back to bare
+// SHA-256 (see lib/hash-token.ts). That is a valid default, but an operator who
+// believes peppering is active should get a signal that it is not. We emit a
+// single log + Analytics datapoint per isolate on the first authenticated
+// request so the warning is visible without spamming every request.
+let hashPepperUnsetWarned = false;
+
+/**
+ * Warn exactly once per isolate when HASH_PEPPER is unset. No-op when the pepper
+ * is configured. Analytics emission is best-effort and never load-bearing.
+ */
+function warnHashPepperUnsetOnce(env: Env): void {
+  if (hashPepperUnsetWarned || env.HASH_PEPPER) return;
+  hashPepperUnsetWarned = true;
+  console.warn(
+    "[auth] HASH_PEPPER is not set — token and session hashes use bare SHA-256. " +
+      "Set the HASH_PEPPER secret to harden stored hashes (HMAC-SHA-256). " +
+      "Note: enabling it does not re-hash existing credentials (code: hash-pepper-unset).",
+  );
+  try {
+    env.ANALYTICS.writeDataPoint({
+      blobs: ["auth", "hash-pepper-unset"],
+      doubles: [1],
+      indexes: ["hash-pepper-unset"],
+    });
+  } catch {
+    // Analytics emission is never load-bearing
+  }
+}
+
 // --- In-isolate sliding-window rate-limit fallback (C8) ---
 // When D1's rate-limit check throws (fail-open), we consult this in-isolate
 // counter as a secondary guard. Best-effort and per-isolate (not global), but
@@ -238,6 +269,9 @@ export function createAuthMiddleware(
 
   return async (c, next) => {
     const now = Date.now();
+
+    // SEC-1: warn once per isolate if HASH_PEPPER is unset (bare SHA-256 fallback).
+    warnHashPepperUnsetOnce(c.env);
 
     // 1. Rate limit check (pre-auth)
     const ip = getIP(c.req.raw);
@@ -737,6 +771,7 @@ export function _resetMiddlewareStateForTest(): void {
   jtiRevCache.clear();
   cachedHmacKey = null;
   cachedHmacKeyRaw = null;
+  hashPepperUnsetWarned = false;
 }
 
 /** For testing only -- returns current debounce map size. */

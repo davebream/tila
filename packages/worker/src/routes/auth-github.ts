@@ -531,8 +531,10 @@ authGithub.post("/exchange", async (c) => {
   }
 
   // Idempotency check (keyed by project_id + sha256 of github token)
-  // The hash ensures the raw token is never stored in D1
-  const tokenHash = await hashToken(github_token);
+  // The hash ensures the raw token is never stored in D1.
+  // SEC-1: pepper for consistency with the App-path idempotency key (:276).
+  // This is an idempotency-cache key, not a stored credential — no validate() pairs it.
+  const tokenHash = await hashToken(github_token, c.env.HASH_PEPPER);
   const idempotencyKey = `exchange:${project_id}:${tokenHash}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
@@ -880,9 +882,9 @@ authGithub.get("/oauth/callback", async (c) => {
   // Discard accessToken immediately — never store, persist, or forward
   // (variable goes out of scope after this point)
 
-  // Create workspace session in D1
+  // Create workspace session in D1 (SEC-1: pepper to match the cookie-session lookup in auth.ts:302)
   const sessionToken = crypto.randomUUID();
-  const sessionHash = await hashToken(sessionToken);
+  const sessionHash = await hashToken(sessionToken, c.env.HASH_PEPPER);
   const expiresAt = Date.now() + OAUTH_SESSION_TTL_MS;
 
   const sessionStore = new D1SessionStore(c.env.DB);
@@ -941,7 +943,8 @@ authGithub.post("/app-config", async (c) => {
   }
 
   const rawToken = authHeader.slice("Bearer ".length);
-  const tokenHash = await hashToken(rawToken);
+  // SEC-1: pepper to match the D1-token mint in tokens.ts:51
+  const tokenHash = await hashToken(rawToken, c.env.HASH_PEPPER);
 
   const tokenStore = new D1TokenStore(c.env.DB);
   const tokenResult = await tokenStore.validate(tokenHash);
