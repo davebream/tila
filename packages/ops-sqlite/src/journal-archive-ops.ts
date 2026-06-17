@@ -113,8 +113,19 @@ export function getArchivableEvents(
 
 /**
  * Mark journal events as archived. In a single transaction:
- *   1. UPSERT the watermark row to throughSeq (monotonic — never goes backward)
- *   2. DELETE all journal rows where seq <= throughSeq
+ *   1. UPSERT the watermark row to max(current, throughSeq) — monotonic, never
+ *      goes backward.
+ *   2. DELETE only the rows archived THIS cycle: seq <= the PASSED throughSeq.
+ *
+ * The delete uses the PASSED `throughSeq`, NOT the (possibly higher) watermark.
+ * Deleting down to the watermark would be a correctness trap: a call with a
+ * throughSeq BELOW the current watermark would delete rows in the
+ * (throughSeq, watermark] gap that were never written to R2 this cycle, losing
+ * un-backed-up events. The watermark still advances monotonically for the
+ * "already archived" read guard (listJournal), but row deletion is scoped to
+ * exactly what this cycle confirmed. (The sweep always confirms with the
+ * throughSeq it just wrote, so the gap is unreachable in normal operation — this
+ * is defense-in-depth against a future caller passing a stale throughSeq.)
  *
  * This is atomic: either both succeed or neither does.
  */
@@ -134,7 +145,7 @@ export function markArchived(
       ? Math.max(current.last_archived_seq, throughSeq)
       : throughSeq;
 
-    // UPSERT the single watermark row (id = 1)
+    // UPSERT the single watermark row (id = 1) — advances monotonically.
     tx.insert(schema.journalArchiveWatermark)
       .values({
         id: 1,
@@ -150,9 +161,11 @@ export function markArchived(
       })
       .run();
 
-    // Delete archived events from journal (seq <= throughSeq means seq < throughSeq + 1)
+    // Delete ONLY what this cycle archived: seq <= throughSeq (i.e. seq <
+    // throughSeq + 1). Scoped to the PASSED throughSeq, never the watermark, so
+    // a stale low call cannot delete un-archived rows above it.
     tx.delete(schema.journal)
-      .where(lt(schema.journal.seq, newSeq + 1))
+      .where(lt(schema.journal.seq, throughSeq + 1))
       .run();
   });
 }

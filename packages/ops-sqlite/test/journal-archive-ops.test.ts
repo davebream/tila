@@ -203,4 +203,50 @@ describe("markArchived", () => {
     // Watermark must not go backward
     expect(watermark?.lastArchivedSeq).toBeGreaterThanOrEqual(5);
   });
+
+  it("deletes only rows up to the PASSED throughSeq, never down to the watermark", () => {
+    // Latent-trap guard: markArchived advances the watermark monotonically
+    // (max(current, throughSeq)) but must DELETE only what was archived THIS
+    // cycle — i.e. seq <= the PASSED throughSeq — never seq <= watermark.
+    // Otherwise a call with a throughSeq BELOW the watermark would delete rows
+    // in the (throughSeq, watermark] gap that were never written to R2 this
+    // cycle. (Unreachable via the sweep today, since it always confirms with the
+    // throughSeq it just wrote, but a real correctness trap.)
+    const oldTs = Date.now() - 60_000;
+    for (let i = 0; i < 5; i++) {
+      testDb.rawDb
+        .prepare(
+          `INSERT INTO journal (t, kind, resource, actor, data) VALUES (?, 'task.created', 'res-${i}', 'actor', '{}')`,
+        )
+        .run(oldTs);
+    }
+    // Advance the watermark to 5 (this deletes seq 1..5).
+    markArchived(testDb.db, 5);
+
+    // Plant a DELETABLE row whose seq (4) falls in the (throughSeq=3, watermark=5]
+    // gap. Explicit low seq simulates the hazard the buggy "delete <= watermark"
+    // would wrongly hit. (Previously this test masked the bug by using a
+    // non-deletable far-future row; this row is fully eligible by both seq and t.)
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO journal (seq, t, kind, resource, actor, data) VALUES (4, ?, 'task.updated', 'gap-row', 'actor', '{}')`,
+      )
+      .run(oldTs);
+
+    // Stale call with a throughSeq (3) BELOW the current watermark (5).
+    markArchived(testDb.db, 3);
+
+    // The gap row (seq 4) must SURVIVE: it was not archived in this cycle, so
+    // deleting it would lose an un-backed-up event. The fixed code deletes only
+    // seq < throughSeq + 1 = 4, so seq 4 is preserved.
+    const gapRow = testDb.rawDb
+      .prepare("SELECT seq FROM journal WHERE seq = 4")
+      .get() as { seq: number } | undefined;
+    expect(gapRow).toBeDefined();
+    expect(gapRow?.seq).toBe(4);
+
+    // And the watermark still must not regress below 5.
+    const watermark = getArchiveWatermark(testDb.db);
+    expect(watermark?.lastArchivedSeq).toBeGreaterThanOrEqual(5);
+  });
 });

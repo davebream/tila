@@ -556,11 +556,25 @@ First request after idle eviction adds ~50-100ms latency. Subsequent requests ar
 
 ### Cron sweep health
 
-Check `expired-claims` in `tila doctor`. Elevated counts indicate the sweep cron is behind. The sweep runs daily at `/_internal/sweep`.
+The sweep runs daily at `/_internal/sweep`. It is now a **budgeted, multi-run, per-project** process — read this before treating an elevated backlog as a failure.
+
+**Backlog draining is multi-run by design.** A single sweep invocation self-throttles on two budgets: a subrequest ceiling (`SWEEP_SUBREQUEST_BUDGET`, a conservative self-limit that stays safe even on the smallest plan — see `packages/worker/src/config.ts`) and a wall-clock budget (`SWEEP_TIME_BUDGET_MS`). When either is exhausted, the run stops cleanly and records a `resumePoint` (the project/phase frontier) in the sweep summary; the next daily run continues from there. **A large expired-artifact or journal backlog therefore drains across several daily runs — an elevated `expired-claims` count is often expected progress, not a stuck cron.** It is a problem only if it keeps climbing across many consecutive days with no `resumePoint` movement.
+
+**One project's failure no longer aborts the run.** Each project is swept in isolation: a failing sub-step (expired-artifact drain, journal archive, or search-drift reconcile) marks only that project `degraded` (`status: "degraded"` in its per-project status) and the run continues to its siblings. A pre-loop crash (e.g. the project-registry read failing) is caught and recorded rather than silently aborting the whole nightly sweep.
+
+**`claim.expired` journal events.** When the sweep reaps an expired claim it now writes a `claim.expired` journal event (actor = the holder whose lease lapsed, with the claim's fence) in the same transaction as the delete. This is the audit trail behind the `expired-claims` doctor check: a healthy sweep both clears the pending count AND leaves a `claim.expired` trace per reaped claim, so you can distinguish a lease that **expired** from one that was explicitly **released**.
+
+**Observability surface (Analytics Engine).** Each run emits structural-only datapoints (no secrets/tokens) to the `ANALYTICS` dataset:
+- one **per-project** datapoint (tag `sweep_project`): `projectId`, rollup `status`, per-step outcomes, and `expired`/`remaining`/`truncated` counts;
+- one **run-level rollup** datapoint (tag `sweep_rollup`, indexed under `sweep`): `projectsSwept`, `projectsDegraded`, `artifactsExpired`, `journalEventsArchived`, `driftReconciled`, and how many per-project datapoints were actually emitted;
+- a **`sweep_error`** datapoint if the run throws before the per-project loop.
+
+> **Per-project emission ceiling (~250-project fleets).** Analytics Engine hard-caps `writeDataPoint` at **250 calls per Worker invocation**. The sweep self-limits below that: `degraded`/`truncated` projects always emit, healthy projects emit only up to `SWEEP_ANALYTICS_MAX_PROJECT_DATAPOINTS` (200), and the rollup always emits. On a fleet larger than ~250 projects, healthy per-project datapoints beyond the cap are intentionally dropped — rely on the **rollup** datapoint for aggregate observability at that scale, and on the always-emitted `degraded`/`truncated` per-project datapoints for the projects that need attention.
 
 If sweep is failing:
 1. `wrangler tail --format pretty --search "sweep"` to see errors
-2. Manual trigger: `curl -X POST https://<worker-url>/_internal/sweep`
+2. Inspect the `sweep_rollup` / `sweep_error` Analytics datapoints for run-level health
+3. Manual trigger: `curl -X POST https://<worker-url>/_internal/sweep`
 
 ### What is NOT tunable in v0.1
 

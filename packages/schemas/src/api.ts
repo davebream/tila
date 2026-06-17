@@ -851,7 +851,7 @@ export const ArtifactGrepQuerySchema = z.object({
     .optional()
     .default("50")
     .transform((v) => Number.parseInt(v, 10))
-    .pipe(z.number().int().min(1).max(100)), // candidate cap, hard ceiling SWEEP_BATCH_SIZE
+    .pipe(z.number().int().min(1).max(100)), // candidate cap, hard ceiling GREP_CANDIDATE_CAP (100)
 });
 
 export type ArtifactGrepQuery = z.infer<typeof ArtifactGrepQuerySchema>;

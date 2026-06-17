@@ -7,6 +7,7 @@ export const JournalEventKindSchema = z.enum([
   "claim.acquired",
   "claim.renewed",
   "claim.released",
+  "claim.expired",
   "artifact.produced",
   "artifact.expired",
   "artifact.tombstoned",
