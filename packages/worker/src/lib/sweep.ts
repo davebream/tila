@@ -2,12 +2,32 @@ import { D1ProjectRegistry, D1SessionStore } from "@tila/backend-d1";
 import { R2ArtifactBackend } from "@tila/backend-r2";
 import {
   DRIFT_RECONCILE_THRESHOLD,
-  SWEEP_BATCH_SIZE,
+  SWEEP_DRAIN_PAGE_SIZE,
   SWEEP_MAX_DRAIN_ITERATIONS,
+  SWEEP_SUBREQUESTS_PER_KEY,
+  SWEEP_SUBREQUEST_BUDGET,
   SWEEP_TIME_BUDGET_MS,
 } from "../config";
 import type { Env } from "../types";
 import { sweepExpiredKey } from "./sweep-key";
+
+/**
+ * Tracks subrequests issued across the whole invocation. Cloudflare caps
+ * subrequests at 1000 PER INVOCATION; a cron sweep is one invocation fanning
+ * out over every project and every drain round, so this counter is shared and
+ * accumulates globally — never reset per project or per round.
+ */
+interface SweepBudget {
+  /** Subrequests issued so far this invocation. */
+  subrequests: number;
+  /** Ceiling; the run stops cleanly before crossing it. */
+  ceiling: number;
+}
+
+/** True when issuing `n` more subrequests would cross the ceiling. */
+function wouldExceed(budget: SweepBudget, n: number): boolean {
+  return budget.subrequests + n > budget.ceiling;
+}
 
 /** Outcome of a single per-project sweep sub-step. */
 export type StepStatus = "ok" | "error" | "skipped";
@@ -30,20 +50,32 @@ export interface ProjectSweepStatus {
   /** Expired artifacts successfully tombstoned+deleted this run. */
   expired: number;
   /**
-   * Expired artifacts still pending after the drain loop stopped. >0 only when
-   * the wall-clock budget or the drain-iteration clamp halted draining early.
+   * Expired-artifact backlog signal for this project, NOT an exact count:
+   *   0   — the project was fully drained (no expired pointers remain), or
+   *   ≥1  — the drain stopped early (budget or clamp) and ≥1 pointer is pending.
+   * Counting the true remainder would cost an extra DO round-trip, which defeats
+   * the subrequest budget, so this is a 0/≥1 sentinel. Pair with `truncated`.
    */
   remaining: number;
+  /**
+   * True when the drain stopped before clearing this project — either the
+   * shared subrequest/wall-clock budget was exhausted, or the per-project
+   * iteration clamp was hit. Analytics should treat `remaining` as a boolean
+   * "work left" signal via this field, not as a magnitude.
+   */
+  truncated: boolean;
 }
 
 /**
  * Where a budget-truncated run stopped, so the next run (and operators) know
- * the backlog frontier. `null` when the run completed within budget.
+ * the backlog frontier. `null` when the run completed within budget. Only a
+ * true RUN-level budget exhaustion (subrequest or wall-clock) sets this — a
+ * per-project iteration clamp does not, since the run continues to siblings.
  */
 export interface SweepResumePoint {
   projectId: string;
-  /** The phase at which the run ran out of budget for this project. */
-  phase: "before-project" | "drain";
+  /** The phase / cause at which the run ran out of budget. */
+  phase: "before-project" | "drain" | "subrequest-budget";
 }
 
 export interface SweepSummary {
@@ -85,7 +117,7 @@ interface DoStub {
 /**
  * Optional overrides for unit testing. The production caller invokes
  * `runSweep(env)` with no options: `projects` is then loaded from the D1
- * registry, `now` is `Date.now`, and the budget/batch come from config.
+ * registry, `now` is `Date.now`, and the budgets/page come from config.
  */
 export interface RunSweepOptions {
   /** Inject the project list instead of reading the D1 registry. */
@@ -94,8 +126,10 @@ export interface RunSweepOptions {
   now?: () => number;
   /** Wall-clock budget in ms. Defaults to SWEEP_TIME_BUDGET_MS. */
   timeBudgetMs?: number;
-  /** Expired-artifact page size per drain round. Defaults to SWEEP_BATCH_SIZE. */
-  batchSize?: number;
+  /** Expired-artifact page size per drain round. Defaults to SWEEP_DRAIN_PAGE_SIZE. */
+  drainPageSize?: number;
+  /** Per-invocation subrequest ceiling. Defaults to SWEEP_SUBREQUEST_BUDGET. */
+  subrequestBudget?: number;
 }
 
 export async function runSweep(
@@ -105,8 +139,14 @@ export async function runSweep(
   console.log("[sweep] daily artifact cleanup started");
   const now = options.now ?? Date.now;
   const timeBudgetMs = options.timeBudgetMs ?? SWEEP_TIME_BUDGET_MS;
-  const batchSize = options.batchSize ?? SWEEP_BATCH_SIZE;
+  const drainPageSize = options.drainPageSize ?? SWEEP_DRAIN_PAGE_SIZE;
   const deadline = now() + timeBudgetMs;
+  // Shared across ALL projects and ALL drain rounds — a cron sweep is a single
+  // Worker invocation and the subrequest cap is per-invocation.
+  const budget: SweepBudget = {
+    subrequests: 0,
+    ceiling: options.subrequestBudget ?? SWEEP_SUBREQUEST_BUDGET,
+  };
 
   const r2 = new R2ArtifactBackend(env.ARTIFACTS);
   const projects =
@@ -126,10 +166,11 @@ export async function runSweep(
     resumePoint: null,
   };
 
-  // Session expiry cleanup (global, not per-project).
+  // Session expiry cleanup (global, not per-project). One D1 subrequest.
   try {
     const sessionStore = new D1SessionStore(env.DB);
     const { deleted: expiredSessions } = await sessionStore.deleteExpired();
+    budget.subrequests++;
     console.log(`[sweep] deleted ${expiredSessions} expired sessions`);
     summary.expiredSessions = expiredSessions;
   } catch (err) {
@@ -137,13 +178,22 @@ export async function runSweep(
   }
 
   for (const { projectId } of projects) {
-    // Stop cleanly if the wall-clock budget is exhausted before this project.
-    // The resume point captures the FRONTIER (the first project we did not
-    // finish), so it is set once and never overwritten by a later iteration.
+    // Stop cleanly if a RUN-level budget is exhausted before this project. The
+    // resume point captures the FRONTIER (the first project we did not finish),
+    // so it is set once and never overwritten by a later iteration.
     if (now() >= deadline) {
       summary.resumePoint = { projectId, phase: "before-project" };
       console.warn(
         `[sweep] wall-clock budget exhausted; stopping before project ${projectId}`,
+      );
+      break;
+    }
+    // A project needs at least one /sweep round (1 subrequest) to do anything;
+    // if even that would cross the subrequest ceiling, stop and resume later.
+    if (wouldExceed(budget, 1)) {
+      summary.resumePoint = { projectId, phase: "subrequest-budget" };
+      console.warn(
+        `[sweep] subrequest budget exhausted (${budget.subrequests}/${budget.ceiling}); stopping before project ${projectId}`,
       );
       break;
     }
@@ -155,7 +205,8 @@ export async function runSweep(
       summary,
       now,
       deadline,
-      batchSize,
+      drainPageSize,
+      budget,
     });
 
     summary.projectStatuses.push(status);
@@ -165,9 +216,10 @@ export async function runSweep(
       summary.projectsDegraded++;
     }
 
-    // sweepProject sets a drain-phase resume point when it ran out of budget
-    // mid-project. Stop here so the next iteration's before-project check does
-    // not overwrite that frontier with a less-precise entry.
+    // sweepProject sets a drain/subrequest-budget resume point when it ran out
+    // of a RUN-level budget mid-project. Stop here so the next iteration's
+    // before-project check does not overwrite that frontier. A per-project
+    // iteration-clamp does NOT set resumePoint, so the loop continues past it.
     if (summary.resumePoint !== null) {
       break;
     }
@@ -189,9 +241,11 @@ async function sweepProject(args: {
   summary: SweepSummary;
   now: () => number;
   deadline: number;
-  batchSize: number;
+  drainPageSize: number;
+  budget: SweepBudget;
 }): Promise<ProjectSweepStatus> {
-  const { projectId, env, r2, summary, now, deadline, batchSize } = args;
+  const { projectId, env, r2, summary, now, deadline, drainPageSize, budget } =
+    args;
   const status: ProjectSweepStatus = {
     projectId,
     status: "ok",
@@ -200,13 +254,14 @@ async function sweepProject(args: {
     drift: "skipped",
     expired: 0,
     remaining: 0,
+    truncated: false,
   };
 
   const doId = env.PROJECT.idFromName(projectId);
   const doStub = env.PROJECT.get(doId) as unknown as DoStub;
 
   // --- 1. Expired-artifact drain loop ---
-  let budgetHitDuringDrain = false;
+  let runBudgetHit = false;
   try {
     const drained = await drainExpiredArtifacts({
       projectId,
@@ -215,13 +270,25 @@ async function sweepProject(args: {
       summary,
       now,
       deadline,
-      batchSize,
+      drainPageSize,
+      budget,
     });
     status.expired = drained.expired;
     status.remaining = drained.remaining;
-    budgetHitDuringDrain = drained.budgetHit;
+    status.truncated = drained.budgetHit || drained.clampHit;
+    runBudgetHit = drained.budgetHit;
+
+    // A RUN-level budget exhaustion sets the resume frontier and stops the run.
     if (drained.budgetHit && summary.resumePoint === null) {
-      summary.resumePoint = { projectId, phase: "drain" };
+      summary.resumePoint = {
+        projectId,
+        phase: drained.budgetPhase ?? "drain",
+      };
+    }
+    // The per-project iteration clamp marks ONLY this project degraded; it does
+    // NOT set a resume point, so sibling projects still run.
+    if (drained.clampHit) {
+      status.sweep = "error";
     }
   } catch (err) {
     console.error(
@@ -231,23 +298,28 @@ async function sweepProject(args: {
     status.sweep = "error";
   }
 
-  // If the wall-clock budget was exhausted mid-drain, stop here: the project is
-  // already a resume entry, and running archive/drift would only overrun the
-  // budget. They stay "skipped" and the next run picks the project back up.
-  if (budgetHitDuringDrain) {
-    return status; // status stays "ok" rollup-wise; remaining>0 marks the work left
+  // If a RUN-level budget was exhausted mid-drain, stop here: the project is
+  // already the resume frontier, and running archive/drift would only push us
+  // further past the budget. They stay "skipped" and the next run resumes.
+  if (runBudgetHit) {
+    return status; // remaining≥1 + truncated mark the work left for next run
   }
 
-  // --- 2. Journal archival ---
-  status.archive = await archiveJournal({
-    projectId,
-    doStub,
-    env,
-    summary,
-  });
+  // --- 2. Journal archival --- (skip if the subrequest budget is spent)
+  if (!wouldExceed(budget, 1)) {
+    status.archive = await archiveJournal({
+      projectId,
+      doStub,
+      env,
+      summary,
+      budget,
+    });
+  }
 
   // --- 3. Search drift check + conditional reconciliation ---
-  status.drift = await reconcileDrift({ projectId, doStub, summary });
+  if (!wouldExceed(budget, 1)) {
+    status.drift = await reconcileDrift({ projectId, doStub, summary, budget });
+  }
 
   if (
     status.sweep === "error" ||
@@ -267,6 +339,18 @@ async function sweepProject(args: {
  * shrinking batch is the termination signal — this is the core fix for the
  * monotonically-growing backlog.
  */
+interface DrainResult {
+  expired: number;
+  /** 0/≥1 backlog sentinel (see ProjectSweepStatus.remaining). */
+  remaining: number;
+  /** A RUN-level budget (wall-clock or subrequest) was exhausted mid-drain. */
+  budgetHit: boolean;
+  /** Which RUN-level budget tripped (only meaningful when budgetHit). */
+  budgetPhase?: "drain" | "subrequest-budget";
+  /** The per-project iteration clamp was hit (NOT run-aborting). */
+  clampHit: boolean;
+}
+
 async function drainExpiredArtifacts(args: {
   projectId: string;
   doStub: DoStub;
@@ -274,25 +358,49 @@ async function drainExpiredArtifacts(args: {
   summary: SweepSummary;
   now: () => number;
   deadline: number;
-  batchSize: number;
-}): Promise<{ expired: number; remaining: number; budgetHit: boolean }> {
-  const { projectId, doStub, r2, summary, now, deadline, batchSize } = args;
+  drainPageSize: number;
+  budget: SweepBudget;
+}): Promise<DrainResult> {
+  const {
+    projectId,
+    doStub,
+    r2,
+    summary,
+    now,
+    deadline,
+    drainPageSize,
+    budget,
+  } = args;
   let expiredThisProject = 0;
 
   for (let iteration = 0; iteration < SWEEP_MAX_DRAIN_ITERATIONS; iteration++) {
+    // Wall-clock budget: stop the whole run, the project keeps its backlog.
     if (now() >= deadline) {
-      // Budget hit mid-drain: the project may still have expired pointers.
-      // We cannot cheaply count the true remainder, so report ">=1 pending"
-      // by returning remaining=1 as a non-zero "work left" sentinel and let
-      // the resume point capture the frontier.
-      return { expired: expiredThisProject, remaining: 1, budgetHit: true };
+      return {
+        expired: expiredThisProject,
+        remaining: 1,
+        budgetHit: true,
+        budgetPhase: "drain",
+        clampHit: false,
+      };
+    }
+    // Subrequest budget: even one more /sweep round would cross the ceiling.
+    if (wouldExceed(budget, 1)) {
+      return {
+        expired: expiredThisProject,
+        remaining: 1,
+        budgetHit: true,
+        budgetPhase: "subrequest-budget",
+        clampHit: false,
+      };
     }
 
     const res = await doStub.fetch("http://do/sweep", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batch_size: batchSize }),
+      body: JSON.stringify({ batch_size: drainPageSize }),
     });
+    budget.subrequests++;
     if (!res.ok) {
       throw new Error(`DO /sweep returned ${res.status}`);
     }
@@ -300,24 +408,48 @@ async function drainExpiredArtifacts(args: {
     const keys = data.expiredKeys ?? [];
 
     for (const key of keys) {
+      // Each key costs SWEEP_SUBREQUESTS_PER_KEY subrequests. If processing it
+      // would cross the ceiling, stop mid-page: the unprocessed keys (and any
+      // not yet returned) remain expired and are picked up by the next run.
+      if (wouldExceed(budget, SWEEP_SUBREQUESTS_PER_KEY)) {
+        return {
+          expired: expiredThisProject,
+          remaining: 1,
+          budgetHit: true,
+          budgetPhase: "subrequest-budget",
+          clampHit: false,
+        };
+      }
       const before = summary.artifactsExpired;
       await sweepExpiredKey(key, doStub, (k) => r2.delete(k), summary);
+      budget.subrequests += SWEEP_SUBREQUESTS_PER_KEY;
       if (summary.artifactsExpired > before) expiredThisProject++;
     }
 
     // Fewer than a full page => no more expired pointers remain. Done.
-    if (keys.length < batchSize) {
-      return { expired: expiredThisProject, remaining: 0, budgetHit: false };
+    if (keys.length < drainPageSize) {
+      return {
+        expired: expiredThisProject,
+        remaining: 0,
+        budgetHit: false,
+        clampHit: false,
+      };
     }
   }
 
-  // Iteration clamp reached with full pages every round — treat the rest as
-  // pending and surface a resume point. This should not happen in practice
-  // (it implies tombstoning is not shrinking the candidate set).
+  // Iteration clamp reached with full pages every round. This should not happen
+  // in practice (it implies tombstoning is not shrinking the candidate set), so
+  // mark ONLY this project degraded and let the run continue to siblings — do
+  // NOT treat it as a run-aborting budget hit.
   console.warn(
-    `[sweep] project ${projectId} hit drain-iteration clamp (${SWEEP_MAX_DRAIN_ITERATIONS}); backlog may remain`,
+    `[sweep] project ${projectId} hit drain-iteration clamp (${SWEEP_MAX_DRAIN_ITERATIONS}); marking degraded, continuing run`,
   );
-  return { expired: expiredThisProject, remaining: 1, budgetHit: true };
+  return {
+    expired: expiredThisProject,
+    remaining: 1,
+    budgetHit: false,
+    clampHit: true,
+  };
 }
 
 /**
@@ -336,13 +468,15 @@ async function archiveJournal(args: {
   doStub: DoStub;
   env: Env;
   summary: SweepSummary;
+  budget: SweepBudget;
 }): Promise<StepStatus> {
-  const { projectId, doStub, env, summary } = args;
+  const { projectId, doStub, env, summary, budget } = args;
   try {
     const archiveRes = await doStub.fetch("http://do/journal/archive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
+    budget.subrequests++;
     if (!archiveRes.ok) {
       console.error(
         `[sweep] journal archive request failed for project ${projectId}: ${archiveRes.status}`,
@@ -389,6 +523,7 @@ async function archiveJournal(args: {
       // (and therefore do NOT delete) the journal rows — preserving the audit
       // log. The throw is caught below and marks the project degraded.
       await env.ARTIFACTS.put(r2Key, jsonl);
+      budget.subrequests++;
     }
 
     // Confirm only after every group's R2 write succeeded.
@@ -397,6 +532,7 @@ async function archiveJournal(args: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ throughSeq }),
     });
+    budget.subrequests++;
     if (!confirmRes.ok) {
       console.error(
         `[sweep] journal confirm failed for project ${projectId}: ${confirmRes.status}`,
@@ -427,10 +563,12 @@ async function reconcileDrift(args: {
   projectId: string;
   doStub: DoStub;
   summary: SweepSummary;
+  budget: SweepBudget;
 }): Promise<StepStatus> {
-  const { projectId, doStub, summary } = args;
+  const { projectId, doStub, summary, budget } = args;
   try {
     const driftRes = await doStub.fetch("http://do/artifact/search-drift");
+    budget.subrequests++;
     if (!driftRes.ok) {
       console.error(
         `[sweep] drift check returned ${driftRes.status} for project ${projectId}`,
@@ -470,6 +608,7 @@ async function reconcileDrift(args: {
       const scanRes = await doStub.fetch(
         "http://do/artifact/search-rebuild-scan",
       );
+      budget.subrequests++;
       if (!scanRes.ok) {
         throw new Error(`search-rebuild-scan returned ${scanRes.status}`);
       }
@@ -490,6 +629,7 @@ async function reconcileDrift(args: {
           }),
         },
       );
+      budget.subrequests++;
       if (!rebuildRes.ok) {
         throw new Error(`search-rebuild returned ${rebuildRes.status}`);
       }

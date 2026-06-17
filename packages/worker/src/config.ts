@@ -37,12 +37,25 @@ export const MAX_DEBOUNCE_MAP_SIZE = 2000;
 
 /**
  * Number of expired artifact pointers requested from a DO per /sweep call.
- * The sweep now re-arms this batch in a drain loop until a project is fully
- * cleared (see SWEEP_MAX_DRAIN_ITERATIONS) — so this is a per-round page size,
- * NOT a per-run cap. The DO clamps the accepted value to [1, 500]; we request
- * the clamp ceiling to minimize round-trips while staying within it.
+ * The sweep re-arms this page in a drain loop until a project is fully cleared
+ * (see SWEEP_MAX_DRAIN_ITERATIONS) — so this is a per-round page size, NOT a
+ * per-run cap. The DO clamps the accepted value to [1, 500].
+ *
+ * Kept modest (well under the DO clamp ceiling) so a single drain round can
+ * never itself approach the Workers subrequest cap: each key costs
+ * SWEEP_SUBREQUESTS_PER_KEY subrequests, so one round is at most
+ * page * SWEEP_SUBREQUESTS_PER_KEY (150 * 3 = 450) — leaving the
+ * per-invocation bound (SWEEP_SUBREQUEST_BUDGET) as the real limiter.
  */
-export const SWEEP_BATCH_SIZE = 500;
+export const SWEEP_DRAIN_PAGE_SIZE = 150;
+
+/**
+ * Candidate cap for the artifact searchable-pointers repair scan
+ * (routes/artifacts.ts). This was historically coupled to the sweep batch
+ * constant; it is now its own constant so the two evolve independently. Keep
+ * at 100 unless the repair scan specifically needs a wider window.
+ */
+export const ARTIFACT_REPAIR_SCAN_LIMIT = 100;
 
 /**
  * Wall-clock budget for a single sweep run, in milliseconds. When exceeded, the
@@ -53,11 +66,39 @@ export const SWEEP_BATCH_SIZE = 500;
 export const SWEEP_TIME_BUDGET_MS = 25_000;
 
 /**
+ * Subrequests consumed per expired artifact key during the drain:
+ *   1. POST /artifact/tombstone   (DO fetch)
+ *   2. r2.delete                  (R2 binding call)
+ *   3. POST /artifact/confirm-blob-deleted (DO fetch)
+ * A failed delete adds a retry, so this is the nominal (not worst-case) cost;
+ * the budget ceiling below carries headroom to absorb retries and per-project
+ * overhead (/sweep, /journal/archive, /search-drift, reconcile).
+ */
+export const SWEEP_SUBREQUESTS_PER_KEY = 3;
+
+/**
+ * Per-Worker-invocation subrequest budget for the sweep. Cloudflare caps
+ * subrequests at 1000 PER INVOCATION (not per round, not per project) — and a
+ * cron sweep is one invocation that fans out across every project and every
+ * drain round. Exceeding the cap makes the runtime terminate the invocation
+ * mid-run, so the drain must stop well before 1000.
+ *
+ * 800 leaves ~200 subrequests of headroom for delete-retries, per-project
+ * journal/drift/reconcile overhead, and the global session-cleanup call. When
+ * the running counter would cross this ceiling the run stops cleanly and
+ * records a resume point; the NEXT cron run continues the backlog. Draining a
+ * large backlog across multiple daily runs is expected and correct.
+ */
+export const SWEEP_SUBREQUEST_BUDGET = 800;
+
+/**
  * Safety clamp on the per-project expired-artifact drain loop. Each round
- * tombstones up to SWEEP_BATCH_SIZE keys (removing them from the next round's
- * candidate set), so a project of any realistic size drains in a handful of
- * rounds. This bound prevents an unbounded loop if a DO ever returns a full
- * batch without the candidate set shrinking (e.g. a tombstone-path bug).
+ * tombstones up to SWEEP_DRAIN_PAGE_SIZE keys (removing them from the next
+ * round's candidate set), so a project of any realistic size drains in a
+ * handful of rounds. This bound prevents an unbounded loop if a DO ever
+ * returns a full page without the candidate set shrinking (e.g. a
+ * tombstone-path bug). Hitting it marks ONLY that project degraded — it does
+ * NOT abort the run for sibling projects.
  */
 export const SWEEP_MAX_DRAIN_ITERATIONS = 50;
 

@@ -21,7 +21,7 @@ import {
 import { Hono } from "hono";
 import TOML from "smol-toml";
 import { ZodError, z } from "zod";
-import { SWEEP_BATCH_SIZE } from "../config";
+import { ARTIFACT_REPAIR_SCAN_LIMIT } from "../config";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import {
@@ -1203,7 +1203,7 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     "/artifact/searchable-pointers",
     "GET",
     undefined,
-    { limit: String(SWEEP_BATCH_SIZE) },
+    { limit: String(ARTIFACT_REPAIR_SCAN_LIMIT) },
     analyticsCtxFrom(c),
   );
 

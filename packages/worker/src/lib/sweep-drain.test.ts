@@ -69,8 +69,20 @@ interface ProjectScript {
   journalEvents?: JournalEvent[];
   /** Drift findings returned by /artifact/search-drift. */
   driftFindings?: Array<{ check: string; count: number; status: string }>;
-  /** When set, the named endpoint throws to exercise per-project isolation. */
-  failOn?: "sweep" | "archive" | "archive-r2" | "drift" | "tombstone";
+  /**
+   * Fault injection:
+   *   sweep/archive/drift/tombstone — that DO endpoint throws (isolation tests)
+   *   archive-r2                    — the R2 journal put throws
+   *   tombstone-noop                — tombstone returns ok but does NOT remove
+   *     the key, so /sweep keeps returning a full page → drain clamp trips
+   */
+  failOn?:
+    | "sweep"
+    | "archive"
+    | "archive-r2"
+    | "drift"
+    | "tombstone"
+    | "tombstone-noop";
 }
 
 /**
@@ -85,6 +97,11 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
   // Per-project list of every R2 put key in order (to catch overwrites).
   const r2PutOrder = new Map<string, string[]>();
   const archiveConfirms = new Map<string, number[]>(); // projectId → throughSeqs
+
+  // Real-subrequest meter: every DO fetch and every R2 op counts as one
+  // subrequest, mirroring the Cloudflare per-invocation cap. Tests assert this
+  // never crosses 1000 for a large backlog.
+  const meter = { subrequests: 0 };
 
   function r2Put(key: string, body: string) {
     // key format: journal-archive/<projectId>/<...>
@@ -102,6 +119,7 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
 
   const ARTIFACTS = {
     put: vi.fn(async (key: string, body: string) => {
+      meter.subrequests++;
       // A project flagged `archive-r2` fails its R2 journal write, exercising
       // the "must not confirm/delete on a failed put" branch.
       const projectId = key.split("/")[1] ?? "_";
@@ -111,6 +129,7 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
       r2Put(key, body);
     }),
     delete: vi.fn(async () => {
+      meter.subrequests++;
       // R2 blob delete — no-op for the drain accounting.
     }),
   } as unknown as R2Bucket;
@@ -119,6 +138,7 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
     const script = scripts[projectId];
     return {
       fetch: vi.fn(async (req: Request | string, _init?: RequestInit) => {
+        meter.subrequests++;
         const url = typeof req === "string" ? req : req.url;
         const path = new URL(url).pathname;
 
@@ -136,11 +156,15 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
         if (path === "/artifact/tombstone") {
           if (script.failOn === "tombstone") throw new Error("tombstone boom");
           const body = JSON.parse(_init?.body as string) as { r2_key: string };
-          // Tombstoning removes the key from the live expired set, so the next
-          // /sweep call returns fewer keys — the drain terminates.
-          script.expiredKeys = script.expiredKeys.filter(
-            (k) => k !== body.r2_key,
-          );
+          // Normally tombstoning removes the key from the live expired set, so
+          // the next /sweep returns fewer keys and the drain terminates. The
+          // `tombstone-noop` fault skips removal, so the candidate set never
+          // shrinks → the drain hits its iteration clamp.
+          if (script.failOn !== "tombstone-noop") {
+            script.expiredKeys = script.expiredKeys.filter(
+              (k) => k !== body.r2_key,
+            );
+          }
           return Response.json({ ok: true });
         }
 
@@ -221,7 +245,15 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
     scripts[projectId].journalEvents = events;
   }
 
-  return { env, r2Puts, r2PutOrder, archiveConfirms, ARTIFACTS, reseedJournal };
+  return {
+    env,
+    r2Puts,
+    r2PutOrder,
+    archiveConfirms,
+    ARTIFACTS,
+    reseedJournal,
+    meter,
+  };
 }
 
 function evt(seq: number, t: number): JournalEvent {
@@ -246,18 +278,24 @@ const JAN_2025 = Date.UTC(2025, 0, 15);
 // ---------------------------------------------------------------------------
 
 describe("runSweep — drain loop", () => {
-  it("fully drains a project with more than batchSize expired artifacts", async () => {
-    // 250 expired keys, batchSize 100 → needs 3 /sweep calls (100, 100, 50).
+  it("fully drains a project with more than one page of expired artifacts", async () => {
+    // 250 expired keys, page size 100 → needs 3 /sweep rounds (100, 100, 50).
+    // A generous subrequest budget keeps this test focused on DRAIN, not the cap.
     const keys = Array.from({ length: 250 }, (_, i) => `produced/p1/k${i}.bin`);
     const { env } = makeWorld({ p1: { expiredKeys: [...keys] } });
 
-    const summary = await runSweep(env, { projects: [{ projectId: "p1" }] });
+    const summary = await runSweep(env, {
+      projects: [{ projectId: "p1" }],
+      drainPageSize: 100,
+      subrequestBudget: 10_000,
+    });
 
     expect(summary.artifactsExpired).toBe(250);
     const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
     expect(p1).toBeDefined();
     expect(p1?.expired).toBe(250);
     expect(p1?.remaining).toBe(0);
+    expect(p1?.truncated).toBe(false);
     expect(p1?.status).toBe("ok");
   });
 
@@ -267,7 +305,7 @@ describe("runSweep — drain loop", () => {
 
     const summary = await runSweep(env, {
       projects: [{ projectId: "p1" }],
-      batchSize: 100,
+      drainPageSize: 100,
     });
 
     const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
@@ -443,6 +481,7 @@ describe("runSweep — wall-clock budget", () => {
     // steps were skipped (not run past the budget).
     const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
     expect(p1?.remaining).toBeGreaterThan(0);
+    expect(p1?.truncated).toBe(true);
     expect(p1?.archive).toBe("skipped");
     expect(p1?.drift).toBe("skipped");
   });
@@ -458,5 +497,189 @@ describe("runSweep — wall-clock budget", () => {
     });
 
     expect(summary.resumePoint).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (e) Per-invocation subrequest budget (Cloudflare 1000-subrequest cap)
+// ---------------------------------------------------------------------------
+
+describe("runSweep — subrequest budget", () => {
+  it("stops at the subrequest budget for a large backlog and records a resume point", async () => {
+    // 5000 expired keys would cost ~15000 subrequests if fully drained — far
+    // over the 1000 cap. The run must stop at the budget and resume next time.
+    const keys = Array.from(
+      { length: 5000 },
+      (_, i) => `produced/p1/k${i}.bin`,
+    );
+    const world = makeWorld({ p1: { expiredKeys: [...keys] } });
+
+    const summary = await runSweep(world.env, {
+      projects: [{ projectId: "p1" }],
+      subrequestBudget: 800,
+    });
+
+    // Stopped on the subrequest budget, with a resume frontier on p1.
+    expect(summary.resumePoint).not.toBeNull();
+    expect(summary.resumePoint?.projectId).toBe("p1");
+    expect(summary.resumePoint?.phase).toBe("subrequest-budget");
+
+    const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
+    expect(p1?.truncated).toBe(true);
+    expect(p1?.remaining).toBeGreaterThan(0);
+    // It made real progress (drained some) before stopping.
+    expect(p1?.expired).toBeGreaterThan(0);
+
+    // CRITICAL: actual subrequests issued never crossed the Cloudflare cap.
+    expect(world.meter.subrequests).toBeLessThanOrEqual(1000);
+    // And stayed within the configured ceiling (checks are pre-increment).
+    expect(world.meter.subrequests).toBeLessThanOrEqual(800);
+  });
+
+  it("counts subrequests ACROSS projects, not per-project", async () => {
+    // Two projects each with a big backlog; the budget is shared, so the second
+    // project must inherit the spent budget and not get a fresh 800.
+    const mk = (p: string) =>
+      Array.from({ length: 2000 }, (_, i) => `produced/${p}/k${i}.bin`);
+    const world = makeWorld({
+      p1: { expiredKeys: mk("p1") },
+      p2: { expiredKeys: mk("p2") },
+    });
+
+    const summary = await runSweep(world.env, {
+      projects: [{ projectId: "p1" }, { projectId: "p2" }],
+      subrequestBudget: 800,
+    });
+
+    // The shared cap was hit inside p1, so p2 is never started (resume on p1).
+    expect(summary.resumePoint?.projectId).toBe("p1");
+    expect(world.meter.subrequests).toBeLessThanOrEqual(800);
+    // p2 did not run at all.
+    expect(
+      summary.projectStatuses.find((p) => p.projectId === "p2"),
+    ).toBeUndefined();
+  });
+
+  it("drains a backlog larger than one invocation across multiple runs", async () => {
+    // 400 keys, budget 300 subrequests (~100 keys/run after overhead). Run the
+    // sweep repeatedly against the SAME world until the backlog is cleared.
+    const keys = Array.from({ length: 400 }, (_, i) => `produced/p1/k${i}.bin`);
+    const world = makeWorld({ p1: { expiredKeys: [...keys] } });
+
+    let runs = 0;
+    let totalExpired = 0;
+    let lastSummary = await runSweep(world.env, {
+      projects: [{ projectId: "p1" }],
+      subrequestBudget: 300,
+      drainPageSize: 50,
+    });
+    runs++;
+    totalExpired +=
+      lastSummary.projectStatuses.find((p) => p.projectId === "p1")?.expired ??
+      0;
+
+    // Keep running until a run reports no resume point (backlog cleared).
+    while (lastSummary.resumePoint !== null && runs < 20) {
+      world.meter.subrequests = 0; // each run is a fresh invocation
+      lastSummary = await runSweep(world.env, {
+        projects: [{ projectId: "p1" }],
+        subrequestBudget: 300,
+        drainPageSize: 50,
+      });
+      runs++;
+      totalExpired +=
+        lastSummary.projectStatuses.find((p) => p.projectId === "p1")
+          ?.expired ?? 0;
+      // Every single invocation stayed under the cap.
+      expect(world.meter.subrequests).toBeLessThanOrEqual(300);
+    }
+
+    // Backlog fully drained across multiple runs, each under the cap.
+    expect(totalExpired).toBe(400);
+    expect(lastSummary.resumePoint).toBeNull();
+    expect(runs).toBeGreaterThan(1); // it genuinely took several invocations
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (f) Iteration-clamp isolation (degrades the project, does NOT abort the run)
+// ---------------------------------------------------------------------------
+
+describe("runSweep — drain iteration clamp", () => {
+  it("marks only the clamped project degraded and continues to siblings", async () => {
+    // p1's tombstone is a no-op, so /sweep keeps returning a full page forever
+    // → the iteration clamp trips. p2 is healthy and must still complete.
+    const fullPage = Array.from(
+      { length: 150 },
+      (_, i) => `produced/p1/k${i}.bin`,
+    );
+    const { env } = makeWorld({
+      p1: { expiredKeys: [...fullPage], failOn: "tombstone-noop" },
+      p2: { expiredKeys: ["produced/p2/a.bin"] },
+    });
+
+    const summary = await runSweep(env, {
+      projects: [{ projectId: "p1" }, { projectId: "p2" }],
+      drainPageSize: 150,
+      subrequestBudget: 100_000, // ensure the CLAMP trips, not the budget
+    });
+
+    const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
+    expect(p1?.status).toBe("degraded");
+    expect(p1?.sweep).toBe("error");
+    expect(p1?.truncated).toBe(true);
+
+    // The clamp must NOT set a run-aborting resume point.
+    expect(summary.resumePoint).toBeNull();
+
+    // p2 still ran to completion despite p1's clamp.
+    const p2 = summary.projectStatuses.find((p) => p.projectId === "p2");
+    expect(p2?.status).toBe("ok");
+    expect(p2?.expired).toBe(1);
+    expect(summary.projectStatuses).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (g) Test edges: drift reconcile + zero-work no-op
+// ---------------------------------------------------------------------------
+
+describe("runSweep — drift and no-op edges", () => {
+  it("reconciles a project whose drift findings exceed the threshold", async () => {
+    const { env } = makeWorld({
+      p1: {
+        expiredKeys: [],
+        driftFindings: [{ check: "orphan_docs", count: 25, status: "fail" }],
+      },
+    });
+
+    const summary = await runSweep(env, { projects: [{ projectId: "p1" }] });
+
+    expect(summary.driftChecksRun).toBe(1);
+    expect(summary.driftReconciled).toBe(1);
+    const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
+    expect(p1?.status).toBe("ok");
+    expect(p1?.drift).toBe("ok");
+  });
+
+  it("handles a zero-work project as a clean no-op", async () => {
+    // No expired keys, no journal events, no drift findings.
+    const { env } = makeWorld({ p1: { expiredKeys: [] } });
+
+    const summary = await runSweep(env, { projects: [{ projectId: "p1" }] });
+
+    const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
+    expect(p1?.status).toBe("ok");
+    expect(p1?.expired).toBe(0);
+    expect(p1?.remaining).toBe(0);
+    expect(p1?.truncated).toBe(false);
+    expect(p1?.sweep).toBe("ok");
+    expect(p1?.archive).toBe("ok"); // no events → clean no-op, still "ok"
+    expect(p1?.drift).toBe("ok");
+    expect(summary.projectsSwept).toBe(1);
+    expect(summary.projectsDegraded).toBe(0);
+    expect(summary.resumePoint).toBeNull();
+    expect(summary.artifactsExpired).toBe(0);
+    expect(summary.journalEventsArchived).toBe(0);
   });
 });
