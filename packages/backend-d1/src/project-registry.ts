@@ -29,6 +29,31 @@ export class D1ProjectRegistry {
     };
   }
 
+  /**
+   * Like {@link get}, but matches archived projects too. Used by cross-project
+   * admin paths (e.g. destroy) that must reach archived projects, which the
+   * normal {@link get} filters out. Returns the same shape as {@link get}.
+   */
+  async getIncludingArchived(
+    projectId: string,
+  ): Promise<{ displayName: string; cloudflareAccountId: string } | null> {
+    const rows = await this.drizzle
+      .select({
+        displayName: projects.display_name,
+        cloudflareAccountId: projects.cloudflare_account_id,
+      })
+      .from(projects)
+      .where(eq(projects.project_id, projectId))
+      .limit(1);
+
+    if (!rows[0]) return null;
+
+    return {
+      displayName: rows[0].displayName ?? "",
+      cloudflareAccountId: rows[0].cloudflareAccountId,
+    };
+  }
+
   async listAll(): Promise<{ projectId: string }[]> {
     const rows = await this.drizzle
       .select({ projectId: projects.project_id })
