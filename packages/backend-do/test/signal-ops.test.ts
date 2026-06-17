@@ -197,6 +197,35 @@ describe("signal-ops", () => {
       ).toBe(true);
       expect(signalOps.inbox(db, "machine-B", now + 2000)).toHaveLength(0);
     });
+
+    it("a second ack is a no-op: the original acked_at timestamp is preserved", () => {
+      const { db, sqlite } = createTestDb();
+      const now = 1000000;
+      const result = signalOps.send(
+        db,
+        { target: "machine-B", kind: "info", created_by: "machine-A" },
+        now,
+      );
+
+      // First ack stamps acked_at at now + 1000.
+      signalOps.ack(db, result.id, "machine-B", now + 1000);
+      const firstAckedAt = (
+        sqlite
+          .prepare("SELECT acked_at FROM signals WHERE id = ?")
+          .get(result.id) as { acked_at: number }
+      ).acked_at;
+      expect(firstAckedAt).toBe(now + 1000);
+
+      // A later ack must NOT re-stamp acked_at — the WHERE acked_at IS NULL guard
+      // makes it a true no-op so a concurrent double-ack cannot clobber the first.
+      signalOps.ack(db, result.id, "machine-B", now + 5000);
+      const secondAckedAt = (
+        sqlite
+          .prepare("SELECT acked_at FROM signals WHERE id = ?")
+          .get(result.id) as { acked_at: number }
+      ).acked_at;
+      expect(secondAckedAt).toBe(now + 1000);
+    });
   });
 });
 
