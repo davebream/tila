@@ -139,6 +139,34 @@ export function listJournal(
 }
 
 /**
+ * Compute the archive-range indicator for a journal read, given the requested
+ * cursor and the current archival watermark.
+ *
+ * `archived` is true only when a cursor (`after_seq`) is supplied AND it falls
+ * below the archival watermark — i.e. the requested range was archived to R2 and
+ * deleted from DO SQLite, so an empty `listJournal` result means "archived", not
+ * "caught up". Recent `{limit:N}` reads (no cursor) are never flagged archived.
+ *
+ * `lastArchivedSeq` echoes the watermark (or null when no archival has run) so a
+ * client knows where the archived boundary sits.
+ *
+ * This is a pure helper so the route layer can surface `{ archived, lastArchivedSeq }`
+ * as a sibling field on its response envelope without changing `listJournal`'s
+ * array return type.
+ */
+export function journalArchiveState(
+  afterSeq: number | undefined,
+  watermark: { lastArchivedSeq: number } | null | undefined,
+): { archived: boolean; lastArchivedSeq: number | null } {
+  if (!watermark) {
+    return { archived: false, lastArchivedSeq: null };
+  }
+  const archived =
+    afterSeq !== undefined && afterSeq < watermark.lastArchivedSeq;
+  return { archived, lastArchivedSeq: watermark.lastArchivedSeq };
+}
+
+/**
  * Return aggregate journal statistics: total row count and max sequence number.
  */
 export function journalStats(
