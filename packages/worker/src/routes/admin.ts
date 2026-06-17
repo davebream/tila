@@ -1,11 +1,10 @@
-import { D1RevokedJtiStore } from "@tila/backend-d1";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import { archiveJournal, revokeSession } from "../lib/admin-ops";
 import { destroyProjectResources } from "../lib/destroy-project";
 import { forwardToDO } from "../lib/do-forward";
-import { revokeJtiInCache } from "../middleware/auth";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
 
@@ -35,62 +34,6 @@ export const requireD1Token: MiddlewareHandler<AdminEnv> = async (c, next) => {
   return next();
 };
 
-interface JournalEvent {
-  seq: number;
-  t: number;
-  kind: string;
-  resource: string;
-  actor: string;
-  token_id: string | null;
-  fence: number | null;
-  data: Record<string, unknown>;
-  source: string | null;
-  source_version: string | null;
-}
-
-interface ArchiveResponse {
-  ok: boolean;
-  events: JournalEvent[];
-  throughSeq: number;
-  count: number;
-}
-
-interface ConfirmResponse {
-  ok: boolean;
-  watermark: { lastArchivedSeq: number; archivedAt: number } | null;
-}
-
-/**
- * Write journal events to R2 as JSONL files grouped by year/month.
- * Key format: journal-archive/<projectId>/<year>/<month>.jsonl
- */
-async function writeJournalArchiveToR2(
-  r2: R2Bucket,
-  events: JournalEvent[],
-  projectId: string,
-): Promise<void> {
-  // Group events by year/month based on their timestamp
-  const groups = new Map<string, JournalEvent[]>();
-  for (const event of events) {
-    const d = new Date(event.t);
-    const year = d.getUTCFullYear();
-    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const key = `${year}/${month}`;
-    const group = groups.get(key);
-    if (group) {
-      group.push(event);
-    } else {
-      groups.set(key, [event]);
-    }
-  }
-
-  for (const [yearMonth, groupEvents] of groups) {
-    const r2Key = `journal-archive/${projectId}/${yearMonth}.jsonl`;
-    const jsonl = groupEvents.map((e) => JSON.stringify(e)).join("\n");
-    await r2.put(r2Key, jsonl);
-  }
-}
-
 export const admin = new Hono<AdminEnv>();
 const RevokeSessionRequestSchema = z.object({
   jti: z.string().uuid().max(64),
@@ -108,81 +51,8 @@ admin.post(
   async (c) => {
     const stub = c.get("doStub");
     const projectId = c.get("projectId");
-
-    // Step 1: Get archivable events from the DO
-    const archiveRes = await forwardToDO(stub, "/journal/archive", "POST");
-    if (!archiveRes.ok) {
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "DO_ERROR",
-            message: "Failed to fetch archivable events",
-          },
-        },
-        502,
-      );
-    }
-
-    const archiveData = (await archiveRes.json()) as ArchiveResponse;
-
-    // Step 2: If nothing to archive, return early
-    if (archiveData.count === 0) {
-      return c.json({ ok: true, archived: 0 });
-    }
-
-    // Step 3: Write events to R2 grouped by year/month
-    try {
-      await writeJournalArchiveToR2(
-        c.env.ARTIFACTS,
-        archiveData.events,
-        projectId,
-      );
-    } catch (err) {
-      console.error(`[archive] R2 write failed for project ${projectId}:`, err);
-      return c.json(
-        {
-          ok: false,
-          error: { code: "R2_ERROR", message: "Failed to write archive to R2" },
-        },
-        502,
-      );
-    }
-
-    // Step 4: Confirm archival on DO (watermark advances + rows deleted)
-    const confirmRes = await forwardToDO(
-      stub,
-      "/journal/archive/confirm",
-      "POST",
-      {
-        throughSeq: archiveData.throughSeq,
-      },
-    );
-
-    if (!confirmRes.ok) {
-      console.error(
-        `[archive] confirm failed for project ${projectId}, R2 already written`,
-      );
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "CONFIRM_ERROR",
-            message: "R2 write succeeded but DO confirm failed",
-          },
-        },
-        502,
-      );
-    }
-
-    const confirmData = (await confirmRes.json()) as ConfirmResponse;
-
-    return c.json({
-      ok: true,
-      archived: archiveData.count,
-      throughSeq: archiveData.throughSeq,
-      watermark: confirmData.watermark,
-    });
+    const result = await archiveJournal(c.env, stub, projectId);
+    return c.json(result.body, result.status as ContentfulStatusCode);
   },
 );
 
@@ -275,13 +145,7 @@ admin.post(
     const { jti } = parsed.data;
     const projectId = c.get("projectId") ?? "";
 
-    // 1. Persist to D1
-    const store = new D1RevokedJtiStore(c.env.DB);
-    await store.revoke(jti, projectId);
-
-    // 2. Immediately invalidate in the revoking isolate's cache
-    revokeJtiInCache(jti);
-
-    return c.json({ ok: true, jti, revoked_at: Date.now() });
+    const result = await revokeSession(c.env, jti, projectId);
+    return c.json(result);
   },
 );
