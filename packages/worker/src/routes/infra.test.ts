@@ -72,7 +72,7 @@ function destroyReq(
   headers: Record<string, string> = {},
 ) {
   return app.request(
-    `/_internal/projects/${projectId}/destroy`,
+    `/_internal/admin/projects/${projectId}/destroy`,
     { method: "POST", headers },
     env as Env,
   );
@@ -211,7 +211,7 @@ describe("infra destroy route", () => {
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
 
-  it("writes an audit datapoint tagged infra_destroy on a successful destroy", async () => {
+  it("writes an audit datapoint tagged infra_admin on a successful destroy", async () => {
     const writeDataPoint = vi.fn();
     const app = createApp();
     const env = makeEnv({
@@ -233,9 +233,35 @@ describe("infra destroy route", () => {
       blobs: string[];
       doubles: number[];
     };
-    expect(arg.blobs).toContain("infra_destroy");
+    expect(arg.blobs).toContain("infra_admin");
+    expect(arg.blobs).toContain("destroyed");
     expect(arg.blobs).toContain("proj-target");
     expect(arg.doubles).toContain(200);
+  });
+
+  it("destroys an ARCHIVED project when the guard runs with includeArchived", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
+    // The default registry lookup filters archived (null), but the
+    // includeArchived guard reaches it via getIncludingArchived.
+    getMock.mockResolvedValue(null);
+    getIncludingArchivedMock.mockResolvedValue({
+      displayName: "Archived",
+      cloudflareAccountId: "acc",
+    });
+    listAllIncludingArchivedMock.mockResolvedValue([
+      { projectId: "proj-archived" },
+    ]);
+
+    const res = await destroyReq(app, "proj-archived", env, {
+      Authorization: "Bearer s3cret-infra-token",
+      "X-Confirm-Slug": "proj-archived",
+    });
+
+    expect(res.status).toBe(200);
+    expect(getIncludingArchivedMock).toHaveBeenCalledWith("proj-archived");
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
   });
 
   it("writes an audit datapoint when a bearer is rejected", async () => {
@@ -253,7 +279,7 @@ describe("infra destroy route", () => {
     expect(res.status).toBe(403);
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
-    expect(arg.blobs).toContain("infra_destroy");
+    expect(arg.blobs).toContain("infra_admin");
   });
 });
 
@@ -326,7 +352,7 @@ describe("requireInfraPrincipal middleware", () => {
     expect(res.status).toBe(403);
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
-    expect(arg.blobs).toContain("infra_destroy");
+    expect(arg.blobs).toContain("infra_admin");
   });
 
   it("calls next() (handler runs) when the bearer matches", async () => {

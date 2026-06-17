@@ -2,7 +2,7 @@ import { D1ProjectRegistry } from "@tila/backend-d1";
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { emitInfraDestroyDatapoint } from "../lib/analytics";
+import { emitInfraAdminDatapoint } from "../lib/analytics";
 import { constantTimeSecretMatch } from "../lib/constant-time-compare";
 import { destroyProjectResources } from "../lib/destroy-project";
 import type { Env, HonoVariables } from "../types";
@@ -58,7 +58,7 @@ export const requireInfraPrincipal: MiddlewareHandler<AppEnv> = async (
     : undefined;
 
   if (!(await constantTimeSecretMatch(provided, secret, INFRA_COMPARE_KEY))) {
-    emitInfraDestroyDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+    emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
       projectId: c.req.param("projectId") ?? "",
       outcome: "auth-failure",
       statusCode: 403,
@@ -108,7 +108,7 @@ export function resolveTargetProject(opts?: {
 
     // Fail closed before any DO is materialized.
     if (!row) {
-      emitInfraDestroyDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+      emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
         projectId: id,
         outcome: "project-not-found",
         statusCode: 404,
@@ -142,39 +142,44 @@ export const infra = new Hono<AppEnv>();
 
 infra.use("/*", requireInfraPrincipal);
 
-infra.post("/projects/:projectId/destroy", async (c) => {
-  const projectId = c.req.param("projectId");
+infra.post(
+  "/admin/projects/:projectId/destroy",
+  resolveTargetProject({ includeArchived: true }),
+  async (c) => {
+    const projectId = c.req.param("projectId");
 
-  // Second-factor confirmation: the caller must echo the slug in X-Confirm-Slug.
-  // Forces the operator to name the irreversible target twice, defeating a
-  // fat-fingered or wrong-loop-variable destroy of the wrong project.
-  if (c.req.header("X-Confirm-Slug") !== projectId) {
-    emitInfraDestroyDatapoint(c.env.ANALYTICS, execCtxOf(c), {
-      projectId,
-      outcome: "confirm-slug-mismatch",
-      statusCode: 400,
-    });
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "CONFIRM_SLUG_MISMATCH",
-          message:
-            "X-Confirm-Slug header must match the project slug in the URL",
-          retryable: false,
+    // Second-factor confirmation: the caller must echo the slug in X-Confirm-Slug.
+    // Forces the operator to name the irreversible target twice, defeating a
+    // fat-fingered or wrong-loop-variable destroy of the wrong project.
+    if (c.req.header("X-Confirm-Slug") !== projectId) {
+      emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+        projectId,
+        outcome: "confirm-slug-mismatch",
+        statusCode: 400,
+      });
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "CONFIRM_SLUG_MISMATCH",
+            message:
+              "X-Confirm-Slug header must match the project slug in the URL",
+            retryable: false,
+          },
         },
-      },
-      400,
-    );
-  }
+        400,
+      );
+    }
 
-  const doId = c.env.PROJECT.idFromName(projectId);
-  const stub = c.env.PROJECT.get(doId);
-  const result = await destroyProjectResources(c.env, stub, projectId);
-  emitInfraDestroyDatapoint(c.env.ANALYTICS, execCtxOf(c), {
-    projectId,
-    outcome: result.status === 200 ? "destroyed" : "destroy-failed",
-    statusCode: result.status,
-  });
-  return c.json(result.body, result.status as ContentfulStatusCode);
-});
+    // The DO stub was resolved by resolveTargetProject after confirming the
+    // project exists in the D1 registry, so no idFromName/get happens here.
+    const stub = c.get("doStub");
+    const result = await destroyProjectResources(c.env, stub, projectId);
+    emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+      projectId,
+      outcome: result.status === 200 ? "destroyed" : "destroy-failed",
+      statusCode: result.status,
+    });
+    return c.json(result.body, result.status as ContentfulStatusCode);
+  },
+);

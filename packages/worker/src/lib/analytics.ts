@@ -46,13 +46,13 @@ export function emitRequestDatapoint(
 }
 
 /**
- * Audit datapoint for the infra-owner destroy endpoint. Because that endpoint is
+ * Audit datapoint for the infra-owner admin endpoints. Because those endpoints are
  * authenticated by a SHARED secret (no per-actor identity), this is the only
  * forensic footprint in the Worker layer — so it is emitted on every
  * authenticated attempt, including rejections. `executionCtx` is optional: when
  * absent (e.g. unit tests) the write runs inline instead of via waitUntil.
  */
-export function emitInfraDestroyDatapoint(
+export function emitInfraAdminDatapoint(
   analytics: AnalyticsEngineDataset | undefined,
   ctx: ExecutionContext | undefined,
   fields: {
@@ -65,7 +65,7 @@ export function emitInfraDestroyDatapoint(
   try {
     const write = () =>
       analytics.writeDataPoint({
-        blobs: [fields.projectId, fields.outcome, "infra_destroy"],
+        blobs: [fields.projectId, fields.outcome, "infra_admin"],
         doubles: [fields.statusCode],
         indexes: [fields.projectId || "unknown"],
       });
