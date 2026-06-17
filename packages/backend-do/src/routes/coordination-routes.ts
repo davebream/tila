@@ -1,6 +1,7 @@
 import {
   type RequestOrigin,
   coordinationOps,
+  journalArchiveOps,
   journalOps,
   resolveEntityResource,
 } from "@tila/ops-sqlite";
@@ -221,14 +222,26 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     const after_seq = afterSeqParam ? Number(afterSeqParam) : undefined;
     const limitParam = c.req.query("limit");
     const limit = limitParam ? Number(limitParam) : undefined;
-    const events = journalOps.listJournal(db, {
-      resource,
-      kind,
-      source,
+    // Thread the archival watermark so a cursor below it yields an explicit
+    // "archived" indicator instead of an ambiguous empty list. Recent
+    // {limit:N} reads (no after_seq) are unaffected: archived stays false.
+    const watermark = journalArchiveOps.getArchiveWatermark(db);
+    const events = journalOps.listJournal(
+      db,
+      {
+        resource,
+        kind,
+        source,
+        after_seq,
+        limit,
+      },
+      watermark ?? undefined,
+    );
+    const { archived, lastArchivedSeq } = journalOps.journalArchiveState(
       after_seq,
-      limit,
-    });
-    return c.json({ ok: true, events });
+      watermark,
+    );
+    return c.json({ ok: true, events, archived, lastArchivedSeq });
   });
 
   return app;

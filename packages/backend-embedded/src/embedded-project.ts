@@ -344,6 +344,26 @@ export class EmbeddedProject
   }
 
   /**
+   * Fenced entity archive. Mirrors the DO `/entity/archive/:id` route: passes
+   * the caller-supplied `fence` straight to `entityOps.archive`, which validates
+   * it via `assertResourceFence` (requireLiveClaim) and throws a fence-conflict
+   * on a stale fence -- exactly like `updateWithFence`. Unlike `archive()`, this
+   * does NOT auto-acquire a claim; the caller owns the fence, so a stale-fence
+   * archive is REJECTED locally (parity with remote) instead of silently
+   * succeeding.
+   */
+  async archiveWithFence(id: string, fence: number): Promise<void> {
+    return this.retry(() =>
+      entityOps.archive(this.db, id, fence, {
+        actor: "local",
+        tokenId: null,
+        source: null,
+        sourceVersion: null,
+      }),
+    );
+  }
+
+  /**
    * Attach an artifact reference to a task. Mirrors the DO
    * `/entity/artifact-ref` route (entity-routes.ts ~534-604) guard-for-guard so
    * CLI/SDK/MCP get the SAME clean errors locally as remote:

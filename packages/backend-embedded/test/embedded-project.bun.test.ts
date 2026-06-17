@@ -241,6 +241,33 @@ describe("EmbeddedProject", () => {
       ).rejects.toThrow();
     });
 
+    it("archiveWithFence enforces the fence (stale fence throws)", async () => {
+      await project.create({
+        id: "fenced-archive",
+        type: "task",
+        data: { status: "open" },
+        created_by: "cli",
+      });
+      const acq = await project.acquire(
+        "task:fenced-archive",
+        "local",
+        "local",
+        "exclusive",
+        60000,
+      );
+
+      // Stale fence is rejected -- parity with the DO archive route and with
+      // updateWithFence (the entity must NOT be archived).
+      await expect(
+        project.archiveWithFence("fenced-archive", acq.fence - 1),
+      ).rejects.toThrow();
+      expect((await project.get("fenced-archive"))?.archived).toBe(0);
+
+      // Valid fence archives.
+      await project.archiveWithFence("fenced-archive", acq.fence);
+      expect((await project.get("fenced-archive"))?.archived).toBe(1);
+    });
+
     it("addArtifactRef / listArtifactRefs round-trip", async () => {
       await project.create({
         id: "withref",
