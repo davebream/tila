@@ -337,4 +337,38 @@ describe("exchangeGitHubToken", () => {
       exchangeGitHubToken("https://api.test", "proj-1", "ghp_fake"),
     ).rejects.toThrow(TilaApiError);
   });
+
+  it("passes an AbortSignal timeout to fetch (does not hang on a slow response)", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          session_token: "tila_s.test-fake-session-value", // gitleaks:allow
+          expires_at: 1700000000,
+          permission: "read",
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await exchangeGitHubToken("https://api.test", "proj-1", "ghp_fake");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.signal).toBeDefined();
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("rejects (rather than hanging) when the exchange request aborts on timeout", async () => {
+    // Simulate fetch aborting because the timeout signal fired on a hung response.
+    mockFetch.mockRejectedValueOnce(
+      new DOMException(
+        "The operation was aborted due to timeout",
+        "TimeoutError",
+      ),
+    );
+
+    await expect(
+      exchangeGitHubToken("https://api.test", "proj-1", "ghp_fake"),
+    ).rejects.toThrow(/Network error during GitHub token exchange/);
+  });
 });
