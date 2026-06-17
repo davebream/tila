@@ -108,6 +108,38 @@ describe("createTilaLocal — full local round-trip", () => {
     expect(got.record.value).toEqual({ body: "v2" });
   });
 
+  it("tasks.archive honors the caller fence (stale fence rejected, parity with remote)", async () => {
+    // Drive the local tasks adapter (the same surface createTila wires for
+    // backend:"local") so the adapter's archive fence-handling is exercised end
+    // to end, not just EmbeddedProject directly.
+    const tasks = buildLocalResources(local.project, local.artifacts).tasks;
+
+    await tasks.create("arch-1", "task", {
+      title: "to archive",
+      status: "open",
+    });
+    const acquired = await local.project.acquire(
+      "task:arch-1",
+      "machine-a",
+      "user-a",
+      "exclusive",
+      30_000,
+    );
+
+    // Stale fence is REJECTED -- the local adapter must not silently
+    // self-acquire a fresh fence (the bug this fix closes). Remote rejects the
+    // same way; the task must remain un-archived.
+    await expect(tasks.archive("arch-1", acquired.fence - 1)).rejects.toThrow();
+    const stillOpen = await local.project.get("arch-1");
+    expect(stillOpen?.archived).toBe(0);
+
+    // Valid fence archives.
+    const ok = await tasks.archive("arch-1", acquired.fence);
+    expect(ok.ok).toBe(true);
+    const archived = await local.project.get("arch-1");
+    expect(archived?.archived).toBe(1);
+  });
+
   it("persists across reopen (same db file, schema-identical)", async () => {
     await local.project.create({
       id: "persist-1",

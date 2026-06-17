@@ -177,8 +177,11 @@ function createLocalTaskMethods(project: EmbeddedProject) {
       return { ok: true, entity };
     },
 
-    async archive(id: string, _fence: number): Promise<ArchiveSuccessResponse> {
-      await project.archive(id);
+    async archive(id: string, fence: number): Promise<ArchiveSuccessResponse> {
+      // Honor the caller's fence (parity with remote `archive`): a stale fence
+      // is REJECTED, not silently self-acquired. Routes through
+      // `archiveWithFence` rather than the self-acquiring `archive()`.
+      await project.archiveWithFence(id, fence);
       return { ok: true };
     },
 
