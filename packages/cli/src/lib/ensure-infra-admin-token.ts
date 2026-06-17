@@ -20,8 +20,10 @@ export function ensureInfraAdminToken(
     return { token: generateRawToken(), generated: true };
   }
 
+  // Treat a blank/whitespace-only token as absent — same predicate as
+  // resolveInfraAdminToken, so the two helpers agree on "is a token present?".
   const existing = infraConfig?.infra_admin_token;
-  if (existing) {
+  if (existing && existing.trim().length > 0) {
     return { token: existing, generated: false };
   }
 
