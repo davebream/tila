@@ -57,6 +57,7 @@ export * as errorMap from "./error-map";
 export * as fenceOps from "./fence-ops";
 export * as searchReindexOps from "./search-reindex-ops";
 export * as storeCountsOps from "./store-counts-ops";
+export * as destroyOps from "./destroy-ops";
 export * as templateOps from "./template-ops";
 
 // Named type exports for downstream consumers

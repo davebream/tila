@@ -1,4 +1,4 @@
-import { artifactOps, storeCountsOps } from "@tila/ops-sqlite";
+import { artifactOps, destroyOps, storeCountsOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
@@ -24,18 +24,12 @@ export function createAdminRoutes(deps: RouterDeps): ProjectSubRouter {
   app.post("/admin/destroy", async (c) => {
     try {
       await deps.ctx.storage.deleteAlarm();
-      // Empty every domain table explicitly. We must NOT call ctx.storage.deleteAll():
-      // on a SQLite-backed DO it drops the SQL tables, which leaves the schema broken
-      // (migrations think they have already run) and corrupts the object. Deleting rows
-      // keeps the schema intact. defer_foreign_keys allows any delete order within the
-      // implicit transaction; deleting the *_search_docs base tables fires the FTS5
-      // cleanup triggers.
-      const rawSql = deps.ctx.storage.sql;
-      rawSql.exec("PRAGMA defer_foreign_keys = ON");
-      for (const table of storeCountsOps.DOMAIN_TABLE_NAMES) {
-        rawSql.exec(`DELETE FROM "${table}"`);
-      }
-      rawSql.exec("DELETE FROM _schema_history");
+      // Truncate every domain table (and _schema_history) via the ops module, so the
+      // raw-SQL destroy lives in @tila/ops-sqlite alongside the rest of the DB layer.
+      // We must NOT call ctx.storage.deleteAll(): on a SQLite-backed DO it drops the SQL
+      // tables, which leaves the schema broken (migrations think they have already run)
+      // and corrupts the object. Deleting rows keeps the schema intact.
+      destroyOps.truncateAllDomainTables(deps.ctx.storage.sql);
     } catch (err) {
       console.error("[admin/destroy] failed to clear DO state:", err);
       return c.json({ ok: false, error: { code: "destroy-failed" } }, 500);
