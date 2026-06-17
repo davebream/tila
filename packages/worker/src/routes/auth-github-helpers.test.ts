@@ -268,6 +268,29 @@ describe("call-site count assertions (C3 regression guard)", () => {
     expect(callSites).toBe(7);
   });
 
+  it("checkExchangeRateLimit is called at exactly 3 sites, with RATE_LIMITED defined once", async () => {
+    // The upfront rate-limit check was extracted from 3 byte-identical inline
+    // blocks (/exchange, /exchange-oidc, /app-config) into checkExchangeRateLimit.
+    // This guards against a future edit re-inlining a copy.
+    const { readFileSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const src = readFileSync(join(__dirname, "auth-github.ts"), "utf-8");
+
+    const callSites = (src.match(/await checkExchangeRateLimit\(/g) ?? [])
+      .length;
+    expect(callSites).toBe(3);
+
+    // The RATE_LIMITED 429 response should be authored exactly once (inside the
+    // helper); a count > 1 means a block was re-inlined into a route.
+    const rateLimitedLiterals = (src.match(/code: "RATE_LIMITED"/g) ?? [])
+      .length;
+    expect(rateLimitedLiterals).toBe(1);
+  });
+
   it("checkIdempotentExchange is called at exactly 3 sites in auth-github.ts", async () => {
     const { readFileSync } = await import("node:fs");
     const { join, dirname } = await import("node:path");

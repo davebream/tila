@@ -190,7 +190,10 @@ function getJtiFromCache(jti: string): boolean | null {
 }
 
 function isExpectedAudience(aud: unknown, expected: string): boolean {
-  if (aud === undefined) return true;
+  // Fail closed: an absent aud is not an expected audience. The session-token
+  // call site already guards `aud === undefined` separately, so this is
+  // defense-in-depth should a future caller drop that outer guard.
+  if (aud === undefined) return false;
   return Array.isArray(aud) ? aud.includes(expected) : aud === expected;
 }
 
@@ -530,8 +533,9 @@ export function createAuthMiddleware(
       }
 
       // Require aud to be present AND correct (mintSessionToken always sets
-      // aud="tila"). isExpectedAudience returns true for an absent aud, so the
-      // explicit undefined check closes that gap.
+      // aud="tila"). The explicit undefined check is kept as a belt-and-suspenders
+      // guard alongside isExpectedAudience, which now also fails closed on an
+      // absent aud.
       if (
         rawPayload.aud === undefined ||
         !isExpectedAudience(rawPayload.aud, "tila")

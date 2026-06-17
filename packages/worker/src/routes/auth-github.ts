@@ -13,7 +13,7 @@ import {
   OidcExchangeRequestSchema,
   SessionPermissionSchema,
 } from "@tila/schemas";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { SignJWT, importJWK, jwtVerify } from "jose";
 import { z } from "zod";
 import {
@@ -127,6 +127,58 @@ export async function recordExchangeFailure(
       // Analytics emission is never load-bearing
     }
   }
+}
+
+/**
+ * Upfront per-IP rate-limit guard shared by every exchange-family route
+ * (/exchange, /exchange-oidc, /app-config). Reads CF-Connecting-IP and checks
+ * the shared `exchange:${ip}` counter; the matching failure-recording side is
+ * `recordExchangeFailure`. Extracted from 3 byte-identical inline blocks.
+ *
+ * Fails open: a D1 error emits an analytics data point and returns null
+ * (request proceeds) rather than blocking legitimate traffic on a D1 blip.
+ *
+ * @param c - Hono context (DB + ANALYTICS bindings, request headers)
+ * @returns A 429 Response when the IP is over the threshold, else null.
+ */
+export async function checkExchangeRateLimit(
+  c: Context<AppEnv>,
+): Promise<Response | null> {
+  const ip = c.req.raw.headers.get("CF-Connecting-IP");
+  if (!ip) return null;
+  const rateLimitStore = new D1RateLimitStore(c.env.DB);
+  try {
+    const isLimited = await rateLimitStore.check(
+      `exchange:${ip}`,
+      RATE_LIMIT_MAX_FAILURES,
+      RATE_LIMIT_WINDOW_MS,
+    );
+    if (isLimited) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many failed exchange attempts",
+            retryable: true,
+          },
+        },
+        429,
+      );
+    }
+  } catch {
+    // Fail open
+    try {
+      c.env.ANALYTICS.writeDataPoint({
+        blobs: ["auth", "rate_limit_d1_error", "check"],
+        doubles: [1],
+        indexes: ["rate-limit"],
+      });
+    } catch {
+      // Analytics emission is never load-bearing
+    }
+  }
+  return null;
 }
 
 /**
@@ -429,40 +481,8 @@ export const authGithub = new Hono<AppEnv>();
 authGithub.post("/exchange", async (c) => {
   // Rate limit check (pre-auth, keyed by IP)
   const ip = c.req.raw.headers.get("CF-Connecting-IP");
-  if (ip) {
-    const rateLimitStore = new D1RateLimitStore(c.env.DB);
-    try {
-      const isLimited = await rateLimitStore.check(
-        `exchange:${ip}`,
-        RATE_LIMIT_MAX_FAILURES,
-        RATE_LIMIT_WINDOW_MS,
-      );
-      if (isLimited) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "RATE_LIMITED",
-              message: "Too many failed exchange attempts",
-              retryable: true,
-            },
-          },
-          429,
-        );
-      }
-    } catch {
-      // Fail open
-      try {
-        c.env.ANALYTICS.writeDataPoint({
-          blobs: ["auth", "rate_limit_d1_error", "check"],
-          doubles: [1],
-          indexes: ["rate-limit"],
-        });
-      } catch {
-        // Analytics emission is never load-bearing
-      }
-    }
-  }
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
 
   // Parse and validate body
   let body: unknown;
@@ -949,43 +969,11 @@ authGithub.post("/app-config", async (c) => {
   // SEC-5: this route is on the pre-auth router and does its own inline token
   // check, so it needs the same upfront IP rate-limit guard as /exchange.
   // Without it, an attacker could brute-force D1 API tokens here with no
-  // rate-limit consequence recorded (the failed-token branch below now calls
-  // recordExchangeFailure to feed this counter).
+  // rate-limit consequence recorded (the failed-token branch below calls
+  // recordExchangeFailure to feed the shared exchange:${ip} counter).
   const ip = c.req.raw.headers.get("CF-Connecting-IP");
-  if (ip) {
-    const rateLimitStore = new D1RateLimitStore(c.env.DB);
-    try {
-      const isLimited = await rateLimitStore.check(
-        `exchange:${ip}`,
-        RATE_LIMIT_MAX_FAILURES,
-        RATE_LIMIT_WINDOW_MS,
-      );
-      if (isLimited) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "RATE_LIMITED",
-              message: "Too many failed exchange attempts",
-              retryable: true,
-            },
-          },
-          429,
-        );
-      }
-    } catch {
-      // Fail open
-      try {
-        c.env.ANALYTICS.writeDataPoint({
-          blobs: ["auth", "rate_limit_d1_error", "check"],
-          doubles: [1],
-          indexes: ["rate-limit"],
-        });
-      } catch {
-        // Analytics emission is never load-bearing
-      }
-    }
-  }
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
 
   // Inline token auth check (this route is on the pre-auth router)
   const authHeader = c.req.header("Authorization");
@@ -1108,40 +1096,8 @@ authGithub.post("/app-config", async (c) => {
 authGithub.post("/exchange-oidc", async (c) => {
   // Rate limit check (pre-auth, keyed by IP)
   const ip = c.req.raw.headers.get("CF-Connecting-IP");
-  if (ip) {
-    const rateLimitStore = new D1RateLimitStore(c.env.DB);
-    try {
-      const isLimited = await rateLimitStore.check(
-        `exchange:${ip}`,
-        RATE_LIMIT_MAX_FAILURES,
-        RATE_LIMIT_WINDOW_MS,
-      );
-      if (isLimited) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "RATE_LIMITED",
-              message: "Too many failed exchange attempts",
-              retryable: true,
-            },
-          },
-          429,
-        );
-      }
-    } catch {
-      // Fail open
-      try {
-        c.env.ANALYTICS.writeDataPoint({
-          blobs: ["auth", "rate_limit_d1_error", "check"],
-          doubles: [1],
-          indexes: ["rate-limit"],
-        });
-      } catch {
-        // Analytics emission is never load-bearing
-      }
-    }
-  }
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
 
   // Parse and validate body
   let body: unknown;
