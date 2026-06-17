@@ -2,6 +2,7 @@ import { D1ProjectRegistry, D1SessionStore } from "@tila/backend-d1";
 import { R2ArtifactBackend } from "@tila/backend-r2";
 import {
   DRIFT_RECONCILE_THRESHOLD,
+  SWEEP_ANALYTICS_MAX_PROJECT_DATAPOINTS,
   SWEEP_DRAIN_PAGE_SIZE,
   SWEEP_DRIFT_MAX_SUBREQUESTS,
   SWEEP_MAX_DRAIN_ITERATIONS,
@@ -10,14 +11,19 @@ import {
   SWEEP_TIME_BUDGET_MS,
 } from "../config";
 import type { Env } from "../types";
-import { emitSweepProjectDatapoint } from "./analytics";
+import {
+  emitSweepProjectDatapoint,
+  emitSweepRollupDatapoint,
+} from "./analytics";
 import { sweepExpiredKey } from "./sweep-key";
 
 /**
- * Tracks subrequests issued across the whole invocation. Cloudflare caps
- * subrequests at 1000 PER INVOCATION; a cron sweep is one invocation fanning
- * out over every project and every drain round, so this counter is shared and
- * accumulates globally — never reset per project or per round.
+ * Tracks subrequests issued across the whole invocation. A cron sweep is one
+ * Worker invocation fanning out over every project and every drain round, so
+ * this counter is shared and accumulates globally — never reset per project or
+ * per round. The ceiling is a self-imposed throttle (see SWEEP_SUBREQUEST_BUDGET
+ * in config.ts) set well under the smallest plan's internal-services limit, not
+ * the platform cap itself.
  */
 interface SweepBudget {
   /** Subrequests issued so far this invocation. */
@@ -144,7 +150,8 @@ export async function runSweep(
   const drainPageSize = options.drainPageSize ?? SWEEP_DRAIN_PAGE_SIZE;
   const deadline = now() + timeBudgetMs;
   // Shared across ALL projects and ALL drain rounds — a cron sweep is a single
-  // Worker invocation and the subrequest cap is per-invocation.
+  // Worker invocation, so the self-imposed subrequest ceiling applies across the
+  // whole run (it mirrors the platform's per-invocation accounting).
   const budget: SweepBudget = {
     subrequests: 0,
     ceiling: options.subrequestBudget ?? SWEEP_SUBREQUEST_BUDGET,
@@ -167,6 +174,12 @@ export async function runSweep(
     projectStatuses: [],
     resumePoint: null,
   };
+
+  // Per-project Analytics datapoints emitted so far this run. Bounded to stay
+  // under the AE 250/invocation cap (see SWEEP_ANALYTICS_MAX_PROJECT_DATAPOINTS):
+  // degraded/truncated projects always emit; healthy ones emit only up to the
+  // cap; a single rollup datapoint is always emitted at the end.
+  let projectDatapointsEmitted = 0;
 
   // Session expiry cleanup (global, not per-project). One D1 subrequest.
   try {
@@ -216,16 +229,28 @@ export async function runSweep(
     // status + sub-step outcomes + counts. Structural only — no secret/token.
     // The cron path has no ExecutionContext, so this writes inline; it is
     // best-effort and undefined-safe (ANALYTICS may be unset in unit seams).
-    emitSweepProjectDatapoint(env.ANALYTICS, undefined, {
-      projectId: status.projectId,
-      status: status.status,
-      sweep: status.sweep,
-      archive: status.archive,
-      drift: status.drift,
-      expired: status.expired,
-      remaining: status.remaining,
-      truncated: status.truncated,
-    });
+    //
+    // AE caps writeDataPoint at 250/invocation, so on a large fleet we bound
+    // emission: ALWAYS emit operator-critical projects (degraded or truncated),
+    // but emit healthy ones only until the cap. Overflow healthy projects are
+    // still represented in the rollup datapoint below.
+    const operatorCritical = status.status !== "ok" || status.truncated;
+    if (
+      operatorCritical ||
+      projectDatapointsEmitted < SWEEP_ANALYTICS_MAX_PROJECT_DATAPOINTS
+    ) {
+      emitSweepProjectDatapoint(env.ANALYTICS, undefined, {
+        projectId: status.projectId,
+        status: status.status,
+        sweep: status.sweep,
+        archive: status.archive,
+        drift: status.drift,
+        expired: status.expired,
+        remaining: status.remaining,
+        truncated: status.truncated,
+      });
+      projectDatapointsEmitted++;
+    }
     if (status.status === "ok") {
       summary.projectsSwept++;
     } else {
@@ -240,6 +265,20 @@ export async function runSweep(
       break;
     }
   }
+
+  // Always emit ONE run-level rollup datapoint. Because the per-project stream
+  // is capped under the AE 250/invocation limit, this guarantees aggregate
+  // observability at any fleet size. `projectsEmitted` lets a consumer see how
+  // many per-project datapoints were actually written (vs total attempted).
+  emitSweepRollupDatapoint(env.ANALYTICS, undefined, {
+    projectsSwept: summary.projectsSwept,
+    projectsDegraded: summary.projectsDegraded,
+    artifactsExpired: summary.artifactsExpired,
+    journalEventsArchived: summary.journalEventsArchived,
+    driftReconciled: summary.driftReconciled,
+    projectsEmitted: projectDatapointsEmitted,
+    truncated: summary.resumePoint !== null,
+  });
 
   console.log("[sweep] completed:", JSON.stringify(summary));
   return summary;
@@ -439,6 +478,11 @@ async function drainExpiredArtifacts(args: {
           clampHit: false,
         };
       }
+      // sweepExpiredKey reports success by INCREMENTING summary.artifactsExpired
+      // (it doesn't return a per-call result), so we snapshot before/after and
+      // treat a positive delta as "this key was expired". This delta idiom keeps
+      // sweepExpiredKey's single side-effecting contract intact — do not replace
+      // it with a return value without also updating that function and its tests.
       const before = summary.artifactsExpired;
       await sweepExpiredKey(key, doStub, (k) => r2.delete(k), summary);
       budget.subrequests += SWEEP_SUBREQUESTS_PER_KEY;

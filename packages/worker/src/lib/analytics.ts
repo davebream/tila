@@ -160,6 +160,54 @@ export function emitSweepErrorDatapoint(
   }
 }
 
+/**
+ * Run-level ROLLUP sweep datapoint (Task 9 / PR17). Exactly one is emitted per
+ * sweep run, carrying aggregate totals from the SweepSummary. Because per-project
+ * datapoints are capped to stay under the Analytics Engine 250/invocation limit
+ * (see SWEEP_ANALYTICS_MAX_PROJECT_DATAPOINTS), this rollup guarantees that
+ * aggregate observability survives at ANY fleet size — even when the per-project
+ * stream is truncated. Indexed under the stable "sweep" key (AE allows 1 index
+ * per datapoint). Structural totals only — NEVER a secret/token or a project id.
+ * `executionCtx` optional (see emitSweepProjectDatapoint).
+ */
+export function emitSweepRollupDatapoint(
+  analytics: AnalyticsEngineDataset | undefined,
+  ctx: ExecutionContext | undefined,
+  fields: {
+    projectsSwept: number;
+    projectsDegraded: number;
+    artifactsExpired: number;
+    journalEventsArchived: number;
+    driftReconciled: number;
+    projectsEmitted: number;
+    truncated: boolean;
+  },
+): void {
+  if (!analytics) return;
+  try {
+    const write = () =>
+      analytics.writeDataPoint({
+        blobs: [fields.truncated ? "truncated" : "complete", "sweep_rollup"],
+        doubles: [
+          fields.projectsSwept,
+          fields.projectsDegraded,
+          fields.artifactsExpired,
+          fields.journalEventsArchived,
+          fields.driftReconciled,
+          fields.projectsEmitted,
+        ],
+        indexes: ["sweep"],
+      });
+    if (ctx) {
+      ctx.waitUntil(Promise.resolve(write()));
+    } else {
+      write();
+    }
+  } catch {
+    // Swallow -- emission is never load-bearing
+  }
+}
+
 export function emitDoOperationDatapoint(
   analytics: AnalyticsEngineDataset,
   ctx: ExecutionContext,

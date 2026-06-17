@@ -762,19 +762,21 @@ describe("runSweep — per-project Analytics", () => {
       projects: [{ projectId: "p1" }, { projectId: "p2" }],
     });
 
-    // One datapoint per project (2 projects attempted → 2 datapoints).
-    expect(world.writeDataPoint).toHaveBeenCalledTimes(2);
-
     const calls = world.writeDataPoint.mock.calls.map(
       (c) =>
         c[0] as { blobs?: unknown[]; doubles?: number[]; indexes?: unknown[] },
     );
+    // One per-project datapoint per attempted project (2 projects → 2), tagged
+    // "sweep_project". (A single "sweep_rollup" datapoint is also emitted; it is
+    // asserted separately below.)
+    const projectDps = calls.filter((c) => c.blobs?.includes("sweep_project"));
+    expect(projectDps).toHaveLength(2);
 
     // Each datapoint is tagged "sweep_project", carries the projectId and the
     // rollup status, and is indexed by projectId. Structural metadata only —
     // no secret/token is ever in the payload.
-    const p1Dp = calls.find((c) => c.blobs?.includes("p1"));
-    const p2Dp = calls.find((c) => c.blobs?.includes("p2"));
+    const p1Dp = projectDps.find((c) => c.blobs?.includes("p1"));
+    const p2Dp = projectDps.find((c) => c.blobs?.includes("p2"));
     expect(p1Dp).toBeDefined();
     expect(p2Dp).toBeDefined();
     expect(p1Dp?.blobs).toContain("sweep_project");
@@ -800,5 +802,69 @@ describe("runSweep — per-project Analytics", () => {
     await expect(
       runSweep(world.env, { projects: [{ projectId: "p1" }] }),
     ).resolves.toBeDefined();
+  });
+
+  it("always emits exactly one rollup datapoint carrying run totals", async () => {
+    const world = makeWorld({
+      p1: { expiredKeys: ["produced/p1/a.bin", "produced/p1/b.bin"] },
+      p2: { expiredKeys: ["produced/p2/a.bin"], failOn: "drift" }, // degraded
+    });
+
+    await runSweep(world.env, {
+      projects: [{ projectId: "p1" }, { projectId: "p2" }],
+    });
+
+    const calls = world.writeDataPoint.mock.calls.map(
+      (c) =>
+        c[0] as { blobs?: unknown[]; doubles?: number[]; indexes?: unknown[] },
+    );
+    const rollupDps = calls.filter((c) => c.blobs?.includes("sweep_rollup"));
+    // Exactly one rollup datapoint — aggregate observability for the whole run.
+    expect(rollupDps).toHaveLength(1);
+    const rollup = rollupDps[0];
+    // Indexed under a stable "sweep" key (1 index max per AE datapoint).
+    expect(rollup.indexes).toEqual(["sweep"]);
+    // Totals are carried as doubles: projectsSwept=1, projectsDegraded=1.
+    expect(rollup.doubles).toContain(1); // swept
+    // Structural only — no project ids / secrets in the rollup blobs.
+    expect(rollup.blobs).toContain("sweep_rollup");
+  });
+
+  it("bounds per-project datapoints for a large fleet but ALWAYS emits degraded ones + a rollup (AE 250/invocation cap)", async () => {
+    // Analytics Engine hard-caps at 250 writeDataPoint calls per invocation, so
+    // a >250-project fleet would silently lose metrics for the overflow. The
+    // sweep must: (1) cap healthy per-project emission, (2) ALWAYS emit for
+    // degraded/truncated projects, (3) ALWAYS emit one rollup. Build 260
+    // projects: 258 healthy + 2 degraded (drift fails) and assert all three.
+    const scripts: Record<string, ProjectScript> = {};
+    const projects: Array<{ projectId: string }> = [];
+    for (let i = 0; i < 258; i++) {
+      const id = `h${i}`;
+      scripts[id] = { expiredKeys: [] };
+      projects.push({ projectId: id });
+    }
+    for (const id of ["d0", "d1"]) {
+      scripts[id] = { expiredKeys: [], failOn: "drift" };
+      projects.push({ projectId: id });
+    }
+
+    const world = makeWorld(scripts);
+    await runSweep(world.env, { projects });
+
+    const calls = world.writeDataPoint.mock.calls.map(
+      (c) => c[0] as { blobs?: unknown[] },
+    );
+    const projectDps = calls.filter((c) => c.blobs?.includes("sweep_project"));
+    const rollupDps = calls.filter((c) => c.blobs?.includes("sweep_rollup"));
+
+    // Total writeDataPoint calls stay within the AE 250/invocation hard cap.
+    expect(world.writeDataPoint.mock.calls.length).toBeLessThanOrEqual(250);
+    // Per-project emission is bounded below the cap (it did NOT emit all 260).
+    expect(projectDps.length).toBeLessThan(260);
+    // Both degraded projects were emitted despite the cap (operator-critical).
+    expect(projectDps.some((c) => c.blobs?.includes("d0"))).toBe(true);
+    expect(projectDps.some((c) => c.blobs?.includes("d1"))).toBe(true);
+    // Aggregate observability always survives.
+    expect(rollupDps).toHaveLength(1);
   });
 });
