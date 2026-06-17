@@ -20,7 +20,7 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { ZodError } from "zod";
-import { jsonError } from "./responses";
+import { idempotencyFrom, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 const { checkRecordTypeDeclared, resolveCurrentSchema } = constraintOps;
@@ -244,6 +244,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         actor,
       },
       setProvenance,
+      idempotencyFrom(c),
     );
 
     if (canonicalArtifactKey !== null) {
@@ -385,6 +386,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         actor,
       },
       patchProvenance,
+      idempotencyFrom(c),
     );
 
     return c.json({
@@ -435,6 +437,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         actor,
       },
       archiveProvenance,
+      idempotencyFrom(c),
     );
 
     return c.json({
@@ -485,6 +488,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         actor,
       },
       unarchiveProvenance,
+      idempotencyFrom(c),
     );
 
     return c.json({

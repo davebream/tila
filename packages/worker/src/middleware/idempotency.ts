@@ -130,6 +130,15 @@ export function createIdempotencyMiddleware(deps?: {
       );
     }
 
+    // Expose the caller-scoped key + body hash so covered write routes can
+    // forward them to the DO, which dedups the fence-mutating write inside its
+    // own transaction (audit B1). This does NOT change the D1 fast-path store or
+    // the fail-closed behavior above — it only threads the already-computed
+    // values down to the DO so the cross-store crash window is closed at the
+    // source of truth.
+    c.set("idempotencyKey", key);
+    c.set("idempotencyHash", requestHash);
+
     // miss: run the handler OUTSIDE the store try/catch so a handler error never
     // triggers the fail-closed path or a re-run.
     await next();

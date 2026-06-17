@@ -1,4 +1,5 @@
 import { FenceError } from "@tila/core";
+import { DoIdempotencyConflictError } from "./do-idempotency-ops";
 import { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
 import {
   ClaimOwnershipError,
@@ -32,7 +33,8 @@ type ProjectErrorConstructor =
   | typeof RecordInvalidStateError
   | typeof RevisionNotFoundError
   | typeof EntityAlreadyExistsError
-  | typeof EntityNotFoundError;
+  | typeof EntityNotFoundError
+  | typeof DoIdempotencyConflictError;
 
 export type ProjectErrorResponse = {
   errorClass: ProjectErrorConstructor;
@@ -79,6 +81,13 @@ export const projectErrorResponses: ProjectErrorResponse[] = [
   { errorClass: RevisionNotFoundError, status: 404, code: "not-found" },
   { errorClass: EntityAlreadyExistsError, status: 409, code: "already-exists" },
   { errorClass: EntityNotFoundError, status: 404, code: "not-found" },
+  // Same Idempotency-Key reused with a different body — mirrors the worker
+  // idempotency middleware's 422 `idempotency-key-conflict`.
+  {
+    errorClass: DoIdempotencyConflictError,
+    status: 422,
+    code: "idempotency-key-conflict",
+  },
 ];
 
 export function mapProjectError(

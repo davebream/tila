@@ -2,6 +2,7 @@ import { assertFence } from "@tila/core";
 import type { Claim, Presence } from "@tila/schemas";
 import { eq, gt, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import {
   ClaimOwnershipError,
   FenceNotFoundError,
@@ -26,106 +27,118 @@ export function acquire(
   metadata?: Record<string, unknown>,
   now: number = Date.now(),
   origin?: RequestOrigin,
+  idempotency?: DoIdempotency<AcquireResult>,
 ): AcquireResult {
   return db.transaction((tx) => {
-    // Canonicalize entity resources to `<type>:<id>` at the write boundary.
-    // This ensures both the fence row and the claim row use the canonical form
-    // regardless of whether the caller passed a bare id or the typed form.
-    // Non-entity resources (records, arbitrary coordination keys) pass through
-    // unchanged (resolveEntityResource returns null for them).
-    const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
+    // Dedup the fence-bumping acquire inside this transaction (audit B1). Only a
+    // successful acquire is stored (shouldStore); a failed acquire must not be
+    // replayed as success. A replay returns the original fence, not a new bump.
+    return withDoIdempotency<AcquireResult>(
+      tx,
+      idempotency && { ...idempotency, shouldStore: (r) => r.acquired },
+      () => doAcquire(),
+    ).result;
 
-    const existing = tx
-      .select()
-      .from(schema.claims)
-      .where(eq(schema.claims.resource, canonicalResource))
-      .get();
+    function doAcquire(): AcquireResult {
+      // Canonicalize entity resources to `<type>:<id>` at the write boundary.
+      // This ensures both the fence row and the claim row use the canonical form
+      // regardless of whether the caller passed a bare id or the typed form.
+      // Non-entity resources (records, arbitrary coordination keys) pass through
+      // unchanged (resolveEntityResource returns null for them).
+      const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
 
-    if (existing && existing.expires_at > now) {
-      if (existing.machine === machine && existing.user === user) {
-        // Same-holder self-reacquire is treated as a RENEW, not a fresh acquire:
-        // we only extend expires_at and return the EXISTING fence unchanged. The
-        // fence does NOT bump here. Per docs/01-DECISIONS §2 the fence increments
-        // on each *acquire* to invalidate a prior holder — but re-acquiring a lease
-        // you already hold has no prior holder to fence out, so bumping would
-        // needlessly invalidate the caller's own in-flight fenced writes.
-        const expiresAt = now + ttlMs;
-        tx.update(schema.claims)
-          .set({ expires_at: expiresAt })
-          .where(eq(schema.claims.resource, canonicalResource))
-          .run();
+      const existing = tx
+        .select()
+        .from(schema.claims)
+        .where(eq(schema.claims.resource, canonicalResource))
+        .get();
 
-        return {
-          acquired: true,
-          fence: existing.fence,
+      if (existing && existing.expires_at > now) {
+        if (existing.machine === machine && existing.user === user) {
+          // Same-holder self-reacquire is treated as a RENEW, not a fresh acquire:
+          // we only extend expires_at and return the EXISTING fence unchanged. The
+          // fence does NOT bump here. Per docs/01-DECISIONS §2 the fence increments
+          // on each *acquire* to invalidate a prior holder — but re-acquiring a lease
+          // you already hold has no prior holder to fence out, so bumping would
+          // needlessly invalidate the caller's own in-flight fenced writes.
+          const expiresAt = now + ttlMs;
+          tx.update(schema.claims)
+            .set({ expires_at: expiresAt })
+            .where(eq(schema.claims.resource, canonicalResource))
+            .run();
+
+          return {
+            acquired: true,
+            fence: existing.fence,
+            expires_at: expiresAt,
+          };
+        }
+
+        if (
+          mode === "exclusive" &&
+          (existing.machine !== machine || existing.user !== user)
+        ) {
+          return {
+            acquired: false,
+            fence: existing.fence,
+            expires_at: 0,
+          };
+        }
+        if (mode === "owner" && existing.user !== user) {
+          return {
+            acquired: false,
+            fence: existing.fence,
+            expires_at: 0,
+          };
+        }
+      }
+
+      tx.run(
+        sql`INSERT INTO fences(resource, current_fence) VALUES(${canonicalResource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
+      );
+
+      const fenceRow = tx
+        .select()
+        .from(schema.fences)
+        .where(eq(schema.fences.resource, canonicalResource))
+        .get();
+      const newFence = fenceRow?.current_fence ?? 1;
+
+      tx.delete(schema.claims)
+        .where(eq(schema.claims.resource, canonicalResource))
+        .run();
+
+      const expiresAt = now + ttlMs;
+      tx.insert(schema.claims)
+        .values({
+          resource: canonicalResource,
+          holder: `${machine}/${user}`,
+          machine,
+          user,
+          mode,
+          fence: newFence,
+          acquired_at: now,
           expires_at: expiresAt,
-        };
-      }
+          metadata: JSON.stringify(metadata ?? {}),
+        })
+        .run();
 
-      if (
-        mode === "exclusive" &&
-        (existing.machine !== machine || existing.user !== user)
-      ) {
-        return {
-          acquired: false,
-          fence: existing.fence,
-          expires_at: 0,
-        };
-      }
-      if (mode === "owner" && existing.user !== user) {
-        return {
-          acquired: false,
-          fence: existing.fence,
-          expires_at: 0,
-        };
-      }
-    }
-
-    tx.run(
-      sql`INSERT INTO fences(resource, current_fence) VALUES(${canonicalResource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
-    );
-
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, canonicalResource))
-      .get();
-    const newFence = fenceRow?.current_fence ?? 1;
-
-    tx.delete(schema.claims)
-      .where(eq(schema.claims.resource, canonicalResource))
-      .run();
-
-    const expiresAt = now + ttlMs;
-    tx.insert(schema.claims)
-      .values({
+      appendJournal(tx, {
+        kind: "claim.acquired",
         resource: canonicalResource,
-        holder: `${machine}/${user}`,
-        machine,
-        user,
-        mode,
+        actor: `${machine}/${user}`,
         fence: newFence,
-        acquired_at: now,
+        tokenId: origin?.tokenId,
+        source: origin?.source,
+        sourceVersion: origin?.sourceVersion,
+      });
+
+      return {
+        acquired: true,
+        fence: newFence,
         expires_at: expiresAt,
-        metadata: JSON.stringify(metadata ?? {}),
-      })
-      .run();
-
-    appendJournal(tx, {
-      kind: "claim.acquired",
-      resource: canonicalResource,
-      actor: `${machine}/${user}`,
-      fence: newFence,
-      tokenId: origin?.tokenId,
-      source: origin?.source,
-      sourceVersion: origin?.sourceVersion,
-    });
-
-    return {
-      acquired: true,
-      fence: newFence,
-      expires_at: expiresAt,
-    };
+      };
+    }
   });
 }
 
@@ -143,49 +156,60 @@ export function renew(
   ttlMs: number,
   now: number = Date.now(),
   origin?: RequestOrigin,
+  idempotency?: DoIdempotency<RenewResult>,
 ): RenewResult {
   return db.transaction((tx) => {
-    const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
-    const claim = tx
-      .select()
-      .from(schema.claims)
-      .where(eq(schema.claims.resource, canonicalResource))
-      .get();
+    // Dedup the renew inside this transaction (audit B1). Only a successful
+    // renew is stored; a failed renew must re-evaluate live state on retry.
+    return withDoIdempotency<RenewResult>(
+      tx,
+      idempotency && { ...idempotency, shouldStore: (r) => r.renewed },
+      () => doRenew(),
+    ).result;
 
-    if (!claim || claim.expires_at <= now) {
-      return { renewed: false, expires_at: 0 };
+    function doRenew(): RenewResult {
+      const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
+      const claim = tx
+        .select()
+        .from(schema.claims)
+        .where(eq(schema.claims.resource, canonicalResource))
+        .get();
+
+      if (!claim || claim.expires_at <= now) {
+        return { renewed: false, expires_at: 0 };
+      }
+
+      if (claim.machine !== machine || claim.user !== user) {
+        return { renewed: false, expires_at: 0 };
+      }
+
+      const fenceRow = tx
+        .select()
+        .from(schema.fences)
+        .where(eq(schema.fences.resource, canonicalResource))
+        .get();
+
+      if (!fenceRow) throw new FenceNotFoundError(resource);
+      assertFence(fenceRow.current_fence, fence);
+
+      const newExpiresAt = now + ttlMs;
+      tx.update(schema.claims)
+        .set({ expires_at: newExpiresAt })
+        .where(eq(schema.claims.resource, canonicalResource))
+        .run();
+
+      appendJournal(tx, {
+        kind: "claim.renewed",
+        resource: canonicalResource,
+        actor: `${machine}/${user}`,
+        fence,
+        tokenId: origin?.tokenId,
+        source: origin?.source,
+        sourceVersion: origin?.sourceVersion,
+      });
+
+      return { renewed: true, expires_at: newExpiresAt };
     }
-
-    if (claim.machine !== machine || claim.user !== user) {
-      return { renewed: false, expires_at: 0 };
-    }
-
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, canonicalResource))
-      .get();
-
-    if (!fenceRow) throw new FenceNotFoundError(resource);
-    assertFence(fenceRow.current_fence, fence);
-
-    const newExpiresAt = now + ttlMs;
-    tx.update(schema.claims)
-      .set({ expires_at: newExpiresAt })
-      .where(eq(schema.claims.resource, canonicalResource))
-      .run();
-
-    appendJournal(tx, {
-      kind: "claim.renewed",
-      resource: canonicalResource,
-      actor: `${machine}/${user}`,
-      fence,
-      tokenId: origin?.tokenId,
-      source: origin?.source,
-      sourceVersion: origin?.sourceVersion,
-    });
-
-    return { renewed: true, expires_at: newExpiresAt };
   });
 }
 
@@ -194,50 +218,63 @@ export function release(
   resource: string,
   fence: number,
   origin: RequestOrigin,
+  idempotency?: DoIdempotency<{ released: boolean }>,
 ): void {
   db.transaction((tx) => {
-    const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
-    const claimRow = tx
-      .select()
-      .from(schema.claims)
-      .where(eq(schema.claims.resource, canonicalResource))
-      .get();
-    if (!claimRow) {
-      // The claim was already released or swept. Releasing an absent claim is
-      // an idempotent no-op -- crucially, do NOT emit a claim.released journal
-      // row, since the caller may not be (or never was) the holder and the
-      // holder check below is skipped when there is no claim row.
-      return;
+    // Dedup the release inside this transaction (audit B1). Release is already
+    // intrinsically idempotent (a second release finds no claim and no-ops), so
+    // we only store the actual-release outcome; no-op paths are not stored.
+    withDoIdempotency<{ released: boolean }>(
+      tx,
+      idempotency && { ...idempotency, shouldStore: (r) => r.released },
+      () => doRelease(),
+    );
+
+    function doRelease(): { released: boolean } {
+      const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
+      const claimRow = tx
+        .select()
+        .from(schema.claims)
+        .where(eq(schema.claims.resource, canonicalResource))
+        .get();
+      if (!claimRow) {
+        // The claim was already released or swept. Releasing an absent claim is
+        // an idempotent no-op -- crucially, do NOT emit a claim.released journal
+        // row, since the caller may not be (or never was) the holder and the
+        // holder check below is skipped when there is no claim row.
+        return { released: false };
+      }
+      if (claimRow.holder !== origin.actor) {
+        throw new ClaimOwnershipError(resource);
+      }
+
+      const fenceRow = tx
+        .select()
+        .from(schema.fences)
+        .where(eq(schema.fences.resource, canonicalResource))
+        .get();
+
+      if (!fenceRow) {
+        return { released: false }; // Nothing to release -- idempotent
+      }
+
+      assertFence(fenceRow.current_fence, fence);
+
+      tx.delete(schema.claims)
+        .where(eq(schema.claims.resource, canonicalResource))
+        .run();
+
+      appendJournal(tx, {
+        kind: "claim.released",
+        resource: canonicalResource,
+        actor: origin.actor,
+        fence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
+      return { released: true };
     }
-    if (claimRow.holder !== origin.actor) {
-      throw new ClaimOwnershipError(resource);
-    }
-
-    const fenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, canonicalResource))
-      .get();
-
-    if (!fenceRow) {
-      return; // Nothing to release -- idempotent
-    }
-
-    assertFence(fenceRow.current_fence, fence);
-
-    tx.delete(schema.claims)
-      .where(eq(schema.claims.resource, canonicalResource))
-      .run();
-
-    appendJournal(tx, {
-      kind: "claim.released",
-      resource: canonicalResource,
-      actor: origin.actor,
-      fence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
-    });
   });
 }
 

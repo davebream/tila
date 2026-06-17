@@ -626,6 +626,32 @@ export function runMigration0020(storage: MigrationStorage): void {
 }
 
 /**
+ * DO-side idempotency dedup table (audit finding B1). A fence-mutating write
+ * co-commits a dedup row here inside its own DO SQLite transaction, so a replay
+ * after a cross-store crash returns the prior result without re-executing.
+ *
+ * Strictly additive + idempotent (CREATE … IF NOT EXISTS) so it is safe to apply
+ * against production DO SQLite. `request_hash` is nullable to mirror the worker
+ * middleware's null-hash "always replay" path. Named `_do_idempotency` to avoid
+ * collision with the embedded-only `_idempotency` table.
+ *
+ * FOLLOW-UP (tracked, not this PR): rows accumulate unbounded; a GC pass folded
+ * into the daily sweep is needed (see schema.ts doIdempotency comment).
+ */
+export const MIGRATION_0021 = `
+CREATE TABLE IF NOT EXISTS _do_idempotency (
+  key           TEXT PRIMARY KEY,
+  request_hash  TEXT,
+  status_code   INTEGER NOT NULL,
+  response_json TEXT NOT NULL,
+  created_at    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_do_idempotency_created
+ON _do_idempotency(created_at);
+`;
+
+/**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
  * The runner executes only versions not yet recorded in _migrations.
@@ -651,4 +677,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 18, sql: MIGRATION_0018 },
   { version: 19, sql: MIGRATION_0019 },
   { version: 20, run: runMigration0020 },
+  { version: 21, sql: MIGRATION_0021 },
 ];

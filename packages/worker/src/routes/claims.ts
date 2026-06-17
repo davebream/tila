@@ -5,7 +5,7 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { analyticsCtxFrom } from "../lib/analytics";
-import { forwardToDO } from "../lib/do-forward";
+import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
@@ -74,6 +74,7 @@ claims.post("/acquire", requirePermission("write"), async (c) => {
     },
     undefined,
     analyticsCtxFrom(c),
+    idempotencyHeaders(c),
   );
 });
 
@@ -98,6 +99,7 @@ claims.post("/renew", requirePermission("write"), async (c) => {
     },
     undefined,
     analyticsCtxFrom(c),
+    idempotencyHeaders(c),
   );
 });
 
@@ -121,6 +123,7 @@ claims.post("/release", requirePermission("write"), async (c) => {
     },
     undefined,
     analyticsCtxFrom(c),
+    idempotencyHeaders(c),
   );
 });
 

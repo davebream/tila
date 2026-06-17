@@ -16,7 +16,7 @@ import { Hono } from "hono";
 import TOML from "smol-toml";
 import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
-import { forwardToDO } from "../lib/do-forward";
+import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
@@ -259,6 +259,7 @@ records.post(
       },
       undefined,
       analyticsCtxFrom(c),
+      idempotencyHeaders(c),
     );
   },
 );
@@ -288,6 +289,7 @@ records.post(
       },
       undefined,
       analyticsCtxFrom(c),
+      idempotencyHeaders(c),
     );
   },
 );
@@ -510,6 +512,7 @@ records.put("/:type/:key{.+}", requirePermission("write"), async (c) => {
     },
     undefined,
     analyticsCtx,
+    idempotencyHeaders(c),
   );
 });
 
@@ -542,6 +545,7 @@ records.patch("/:type/:key{.+}", requirePermission("write"), async (c) => {
     },
     undefined,
     analyticsCtx,
+    idempotencyHeaders(c),
   );
 
   // If not snapshot type or DO call failed, return response as-is

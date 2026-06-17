@@ -26,6 +26,7 @@ export {
   MIGRATION_0016,
   MIGRATION_0018,
   MIGRATION_0019,
+  MIGRATION_0021,
   runMigration0002,
   runMigration0004,
   runMigration0010,
@@ -53,6 +54,12 @@ export * as readyOps from "./ready-ops";
 export * as gateOps from "./gate-ops";
 export * as signalOps from "./signal-ops";
 export * as recordOps from "./record-ops";
+export * as doIdempotencyOps from "./do-idempotency-ops";
+export {
+  DoIdempotencyConflictError,
+  withDoIdempotency,
+} from "./do-idempotency-ops";
+export type { DoIdempotency } from "./do-idempotency-ops";
 export * as errorMap from "./error-map";
 export * as fenceOps from "./fence-ops";
 export * as searchReindexOps from "./search-reindex-ops";

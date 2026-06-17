@@ -1,4 +1,24 @@
+import type { Context } from "hono";
+import type { Env, HonoVariables } from "../types";
 import { emitDoOperationDatapoint } from "./analytics";
+
+/**
+ * Build the extra headers that forward the caller-scoped idempotency key + body
+ * hash to the DO, so the DO can dedup a fence-mutating write inside its own
+ * transaction (audit B1). Returns undefined when the request carried no
+ * Idempotency-Key (the middleware then left these unset), so forwarding is a
+ * no-op and DO behavior is unchanged.
+ */
+export function idempotencyHeaders(
+  c: Context<{ Bindings: Env; Variables: HonoVariables }>,
+): Record<string, string> | undefined {
+  const key = c.get("idempotencyKey");
+  if (!key) return undefined;
+  return {
+    "Idempotency-Key": key,
+    "X-Idempotency-Hash": c.get("idempotencyHash") ?? "",
+  };
+}
 
 /** Map of first DO path segment to canonical table name */
 const TABLE_MAP: Record<string, string> = {

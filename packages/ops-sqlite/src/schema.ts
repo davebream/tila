@@ -403,8 +403,9 @@ export const recordSearchDocs = sqliteTable(
 // mirrors the DDL in `@tila/backend-embedded`'s MIGRATION_IDEMPOTENCY
 // (version 1000) so the embedded backend reads/writes idempotency rows via
 // Drizzle instead of raw SQL.
-// The table does not exist in DO SQLite (DO idempotency is D1-backed), so no
-// canonical migration creates it; only the embedded migration set does.
+// This `_idempotency` table does not exist in DO SQLite; only the embedded
+// migration set creates it. DO SQLite has its own dedup table, `_do_idempotency`
+// (below), created by canonical migration v21.
 export const idempotency = sqliteTable(
   "_idempotency",
   {
@@ -414,4 +415,28 @@ export const idempotency = sqliteTable(
     status_code: integer("status_code").notNull(),
   },
   (table) => [index("idx_idempotency_created").on(table.created_at)],
+);
+
+// --- _do_idempotency ---
+// DO-side idempotency dedup, written INSIDE the same DO SQLite transaction as a
+// fence-mutating write so the dedup record co-commits with the write (audit
+// finding B1). Distinct from the embedded-only `_idempotency` above: this table
+// DOES exist in DO SQLite, created by the canonical migration v21
+// (MIGRATION_0021). The `request_hash` is nullable to mirror the worker
+// middleware's null-hash "always replay" path. See do-idempotency-ops.ts.
+//
+// FOLLOW-UP (tracked, not in this PR): this table grows unbounded — one row per
+// fence-mutating write, forever. The D1 idempotency store has TTL cleanup; this
+// DO table has none yet. It needs a GC pass folded into the daily per-project
+// sweep (mirroring the D1 idempotency TTL). Until then rows accumulate.
+export const doIdempotency = sqliteTable(
+  "_do_idempotency",
+  {
+    key: text("key").primaryKey(),
+    request_hash: text("request_hash"),
+    status_code: integer("status_code").notNull(),
+    response_json: text("response_json").notNull(),
+    created_at: integer("created_at").notNull(),
+  },
+  (table) => [index("idx_do_idempotency_created").on(table.created_at)],
 );
