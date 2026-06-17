@@ -3,12 +3,14 @@ import { R2ArtifactBackend } from "@tila/backend-r2";
 import {
   DRIFT_RECONCILE_THRESHOLD,
   SWEEP_DRAIN_PAGE_SIZE,
+  SWEEP_DRIFT_MAX_SUBREQUESTS,
   SWEEP_MAX_DRAIN_ITERATIONS,
   SWEEP_SUBREQUESTS_PER_KEY,
   SWEEP_SUBREQUEST_BUDGET,
   SWEEP_TIME_BUDGET_MS,
 } from "../config";
 import type { Env } from "../types";
+import { emitSweepProjectDatapoint } from "./analytics";
 import { sweepExpiredKey } from "./sweep-key";
 
 /**
@@ -210,6 +212,20 @@ export async function runSweep(
     });
 
     summary.projectStatuses.push(status);
+    // Per-project Analytics (Task 9 / PR17): one datapoint per project carrying
+    // status + sub-step outcomes + counts. Structural only — no secret/token.
+    // The cron path has no ExecutionContext, so this writes inline; it is
+    // best-effort and undefined-safe (ANALYTICS may be unset in unit seams).
+    emitSweepProjectDatapoint(env.ANALYTICS, undefined, {
+      projectId: status.projectId,
+      status: status.status,
+      sweep: status.sweep,
+      archive: status.archive,
+      drift: status.drift,
+      expired: status.expired,
+      remaining: status.remaining,
+      truncated: status.truncated,
+    });
     if (status.status === "ok") {
       summary.projectsSwept++;
     } else {
@@ -317,7 +333,10 @@ async function sweepProject(args: {
   }
 
   // --- 3. Search drift check + conditional reconciliation ---
-  if (!wouldExceed(budget, 1)) {
+  // Drift can issue up to 3 subrequests (drift check + rebuild-scan + rebuild),
+  // so reserve the real max here — gating with 1 could let drift overshoot the
+  // ceiling when reconciliation fires near the budget edge.
+  if (!wouldExceed(budget, SWEEP_DRIFT_MAX_SUBREQUESTS)) {
     status.drift = await reconcileDrift({ projectId, doStub, summary, budget });
   }
 
@@ -511,6 +530,21 @@ async function archiveJournal(args: {
       const group = groups.get(key);
       if (group) group.push(event);
       else groups.set(key, [event]);
+    }
+
+    // Reserve the FULL remaining archive cost before touching R2: one put per
+    // year/month group plus the final confirm. A pathological multi-year
+    // backlog can produce many groups, so gating archive ENTRY with 1 is not
+    // enough — without this check the put loop could overshoot the ceiling. If
+    // the whole batch will not fit, skip cleanly: write NOTHING and do NOT
+    // confirm, so the journal rows stay intact and the next run archives them
+    // (preserving the all-or-nothing audit-log invariant). The archive request
+    // already issued above is sunk, but harmless (read-only).
+    if (wouldExceed(budget, groups.size + 1)) {
+      console.warn(
+        `[sweep] project ${projectId} archive deferred: ${groups.size} groups + confirm would exceed subrequest budget (${budget.subrequests}/${budget.ceiling})`,
+      );
+      return "skipped";
     }
 
     for (const [yearMonth, groupEvents] of groups) {

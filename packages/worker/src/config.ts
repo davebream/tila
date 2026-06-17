@@ -109,6 +109,17 @@ export const SWEEP_MAX_DRAIN_ITERATIONS = 50;
 export const DRIFT_RECONCILE_THRESHOLD = 10;
 
 /**
+ * Worst-case subrequests the drift step issues for one project:
+ *   1. GET  /artifact/search-drift        (always)
+ *   2. GET  /artifact/search-rebuild-scan (only when reconciliation fires)
+ *   3. POST /artifact/search-rebuild      (only when reconciliation fires)
+ * The sweep reserves this many before entering the drift step so reconciliation
+ * firing near the budget edge can never push the per-invocation subrequest
+ * total past the ceiling.
+ */
+export const SWEEP_DRIFT_MAX_SUBREQUESTS = 3;
+
+/**
  * Maximum number of D1-fail-open events from a single IP before the in-isolate
  * secondary rate-limit guard returns 429 (C8).
  * This threshold is intentionally higher than RATE_LIMIT_MAX_FAILURES because

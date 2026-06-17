@@ -232,11 +232,15 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
     },
   } as unknown as DurableObjectNamespace;
 
+  // Real ANALYTICS stub with a writeDataPoint spy so Task 9 per-project emission
+  // can be asserted. Task 8's seam test left this undefined; the sweep must
+  // tolerate both (undefined-safe) and emit one datapoint per project here.
+  const writeDataPoint = vi.fn();
   const env = {
     DB: makeEmptyD1(),
     PROJECT,
     ARTIFACTS,
-    ANALYTICS: undefined as unknown as AnalyticsEngineDataset,
+    ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
   } as Env;
 
   /** Replace a project's pending journal events between runs (simulates new
@@ -253,6 +257,7 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
     ARTIFACTS,
     reseedJournal,
     meter,
+    writeDataPoint,
   };
 }
 
@@ -272,6 +277,7 @@ function evt(seq: number, t: number): JournalEvent {
 }
 
 const JAN_2025 = Date.UTC(2025, 0, 15);
+const FEB_2025 = Date.UTC(2025, 1, 15);
 
 // ---------------------------------------------------------------------------
 // (a) Drain
@@ -681,5 +687,118 @@ describe("runSweep — drift and no-op edges", () => {
     expect(summary.resumePoint).toBeNull();
     expect(summary.artifactsExpired).toBe(0);
     expect(summary.journalEventsArchived).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (h0) Budget-gate tightening (Task 9 cheap hardening)
+// ---------------------------------------------------------------------------
+
+describe("runSweep — archive/drift budget gates can't overshoot", () => {
+  it("defers archival (writes nothing, does not confirm) when groups+confirm won't fit the budget", async () => {
+    // Events span TWO UTC months → 2 R2 puts + 1 confirm = 3 subrequests after
+    // the archive request. With no expired keys the per-project drain issues 1
+    // /sweep round; plus the global session cleanup (1) and the archive request
+    // (1), that is 3 used. A budget of 5 leaves only 2 free — fewer than the 3
+    // the puts+confirm need — so archival must DEFER cleanly rather than write a
+    // partial batch and overshoot.
+    const world = makeWorld({
+      p1: {
+        expiredKeys: [],
+        journalEvents: [evt(1, JAN_2025), evt(2, FEB_2025)],
+      },
+    });
+
+    const summary = await runSweep(world.env, {
+      projects: [{ projectId: "p1" }],
+      subrequestBudget: 5,
+    });
+
+    const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
+    // Archive was skipped (deferred), NOT errored — the rows are intact for the
+    // next run, so the project is not degraded.
+    expect(p1?.archive).toBe("skipped");
+    // CRITICAL: nothing was written to R2 and no confirm happened.
+    expect(world.r2Puts.get("p1")?.size ?? 0).toBe(0);
+    expect(world.archiveConfirms.get("p1") ?? []).toEqual([]);
+    expect(summary.journalEventsArchived).toBe(0);
+    // The shared meter never crossed the ceiling.
+    expect(world.meter.subrequests).toBeLessThanOrEqual(5);
+  });
+
+  it("still archives normally when the budget comfortably covers groups+confirm", async () => {
+    // Same two-month batch, generous budget → archival proceeds and confirms.
+    const world = makeWorld({
+      p1: {
+        expiredKeys: [],
+        journalEvents: [evt(1, JAN_2025), evt(2, FEB_2025)],
+      },
+    });
+
+    const summary = await runSweep(world.env, {
+      projects: [{ projectId: "p1" }],
+      subrequestBudget: 1000,
+    });
+
+    const p1 = summary.projectStatuses.find((p) => p.projectId === "p1");
+    expect(p1?.archive).toBe("ok");
+    expect(world.r2Puts.get("p1")?.size).toBe(2); // one object per month
+    expect(summary.journalEventsArchived).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (h) Per-project Analytics emission (Task 9 / PR17 observability)
+// ---------------------------------------------------------------------------
+
+describe("runSweep — per-project Analytics", () => {
+  it("emits exactly one datapoint per attempted project with status + counts", async () => {
+    const world = makeWorld({
+      p1: { expiredKeys: ["produced/p1/a.bin", "produced/p1/b.bin"] },
+      p2: { expiredKeys: ["produced/p2/a.bin"], failOn: "drift" }, // degraded
+    });
+
+    const summary = await runSweep(world.env, {
+      projects: [{ projectId: "p1" }, { projectId: "p2" }],
+    });
+
+    // One datapoint per project (2 projects attempted → 2 datapoints).
+    expect(world.writeDataPoint).toHaveBeenCalledTimes(2);
+
+    const calls = world.writeDataPoint.mock.calls.map(
+      (c) =>
+        c[0] as { blobs?: unknown[]; doubles?: number[]; indexes?: unknown[] },
+    );
+
+    // Each datapoint is tagged "sweep_project", carries the projectId and the
+    // rollup status, and is indexed by projectId. Structural metadata only —
+    // no secret/token is ever in the payload.
+    const p1Dp = calls.find((c) => c.blobs?.includes("p1"));
+    const p2Dp = calls.find((c) => c.blobs?.includes("p2"));
+    expect(p1Dp).toBeDefined();
+    expect(p2Dp).toBeDefined();
+    expect(p1Dp?.blobs).toContain("sweep_project");
+    expect(p1Dp?.blobs).toContain("ok");
+    expect(p1Dp?.indexes).toContain("p1");
+    // The degraded project's status is carried through.
+    expect(p2Dp?.blobs).toContain("degraded");
+
+    // The datapoints' counts line up with the per-project statuses.
+    const p1Status = summary.projectStatuses.find((p) => p.projectId === "p1");
+    expect(p1Status?.expired).toBe(2);
+    // expired count is carried in doubles (structural count, not a magnitude of
+    // anything sensitive).
+    expect(p1Dp?.doubles).toContain(2);
+  });
+
+  it("does not throw when ANALYTICS emission is unavailable (undefined-safe)", async () => {
+    // Task 8's seam test passes ANALYTICS = undefined. Emission must be
+    // best-effort: a missing dataset must never break the sweep.
+    const world = makeWorld({ p1: { expiredKeys: ["produced/p1/a.bin"] } });
+    (world.env as { ANALYTICS: unknown }).ANALYTICS = undefined;
+
+    await expect(
+      runSweep(world.env, { projects: [{ projectId: "p1" }] }),
+    ).resolves.toBeDefined();
   });
 });

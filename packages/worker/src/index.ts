@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { emitRequestDatapoint } from "./lib/analytics";
+import { emitRequestDatapoint, emitSweepErrorDatapoint } from "./lib/analytics";
 import { constantTimeSecretMatch } from "./lib/constant-time-compare";
 import { runSweep } from "./lib/sweep";
 import { createAuthMiddleware } from "./middleware/auth";
@@ -187,6 +187,20 @@ export { app };
 export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runSweep(env));
+    // Crash-safe wrapper (PR17): runSweep already isolates PER-PROJECT failures,
+    // but a throw BEFORE the loop (e.g. the D1 registry read) would otherwise
+    // reject this waitUntil promise and abort the whole nightly sweep with no
+    // record. Catch it, log it, and emit a sweep-level error datapoint so the
+    // pre-loop crash leaves a forensic footprint. Per-project Analytics are
+    // emitted inside runSweep.
+    ctx.waitUntil(
+      runSweep(env).then(
+        () => {},
+        (err) => {
+          console.error("[sweep] run aborted before completion:", err);
+          emitSweepErrorDatapoint(env.ANALYTICS, ctx, { phase: "pre-loop" });
+        },
+      ),
+    );
   },
 };
