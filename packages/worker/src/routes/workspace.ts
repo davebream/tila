@@ -57,16 +57,33 @@ workspace.get("/projects", async (c) => {
       : tokenResult.name;
 
   const registry = new D1ProjectRegistry(c.env.DB);
-  const allProjects = await registry.listAll();
 
   if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
-    const accessible = allProjects.map(({ projectId }) => ({
-      projectId,
-      displayName: projectId,
-      repos: [],
-    }));
-    return c.json({ ok: true, projects: accessible });
+    // SEC-4: With the GitHub App unconfigured there is no way to resolve
+    // per-user repository membership, so we cannot enumerate the registry
+    // without leaking every project ID on the instance. Scope the response to
+    // exactly what the caller is already entitled to: the token-scoped project
+    // (D1/bootstrap token or bearer session that carries a projectId), or an
+    // empty list for a workspace session (projectId "") that has not selected
+    // a project yet.
+    const scopedProjectId = tokenResult.projectId;
+    if (!scopedProjectId) {
+      return c.json({ ok: true, projects: [] });
+    }
+    const meta = await registry.get(scopedProjectId);
+    return c.json({
+      ok: true,
+      projects: [
+        {
+          projectId: scopedProjectId,
+          displayName: meta?.displayName ?? scopedProjectId,
+          repos: [],
+        },
+      ],
+    });
   }
+
+  const allProjects = await registry.listAll();
   const configStore = new GitHubAppConfigStore(c.env.DB);
   const allowlistStore = new RepoAllowlistStore(c.env.DB);
 

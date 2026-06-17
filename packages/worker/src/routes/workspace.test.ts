@@ -199,7 +199,9 @@ describe("GET /api/workspace/projects", () => {
     expect(mockMintAppJwt).toHaveBeenCalledOnce();
   });
 
-  it("returns projects with empty repos when GitHub App is not configured", async () => {
+  it("does not leak the full registry when GitHub App is not configured (workspace session)", async () => {
+    // SEC-4: with the App unconfigured, a workspace session (projectId "")
+    // has no resolvable membership and must NOT receive the full registry.
     mockRegistryListAll.mockResolvedValue([
       { projectId: "proj-1" },
       { projectId: "proj-2" },
@@ -216,6 +218,47 @@ describe("GET /api/workspace/projects", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ok: boolean;
+      projects: Array<{ projectId: string }>;
+    };
+    expect(body.ok).toBe(true);
+    // Empty: a workspace session carries no projectId, so nothing is accessible.
+    expect(body.projects).toHaveLength(0);
+    // The full registry must never be enumerated to the caller.
+    expect(body.projects.map((p) => p.projectId)).not.toContain("proj-2");
+  });
+
+  it("returns only the token-scoped project when GitHub App is not configured", async () => {
+    // SEC-4: a caller bearing a concrete projectId (e.g. a D1/bootstrap token)
+    // is entitled to exactly that project — not the whole registry.
+    mockRegistryListAll.mockResolvedValue([
+      { projectId: "proj-1" },
+      { projectId: "proj-2" },
+      { projectId: "proj-3" },
+    ]);
+    mockRegistryGet.mockResolvedValue({
+      displayName: "My Project",
+      cloudflareAccountId: "acc",
+    });
+    const envWithoutApp = {
+      ...testEnv,
+      GITHUB_APP_ID: undefined,
+      GITHUB_APP_PRIVATE_KEY: undefined,
+    } as unknown as Env;
+
+    const scopedToken = {
+      kind: "d1-token",
+      projectId: "proj-2",
+      name: "ci-bot",
+      scopes: "full",
+      tokenId: "tok-1",
+    };
+
+    const app = createApp(scopedToken);
+    const res = await app.request("/api/workspace/projects", {}, envWithoutApp);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
       projects: Array<{
         projectId: string;
         displayName: string;
@@ -223,12 +266,13 @@ describe("GET /api/workspace/projects", () => {
       }>;
     };
     expect(body.ok).toBe(true);
-    expect(body.projects).toHaveLength(2);
-    expect(body.projects[0].projectId).toBe("proj-1");
-    expect(body.projects[0].displayName).toBe("proj-1");
+    expect(body.projects).toHaveLength(1);
+    expect(body.projects[0].projectId).toBe("proj-2");
+    expect(body.projects[0].displayName).toBe("My Project");
     expect(body.projects[0].repos).toHaveLength(0);
-    expect(body.projects[1].projectId).toBe("proj-2");
-    expect(body.projects[1].repos).toHaveLength(0);
+    // Other projects in the registry must not leak.
+    expect(body.projects.map((p) => p.projectId)).not.toContain("proj-1");
+    expect(body.projects.map((p) => p.projectId)).not.toContain("proj-3");
   });
 
   it("returns partial results when one project's GitHub API call fails", async () => {
