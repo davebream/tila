@@ -337,15 +337,45 @@ export async function wipeProjectViaWorker(
   token: string,
   slug: string,
 ): Promise<WipeProjectResult> {
-  const url = `${workerUrl}/projects/${slug}/admin/destroy`;
+  return wipeViaEndpoint(`${workerUrl}/projects/${slug}/admin/destroy`, {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  });
+}
+
+/**
+ * Call the infra-owner destroy endpoint for a project by slug, authenticated by
+ * the INFRA_ADMIN_TOKEN secret rather than a per-project token. Echoes the
+ * slug in X-Confirm-Slug (the Worker rejects a mismatch). Used when an admin
+ * destroys a project they have no local .tila/ config for.
+ * NEVER logs the token — error messages contain only HTTP status + error code.
+ */
+export async function wipeProjectViaInfraToken(
+  workerUrl: string,
+  infraToken: string,
+  slug: string,
+): Promise<WipeProjectResult> {
+  return wipeViaEndpoint(
+    `${workerUrl}/_internal/admin/projects/${slug}/destroy`,
+    {
+      Authorization: `Bearer ${infraToken}`,
+      "X-Confirm-Slug": slug,
+      "Content-Type": "application/json",
+    },
+  );
+}
+
+/**
+ * Shared POST-and-parse core for the two destroy entry points. Both wipe the
+ * same way; they differ only in URL and auth headers (per-project token vs
+ * infra secret). NEVER include a token in the returned error message.
+ */
+async function wipeViaEndpoint(
+  url: string,
+  headers: Record<string, string>,
+): Promise<WipeProjectResult> {
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const res = await fetch(url, { method: "POST", headers });
 
     if (!res.ok) {
       if (res.status === 403) {

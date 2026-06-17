@@ -422,6 +422,52 @@ Existing D1 API tokens continue to work — they are not deprecated. This sectio
    tila token revoke --name default
    ```
 
+### Infra Admin Token (`INFRA_ADMIN_TOKEN`)
+
+`INFRA_ADMIN_TOKEN` is the infra-owner admin secret — a single, shared, identity-less credential (NOT a per-project token). When set, the `/_internal/admin/*` routes accept a matching `Authorization: Bearer <token>`; when unset, those routes return 404 (invisible). It authorizes cross-project infra operations such as destroying a project by slug without that project's own token. `tila infra provision` sets it; it is stored as a Worker secret and locally in `~/.tila/infra.toml` (`infra_admin_token`).
+
+#### Mandatory: alert on auth-failure volume
+
+Because this is a shared secret with no per-caller identity, **a spike in failed authentications is the only compromise signal** — there is no "wrong user" to flag, only wrong-token attempts. Wiring an Analytics Engine alert on the `auth-failure` outcome volume is **mandatory**, not optional.
+
+Infra-admin datapoints land in the `tila-analytics` dataset with `blob3 = 'infra_admin'`. The outcome lives in the **`blob2`** column (`auth-failure`, `project-not-found`, `confirm-slug-mismatch`, success, etc.); `double1` carries the status code. Alert on the **`outcome` blob (`blob2`)** — NOT on the `projectId` index (`index1` / `blob1`): a brute-force attacker controls or omits the project slug, so partitioning by project hides the attack. Count `auth-failure` outcomes across all projects.
+
+Baseline query (raise an alert when the count over a short window exceeds your normal floor, which should be ~0):
+
+```sql
+SELECT
+  COUNT() AS auth_failures
+FROM tila-analytics
+WHERE
+  blob3 = 'infra_admin'
+  AND blob2 = 'auth-failure'
+  AND timestamp > NOW() - INTERVAL '15' MINUTE
+```
+
+Run it on a schedule (or via Cloudflare's notification tooling) and page on a non-trivial count. Even a handful of `auth-failure` events is suspicious, because legitimate infra-admin calls come from the CLI with the correct secret.
+
+#### Rotation
+
+Rotate the secret periodically and immediately on any suspected compromise:
+
+```bash
+tila infra provision --rotate-admin-token
+```
+
+This generates a new `INFRA_ADMIN_TOKEN`, invalidating the previous one. Recommended cadence: **annually**, plus on-demand whenever compromise is suspected or an operator with access leaves. Rotation takes effect within seconds as the new secret propagates to all edge locations; an admin call made during propagation may return **403** — retry, and it will succeed once propagation completes.
+
+#### Pre-deploy action: delete the orphaned `INFRA_DESTROY_TOKEN` secret (RC-7)
+
+The infra-admin secret was previously named `INFRA_DESTROY_TOKEN`. Worker secrets **survive deploys** — a `wrangler deploy` never deletes a secret just because the new config/code no longer references it. So in any environment where the old `INFRA_DESTROY_TOKEN` secret was set, it would linger inert after this change ships, an orphaned long-lived credential with no consumer.
+
+**Before** the first deploy of this change to such an environment, delete it:
+
+```bash
+wrangler secret delete INFRA_DESTROY_TOKEN
+```
+
+Do this as a pre-deploy step for each affected environment. It is a cleanup action to perform up front, not a post-deploy verification — the goal is that the obsolete secret never coexists with the new deployment.
+
 ## Troubleshooting
 
 Common failure modes and remediation steps.

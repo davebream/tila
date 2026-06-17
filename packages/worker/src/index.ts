@@ -3,6 +3,7 @@ import { R2ArtifactBackend } from "@tila/backend-r2";
 import { Hono } from "hono";
 import { DRIFT_RECONCILE_THRESHOLD, SWEEP_BATCH_SIZE } from "./config";
 import { emitRequestDatapoint } from "./lib/analytics";
+import { constantTimeSecretMatch } from "./lib/constant-time-compare";
 import { sweepExpiredKey } from "./lib/sweep-key";
 import { createAuthMiddleware } from "./middleware/auth";
 import { createCacheMiddleware } from "./middleware/cache";
@@ -27,6 +28,7 @@ import { doctor } from "./routes/doctor";
 import { entities } from "./routes/entities";
 import { gates } from "./routes/gates";
 import { health } from "./routes/health";
+import { infra } from "./routes/infra";
 import { journal } from "./routes/journal";
 import { presence } from "./routes/presence";
 import { records } from "./routes/records";
@@ -129,34 +131,9 @@ workspaceRoutes.use("/*", csrfGuard);
 workspaceRoutes.route("/", workspace);
 app.route("/api/workspace", workspaceRoutes);
 
-async function hmacDigest(input: string): Promise<Uint8Array> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode("tila-sweep-compare"),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  return new Uint8Array(
-    await crypto.subtle.sign("HMAC", key, encoder.encode(input)),
-  );
-}
-
-async function constantTimeSecretMatch(
-  provided: string | undefined,
-  expected: string,
-): Promise<boolean> {
-  const left = await hmacDigest(provided ?? "");
-  const right = await hmacDigest(expected);
-  let diff = 0;
-  for (let i = 0; i < left.length; i++) {
-    diff |= left[i] ^ right[i];
-  }
-  return diff === 0;
-}
-
-// Sweep route — secret-header auth (no bearer token)
+// Sweep route — secret-header auth (no bearer token). Uses the shared
+// constant-time compare with the "tila-sweep-compare" HMAC key, which MUST stay
+// distinct from the infra "tila-secret-compare" key (see lib/constant-time-compare.ts).
 const sweepRoutes = new Hono<AppEnv>();
 sweepRoutes.post("/sweep", async (c) => {
   const secret = c.env.SWEEP_SECRET;
@@ -165,6 +142,7 @@ sweepRoutes.post("/sweep", async (c) => {
     !(await constantTimeSecretMatch(
       c.req.header("X-Sweep-Secret") ?? undefined,
       secret,
+      "tila-sweep-compare",
     ))
   ) {
     return c.json(
@@ -183,6 +161,11 @@ sweepRoutes.post("/sweep", async (c) => {
   return c.json({ ok: true, ...summary });
 });
 app.route("/_internal", sweepRoutes);
+
+// Infra-owner admin routes (e.g. destroy any project by slug). Authenticated by
+// the INFRA_ADMIN_TOKEN secret, NOT a per-project token — mounted outside
+// /projects/:projectId so it bypasses projectMiddleware's PROJECT_MISMATCH guard.
+app.route("/_internal", infra);
 
 const projectRoutes = new Hono<AppEnv>();
 projectRoutes.use("/*", createAuthMiddleware());

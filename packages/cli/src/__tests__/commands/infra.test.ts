@@ -71,6 +71,12 @@ vi.mock("../../lib/infra-config", () => ({
   getInfraSlug: (config: unknown) => mockGetInfraSlug(config),
 }));
 
+const mockEnsureInfraAdminToken = vi.fn();
+vi.mock("../../lib/ensure-infra-admin-token", () => ({
+  ensureInfraAdminToken: (...args: unknown[]) =>
+    mockEnsureInfraAdminToken(...args),
+}));
+
 const mockResolveCfApiToken = vi.fn();
 const mockResolveMigrationsDir = vi.fn();
 const mockGenerateHmacKey = vi.fn();
@@ -165,12 +171,18 @@ const mockCfClient = {
   },
 };
 
-async function invokeProvision(forceGithubApp = false): Promise<void> {
+async function invokeProvision(
+  forceGithubApp = false,
+  rotateAdminToken = false,
+): Promise<void> {
   const mod = await import("../../commands/infra/provision");
   const cmd = mod.default;
   // biome-ignore lint/suspicious/noExplicitAny: citty run function args type bypass
   await (cmd.run as (opts: any) => Promise<void>)({
-    args: { "force-github-app": forceGithubApp },
+    args: {
+      "force-github-app": forceGithubApp,
+      "rotate-admin-token": rotateAdminToken,
+    },
   });
 }
 
@@ -243,6 +255,10 @@ describe("tila infra provision", () => {
     });
     mockResolveUiDistDir.mockReturnValue("/mock/ui/dist");
     mockGenerateHmacKey.mockReturnValue("mock-hmac-key");
+    mockEnsureInfraAdminToken.mockReturnValue({
+      token: "mock-admin-token",
+      generated: true,
+    });
     mockSetWorkerSecrets.mockResolvedValue(undefined);
     mockDeleteWorkerSecret.mockResolvedValue(undefined);
 
@@ -344,6 +360,7 @@ describe("tila infra provision", () => {
         worker_url: "https://tila.test-sub.workers.dev",
         r2_bucket_name: "tila-artifacts",
         hmac_key: "mock-hmac-key",
+        infra_admin_token: "mock-admin-token",
         infra_slug: "tila",
         github_app: {
           app_id: APP_CREDENTIALS.app_id,
@@ -411,6 +428,7 @@ describe("tila infra provision", () => {
         worker_url: "https://tila.test-sub.workers.dev",
         r2_bucket_name: "tila-artifacts",
         hmac_key: "mock-hmac-key",
+        infra_admin_token: "mock-admin-token",
         infra_slug: "tila",
       },
       expect.any(String),
@@ -504,6 +522,81 @@ describe("tila infra provision", () => {
       expect.stringContaining(`app_id=${APP_CREDENTIALS.app_id}`),
       expect.any(String),
     );
+  });
+
+  it("adds INFRA_ADMIN_TOKEN to the setWorkerSecrets map", async () => {
+    await invokeProvision();
+
+    const secretsArgs = mockSetWorkerSecrets.mock.calls.map(
+      (call: unknown[]) => call[3],
+    );
+    expect(secretsArgs).toContainEqual(
+      expect.objectContaining({ INFRA_ADMIN_TOKEN: "mock-admin-token" }),
+    );
+  });
+
+  it("persists infra_admin_token via writeInfraConfig", async () => {
+    await invokeProvision();
+
+    expect(mockWriteInfraConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ infra_admin_token: "mock-admin-token" }),
+      expect.any(String),
+    );
+  });
+
+  it("calls ensureInfraAdminToken with rotate=false by default", async () => {
+    await invokeProvision();
+
+    const rotateOpts = mockEnsureInfraAdminToken.mock.calls.map(
+      (call: unknown[]) => call[1],
+    );
+    expect(rotateOpts).toContainEqual({ rotate: false });
+  });
+
+  it("calls ensureInfraAdminToken with rotate=true when --rotate-admin-token is set", async () => {
+    await invokeProvision(false, true);
+
+    const rotateOpts = mockEnsureInfraAdminToken.mock.calls.map(
+      (call: unknown[]) => call[1],
+    );
+    expect(rotateOpts).toContainEqual({ rotate: true });
+  });
+
+  it("prints a propagation-delay hint when --rotate-admin-token is set", async () => {
+    await invokeProvision(false, true);
+
+    expect(mockLogWarn).toHaveBeenCalledWith(
+      expect.stringContaining("propagat"),
+    );
+  });
+
+  it("never logs the generated admin token value (RC-6)", async () => {
+    await invokeProvision(false, true);
+
+    const logFns = [
+      mockLogInfo,
+      mockLogWarn,
+      mockLogError,
+      mockLogSuccess,
+      mockNote,
+      mockClackSpinnerStart,
+      mockClackSpinnerStop,
+    ];
+    const consoleLogSpy = console.log as unknown as ReturnType<typeof vi.fn>;
+    const consoleErrorSpy = console.error as unknown as ReturnType<
+      typeof vi.fn
+    >;
+
+    const allLogged = [
+      ...logFns.flatMap((fn) => fn.mock.calls),
+      ...consoleLogSpy.mock.calls,
+      ...consoleErrorSpy.mock.calls,
+    ]
+      .flat()
+      .map((arg) => String(arg))
+      .join("\n");
+
+    expect(allLogged).not.toContain("mock-admin-token");
   });
 });
 

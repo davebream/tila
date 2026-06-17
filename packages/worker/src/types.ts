@@ -17,6 +17,10 @@ export interface Env {
   GITHUB_APP_CLIENT_SECRET?: string;
   GITHUB_OIDC_AUDIENCE?: string;
   SWEEP_SECRET?: string;
+  // Optional infra-owner admin secret. When set, the infra admin sub-router
+  // accepts a matching bearer to operate on ANY project by slug (no per-project
+  // token). When unset, those endpoints return 404 (invisible). See routes/infra.ts.
+  INFRA_ADMIN_TOKEN?: string;
 }
 
 // Re-export for convenience

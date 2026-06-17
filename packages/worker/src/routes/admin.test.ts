@@ -460,6 +460,272 @@ describe("project admin routes", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // RC-2 — archive/journal route (characterization, pre-extraction)
+  //
+  // The route is a 4-step orchestration:
+  //   1. forwardToDO("/journal/archive")  → DO ArchiveResponse { ok, events, throughSeq, count }
+  //   2. count === 0 → early-return { ok:true, archived:0 } (no R2, no confirm)
+  //   3. ARTIFACTS.put(...) per year/month group; throw → 502 R2_ERROR
+  //   4. forwardToDO("/journal/archive/confirm") non-ok → 502 CONFIRM_ERROR;
+  //      ok → { ok:true, archived:<count>, throughSeq, watermark }
+  //
+  // NOTE: the DO returns `count`; the route RENAMES it to `archived`. The mocks
+  // below return the DO ArchiveResponse shape (with `count`), never `archived`.
+  // The R2 write uses c.env.ARTIFACTS.put directly, so each test injects an
+  // ARTIFACTS binding with a put() mock.
+  // ---------------------------------------------------------------------------
+  describe("POST /admin/archive/journal", () => {
+    const baseEvent = {
+      seq: 1,
+      t: Date.parse("2026-03-15T10:00:00Z"),
+      kind: "entity.created",
+      resource: "task:T-1",
+      actor: "agent",
+      token_id: "tid",
+      fence: 1,
+      data: {},
+      source: null,
+      source_version: null,
+    };
+
+    /** Build an env whose ARTIFACTS.put is the supplied mock. */
+    function envWithR2Put(put: ReturnType<typeof vi.fn>): Partial<Env> {
+      return { ...mockEnv, ARTIFACTS: { put } as unknown as R2Bucket };
+    }
+
+    it("returns 403 for admin session token (non-d1-token)", async () => {
+      const putMock = vi.fn();
+      const app = createApp("full", "session");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(403);
+      // No DO forward, no R2 write — rejected before orchestration
+      expect(forwardToDOMock).not.toHaveBeenCalled();
+      expect(putMock).not.toHaveBeenCalled();
+    });
+
+    it("accepts a full-scope d1-token", async () => {
+      const putMock = vi.fn().mockResolvedValue(undefined);
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, _method: string) => {
+          if (path === "/journal/archive") {
+            return Promise.resolve(
+              Response.json({
+                ok: true,
+                events: [],
+                throughSeq: 0,
+                count: 0,
+              }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true, watermark: null }));
+        },
+      );
+
+      const app = createApp("full", "d1-token");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    it("(1) early-returns archived:0 without writing R2 or confirming when count is 0", async () => {
+      const putMock = vi.fn();
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, _method: string) => {
+          if (path === "/journal/archive") {
+            return Promise.resolve(
+              Response.json({
+                ok: true,
+                events: [],
+                throughSeq: 0,
+                count: 0,
+              }),
+            );
+          }
+          // confirm should never be reached in this branch
+          return Promise.resolve(Response.json({ ok: true, watermark: null }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, archived: 0 });
+      // No R2 write, no confirm forward
+      expect(putMock).not.toHaveBeenCalled();
+      expect(forwardToDOMock).toHaveBeenCalledTimes(1);
+      expect(forwardToDOMock).toHaveBeenCalledWith(
+        expect.anything(),
+        "/journal/archive",
+        "POST",
+      );
+    });
+
+    it("(2) returns 502 R2_ERROR when the R2 write throws (count > 0)", async () => {
+      const putMock = vi.fn().mockRejectedValue(new Error("R2 down"));
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, _method: string) => {
+          if (path === "/journal/archive") {
+            return Promise.resolve(
+              Response.json({
+                ok: true,
+                events: [baseEvent],
+                throughSeq: 1,
+                count: 1,
+              }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true, watermark: null }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as {
+        ok: boolean;
+        error: { code: string };
+      };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe("R2_ERROR");
+      // R2 put was attempted; confirm was never reached
+      expect(putMock).toHaveBeenCalled();
+      expect(forwardToDOMock).not.toHaveBeenCalledWith(
+        expect.anything(),
+        "/journal/archive/confirm",
+        "POST",
+        expect.anything(),
+      );
+    });
+
+    it("(3) returns 502 CONFIRM_ERROR when R2 write succeeds but confirm is non-ok", async () => {
+      const putMock = vi.fn().mockResolvedValue(undefined);
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, _method: string) => {
+          if (path === "/journal/archive") {
+            return Promise.resolve(
+              Response.json({
+                ok: true,
+                events: [baseEvent],
+                throughSeq: 1,
+                count: 1,
+              }),
+            );
+          }
+          if (path === "/journal/archive/confirm") {
+            return Promise.resolve(
+              new Response(JSON.stringify({ ok: false }), { status: 500 }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as {
+        ok: boolean;
+        error: { code: string };
+      };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe("CONFIRM_ERROR");
+      // R2 write succeeded before confirm failed
+      expect(putMock).toHaveBeenCalled();
+    });
+
+    it("(4) returns archived === DO count with throughSeq + watermark on success", async () => {
+      const putMock = vi.fn().mockResolvedValue(undefined);
+      const watermark = { lastArchivedSeq: 2, archivedAt: 1_700_000_000_000 };
+      // Two events in different months → two R2 groups (two put calls).
+      const events = [
+        { ...baseEvent, seq: 1, t: Date.parse("2026-03-15T10:00:00Z") },
+        { ...baseEvent, seq: 2, t: Date.parse("2026-04-01T10:00:00Z") },
+      ];
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, _method: string) => {
+          if (path === "/journal/archive") {
+            return Promise.resolve(
+              Response.json({
+                ok: true,
+                events,
+                throughSeq: 2,
+                count: 2,
+              }),
+            );
+          }
+          if (path === "/journal/archive/confirm") {
+            return Promise.resolve(Response.json({ ok: true, watermark }));
+          }
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(
+        app,
+        "/admin/archive/journal",
+        "POST",
+        envWithR2Put(putMock),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        ok: true,
+        archived: 2,
+        throughSeq: 2,
+        watermark,
+      });
+      // archived mirrors the DO's `count` (2), not an `archived` field on the DO response
+      // Two distinct year/month groups → two R2 puts
+      expect(putMock).toHaveBeenCalledTimes(2);
+      expect(putMock).toHaveBeenCalledWith(
+        "journal-archive/proj-target/2026/03.jsonl",
+        expect.any(String),
+      );
+      expect(putMock).toHaveBeenCalledWith(
+        "journal-archive/proj-target/2026/04.jsonl",
+        expect.any(String),
+      );
+      // confirm was forwarded with throughSeq
+      expect(forwardToDOMock).toHaveBeenCalledWith(
+        expect.anything(),
+        "/journal/archive/confirm",
+        "POST",
+        { throughSeq: 2 },
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // C9 — admin session revoke route
   // ---------------------------------------------------------------------------
   describe("POST /admin/sessions/revoke", () => {
@@ -482,6 +748,41 @@ describe("project admin routes", () => {
         mockEnv as Env,
       );
       expect(res.status).toBe(403);
+    });
+
+    it("returns 403 for admin session token (non-d1-token)", async () => {
+      const app = createApp("full", "session");
+      const res = await app.request(
+        "/admin/sessions/revoke",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jti: validJti }),
+        },
+        mockEnv as Env,
+      );
+      expect(res.status).toBe(403);
+      // Rejected before the global jti kill-switch fires
+      expect(mockRevokedJtiRevoke).not.toHaveBeenCalled();
+      expect(mockRevokeJtiInCache).not.toHaveBeenCalled();
+    });
+
+    it("accepts a full-scope d1-token", async () => {
+      const app = createApp("full", "d1-token");
+      const res = await app.request(
+        "/admin/sessions/revoke",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jti: validJti }),
+        },
+        mockEnv as Env,
+      );
+      expect(res.status).toBe(200);
+      expect(mockRevokedJtiRevoke).toHaveBeenCalledWith(
+        validJti,
+        "proj-target",
+      );
     });
 
     it("returns 400 on missing jti field", async () => {

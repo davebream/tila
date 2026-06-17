@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
+import type { TilaInfraConfig } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { parse } from "smol-toml";
 import { findConfig } from "../../config";
@@ -8,10 +9,16 @@ import { createCloudflareClient } from "../../lib/cloudflare-client";
 import { loadInfraConfig } from "../../lib/infra-config";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import {
+  type DestroyPlan,
+  resolveDestroyPlan,
+  resolveInfraAdminToken,
+} from "../../lib/resolve-destroy-plan";
+import {
   cleanD1NonTokenRecords,
   cleanLocalFiles,
   deleteD1TokenRecord,
   verifyStoresEmpty,
+  wipeProjectViaInfraToken,
   wipeProjectViaWorker,
 } from "../../lib/teardown";
 
@@ -49,12 +56,122 @@ function readTilaApiToken(tilaDir: string): string | null {
   return null;
 }
 
+/**
+ * Infra-owner destroy: wipe a project by slug with no local .tila/ config.
+ * Remote state (DO + R2) is wiped through the Worker's /_internal/admin destroy
+ * endpoint using INFRA_ADMIN_TOKEN; D1 records are cleaned via the CF SDK.
+ * Trust the endpoint's internal doWiped read-back instead of the per-project
+ * store-counts verify (which needs a per-project token we do not hold here).
+ */
+async function runInfraDestroy(
+  args: { force?: boolean; json?: boolean },
+  plan: Extract<DestroyPlan, { mode: "infra" }>,
+  infraConfig: TilaInfraConfig | null,
+): Promise<void> {
+  const { slug, workerUrl, accountId, databaseId } = plan;
+
+  const infraToken = resolveInfraAdminToken(
+    infraConfig,
+    process.env.INFRA_ADMIN_TOKEN,
+  );
+  if (!infraToken) {
+    p.cancel(
+      "No INFRA_ADMIN_TOKEN available.\n\nSet it in the environment or add infra_admin_token to ~/.tila/infra.toml.\nThis secret authorizes destroying a project you have no local config for.",
+    );
+    process.exit(1);
+  }
+
+  const cfApiToken = resolveCfApiToken();
+  if (!cfApiToken) {
+    p.cancel(
+      "CLOUDFLARE_API_TOKEN not found. Set it in ~/.tila/.env or export it.",
+    );
+    process.exit(1);
+  }
+  const cf = createCloudflareClient(cfApiToken);
+
+  p.note(
+    ["Remote project state (DO + R2)", "Project records (D1)"].join("\n"),
+    `Destroy project ${slug} (infra mode)`,
+  );
+
+  if (!args.force) {
+    const answer = await p.text({
+      message: `Type "${slug}" to confirm:`,
+      validate: (value) => {
+        if (value !== slug) return `Expected "${slug}"`;
+      },
+    });
+    if (p.isCancel(answer) || answer !== slug) {
+      p.cancel("Destroy cancelled.");
+      process.exit(1);
+    }
+  }
+
+  const failures: Array<{ label: string; message: string }> = [];
+  const s = p.spinner();
+
+  // Step 1: Wipe remote state (DO + R2) via the infra endpoint.
+  s.start("Wiping remote project state...");
+  const wipe = await wipeProjectViaInfraToken(workerUrl, infraToken, slug);
+  s.stop(
+    wipe.ok
+      ? "Remote project state wiped."
+      : `Remote project state: ${wipe.errorMessage}`,
+  );
+  if (!wipe.ok) {
+    if (args.json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, slug, mode: "infra", failures: [wipe.errorMessage] })}\n`,
+      );
+    } else {
+      p.log.error(wipe.errorMessage);
+    }
+    process.exit(1);
+  }
+
+  // Step 2: Clean D1 non-token records (CF SDK).
+  s.start("Cleaning project records...");
+  const d1 = await cleanD1NonTokenRecords(cf, accountId, databaseId, slug);
+  s.stop(d1.ok ? "Project records cleaned." : `Project records: ${d1.message}`);
+  if (!d1.ok) failures.push({ label: "Project records", message: d1.message });
+
+  // Step 3: Delete the _tokens row LAST.
+  const tok = await deleteD1TokenRecord(cf, accountId, databaseId, slug);
+  if (!tok.ok) failures.push({ label: "Project tokens", message: tok.message });
+
+  if (args.json) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: failures.length === 0,
+        slug,
+        mode: "infra",
+        doWiped: wipe.doWiped,
+        failures: failures.map((f) => f.message),
+      })}\n`,
+    );
+  } else if (failures.length > 0) {
+    p.log.error(`${failures.length} resource(s) failed. Clean up manually.`);
+    for (const f of failures) p.log.error(`  ${f.label}: ${f.message}`);
+  } else {
+    p.log.success(`Project ${slug} destroyed.`);
+  }
+
+  if (failures.length > 0) process.exit(1);
+}
+
 export default defineCommand({
   meta: {
     name: "destroy",
     description: "Destroy a tila project and its resources",
   },
   args: {
+    slug: {
+      type: "positional",
+      description:
+        "Project slug to destroy by ID (infra-owner mode; no local .tila/ needed)",
+      required: false,
+    },
     force: {
       type: "boolean",
       description: "Skip confirmation prompt",
@@ -75,12 +192,41 @@ export default defineCommand({
     const cwd = process.cwd();
     const tilaDir = join(cwd, ".tila");
 
-    // Step 1: Read config
-    const config = findConfig(cwd);
-    if (!config) {
-      p.cancel("No project found. Run `tila project create` first.");
+    // Step 1: Resolve the destroy plan — local (.tila/ in cwd) vs infra-owner
+    // (target a slug using ~/.tila/infra.toml + INFRA_ADMIN_TOKEN).
+    const slugArg =
+      typeof args.slug === "string" && args.slug.length > 0
+        ? args.slug
+        : undefined;
+    const localConfig = findConfig(cwd);
+    let infraConfig: TilaInfraConfig | null = null;
+    try {
+      infraConfig = loadInfraConfig(tilaHome());
+    } catch {
+      infraConfig = null;
+    }
+
+    const plan = resolveDestroyPlan({ slugArg, localConfig, infraConfig });
+
+    if (plan.mode === "error") {
+      p.cancel(plan.message);
       process.exit(1);
     }
+
+    if (plan.mode === "needs-picker") {
+      p.cancel(
+        "No project found in this directory.\n\nTo destroy a project you are not set up for locally, target it by ID:\n    tila project destroy <slug>\n\nList every project on this account with:\n    tila project list",
+      );
+      process.exit(1);
+    }
+
+    if (plan.mode === "infra") {
+      await runInfraDestroy(args, plan, infraConfig);
+      return;
+    }
+
+    // plan.mode === "local" — the per-project path, using the cwd config.
+    const config = plan.config;
 
     const slug = config.project_id;
     const workerUrl = config.worker_url ?? null;

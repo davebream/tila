@@ -90,6 +90,36 @@ describe("D1ProjectRegistry.listAllIncludingArchived", () => {
   });
 });
 
+describe("D1ProjectRegistry.getIncludingArchived", () => {
+  it("get() returns null for an archived project, getIncludingArchived() returns it", async () => {
+    const sqlite = createTestDb();
+    sqlite.exec(`
+      INSERT INTO _projects (project_id, display_name, cloudflare_account_id, archived) VALUES ('proj-archived', 'Archived Project', 'acc-1', 1);
+    `);
+    const d1Shim = createD1Shim(sqlite);
+    const registry = new D1ProjectRegistry(d1Shim as unknown as D1Database);
+
+    const viaGet = await registry.get("proj-archived");
+    const viaGetIncluding =
+      await registry.getIncludingArchived("proj-archived");
+
+    expect(viaGet).toBeNull();
+    expect(viaGetIncluding).toEqual({
+      displayName: "Archived Project",
+      cloudflareAccountId: "acc-1",
+    });
+  });
+
+  it("getIncludingArchived() returns null when the project does not exist", async () => {
+    const sqlite = createTestDb();
+    const d1Shim = createD1Shim(sqlite);
+    const registry = new D1ProjectRegistry(d1Shim as unknown as D1Database);
+
+    const result = await registry.getIncludingArchived("missing");
+    expect(result).toBeNull();
+  });
+});
+
 describe("D1ProjectRegistry.listAll", () => {
   it("returns empty array when no projects exist", async () => {
     const sqlite = createTestDb();
