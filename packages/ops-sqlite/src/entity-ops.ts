@@ -435,6 +435,11 @@ export function update(
   const normalizedTags =
     tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
 
+  // Single clock read for the whole transaction: the entity write and any gate
+  // resolution it triggers (checkPendingGates resolving an expired timer gate)
+  // must share one timestamp, so entity.updated_at and gate.resolved_at agree.
+  const now = Date.now();
+
   return db.transaction((tx) => {
     const existing = tx
       .select()
@@ -457,13 +462,12 @@ export function update(
     const TERMINAL_STATUSES = new Set(["done", "closed", "merged"]);
     const incomingStatus = data.status as string | undefined;
     if (incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
-      checkPendingGates(tx, id, Date.now());
+      checkPendingGates(tx, id, now);
     }
 
     // Merge data: spread existing + new fields (passthrough preservation)
     const existingData = JSON.parse(existing.data) as Record<string, unknown>;
     const mergedData = { ...existingData, ...data };
-    const now = Date.now();
 
     tx.update(schema.entities)
       .set({
@@ -533,6 +537,11 @@ export function archive(
   fence: number,
   origin: RequestOrigin,
 ): void {
+  // Single clock read for the whole transaction: the archive write and the gate
+  // resolution it triggers (checkPendingGates resolving an expired timer gate)
+  // must share one timestamp, so entity.updated_at and gate.resolved_at agree.
+  const now = Date.now();
+
   db.transaction((tx) => {
     const existing = tx
       .select()
@@ -553,13 +562,11 @@ export function archive(
     // Gate enforcement: archive is a terminal operation -- always check gates.
     // If GateBlockedError is thrown, the transaction rolls back cleanly.
     // The entity's claim remains valid; caller can retry after resolving gates.
-    checkPendingGates(tx, id, Date.now());
+    checkPendingGates(tx, id, now);
 
     tx.delete(schema.claims)
       .where(eq(schema.claims.resource, `${existing.type}:${id}`))
       .run();
-
-    const now = Date.now();
 
     tx.update(schema.entities)
       .set({
