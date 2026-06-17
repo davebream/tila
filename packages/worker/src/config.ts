@@ -35,8 +35,31 @@ export const DEBOUNCE_MS = 60_000;
  */
 export const MAX_DEBOUNCE_MAP_SIZE = 2000;
 
-/** Maximum number of projects processed per sweep batch. */
-export const SWEEP_BATCH_SIZE = 100;
+/**
+ * Number of expired artifact pointers requested from a DO per /sweep call.
+ * The sweep now re-arms this batch in a drain loop until a project is fully
+ * cleared (see SWEEP_MAX_DRAIN_ITERATIONS) — so this is a per-round page size,
+ * NOT a per-run cap. The DO clamps the accepted value to [1, 500]; we request
+ * the clamp ceiling to minimize round-trips while staying within it.
+ */
+export const SWEEP_BATCH_SIZE = 500;
+
+/**
+ * Wall-clock budget for a single sweep run, in milliseconds. When exceeded, the
+ * run stops cleanly between projects (or between drain rounds) and records a
+ * resume point in the summary so the next run knows where it stopped. Sized
+ * well under the Workers cron CPU/wall limits with headroom for a slow night.
+ */
+export const SWEEP_TIME_BUDGET_MS = 25_000;
+
+/**
+ * Safety clamp on the per-project expired-artifact drain loop. Each round
+ * tombstones up to SWEEP_BATCH_SIZE keys (removing them from the next round's
+ * candidate set), so a project of any realistic size drains in a handful of
+ * rounds. This bound prevents an unbounded loop if a DO ever returns a full
+ * batch without the candidate set shrinking (e.g. a tombstone-path bug).
+ */
+export const SWEEP_MAX_DRAIN_ITERATIONS = 50;
 
 /**
  * Minimum number of drift findings that triggers search index reconciliation.

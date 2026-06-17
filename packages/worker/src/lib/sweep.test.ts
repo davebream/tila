@@ -82,6 +82,7 @@ describe("runSweep — extraction seam", () => {
     // Structured summary with all expected counters, zeroed for an empty registry.
     expect(summary).toEqual({
       projectsSwept: 0,
+      projectsDegraded: 0,
       artifactsExpired: 0,
       r2DeleteErrors: 0,
       driftChecksRun: 0,
@@ -89,6 +90,8 @@ describe("runSweep — extraction seam", () => {
       driftErrors: 0,
       expiredSessions: 0,
       journalEventsArchived: 0,
+      projectStatuses: [],
+      resumePoint: null,
     });
   });
 
