@@ -657,7 +657,7 @@ The external API surface that the CLI calls. All requests are JSON over HTTPS. A
 | GET | `/artifacts/:key` | — | binary body with metadata headers |
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
-| GET | `/journal` | query: `since_seq`, `resource`, `kind`, `limit` | `{ events: [], cursor? }` |
+| GET | `/journal` | query: `since_seq`, `resource`, `kind`, `limit` | `{ ok, events: [], archived, lastArchivedSeq }` — `archived: true` (with `lastArchivedSeq`) signals the requested cursor falls below the archival watermark, so the range was cold-stored to R2 and pruned from DO SQLite rather than being genuinely empty; resume reads from `lastArchivedSeq` |
 | GET | `/journal/stream` | query: `since_seq` | SSE event stream (v0.2; v0.1 uses polling) |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
