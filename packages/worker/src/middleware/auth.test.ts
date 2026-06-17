@@ -355,7 +355,8 @@ describe("auth middleware", () => {
   it("invalidate() removes positive cache so next request queries D1", async () => {
     mockValidate.mockResolvedValue(CLAIMS);
     const app = createTestApp();
-    const hash = await hashToken(VALID_TOKEN);
+    // fetchWithCtx sets no HASH_PEPPER, so the middleware hashes bare — match it.
+    const hash = await hashToken(VALID_TOKEN, undefined);
 
     await fetchWithCtx(
       app,
@@ -425,7 +426,8 @@ describe("auth middleware", () => {
     app.use("/*", createAuthMiddleware());
     app.get("/test", (c) => c.json({ ok: true }));
 
-    const hash = await hashToken(VALID_TOKEN);
+    // fetchWithCtx sets no HASH_PEPPER, so the middleware hashes bare — match it.
+    const hash = await hashToken(VALID_TOKEN, undefined);
 
     const capturedPromises: Promise<unknown>[] = [];
     const capturingWaitUntil = vi.fn((p: Promise<unknown>) => {
@@ -1336,5 +1338,89 @@ describe("auth middleware", () => {
       // Generous timeout: this test makes 2000+ full auth requests to fill the
       // map to its cap, which can exceed the default 5s on loaded CI runners.
     }, 30000);
+  });
+
+  // ---------------------------------------------------------------------------
+  // SEC-1 — warn once per isolate when HASH_PEPPER is unset
+  // ---------------------------------------------------------------------------
+  describe("HASH_PEPPER unset warning (SEC-1)", () => {
+    async function fetchWithAnalytics(
+      app: ReturnType<typeof createTestApp>,
+      request: Request,
+      writeDataPoint: Mock,
+      pepper?: string,
+    ): Promise<Response> {
+      return app.fetch(
+        request,
+        {
+          DB: {} as D1Database,
+          PROJECT: {} as DurableObjectNamespace,
+          ARTIFACTS: {} as R2Bucket,
+          ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+          ...(pepper ? { HASH_PEPPER: pepper } : {}),
+        } as Env,
+        {
+          waitUntil: mockWaitUntil,
+          passThroughOnException: vi.fn(),
+        } as unknown as ExecutionContext,
+      );
+    }
+
+    it("warns (log + analytics) exactly once per isolate when HASH_PEPPER is unset", async () => {
+      mockValidate.mockResolvedValue(CLAIMS);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const writeDataPoint = vi.fn();
+      const app = createTestApp();
+
+      await fetchWithAnalytics(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }),
+        writeDataPoint,
+      );
+      // Second authed request in the same isolate — must NOT warn again
+      await fetchWithAnalytics(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }),
+        writeDataPoint,
+      );
+
+      const hashPepperWarns = warnSpy.mock.calls.filter((args) =>
+        String(args[0]).includes("HASH_PEPPER"),
+      );
+      expect(hashPepperWarns).toHaveLength(1);
+      expect(String(hashPepperWarns[0][0])).toContain("hash-pepper-unset");
+
+      const pepperPoints = writeDataPoint.mock.calls.filter((args) =>
+        (args[0]?.blobs ?? []).includes("hash-pepper-unset"),
+      );
+      expect(pepperPoints).toHaveLength(1);
+
+      warnSpy.mockRestore();
+    });
+
+    it("does NOT warn when HASH_PEPPER is set", async () => {
+      mockValidate.mockResolvedValue(CLAIMS);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const writeDataPoint = vi.fn();
+      const app = createTestApp();
+
+      await fetchWithAnalytics(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }),
+        writeDataPoint,
+        "operator-pepper",
+      );
+
+      const hashPepperWarns = warnSpy.mock.calls.filter((args) =>
+        String(args[0]).includes("HASH_PEPPER"),
+      );
+      expect(hashPepperWarns).toHaveLength(0);
+      const pepperPoints = writeDataPoint.mock.calls.filter((args) =>
+        (args[0]?.blobs ?? []).includes("hash-pepper-unset"),
+      );
+      expect(pepperPoints).toHaveLength(0);
+
+      warnSpy.mockRestore();
+    });
   });
 });

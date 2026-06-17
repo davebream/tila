@@ -101,8 +101,8 @@ authSessionExchange.post("/", async (c) => {
 
   const { token, project_id } = parsed.data;
 
-  // Validate token against D1
-  const tokenHash = await hashToken(token);
+  // Validate token against D1 (SEC-1: pepper to match D1-token mint in tokens.ts)
+  const tokenHash = await hashToken(token, c.env.HASH_PEPPER);
   const tokenStore = new D1TokenStore(c.env.DB);
   const tokenResult = await tokenStore.validate(tokenHash);
 
@@ -144,9 +144,9 @@ authSessionExchange.post("/", async (c) => {
     );
   }
 
-  // Create session
+  // Create session (SEC-1: pepper to match the cookie-session lookup in auth.ts:302)
   const sessionUUID = crypto.randomUUID();
-  const sessionHash = await hashToken(sessionUUID);
+  const sessionHash = await hashToken(sessionUUID, c.env.HASH_PEPPER);
   const expiresAt = Date.now() + COOKIE_SESSION_TTL_MS;
 
   const sessionStore = new D1SessionStore(c.env.DB);
@@ -193,7 +193,8 @@ authSessionProtected.post("/logout", async (c) => {
     "tila_session",
   );
   if (sessionCookie) {
-    const sessionHash = await hashToken(sessionCookie);
+    // SEC-1: pepper to match the session mint above and the cookie lookup in auth.ts:302
+    const sessionHash = await hashToken(sessionCookie, c.env.HASH_PEPPER);
     const sessionStore = new D1SessionStore(c.env.DB);
     try {
       await sessionStore.revoke(sessionHash);

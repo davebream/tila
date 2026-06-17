@@ -48,7 +48,10 @@ tokens.post("/", async (c) => {
 
   const { name, note } = parsed.data;
   const plaintext = generateToken();
-  const tokenHash = await hashToken(plaintext);
+  // SEC-1: pepper at mint so it matches every peppered lookup (auth.ts:614,
+  // auth-github app-config, auth-session exchange). Bare here would break
+  // validation the moment an operator sets HASH_PEPPER.
+  const tokenHash = await hashToken(plaintext, c.env.HASH_PEPPER);
   const createdAt = Math.floor(Date.now() / 1000);
 
   const store = new D1TokenStore(c.env.DB);

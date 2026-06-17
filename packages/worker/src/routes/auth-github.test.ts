@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { SignJWT, importJWK } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RATE_LIMIT_MAX_FAILURES, RATE_LIMIT_WINDOW_MS } from "../config";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import type { Env, HonoVariables } from "../types";
 
@@ -894,6 +895,8 @@ describe("POST /api/auth/github/app-config", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockD1TokenValidate.mockResolvedValue(null);
+    mockRateLimitCheck.mockResolvedValue(false);
+    mockRateLimitRecordFailure.mockResolvedValue(undefined);
   });
 
   it("returns 401 when no auth token provided", async () => {
@@ -1058,12 +1061,129 @@ describe("POST /api/auth/github/app-config", () => {
 
     expect(mockD1TokenUpdateLastUsedAt).toHaveBeenCalled();
   });
+
+  it("returns 429 when rate limited (upfront, before token validation)", async () => {
+    // SEC-5: this pre-auth route must perform the same upfront IP rate-limit
+    // check as /exchange. When the IP is over the threshold, reject with 429
+    // before ever touching the token store.
+    const app = createApp();
+    mockRateLimitCheck.mockResolvedValue(true);
+
+    const res = await app.request(
+      "/api/auth/github/app-config",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "1.2.3.4",
+          Authorization: "Bearer tila_t.fake-token",
+        },
+        body: JSON.stringify({
+          project_id: "test-project",
+          installation_id: 99999,
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("RATE_LIMITED");
+    // Must short-circuit before token validation.
+    expect(mockD1TokenValidate).not.toHaveBeenCalled();
+  });
+
+  it("records an exchange failure on an invalid token (SEC-5)", async () => {
+    // SEC-5: a failed tokenStore.validate(...) must record a rate-limit failure,
+    // exactly like the /exchange and /exchange-oidc auth-failure branches. This
+    // is what makes brute-force attempts against this endpoint accumulate toward
+    // the IP rate limit.
+    const app = createApp();
+    mockD1TokenValidate.mockResolvedValue(null); // invalid / revoked token
+
+    const res = await app.request(
+      "/api/auth/github/app-config",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "9.8.7.6",
+          Authorization: "Bearer tila_t.bad-token",
+        },
+        body: JSON.stringify({
+          project_id: "test-project",
+          installation_id: 99999,
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("UNAUTHORIZED");
+    // The failure must be recorded against the IP (mirrors /exchange).
+    expect(mockRateLimitRecordFailure).toHaveBeenCalledWith(
+      "exchange:9.8.7.6",
+      RATE_LIMIT_WINDOW_MS,
+    );
+  });
+
+  it("does not record a failure on the successful path", async () => {
+    // SEC-5 guard: a valid full-scope token must still succeed and must NOT
+    // record a rate-limit failure (the success path is unchanged).
+    const app = createApp();
+    mockD1TokenValidate.mockResolvedValue({
+      projectId: "test-project",
+      name: "admin-token",
+      scopes: "full",
+      tokenId: "token-123",
+    });
+
+    const res = await app.request(
+      "/api/auth/github/app-config",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "5.5.5.5",
+          Authorization: "Bearer tila_t.valid-token",
+        },
+        body: JSON.stringify({
+          project_id: "test-project",
+          installation_id: 99999,
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockRateLimitRecordFailure).not.toHaveBeenCalled();
+    // Upfront rate-limit check still runs on the happy path (parity with /exchange).
+    expect(mockRateLimitCheck).toHaveBeenCalledWith(
+      "exchange:5.5.5.5",
+      RATE_LIMIT_MAX_FAILURES,
+      RATE_LIMIT_WINDOW_MS,
+    );
+  });
 });
 
-// Helper to build a valid HMAC-signed OAuth state JWT for tests
+// Purpose-binding claims for the OAuth-state JWT (SEC-2). Must match the values
+// the mint/verify sites in auth-github.ts use, otherwise valid state is rejected.
+const OAUTH_STATE_ISSUER = "tila-oauth-state";
+const OAUTH_STATE_AUDIENCE = "tila-oauth-callback";
+
+// Helper to build a valid HMAC-signed OAuth state JWT for tests.
+// Mirrors the mint site: includes the purpose-binding iss/aud claims so the
+// callback's jwtVerify({ issuer, audience }) accepts it. Pass `issuer`/`audience`
+// overrides to simulate a JWT minted for a different purpose (e.g. a session token).
 async function buildOAuthState(
   hmacKeyB64: string,
-  overrides?: { iat?: number; nonce?: string },
+  overrides?: {
+    iat?: number;
+    nonce?: string;
+    issuer?: string | null;
+    audience?: string | null;
+  },
 ): Promise<string> {
   const iat = overrides?.iat ?? Math.floor(Date.now() / 1000);
   const nonce = overrides?.nonce ?? "test-nonce-uuid";
@@ -1074,9 +1194,22 @@ async function buildOAuthState(
     "HS256",
   );
 
-  return new SignJWT({ nonce, iat })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .sign(secret);
+  let builder = new SignJWT({ nonce, iat }).setProtectedHeader({
+    alg: "HS256",
+    typ: "JWT",
+  });
+  // Omitted/undefined override -> use the correct purpose value; explicit `null`
+  // -> omit the claim (to simulate a JWT minted for a different/no purpose).
+  const issuer: string | null =
+    overrides?.issuer === undefined ? OAUTH_STATE_ISSUER : overrides.issuer;
+  const audience: string | null =
+    overrides?.audience === undefined
+      ? OAUTH_STATE_AUDIENCE
+      : overrides.audience;
+  if (issuer !== null) builder = builder.setIssuer(issuer);
+  if (audience !== null) builder = builder.setAudience(audience);
+
+  return builder.sign(secret);
 }
 
 describe("GET /api/auth/github/oauth/callback", () => {
@@ -1187,6 +1320,79 @@ describe("GET /api/auth/github/oauth/callback", () => {
     const location = res.headers.get("Location") ?? "";
     expect(location).toContain("auth_status=error");
     expect(location).toContain("Invalid+State");
+  });
+
+  it("rejects a state JWT minted for a different purpose (wrong iss/aud) even when the cookie matches", async () => {
+    // SEC-2: simulate a JWT signed by the SHARED GITHUB_SESSION_HMAC_KEY but for a
+    // different purpose (e.g. a tila session token, iss/aud "tila"/"tila"). The
+    // cookie matches the state param exactly, so the nonce/cookie CSRF check passes;
+    // rejection must come from purpose-binding (iss/aud) verification.
+    const app = createApp();
+    const state = await buildOAuthState(TEST_HMAC_KEY, {
+      issuer: "tila",
+      audience: "tila",
+    });
+
+    const res = await app.request(
+      `/api/auth/github/oauth/callback?code=auth_code_123&state=${encodeURIComponent(state)}`,
+      {
+        method: "GET",
+        headers: { Cookie: `tila_oauth_state=${state}` },
+      },
+      envWithOAuth,
+    );
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("Location") ?? "";
+    expect(location).toContain("auth_status=error");
+    expect(location).toContain("Invalid+State");
+    // Must not have proceeded to the code exchange.
+    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
+  });
+
+  it("rejects a state JWT with missing iss/aud claims even when the cookie matches", async () => {
+    // SEC-2: a JWT with no purpose claims at all (the pre-fix mint shape) must be
+    // rejected once the verifier enforces issuer/audience. Cookie matches the param.
+    const app = createApp();
+    const state = await buildOAuthState(TEST_HMAC_KEY, {
+      issuer: null,
+      audience: null,
+    });
+
+    const res = await app.request(
+      `/api/auth/github/oauth/callback?code=auth_code_123&state=${encodeURIComponent(state)}`,
+      {
+        method: "GET",
+        headers: { Cookie: `tila_oauth_state=${state}` },
+      },
+      envWithOAuth,
+    );
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("Location") ?? "";
+    expect(location).toContain("auth_status=error");
+    expect(location).toContain("Invalid+State");
+    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
+  });
+
+  it("still enforces the nonce/cookie CSRF check independently of iss/aud (valid purpose, missing cookie)", async () => {
+    // SEC-2 regression guard: even a correctly purpose-bound state JWT must be
+    // rejected when the cookie binding is absent — iss/aud is additive, not a
+    // replacement for the primary CSRF defense.
+    const app = createApp();
+    const state = await buildOAuthState(TEST_HMAC_KEY);
+
+    const res = await app.request(
+      `/api/auth/github/oauth/callback?code=auth_code_123&state=${encodeURIComponent(state)}`,
+      { method: "GET" }, // no Cookie header
+      envWithOAuth,
+    );
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("Location") ?? "";
+    expect(location).toContain("auth_status=error");
+    expect(location).toContain("Invalid+State");
+    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
   });
 
   it("redirects with error when state is expired (iat > 300s ago)", async () => {

@@ -13,7 +13,7 @@ import {
   OidcExchangeRequestSchema,
   SessionPermissionSchema,
 } from "@tila/schemas";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { SignJWT, importJWK, jwtVerify } from "jose";
 import { z } from "zod";
 import {
@@ -39,6 +39,12 @@ import { parseCookieHeader } from "../lib/parse-cookie";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
+
+// SEC-2: purpose-binding claims for the OAuth-state JWT. These differ from the
+// session token's iss/aud ("tila"/"tila") so a token signed by the shared
+// GITHUB_SESSION_HMAC_KEY for any other purpose cannot pass state verification.
+const OAUTH_STATE_ISSUER = "tila-oauth-state";
+const OAUTH_STATE_AUDIENCE = "tila-oauth-callback";
 
 const PERMISSION_HIERARCHY: Record<string, number> = {
   none: 0,
@@ -121,6 +127,58 @@ export async function recordExchangeFailure(
       // Analytics emission is never load-bearing
     }
   }
+}
+
+/**
+ * Upfront per-IP rate-limit guard shared by every exchange-family route
+ * (/exchange, /exchange-oidc, /app-config). Reads CF-Connecting-IP and checks
+ * the shared `exchange:${ip}` counter; the matching failure-recording side is
+ * `recordExchangeFailure`. Extracted from 3 byte-identical inline blocks.
+ *
+ * Fails open: a D1 error emits an analytics data point and returns null
+ * (request proceeds) rather than blocking legitimate traffic on a D1 blip.
+ *
+ * @param c - Hono context (DB + ANALYTICS bindings, request headers)
+ * @returns A 429 Response when the IP is over the threshold, else null.
+ */
+export async function checkExchangeRateLimit(
+  c: Context<AppEnv>,
+): Promise<Response | null> {
+  const ip = c.req.raw.headers.get("CF-Connecting-IP");
+  if (!ip) return null;
+  const rateLimitStore = new D1RateLimitStore(c.env.DB);
+  try {
+    const isLimited = await rateLimitStore.check(
+      `exchange:${ip}`,
+      RATE_LIMIT_MAX_FAILURES,
+      RATE_LIMIT_WINDOW_MS,
+    );
+    if (isLimited) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many failed exchange attempts",
+            retryable: true,
+          },
+        },
+        429,
+      );
+    }
+  } catch {
+    // Fail open
+    try {
+      c.env.ANALYTICS.writeDataPoint({
+        blobs: ["auth", "rate_limit_d1_error", "check"],
+        doubles: [1],
+        indexes: ["rate-limit"],
+      });
+    } catch {
+      // Analytics emission is never load-bearing
+    }
+  }
+  return null;
 }
 
 /**
@@ -423,40 +481,8 @@ export const authGithub = new Hono<AppEnv>();
 authGithub.post("/exchange", async (c) => {
   // Rate limit check (pre-auth, keyed by IP)
   const ip = c.req.raw.headers.get("CF-Connecting-IP");
-  if (ip) {
-    const rateLimitStore = new D1RateLimitStore(c.env.DB);
-    try {
-      const isLimited = await rateLimitStore.check(
-        `exchange:${ip}`,
-        RATE_LIMIT_MAX_FAILURES,
-        RATE_LIMIT_WINDOW_MS,
-      );
-      if (isLimited) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "RATE_LIMITED",
-              message: "Too many failed exchange attempts",
-              retryable: true,
-            },
-          },
-          429,
-        );
-      }
-    } catch {
-      // Fail open
-      try {
-        c.env.ANALYTICS.writeDataPoint({
-          blobs: ["auth", "rate_limit_d1_error", "check"],
-          doubles: [1],
-          indexes: ["rate-limit"],
-        });
-      } catch {
-        // Analytics emission is never load-bearing
-      }
-    }
-  }
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
 
   // Parse and validate body
   let body: unknown;
@@ -531,8 +557,10 @@ authGithub.post("/exchange", async (c) => {
   }
 
   // Idempotency check (keyed by project_id + sha256 of github token)
-  // The hash ensures the raw token is never stored in D1
-  const tokenHash = await hashToken(github_token);
+  // The hash ensures the raw token is never stored in D1.
+  // SEC-1: pepper for consistency with the App-path idempotency key (:276).
+  // This is an idempotency-cache key, not a stored credential — no validate() pairs it.
+  const tokenHash = await hashToken(github_token, c.env.HASH_PEPPER);
   const idempotencyKey = `exchange:${project_id}:${tokenHash}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
@@ -694,6 +722,12 @@ authGithub.get("/login", async (c) => {
 
   const state = await new SignJWT({ nonce, iat })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    // SEC-2: purpose-bind the state JWT. GITHUB_SESSION_HMAC_KEY also signs
+    // tila_s.* session tokens; without distinct iss/aud claims any JWT from that
+    // shared key is structurally interchangeable with OAuth state (JWT confusion).
+    // The callback verifier enforces both (see OAUTH_STATE_ISSUER/AUDIENCE).
+    .setIssuer(OAUTH_STATE_ISSUER)
+    .setAudience(OAUTH_STATE_AUDIENCE)
     .sign(secret);
 
   // Build cookie
@@ -815,7 +849,15 @@ authGithub.get("/oauth/callback", async (c) => {
       { kty: "oct", k: base64UrlEncode(keyBytes), alg: "HS256" },
       "HS256",
     );
-    const { payload: jwtPayload } = await jwtVerify(state, secret);
+    // SEC-2: enforce purpose-binding. A JWT signed by the shared
+    // GITHUB_SESSION_HMAC_KEY for any other purpose (e.g. a tila_s.* session
+    // token) lacks these claims and is rejected here. This is defense-in-depth
+    // ON TOP OF the nonce/cookie CSRF check above (the primary defense), not a
+    // replacement for it. jwtVerify throws on iss/aud mismatch -> caught below.
+    const { payload: jwtPayload } = await jwtVerify(state, secret, {
+      issuer: OAUTH_STATE_ISSUER,
+      audience: OAUTH_STATE_AUDIENCE,
+    });
     const parsed = OAuthStatePayloadSchema.safeParse(jwtPayload);
     if (!parsed.success) {
       return oauthErrorRedirect(
@@ -880,9 +922,9 @@ authGithub.get("/oauth/callback", async (c) => {
   // Discard accessToken immediately — never store, persist, or forward
   // (variable goes out of scope after this point)
 
-  // Create workspace session in D1
+  // Create workspace session in D1 (SEC-1: pepper to match the cookie-session lookup in auth.ts:302)
   const sessionToken = crypto.randomUUID();
-  const sessionHash = await hashToken(sessionToken);
+  const sessionHash = await hashToken(sessionToken, c.env.HASH_PEPPER);
   const expiresAt = Date.now() + OAUTH_SESSION_TTL_MS;
 
   const sessionStore = new D1SessionStore(c.env.DB);
@@ -924,6 +966,15 @@ authGithub.get("/oauth/callback", async (c) => {
 
 // POST /app-config -- Store GitHub App installation ID for a project
 authGithub.post("/app-config", async (c) => {
+  // SEC-5: this route is on the pre-auth router and does its own inline token
+  // check, so it needs the same upfront IP rate-limit guard as /exchange.
+  // Without it, an attacker could brute-force D1 API tokens here with no
+  // rate-limit consequence recorded (the failed-token branch below calls
+  // recordExchangeFailure to feed the shared exchange:${ip} counter).
+  const ip = c.req.raw.headers.get("CF-Connecting-IP");
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
+
   // Inline token auth check (this route is on the pre-auth router)
   const authHeader = c.req.header("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
@@ -941,12 +992,17 @@ authGithub.post("/app-config", async (c) => {
   }
 
   const rawToken = authHeader.slice("Bearer ".length);
-  const tokenHash = await hashToken(rawToken);
+  // SEC-1: pepper to match the D1-token mint in tokens.ts:51
+  const tokenHash = await hashToken(rawToken, c.env.HASH_PEPPER);
 
   const tokenStore = new D1TokenStore(c.env.DB);
   const tokenResult = await tokenStore.validate(tokenHash);
 
   if (!tokenResult) {
+    // SEC-5: record the failed-token attempt against the IP so brute-force
+    // attempts accumulate toward the rate limit (parity with /exchange's
+    // GITHUB_AUTH_FAILED branch).
+    await recordExchangeFailure(c.env, ip);
     return c.json(
       {
         ok: false,
@@ -1040,40 +1096,8 @@ authGithub.post("/app-config", async (c) => {
 authGithub.post("/exchange-oidc", async (c) => {
   // Rate limit check (pre-auth, keyed by IP)
   const ip = c.req.raw.headers.get("CF-Connecting-IP");
-  if (ip) {
-    const rateLimitStore = new D1RateLimitStore(c.env.DB);
-    try {
-      const isLimited = await rateLimitStore.check(
-        `exchange:${ip}`,
-        RATE_LIMIT_MAX_FAILURES,
-        RATE_LIMIT_WINDOW_MS,
-      );
-      if (isLimited) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "RATE_LIMITED",
-              message: "Too many failed exchange attempts",
-              retryable: true,
-            },
-          },
-          429,
-        );
-      }
-    } catch {
-      // Fail open
-      try {
-        c.env.ANALYTICS.writeDataPoint({
-          blobs: ["auth", "rate_limit_d1_error", "check"],
-          doubles: [1],
-          indexes: ["rate-limit"],
-        });
-      } catch {
-        // Analytics emission is never load-bearing
-      }
-    }
-  }
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
 
   // Parse and validate body
   let body: unknown;

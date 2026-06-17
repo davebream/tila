@@ -82,10 +82,31 @@ export const tokens = sqliteTable("_tokens", {
 
 ### Hashing
 
-Raw tokens are **never** stored. Only SHA-256 hashes persist in D1.
+Raw tokens are **never** stored. Only token hashes persist in D1.
 
 - Implementation: `packages/worker/src/lib/hash-token.ts`
-- Algorithm: UTF-8 encode → SHA-256 → hex string
+- Algorithm (default): UTF-8 encode → SHA-256 → hex string
+- Algorithm (hardened): when the optional `HASH_PEPPER` Worker secret is set, the
+  token is hashed with keyed **HMAC-SHA-256** (pepper as key) instead of bare
+  SHA-256, so a leaked digest is useless without the secret.
+
+`HASH_PEPPER` is threaded into **every** mint and lookup callsite for both D1 API
+tokens and cookie/workspace sessions (SEC-1). The `hashToken` `pepper` parameter is
+required (`string | undefined`, not optional) so a bare call is a compile error —
+mint/lookup consistency is type-enforced, not just convention. The auth middleware
+logs a one-time-per-isolate warning plus an Analytics datapoint (`hash-pepper-unset`)
+on the first request handled by the auth middleware (regardless of auth outcome) when
+the secret is not configured.
+
+> **Activation caveat — enabling or rotating `HASH_PEPPER` does NOT re-hash existing credentials.**
+> Setting the secret (or changing it from one value to another) changes the digest of
+> every token. Pre-existing D1 API tokens hashed under the old configuration stop
+> validating and must be re-issued; cookie/workspace sessions re-authenticate within
+> their TTL (1h GitHub sessions, 8h cookie sessions). The bare-SHA-256 fallback is
+> retained intentionally so the secret is a no-op until set. A zero-downtime dual-verify
+> re-hash migration (verify against both the new and old digest during a rollover
+> window) is a separate tracked follow-up — and is what a safe pepper *rotation* would
+> also require.
 
 ### LRU Cache
 
@@ -940,19 +961,17 @@ All caches use Map-based LRU eviction: on insert, if at capacity, delete the old
 
 **Pre-auth:** IP-based rate limiting via `D1RateLimitStore` (checked before auth validation).
 
-**Configurable thresholds** (lines 73-74 in `auth.ts`):
+**Configurable thresholds** (`RATE_LIMIT_MAX_FAILURES` / `RATE_LIMIT_WINDOW_MS` in `config.ts`):
 - `RATE_LIMIT_MAX_FAILURES = 20`
 - `RATE_LIMIT_WINDOW_MS = 60_000` (60 seconds)
 
-**Separate limit for exchange endpoint** (lines 16-17 in `auth-github.ts`):
-- `RATE_LIMIT_MAX_FAILURES = 10`
-- `RATE_LIMIT_WINDOW_MS = 60_000`
+**Shared exchange-family counter:** The exchange-family endpoints — `/exchange`, `/exchange-oidc`, and `/app-config` — all run the same upfront check via `checkExchangeRateLimit()` against a single per-IP key, `exchange:${ip}`. Because the key is shared, failed attempts accrue across all three endpoints, so an attacker cannot dodge the limit by spreading brute-force attempts over the different exchange routes.
 
 **IP extraction:** `CF-Connecting-IP` header (Cloudflare-provided client IP).
 
-**Failure recording:** Failed auth attempts increment the rate-limit counter (lines 164-169 in `auth.ts`, lines 191-200 in `auth-github.ts`).
+**Failure recording:** Failed auth attempts increment the rate-limit counter via `recordExchangeFailure()` (exchange-family routes) and the equivalent negative-result path in `auth.ts`.
 
-**Fail-open:** If D1 is unavailable, rate limiting is skipped (non-blocking).
+**Fail-open:** If D1 is unavailable, rate limiting is skipped (non-blocking) and an analytics data point is emitted.
 
 ### HMAC Integrity
 
@@ -967,6 +986,8 @@ GitHub session tokens use HMAC-SHA256 signatures to ensure:
 openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 npx wrangler secret put GITHUB_SESSION_HMAC_KEY
 ```
+
+**OAuth-state purpose binding (SEC-2):** The same `GITHUB_SESSION_HMAC_KEY` also signs the OAuth login `state` JWT, so the state JWT is purpose-bound with distinct `iss`/`aud` claims (`tila-oauth-state` / `tila-oauth-callback`) that the callback verifies — a session token (`iss`/`aud` = `tila`) therefore cannot be replayed as OAuth state. This is defense-in-depth on top of the nonce/cookie CSRF check, not a replacement for it.
 
 ### No Raw Token Persistence
 

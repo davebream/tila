@@ -386,6 +386,12 @@ export async function exchangeGitHubToken(
         project_id: projectId,
         github_token: githubToken,
       }),
+      // Bound the exchange so a hung/slow response can't block the caller (CLI,
+      // MCP server) until the OS TCP timeout. 30s matches the TilaClient default
+      // timeout (see ClientOptions.timeoutMs). AbortSignal.timeout is supported
+      // in all of the SDK's target runtimes (Node 18.8+, Bun, Cloudflare Workers,
+      // browsers).
+      signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
     throw new Error(
