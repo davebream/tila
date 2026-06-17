@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { SignJWT, importJWK } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RATE_LIMIT_MAX_FAILURES, RATE_LIMIT_WINDOW_MS } from "../config";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import type { Env, HonoVariables } from "../types";
 
@@ -894,6 +895,8 @@ describe("POST /api/auth/github/app-config", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockD1TokenValidate.mockResolvedValue(null);
+    mockRateLimitCheck.mockResolvedValue(false);
+    mockRateLimitRecordFailure.mockResolvedValue(undefined);
   });
 
   it("returns 401 when no auth token provided", async () => {
@@ -1057,6 +1060,110 @@ describe("POST /api/auth/github/app-config", () => {
     );
 
     expect(mockD1TokenUpdateLastUsedAt).toHaveBeenCalled();
+  });
+
+  it("returns 429 when rate limited (upfront, before token validation)", async () => {
+    // SEC-5: this pre-auth route must perform the same upfront IP rate-limit
+    // check as /exchange. When the IP is over the threshold, reject with 429
+    // before ever touching the token store.
+    const app = createApp();
+    mockRateLimitCheck.mockResolvedValue(true);
+
+    const res = await app.request(
+      "/api/auth/github/app-config",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "1.2.3.4",
+          Authorization: "Bearer tila_t.fake-token",
+        },
+        body: JSON.stringify({
+          project_id: "test-project",
+          installation_id: 99999,
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("RATE_LIMITED");
+    // Must short-circuit before token validation.
+    expect(mockD1TokenValidate).not.toHaveBeenCalled();
+  });
+
+  it("records an exchange failure on an invalid token (SEC-5)", async () => {
+    // SEC-5: a failed tokenStore.validate(...) must record a rate-limit failure,
+    // exactly like the /exchange and /exchange-oidc auth-failure branches. This
+    // is what makes brute-force attempts against this endpoint accumulate toward
+    // the IP rate limit.
+    const app = createApp();
+    mockD1TokenValidate.mockResolvedValue(null); // invalid / revoked token
+
+    const res = await app.request(
+      "/api/auth/github/app-config",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "9.8.7.6",
+          Authorization: "Bearer tila_t.bad-token",
+        },
+        body: JSON.stringify({
+          project_id: "test-project",
+          installation_id: 99999,
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("UNAUTHORIZED");
+    // The failure must be recorded against the IP (mirrors /exchange).
+    expect(mockRateLimitRecordFailure).toHaveBeenCalledWith(
+      "exchange:9.8.7.6",
+      RATE_LIMIT_WINDOW_MS,
+    );
+  });
+
+  it("does not record a failure on the successful path", async () => {
+    // SEC-5 guard: a valid full-scope token must still succeed and must NOT
+    // record a rate-limit failure (the success path is unchanged).
+    const app = createApp();
+    mockD1TokenValidate.mockResolvedValue({
+      projectId: "test-project",
+      name: "admin-token",
+      scopes: "full",
+      tokenId: "token-123",
+    });
+
+    const res = await app.request(
+      "/api/auth/github/app-config",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "5.5.5.5",
+          Authorization: "Bearer tila_t.valid-token",
+        },
+        body: JSON.stringify({
+          project_id: "test-project",
+          installation_id: 99999,
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockRateLimitRecordFailure).not.toHaveBeenCalled();
+    // Upfront rate-limit check still runs on the happy path (parity with /exchange).
+    expect(mockRateLimitCheck).toHaveBeenCalledWith(
+      "exchange:5.5.5.5",
+      RATE_LIMIT_MAX_FAILURES,
+      RATE_LIMIT_WINDOW_MS,
+    );
   });
 });
 

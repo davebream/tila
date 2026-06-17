@@ -244,7 +244,7 @@ describe("checkIdempotentExchange", () => {
 // ---------------------------------------------------------------------------
 
 describe("call-site count assertions (C3 regression guard)", () => {
-  it("recordExchangeFailure is called at exactly 6 sites in auth-github.ts", async () => {
+  it("recordExchangeFailure is called at exactly 7 sites in auth-github.ts", async () => {
     // Read the source file and count occurrences of recordExchangeFailure calls.
     // This catches a dropped site if a future edit forgets to use the helper.
     // Duplication sites:
@@ -254,6 +254,7 @@ describe("call-site count assertions (C3 regression guard)", () => {
     //  4. /exchange PAT handler — permission fail
     //  5. /exchange-oidc — OIDC token error (401 path)
     //  6. /exchange-oidc — repo not registered
+    //  7. /app-config — invalid/revoked token (SEC-5)
     const { readFileSync } = await import("node:fs");
     const { join, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
@@ -264,7 +265,7 @@ describe("call-site count assertions (C3 regression guard)", () => {
 
     const callSites = (src.match(/await recordExchangeFailure\(/g) ?? [])
       .length;
-    expect(callSites).toBe(6);
+    expect(callSites).toBe(7);
   });
 
   it("checkIdempotentExchange is called at exactly 3 sites in auth-github.ts", async () => {

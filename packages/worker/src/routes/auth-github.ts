@@ -946,6 +946,47 @@ authGithub.get("/oauth/callback", async (c) => {
 
 // POST /app-config -- Store GitHub App installation ID for a project
 authGithub.post("/app-config", async (c) => {
+  // SEC-5: this route is on the pre-auth router and does its own inline token
+  // check, so it needs the same upfront IP rate-limit guard as /exchange.
+  // Without it, an attacker could brute-force D1 API tokens here with no
+  // rate-limit consequence recorded (the failed-token branch below now calls
+  // recordExchangeFailure to feed this counter).
+  const ip = c.req.raw.headers.get("CF-Connecting-IP");
+  if (ip) {
+    const rateLimitStore = new D1RateLimitStore(c.env.DB);
+    try {
+      const isLimited = await rateLimitStore.check(
+        `exchange:${ip}`,
+        RATE_LIMIT_MAX_FAILURES,
+        RATE_LIMIT_WINDOW_MS,
+      );
+      if (isLimited) {
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many failed exchange attempts",
+              retryable: true,
+            },
+          },
+          429,
+        );
+      }
+    } catch {
+      // Fail open
+      try {
+        c.env.ANALYTICS.writeDataPoint({
+          blobs: ["auth", "rate_limit_d1_error", "check"],
+          doubles: [1],
+          indexes: ["rate-limit"],
+        });
+      } catch {
+        // Analytics emission is never load-bearing
+      }
+    }
+  }
+
   // Inline token auth check (this route is on the pre-auth router)
   const authHeader = c.req.header("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
@@ -970,6 +1011,10 @@ authGithub.post("/app-config", async (c) => {
   const tokenResult = await tokenStore.validate(tokenHash);
 
   if (!tokenResult) {
+    // SEC-5: record the failed-token attempt against the IP so brute-force
+    // attempts accumulate toward the rate limit (parity with /exchange's
+    // GITHUB_AUTH_FAILED branch).
+    await recordExchangeFailure(c.env, ip);
     return c.json(
       {
         ok: false,
