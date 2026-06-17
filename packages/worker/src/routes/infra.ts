@@ -1,3 +1,4 @@
+import { D1ProjectRegistry } from "@tila/backend-d1";
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -77,6 +78,59 @@ export const requireInfraPrincipal: MiddlewareHandler<AppEnv> = async (
 
   await next();
 };
+
+/**
+ * Existence guard (CI-1) — runs AFTER {@link requireInfraPrincipal}. Confirms the
+ * target project EXISTS in the D1 registry BEFORE any Durable Object is contacted.
+ *
+ * This is load-bearing: tila's `ProjectDO` runs migrations in its constructor on
+ * first access, so calling `idFromName`/`get` for a slug that never existed would
+ * MATERIALIZE a permanent empty DO (writing to DO SQLite). We must fail closed on
+ * a missing registry row before touching the DO namespace at all.
+ *
+ * - `opts.includeArchived` selects the archived-inclusive lookup
+ *   (`getIncludingArchived`) for admin paths that must reach archived projects;
+ *   the default lookup (`get`) filters archived projects out.
+ * - On a missing row → 404 PROJECT_NOT_FOUND, emit the analytics datapoint, and
+ *   return BEFORE any `idFromName`/`get`/DO contact.
+ * - On success, stashes the resolved `projectId` and `doStub` for downstream
+ *   handlers, then calls `next()`.
+ */
+export function resolveTargetProject(opts?: {
+  includeArchived?: boolean;
+}): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const id = c.req.param("projectId") ?? "";
+    const registry = new D1ProjectRegistry(c.env.DB);
+    const row = opts?.includeArchived
+      ? await registry.getIncludingArchived(id)
+      : await registry.get(id);
+
+    // Fail closed before any DO is materialized.
+    if (!row) {
+      emitInfraDestroyDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+        projectId: id,
+        outcome: "project-not-found",
+        statusCode: 404,
+      });
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "PROJECT_NOT_FOUND",
+            message: "Project not found",
+            retryable: false,
+          },
+        },
+        404,
+      );
+    }
+
+    c.set("projectId", id);
+    c.set("doStub", c.env.PROJECT.get(c.env.PROJECT.idFromName(id)));
+    await next();
+  };
+}
 
 /**
  * Infra-owner admin routes — authenticated by the INFRA_ADMIN_TOKEN Worker

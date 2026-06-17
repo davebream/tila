@@ -9,10 +9,14 @@ vi.mock("../lib/do-forward", () => ({
 }));
 
 const listAllIncludingArchivedMock = vi.fn();
+const getMock = vi.fn();
+const getIncludingArchivedMock = vi.fn();
 vi.mock("@tila/backend-d1", () => ({
   D1ProjectRegistry: vi.fn().mockImplementation(
     class {
       listAllIncludingArchived = listAllIncludingArchivedMock;
+      get = getMock;
+      getIncludingArchived = getIncludingArchivedMock;
     } as unknown as () => unknown,
   ),
 }));
@@ -30,7 +34,9 @@ vi.mock("@tila/backend-r2", () => ({
   ),
 }));
 
-const { infra, requireInfraPrincipal } = await import("./infra");
+const { infra, requireInfraPrincipal, resolveTargetProject } = await import(
+  "./infra"
+);
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -78,6 +84,12 @@ describe("infra destroy route", () => {
       .mockReset()
       .mockResolvedValue(Response.json({ ok: true, keys: [] }));
     listAllIncludingArchivedMock.mockReset().mockResolvedValue([]);
+    getMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+    getIncludingArchivedMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
     deleteManyMock.mockReset().mockResolvedValue({ deleted: 0, failed: [] });
     deleteByPrefixMock
       .mockReset()
@@ -333,5 +345,170 @@ describe("requireInfraPrincipal middleware", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { route: string };
     expect(body.route).toBe("two");
+  });
+});
+
+describe("resolveTargetProject middleware", () => {
+  // A DO namespace whose idFromName is a spy, so the existence guard can be
+  // proven to short-circuit BEFORE any DO is materialized.
+  function makeSpyDONamespace(idFromName: ReturnType<typeof vi.fn>) {
+    return {
+      idFromName,
+      get: () => ({}) as DurableObjectStub,
+      idFromString: () => ({ toString: () => "id" }) as DurableObjectId,
+      newUniqueId: () => ({ toString: () => "id" }) as DurableObjectId,
+      jurisdiction: () => ({}) as DurableObjectNamespace,
+    } as unknown as DurableObjectNamespace;
+  }
+
+  // A 2-route app: auth (requireInfraPrincipal) then existence (resolveTargetProject).
+  // On pass-through, the handler echoes the resolved projectId so we can prove next() ran.
+  function guardedApp(includeArchived?: boolean): Hono<AppEnv> {
+    const app = new Hono<AppEnv>();
+    app.use("/p/:projectId/*", requireInfraPrincipal);
+    app.use(
+      "/p/:projectId/*",
+      resolveTargetProject(
+        includeArchived ? { includeArchived: true } : undefined,
+      ),
+    );
+    app.get("/p/:projectId/one", (c) =>
+      c.json({ ok: true, route: "one", projectId: c.get("projectId") }),
+    );
+    app.get("/p/:projectId/two", (c) =>
+      c.json({ ok: true, route: "two", projectId: c.get("projectId") }),
+    );
+    return app;
+  }
+
+  beforeEach(() => {
+    forwardToDOMock.mockReset();
+    getMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+    getIncludingArchivedMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+  });
+
+  it("returns 404 PROJECT_NOT_FOUND without touching the DO when the slug is unknown", async () => {
+    getMock.mockResolvedValue(null);
+    const idFromName = vi.fn(
+      () => ({ toString: () => "id" }) as DurableObjectId,
+    );
+    const app = guardedApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: "s3cret-infra-token",
+      PROJECT: makeSpyDONamespace(idFromName),
+    });
+
+    const res = await app.request(
+      "/p/proj-ghost/one",
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer s3cret-infra-token" },
+      },
+      env as Env,
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(idFromName).not.toHaveBeenCalled();
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+  });
+
+  it("emits a project-not-found analytics datapoint on an unknown slug", async () => {
+    getMock.mockResolvedValue(null);
+    const writeDataPoint = vi.fn();
+    const app = guardedApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: "s3cret-infra-token",
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+
+    const res = await app.request(
+      "/p/proj-ghost/one",
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer s3cret-infra-token" },
+      },
+      env as Env,
+    );
+
+    expect(res.status).toBe(404);
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    const arg = writeDataPoint.mock.calls[0][0] as {
+      blobs: string[];
+      doubles: number[];
+    };
+    expect(arg.blobs).toContain("project-not-found");
+    expect(arg.doubles).toContain(404);
+  });
+
+  it("calls next() (handler runs) when the slug is known", async () => {
+    const app = guardedApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
+
+    const res = await app.request(
+      "/p/proj-target/two",
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer s3cret-infra-token" },
+      },
+      env as Env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { route: string; projectId: string };
+    expect(body.route).toBe("two");
+    expect(body.projectId).toBe("proj-target");
+    expect(getMock).toHaveBeenCalledWith("proj-target");
+  });
+
+  it("returns 404 for an archived slug under the default (archived-excluding) guard", async () => {
+    // Default guard uses get(), which filters archived → null.
+    getMock.mockResolvedValue(null);
+    const app = guardedApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
+
+    const res = await app.request(
+      "/p/proj-archived/one",
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer s3cret-infra-token" },
+      },
+      env as Env,
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+  });
+
+  it("reaches an archived slug when { includeArchived: true } is set", async () => {
+    // get() would filter archived (null), but getIncludingArchived() finds it.
+    getMock.mockResolvedValue(null);
+    getIncludingArchivedMock.mockResolvedValue({
+      displayName: "Archived",
+      cloudflareAccountId: "acc",
+    });
+    const app = guardedApp(true);
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
+
+    const res = await app.request(
+      "/p/proj-archived/two",
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer s3cret-infra-token" },
+      },
+      env as Env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { route: string; projectId: string };
+    expect(body.route).toBe("two");
+    expect(getIncludingArchivedMock).toHaveBeenCalledWith("proj-archived");
+    expect(getMock).not.toHaveBeenCalled();
   });
 });
