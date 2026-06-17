@@ -23,7 +23,7 @@ export class GrepQueryError extends Error {
 // Cap constants
 // ---------------------------------------------------------------------------
 
-/** Maximum number of candidate artifacts to scan per request (== SWEEP_BATCH_SIZE). */
+/** Maximum number of candidate artifacts to scan per request. */
 export const GREP_CANDIDATE_CAP = 100;
 
 /** Per-blob raw-byte scan ceiling (1 MiB). */
