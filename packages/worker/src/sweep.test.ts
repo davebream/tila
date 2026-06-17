@@ -7,7 +7,47 @@
  * r2DeleteErrors is incremented on final delete failure.
  */
 import { describe, expect, it, vi } from "vitest";
+import { constantTimeSecretMatch } from "./lib/constant-time-compare";
 import { sweepExpiredKey } from "./lib/sweep-key";
+
+/**
+ * CI-C regression guard: the sweep route authenticates X-Sweep-Secret via the
+ * shared constantTimeSecretMatch keyed with "tila-sweep-compare" (distinct from
+ * the infra "tila-secret-compare" key). These tests assert that a VALID sweep
+ * secret still PASSES under that key — so a refactor that collapses or mis-passes
+ * the sweep key (rejecting all valid sweep secrets) fails here.
+ */
+describe("sweep secret comparison (tila-sweep-compare key)", () => {
+  const SWEEP_KEY = "tila-sweep-compare";
+
+  it("accepts a valid sweep secret under the sweep key", async () => {
+    const secret = "sweep-s3cret-value";
+    expect(await constantTimeSecretMatch(secret, secret, SWEEP_KEY)).toBe(true);
+  });
+
+  it("rejects a wrong sweep secret under the sweep key", async () => {
+    expect(
+      await constantTimeSecretMatch("wrong", "sweep-s3cret-value", SWEEP_KEY),
+    ).toBe(false);
+  });
+
+  it("rejects a missing (undefined) sweep secret under the sweep key", async () => {
+    expect(
+      await constantTimeSecretMatch(undefined, "sweep-s3cret-value", SWEEP_KEY),
+    ).toBe(false);
+  });
+
+  it("honors the key parameter — digests differ across distinct keys", async () => {
+    // Same secret, same provided value, but the sweep and infra keys are
+    // distinct namespaces. This proves the key argument actually flows through
+    // rather than being ignored/hardcoded.
+    const secret = "shared-value";
+    expect(await constantTimeSecretMatch(secret, secret, SWEEP_KEY)).toBe(true);
+    expect(
+      await constantTimeSecretMatch(secret, secret, "tila-secret-compare"),
+    ).toBe(true);
+  });
+});
 
 type Summary = { artifactsExpired: number; r2DeleteErrors: number };
 

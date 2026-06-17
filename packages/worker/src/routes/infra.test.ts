@@ -30,7 +30,7 @@ vi.mock("@tila/backend-r2", () => ({
   ),
 }));
 
-const { infra } = await import("./infra");
+const { infra, requireInfraPrincipal } = await import("./infra");
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -85,9 +85,9 @@ describe("infra destroy route", () => {
     headMock.mockReset().mockResolvedValue(null);
   });
 
-  it("returns 404 when INFRA_DESTROY_TOKEN is not configured", async () => {
+  it("returns 404 when INFRA_ADMIN_TOKEN is not configured", async () => {
     const app = createApp();
-    const env = makeEnv(); // no INFRA_DESTROY_TOKEN
+    const env = makeEnv(); // no INFRA_ADMIN_TOKEN
 
     const res = await destroyReq(app, "proj-target", env, {
       Authorization: "Bearer anything",
@@ -99,7 +99,7 @@ describe("infra destroy route", () => {
 
   it("returns 403 when the bearer token is missing", async () => {
     const app = createApp();
-    const env = makeEnv({ INFRA_DESTROY_TOKEN: "s3cret-infra-token" });
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
 
     const res = await destroyReq(app, "proj-target", env); // no Authorization
 
@@ -109,7 +109,7 @@ describe("infra destroy route", () => {
 
   it("returns 403 when the bearer token does not match", async () => {
     const app = createApp();
-    const env = makeEnv({ INFRA_DESTROY_TOKEN: "s3cret-infra-token" });
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
 
     const res = await destroyReq(app, "proj-target", env, {
       Authorization: "Bearer wrong-token",
@@ -123,7 +123,7 @@ describe("infra destroy route", () => {
 
   it("runs the destroy orchestration and returns 200 when the bearer matches", async () => {
     const app = createApp();
-    const env = makeEnv({ INFRA_DESTROY_TOKEN: "s3cret-infra-token" });
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
     // Only this project exists, with one project-only blob.
     listAllIncludingArchivedMock.mockResolvedValue([
       { projectId: "proj-target" },
@@ -172,7 +172,7 @@ describe("infra destroy route", () => {
 
   it("returns 400 without touching the DO when X-Confirm-Slug is missing", async () => {
     const app = createApp();
-    const env = makeEnv({ INFRA_DESTROY_TOKEN: "s3cret-infra-token" });
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
 
     const res = await destroyReq(app, "proj-target", env, {
       Authorization: "Bearer s3cret-infra-token",
@@ -186,7 +186,7 @@ describe("infra destroy route", () => {
 
   it("returns 400 without touching the DO when X-Confirm-Slug does not match the URL slug", async () => {
     const app = createApp();
-    const env = makeEnv({ INFRA_DESTROY_TOKEN: "s3cret-infra-token" });
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
 
     const res = await destroyReq(app, "proj-target", env, {
       Authorization: "Bearer s3cret-infra-token",
@@ -203,7 +203,7 @@ describe("infra destroy route", () => {
     const writeDataPoint = vi.fn();
     const app = createApp();
     const env = makeEnv({
-      INFRA_DESTROY_TOKEN: "s3cret-infra-token",
+      INFRA_ADMIN_TOKEN: "s3cret-infra-token",
       ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
     });
     listAllIncludingArchivedMock.mockResolvedValue([
@@ -230,7 +230,7 @@ describe("infra destroy route", () => {
     const writeDataPoint = vi.fn();
     const app = createApp();
     const env = makeEnv({
-      INFRA_DESTROY_TOKEN: "s3cret-infra-token",
+      INFRA_ADMIN_TOKEN: "s3cret-infra-token",
       ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
     });
 
@@ -242,5 +242,96 @@ describe("infra destroy route", () => {
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
     expect(arg.blobs).toContain("infra_destroy");
+  });
+});
+
+describe("requireInfraPrincipal middleware", () => {
+  // A minimal 2-route app guarded by the middleware. If the middleware passes,
+  // the handlers respond 200 with a marker so we can prove the guard let through.
+  function guardedApp(): Hono<AppEnv> {
+    const app = new Hono<AppEnv>();
+    app.use("/guarded/*", requireInfraPrincipal);
+    app.get("/guarded/one", (c) => c.json({ ok: true, route: "one" }));
+    app.get("/guarded/two", (c) => c.json({ ok: true, route: "two" }));
+    return app;
+  }
+
+  it("returns 404 when INFRA_ADMIN_TOKEN is unset (endpoint invisible)", async () => {
+    const app = guardedApp();
+    const env = makeEnv(); // no INFRA_ADMIN_TOKEN
+
+    const res = await app.request(
+      "/guarded/one",
+      { method: "GET", headers: { Authorization: "Bearer anything" } },
+      env as Env,
+    );
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 on a missing bearer", async () => {
+    const app = guardedApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
+
+    const res = await app.request(
+      "/guarded/one",
+      { method: "GET" },
+      env as Env,
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("FORBIDDEN");
+  });
+
+  it("returns 403 on a wrong bearer", async () => {
+    const app = guardedApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
+
+    const res = await app.request(
+      "/guarded/two",
+      { method: "GET", headers: { Authorization: "Bearer wrong-token" } },
+      env as Env,
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  it("emits an auth-failure analytics datapoint on rejection", async () => {
+    const writeDataPoint = vi.fn();
+    const app = guardedApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: "s3cret-infra-token",
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+
+    const res = await app.request(
+      "/guarded/one",
+      { method: "GET", headers: { Authorization: "Bearer wrong-token" } },
+      env as Env,
+    );
+
+    expect(res.status).toBe(403);
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
+    expect(arg.blobs).toContain("infra_destroy");
+  });
+
+  it("calls next() (handler runs) when the bearer matches", async () => {
+    const app = guardedApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: "s3cret-infra-token" });
+
+    const res = await app.request(
+      "/guarded/two",
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer s3cret-infra-token" },
+      },
+      env as Env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { route: string };
+    expect(body.route).toBe("two");
   });
 });
