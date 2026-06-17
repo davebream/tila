@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchQueryError } from "../src/artifact-ops";
 import { acquire } from "../src/coordination-ops";
 import {
@@ -307,6 +307,99 @@ describe("archive", () => {
       q: "ArchiveSearchTarget",
     });
     expect(afterArchive).toHaveLength(0);
+  });
+
+  it("stamps the entity and the gate it resolves with the SAME timestamp", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-arch-ts",
+        type: "task",
+        data: { name: "TimestampParity", status: "open" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    const fence = acquireFence("e-arch-ts");
+
+    // An expired pending timer gate keyed on the bare entity id (the resource
+    // archive() passes to checkPendingGates). Archiving resolves this gate.
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO gates(id, resource, await_type, status, fence, timeout_at, created_at, created_by)
+         VALUES('gate-ts', 'e-arch-ts', 'timer', 'pending', ${fence}, 1, 1, 'actor-1')`,
+      )
+      .run();
+
+    // Hand out strictly increasing clock reads. With one read per transaction the
+    // entity write and the gate resolution share the SAME value; if the code read
+    // the clock twice (pre-fix), the two stamps would diverge.
+    let tick = 5_000_000;
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => ++tick);
+    try {
+      archive(testDb.db, "e-arch-ts", fence, { actor: "actor-1" });
+    } finally {
+      spy.mockRestore();
+    }
+
+    const entityRow = testDb.rawDb
+      .prepare("SELECT updated_at FROM entities WHERE id = ?")
+      .get("e-arch-ts") as { updated_at: number };
+    const gateRow = testDb.rawDb
+      .prepare("SELECT resolved_at, status FROM gates WHERE id = ?")
+      .get("gate-ts") as { resolved_at: number; status: string };
+
+    expect(gateRow.status).toBe("timed_out");
+    expect(gateRow.resolved_at).toBe(entityRow.updated_at);
+  });
+
+  it("update stamps the entity and the gate it resolves with the SAME timestamp", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-upd-ts",
+        type: "task",
+        data: { name: "TimestampParity", status: "open" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+    const fence = acquireFence("e-upd-ts");
+
+    // An expired pending timer gate keyed on the bare entity id (the resource
+    // update() passes to checkPendingGates on a terminal transition). The
+    // terminal status change resolves this gate.
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO gates(id, resource, await_type, status, fence, timeout_at, created_at, created_by)
+         VALUES('gate-upd-ts', 'e-upd-ts', 'timer', 'pending', ${fence}, 1, 1, 'actor-1')`,
+      )
+      .run();
+
+    // Strictly increasing clock reads: one read per transaction makes the entity
+    // write and the gate resolution share the SAME value; a second read (pre-fix)
+    // would diverge. This protects the update() B5 site (archive() is covered above).
+    let tick = 6_000_000;
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => ++tick);
+    try {
+      update(testDb.db, "e-upd-ts", { status: "done" }, fence, {
+        actor: "actor-1",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    const entityRow = testDb.rawDb
+      .prepare("SELECT updated_at FROM entities WHERE id = ?")
+      .get("e-upd-ts") as { updated_at: number };
+    const gateRow = testDb.rawDb
+      .prepare("SELECT resolved_at, status FROM gates WHERE id = ?")
+      .get("gate-upd-ts") as { resolved_at: number; status: string };
+
+    expect(gateRow.status).toBe("timed_out");
+    expect(gateRow.resolved_at).toBe(entityRow.updated_at);
   });
 });
 

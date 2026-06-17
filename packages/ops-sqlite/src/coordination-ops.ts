@@ -43,6 +43,12 @@ export function acquire(
 
     if (existing && existing.expires_at > now) {
       if (existing.machine === machine && existing.user === user) {
+        // Same-holder self-reacquire is treated as a RENEW, not a fresh acquire:
+        // we only extend expires_at and return the EXISTING fence unchanged. The
+        // fence does NOT bump here. Per docs/01-DECISIONS §2 the fence increments
+        // on each *acquire* to invalidate a prior holder — but re-acquiring a lease
+        // you already hold has no prior holder to fence out, so bumping would
+        // needlessly invalidate the caller's own in-flight fenced writes.
         const expiresAt = now + ttlMs;
         tx.update(schema.claims)
           .set({ expires_at: expiresAt })

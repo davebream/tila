@@ -43,9 +43,17 @@ resolve_version() {
     return
   fi
 
-  RELEASE_TAG=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null \
-    | grep '"tag_name"' \
-    | sed 's/.*"tag_name": "\(.*\)".*/\1/')
+  RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null || echo "")
+
+  # Prefer jq for robust JSON parsing; fall back to grep/sed when jq is absent.
+  # The sed fallback tolerates arbitrary whitespace around the colon and the value.
+  if command -v jq >/dev/null 2>&1; then
+    RELEASE_TAG=$(printf '%s' "${RELEASE_JSON}" | jq -r '.tag_name // empty')
+  else
+    RELEASE_TAG=$(printf '%s' "${RELEASE_JSON}" \
+      | grep '"tag_name"' \
+      | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+  fi
 
   if [ -z "${RELEASE_TAG}" ]; then
     echo "ERROR: Failed to resolve latest release version from GitHub API." >&2

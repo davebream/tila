@@ -99,29 +99,39 @@ export function ack(
   acker: string,
   now: number = Date.now(),
 ): AckSignalResult {
-  const existing = db
-    .select()
-    .from(schema.signals)
-    .where(eq(schema.signals.id, signalId))
-    .get();
+  // Wrap the select + update in one transaction with a `WHERE acked_at IS NULL`
+  // guard so a concurrent or repeated ack is idempotent: the first ack stamps
+  // `acked_at`; any later ack updates 0 rows and leaves the original timestamp
+  // intact. Without the transaction + guard, two acks racing in an embedded
+  // multi-process backend could each read a null `acked_at` and both write,
+  // clobbering the first timestamp.
+  return db.transaction((tx) => {
+    const existing = tx
+      .select()
+      .from(schema.signals)
+      .where(eq(schema.signals.id, signalId))
+      .get();
 
-  if (!existing) {
-    return { found: false, authorized: false };
-  }
+    if (!existing) {
+      return { found: false, authorized: false };
+    }
 
-  const authorized =
-    existing.target === acker ||
-    existing.target === "*" ||
-    existing.created_by === acker;
+    const authorized =
+      existing.target === acker ||
+      existing.target === "*" ||
+      existing.created_by === acker;
 
-  if (!authorized) {
-    return { found: true, authorized: false };
-  }
+    if (!authorized) {
+      return { found: true, authorized: false };
+    }
 
-  db.update(schema.signals)
-    .set({ acked_at: now })
-    .where(eq(schema.signals.id, signalId))
-    .run();
+    tx.update(schema.signals)
+      .set({ acked_at: now })
+      .where(
+        and(eq(schema.signals.id, signalId), isNull(schema.signals.acked_at)),
+      )
+      .run();
 
-  return { found: true, authorized: true };
+    return { found: true, authorized: true };
+  });
 }
