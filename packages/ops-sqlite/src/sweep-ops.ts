@@ -1,6 +1,7 @@
 import { lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { deleteTombstonedPointers } from "./artifact-ops";
+import { appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 
 /**
@@ -36,6 +37,29 @@ export function sweep(
   );
 
   return db.transaction((tx) => {
+    // B3: lease expiry is the most important coordination transition, so it
+    // must leave an audit trace. SELECT the expired claims first to recover each
+    // claim's resource/holder/fence, append one `claim.expired` journal row per
+    // claim, THEN delete — all inside this transaction so the journal rows and
+    // the delete commit (or roll back) atomically. The actor is the claim's
+    // holder (whose lease lapsed); the sweep is system-initiated, so there is no
+    // client provenance (tokenId/source left null).
+    const expiredClaims = tx
+      .select()
+      .from(schema.claims)
+      .where(lte(schema.claims.expires_at, now))
+      .all();
+
+    for (const claim of expiredClaims) {
+      appendJournal(tx, {
+        kind: "claim.expired",
+        resource: claim.resource,
+        actor: claim.holder,
+        fence: claim.fence,
+        data: { mode: claim.mode, expired_at: claim.expires_at },
+      });
+    }
+
     tx.delete(schema.claims).where(lte(schema.claims.expires_at, now)).run();
     const claimsDeleted = readChanges(tx);
 
