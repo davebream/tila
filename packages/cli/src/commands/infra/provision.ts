@@ -14,6 +14,7 @@ import {
   setWorkerSecrets,
 } from "../../lib/cloudflare-resources";
 import { deployWorkerWithAssets, describeUiOutcome } from "../../lib/deploy";
+import { ensureInfraAdminToken } from "../../lib/ensure-infra-admin-token";
 import {
   discoverInstallation,
   loadGithubAppCredentials,
@@ -83,6 +84,7 @@ async function promptForCfToken(): Promise<string> {
 async function runForceRedeploy(
   tilaDir: string,
   rotateHmac: boolean,
+  rotateAdminToken: boolean,
   headless = false,
 ): Promise<void> {
   // Load existing infra.toml
@@ -159,9 +161,16 @@ async function runForceRedeploy(
     // Non-fatal — log nothing to avoid leaking internals
   }
 
+  // Infra admin token — generate-if-absent / preserve / rotate-with-flag.
+  // The token value is NEVER logged; it flows only into the secrets map + infra.toml.
+  const { token: infraAdminToken } = ensureInfraAdminToken(infraConfig, {
+    rotate: rotateAdminToken,
+  });
+
   // Worker secrets
   const secrets: Record<string, string> = {
     GITHUB_SESSION_HMAC_KEY: hmacKey,
+    INFRA_ADMIN_TOKEN: infraAdminToken,
   };
 
   // Re-set GitHub App secrets if available
@@ -179,9 +188,20 @@ async function runForceRedeploy(
 
   // Update infra.toml
   writeInfraConfig(
-    { ...infraConfig, worker_url: workerUrl, hmac_key: hmacKey },
+    {
+      ...infraConfig,
+      worker_url: workerUrl,
+      hmac_key: hmacKey,
+      infra_admin_token: infraAdminToken,
+    },
     tilaDir,
   );
+
+  if (rotateAdminToken) {
+    p.log.warn(
+      "INFRA_ADMIN_TOKEN rotated — takes effect within seconds as it propagates to all edge locations; an immediate admin call may 403 until propagation completes, retry.",
+    );
+  }
 
   p.note(
     `Worker: ${workerUrl}\n${rotateHmac ? "HMAC key rotated — existing sessions invalidated." : "HMAC key preserved."}`,
@@ -210,6 +230,12 @@ export default defineCommand({
     "rotate-hmac": {
       type: "boolean",
       description: "Generate new HMAC key (invalidates all active sessions)",
+      default: false,
+    },
+    "rotate-admin-token": {
+      type: "boolean",
+      description:
+        "Generate a new INFRA_ADMIN_TOKEN (invalidates the previous admin token)",
       default: false,
     },
     headless: {
@@ -245,7 +271,12 @@ export default defineCommand({
     }
 
     if (args["force-redeploy"]) {
-      await runForceRedeploy(tilaDir, args["rotate-hmac"], args.headless);
+      await runForceRedeploy(
+        tilaDir,
+        args["rotate-hmac"],
+        args["rotate-admin-token"],
+        args.headless,
+      );
       return;
     }
 
@@ -356,14 +387,26 @@ export default defineCommand({
       // Non-fatal
     }
 
-    // Step 8: HMAC key + initial secrets
+    // Step 8: HMAC key + infra admin token + initial secrets
     const hmacKey = generateHmacKey();
+    // Infra admin token — generate-if-absent / preserve / rotate-with-flag.
+    // The token value is NEVER logged; it flows only into the secrets map + infra.toml.
+    const { token: infraAdminToken } = ensureInfraAdminToken(existingInfra, {
+      rotate: args["rotate-admin-token"],
+    });
     const secrets: Record<string, string> = {
       GITHUB_SESSION_HMAC_KEY: hmacKey,
+      INFRA_ADMIN_TOKEN: infraAdminToken,
     };
     s.start("Setting Worker secrets...");
     await setWorkerSecrets(cf, whoami.account_id, infraSlug, secrets);
     s.stop("Worker secrets set.");
+
+    if (args["rotate-admin-token"]) {
+      p.log.warn(
+        "INFRA_ADMIN_TOKEN rotated — takes effect within seconds as it propagates to all edge locations; an immediate admin call may 403 until propagation completes, retry.",
+      );
+    }
 
     // Step 9: Orphan detection — warn if github-app.json exists but infra.toml doesn't
     const githubAppJsonPath = join(tilaDir, "github-app.json");
@@ -456,6 +499,7 @@ export default defineCommand({
         worker_url: workerUrl,
         r2_bucket_name: R2_BUCKET_NAME,
         hmac_key: hmacKey,
+        infra_admin_token: infraAdminToken,
         infra_slug: infraSlug,
         ...(githubApp ? { github_app: githubApp } : {}),
       },
