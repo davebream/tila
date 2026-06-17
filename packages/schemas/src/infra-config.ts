@@ -8,6 +8,9 @@ export const TilaInfraConfigSchema = z.object({
   r2_bucket_name: z.string().optional(),
   hmac_key: z.string().optional(),
   sweep_secret: z.string().optional(),
+  // Infra-owner secret for destroying any project by slug via the Worker's
+  // /_internal destroy endpoint (no per-project token). Mirrors sweep_secret.
+  infra_destroy_token: z.string().optional(),
   github_app: z
     .object({
       app_id: z.number().int().positive(),

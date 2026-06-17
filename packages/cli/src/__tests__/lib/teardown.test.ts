@@ -758,3 +758,71 @@ describe("verifyStoresEmpty", () => {
     expect(result.failures.length).toBeGreaterThan(0);
   });
 });
+
+describe("wipeProjectViaInfraToken", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("POSTs to the infra endpoint with Bearer token + X-Confirm-Slug and parses success", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        doWiped: true,
+        journalDeleted: 2,
+        r2Deleted: 3,
+        r2Kept: 1,
+        r2Failed: 0,
+        r2GcSkipped: false,
+      }),
+    });
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    const { wipeProjectViaInfraToken } = await import("../../lib/teardown");
+    const result = await wipeProjectViaInfraToken(
+      "https://worker.example.com",
+      "infra-secret",
+      "my-project",
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doWiped).toBe(true);
+      expect(result.r2Deleted).toBe(3);
+    }
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe(
+      "https://worker.example.com/_internal/projects/my-project/destroy",
+    );
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer infra-secret");
+    expect(init.headers["X-Confirm-Slug"]).toBe("my-project");
+  });
+
+  it("returns insufficient-scope on HTTP 403", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: { code: "FORBIDDEN" } }),
+    });
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    const { wipeProjectViaInfraToken } = await import("../../lib/teardown");
+    const result = await wipeProjectViaInfraToken(
+      "https://worker.example.com",
+      "wrong-secret",
+      "my-project",
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorClass).toBe("insufficient-scope");
+      expect(result.status).toBe(403);
+      // token must never leak into the error message
+      expect(result.errorMessage).not.toContain("wrong-secret");
+    }
+  });
+});

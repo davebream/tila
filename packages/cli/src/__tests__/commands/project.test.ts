@@ -49,6 +49,7 @@ const mockCleanD1NonTokenRecords = vi.fn();
 const mockDeleteD1TokenRecord = vi.fn();
 const mockCleanLocalFiles = vi.fn();
 const mockWipeProjectViaWorker = vi.fn();
+const mockWipeProjectViaInfraToken = vi.fn();
 const mockVerifyStoresEmpty = vi.fn();
 vi.mock("../../lib/teardown", () => ({
   deleteWorker: (...args: unknown[]) => mockDeleteWorker(...args),
@@ -62,6 +63,8 @@ vi.mock("../../lib/teardown", () => ({
   cleanLocalFiles: (...args: unknown[]) => mockCleanLocalFiles(...args),
   wipeProjectViaWorker: (...args: unknown[]) =>
     mockWipeProjectViaWorker(...args),
+  wipeProjectViaInfraToken: (...args: unknown[]) =>
+    mockWipeProjectViaInfraToken(...args),
   verifyStoresEmpty: (...args: unknown[]) => mockVerifyStoresEmpty(...args),
 }));
 
@@ -659,6 +662,17 @@ describe("tila project destroy", () => {
       r2GcSkipped: false,
     });
 
+    // Default infra-token wipe succeeds
+    mockWipeProjectViaInfraToken.mockResolvedValue({
+      ok: true,
+      doWiped: true,
+      journalDeleted: 0,
+      r2Deleted: 1,
+      r2Kept: 0,
+      r2Failed: 0,
+      r2GcSkipped: false,
+    });
+
     // Default D1 cleanup succeeds
     mockCleanD1ProjectRecords.mockResolvedValue({ ok: true, message: "done" });
     mockCleanD1NonTokenRecords.mockResolvedValue({ ok: true, message: "done" });
@@ -675,12 +689,62 @@ describe("tila project destroy", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("exits 1 when no config found", async () => {
     mockFindConfig.mockReturnValue(null);
 
     await expect(invokeProjectDestroy()).rejects.toThrow("process.exit(1)");
+  });
+
+  // Infra-owner destroy by slug: no local .tila/, target resolved from infra.toml
+  it("destroys by slug via the infra token when no local config exists", async () => {
+    mockFindConfig.mockReturnValue(null);
+    mockLoadInfraConfig.mockReturnValue({
+      account_id: "acct-infra",
+      account_name: "Infra Account",
+      d1_database_id: "d1-infra",
+      worker_url: "https://tila-infra.workers.dev",
+    });
+    vi.stubEnv("INFRA_DESTROY_TOKEN", "infra-secret");
+
+    await invokeProjectDestroy({ slug: "remote-proj" });
+
+    // Remote wipe goes through the infra-token client, with the resolved slug.
+    expect(mockWipeProjectViaInfraToken).toHaveBeenCalledWith(
+      "https://tila-infra.workers.dev",
+      "infra-secret",
+      "remote-proj",
+    );
+    // Per-project worker wipe must NOT be used in infra mode.
+    expect(mockWipeProjectViaWorker).not.toHaveBeenCalled();
+    // D1 cleanup uses the infra account + database + the target slug.
+    expect(mockCleanD1NonTokenRecords).toHaveBeenCalledWith(
+      expect.anything(),
+      "acct-infra",
+      "d1-infra",
+      "remote-proj",
+    );
+    // No local .tila/ to remove when destroying a project by slug.
+    expect(mockCleanLocalFiles).not.toHaveBeenCalled();
+  });
+
+  it("exits 1 in slug mode when no infra destroy token is available", async () => {
+    mockFindConfig.mockReturnValue(null);
+    mockLoadInfraConfig.mockReturnValue({
+      account_id: "acct-infra",
+      account_name: "Infra Account",
+      d1_database_id: "d1-infra",
+      worker_url: "https://tila-infra.workers.dev",
+    });
+    // Empty env value is treated as unset by resolveInfraDestroyToken.
+    vi.stubEnv("INFRA_DESTROY_TOKEN", "");
+
+    await expect(invokeProjectDestroy({ slug: "remote-proj" })).rejects.toThrow(
+      "process.exit(1)",
+    );
+    expect(mockWipeProjectViaInfraToken).not.toHaveBeenCalled();
   });
 
   // (a) Happy path: worker→D1 5 tables→verify→_tokens→local

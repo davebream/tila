@@ -1,8 +1,9 @@
-import { D1ProjectRegistry, D1RevokedJtiStore } from "@tila/backend-d1";
-import { R2ArtifactBackend } from "@tila/backend-r2";
+import { D1RevokedJtiStore } from "@tila/backend-d1";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import { destroyProjectResources } from "../lib/destroy-project";
 import { forwardToDO } from "../lib/do-forward";
 import { revokeJtiInCache } from "../middleware/auth";
 import { requirePermission } from "../middleware/permission";
@@ -199,28 +200,11 @@ admin.get(
 /**
  * POST /admin/destroy
  *
- * Orchestrates a full project destroy:
- *   1. Read target pointer keys from DO (DO is still live).
- *   2. Reference-counted R2 GC: fetch all other projects' keys (including
- *      archived — listAllIncludingArchived prevents deleting blobs an archived
- *      project still references). Delete only keys absent from the live union.
- *      Re-head each key immediately before deletion to narrow the
- *      concurrent-adoption race window.
- *   3. Delete journal-archive/<projectId>/ prefix.
- *   4. POST /admin/destroy to DO (last — deleteAll+abort).
- *   5. Probe store-counts on the reconstructed DO to derive doWiped.
- *
- * Subrequest counter ceiling: ~800 (leaves headroom for DO wipe + journal
- * delete + the post-destroy store-counts probe). Budget is dominated by cold
- * DO wakes for peer pointer-key fetches. If the ceiling is reached, R2
- * content-blob GC is skipped (r2GcSkipped: true); DO wipe + journal delete
- * always run.
- *
- * Note: keys read from peer DOs are used transiently for the union computation
- * only; they are never written or retained beyond this request. (RC-8)
+ * Per-project entry point to the shared destroy orchestration
+ * (see lib/destroy-project.ts). Authenticated by a per-project full-scope D1
+ * token. The infra-owner entry point (POST /_internal/projects/:id/destroy)
+ * runs the SAME orchestration under a different auth model.
  */
-const SUBREQUEST_CEILING = 800;
-
 admin.post(
   "/destroy",
   requirePermission("admin"),
@@ -228,175 +212,8 @@ admin.post(
   async (c) => {
     const stub = c.get("doStub");
     const projectId = c.get("projectId");
-    const r2 = new R2ArtifactBackend(c.env.ARTIFACTS);
-    const registry = new D1ProjectRegistry(c.env.DB);
-
-    let subrequestCount = 0;
-    let r2GcSkipped = false;
-    let r2Deleted = 0;
-    let r2Kept = 0;
-    let r2Failed = 0;
-    let journalDeleted = 0;
-
-    // ── Step 1: Read target project's pointer keys ──────────────────────────
-    subrequestCount++;
-    const targetKeysRes = await forwardToDO(stub, "/admin/pointer-keys", "GET");
-    if (!targetKeysRes.ok) {
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "POINTER_KEYS_FETCH_FAILED",
-            message: "Failed to read target project pointer keys",
-          },
-        },
-        502,
-      );
-    }
-    const { keys: targetKeys } = (await targetKeysRes.json()) as {
-      keys: string[];
-    };
-
-    // ── Step 2: Reference-counted R2 GC ────────────────────────────────────
-    // Fetch pointer keys for every other project (including archived) to build
-    // the live-key union. A key is only deleted if absent from this union.
-    const allProjects = await registry.listAllIncludingArchived();
-    const otherProjects = allProjects.filter((p) => p.projectId !== projectId);
-
-    const liveKeyUnion = new Set<string>();
-
-    for (const { projectId: otherId } of otherProjects) {
-      if (subrequestCount >= SUBREQUEST_CEILING) {
-        // r2GcSkipped = true here means r2Kept reflects union-diff candidates
-        // only (not a refcount-retention guarantee) and r2Deleted may be 0
-        // because deleteMany is skipped — the DO wipe and journal delete still run.
-        r2GcSkipped = true;
-        break;
-      }
-      subrequestCount++;
-      const otherDoId = c.env.PROJECT.idFromName(otherId);
-      const otherStub = c.env.PROJECT.get(otherDoId);
-      // Pass NO analytics context to peer fetches — a destroy of one project
-      // must not emit analytics datapoints attributed to others. (RC-4)
-      const res = await forwardToDO(otherStub, "/admin/pointer-keys", "GET");
-      if (!res.ok) {
-        // Fail GC rather than under-count the union — under-counting risks
-        // deleting blobs another project needs (data corruption).
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "PEER_POINTER_KEYS_FETCH_FAILED",
-              message: `Failed to read pointer keys for project ${otherId}`,
-            },
-          },
-          502,
-        );
-      }
-      const { keys: peerKeys } = (await res.json()) as { keys: string[] };
-      for (const key of peerKeys) {
-        liveKeyUnion.add(key);
-      }
-    }
-
-    if (!r2GcSkipped) {
-      // Determine which keys to delete: target keys NOT in the live union
-      const toDelete = targetKeys.filter((k) => !liveKeyUnion.has(k));
-      r2Kept = targetKeys.length - toDelete.length;
-
-      // Re-head each candidate key immediately before deleting to narrow the
-      // concurrent-adoption race window. Skip keys that are no longer in R2.
-      const confirmedToDelete: string[] = [];
-      for (const key of toDelete) {
-        if (subrequestCount >= SUBREQUEST_CEILING) {
-          r2GcSkipped = true;
-          break;
-        }
-        subrequestCount++;
-        const headResult = await r2.head(key);
-        if (headResult !== null) {
-          confirmedToDelete.push(key);
-        }
-      }
-
-      if (confirmedToDelete.length > 0 && !r2GcSkipped) {
-        subrequestCount++; // conservative count for the deleteMany batch
-        const deleteResult = await r2.deleteMany(confirmedToDelete);
-        r2Deleted = deleteResult.deleted;
-        r2Failed = deleteResult.failed.length;
-      }
-    }
-
-    // ── Step 3: Delete journal-archive prefix ───────────────────────────────
-    subrequestCount++; // budget for the prefix delete (may paginate internally)
-    const journalResult = await r2.deleteByPrefix(
-      `journal-archive/${projectId}/`,
-    );
-    journalDeleted = journalResult.deleted;
-
-    // ── Step 4: Destroy the DO (LAST) ───────────────────────────────────────
-    // ok-then-disconnect = durable wipe (abort() severs the connection).
-    // A returned non-ok body is a real failure (deleteAll() threw before abort).
-    let destroyOk = false;
-    try {
-      const destroyRes = await forwardToDO(stub, "/admin/destroy", "POST");
-      if (!destroyRes.ok) {
-        const errBody = (await destroyRes.json()) as {
-          error?: { code?: string };
-        };
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: errBody?.error?.code ?? "DO_DESTROY_FAILED",
-              message: "DO destroy returned a non-ok response",
-            },
-            journalDeleted,
-            r2Deleted,
-            r2Kept,
-            r2Failed,
-            r2GcSkipped,
-          },
-          502,
-        );
-      }
-      destroyOk = true;
-    } catch {
-      // Connection severed after abort() — treat as a durable wipe.
-      // The authoritative check is the store-counts read-back below.
-      destroyOk = true;
-    }
-
-    // ── Step 5: Probe store-counts on reconstructed DO ──────────────────────
-    // doWiped is NEVER hardcoded — it is derived from the read-back.
-    // The DO reconstruct re-runs migrations in blockConcurrencyWhile, yielding
-    // an empty schema (domain tables all zero; _schema_history may have rows).
-    let doWiped = false;
-    if (destroyOk) {
-      try {
-        const countsRes = await forwardToDO(stub, "/admin/store-counts", "GET");
-        if (countsRes.ok) {
-          const { counts } = (await countsRes.json()) as {
-            counts: { domain: Record<string, number>; schemaHistory: number };
-          };
-          const domainValues = Object.values(counts.domain ?? {});
-          doWiped =
-            domainValues.length > 0 && domainValues.every((v) => v === 0);
-        }
-      } catch {
-        // store-counts probe failed — doWiped stays false
-      }
-    }
-
-    return c.json({
-      ok: true,
-      doWiped,
-      journalDeleted,
-      r2Deleted,
-      r2Kept,
-      r2Failed,
-      r2GcSkipped,
-    });
+    const result = await destroyProjectResources(c.env, stub, projectId);
+    return c.json(result.body, result.status as ContentfulStatusCode);
   },
 );
 

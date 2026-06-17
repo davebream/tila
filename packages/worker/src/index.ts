@@ -27,6 +27,7 @@ import { doctor } from "./routes/doctor";
 import { entities } from "./routes/entities";
 import { gates } from "./routes/gates";
 import { health } from "./routes/health";
+import { infra } from "./routes/infra";
 import { journal } from "./routes/journal";
 import { presence } from "./routes/presence";
 import { records } from "./routes/records";
@@ -183,6 +184,11 @@ sweepRoutes.post("/sweep", async (c) => {
   return c.json({ ok: true, ...summary });
 });
 app.route("/_internal", sweepRoutes);
+
+// Infra-owner admin routes (e.g. destroy any project by slug). Authenticated by
+// the INFRA_DESTROY_TOKEN secret, NOT a per-project token — mounted outside
+// /projects/:projectId so it bypasses projectMiddleware's PROJECT_MISMATCH guard.
+app.route("/_internal", infra);
 
 const projectRoutes = new Hono<AppEnv>();
 projectRoutes.use("/*", createAuthMiddleware());
