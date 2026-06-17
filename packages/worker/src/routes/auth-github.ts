@@ -40,6 +40,12 @@ import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
+// SEC-2: purpose-binding claims for the OAuth-state JWT. These differ from the
+// session token's iss/aud ("tila"/"tila") so a token signed by the shared
+// GITHUB_SESSION_HMAC_KEY for any other purpose cannot pass state verification.
+const OAUTH_STATE_ISSUER = "tila-oauth-state";
+const OAUTH_STATE_AUDIENCE = "tila-oauth-callback";
+
 const PERMISSION_HIERARCHY: Record<string, number> = {
   none: 0,
   read: 1,
@@ -696,6 +702,12 @@ authGithub.get("/login", async (c) => {
 
   const state = await new SignJWT({ nonce, iat })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    // SEC-2: purpose-bind the state JWT. GITHUB_SESSION_HMAC_KEY also signs
+    // tila_s.* session tokens; without distinct iss/aud claims any JWT from that
+    // shared key is structurally interchangeable with OAuth state (JWT confusion).
+    // The callback verifier enforces both (see OAUTH_STATE_ISSUER/AUDIENCE).
+    .setIssuer(OAUTH_STATE_ISSUER)
+    .setAudience(OAUTH_STATE_AUDIENCE)
     .sign(secret);
 
   // Build cookie
@@ -817,7 +829,15 @@ authGithub.get("/oauth/callback", async (c) => {
       { kty: "oct", k: base64UrlEncode(keyBytes), alg: "HS256" },
       "HS256",
     );
-    const { payload: jwtPayload } = await jwtVerify(state, secret);
+    // SEC-2: enforce purpose-binding. A JWT signed by the shared
+    // GITHUB_SESSION_HMAC_KEY for any other purpose (e.g. a tila_s.* session
+    // token) lacks these claims and is rejected here. This is defense-in-depth
+    // ON TOP OF the nonce/cookie CSRF check above (the primary defense), not a
+    // replacement for it. jwtVerify throws on iss/aud mismatch -> caught below.
+    const { payload: jwtPayload } = await jwtVerify(state, secret, {
+      issuer: OAUTH_STATE_ISSUER,
+      audience: OAUTH_STATE_AUDIENCE,
+    });
     const parsed = OAuthStatePayloadSchema.safeParse(jwtPayload);
     if (!parsed.success) {
       return oauthErrorRedirect(
