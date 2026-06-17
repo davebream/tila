@@ -77,7 +77,7 @@ admin.get(
  *
  * Per-project entry point to the shared destroy orchestration
  * (see lib/destroy-project.ts). Authenticated by a per-project full-scope D1
- * token. The infra-owner entry point (POST /_internal/projects/:id/destroy)
+ * token. The infra-owner entry point (POST /_internal/admin/projects/:slug/destroy)
  * runs the SAME orchestration under a different auth model.
  */
 admin.post(

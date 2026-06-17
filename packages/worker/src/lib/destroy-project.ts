@@ -20,7 +20,7 @@ export interface DestroyResult {
 /**
  * Orchestrate a full project destroy. Shared by the per-project admin route
  * (POST /projects/:id/admin/destroy) and the infra-owner route
- * (POST /_internal/projects/:id/destroy) — both wipe identically; they differ
+ * (POST /_internal/admin/projects/:slug/destroy) — both wipe identically; they differ
  * only in how the caller is authenticated.
  *
  *   1. Read target pointer keys from the DO (still live).
