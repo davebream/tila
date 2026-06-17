@@ -444,3 +444,20 @@ This document is the constitution. It changes when reality requires it, not when
 **Rationale:** This tightens token audience binding without forcing an all-at-once logout during rollout. Soft migration is acceptable because signature verification and expiry checks already exist; `iss`/`aud` hardening only narrows acceptance.
 
 **Cross-references:** §14 (platform: Cloudflare-native), §16 (growth path: scoped tokens in v0.2).
+
+---
+
+## C9. Session revocation is a global, PK-only kill-switch; `_revoked_jti.project_id` is provenance, not scope
+
+**Decision:** Session JWT revocation is a **global, unconditional kill-switch keyed solely on `jti`**. A revoked jti is revoked everywhere, for every project, full stop. The `_revoked_jti` lookup that gates acceptance (`D1RevokedJtiStore.isRevoked`) MUST be a single-column PRIMARY-KEY lookup on `jti` — never compound, never filtered by `project_id` or any other column.
+
+**Why PK-only, no project filter:** A jti is a per-token nonce; it is not derivable from a project, and the engine never derives a project from a jti. If `isRevoked` were filtered by `project_id`, a revoked token would be **accepted** whenever the checking request's project differed from the recorded one — a silent **fail-open** of the kill-switch. The whole point of revocation is to fail closed; a scope filter inverts that. This is enforced both at the call site (auth fails closed if the D1 lookup throws) and by the store contract (the WHERE clause stays single-column).
+
+**`_revoked_jti.project_id` is asserted-unverified provenance, not a scope filter.** The `project_id` recorded by `revoke()` exists for audit/forensics — "who asked for this revocation" — and never participates in the acceptance check. Its trustworthiness depends on how the revoke was authenticated:
+
+- A revoke driven by a **verifiable token** records that token's verified project — trustworthy provenance.
+- A **bare-jti** revoke (e.g. an infra-owner cross-project admin revoke, which has no per-project token to verify) records the **caller-asserted slug** — *asserted, unverified* provenance. The operator named the project; the engine did not confirm it.
+
+Either way the column is a label on the audit row, not a gate. Cross-project infra revoke is therefore expected and correct: it records the caller-asserted slug and still revokes the jti globally.
+
+**Code references:** `packages/backend-d1/src/revoked-jti-store.ts` (store contract + `isRevoked` DON'T comment), `packages/backend-d1/src/schema.ts` (`_revoked_jti` table), `packages/worker/src/middleware/auth.ts` (fail-closed per-isolate revocation check), `packages/worker/src/routes/admin.ts` and `packages/worker/src/routes/infra.ts` (revoke entry points).

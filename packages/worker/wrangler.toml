@@ -67,3 +67,9 @@ run_worker_first = ["/api/*", "/auth/*", "/projects/*", "/_internal/*"]
 #   Set: wrangler secret put GITHUB_APP_CLIENT_SECRET
 #
 # GITHUB_OIDC_AUDIENCE — Expected 'aud' claim in OIDC tokens (set via wrangler secret put)
+#
+# INFRA_ADMIN_TOKEN — infra-owner admin secret (a shared, identity-less credential, NOT a per-project token)
+#   When set, the /_internal/admin/* routes accept a matching `Authorization: Bearer <token>`.
+#   When unset, those routes return 404 (the endpoints are invisible).
+#   Managed by the CLI: `tila infra provision` sets it; `tila infra provision --rotate-admin-token` rotates it.
+#   Set manually: wrangler secret put INFRA_ADMIN_TOKEN
