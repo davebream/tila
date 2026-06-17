@@ -355,7 +355,8 @@ describe("auth middleware", () => {
   it("invalidate() removes positive cache so next request queries D1", async () => {
     mockValidate.mockResolvedValue(CLAIMS);
     const app = createTestApp();
-    const hash = await hashToken(VALID_TOKEN);
+    // fetchWithCtx sets no HASH_PEPPER, so the middleware hashes bare — match it.
+    const hash = await hashToken(VALID_TOKEN, undefined);
 
     await fetchWithCtx(
       app,
@@ -425,7 +426,8 @@ describe("auth middleware", () => {
     app.use("/*", createAuthMiddleware());
     app.get("/test", (c) => c.json({ ok: true }));
 
-    const hash = await hashToken(VALID_TOKEN);
+    // fetchWithCtx sets no HASH_PEPPER, so the middleware hashes bare — match it.
+    const hash = await hashToken(VALID_TOKEN, undefined);
 
     const capturedPromises: Promise<unknown>[] = [];
     const capturingWaitUntil = vi.fn((p: Promise<unknown>) => {

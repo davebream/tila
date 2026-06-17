@@ -1,11 +1,17 @@
 /**
- * SEC-1 — HASH_PEPPER consistency across mint↔lookup pairs.
+ * SEC-1 — HASH_PEPPER consistency for the mint↔lookup pairs this change touched.
  *
- * `hashToken(raw, pepper?)` is keyed HMAC-SHA-256 when a pepper is supplied,
- * else bare SHA-256. If a credential is MINTED with one peppering and LOOKED UP
- * with the other, validation can never match. These tests assert mint and lookup
+ * `hashToken(raw, pepper)` is keyed HMAC-SHA-256 when a pepper is supplied, else
+ * bare SHA-256. If a credential is MINTED with one peppering and LOOKED UP with
+ * the other, validation can never match. These tests assert mint and lookup
  * compute an identical digest for the same raw secret, with HASH_PEPPER both set
  * and unset, plus a negative test proving the pair is coupled.
+ *
+ * Scope: the callsites SEC-1 changed from bare to peppered — the D1-token mint
+ * (tokens.ts) against its three lookups (auth.ts bearer, auth-github app-config,
+ * auth-session exchange), and the session-exchange mint (auth-session.ts) against
+ * the cookie lookup (auth.ts). The already-peppered session-rotation mint in
+ * workspace.ts is not re-covered here; its pairing is unchanged by SEC-1.
  *
  * Strategy: drive the real route handlers (no mock of `hashToken`) through mocked
  * D1 stores. The mint route stores a `tokenHash`/`sessionHash` via the store; we

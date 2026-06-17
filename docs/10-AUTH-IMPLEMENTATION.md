@@ -91,18 +91,22 @@ Raw tokens are **never** stored. Only token hashes persist in D1.
   SHA-256, so a leaked digest is useless without the secret.
 
 `HASH_PEPPER` is threaded into **every** mint and lookup callsite for both D1 API
-tokens and cookie/workspace sessions (SEC-1), so mint and lookup always compute the
-same digest. The auth middleware logs a one-time-per-isolate warning plus an
-Analytics datapoint (`hash-pepper-unset`) on the first authenticated request when the
-secret is not configured.
+tokens and cookie/workspace sessions (SEC-1). The `hashToken` `pepper` parameter is
+required (`string | undefined`, not optional) so a bare call is a compile error —
+mint/lookup consistency is type-enforced, not just convention. The auth middleware
+logs a one-time-per-isolate warning plus an Analytics datapoint (`hash-pepper-unset`)
+on the first request handled by the auth middleware (regardless of auth outcome) when
+the secret is not configured.
 
-> **Activation caveat — enabling `HASH_PEPPER` does NOT re-hash existing credentials.**
-> Turning the secret on changes the digest of every token. Pre-existing bare-SHA-256
-> D1 API tokens stop validating and must be re-issued; cookie/workspace sessions
-> re-authenticate within their TTL (1h GitHub sessions, 8h cookie sessions). The
-> bare-SHA-256 fallback is retained intentionally so the secret is a no-op until set.
-> A zero-downtime dual-verify re-hash migration (verify against both the peppered and
-> bare digest during a rollover window) is a separate tracked follow-up.
+> **Activation caveat — enabling or rotating `HASH_PEPPER` does NOT re-hash existing credentials.**
+> Setting the secret (or changing it from one value to another) changes the digest of
+> every token. Pre-existing D1 API tokens hashed under the old configuration stop
+> validating and must be re-issued; cookie/workspace sessions re-authenticate within
+> their TTL (1h GitHub sessions, 8h cookie sessions). The bare-SHA-256 fallback is
+> retained intentionally so the secret is a no-op until set. A zero-downtime dual-verify
+> re-hash migration (verify against both the new and old digest during a rollover
+> window) is a separate tracked follow-up — and is what a safe pepper *rotation* would
+> also require.
 
 ### LRU Cache
 

@@ -46,8 +46,9 @@ const lastWriteMap = new Map<string, number>();
 // When HASH_PEPPER is not configured, token/session hashes fall back to bare
 // SHA-256 (see lib/hash-token.ts). That is a valid default, but an operator who
 // believes peppering is active should get a signal that it is not. We emit a
-// single log + Analytics datapoint per isolate on the first authenticated
-// request so the warning is visible without spamming every request.
+// single log + Analytics datapoint per isolate on the first request handled by
+// the auth middleware (regardless of auth outcome) so the warning is visible
+// without spamming every request.
 let hashPepperUnsetWarned = false;
 
 /**

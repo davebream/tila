@@ -7,14 +7,21 @@
  * back to plain SHA-256 (the historical behavior), so the function is a no-op
  * until the secret is configured.
  *
- * Activation note: setting `HASH_PEPPER` changes the digest of every token.
- * Existing SHA-256-hashed D1 API tokens must be re-issued, and cookie sessions
- * re-authenticate within their 1h TTL. (A zero-downtime dual-verify migration is
- * a tracked follow-up.)
+ * The `pepper` parameter is **required** (`string | undefined`, not optional) by
+ * design: every callsite must pass `c.env.HASH_PEPPER` (or an explicit
+ * `undefined` when intentionally testing the bare fallback). This makes a silent
+ * bare `hashToken(raw)` a compile error, so no one can reintroduce a peppered
+ * lookup against a bare mint — the SEC-1 mint/lookup consistency is
+ * type-enforced, not just convention.
+ *
+ * Activation note: setting (or rotating) `HASH_PEPPER` changes the digest of
+ * every token. Existing SHA-256-hashed D1 API tokens must be re-issued, and
+ * cookie sessions re-authenticate within their TTL. (A zero-downtime dual-verify
+ * migration is a tracked follow-up.)
  */
 export async function hashToken(
   rawToken: string,
-  pepper?: string,
+  pepper: string | undefined,
 ): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(rawToken);
