@@ -2,9 +2,12 @@ import { D1ProjectRegistry } from "@tila/backend-d1";
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { z } from "zod";
+import { archiveJournal, revokeSession } from "../lib/admin-ops";
 import { emitInfraAdminDatapoint } from "../lib/analytics";
 import { constantTimeSecretMatch } from "../lib/constant-time-compare";
 import { destroyProjectResources } from "../lib/destroy-project";
+import { forwardToDO } from "../lib/do-forward";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -178,6 +181,132 @@ infra.post(
     emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
       projectId,
       outcome: result.status === 200 ? "destroyed" : "destroy-failed",
+      statusCode: result.status,
+    });
+    return c.json(result.body, result.status as ContentfulStatusCode);
+  },
+);
+
+/** Zod schema for the cross-project sessions/revoke body, mirroring admin.ts. */
+const RevokeSessionRequestSchema = z.object({
+  jti: z.string().uuid().max(64),
+});
+
+/**
+ * POST /admin/projects/:projectId/restart — cross-project mirror of
+ * admin.ts `POST /admin/restart`. Reachable by slug under the infra principal.
+ * Returns the delegated DO body VERBATIM.
+ */
+infra.post(
+  "/admin/projects/:projectId/restart",
+  resolveTargetProject(),
+  async (c) => {
+    const res = await forwardToDO(c.get("doStub"), "/admin/restart", "POST");
+    emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+      projectId: c.get("projectId"),
+      outcome: "restarted",
+      statusCode: res.status,
+    });
+    return res;
+  },
+);
+
+/**
+ * GET /admin/projects/:projectId/store-counts — cross-project mirror of
+ * admin.ts `GET /admin/store-counts`. Returns the DO body
+ * `{ counts: { domain, schemaHistory } }` VERBATIM.
+ */
+infra.get(
+  "/admin/projects/:projectId/store-counts",
+  resolveTargetProject(),
+  async (c) => {
+    const res = await forwardToDO(
+      c.get("doStub"),
+      "/admin/store-counts",
+      "GET",
+    );
+    emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+      projectId: c.get("projectId"),
+      outcome: "store-counts",
+      statusCode: res.status,
+    });
+    return res;
+  },
+);
+
+/**
+ * POST /admin/projects/:projectId/sessions/revoke — cross-project mirror of
+ * admin.ts `POST /admin/sessions/revoke`. The URL slug is the caller-asserted
+ * provenance recorded against the jti (CI-2: no jti→project derivation).
+ */
+infra.post(
+  "/admin/projects/:projectId/sessions/revoke",
+  resolveTargetProject(),
+  async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Invalid JSON body",
+            retryable: false,
+          },
+        },
+        400,
+      );
+    }
+
+    const parsed = RevokeSessionRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message:
+              "Body must include a UUID jti no longer than 64 characters",
+            retryable: false,
+          },
+        },
+        400,
+      );
+    }
+
+    const result = await revokeSession(
+      c.env,
+      parsed.data.jti,
+      c.req.param("projectId"),
+    );
+    emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+      projectId: c.get("projectId"),
+      outcome: "session-revoked",
+      statusCode: 200,
+    });
+    return c.json(result);
+  },
+);
+
+/**
+ * POST /admin/projects/:projectId/archive/journal — cross-project mirror of
+ * admin.ts `POST /admin/archive/journal`. Runs the shared 4-step archive
+ * orchestration and returns its `{ body, status }`.
+ */
+infra.post(
+  "/admin/projects/:projectId/archive/journal",
+  resolveTargetProject(),
+  async (c) => {
+    const result = await archiveJournal(
+      c.env,
+      c.get("doStub"),
+      c.get("projectId"),
+    );
+    emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+      projectId: c.get("projectId"),
+      outcome: "journal-archived",
       statusCode: result.status,
     });
     return c.json(result.body, result.status as ContentfulStatusCode);

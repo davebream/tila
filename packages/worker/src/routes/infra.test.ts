@@ -8,6 +8,13 @@ vi.mock("../lib/do-forward", () => ({
   forwardToDO: (...args: unknown[]) => forwardToDOMock(...args),
 }));
 
+const revokeSessionMock = vi.fn();
+const archiveJournalMock = vi.fn();
+vi.mock("../lib/admin-ops", () => ({
+  revokeSession: (...args: unknown[]) => revokeSessionMock(...args),
+  archiveJournal: (...args: unknown[]) => archiveJournalMock(...args),
+}));
+
 const listAllIncludingArchivedMock = vi.fn();
 const getMock = vi.fn();
 const getIncludingArchivedMock = vi.fn();
@@ -536,5 +543,443 @@ describe("resolveTargetProject middleware", () => {
     expect(body.route).toBe("two");
     expect(getIncludingArchivedMock).toHaveBeenCalledWith("proj-archived");
     expect(getMock).not.toHaveBeenCalled();
+  });
+});
+
+const TOKEN = "s3cret-infra-token";
+const AUTH = { Authorization: `Bearer ${TOKEN}` };
+
+function makeSpyDONamespaceTop(idFromName: ReturnType<typeof vi.fn>) {
+  return {
+    idFromName,
+    get: () => ({}) as DurableObjectStub,
+    idFromString: () => ({ toString: () => "id" }) as DurableObjectId,
+    newUniqueId: () => ({ toString: () => "id" }) as DurableObjectId,
+    jurisdiction: () => ({}) as DurableObjectNamespace,
+  } as unknown as DurableObjectNamespace;
+}
+
+describe("infra restart route", () => {
+  beforeEach(() => {
+    forwardToDOMock
+      .mockReset()
+      .mockResolvedValue(Response.json({ ok: true, restarted: true }));
+    getMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+    getIncludingArchivedMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+  });
+
+  function req(
+    app: Hono<AppEnv>,
+    projectId: string,
+    env: Partial<Env>,
+    headers: Record<string, string> = {},
+  ) {
+    return app.request(
+      `/_internal/admin/projects/${projectId}/restart`,
+      { method: "POST", headers },
+      env as Env,
+    );
+  }
+
+  it("returns 404 PROJECT_NOT_FOUND and never contacts the DO for an unknown slug", async () => {
+    getMock.mockResolvedValue(null);
+    const idFromName = vi.fn(
+      () => ({ toString: () => "id" }) as DurableObjectId,
+    );
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      PROJECT: makeSpyDONamespaceTop(idFromName),
+    });
+
+    const res = await req(app, "proj-ghost", env, AUTH);
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(idFromName).not.toHaveBeenCalled();
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when INFRA_ADMIN_TOKEN is unset", async () => {
+    const app = createApp();
+    const res = await req(app, "proj-target", makeEnv(), AUTH);
+    expect(res.status).toBe(404);
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 on a bad bearer", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, {
+      Authorization: "Bearer wrong",
+    });
+    expect(res.status).toBe(403);
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards to /admin/restart and returns the DO body verbatim", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; restarted: boolean };
+    expect(body).toEqual({ ok: true, restarted: true });
+    expect(forwardToDOMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "/admin/restart",
+      "POST",
+    );
+  });
+
+  it("emits an audit datapoint with outcome restarted", async () => {
+    const writeDataPoint = vi.fn();
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+    const res = await req(app, "proj-target", env, AUTH);
+    expect(res.status).toBe(200);
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
+    expect(arg.blobs).toContain("infra_admin");
+    expect(arg.blobs).toContain("restarted");
+    expect(arg.blobs).toContain("proj-target");
+  });
+});
+
+describe("infra store-counts route", () => {
+  beforeEach(() => {
+    forwardToDOMock.mockReset().mockResolvedValue(
+      Response.json({
+        counts: { domain: { entities: 3 }, schemaHistory: 2 },
+      }),
+    );
+    getMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+    getIncludingArchivedMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+  });
+
+  function req(
+    app: Hono<AppEnv>,
+    projectId: string,
+    env: Partial<Env>,
+    headers: Record<string, string> = {},
+  ) {
+    return app.request(
+      `/_internal/admin/projects/${projectId}/store-counts`,
+      { method: "GET", headers },
+      env as Env,
+    );
+  }
+
+  it("returns 404 PROJECT_NOT_FOUND and never contacts the DO for an unknown slug", async () => {
+    getMock.mockResolvedValue(null);
+    const idFromName = vi.fn(
+      () => ({ toString: () => "id" }) as DurableObjectId,
+    );
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      PROJECT: makeSpyDONamespaceTop(idFromName),
+    });
+
+    const res = await req(app, "proj-ghost", env, AUTH);
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(idFromName).not.toHaveBeenCalled();
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when INFRA_ADMIN_TOKEN is unset", async () => {
+    const app = createApp();
+    const res = await req(app, "proj-target", makeEnv(), AUTH);
+    expect(res.status).toBe(404);
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 on a bad bearer", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, {
+      Authorization: "Bearer wrong",
+    });
+    expect(res.status).toBe(403);
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards to /admin/store-counts and passes the { counts } body through verbatim", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      counts: { domain: { entities: number }; schemaHistory: number };
+    };
+    expect(body).toEqual({
+      counts: { domain: { entities: 3 }, schemaHistory: 2 },
+    });
+    expect(forwardToDOMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "/admin/store-counts",
+      "GET",
+    );
+  });
+
+  it("emits an audit datapoint with outcome store-counts", async () => {
+    const writeDataPoint = vi.fn();
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+    const res = await req(app, "proj-target", env, AUTH);
+    expect(res.status).toBe(200);
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
+    expect(arg.blobs).toContain("infra_admin");
+    expect(arg.blobs).toContain("store-counts");
+    expect(arg.blobs).toContain("proj-target");
+  });
+});
+
+describe("infra sessions/revoke route", () => {
+  beforeEach(() => {
+    forwardToDOMock.mockReset();
+    revokeSessionMock
+      .mockReset()
+      .mockResolvedValue({ ok: true, jti: "x", revoked_at: 123 });
+    getMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+    getIncludingArchivedMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+  });
+
+  const VALID_JTI = "123e4567-e89b-12d3-a456-426614174000";
+
+  function req(
+    app: Hono<AppEnv>,
+    projectId: string,
+    env: Partial<Env>,
+    headers: Record<string, string> = {},
+    body?: unknown,
+  ) {
+    return app.request(
+      `/_internal/admin/projects/${projectId}/sessions/revoke`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      env as Env,
+    );
+  }
+
+  it("returns 404 PROJECT_NOT_FOUND and never calls revokeSession/the DO for an unknown slug", async () => {
+    getMock.mockResolvedValue(null);
+    const idFromName = vi.fn(
+      () => ({ toString: () => "id" }) as DurableObjectId,
+    );
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      PROJECT: makeSpyDONamespaceTop(idFromName),
+    });
+
+    const res = await req(app, "proj-ghost", env, AUTH, { jti: VALID_JTI });
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(idFromName).not.toHaveBeenCalled();
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+    expect(revokeSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when INFRA_ADMIN_TOKEN is unset", async () => {
+    const app = createApp();
+    const res = await req(app, "proj-target", makeEnv(), AUTH, {
+      jti: VALID_JTI,
+    });
+    expect(res.status).toBe(404);
+    expect(revokeSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 on a bad bearer", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(
+      app,
+      "proj-target",
+      env,
+      { Authorization: "Bearer wrong" },
+      { jti: VALID_JTI },
+    );
+    expect(res.status).toBe(403);
+    expect(revokeSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 on an invalid jti", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH, { jti: "not-a-uuid" });
+    expect(res.status).toBe(400);
+    expect(revokeSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("revokes and passes the asserted slug (URL provenance) to revokeSession", async () => {
+    revokeSessionMock.mockResolvedValue({
+      ok: true,
+      jti: VALID_JTI,
+      revoked_at: 999,
+    });
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH, { jti: VALID_JTI });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      jti: string;
+      revoked_at: number;
+    };
+    expect(body).toEqual({ ok: true, jti: VALID_JTI, revoked_at: 999 });
+    expect(revokeSessionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      VALID_JTI,
+      "proj-target",
+    );
+  });
+
+  it("emits an audit datapoint with outcome session-revoked", async () => {
+    const writeDataPoint = vi.fn();
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+    const res = await req(app, "proj-target", env, AUTH, { jti: VALID_JTI });
+    expect(res.status).toBe(200);
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
+    expect(arg.blobs).toContain("infra_admin");
+    expect(arg.blobs).toContain("session-revoked");
+    expect(arg.blobs).toContain("proj-target");
+  });
+});
+
+describe("infra archive/journal route", () => {
+  beforeEach(() => {
+    forwardToDOMock.mockReset();
+    archiveJournalMock
+      .mockReset()
+      .mockResolvedValue({ status: 200, body: { ok: true, archived: 0 } });
+    getMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+    getIncludingArchivedMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+  });
+
+  function req(
+    app: Hono<AppEnv>,
+    projectId: string,
+    env: Partial<Env>,
+    headers: Record<string, string> = {},
+  ) {
+    return app.request(
+      `/_internal/admin/projects/${projectId}/archive/journal`,
+      { method: "POST", headers },
+      env as Env,
+    );
+  }
+
+  it("returns 404 PROJECT_NOT_FOUND and never calls archiveJournal/the DO for an unknown slug", async () => {
+    getMock.mockResolvedValue(null);
+    const idFromName = vi.fn(
+      () => ({ toString: () => "id" }) as DurableObjectId,
+    );
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      PROJECT: makeSpyDONamespaceTop(idFromName),
+    });
+
+    const res = await req(app, "proj-ghost", env, AUTH);
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(idFromName).not.toHaveBeenCalled();
+    expect(forwardToDOMock).not.toHaveBeenCalled();
+    expect(archiveJournalMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when INFRA_ADMIN_TOKEN is unset", async () => {
+    const app = createApp();
+    const res = await req(app, "proj-target", makeEnv(), AUTH);
+    expect(res.status).toBe(404);
+    expect(archiveJournalMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 on a bad bearer", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, {
+      Authorization: "Bearer wrong",
+    });
+    expect(res.status).toBe(403);
+    expect(archiveJournalMock).not.toHaveBeenCalled();
+  });
+
+  it("delegates to archiveJournal and returns its body/status", async () => {
+    archiveJournalMock.mockResolvedValue({
+      status: 200,
+      body: { ok: true, archived: 5, throughSeq: 5 },
+    });
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      archived: number;
+      throughSeq: number;
+    };
+    expect(body).toEqual({ ok: true, archived: 5, throughSeq: 5 });
+    // archiveJournal is called with (env, doStub, projectId)
+    expect(archiveJournalMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "proj-target",
+    );
+  });
+
+  it("emits an audit datapoint with outcome journal-archived", async () => {
+    const writeDataPoint = vi.fn();
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+    const res = await req(app, "proj-target", env, AUTH);
+    expect(res.status).toBe(200);
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    const arg = writeDataPoint.mock.calls[0][0] as { blobs: string[] };
+    expect(arg.blobs).toContain("infra_admin");
+    expect(arg.blobs).toContain("journal-archived");
+    expect(arg.blobs).toContain("proj-target");
   });
 });
