@@ -184,10 +184,10 @@ describe("task relationship commands", () => {
           json: true,
         }),
       ).rejects.toThrow("process.exit(1)");
-      // printJsonError writes { error, code } to stderr via console.error
+      // printJsonError writes { ok:false, code, message } to stderr via console.error
       const output = JSON.parse(errorSpy.mock.calls[0][0] as string);
       expect(output.code).toBe("VALIDATION_ERROR");
-      expect(output.error).toContain("invalid-type");
+      expect(output.message).toContain("invalid-type");
       expect(mockAddRelationship).not.toHaveBeenCalled();
     });
 
@@ -632,10 +632,10 @@ describe("task relationship commands", () => {
           "link-parent": false,
         }),
       ).rejects.toThrow("process.exit(1)");
-      // printJsonError writes { error, code } to stderr via console.error
+      // printJsonError writes { ok:false, code, message } to stderr via console.error
       const output = JSON.parse(errorSpy.mock.calls[0][0] as string);
       expect(output.code).toBe("already-exists");
-      expect(output.error).toContain("epic.x");
+      expect(output.message).toContain("epic.x");
     });
 
     it("plain success --json shape is {ok,id,type,title} (no parent)", async () => {
