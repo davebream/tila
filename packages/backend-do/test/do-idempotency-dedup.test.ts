@@ -322,4 +322,98 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
     };
     expect(rows.n).toBe(0);
   });
+
+  it("coord.acquire shouldStore=false: a failed acquire is not stored; a same-key retry re-evaluates live state", () => {
+    const { db, rawDb } = createTestDb();
+
+    // 1. Create the entity (schemaVersion=1, not a fence).
+    entityOps.create(
+      db,
+      { id: "e5", type: "task", data: {}, created_by: "test" },
+      1,
+      { actor: "test" },
+    );
+
+    // 2. Holder A (mA/uA) acquires exclusive — this is the fence-mutating success path.
+    const a = coordinationOps.acquire(
+      db,
+      "e5",
+      "mA",
+      "uA",
+      "exclusive",
+      60_000,
+    );
+    const fenceAfterA = fenceOf(rawDb, "task:e5");
+    expect(a.acquired).toBe(true);
+    expect(fenceAfterA).toBe(a.fence);
+    expect(journalCount(rawDb, "claim.acquired", "task:e5")).toBe(1);
+
+    // 3. Holder B (mB/uB — DISTINCT from A; a same-holder re-acquire would be a RENEW
+    //    returning acquired:true, which would NOT exercise the shouldStore=false branch)
+    //    attempts exclusive acquire while A holds the lease. B carries an idempotency key.
+    //    All positionals are spelled out to reach the trailing `idempotency` arg:
+    //    acquire(db, resource, machine, user, mode, ttlMs, metadata?, now?, origin?, idempotency?)
+    const idemB = { key: "dp:p:c:POST:/acquire:B", requestHash: "h-B" };
+    const failed = coordinationOps.acquire(
+      db,
+      "e5",
+      "mB",
+      "uB",
+      "exclusive",
+      60_000,
+      undefined,
+      Date.now(),
+      undefined,
+      idemB,
+    );
+
+    // 4. shouldStore=false contract: the failed acquire must NOT be stored in _do_idempotency,
+    //    must NOT bump the fence, and must NOT add a second journal row.
+    expect(failed).toMatchObject({ acquired: false, fence: fenceAfterA });
+    expect(
+      (
+        rawDb
+          .prepare("SELECT COUNT(*) AS n FROM _do_idempotency WHERE key = ?")
+          .get(idemB.key) as { n: number }
+      ).n,
+    ).toBe(0);
+    expect(fenceOf(rawDb, "task:e5")).toBe(fenceAfterA);
+    expect(journalCount(rawDb, "claim.acquired", "task:e5")).toBe(1);
+
+    // 5. Crash + same-key replay proving re-evaluation (NOT a frozen replay):
+    //    Release A so that B's next attempt can succeed. origin.actor must equal
+    //    the stored holder string "mA/uA" (= `${machine}/${user}`) and fence must
+    //    equal fenceAfterA, otherwise release throws ClaimOwnershipError/assertFence.
+    coordinationOps.release(db, "e5", fenceAfterA, {
+      actor: "mA/uA",
+      tokenId: null,
+      source: null,
+      sourceVersion: null,
+    });
+
+    // Retry B's acquire with the SAME idemB (identical requestHash).
+    // Reusing the IDENTICAL requestHash is intentional: a different hash would throw
+    // DoIdempotencyConflictError rather than re-evaluate; reusing it exercises the
+    // miss→recompute path (the failed result was never stored, so there is no frozen
+    // row to return — the op runs live against current state).
+    const replay = coordinationOps.acquire(
+      db,
+      "e5",
+      "mB",
+      "uB",
+      "exclusive",
+      60_000,
+      undefined,
+      Date.now(),
+      undefined,
+      idemB,
+    );
+
+    // 6. Re-evaluation assertions: the same key now yields a different, live result,
+    //    proving the failed outcome was never stored as a frozen replay.
+    expect(replay.acquired).toBe(true);
+    expect(replay.fence).toBe(fenceAfterA + 1);
+    expect(fenceOf(rawDb, "task:e5")).toBe(fenceAfterA + 1);
+    expect(journalCount(rawDb, "claim.acquired", "task:e5")).toBe(2);
+  });
 });
