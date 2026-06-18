@@ -55,3 +55,20 @@ export function formatZodIssues(
 ): string {
   return issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
 }
+
+/**
+ * Return a 200 JSON success body AND set the `X-Rows-Affected` header so the
+ * Worker's `do-forward.ts` can read the real mutation count for Analytics.
+ * Use for mutating routes that have the row count in hand (entity create/update/
+ * archive/relationship; record create/set/put/patch/archive/unarchive; artifact
+ * pointer/tombstone/relationship). Read-only routes return via `c.json()` directly
+ * and emit `rowsAffected: 0` (the default in `do-forward.ts`).
+ */
+export function jsonOkRows(
+  c: Context,
+  body: Record<string, unknown>,
+  rowsAffected: number,
+) {
+  c.header("X-Rows-Affected", String(rowsAffected));
+  return c.json({ ok: true, ...body });
+}
