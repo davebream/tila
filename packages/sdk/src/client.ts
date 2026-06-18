@@ -3,6 +3,7 @@ import type { z } from "zod";
 import { createArtifactMethods } from "./artifacts";
 import { createClaimMethods } from "./claims";
 import { createTaskMethods } from "./entities";
+import { type TilaErrorCode, toTilaErrorCode } from "./error-codes";
 import { createGateMethods } from "./gates";
 import { createJournalMethods } from "./journal";
 import { createPresenceMethods } from "./presence";
@@ -340,7 +341,12 @@ export class TilaClient {
       const parsed = ErrorEnvelopeSchema.safeParse(body);
       if (parsed.success) {
         const { code, message, retryable } = parsed.data.error;
-        throw new TilaApiError(res.status, code, message, retryable);
+        throw new TilaApiError(
+          res.status,
+          toTilaErrorCode(code),
+          message,
+          retryable,
+        );
       }
     } catch (err) {
       if (err instanceof TilaApiError) throw err;
@@ -357,7 +363,7 @@ export class TilaClient {
 export class TilaApiError extends Error {
   constructor(
     public status: number,
-    public code: string,
+    public code: TilaErrorCode,
     message: string,
     public retryable: boolean,
   ) {
@@ -405,7 +411,12 @@ export async function exchangeGitHubToken(
       const parsed = ErrorEnvelopeSchema.safeParse(body);
       if (parsed.success) {
         const { code, message, retryable } = parsed.data.error;
-        throw new TilaApiError(res.status, code, message, retryable);
+        throw new TilaApiError(
+          res.status,
+          toTilaErrorCode(code),
+          message,
+          retryable,
+        );
       }
     } catch (err) {
       if (err instanceof TilaApiError) throw err;

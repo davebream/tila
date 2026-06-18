@@ -262,7 +262,7 @@ describe("TilaClient", () => {
 
 describe("isTilaApiError", () => {
   it("returns true for TilaApiError instances", () => {
-    const err = new TilaApiError(409, "FENCE_CONFLICT", "stale fence", false);
+    const err = new TilaApiError(409, "stale-fence", "stale fence", false);
     expect(isTilaApiError(err)).toBe(true);
   });
 
