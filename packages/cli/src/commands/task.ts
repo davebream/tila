@@ -2,6 +2,7 @@ import { EntityRelationshipTypeSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { TilaApiError } from "tila-sdk";
 import { resolveContext } from "../context";
+import { parseFieldArg } from "../lib/field-validator";
 import {
   failWithCliError,
   formatStatus,
@@ -668,8 +669,11 @@ export default defineCommand({
       },
       async run({ args }) {
         const { entity } = await resolveContext();
-        const [key, ...rest] = (args.field as string).split("=");
-        const value = rest.join("=");
+        // Loud-fail when --field is missing the = separator (C2)
+        const { key, value } = parseFieldArg(
+          args.field as string,
+          Boolean(args.json),
+        );
         const data = { [key]: value };
         const id = args.id as string;
         // --fence supplied: caller owns the fence; a stale fence is rejected by

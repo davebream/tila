@@ -168,7 +168,21 @@ export default defineCommand({
     }
 
     if (ctx.config.backend === "local") {
-      p.cancel("This command requires a remote connection (tila init).");
+      // Guard p.cancel with !jsonMode so doctor --json local emits only JSON (C2)
+      if (jsonMode) {
+        printJson({
+          checks: [
+            {
+              name: "backend",
+              status: "fail",
+              detail: "Local mode — remote checks require tila init",
+            },
+          ],
+          summary: { passed: 0, warned: 0, failed: 1 },
+        });
+      } else {
+        p.cancel("This command requires a remote connection (tila init).");
+      }
       process.exit(1);
     }
 

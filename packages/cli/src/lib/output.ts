@@ -9,7 +9,7 @@ import ansis from "ansis";
 import { Table } from "console-table-printer";
 import treeify from "object-treeify";
 import createSpinner from "yocto-spinner";
-import { exitCodeFor } from "./exit-codes";
+import { EXIT_CODES, exitCodeFor } from "./exit-codes";
 
 // --- CLI JSON envelope types (NOT coupled to the HTTP ErrorEnvelope) ---
 
@@ -142,7 +142,30 @@ export function describeCliError(err: unknown): {
   const code = typeof e?.code === "string" && e.code ? e.code : "ERROR";
   const raw =
     typeof e?.message === "string" && e.message ? e.message : String(err);
-  return { code, message: raw.split("\n")[0].trim() };
+  const hint = _remediationHint(code);
+  return {
+    code,
+    message: raw.split("\n")[0].trim(),
+    ...(hint ? { hint } : {}),
+  };
+}
+
+/**
+ * Return a remediation hint for network/backend error classes.
+ * Returns undefined for user-error codes (no hint needed).
+ */
+function _remediationHint(code: string): string | undefined {
+  if (exitCodeFor(code) === EXIT_CODES.NETWORK_ERROR) {
+    switch (code) {
+      case "RATE_LIMITED":
+        return "The server is rate-limiting requests. Wait a moment and retry.";
+      case "do-unreachable":
+        return "The project backend is unreachable. Check your network connection and retry.";
+      default:
+        return "A transient server error occurred. Retry the command.";
+    }
+  }
+  return undefined;
 }
 
 /**

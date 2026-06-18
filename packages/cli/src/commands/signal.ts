@@ -1,6 +1,12 @@
 import { defineCommand } from "citty";
+import { TILA_ERRORS } from "tila-sdk";
 import { resolveContext } from "../context";
-import { jsonArg, printJson, printJsonError } from "../lib/output";
+import {
+  failWithCliError,
+  jsonArg,
+  printJson,
+  printJsonError,
+} from "../lib/output";
 
 const sendCommand = defineCommand({
   meta: { name: "send", description: "Send a signal to a target" },
@@ -46,11 +52,13 @@ const sendCommand = defineCommand({
       try {
         input.payload = JSON.parse(args.payload as string);
       } catch {
-        if (args.json) {
-          printJsonError("Invalid JSON in --payload", "INVALID_PAYLOAD");
-        }
-        console.error("Error: --payload must be valid JSON");
-        process.exit(1);
+        // :54 — use real TILA_ERRORS code instead of ad-hoc "INVALID_PAYLOAD"
+        printJsonError(
+          "Invalid JSON in --payload",
+          TILA_ERRORS.VALIDATION_ERROR_DO,
+          'Pass valid JSON, e.g. --payload \'{"key":"value"}\'',
+          1,
+        );
       }
     }
     if (args.ttl) input.ttl_ms = Number(args.ttl) * 1000;
@@ -63,11 +71,9 @@ const sendCommand = defineCommand({
       }
       console.log(`Signal sent: ${result.id}`);
     } catch (err) {
+      // :73 — use failWithCliError (routes to real TILA_ERRORS code + exitCodeFor)
       if (args.json) {
-        printJsonError(
-          err instanceof Error ? err.message : String(err),
-          "NETWORK_ERROR",
-        );
+        failWithCliError(err, true);
       }
       throw err;
     }
@@ -98,11 +104,9 @@ const inboxCommand = defineCommand({
         console.log(`${s.id}  ${s.kind}  from=${from}${res}`);
       }
     } catch (err) {
+      // :112 — use failWithCliError for real error code + exit code routing
       if (args.json) {
-        printJsonError(
-          err instanceof Error ? err.message : String(err),
-          "NETWORK_ERROR",
-        );
+        failWithCliError(err, true);
       }
       throw err;
     }
@@ -131,11 +135,9 @@ const ackCommand = defineCommand({
       }
       console.log("Signal acked.");
     } catch (err) {
+      // :149 — use failWithCliError for real error code + exit code routing
       if (args.json) {
-        printJsonError(
-          err instanceof Error ? err.message : String(err),
-          "NETWORK_ERROR",
-        );
+        failWithCliError(err, true);
       }
       throw err;
     }
