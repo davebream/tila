@@ -81,4 +81,10 @@ export interface HonoVariables {
   requestId?: string;
   source?: string;
   sourceVersion?: string | null;
+  // Caller-scoped idempotency key + request-body hash, computed by the
+  // idempotency middleware and forwarded to the DO so it can dedup the
+  // fence-mutating write inside its own transaction (audit B1). Present only
+  // for write requests that carried an Idempotency-Key.
+  idempotencyKey?: string;
+  idempotencyHash?: string;
 }

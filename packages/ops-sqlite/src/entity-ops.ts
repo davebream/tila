@@ -14,6 +14,7 @@ import {
   searchArtifacts,
   validateFtsQuery,
 } from "./artifact-ops";
+import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
 import { assertResourceFence } from "./fence-ops";
 import { checkPendingGates } from "./gate-ops";
@@ -430,6 +431,7 @@ export function update(
   fence: number,
   origin: RequestOrigin,
   tags?: string[],
+  idempotency?: DoIdempotency<Entity>,
 ): Entity {
   // Validate + normalize tags before the transaction
   const normalizedTags =
@@ -441,93 +443,106 @@ export function update(
   const now = Date.now();
 
   return db.transaction((tx) => {
-    const existing = tx
-      .select()
-      .from(schema.entities)
-      .where(eq(schema.entities.id, id))
-      .get();
+    // Dedup the fence-mutating write inside this same transaction (audit B1):
+    // a replay of the same Idempotency-Key returns the stored result and never
+    // re-applies the update. No idempotency → runs the write unchanged.
+    return withDoIdempotency(tx, idempotency, () => doUpdate()).result;
 
-    if (!existing) {
-      throw new EntityNotFoundError(id);
-    }
+    function doUpdate(): Entity {
+      const existing = tx
+        .select()
+        .from(schema.entities)
+        .where(eq(schema.entities.id, id))
+        .get();
 
-    // Fence validation: always required -- caller must hold a LIVE claim.
-    // requireLiveClaim closes the zombie-write window where an expired lease's
-    // fence still numerically matches current_fence (entity fences do not bump
-    // on write).
-    assertResourceFence(tx, id, fence, { requireLiveClaim: true });
-
-    // Gate enforcement: block terminal transitions if pending gates exist.
-    // Non-terminal status changes and updates without a status field are unaffected.
-    const TERMINAL_STATUSES = new Set(["done", "closed", "merged"]);
-    const incomingStatus = data.status as string | undefined;
-    if (incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
-      checkPendingGates(tx, id, now);
-    }
-
-    // Merge data: spread existing + new fields (passthrough preservation)
-    const existingData = JSON.parse(existing.data) as Record<string, unknown>;
-    const mergedData = { ...existingData, ...data };
-
-    tx.update(schema.entities)
-      .set({
-        data: JSON.stringify(mergedData),
-        updated_at: now,
-      })
-      .where(eq(schema.entities.id, id))
-      .run();
-
-    // Tag update: undefined=preserve, []=clear, [...]= replace
-    if (normalizedTags !== undefined) {
-      tx.delete(schema.entityTags)
-        .where(eq(schema.entityTags.entity_id, id))
-        .run();
-      for (const tag of normalizedTags) {
-        tx.insert(schema.entityTags).values({ entity_id: id, tag }).run();
+      if (!existing) {
+        throw new EntityNotFoundError(id);
       }
-    }
 
-    appendJournal(tx, {
-      kind: "entity.updated",
-      resource: id,
-      actor: origin.actor,
-      fence: fence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
-    });
+      // Fence validation: always required -- caller must hold a LIVE claim.
+      // requireLiveClaim closes the zombie-write window where an expired lease's
+      // fence still numerically matches current_fence (entity fences do not bump
+      // on write).
+      assertResourceFence(tx, id, fence, { requireLiveClaim: true });
 
-    // FTS5: re-index entity for full-text search (data.title, fallback data.name -- issue #412)
-    const updatedName = entitySearchText(mergedData as Record<string, unknown>);
-    tx.run(
-      sql`INSERT OR REPLACE INTO entity_search_docs(
+      // Gate enforcement: block terminal transitions if pending gates exist.
+      // Non-terminal status changes and updates without a status field are unaffected.
+      const TERMINAL_STATUSES = new Set(["done", "closed", "merged"]);
+      const incomingStatus = data.status as string | undefined;
+      if (incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
+        // B5: share the function-level `now` so entity.updated_at and any
+        // gate.resolved_at agree (single clock per transaction).
+        checkPendingGates(tx, id, now);
+      }
+
+      // Merge data: spread existing + new fields (passthrough preservation)
+      const existingData = JSON.parse(existing.data) as Record<string, unknown>;
+      const mergedData = { ...existingData, ...data };
+
+      tx.update(schema.entities)
+        .set({
+          data: JSON.stringify(mergedData),
+          updated_at: now,
+        })
+        .where(eq(schema.entities.id, id))
+        .run();
+
+      // Tag update: undefined=preserve, []=clear, [...]= replace
+      if (normalizedTags !== undefined) {
+        tx.delete(schema.entityTags)
+          .where(eq(schema.entityTags.entity_id, id))
+          .run();
+        for (const tag of normalizedTags) {
+          tx.insert(schema.entityTags).values({ entity_id: id, tag }).run();
+        }
+      }
+
+      appendJournal(tx, {
+        kind: "entity.updated",
+        resource: id,
+        actor: origin.actor,
+        fence: fence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
+
+      // FTS5: re-index entity for full-text search (data.title, fallback data.name -- issue #412)
+      const updatedName = entitySearchText(
+        mergedData as Record<string, unknown>,
+      );
+      tx.run(
+        sql`INSERT OR REPLACE INTO entity_search_docs(
         entity_id, entity_type, name, indexed_at
       ) VALUES(
         ${id}, ${existing.type}, ${updatedName}, ${now}
       )`,
-    );
+      );
 
-    const updated = tx
-      .select()
-      .from(schema.entities)
-      .where(eq(schema.entities.id, id))
-      .get();
-
-    const entity = rowToEntity(updated as typeof schema.entities.$inferSelect);
-
-    // Attach final tags: if we updated them, use normalizedTags; else read current tags
-    if (normalizedTags !== undefined) {
-      entity.tags = normalizedTags;
-    } else {
-      const tagRows = tx
+      const updated = tx
         .select()
-        .from(schema.entityTags)
-        .where(eq(schema.entityTags.entity_id, id))
-        .all();
-      entity.tags = tagRows.map((t) => t.tag);
-    }
+        .from(schema.entities)
+        .where(eq(schema.entities.id, id))
+        .get();
 
-    return entity;
+      const entity = rowToEntity(
+        updated as typeof schema.entities.$inferSelect,
+      );
+
+      // Attach final tags: if we updated them, use normalizedTags; else read current tags
+      if (normalizedTags !== undefined) {
+        entity.tags = normalizedTags;
+      } else {
+        const tagRows = tx
+          .select()
+          .from(schema.entityTags)
+          .where(eq(schema.entityTags.entity_id, id))
+          .all();
+        entity.tags = tagRows.map((t) => t.tag);
+      }
+
+      return entity;
+    }
   });
 }
 
@@ -536,6 +551,7 @@ export function archive(
   id: string,
   fence: number,
   origin: RequestOrigin,
+  idempotency?: DoIdempotency<{ archived: true }>,
 ): void {
   // Single clock read for the whole transaction: the archive write and the gate
   // resolution it triggers (checkPendingGates resolving an expired timer gate)
@@ -543,51 +559,59 @@ export function archive(
   const now = Date.now();
 
   db.transaction((tx) => {
-    const existing = tx
-      .select()
-      .from(schema.entities)
-      .where(eq(schema.entities.id, id))
-      .get();
+    // Dedup the fence-validated archive inside this transaction (audit B1): a
+    // replay returns without re-running the terminal archive (which would
+    // re-delete the claim / re-journal). The route body carries no data, so we
+    // dedup on a constant sentinel result.
+    withDoIdempotency(tx, idempotency, () => {
+      const existing = tx
+        .select()
+        .from(schema.entities)
+        .where(eq(schema.entities.id, id))
+        .get();
 
-    if (!existing) {
-      throw new EntityNotFoundError(id);
-    }
+      if (!existing) {
+        throw new EntityNotFoundError(id);
+      }
 
-    // Fence validation: always required -- caller must hold a LIVE claim.
-    // requireLiveClaim closes the zombie-write window where an expired lease's
-    // fence still numerically matches current_fence (entity fences do not bump
-    // on write).
-    assertResourceFence(tx, id, fence, { requireLiveClaim: true });
+      // Fence validation: always required -- caller must hold a LIVE claim.
+      // requireLiveClaim closes the zombie-write window where an expired lease's
+      // fence still numerically matches current_fence (entity fences do not bump
+      // on write).
+      assertResourceFence(tx, id, fence, { requireLiveClaim: true });
 
-    // Gate enforcement: archive is a terminal operation -- always check gates.
-    // If GateBlockedError is thrown, the transaction rolls back cleanly.
-    // The entity's claim remains valid; caller can retry after resolving gates.
-    checkPendingGates(tx, id, now);
+      // Gate enforcement: archive is a terminal operation -- always check gates.
+      // If GateBlockedError is thrown, the transaction rolls back cleanly.
+      // The entity's claim remains valid; caller can retry after resolving gates.
+      // B5: share the function-level `now` so updated_at and gate.resolved_at agree.
+      checkPendingGates(tx, id, now);
 
-    tx.delete(schema.claims)
-      .where(eq(schema.claims.resource, `${existing.type}:${id}`))
-      .run();
+      tx.delete(schema.claims)
+        .where(eq(schema.claims.resource, `${existing.type}:${id}`))
+        .run();
 
-    tx.update(schema.entities)
-      .set({
-        archived: 1,
-        updated_at: now,
-      })
-      .where(eq(schema.entities.id, id))
-      .run();
+      tx.update(schema.entities)
+        .set({
+          archived: 1,
+          updated_at: now,
+        })
+        .where(eq(schema.entities.id, id))
+        .run();
 
-    appendJournal(tx, {
-      kind: "entity.archived",
-      resource: id,
-      actor: origin.actor,
-      fence: fence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
+      appendJournal(tx, {
+        kind: "entity.archived",
+        resource: id,
+        actor: origin.actor,
+        fence: fence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
+
+      // FTS5: remove entity from search index (esd_ad trigger cleans up FTS5)
+      tx.run(sql`DELETE FROM entity_search_docs WHERE entity_id = ${id}`);
+      return { archived: true as const };
     });
-
-    // FTS5: remove entity from search index (esd_ad trigger cleans up FTS5)
-    tx.run(sql`DELETE FROM entity_search_docs WHERE entity_id = ${id}`);
   });
 }
 

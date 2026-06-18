@@ -78,7 +78,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
     ]);
 
     const tableNames = (
@@ -101,10 +101,31 @@ describe("migration runner", () => {
     expect(tableNames).toContain("record_revisions");
     expect(tableNames).toContain("record_search_docs");
     expect(tableNames).toContain("_journal_archive_watermark");
+    // v21 (audit B1): DO-side idempotency dedup table + its index.
+    expect(tableNames).toContain("_do_idempotency");
     expect(indexes(sqlite)).toEqual(
       expect.arrayContaining([
         "idx_entity_relationships_to_id_type",
         "idx_presence_last_seen",
+        "idx_do_idempotency_created",
+      ]),
+    );
+  });
+
+  it("v21 _do_idempotency migration is idempotent (re-run is a no-op)", () => {
+    const sqlite = new Database(":memory:");
+    const storage = createStorage(sqlite);
+    runProjectMigrations(storage);
+    // Re-running must not throw on the CREATE TABLE/INDEX IF NOT EXISTS.
+    expect(() => runProjectMigrations(storage)).not.toThrow();
+    const cols = columns(sqlite, "_do_idempotency");
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "key",
+        "request_hash",
+        "status_code",
+        "response_json",
+        "created_at",
       ]),
     );
   });
@@ -116,7 +137,7 @@ describe("migration runner", () => {
     runProjectMigrations(storage);
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
     ]);
   });
 
@@ -128,7 +149,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
     ]);
   });
 
@@ -147,7 +168,7 @@ describe("migration runner", () => {
     runProjectMigrations(createStorage(sqlite));
 
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
     ]);
   });
 
@@ -160,7 +181,7 @@ describe("migration runner", () => {
 
     expect(() => runProjectMigrations(createStorage(sqlite))).not.toThrow();
     expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
     ]);
     expect(columns(sqlite, "claims")).toEqual(
       expect.arrayContaining(["holder", "machine", "user"]),

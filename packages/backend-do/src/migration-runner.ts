@@ -198,6 +198,14 @@ const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
     "expires_at",
     "acked_at",
   ],
+  // v21 (audit B1): DO-side idempotency dedup table.
+  _do_idempotency: [
+    "key",
+    "request_hash",
+    "status_code",
+    "response_json",
+    "created_at",
+  ],
 };
 
 function runMigration(storage: MigrationStorage, migration: Migration): void {

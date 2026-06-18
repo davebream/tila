@@ -13,7 +13,7 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { z } from "zod";
-import { formatZodIssues, jsonError } from "./responses";
+import { formatZodIssues, idempotencyFrom, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 const DoAcquireRequestSchema = AcquireRequestSchema.extend({
@@ -71,6 +71,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
       body.metadata,
       Date.now(),
       origin,
+      idempotencyFrom(c),
     );
     if (!result.acquired) {
       return jsonError(
@@ -115,6 +116,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
       body.ttl_ms,
       Date.now(),
       renewOrigin,
+      idempotencyFrom(c),
     );
     if (!result.renewed) {
       return jsonError(
@@ -146,7 +148,13 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
       source: body.source ?? null,
       sourceVersion: body.source_version ?? null,
     };
-    coordinationOps.release(db, resource, body.fence, releaseOrigin);
+    coordinationOps.release(
+      db,
+      resource,
+      body.fence,
+      releaseOrigin,
+      idempotencyFrom(c),
+    );
     return c.json({ ok: true });
   });
 

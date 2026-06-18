@@ -6,6 +6,9 @@ const forwardToDOMock = vi.fn();
 
 vi.mock("../lib/do-forward", () => ({
   forwardToDO: (...args: unknown[]) => forwardToDOMock(...args),
+  // No Idempotency-Key in these tests, so this returns undefined (the real
+  // helper does too when c.get("idempotencyKey") is unset).
+  idempotencyHeaders: () => undefined,
 }));
 
 vi.mock("../lib/analytics", () => ({
@@ -92,6 +95,8 @@ describe("claims routes", () => {
       "POST",
       expect.objectContaining({ actor: "holder/holder" }),
       undefined,
+      undefined,
+      // idempotencyHeaders(c) — undefined when no Idempotency-Key (mocked above).
       undefined,
     );
   });

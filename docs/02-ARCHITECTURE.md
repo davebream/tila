@@ -679,6 +679,8 @@ CREATE INDEX idempotency_created_at ON _idempotency(created_at);
 
 Keys are retained for 1 hour. A repeated request with the same key returns the cached response. This makes the CLI safe to retry on network errors.
 
+**DO-side dedup (audit B1).** The D1 `_idempotency` row above is written by the Worker *after* the DO write commits, so a crash between the DO commit and the D1 store would leave no D1 row — a retry would then re-execute and double-apply a fence-mutating write. To close that cross-store gap, fence-mutating DO writes (entity update/archive, claim acquire/renew/release, record set/patch/archive/unarchive) ALSO record a dedup row inside the *same DO SQLite transaction* as the write, in a DO-only `_do_idempotency` table (canonical migration v21). The Worker forwards its composite caller-scoped key (`dp:<projectId>:<caller>:<method>:<path>:<clientKey>`) plus the request-body hash to the DO; on replay the DO returns the stored result without re-running the write (no second fence bump). The D1 row remains a fast-path optimization, NOT the sole guard. `_do_idempotency` is DO-only — embedded mode keeps its own `_idempotency` overlay and does not create it.
+
 ### 3a.4 Error envelope
 
 All error responses use the shape:
@@ -709,7 +711,7 @@ Most operations are single-DO transactions and have no cross-backend concerns. B
 
 **Rule 1 — DO transaction is always last.** When an operation spans backends, the DO write commits last. This is because the DO transaction includes the journal append; if the journal records "the artifact was produced," the artifact must already exist. Reverse the order and you get journal events for artifacts that don't exist.
 
-**Rule 2 — Idempotency keys span the full operation.** A cross-backend operation carries an idempotency key the entire way. If the operation is retried, the idempotency key short-circuits at the Worker before re-doing any backend work. See §3a.3.
+**Rule 2 — Idempotency keys span the full operation.** A cross-backend operation carries an idempotency key the entire way. If the operation is retried, the idempotency key short-circuits at the Worker (D1 fast-path) before re-doing any backend work. If the Worker's D1 row was never written (a crash after the DO commit), the DO's own in-transaction `_do_idempotency` guard still short-circuits the fence-mutating write on replay (audit B1), so a retry never double-applies. See §3a.3.
 
 **Rule 3 — Orphaned partial work is recoverable, not catastrophic.** If R2 write succeeds but DO write fails:
 - The R2 blob exists with no pointer row.

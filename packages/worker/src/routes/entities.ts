@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import TOML from "smol-toml";
 import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
-import { forwardToDO } from "../lib/do-forward";
+import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
@@ -230,6 +230,7 @@ entities.patch("/:id", requirePermission("write"), async (c) => {
     },
     undefined,
     analyticsCtxFrom(c),
+    idempotencyHeaders(c),
   );
 });
 
@@ -256,6 +257,7 @@ entities.post("/:id/archive", requirePermission("write"), async (c) => {
     },
     undefined,
     analyticsCtxFrom(c),
+    idempotencyHeaders(c),
   );
 });
 

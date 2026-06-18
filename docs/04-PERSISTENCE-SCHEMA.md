@@ -107,6 +107,14 @@ erDiagram
         json info "current resource and status"
     }
 
+    _do_idempotency {
+        text key PK "worker composite caller-scoped key"
+        text request_hash "body sha256, nullable"
+        int status_code
+        text response_json "stored domain result"
+        int created_at
+    }
+
     R2_object {
         text key PK "content-addressed path"
         blob body "content-addressed"
@@ -152,6 +160,8 @@ erDiagram
 **Dashed/soft lines (`}o--o{`) are cross-store or string-based references.** `journal.resource` is a string like `task:T-142`; it is not an enforced FK because the journal is append-only and must survive the archival of the entity it references. `claims.resource` and `fences.resource` reference entities by string for the same reason — fence counters must persist after entities are deleted to prevent reuse.
 
 **The R2 boundary.** `artifact_pointers` is the DO record; `R2_object` is the blob. The R2 key is the linkage. Maintaining consistency across this boundary is the Worker's job: every artifact write is R2 first (content-addressed, idempotent), then DO transaction (pointer row + journal event + required-reference edges). Failure between the two is reconciled on next `tila doctor --reconcile`. See Architecture §3a.6.
+
+**Two idempotency tables, two layers.** The global D1 `_idempotency` is the Worker's fast-path dedup, written *after* the DO write commits. `_do_idempotency` is a DO-only table (migration v21) written *inside* the same DO SQLite transaction as a fence-mutating write, so a retry after a crash between the DO commit and the D1 store still short-circuits without double-applying (audit B1); the D1 row is an optimization, not the sole guard. Embedded mode has neither of these — it uses its own single-file `_idempotency` overlay and does NOT create `_do_idempotency`. See Architecture §3a.3.
 
 ## Why the DO-first split
 

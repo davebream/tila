@@ -20,7 +20,7 @@ import { eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import { filterFields } from "./entity-response";
-import { formatZodIssues, jsonError } from "./responses";
+import { formatZodIssues, idempotencyFrom, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 const {
@@ -284,6 +284,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       parsed.data.fence,
       origin,
       (parsed.data as { tags?: string[] }).tags,
+      idempotencyFrom(c),
     );
     return c.json({ ok: true, entity });
   });
@@ -309,7 +310,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       sourceVersion:
         (body as { source_version?: string | null }).source_version ?? null,
     };
-    entityOps.archive(db, id, parsed.data.fence, origin);
+    entityOps.archive(db, id, parsed.data.fence, origin, idempotencyFrom(c));
     return c.json({ ok: true });
   });
 

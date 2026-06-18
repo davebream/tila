@@ -12,6 +12,7 @@ import {
 import { type SQL, and, desc, eq, or, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { SearchQueryError, validateFtsQuery } from "./artifact-ops";
+import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
@@ -487,6 +488,7 @@ export async function setRecord(
     actor: string;
   },
   origin: RequestOrigin,
+  idempotency?: DoIdempotency<RecordRow>,
 ): Promise<RecordRow> {
   const canonical = canonicalJson(input.value);
   const sha256 = await canonicalJsonSha256(input.value);
@@ -496,113 +498,119 @@ export async function setRecord(
   const bodyText = extractSearchText(input.value);
 
   return db.transaction((tx) => {
-    // Read existing record
-    const existing = tx
-      .select()
-      .from(schema.records)
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .get();
+    // Dedup the fence-mutating set inside this transaction (audit B1): a replay
+    // returns the stored revision/fence without bumping the fence again.
+    return withDoIdempotency(tx, idempotency, () => doSet()).result;
 
-    if (!existing) {
-      throw new RecordNotFoundError(input.type, input.key);
-    }
+    function doSet(): RecordRow {
+      // Read existing record
+      const existing = tx
+        .select()
+        .from(schema.records)
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .get();
 
-    // Validate fence
-    assertResourceFence(tx, resource, input.fence);
+      if (!existing) {
+        throw new RecordNotFoundError(input.type, input.key);
+      }
 
-    const newRevision = existing.revision + 1;
+      // Validate fence
+      assertResourceFence(tx, resource, input.fence);
 
-    // Update record
-    tx.update(schema.records)
-      .set({
+      const newRevision = existing.revision + 1;
+
+      // Update record
+      tx.update(schema.records)
+        .set({
+          schema_version: input.schema_version,
+          value_json: canonical,
+          value_sha256: sha256,
+          revision: newRevision,
+          updated_at: now,
+          updated_by: input.actor,
+        })
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .run();
+
+      // Increment fence
+      const newFence = bumpFence(tx, resource);
+
+      // Insert revision row
+      insertRevisionRow(tx, {
+        type: input.type,
+        key: input.key,
+        revision: newRevision,
+        operation: "set",
         schema_version: input.schema_version,
         value_json: canonical,
         value_sha256: sha256,
+        canonical_artifact_key: input.canonical_artifact_key,
+        source_artifact_key: input.source_artifact_key,
+        actor: input.actor,
+        created_at: now,
+        message: input.message,
+        origin,
+      });
+
+      // Replace tags (if provided)
+      if (input.tags !== undefined) {
+        replaceTags(tx, input.type, input.key, input.tags);
+      }
+
+      // Determine final tags for return value
+      const finalTags =
+        input.tags !== undefined
+          ? input.tags
+          : readTags(tx, input.type, input.key);
+
+      // Journal event
+      appendJournal(tx, {
+        kind: "record.updated",
+        resource,
+        actor: input.actor,
+        fence: newFence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
+
+      // Update record_search_docs (sha256 guard to skip unchanged content).
+      // NOTE: setRecord unconditionally writes tombstoned=0 — this is the
+      // pre-existing archived-resurrection inconsistency (record-ops.ts) that
+      // putRecord deliberately does NOT inherit (it preserves existing.archived).
+      writeSearchDoc(tx, {
+        type: input.type,
+        key: input.key,
+        bodyText,
+        sha256,
+        tombstoned: 0,
+      });
+
+      return {
+        type: input.type,
+        key: input.key,
+        schema_version: input.schema_version,
+        value: input.value,
+        value_sha256: sha256,
         revision: newRevision,
+        archived: existing.archived,
+        created_at: existing.created_at,
         updated_at: now,
         updated_by: input.actor,
-      })
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .run();
-
-    // Increment fence
-    const newFence = bumpFence(tx, resource);
-
-    // Insert revision row
-    insertRevisionRow(tx, {
-      type: input.type,
-      key: input.key,
-      revision: newRevision,
-      operation: "set",
-      schema_version: input.schema_version,
-      value_json: canonical,
-      value_sha256: sha256,
-      canonical_artifact_key: input.canonical_artifact_key,
-      source_artifact_key: input.source_artifact_key,
-      actor: input.actor,
-      created_at: now,
-      message: input.message,
-      origin,
-    });
-
-    // Replace tags (if provided)
-    if (input.tags !== undefined) {
-      replaceTags(tx, input.type, input.key, input.tags);
+        tags: finalTags,
+        fence: newFence,
+      };
     }
-
-    // Determine final tags for return value
-    const finalTags =
-      input.tags !== undefined
-        ? input.tags
-        : readTags(tx, input.type, input.key);
-
-    // Journal event
-    appendJournal(tx, {
-      kind: "record.updated",
-      resource,
-      actor: input.actor,
-      fence: newFence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
-    });
-
-    // Update record_search_docs (sha256 guard to skip unchanged content).
-    // NOTE: setRecord unconditionally writes tombstoned=0 — this is the
-    // pre-existing archived-resurrection inconsistency (record-ops.ts) that
-    // putRecord deliberately does NOT inherit (it preserves existing.archived).
-    writeSearchDoc(tx, {
-      type: input.type,
-      key: input.key,
-      bodyText,
-      sha256,
-      tombstoned: 0,
-    });
-
-    return {
-      type: input.type,
-      key: input.key,
-      schema_version: input.schema_version,
-      value: input.value,
-      value_sha256: sha256,
-      revision: newRevision,
-      archived: existing.archived,
-      created_at: existing.created_at,
-      updated_at: now,
-      updated_by: input.actor,
-      tags: finalTags,
-      fence: newFence,
-    };
   });
 }
 
@@ -878,6 +886,7 @@ export async function patchRecord(
     actor: string;
   },
   origin: RequestOrigin,
+  idempotency?: DoIdempotency<RecordRow>,
 ): Promise<RecordRow> {
   // Pre-read current value outside transaction for SHA-256 computation
   const preRead = db
@@ -913,129 +922,134 @@ export async function patchRecord(
   const bodyText = extractSearchText(merged);
 
   return db.transaction((tx) => {
-    // Re-read inside transaction (authoritative state check)
-    const existing = tx
-      .select()
-      .from(schema.records)
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .get();
-    if (!existing) throw new RecordNotFoundError(input.type, input.key);
-    if (existing.archived === 1) {
-      throw new RecordInvalidStateError(
-        input.type,
-        input.key,
-        "cannot patch archived record",
+    // Dedup the fence-mutating patch inside this transaction (audit B1).
+    return withDoIdempotency(tx, idempotency, () => doPatch()).result;
+
+    function doPatch(): RecordRow {
+      // Re-read inside transaction (authoritative state check)
+      const existing = tx
+        .select()
+        .from(schema.records)
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .get();
+      if (!existing) throw new RecordNotFoundError(input.type, input.key);
+      if (existing.archived === 1) {
+        throw new RecordInvalidStateError(
+          input.type,
+          input.key,
+          "cannot patch archived record",
+        );
+      }
+
+      // Fence check
+      assertResourceFence(tx, resource, input.fence);
+
+      const newRevision = existing.revision + 1;
+
+      // Update record
+      tx.update(schema.records)
+        .set({
+          schema_version: input.schema_version,
+          value_json: canonical,
+          value_sha256: sha256,
+          revision: newRevision,
+          updated_at: now,
+          updated_by: input.actor,
+        })
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .run();
+
+      // Increment fence
+      tx.run(
+        sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
       );
-    }
+      const newFenceRow = tx
+        .select()
+        .from(schema.fences)
+        .where(eq(schema.fences.resource, resource))
+        .get();
+      const newFence = newFenceRow?.current_fence ?? 1;
 
-    // Fence check
-    assertResourceFence(tx, resource, input.fence);
+      // Revision row
+      tx.insert(schema.recordRevisions)
+        .values({
+          type: input.type,
+          key: input.key,
+          revision: newRevision,
+          operation: "patch",
+          schema_version: input.schema_version,
+          value_json: canonical,
+          value_sha256: sha256,
+          canonical_artifact_key: null,
+          source_artifact_key: null,
+          actor: input.actor,
+          created_at: now,
+          message: input.message ?? null,
+          token_id: origin.tokenId ?? null,
+          source: origin.source ?? null,
+          source_version: origin.sourceVersion ?? null,
+        })
+        .run();
 
-    const newRevision = existing.revision + 1;
+      // Tags unchanged by patch -- read current tags for return value
+      const tags = tx
+        .select()
+        .from(schema.recordTags)
+        .where(
+          and(
+            eq(schema.recordTags.type, input.type),
+            eq(schema.recordTags.key, input.key),
+          ),
+        )
+        .all()
+        .map((r) => r.tag);
 
-    // Update record
-    tx.update(schema.records)
-      .set({
-        schema_version: input.schema_version,
-        value_json: canonical,
-        value_sha256: sha256,
-        revision: newRevision,
-        updated_at: now,
-        updated_by: input.actor,
-      })
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .run();
+      appendJournal(tx, {
+        kind: "record.updated",
+        resource,
+        actor: input.actor,
+        fence: newFence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
 
-    // Increment fence
-    tx.run(
-      sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
-    );
-    const newFenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    const newFence = newFenceRow?.current_fence ?? 1;
+      // Update record_search_docs (sha256 guard to skip unchanged content)
+      const existingSearchDoc = tx.get<{ value_sha256: string }>(
+        sql`SELECT value_sha256 FROM record_search_docs WHERE record_type = ${input.type} AND record_key = ${input.key}`,
+      );
+      if (!existingSearchDoc || existingSearchDoc.value_sha256 !== sha256) {
+        const indexedAt = Date.now();
+        tx.run(
+          sql`INSERT OR REPLACE INTO record_search_docs(record_type, record_key, body_text, indexed_at, value_sha256, tombstoned) VALUES(${input.type}, ${input.key}, ${bodyText}, ${indexedAt}, ${sha256}, 0)`,
+        );
+      }
 
-    // Revision row
-    tx.insert(schema.recordRevisions)
-      .values({
+      return {
         type: input.type,
         key: input.key,
-        revision: newRevision,
-        operation: "patch",
         schema_version: input.schema_version,
-        value_json: canonical,
+        value: merged,
         value_sha256: sha256,
-        canonical_artifact_key: null,
-        source_artifact_key: null,
-        actor: input.actor,
-        created_at: now,
-        message: input.message ?? null,
-        token_id: origin.tokenId ?? null,
-        source: origin.source ?? null,
-        source_version: origin.sourceVersion ?? null,
-      })
-      .run();
-
-    // Tags unchanged by patch -- read current tags for return value
-    const tags = tx
-      .select()
-      .from(schema.recordTags)
-      .where(
-        and(
-          eq(schema.recordTags.type, input.type),
-          eq(schema.recordTags.key, input.key),
-        ),
-      )
-      .all()
-      .map((r) => r.tag);
-
-    appendJournal(tx, {
-      kind: "record.updated",
-      resource,
-      actor: input.actor,
-      fence: newFence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
-    });
-
-    // Update record_search_docs (sha256 guard to skip unchanged content)
-    const existingSearchDoc = tx.get<{ value_sha256: string }>(
-      sql`SELECT value_sha256 FROM record_search_docs WHERE record_type = ${input.type} AND record_key = ${input.key}`,
-    );
-    if (!existingSearchDoc || existingSearchDoc.value_sha256 !== sha256) {
-      const indexedAt = Date.now();
-      tx.run(
-        sql`INSERT OR REPLACE INTO record_search_docs(record_type, record_key, body_text, indexed_at, value_sha256, tombstoned) VALUES(${input.type}, ${input.key}, ${bodyText}, ${indexedAt}, ${sha256}, 0)`,
-      );
+        revision: newRevision,
+        archived: existing.archived,
+        created_at: existing.created_at,
+        updated_at: now,
+        updated_by: input.actor,
+        tags,
+        fence: newFence,
+      };
     }
-
-    return {
-      type: input.type,
-      key: input.key,
-      schema_version: input.schema_version,
-      value: merged,
-      value_sha256: sha256,
-      revision: newRevision,
-      archived: existing.archived,
-      created_at: existing.created_at,
-      updated_at: now,
-      updated_by: input.actor,
-      tags,
-      fence: newFence,
-    };
   });
 }
 
@@ -1054,123 +1068,129 @@ export function archiveRecord(
     actor: string;
   },
   origin: RequestOrigin,
+  idempotency?: DoIdempotency<RecordRow>,
 ): RecordRow {
   const resource = formatRecordResource(input.type, input.key);
   const now = Date.now();
 
   return db.transaction((tx) => {
-    const existing = tx
-      .select()
-      .from(schema.records)
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .get();
-    if (!existing) throw new RecordNotFoundError(input.type, input.key);
-    if (existing.archived === 1) {
-      throw new RecordInvalidStateError(
-        input.type,
-        input.key,
-        "already archived",
+    // Dedup the fence-mutating archive inside this transaction (audit B1).
+    return withDoIdempotency(tx, idempotency, () => doArchive()).result;
+
+    function doArchive(): RecordRow {
+      const existing = tx
+        .select()
+        .from(schema.records)
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .get();
+      if (!existing) throw new RecordNotFoundError(input.type, input.key);
+      if (existing.archived === 1) {
+        throw new RecordInvalidStateError(
+          input.type,
+          input.key,
+          "already archived",
+        );
+      }
+
+      // Fence check
+      assertResourceFence(tx, resource, input.fence);
+
+      const newRevision = existing.revision + 1;
+
+      tx.update(schema.records)
+        .set({
+          archived: 1,
+          revision: newRevision,
+          updated_at: now,
+          updated_by: input.actor,
+        })
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .run();
+
+      // Increment fence
+      tx.run(
+        sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
       );
-    }
+      const newFenceRow = tx
+        .select()
+        .from(schema.fences)
+        .where(eq(schema.fences.resource, resource))
+        .get();
+      const newFence = newFenceRow?.current_fence ?? 1;
 
-    // Fence check
-    assertResourceFence(tx, resource, input.fence);
+      // Revision row (value copied verbatim from existing record)
+      tx.insert(schema.recordRevisions)
+        .values({
+          type: input.type,
+          key: input.key,
+          revision: newRevision,
+          operation: "archived",
+          schema_version: existing.schema_version,
+          value_json: existing.value_json,
+          value_sha256: existing.value_sha256,
+          canonical_artifact_key: null,
+          source_artifact_key: null,
+          actor: input.actor,
+          created_at: now,
+          message: input.message ?? null,
+          token_id: origin.tokenId ?? null,
+          source: origin.source ?? null,
+          source_version: origin.sourceVersion ?? null,
+        })
+        .run();
 
-    const newRevision = existing.revision + 1;
+      const tags = tx
+        .select()
+        .from(schema.recordTags)
+        .where(
+          and(
+            eq(schema.recordTags.type, input.type),
+            eq(schema.recordTags.key, input.key),
+          ),
+        )
+        .all()
+        .map((r) => r.tag);
 
-    tx.update(schema.records)
-      .set({
-        archived: 1,
-        revision: newRevision,
-        updated_at: now,
-        updated_by: input.actor,
-      })
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .run();
+      appendJournal(tx, {
+        kind: "record.archived",
+        resource,
+        actor: input.actor,
+        fence: newFence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
 
-    // Increment fence
-    tx.run(
-      sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
-    );
-    const newFenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    const newFence = newFenceRow?.current_fence ?? 1;
+      // Tombstone the search doc so it won't appear in search results
+      tx.run(
+        sql`UPDATE record_search_docs SET tombstoned = 1 WHERE record_type = ${input.type} AND record_key = ${input.key}`,
+      );
 
-    // Revision row (value copied verbatim from existing record)
-    tx.insert(schema.recordRevisions)
-      .values({
+      return {
         type: input.type,
         key: input.key,
-        revision: newRevision,
-        operation: "archived",
         schema_version: existing.schema_version,
-        value_json: existing.value_json,
+        value: JSON.parse(existing.value_json) as Record<string, unknown>,
         value_sha256: existing.value_sha256,
-        canonical_artifact_key: null,
-        source_artifact_key: null,
-        actor: input.actor,
-        created_at: now,
-        message: input.message ?? null,
-        token_id: origin.tokenId ?? null,
-        source: origin.source ?? null,
-        source_version: origin.sourceVersion ?? null,
-      })
-      .run();
-
-    const tags = tx
-      .select()
-      .from(schema.recordTags)
-      .where(
-        and(
-          eq(schema.recordTags.type, input.type),
-          eq(schema.recordTags.key, input.key),
-        ),
-      )
-      .all()
-      .map((r) => r.tag);
-
-    appendJournal(tx, {
-      kind: "record.archived",
-      resource,
-      actor: input.actor,
-      fence: newFence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
-    });
-
-    // Tombstone the search doc so it won't appear in search results
-    tx.run(
-      sql`UPDATE record_search_docs SET tombstoned = 1 WHERE record_type = ${input.type} AND record_key = ${input.key}`,
-    );
-
-    return {
-      type: input.type,
-      key: input.key,
-      schema_version: existing.schema_version,
-      value: JSON.parse(existing.value_json) as Record<string, unknown>,
-      value_sha256: existing.value_sha256,
-      revision: newRevision,
-      archived: 1,
-      created_at: existing.created_at,
-      updated_at: now,
-      updated_by: input.actor,
-      tags,
-      fence: newFence,
-    };
+        revision: newRevision,
+        archived: 1,
+        created_at: existing.created_at,
+        updated_at: now,
+        updated_by: input.actor,
+        tags,
+        fence: newFence,
+      };
+    }
   });
 }
 
@@ -1189,119 +1209,129 @@ export function unarchiveRecord(
     actor: string;
   },
   origin: RequestOrigin,
+  idempotency?: DoIdempotency<RecordRow>,
 ): RecordRow {
   const resource = formatRecordResource(input.type, input.key);
   const now = Date.now();
 
   return db.transaction((tx) => {
-    const existing = tx
-      .select()
-      .from(schema.records)
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .get();
-    if (!existing) throw new RecordNotFoundError(input.type, input.key);
-    if (existing.archived === 0) {
-      throw new RecordInvalidStateError(input.type, input.key, "not archived");
-    }
+    // Dedup the fence-mutating unarchive inside this transaction (audit B1).
+    return withDoIdempotency(tx, idempotency, () => doUnarchive()).result;
 
-    // Fence check
-    assertResourceFence(tx, resource, input.fence);
+    function doUnarchive(): RecordRow {
+      const existing = tx
+        .select()
+        .from(schema.records)
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .get();
+      if (!existing) throw new RecordNotFoundError(input.type, input.key);
+      if (existing.archived === 0) {
+        throw new RecordInvalidStateError(
+          input.type,
+          input.key,
+          "not archived",
+        );
+      }
 
-    const newRevision = existing.revision + 1;
+      // Fence check
+      assertResourceFence(tx, resource, input.fence);
 
-    tx.update(schema.records)
-      .set({
-        archived: 0,
-        revision: newRevision,
-        updated_at: now,
-        updated_by: input.actor,
-      })
-      .where(
-        and(
-          eq(schema.records.type, input.type),
-          eq(schema.records.key, input.key),
-        ),
-      )
-      .run();
+      const newRevision = existing.revision + 1;
 
-    // Increment fence
-    tx.run(
-      sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
-    );
-    const newFenceRow = tx
-      .select()
-      .from(schema.fences)
-      .where(eq(schema.fences.resource, resource))
-      .get();
-    const newFence = newFenceRow?.current_fence ?? 1;
+      tx.update(schema.records)
+        .set({
+          archived: 0,
+          revision: newRevision,
+          updated_at: now,
+          updated_by: input.actor,
+        })
+        .where(
+          and(
+            eq(schema.records.type, input.type),
+            eq(schema.records.key, input.key),
+          ),
+        )
+        .run();
 
-    // Revision row (value copied verbatim from existing record)
-    tx.insert(schema.recordRevisions)
-      .values({
+      // Increment fence
+      tx.run(
+        sql`INSERT INTO fences(resource, current_fence) VALUES(${resource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
+      );
+      const newFenceRow = tx
+        .select()
+        .from(schema.fences)
+        .where(eq(schema.fences.resource, resource))
+        .get();
+      const newFence = newFenceRow?.current_fence ?? 1;
+
+      // Revision row (value copied verbatim from existing record)
+      tx.insert(schema.recordRevisions)
+        .values({
+          type: input.type,
+          key: input.key,
+          revision: newRevision,
+          operation: "unarchived",
+          schema_version: existing.schema_version,
+          value_json: existing.value_json,
+          value_sha256: existing.value_sha256,
+          canonical_artifact_key: null,
+          source_artifact_key: null,
+          actor: input.actor,
+          created_at: now,
+          message: input.message ?? null,
+          token_id: origin.tokenId ?? null,
+          source: origin.source ?? null,
+          source_version: origin.sourceVersion ?? null,
+        })
+        .run();
+
+      const tags = tx
+        .select()
+        .from(schema.recordTags)
+        .where(
+          and(
+            eq(schema.recordTags.type, input.type),
+            eq(schema.recordTags.key, input.key),
+          ),
+        )
+        .all()
+        .map((r) => r.tag);
+
+      appendJournal(tx, {
+        kind: "record.unarchived",
+        resource,
+        actor: input.actor,
+        fence: newFence,
+        tokenId: origin.tokenId,
+        source: origin.source,
+        sourceVersion: origin.sourceVersion,
+      });
+
+      // Restore search doc visibility after unarchive
+      tx.run(
+        sql`UPDATE record_search_docs SET tombstoned = 0 WHERE record_type = ${input.type} AND record_key = ${input.key}`,
+      );
+
+      return {
         type: input.type,
         key: input.key,
-        revision: newRevision,
-        operation: "unarchived",
         schema_version: existing.schema_version,
-        value_json: existing.value_json,
+        value: JSON.parse(existing.value_json) as Record<string, unknown>,
         value_sha256: existing.value_sha256,
-        canonical_artifact_key: null,
-        source_artifact_key: null,
-        actor: input.actor,
-        created_at: now,
-        message: input.message ?? null,
-        token_id: origin.tokenId ?? null,
-        source: origin.source ?? null,
-        source_version: origin.sourceVersion ?? null,
-      })
-      .run();
-
-    const tags = tx
-      .select()
-      .from(schema.recordTags)
-      .where(
-        and(
-          eq(schema.recordTags.type, input.type),
-          eq(schema.recordTags.key, input.key),
-        ),
-      )
-      .all()
-      .map((r) => r.tag);
-
-    appendJournal(tx, {
-      kind: "record.unarchived",
-      resource,
-      actor: input.actor,
-      fence: newFence,
-      tokenId: origin.tokenId,
-      source: origin.source,
-      sourceVersion: origin.sourceVersion,
-    });
-
-    // Restore search doc visibility after unarchive
-    tx.run(
-      sql`UPDATE record_search_docs SET tombstoned = 0 WHERE record_type = ${input.type} AND record_key = ${input.key}`,
-    );
-
-    return {
-      type: input.type,
-      key: input.key,
-      schema_version: existing.schema_version,
-      value: JSON.parse(existing.value_json) as Record<string, unknown>,
-      value_sha256: existing.value_sha256,
-      revision: newRevision,
-      archived: 0,
-      created_at: existing.created_at,
-      updated_at: now,
-      updated_by: input.actor,
-      tags,
-      fence: newFence,
-    };
+        revision: newRevision,
+        archived: 0,
+        created_at: existing.created_at,
+        updated_at: now,
+        updated_by: input.actor,
+        tags,
+        fence: newFence,
+      };
+    }
   });
 }
 

@@ -14,11 +14,17 @@
  * `artifact_relationships` PK was long ago refactored to the plain-`target`
  * form precisely to be portable, so no divergence is needed or wanted.
  *
- * Two deliberate, narrowly-scoped deltas vs the DO set:
+ * Three deliberate, narrowly-scoped deltas vs the DO set:
  *
  *  1. Version 15 (`_journal_archive_watermark`) is SKIPPED: journal archival to
  *     R2 is a DO-only feature with no embedded equivalent. Skipping it does not
  *     affect any shared table.
+ *
+ *  1b. Version 21 (`_do_idempotency`) is SKIPPED for the same reason: the DO-side
+ *      in-transaction idempotency dedup table (audit B1) is a Cloudflare-only
+ *      guard. Embedded mode has its own `_idempotency` overlay (delta 2 below),
+ *      so creating `_do_idempotency` here would be redundant and off-schema.
+ *      Skipping it does not affect any shared table.
  *
  *  2. An embedded-only idempotency table (`MIGRATION_IDEMPOTENCY`) is appended
  *     at a non-canonical version ABOVE the shared range (1000). In Cloudflare
@@ -47,10 +53,12 @@ import {
 export type { Migration, MigrationStorage } from "@tila/ops-sqlite";
 
 /**
- * Canonical version slot for the journal-archive watermark table. Skipped in
- * embedded mode (DO-only feature).
+ * Canonical version slots skipped in embedded mode (DO-only features):
+ *  - 15: `_journal_archive_watermark` (DO-only journal archival to R2)
+ *  - 21: `_do_idempotency` (DO-only in-transaction idempotency dedup, audit B1;
+ *        embedded mode uses its own `_idempotency` overlay instead)
  */
-const SKIPPED_VERSIONS = new Set<number>([15]);
+const SKIPPED_VERSIONS = new Set<number>([15, 21]);
 
 /** Version assigned to the embedded-only idempotency overlay (outside the
  *  canonical 1–19 range so it is purely additive). */
