@@ -19,7 +19,7 @@
     "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.23",
+    "hono": "^4.12.26",
     "zod": "^3.24.0"
   },
   "devDependencies": {
