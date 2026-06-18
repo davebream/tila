@@ -4,6 +4,7 @@ import { defineCommand } from "citty";
 import { resolveContext } from "../context";
 import {
   failWithCliError,
+  jsonArg,
   printJson,
   renderTable,
   tsToIso,
@@ -25,11 +26,7 @@ export default defineCommand({
           type: "string",
           description: "Fencing token (required for produced artifacts)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -152,11 +149,7 @@ export default defineCommand({
           description: "MIME type (default: text/markdown)",
           default: "text/markdown",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -205,11 +198,7 @@ export default defineCommand({
           description: "Artifact key",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON with metadata",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -248,11 +237,7 @@ export default defineCommand({
           type: "string",
           description: "Filter by artifact kind",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -325,11 +310,7 @@ export default defineCommand({
               description:
                 "External URI target (alternative to positional toKey)",
             },
-            json: {
-              type: "boolean",
-              description: "Output as JSON",
-              default: false,
-            },
+            ...jsonArg,
           },
           async run({ args }) {
             const ctx = await resolveContext();
@@ -376,11 +357,7 @@ export default defineCommand({
               description: "Artifact R2 key",
               required: true,
             },
-            json: {
-              type: "boolean",
-              description: "Output as JSON",
-              default: false,
-            },
+            ...jsonArg,
           },
           async run({ args }) {
             const ctx = await resolveContext();
@@ -432,11 +409,7 @@ export default defineCommand({
           description: "Resource ID",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -496,11 +469,7 @@ export default defineCommand({
           description:
             "Maximum candidate artifacts to scan (default: 50, max: 100)",
         },
-        json: {
-          type: "boolean",
-          description: "Output raw JSON response",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -519,7 +488,7 @@ export default defineCommand({
         });
 
         if (args.json) {
-          console.log(JSON.stringify(response, null, 2));
+          printJson(response);
           return;
         }
 
@@ -570,11 +539,7 @@ export default defineCommand({
           description:
             "Maximum number of results to return (default: 20, max: 100)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -592,7 +557,7 @@ export default defineCommand({
         });
 
         if (args.json) {
-          console.log(JSON.stringify({ results }, null, 2));
+          printJson({ results });
           return;
         }
 

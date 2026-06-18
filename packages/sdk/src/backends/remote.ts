@@ -23,6 +23,7 @@ import type {
   JournalEvent,
   JournalQuery,
   PatchRecordInput,
+  PresenceWithStatus,
   ProjectSummary,
   PutRecordInput,
   ReadyFilter,
@@ -543,6 +544,24 @@ export class RemoteBackend
       machine,
       last_seen,
       info,
+    }));
+  }
+
+  async listAllPresence(
+    _ttlMs?: number,
+    _now?: number,
+  ): Promise<PresenceWithStatus[]> {
+    // The remote backend always returns stale-inclusive presence with `active`
+    // computed server-side. ttlMs/now are local-backend parameters; ignored here.
+    const result = await this.client.get(
+      `/projects/${this.projectId}/presence/all`,
+      { schema: PresenceAllListResponseSchema, validate: true },
+    );
+    return result.machines.map(({ machine, last_seen, info, active }) => ({
+      machine,
+      last_seen,
+      info,
+      active,
     }));
   }
 

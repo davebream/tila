@@ -1,5 +1,10 @@
 import type { Claim, Presence } from "@tila/schemas";
 
+/** Presence row augmented with a computed `active` flag. */
+export interface PresenceWithStatus extends Presence {
+  active: boolean;
+}
+
 export interface AcquireResult {
   acquired: boolean;
   fence: number;
@@ -44,5 +49,12 @@ export interface CoordinationBackend {
   state(resource: string): Promise<Claim | null>;
   heartbeat(machine: string, info?: Record<string, unknown>): Promise<void>;
   listPresence(): Promise<Presence[]>;
+  /**
+   * Returns ALL presence rows, including stale ones. Each row carries an
+   * `active` flag: `true` when `last_seen > now - ttlMs`, `false` otherwise.
+   * Use this instead of `listPresence` when you need a full machine inventory
+   * (e.g. SDK local `presence.listAll`).
+   */
+  listAllPresence(ttlMs?: number, now?: number): Promise<PresenceWithStatus[]>;
   listClaims(): Promise<Claim[]>;
 }

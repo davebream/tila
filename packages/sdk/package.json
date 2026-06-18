@@ -58,6 +58,9 @@
     "gen:version": "node scripts/gen-version.mjs"
   },
   "dependencies": {
+    "@tila/backend-embedded": "workspace:*",
+    "@tila/core": "workspace:*",
+    "@tila/ops-sqlite": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "zod": "^3.24.0"
   },
@@ -70,15 +73,12 @@
     }
   },
   "devDependencies": {
-    "@tila/backend-embedded": "workspace:*",
-    "@tila/core": "workspace:*",
-    "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
     "better-sqlite3": "^12.10.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.9"
   }
 }

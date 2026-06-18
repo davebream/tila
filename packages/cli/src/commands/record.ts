@@ -13,6 +13,7 @@ import type { z } from "zod";
 import { resolveContext } from "../context";
 import {
   formatTimestamp,
+  jsonArg,
   printJson,
   renderTable,
   withSpinner,
@@ -119,11 +120,7 @@ export default defineCommand({
           type: "string",
           description: "Fencing token (required for updates)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -233,11 +230,7 @@ export default defineCommand({
           type: "string",
           description: "Output format: json or yaml",
         },
-        json: {
-          type: "boolean",
-          description: "Output full API envelope as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -290,11 +283,7 @@ export default defineCommand({
         },
         filter: { type: "string", description: "JSON data filter" },
         limit: { type: "string", description: "Maximum results" },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -437,11 +426,7 @@ export default defineCommand({
           description: "Fencing token (required)",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const recordType = args.type as string;
@@ -486,11 +471,7 @@ export default defineCommand({
           description: "Fencing token (required)",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const recordType = args.type as string;
@@ -536,11 +517,7 @@ export default defineCommand({
           default: false,
         },
         limit: { type: "string", description: "Maximum revisions to show" },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -675,11 +652,7 @@ export default defineCommand({
           description: "Show only types with existing records",
           default: false,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();

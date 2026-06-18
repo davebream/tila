@@ -30,6 +30,6 @@
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.10.0",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.9"
   }
 }

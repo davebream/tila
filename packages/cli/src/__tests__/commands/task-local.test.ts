@@ -476,7 +476,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
     expect(payload.code).toBe("stale-fence");
-    expect(typeof payload.error).toBe("string");
+    expect(typeof payload.message).toBe("string");
   });
 
   it("artifact-ref add -> list round-trips against the local backend", async () => {

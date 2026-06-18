@@ -15,6 +15,7 @@ import {
 import c from "ansis";
 import { defineCommand } from "citty";
 import { type CommandContext, runStartupChecks } from "../context";
+import { jsonArg, printJson } from "../lib/output";
 import { tilaHome } from "../lib/provisioning";
 
 interface CheckResult {
@@ -128,11 +129,7 @@ export default defineCommand({
         "Rebuild missing or stale search docs from artifact pointers (dry-run by default, use --apply to write)",
       default: false,
     },
-    json: {
-      type: "boolean",
-      description: "Output results as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const jsonMode = args.json as boolean;
@@ -171,7 +168,21 @@ export default defineCommand({
     }
 
     if (ctx.config.backend === "local") {
-      p.cancel("This command requires a remote connection (tila init).");
+      // Guard p.cancel with !jsonMode so doctor --json local emits only JSON (C2)
+      if (jsonMode) {
+        printJson({
+          checks: [
+            {
+              name: "backend",
+              status: "fail",
+              detail: "Local mode — remote checks require tila init",
+            },
+          ],
+          summary: { passed: 0, warned: 0, failed: 1 },
+        });
+      } else {
+        p.cancel("This command requires a remote connection (tila init).");
+      }
       process.exit(1);
     }
 
@@ -612,9 +623,7 @@ export default defineCommand({
     s?.stop("Checks complete.");
 
     if (jsonMode) {
-      console.log(
-        JSON.stringify({ checks, summary: { passed, warned, failed } }),
-      );
+      printJson({ checks, summary: { passed, warned, failed } });
     } else {
       const lines = checks.map((check) => {
         if (check.status === "pass") return `${c.green("✓")} ${check.detail}`;

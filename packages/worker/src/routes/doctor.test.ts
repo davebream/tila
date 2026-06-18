@@ -56,6 +56,11 @@ describe("doctor schema route", () => {
       expect.anything(),
       "/doctor/schema",
       "GET",
+      // forwardTypedDO passes optional args as undefined
+      undefined,
+      undefined,
+      undefined,
+      undefined,
     );
   });
 
@@ -95,6 +100,10 @@ describe("doctor schema route", () => {
       expect.objectContaining({
         resource: "__probe__schema__",
       }),
+      // forwardTypedDO passes optional args as undefined
+      undefined,
+      undefined,
+      undefined,
     );
   });
 

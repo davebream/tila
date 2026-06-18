@@ -296,7 +296,7 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
       .join("\n");
     const payload = JSON.parse(stderr);
     expect(payload.code).toBe("NO_SCHEMA");
-    expect(payload.error).toMatch(/no schema/i);
+    expect(payload.message).toMatch(/no schema/i);
     expect(stderr).not.toMatch(/at Object\.|node_modules/);
   });
 

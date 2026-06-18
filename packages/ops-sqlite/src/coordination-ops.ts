@@ -383,11 +383,7 @@ export function listAllPresence(
   now: number = Date.now(),
 ): PresenceWithStatus[] {
   const cutoff = now - ttlMs;
-  const rows = db
-    .select()
-    .from(schema.presence)
-    .where(gt(schema.presence.last_seen, cutoff))
-    .all();
+  const rows = db.select().from(schema.presence).all();
   return rows.map((row) => ({
     machine: row.machine,
     last_seen: row.last_seen,

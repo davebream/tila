@@ -1,6 +1,6 @@
 import { defineCommand } from "citty";
 import { findConfig } from "../config";
-import { printJson, printJsonError } from "../lib/output";
+import { jsonArg, printJson, printJsonError } from "../lib/output";
 
 export default defineCommand({
   meta: { name: "config", description: "View project configuration" },
@@ -13,11 +13,7 @@ export default defineCommand({
           description: "Config key (dot-separated)",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       run({ args }) {
         const config = findConfig();

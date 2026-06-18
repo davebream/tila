@@ -7,7 +7,7 @@ import {
 import { defineCommand } from "citty";
 import { TilaApiError } from "tila-sdk";
 import { requireClient, resolveContext } from "../context";
-import { printJson, printJsonError, tsToIso } from "../lib/output";
+import { jsonArg, printJson, printJsonError, tsToIso } from "../lib/output";
 
 export default defineCommand({
   meta: { name: "token", description: "Manage project API tokens" },
@@ -23,11 +23,7 @@ export default defineCommand({
           type: "string",
           description: "Optional note describing token purpose",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -102,11 +98,7 @@ export default defineCommand({
           description: "Token name to revoke",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -171,11 +163,7 @@ export default defineCommand({
     list: defineCommand({
       meta: { name: "list", description: "List all project tokens" },
       args: {
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
