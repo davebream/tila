@@ -269,6 +269,12 @@ export {
   type ArtifactGrepQuery,
   parseTagFilter,
   tagFilterQueryParam,
+  SchemaGetResponseSchema,
+  type SchemaGetResponse,
+  SchemaApplyResponseSchema,
+  type SchemaApplyResponse,
+  SchemaHistoryResponseSchema,
+  type SchemaHistoryResponse,
 } from "./api";
 
 // --- Signal API request/response contracts ---

@@ -1013,6 +1013,31 @@ export const RepoDeleteResponseSchema = z.object({
 });
 export type RepoDeleteResponse = z.infer<typeof RepoDeleteResponseSchema>;
 
+// --- Schema-method response types (C3: named wrappers, inner content stays unknown) ---
+
+export const SchemaGetResponseSchema = z.object({
+  ok: z.literal(true),
+  schema: z.unknown(),
+  version: z.number().int().nullable(),
+});
+
+export type SchemaGetResponse = z.infer<typeof SchemaGetResponseSchema>;
+
+export const SchemaApplyResponseSchema = z.object({
+  ok: z.literal(true),
+  version: z.number().int().nullable(),
+  diff: z.unknown(),
+});
+
+export type SchemaApplyResponse = z.infer<typeof SchemaApplyResponseSchema>;
+
+export const SchemaHistoryResponseSchema = z.object({
+  ok: z.literal(true),
+  entries: z.array(z.unknown()),
+});
+
+export type SchemaHistoryResponse = z.infer<typeof SchemaHistoryResponseSchema>;
+
 // --- Record API ---
 
 export const RecordCreateRequestSchema = z.object({
