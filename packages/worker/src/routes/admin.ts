@@ -23,7 +23,7 @@ export const requireD1Token: MiddlewareHandler<AdminEnv> = async (c, next) => {
       {
         ok: false,
         error: {
-          code: "D1_TOKEN_REQUIRED",
+          code: "d1-token-required",
           message: "This operation requires a full-scope D1 API token",
           retryable: false,
         },
@@ -117,7 +117,7 @@ admin.post(
         {
           ok: false,
           error: {
-            code: "VALIDATION_ERROR",
+            code: "validation-error",
             message: "Invalid JSON body",
             retryable: false,
           },
@@ -132,7 +132,7 @@ admin.post(
         {
           ok: false,
           error: {
-            code: "VALIDATION_ERROR",
+            code: "validation-error",
             message:
               "Body must include a UUID jti no longer than 64 characters",
             retryable: false,

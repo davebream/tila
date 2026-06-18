@@ -23,7 +23,7 @@ function requireTokenAdmin(c: import("hono").Context<AppEnv>): Response | null {
       {
         ok: false,
         error: {
-          code: "TOKEN_AUTHZ_DENIED",
+          code: "token-authz-denied",
           message: "Token management requires full scope",
           retryable: false,
         },
@@ -44,7 +44,7 @@ tokens.post("/", async (c) => {
   const body = await c.req.json();
   const parsed = TokenIssueRequestSchema.safeParse(body);
   if (!parsed.success)
-    return zodValidationError(c, parsed.error, "VALIDATION_ERROR");
+    return zodValidationError(c, parsed.error, "validation-error");
 
   const { name, note } = parsed.data;
   const plaintext = generateToken();
@@ -76,7 +76,7 @@ tokens.post("/", async (c) => {
         {
           ok: false,
           error: {
-            code: "TOKEN_NAME_CONFLICT",
+            code: "token-name-conflict",
             message: "A token with this name already exists",
             retryable: false,
           },
@@ -119,7 +119,7 @@ tokens.delete("/:name", async (c) => {
       {
         ok: false,
         error: {
-          code: "TOKEN_NOT_FOUND",
+          code: "token-not-found",
           message: "No active token with that name",
           retryable: false,
         },

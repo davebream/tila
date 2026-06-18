@@ -11,7 +11,7 @@ import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import type { ReindexState } from "../project-do";
-import { jsonError } from "./responses";
+import { jsonError, jsonOkRows } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 function parseMulti(value: string | undefined): string | string[] | undefined {
@@ -107,7 +107,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       autoSupersedes,
       body.tags,
     );
-    return c.json({ ok: true });
+    return jsonOkRows(c, {}, 1);
   });
 
   app.get("/artifact/pointer-meta", (c) => {
@@ -285,7 +285,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       sourceVersion: body.source_version ?? null,
     };
     artifactOps.tombstonePointer(db, body.r2_key, tombstoneOrigin, journalKind);
-    return c.json({ ok: true });
+    return jsonOkRows(c, {}, 1);
   });
 
   app.post("/artifact/confirm-blob-deleted", async (c) => {
@@ -457,7 +457,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       body.metadata ?? {},
       relationshipOrigin,
     );
-    return c.json({ ok: true });
+    return jsonOkRows(c, {}, 1);
   });
 
   app.get("/artifact/relationships", (c) => {

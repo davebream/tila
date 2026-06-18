@@ -79,17 +79,29 @@ export async function forwardToDO(
   }
 
   const start = analyticsCtx ? Date.now() : 0;
+  let res: Response | undefined;
   try {
-    return await stub.fetch(new Request(url, init));
+    res = await stub.fetch(new Request(url, init));
+    return res;
   } finally {
     if (analyticsCtx) {
       emitDoOperationDatapoint(analyticsCtx.analytics, analyticsCtx.ctx, {
         table: deriveTable(path),
         operationType: deriveOperationType(path),
         latencyMs: Date.now() - start,
-        rowsAffected: 0,
+        rowsAffected: parseRows(res?.headers.get("X-Rows-Affected")),
         projectId: analyticsCtx.projectId,
       });
     }
   }
+}
+
+/**
+ * Parse the `X-Rows-Affected` header value to an integer.
+ * Returns 0 on absent or non-numeric values (read paths / errors).
+ */
+function parseRows(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const n = Number.parseInt(raw, 10);
+  return Number.isNaN(n) ? 0 : n;
 }

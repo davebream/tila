@@ -158,7 +158,7 @@ describe("C10 — requirePermission cookie-session read scope", () => {
       error: { code: string; message: string; retryable: boolean };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("PERMISSION_DENIED");
+    expect(body.error.code).toBe("permission-denied");
     expect(body.error.message).toBe("Insufficient session scope");
     expect(body.error.retryable).toBe(false);
   });

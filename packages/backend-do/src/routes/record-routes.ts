@@ -20,7 +20,7 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { ZodError } from "zod";
-import { idempotencyFrom, jsonError } from "./responses";
+import { idempotencyFrom, jsonError, jsonOkRows } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 const { checkRecordTypeDeclared, resolveCurrentSchema } = constraintOps;
@@ -186,6 +186,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       );
     }
 
+    c.header("X-Rows-Affected", "1");
     return c.json(
       {
         ok: true,
@@ -258,12 +259,15 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       );
     }
 
-    return c.json({
-      ok: true,
-      record: serializeRecord(result),
-      fence: result.fence,
-      revision: result.revision,
-    });
+    return jsonOkRows(
+      c,
+      {
+        record: serializeRecord(result),
+        fence: result.fence,
+        revision: result.revision,
+      },
+      1,
+    );
   });
 
   // Fenceless create-or-replace (upsert). Registered before the generic
@@ -337,12 +341,15 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       );
     }
 
-    return c.json({
-      ok: true,
-      record: serializeRecord(result),
-      fence: result.fence,
-      revision: result.revision,
-    });
+    return jsonOkRows(
+      c,
+      {
+        record: serializeRecord(result),
+        fence: result.fence,
+        revision: result.revision,
+      },
+      1,
+    );
   });
 
   app.post("/record/:type/:key{.+}/patch", async (c) => {
@@ -389,12 +396,15 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       idempotencyFrom(c),
     );
 
-    return c.json({
-      ok: true,
-      record: serializeRecord(result),
-      fence: result.fence,
-      revision: result.revision,
-    });
+    return jsonOkRows(
+      c,
+      {
+        record: serializeRecord(result),
+        fence: result.fence,
+        revision: result.revision,
+      },
+      1,
+    );
   });
 
   app.post("/record/:type/:key{.+}/archive", async (c) => {
@@ -440,12 +450,15 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       idempotencyFrom(c),
     );
 
-    return c.json({
-      ok: true,
-      record: serializeRecord(result),
-      fence: result.fence,
-      revision: result.revision,
-    });
+    return jsonOkRows(
+      c,
+      {
+        record: serializeRecord(result),
+        fence: result.fence,
+        revision: result.revision,
+      },
+      1,
+    );
   });
 
   app.post("/record/:type/:key{.+}/unarchive", async (c) => {
@@ -491,12 +504,15 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       idempotencyFrom(c),
     );
 
-    return c.json({
-      ok: true,
-      record: serializeRecord(result),
-      fence: result.fence,
-      revision: result.revision,
-    });
+    return jsonOkRows(
+      c,
+      {
+        record: serializeRecord(result),
+        fence: result.fence,
+        revision: result.revision,
+      },
+      1,
+    );
   });
 
   app.post("/record/:type/:key{.+}/stamp-artifacts", async (c) => {

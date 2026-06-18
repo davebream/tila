@@ -59,7 +59,7 @@ export async function destroyProjectResources(
       body: {
         ok: false,
         error: {
-          code: "POINTER_KEYS_FETCH_FAILED",
+          code: "pointer-keys-fetch-failed",
           message: "Failed to read target project pointer keys",
         },
       },
@@ -92,7 +92,7 @@ export async function destroyProjectResources(
         body: {
           ok: false,
           error: {
-            code: "PEER_POINTER_KEYS_FETCH_FAILED",
+            code: "peer-pointer-keys-fetch-failed",
             message: `Failed to read pointer keys for project ${otherId}`,
           },
         },

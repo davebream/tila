@@ -127,7 +127,7 @@ describe("Token authz — requireTokenAdmin guard", () => {
         error: { code: string; message: string; retryable: boolean };
       };
       expect(body.ok).toBe(false);
-      expect(body.error.code).toBe("TOKEN_AUTHZ_DENIED");
+      expect(body.error.code).toBe("token-authz-denied");
       expect(body.error.message).toBe("Token management requires full scope");
       expect(body.error.retryable).toBe(false);
     });
@@ -140,7 +140,7 @@ describe("Token authz — requireTokenAdmin guard", () => {
         error: { code: string; retryable: boolean };
       };
       expect(body.ok).toBe(false);
-      expect(body.error.code).toBe("TOKEN_AUTHZ_DENIED");
+      expect(body.error.code).toBe("token-authz-denied");
       expect(body.error.retryable).toBe(false);
     });
 
@@ -156,7 +156,7 @@ describe("Token authz — requireTokenAdmin guard", () => {
         error: { code: string; retryable: boolean };
       };
       expect(body.ok).toBe(false);
-      expect(body.error.code).toBe("TOKEN_AUTHZ_DENIED");
+      expect(body.error.code).toBe("token-authz-denied");
       expect(body.error.retryable).toBe(false);
     });
   });

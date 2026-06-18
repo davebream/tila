@@ -70,7 +70,7 @@ export const requireInfraPrincipal: MiddlewareHandler<AppEnv> = async (
       {
         ok: false,
         error: {
-          code: "FORBIDDEN",
+          code: "forbidden",
           message: "Invalid infra admin token",
           retryable: false,
         },
@@ -120,7 +120,7 @@ export function resolveTargetProject(opts?: {
         {
           ok: false,
           error: {
-            code: "PROJECT_NOT_FOUND",
+            code: "not-found",
             message: "Project not found",
             retryable: false,
           },
@@ -164,7 +164,7 @@ infra.post(
         {
           ok: false,
           error: {
-            code: "CONFIRM_SLUG_MISMATCH",
+            code: "confirm-slug-mismatch",
             message:
               "X-Confirm-Slug header must match the project slug in the URL",
             retryable: false,
@@ -251,7 +251,7 @@ infra.post(
         {
           ok: false,
           error: {
-            code: "VALIDATION_ERROR",
+            code: "validation-error",
             message: "Invalid JSON body",
             retryable: false,
           },
@@ -266,7 +266,7 @@ infra.post(
         {
           ok: false,
           error: {
-            code: "VALIDATION_ERROR",
+            code: "validation-error",
             message:
               "Body must include a UUID jti no longer than 64 characters",
             retryable: false,

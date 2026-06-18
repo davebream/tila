@@ -34,12 +34,12 @@ export interface OidcClaims {
 }
 
 export type OidcVerificationErrorCode =
-  | "OIDC_INVALID_TOKEN"
-  | "OIDC_INVALID_ISSUER"
-  | "OIDC_INVALID_AUDIENCE"
-  | "OIDC_TOKEN_EXPIRED"
-  | "OIDC_SIGNATURE_INVALID"
-  | "OIDC_JWKS_UNAVAILABLE";
+  | "oidc-invalid-token"
+  | "oidc-invalid-issuer"
+  | "oidc-invalid-audience"
+  | "oidc-token-expired"
+  | "oidc-signature-invalid"
+  | "oidc-jwks-unavailable";
 
 export class OidcVerificationError extends Error {
   constructor(
@@ -78,7 +78,7 @@ async function fetchJwks(): Promise<void> {
 
   if (!res.ok) {
     throw new OidcVerificationError(
-      "OIDC_JWKS_UNAVAILABLE",
+      "oidc-jwks-unavailable",
       `Failed to fetch JWKS from GitHub (status ${res.status})`,
     );
   }
@@ -153,7 +153,7 @@ export async function verifyOidcToken(
   const parts = token.split(".");
   if (parts.length !== 3) {
     throw new OidcVerificationError(
-      "OIDC_INVALID_TOKEN",
+      "oidc-invalid-token",
       "JWT must have 3 parts",
     );
   }
@@ -169,7 +169,7 @@ export async function verifyOidcToken(
     payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(payloadB64)));
   } catch {
     throw new OidcVerificationError(
-      "OIDC_INVALID_TOKEN",
+      "oidc-invalid-token",
       "Failed to parse JWT header or payload",
     );
   }
@@ -177,7 +177,7 @@ export async function verifyOidcToken(
   // Validate algorithm
   if (header.alg !== "RS256") {
     throw new OidcVerificationError(
-      "OIDC_INVALID_TOKEN",
+      "oidc-invalid-token",
       `Unsupported algorithm: ${header.alg} (only RS256 is supported)`,
     );
   }
@@ -185,7 +185,7 @@ export async function verifyOidcToken(
   // Validate issuer
   if (payload.iss !== GITHUB_OIDC_ISSUER) {
     throw new OidcVerificationError(
-      "OIDC_INVALID_ISSUER",
+      "oidc-invalid-issuer",
       `Invalid issuer: ${payload.iss} (expected ${GITHUB_OIDC_ISSUER})`,
     );
   }
@@ -197,7 +197,7 @@ export async function verifyOidcToken(
   const audiences = Array.isArray(audClaim) ? audClaim : [audClaim];
   if (!audiences.includes(expectedAudience)) {
     throw new OidcVerificationError(
-      "OIDC_INVALID_AUDIENCE",
+      "oidc-invalid-audience",
       `Invalid audience: ${JSON.stringify(audClaim)} (expected ${expectedAudience})`,
     );
   }
@@ -207,14 +207,14 @@ export async function verifyOidcToken(
 
   if (typeof payload.exp !== "number" || payload.exp <= now) {
     throw new OidcVerificationError(
-      "OIDC_TOKEN_EXPIRED",
+      "oidc-token-expired",
       `Token expired at ${payload.exp} (current time: ${now})`,
     );
   }
 
   if (typeof payload.nbf === "number" && payload.nbf > now) {
     throw new OidcVerificationError(
-      "OIDC_TOKEN_EXPIRED",
+      "oidc-token-expired",
       `Token not yet valid (nbf: ${payload.nbf}, current time: ${now})`,
     );
   }
@@ -223,7 +223,7 @@ export async function verifyOidcToken(
   const kid = header.kid as string;
   if (!kid) {
     throw new OidcVerificationError(
-      "OIDC_INVALID_TOKEN",
+      "oidc-invalid-token",
       "Missing kid in JWT header",
     );
   }
@@ -232,7 +232,7 @@ export async function verifyOidcToken(
 
   if (!key) {
     throw new OidcVerificationError(
-      "OIDC_JWKS_UNAVAILABLE",
+      "oidc-jwks-unavailable",
       `Key with kid ${kid} not found in JWKS`,
     );
   }
@@ -273,7 +273,7 @@ export async function verifyOidcToken(
 
   if (!valid) {
     throw new OidcVerificationError(
-      "OIDC_SIGNATURE_INVALID",
+      "oidc-signature-invalid",
       "JWT signature verification failed",
     );
   }

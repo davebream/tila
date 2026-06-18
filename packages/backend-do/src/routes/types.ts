@@ -9,3 +9,6 @@ export type RouterDeps = {
 };
 
 export type ProjectSubRouter = Hono;
+
+/** Context variable key for the sanitized correlation id threaded by the DO router. */
+export const CORRELATION_ID_KEY = "doCorrelationId";

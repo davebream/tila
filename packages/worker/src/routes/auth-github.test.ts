@@ -174,7 +174,7 @@ describe("POST /api/auth/github/exchange", () => {
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns 400 on invalid JSON", async () => {
@@ -190,7 +190,7 @@ describe("POST /api/auth/github/exchange", () => {
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns 403 when GitHub auth fails", async () => {
@@ -213,7 +213,7 @@ describe("POST /api/auth/github/exchange", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("GITHUB_AUTH_FAILED");
+    expect(body.error.code).toBe("github-auth-failed");
   });
 
   it("returns 403 when no repos are registered for project", async () => {
@@ -238,7 +238,7 @@ describe("POST /api/auth/github/exchange", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("REPO_NOT_ALLOWED");
+    expect(body.error.code).toBe("repo-not-allowed");
   });
 
   it("returns 403 when user has insufficient permissions", async () => {
@@ -264,7 +264,7 @@ describe("POST /api/auth/github/exchange", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("REPO_NOT_ALLOWED");
+    expect(body.error.code).toBe("repo-not-allowed");
   });
 
   it("returns 200 with session token for valid registered repo", async () => {
@@ -326,7 +326,7 @@ describe("POST /api/auth/github/exchange", () => {
     );
     expect(res.status).toBe(429);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(body.error.code).toBe("rate-limited");
   });
 
   it("session token has correct tila_s. format with 3 parts", async () => {
@@ -474,7 +474,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("APP_NOT_CONFIGURED");
+    expect(body.error.code).toBe("app-not-configured");
   });
 
   it("returns 500 when GITHUB_APP_PRIVATE_KEY is missing", async () => {
@@ -500,7 +500,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("APP_NOT_CONFIGURED");
+    expect(body.error.code).toBe("app-not-configured");
   });
 
   it("returns 403 when installation is not configured for project", async () => {
@@ -533,7 +533,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("APP_NOT_CONFIGURED");
+    expect(body.error.code).toBe("app-not-configured");
   });
 
   it("returns 403 when user token is invalid", async () => {
@@ -564,7 +564,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("GITHUB_AUTH_FAILED");
+    expect(body.error.code).toBe("github-auth-failed");
   });
 
   it("returns 403 when user has insufficient permissions on all repos", async () => {
@@ -604,7 +604,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("REPO_NOT_ALLOWED");
+    expect(body.error.code).toBe("repo-not-allowed");
   });
 
   it("returns 502 when mintAppJwt fails", async () => {
@@ -645,7 +645,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
     const body = (await res.json()) as {
       error: { code: string; retryable: boolean };
     };
-    expect(body.error.code).toBe("GITHUB_API_ERROR");
+    expect(body.error.code).toBe("github-api-error");
     expect(body.error.retryable).toBe(true);
   });
 
@@ -689,7 +689,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
     const body = (await res.json()) as {
       error: { code: string; retryable: boolean };
     };
-    expect(body.error.code).toBe("GITHUB_API_ERROR");
+    expect(body.error.code).toBe("github-api-error");
     expect(body.error.retryable).toBe(true);
   });
 
@@ -793,7 +793,7 @@ describe("GET /api/auth/github/login", () => {
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("NOT_CONFIGURED");
+    expect(body.error.code).toBe("not-configured");
   });
 
   it("returns 500 with NOT_CONFIGURED when GITHUB_SESSION_HMAC_KEY is missing", async () => {
@@ -812,7 +812,7 @@ describe("GET /api/auth/github/login", () => {
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("NOT_CONFIGURED");
+    expect(body.error.code).toBe("not-configured");
   });
 });
 
@@ -865,7 +865,7 @@ describe("GET /api/auth/github/app-info", () => {
       error: { code: string; message: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("APP_NOT_CONFIGURED");
+    expect(body.error.code).toBe("app-not-configured");
   });
 
   it("returns 503 when GITHUB_APP_CLIENT_ID is missing", async () => {
@@ -887,7 +887,7 @@ describe("GET /api/auth/github/app-info", () => {
       error: { code: string; message: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("APP_NOT_CONFIGURED");
+    expect(body.error.code).toBe("app-not-configured");
   });
 });
 
@@ -920,7 +920,7 @@ describe("POST /api/auth/github/app-config", () => {
       error: { code: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("UNAUTHORIZED");
+    expect(body.error.code).toBe("unauthorized");
   });
 
   it("returns 403 when token does not have full scope", async () => {
@@ -954,7 +954,7 @@ describe("POST /api/auth/github/app-config", () => {
       error: { code: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.code).toBe("forbidden");
   });
 
   it("returns 400 on invalid body", async () => {
@@ -988,7 +988,7 @@ describe("POST /api/auth/github/app-config", () => {
       error: { code: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns 200 when authenticated with full scope token", async () => {
@@ -1088,7 +1088,7 @@ describe("POST /api/auth/github/app-config", () => {
 
     expect(res.status).toBe(429);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(body.error.code).toBe("rate-limited");
     // Must short-circuit before token validation.
     expect(mockD1TokenValidate).not.toHaveBeenCalled();
   });
@@ -1120,7 +1120,7 @@ describe("POST /api/auth/github/app-config", () => {
 
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("UNAUTHORIZED");
+    expect(body.error.code).toBe("unauthorized");
     // The failure must be recorded against the IP (mirrors /exchange).
     expect(mockRateLimitRecordFailure).toHaveBeenCalledWith(
       "exchange:9.8.7.6",
@@ -1664,7 +1664,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("OIDC_NOT_CONFIGURED");
+    expect(body.error.code).toBe("oidc-not-configured");
   });
 
   it("returns 500 when GITHUB_SESSION_HMAC_KEY is missing", async () => {
@@ -1690,7 +1690,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("HMAC_NOT_CONFIGURED");
+    expect(body.error.code).toBe("hmac-not-configured");
   });
 
   it("returns 400 on invalid body (missing fields)", async () => {
@@ -1712,7 +1712,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns 401 when OIDC token is expired", async () => {
@@ -1724,7 +1724,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     const { OidcVerificationError } = await import("../lib/oidc-verify");
     mockVerifyOidcToken.mockRejectedValue(
-      new OidcVerificationError("OIDC_TOKEN_EXPIRED", "Token expired"),
+      new OidcVerificationError("oidc-token-expired", "Token expired"),
     );
 
     const res = await app.request(
@@ -1742,7 +1742,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("OIDC_TOKEN_EXPIRED");
+    expect(body.error.code).toBe("oidc-token-expired");
   });
 
   it("returns 401 when OIDC signature is invalid", async () => {
@@ -1754,7 +1754,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     const { OidcVerificationError } = await import("../lib/oidc-verify");
     mockVerifyOidcToken.mockRejectedValue(
-      new OidcVerificationError("OIDC_SIGNATURE_INVALID", "Signature invalid"),
+      new OidcVerificationError("oidc-signature-invalid", "Signature invalid"),
     );
 
     const res = await app.request(
@@ -1772,7 +1772,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("OIDC_SIGNATURE_INVALID");
+    expect(body.error.code).toBe("oidc-signature-invalid");
   });
 
   it("returns 401 when OIDC audience is wrong", async () => {
@@ -1784,7 +1784,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     const { OidcVerificationError } = await import("../lib/oidc-verify");
     mockVerifyOidcToken.mockRejectedValue(
-      new OidcVerificationError("OIDC_INVALID_AUDIENCE", "Audience mismatch"),
+      new OidcVerificationError("oidc-invalid-audience", "Audience mismatch"),
     );
 
     const res = await app.request(
@@ -1802,7 +1802,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("OIDC_INVALID_AUDIENCE");
+    expect(body.error.code).toBe("oidc-invalid-audience");
   });
 
   it("returns 502 when JWKS is unavailable", async () => {
@@ -1814,7 +1814,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     const { OidcVerificationError } = await import("../lib/oidc-verify");
     mockVerifyOidcToken.mockRejectedValue(
-      new OidcVerificationError("OIDC_JWKS_UNAVAILABLE", "JWKS fetch failed"),
+      new OidcVerificationError("oidc-jwks-unavailable", "JWKS fetch failed"),
     );
 
     const res = await app.request(
@@ -1832,7 +1832,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("OIDC_JWKS_UNAVAILABLE");
+    expect(body.error.code).toBe("oidc-jwks-unavailable");
   });
 
   it("returns 403 when repo is not in allowlist", async () => {
@@ -1859,7 +1859,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("REPO_NOT_ALLOWED");
+    expect(body.error.code).toBe("repo-not-allowed");
   });
 
   it("returns cached response on replay (same jti)", async () => {
@@ -1959,7 +1959,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(429);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(body.error.code).toBe("rate-limited");
   });
 
   it("maps invalid oidc_permission to session permission 'read' (least privilege)", async () => {

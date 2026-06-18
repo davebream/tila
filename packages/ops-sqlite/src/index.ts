@@ -104,7 +104,11 @@ export {
   FenceNotFoundError,
   resolveEntityResource,
 } from "./fence-ops";
-export { mapProjectError, projectErrorResponses } from "./error-map";
+export {
+  mapProjectError,
+  projectErrorResponses,
+  SchemaCorruptError,
+} from "./error-map";
 export {
   GateNotFoundError,
   GateAlreadySettledError,

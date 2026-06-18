@@ -33,7 +33,7 @@ export const projectMiddleware: MiddlewareHandler<{
       {
         ok: false,
         error: {
-          code: "PROJECT_MISMATCH",
+          code: "project-mismatch",
           message: "Token is not authorized for this project",
           retryable: false,
         },

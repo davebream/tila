@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — HTTP error codes are now uniformly kebab-case.** Worker auth/admin-plane error responses previously emitted SCREAMING_SNAKE `error.code` values (e.g. `UNAUTHORIZED`, `RATE_LIMITED`, `VALIDATION_ERROR`, `PROJECT_NOT_FOUND`) while the resource plane used kebab-case. All codes are now kebab-case (`^[a-z][a-z0-9-]*$`), and four cross-plane duplicates are collapsed onto the existing kebab spelling: `VALIDATION_ERROR`→`validation-error`, `NOT_FOUND` and `PROJECT_NOT_FOUND`→`not-found`, `INTERNAL_ERROR`→`internal`. OIDC verification codes (`OIDC_*`) are likewise kebab-cased. Consumers branching on `error.code` must migrate to the kebab values (SDK typed error-code union tracked in #75). `error.retryable` and HTTP status codes are unchanged.
+
 ## [0.2.0] - 2026-06-11
 
 ### Added

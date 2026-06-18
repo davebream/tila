@@ -118,7 +118,7 @@ describe("DELETE /api/tokens/:name", () => {
       error: { code: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("TOKEN_NOT_FOUND");
+    expect(body.error.code).toBe("token-not-found");
     expect(mockInvalidate).not.toHaveBeenCalled();
   });
 

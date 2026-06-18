@@ -181,7 +181,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_INVALID_TOKEN",
+        "oidc-invalid-token",
       );
     }
   });
@@ -198,7 +198,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_INVALID_TOKEN",
+        "oidc-invalid-token",
       );
     }
   });
@@ -220,7 +220,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_INVALID_ISSUER",
+        "oidc-invalid-issuer",
       );
     }
   });
@@ -239,7 +239,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_INVALID_AUDIENCE",
+        "oidc-invalid-audience",
       );
     }
   });
@@ -261,7 +261,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_TOKEN_EXPIRED",
+        "oidc-token-expired",
       );
     }
   });
@@ -283,7 +283,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_TOKEN_EXPIRED",
+        "oidc-token-expired",
       );
     }
   });
@@ -308,7 +308,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_SIGNATURE_INVALID",
+        "oidc-signature-invalid",
       );
     }
   });
@@ -330,7 +330,7 @@ describe("verifyOidcToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OidcVerificationError);
       expect((err as InstanceType<typeof OidcVerificationError>).code).toBe(
-        "OIDC_JWKS_UNAVAILABLE",
+        "oidc-jwks-unavailable",
       );
     }
   });

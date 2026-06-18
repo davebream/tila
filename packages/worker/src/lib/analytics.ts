@@ -28,15 +28,53 @@ export function emitRequestDatapoint(
     projectId: string;
     latencyMs: number;
     statusCode: number;
+    errorCode?: string;
+    retryable?: boolean;
   },
 ): void {
   try {
     ctx.waitUntil(
       Promise.resolve(
         analytics.writeDataPoint({
-          blobs: [fields.route, fields.method, fields.projectId, "request"],
-          doubles: [fields.latencyMs, fields.statusCode],
+          blobs: [
+            fields.route,
+            fields.method,
+            fields.projectId,
+            "request",
+            fields.errorCode ?? "",
+          ],
+          doubles: [
+            fields.latencyMs,
+            fields.statusCode,
+            fields.retryable ? 1 : 0,
+          ],
           indexes: [fields.projectId || "anonymous"],
+        }),
+      ),
+    );
+  } catch {
+    // Swallow -- emission is never load-bearing
+  }
+}
+
+/**
+ * Distinct datapoint for Worker-level unhandled errors (500 branch in
+ * middleware/error.ts). Fire-and-forget — never throws. Carries route and
+ * errorName so an operator can distinguish RangeError vs TypeError vs
+ * domain-level unhandled throws without PII in Analytics.
+ */
+export function emitUnhandledErrorDatapoint(
+  analytics: AnalyticsEngineDataset,
+  ctx: ExecutionContext,
+  fields: { route: string; errorName: string },
+): void {
+  try {
+    ctx.waitUntil(
+      Promise.resolve(
+        analytics.writeDataPoint({
+          blobs: [fields.route, fields.errorName, "unhandled_error"],
+          doubles: [1],
+          indexes: ["unhandled"],
         }),
       ),
     );

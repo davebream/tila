@@ -257,7 +257,7 @@ describe("auth middleware", () => {
     const res = await fetchWithCtx(app, makeReq("/test"));
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("UNAUTHORIZED");
+    expect(body.error.code).toBe("unauthorized");
   });
 
   it("returns 401 for malformed Authorization header (not Bearer)", async () => {
@@ -508,7 +508,7 @@ describe("auth middleware", () => {
       const body = (await res.json()) as {
         error: { code: string; retryable: boolean };
       };
-      expect(body.error.code).toBe("RATE_LIMITED");
+      expect(body.error.code).toBe("rate-limited");
       expect(body.error.retryable).toBe(true);
     });
 
@@ -588,7 +588,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("SESSION_EXPIRED");
+      expect(body.error.code).toBe("session-expired");
     });
 
     it("returns 401 UNAUTHORIZED for a session token with no iss claim", async () => {
@@ -600,7 +600,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("UNAUTHORIZED");
+      expect(body.error.code).toBe("unauthorized");
     });
 
     it("returns 401 UNAUTHORIZED for a session token with no aud claim", async () => {
@@ -612,7 +612,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("UNAUTHORIZED");
+      expect(body.error.code).toBe("unauthorized");
     });
 
     it("returns 401 UNAUTHORIZED for a tampered HMAC signature", async () => {
@@ -626,7 +626,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("UNAUTHORIZED");
+      expect(body.error.code).toBe("unauthorized");
     });
 
     it("returns 401 UNAUTHORIZED for a malformed token (wrong number of parts)", async () => {
@@ -638,7 +638,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("UNAUTHORIZED");
+      expect(body.error.code).toBe("unauthorized");
     });
 
     it("returns 500 HMAC_NOT_CONFIGURED when GITHUB_SESSION_HMAC_KEY is missing", async () => {
@@ -651,7 +651,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(500);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("HMAC_NOT_CONFIGURED");
+      expect(body.error.code).toBe("hmac-not-configured");
     });
 
     it("D1 token path still works unchanged alongside session path", async () => {
@@ -868,7 +868,7 @@ describe("auth middleware", () => {
 
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("SESSION_EXPIRED");
+      expect(body.error.code).toBe("session-expired");
       expect(mockSessionValidate).not.toHaveBeenCalled();
     });
 
@@ -1050,7 +1050,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("SESSION_REVOKED");
+      expect(body.error.code).toBe("session-revoked");
       // D1 should NOT be queried — cache is authoritative
       expect(mockRevokedJtiIsRevoked).not.toHaveBeenCalled();
     });
@@ -1065,7 +1065,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("SESSION_REVOKED");
+      expect(body.error.code).toBe("session-revoked");
     });
 
     it("returns 401 (fail-closed) when D1 jti lookup throws", async () => {
@@ -1081,7 +1081,7 @@ describe("auth middleware", () => {
       expect(res.status).toBe(401);
       // Should deny (fail-closed) — not 500, not 200
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("UNAUTHORIZED");
+      expect(body.error.code).toBe("unauthorized");
     });
 
     it("accepts a session token without jti (backward compat — pre-C9 token)", async () => {
@@ -1120,7 +1120,7 @@ describe("auth middleware", () => {
       );
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("UNAUTHORIZED");
+      expect(body.error.code).toBe("unauthorized");
     });
 
     it("uses cached not-revoked result (no D1 on second request)", async () => {
@@ -1253,7 +1253,7 @@ describe("auth middleware", () => {
       const body = (await res.json()) as {
         error: { code: string; retryable: boolean };
       };
-      expect(body.error.code).toBe("RATE_LIMITED");
+      expect(body.error.code).toBe("rate-limited");
       expect(body.error.retryable).toBe(true);
     });
 

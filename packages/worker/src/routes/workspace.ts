@@ -159,7 +159,7 @@ workspace.post("/select", async (c) => {
           {
             ok: false,
             error: {
-              code: "RATE_LIMITED",
+              code: "rate-limited",
               message: "Too many project select attempts",
               retryable: true,
             },
@@ -179,7 +179,7 @@ workspace.post("/select", async (c) => {
       {
         ok: false,
         error: {
-          code: "INVALID_SESSION",
+          code: "invalid-session",
           message: "This endpoint requires a workspace session",
           retryable: false,
         },
@@ -199,7 +199,7 @@ workspace.post("/select", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid JSON body",
           retryable: false,
         },
@@ -214,7 +214,7 @@ workspace.post("/select", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid project_id",
           retryable: false,
         },
@@ -231,7 +231,7 @@ workspace.post("/select", async (c) => {
       {
         ok: false,
         error: {
-          code: "NOT_CONFIGURED",
+          code: "not-configured",
           message: "GitHub App not configured",
           retryable: false,
         },
@@ -248,7 +248,7 @@ workspace.post("/select", async (c) => {
       {
         ok: false,
         error: {
-          code: "NOT_FOUND",
+          code: "not-found",
           message: "Project not found or GitHub App not installed",
           retryable: false,
         },
@@ -274,7 +274,7 @@ workspace.post("/select", async (c) => {
       {
         ok: false,
         error: {
-          code: "GITHUB_API_ERROR",
+          code: "github-api-error",
           message: "Failed to obtain GitHub App installation token",
           retryable: true,
         },
@@ -311,7 +311,7 @@ workspace.post("/select", async (c) => {
       {
         ok: false,
         error: {
-          code: "FORBIDDEN",
+          code: "forbidden",
           message: "Insufficient repository permissions for this project",
           retryable: false,
         },
@@ -366,7 +366,7 @@ workspace.post("/deselect", async (c) => {
       {
         ok: false,
         error: {
-          code: "INVALID_SESSION",
+          code: "invalid-session",
           message: "This endpoint requires a project session",
           retryable: false,
         },

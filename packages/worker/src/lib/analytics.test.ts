@@ -7,6 +7,7 @@ import {
   emitSweepErrorDatapoint,
   emitSweepProjectDatapoint,
   emitSweepRollupDatapoint,
+  emitUnhandledErrorDatapoint,
 } from "./analytics";
 import { forwardToDO } from "./do-forward";
 
@@ -36,8 +37,8 @@ describe("emitRequestDatapoint", () => {
 
     expect(ctx.waitUntil).toHaveBeenCalledOnce();
     expect(dataset.writeDataPoint).toHaveBeenCalledWith({
-      blobs: ["/projects/:projectId/entities", "GET", "proj-1", "request"],
-      doubles: [42, 200],
+      blobs: ["/projects/:projectId/entities", "GET", "proj-1", "request", ""],
+      doubles: [42, 200, 0],
       indexes: ["proj-1"],
     });
   });
@@ -248,6 +249,308 @@ describe("forwardToDO analytics emission", () => {
     expect(mockWriteDataPoint).toHaveBeenCalledWith(
       expect.objectContaining({
         blobs: ["claims", "acquire", "proj-1", "do_operation"],
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C2: request datapoint carries errorCode + retryable (RED — Task 4)
+// ---------------------------------------------------------------------------
+
+describe("emitRequestDatapoint — errorCode + retryable fields", () => {
+  it("includes errorCode and retryable in blobs/doubles for a 4xx response", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitRequestDatapoint(dataset, ctx, {
+      route: "/projects/:id/tasks",
+      method: "POST",
+      projectId: "proj-1",
+      latencyMs: 10,
+      statusCode: 422,
+      errorCode: "constraint-violation",
+      retryable: false,
+    });
+
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["constraint-violation"]),
+      }),
+    );
+  });
+
+  it("includes retryable=true in doubles when error is retryable", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitRequestDatapoint(dataset, ctx, {
+      route: "/projects/:id/tasks",
+      method: "GET",
+      projectId: "proj-1",
+      latencyMs: 5,
+      statusCode: 503,
+      errorCode: "rate-limited",
+      retryable: true,
+    });
+
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        doubles: expect.arrayContaining([1]), // retryable encoded as 1
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C2: unhandled 500 emits a distinct datapoint (RED — Task 4)
+// ---------------------------------------------------------------------------
+
+describe("emitUnhandledErrorDatapoint", () => {
+  it("emits a distinct 'unhandled_error' datapoint with route and errorName", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitUnhandledErrorDatapoint(dataset, ctx, {
+      route: "/projects/:id/tasks",
+      errorName: "RangeError",
+    });
+
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining([
+          "/projects/:id/tasks",
+          "RangeError",
+          "unhandled_error",
+        ]),
+      }),
+    );
+  });
+
+  it("swallows errors when writeDataPoint throws", () => {
+    const dataset = {
+      writeDataPoint: vi.fn(() => {
+        throw new Error("AE down");
+      }),
+    } as unknown as AnalyticsEngineDataset;
+    const ctx = makeMockCtx();
+
+    expect(() =>
+      emitUnhandledErrorDatapoint(dataset, ctx, {
+        route: "/test",
+        errorName: "Error",
+      }),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C2: analytics middleware extracts errorCode + retryable from body (RED — Task 4)
+// ---------------------------------------------------------------------------
+
+describe("analytics middleware — errorCode + retryable extraction", () => {
+  it("extracts errorCode and retryable from a JSON 4xx response body", async () => {
+    const mockWriteDataPoint = vi.fn();
+    const mockWaitUntil = vi.fn();
+
+    type AppEnv = { Bindings: Env; Variables: HonoVariables };
+    const testApp = new Hono<AppEnv>();
+
+    testApp.use("*", async (c, next) => {
+      const start = Date.now();
+      await next();
+      let errorCode = "";
+      let retryable = false;
+      if (c.res.status >= 400) {
+        try {
+          const body = (await c.res.clone().json()) as {
+            error?: { code?: string; retryable?: boolean };
+          };
+          errorCode = body?.error?.code ?? "";
+          retryable = body?.error?.retryable === true;
+        } catch {
+          // non-JSON — tolerated
+        }
+      }
+      emitRequestDatapoint(c.env.ANALYTICS, c.executionCtx, {
+        route: c.req.routePath ?? c.req.path,
+        method: c.req.method,
+        projectId: c.get("projectId") ?? "",
+        latencyMs: Date.now() - start,
+        statusCode: c.res.status,
+        errorCode,
+        retryable,
+      });
+    });
+
+    testApp.get("/fail", (c) =>
+      c.json(
+        {
+          ok: false,
+          error: { code: "not-found", message: "x", retryable: false },
+        },
+        404,
+      ),
+    );
+
+    await testApp.fetch(
+      new Request("http://localhost/fail"),
+      {
+        DB: {} as D1Database,
+        PROJECT: {} as DurableObjectNamespace,
+        ARTIFACTS: {} as R2Bucket,
+        ANALYTICS: {
+          writeDataPoint: mockWriteDataPoint,
+        } as unknown as AnalyticsEngineDataset,
+      },
+      {
+        waitUntil: mockWaitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext,
+    );
+
+    expect(mockWriteDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["not-found"]),
+      }),
+    );
+  });
+
+  it("does not throw when the 4xx body is not JSON", async () => {
+    const mockWriteDataPoint = vi.fn();
+    const mockWaitUntil = vi.fn();
+
+    type AppEnv = { Bindings: Env; Variables: HonoVariables };
+    const testApp = new Hono<AppEnv>();
+
+    testApp.use("*", async (c, next) => {
+      const start = Date.now();
+      await next();
+      let errorCode = "";
+      let retryable = false;
+      if (c.res.status >= 400) {
+        try {
+          const body = (await c.res.clone().json()) as {
+            error?: { code?: string; retryable?: boolean };
+          };
+          errorCode = body?.error?.code ?? "";
+          retryable = body?.error?.retryable === true;
+        } catch {
+          // non-JSON — tolerated
+        }
+      }
+      emitRequestDatapoint(c.env.ANALYTICS, c.executionCtx, {
+        route: c.req.routePath ?? c.req.path,
+        method: c.req.method,
+        projectId: c.get("projectId") ?? "",
+        latencyMs: Date.now() - start,
+        statusCode: c.res.status,
+        errorCode,
+        retryable,
+      });
+    });
+
+    testApp.get(
+      "/non-json-error",
+      (c) => new Response("plain text error", { status: 400 }),
+    );
+
+    const res = await testApp.fetch(
+      new Request("http://localhost/non-json-error"),
+      {
+        DB: {} as D1Database,
+        PROJECT: {} as DurableObjectNamespace,
+        ARTIFACTS: {} as R2Bucket,
+        ANALYTICS: {
+          writeDataPoint: mockWriteDataPoint,
+        } as unknown as AnalyticsEngineDataset,
+      },
+      {
+        waitUntil: mockWaitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext,
+    );
+
+    // Must not have thrown; response is still returned
+    expect(res.status).toBe(400);
+    expect(mockWriteDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining([""]), // errorCode defaults to ""
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C2: DO op datapoint carries real rowsAffected (RED — Task 4)
+// ---------------------------------------------------------------------------
+
+describe("forwardToDO — real rowsAffected from X-Rows-Affected header", () => {
+  it("passes rowsAffected=1 when the DO response includes X-Rows-Affected: 1", async () => {
+    const mockWriteDataPoint = vi.fn();
+    const mockWaitUntil = vi.fn();
+
+    const mockStub = {
+      fetch: vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "X-Rows-Affected": "1" },
+        }),
+      ),
+    } as unknown as DurableObjectStub;
+
+    await forwardToDO(
+      mockStub,
+      "/entity/create",
+      "POST",
+      { kind: "test" },
+      undefined,
+      {
+        analytics: {
+          writeDataPoint: mockWriteDataPoint,
+        } as unknown as AnalyticsEngineDataset,
+        ctx: {
+          waitUntil: mockWaitUntil,
+          passThroughOnException: vi.fn(),
+        } as unknown as ExecutionContext,
+        projectId: "proj-1",
+      },
+    );
+
+    expect(mockWriteDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        doubles: expect.arrayContaining([1]), // rowsAffected = 1
+      }),
+    );
+  });
+
+  it("passes rowsAffected=0 when the DO response has no X-Rows-Affected header (read path)", async () => {
+    const mockWriteDataPoint = vi.fn();
+    const mockWaitUntil = vi.fn();
+
+    const mockStub = {
+      fetch: vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, entities: [] }), {
+          status: 200,
+        }),
+      ),
+    } as unknown as DurableObjectStub;
+
+    await forwardToDO(mockStub, "/entity/list", "GET", undefined, undefined, {
+      analytics: {
+        writeDataPoint: mockWriteDataPoint,
+      } as unknown as AnalyticsEngineDataset,
+      ctx: {
+        waitUntil: mockWaitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext,
+      projectId: "proj-1",
+    });
+
+    expect(mockWriteDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        doubles: expect.arrayContaining([0]), // rowsAffected = 0 for reads
       }),
     );
   });

@@ -20,7 +20,12 @@ import { eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import { filterFields } from "./entity-response";
-import { formatZodIssues, idempotencyFrom, jsonError } from "./responses";
+import {
+  formatZodIssues,
+  idempotencyFrom,
+  jsonError,
+  jsonOkRows,
+} from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 const {
@@ -85,7 +90,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       origin,
     );
     const entity = entityOps.get(db, body.id, deps.enrichOpts());
-    return c.json({ ok: true, entity });
+    return jsonOkRows(c, { entity }, 1);
   });
 
   app.get("/entity/get/:id", (c) => {
@@ -286,7 +291,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       (parsed.data as { tags?: string[] }).tags,
       idempotencyFrom(c),
     );
-    return c.json({ ok: true, entity });
+    return jsonOkRows(c, { entity }, 1);
   });
 
   app.post("/entity/archive/:id", async (c) => {
@@ -311,7 +316,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         (body as { source_version?: string | null }).source_version ?? null,
     };
     entityOps.archive(db, id, parsed.data.fence, origin, idempotencyFrom(c));
-    return c.json({ ok: true });
+    return jsonOkRows(c, {}, 1);
   });
 
   app.post("/entity/relationship/create", async (c) => {
@@ -362,6 +367,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       },
       body.actor,
     );
+    c.header("X-Rows-Affected", created ? "1" : "0");
     return c.json({ ok: true, created }, created ? 201 : 200);
   });
 
@@ -401,7 +407,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       body.type,
       body.actor ?? "unknown",
     );
-    return c.json({ ok: true, removed });
+    return jsonOkRows(c, { removed }, removed ? 1 : 0);
   });
 
   app.get("/summary", (c) => {

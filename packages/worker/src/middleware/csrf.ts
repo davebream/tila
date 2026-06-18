@@ -22,7 +22,7 @@ export const csrfGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
       {
         ok: false,
         error: {
-          code: "CSRF_MISSING_ORIGIN",
+          code: "csrf-missing-origin",
           message: "Origin header required for cookie-authenticated mutations",
           retryable: false,
         },
@@ -42,7 +42,7 @@ export const csrfGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
       {
         ok: false,
         error: {
-          code: "CSRF_ORIGIN_MISMATCH",
+          code: "csrf-origin-mismatch",
           message: "Origin header is not a valid URL",
           retryable: false,
         },
@@ -66,7 +66,7 @@ export const csrfGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
     {
       ok: false,
       error: {
-        code: "CSRF_ORIGIN_MISMATCH",
+        code: "csrf-origin-mismatch",
         message: "Origin does not match the server host",
         retryable: false,
       },
