@@ -23,6 +23,7 @@ import TOML from "smol-toml";
 import { ZodError, z } from "zod";
 import { ARTIFACT_REPAIR_SCAN_LIMIT } from "../config";
 import { analyticsCtxFrom } from "../lib/analytics";
+import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO } from "../lib/do-forward";
 import {
   MAX_BYTES_FOR_NORMALIZATION,
@@ -662,14 +663,18 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
   if (kind !== undefined) query.kind = kind;
   if (resource !== undefined) query.resource = resource;
 
-  const candidatesRes = await forwardToDO(
-    stub,
-    "/artifact/grep-candidates",
-    "GET",
-    undefined,
-    query,
-    analyticsCtxFrom(c),
-  );
+  const { response: candidatesRes, json: candidatesBody } =
+    await forwardTypedDO<{
+      ok: true;
+      candidates: GrepCandidate[];
+    }>(
+      stub,
+      DO_PATHS.artifactGrepCandidates,
+      "GET",
+      undefined,
+      query,
+      analyticsCtxFrom(c),
+    );
 
   if (!candidatesRes.ok) {
     return c.json(
@@ -685,10 +690,7 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
     );
   }
 
-  const { candidates } = (await candidatesRes.json()) as {
-    ok: true;
-    candidates: GrepCandidate[];
-  };
+  const { candidates } = candidatesBody;
 
   // 4. Scan loop
   const deadline = AbortSignal.timeout(GREP_DEADLINE_MS);
@@ -1012,18 +1014,17 @@ artifacts.post("/relationship", requirePermission("write"), async (c) => {
 
   // TOML-runtime type validation: if artifact_relationships.types is declared, validate against it
   // This is additive to any static enum check — when types is not declared, any type is accepted.
-  const schemaRes = await forwardToDO(
+  const { json: schemaBody } = await forwardTypedDO<{
+    ok: boolean;
+    schema: { definition: string } | null;
+  }>(
     stub,
-    "/schema/current",
+    DO_PATHS.schemaCurrent,
     "GET",
     undefined,
     undefined,
     analyticsCtxFrom(c),
   );
-  const schemaBody = (await schemaRes.json()) as {
-    ok: boolean;
-    schema: { definition: string } | null;
-  };
 
   if (schemaBody.ok && schemaBody.schema?.definition) {
     try {
@@ -1176,9 +1177,11 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
   const tokenResult = c.get("tokenResult");
   const stub = c.get("doStub");
 
-  const doResponse = await forwardToDO(
+  const { response: doResponse, json: doBody } = await forwardTypedDO<
+    Record<string, unknown>
+  >(
     stub,
-    "/artifact/reconcile",
+    DO_PATHS.artifactReconcile,
     "POST",
     {
       r2_blobs: enrichedBlobs,
@@ -1192,23 +1195,12 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     analyticsCtxFrom(c),
   );
 
-  const doBody = (await doResponse.json()) as Record<string, unknown>;
-
   // Phase 2 (C6): Cross-check R2 blob existence for non-tombstoned searchable pointers.
   // Repair: tombstone any searchable pointer whose R2 blob is missing.
   // R2 head() lives here (Worker has the R2 binding); ops-sqlite listSearchablePointers is blob-free.
   let repairErrors = 0;
-  const searchableRes = await forwardToDO(
-    stub,
-    "/artifact/searchable-pointers",
-    "GET",
-    undefined,
-    { limit: String(ARTIFACT_REPAIR_SCAN_LIMIT) },
-    analyticsCtxFrom(c),
-  );
-
-  if (searchableRes.ok) {
-    const { pointers } = (await searchableRes.json()) as {
+  const { response: searchableRes, json: searchableBody } =
+    await forwardTypedDO<{
       ok: boolean;
       pointers: Array<{
         r2_key: string;
@@ -1216,7 +1208,19 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
         kind: string;
         sha256: string;
       }>;
-    };
+    }>(
+      stub,
+      DO_PATHS.artifactSearchablePointers,
+      "GET",
+      undefined,
+      {
+        limit: String(ARTIFACT_REPAIR_SCAN_LIMIT),
+      },
+      analyticsCtxFrom(c),
+    );
+
+  if (searchableRes.ok) {
+    const { pointers } = searchableBody;
 
     for (const pointer of pointers) {
       let blobMissing = false;
@@ -1269,9 +1273,12 @@ artifacts.post("/search-rebuild", requirePermission("write"), async (c) => {
   const stub = c.get("doStub");
 
   // Phase 1: Get pointer + search doc state from DO
-  const scanRes = await forwardToDO(
+  const { response: scanRes, json: scanBody } = await forwardTypedDO<{
+    ok: boolean;
+    pointers: ScanRow[];
+  }>(
     stub,
-    "/artifact/search-rebuild-scan",
+    DO_PATHS.artifactSearchRebuildScan,
     "GET",
     undefined,
     undefined,
@@ -1290,18 +1297,17 @@ artifacts.post("/search-rebuild", requirePermission("write"), async (c) => {
       502,
     );
   }
-  const { pointers } = (await scanRes.json()) as {
-    ok: boolean;
-    pointers: ScanRow[];
-  };
+  const { pointers } = scanBody;
 
   // Phase 2: Enrich candidates with R2 blob content where needed
   const candidates = await buildRebuildCandidates(r2, pointers);
 
   // Phase 3: Send enriched candidates to DO for rebuild
-  const doResponse = await forwardToDO(
+  const { response: doResponse, json: doBody } = await forwardTypedDO<
+    Record<string, unknown>
+  >(
     stub,
-    "/artifact/search-rebuild",
+    DO_PATHS.artifactSearchRebuild,
     "POST",
     {
       candidates,
@@ -1315,7 +1321,6 @@ artifacts.post("/search-rebuild", requirePermission("write"), async (c) => {
     analyticsCtxFrom(c),
   );
 
-  const doBody = await doResponse.json();
   return c.json(doBody, doResponse.status as 200);
 });
 
@@ -1374,9 +1379,12 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
 
   // Inline fast path: check DO for content_inline before hitting R2
   const stub = c.get("doStub");
-  const metaRes = await forwardToDO(
+  const { response: metaRes, json: meta } = await forwardTypedDO<{
+    ok: boolean;
+    pointer?: { content_inline: string | null; mime_type: string } | null;
+  }>(
     stub,
-    "/artifact/pointer-meta",
+    DO_PATHS.artifactPointerMeta,
     "GET",
     undefined,
     { key },
@@ -1395,10 +1403,6 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
       404,
     );
   }
-  const meta = (await metaRes.json()) as {
-    ok: boolean;
-    pointer?: { content_inline: string | null; mime_type: string } | null;
-  };
   if (!meta.ok || !meta.pointer) {
     return c.json(
       {
