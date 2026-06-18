@@ -1,6 +1,7 @@
 import { parseSchemaToml } from "@tila/core";
 import type { TilaSchemaToml } from "@tila/schemas";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { SchemaCorruptError } from "./error-map";
 import type * as schemaModule from "./schema";
 import { getCurrentSchema } from "./schema-ops";
 
@@ -22,8 +23,11 @@ export type ConstraintResult = { ok: true } | ConstraintViolation;
 
 /**
  * Fetches and parses the current schema from _schema_history.
- * Returns null when no schema is applied or when the stored definition
- * fails to parse — all constraint checks skip on null (graceful degradation).
+ *
+ * Returns null when no schema is applied (legitimate — constraint checks skip).
+ * Throws `SchemaCorruptError` when a schema row exists but its stored TOML
+ * fails to parse — a server-side data-integrity failure that must fail closed
+ * rather than silently skip constraint checks (C3 fail-closed fix).
  */
 export function resolveCurrentSchema(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schemaModule>,
@@ -31,7 +35,12 @@ export function resolveCurrentSchema(
   const row = getCurrentSchema(db);
   if (!row) return null;
   const result = parseSchemaToml(row.definition);
-  return result.ok ? result.schema : null;
+  if (!result.ok) {
+    throw new SchemaCorruptError(
+      `Stored schema (version ${row.version}) failed to parse: ${String(result.errors?.[0] ?? "unknown parse error")}`,
+    );
+  }
+  return result.schema;
 }
 
 // ---------------------------------------------------------------------------

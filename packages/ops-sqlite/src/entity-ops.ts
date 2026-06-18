@@ -16,6 +16,7 @@ import {
 } from "./artifact-ops";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
+import { SchemaCorruptError } from "./error-map";
 import { assertResourceFence } from "./fence-ops";
 import { checkPendingGates } from "./gate-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
@@ -80,7 +81,12 @@ function enrichEntity(
     const row = getSchemaByVersion(opts.db, entity.schema_version);
     if (row) {
       const result = opts.parseSchemaToml(row.definition);
-      parsed = result.ok ? result.schema : null;
+      if (!result.ok) {
+        throw new SchemaCorruptError(
+          `Stored schema (version ${entity.schema_version}) failed to parse during entity enrichment: ${String(result.errors?.[0] ?? "unknown parse error")}`,
+        );
+      }
+      parsed = result.schema;
     } else {
       parsed = null;
     }
