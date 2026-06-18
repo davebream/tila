@@ -1025,6 +1025,36 @@ function createLocalTokenMethods() {
 }
 
 /**
+ * Index methods stub for the local backend.
+ *
+ * `indexes` wraps artifact upload + relationship operations that are
+ * HTTP-oriented (multipart upload to R2 via the Worker). The local embedded
+ * backend stores artifacts on disk but does not expose an equivalent
+ * HTTP-facade-compatible `indexes` surface. These stubs throw
+ * `LocalUnsupportedError` so callers get a clean rejection rather than a
+ * mysterious runtime failure.
+ */
+function createLocalIndexMethods() {
+  return {
+    async create(
+      ..._args: Parameters<TilaFacade["indexes"]["create"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("indexes.create");
+    },
+    async addEntry(
+      ..._args: Parameters<TilaFacade["indexes"]["addEntry"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("indexes.addEntry");
+    },
+    async listEntries(
+      ..._args: Parameters<TilaFacade["indexes"]["listEntries"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("indexes.listEntries");
+    },
+  };
+}
+
+/**
  * Build the full local resource-method surface from an `EmbeddedProject` +
  * `EmbeddedArtifactBackend`. The returned object's keys + method shapes mirror
  * the HTTP facade so `createTila`'s two branches are interchangeable.
@@ -1047,6 +1077,7 @@ export function buildLocalResources(
     search: createLocalSearchMethods(project),
     templates: createLocalTemplateMethods(project),
     tokens: createLocalTokenMethods(),
+    indexes: createLocalIndexMethods(),
   };
 }
 
@@ -1089,5 +1120,6 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   search: true,
   templates: true,
   tokens: true,
+  indexes: true,
 };
 void _assertLocalSurfaceMatchesFacade;

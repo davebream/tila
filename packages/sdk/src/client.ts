@@ -5,6 +5,7 @@ import { createClaimMethods } from "./claims";
 import { createTaskMethods } from "./entities";
 import { type TilaErrorCode, toTilaErrorCode } from "./error-codes";
 import { createGateMethods } from "./gates";
+import { createIndexMethods } from "./indexes";
 import { createJournalMethods } from "./journal";
 import { createPresenceMethods } from "./presence";
 import { createRecordMethods } from "./records";
@@ -470,6 +471,8 @@ export interface TilaFacade {
   search: ReturnType<typeof createSearchMethods>;
   templates: ReturnType<typeof createTemplateMethods>;
   tokens: ReturnType<typeof createTokenMethods>;
+  /** Index artifact operations (create, addEntry, listEntries). */
+  indexes: ReturnType<typeof createIndexMethods>;
   /**
    * Release backend resources. No-op for the HTTP backend; closes the SQLite
    * connection for the local backend. Always safe (and idempotent) to call.
@@ -493,8 +496,21 @@ function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
     search: createSearchMethods(client, projectId),
     templates: createTemplateMethods(client, projectId),
     tokens: createTokenMethods(client),
+    indexes: createIndexMethods(client, projectId),
     close: () => {},
   };
+}
+
+/**
+ * @internal Test helper — exposes the HTTP facade builder without going through
+ * the full `createTila` entry point (which requires a valid config and token).
+ * Used in unit tests to verify facade shape without mocking config parsing.
+ */
+export function buildHttpFacadeForTest(
+  client: TilaClient,
+  projectId: string,
+): TilaFacade {
+  return buildHttpFacade(client, projectId);
 }
 
 /**
