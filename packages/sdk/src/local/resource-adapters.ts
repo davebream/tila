@@ -31,7 +31,11 @@ import type {
  * HTTP-only resources (token issuance — a D1 global-store concern with no local
  * equivalent) throw `LocalUnsupportedError` rather than silently no-op.
  */
-import { type GateRecord, parseTilaSchemaToml } from "@tila/core";
+import {
+  type GateRecord,
+  type PresenceWithStatus,
+  parseTilaSchemaToml,
+} from "@tila/core";
 import type {
   AckSignalResponse,
   AcquireSuccessResponse,
@@ -827,17 +831,17 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
     },
 
     async listAll(): Promise<PresenceAllListResponse> {
-      // DIVERGENCE (deferred to Task 14): the remote `presence/all` returns ALL
-      // machines with a computed `active` (last_seen vs TTL cutoff), including
-      // stale ones. `EmbeddedProject` only exposes `listPresence()`, which
-      // already filters to active machines (last_seen > cutoff) — so every row
-      // returned here IS active, making `active: true` correct PER ROW, but
-      // stale machines are omitted (the remote would include them as
-      // active:false). Closing the gap needs a `listAllPresence` lift onto the
-      // CoordinationBackend interface + both impls (coordinationOps already has
-      // the op); that exceeds this method's scope.
-      const presence = await project.listPresence();
-      const machines = presence.map((p) => ({ ...p, active: true }));
+      // C5 fix: call the stale-inclusive backend read and map `active` per row
+      // rather than hardcoding `active: true`. `listAllPresence` returns ALL
+      // presence rows with `active = last_seen > cutoff` computed per row, so
+      // stale machines appear with `active: false` — matching remote semantics.
+      const presence: PresenceWithStatus[] = await project.listAllPresence();
+      const machines = presence.map((p) => ({
+        machine: p.machine,
+        last_seen: p.last_seen,
+        info: p.info,
+        active: p.active,
+      }));
       return { ok: true, machines };
     },
   };
@@ -1123,3 +1127,20 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   indexes: true,
 };
 void _assertLocalSurfaceMatchesFacade;
+
+/**
+ * @internal Test helper — exposes the presence method factory with a mock
+ * project so tests can verify `listAll` behavior without spinning up SQLite.
+ */
+export function buildLocalPresenceMethodsForTest(
+  project: Pick<
+    EmbeddedProject,
+    "listPresence" | "listAllPresence" | "heartbeat"
+  >,
+) {
+  return (
+    createLocalPresenceMethods as (
+      p: typeof project,
+    ) => ReturnType<typeof createLocalPresenceMethods>
+  )(project);
+}
