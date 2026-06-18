@@ -292,7 +292,7 @@ export function createAuthMiddleware(
             {
               ok: false,
               error: {
-                code: "RATE_LIMITED",
+                code: "rate-limited",
                 message: "Too many failed authentication attempts",
                 retryable: true,
               },
@@ -311,7 +311,7 @@ export function createAuthMiddleware(
             {
               ok: false,
               error: {
-                code: "RATE_LIMITED",
+                code: "rate-limited",
                 message: "Too many failed authentication attempts",
                 retryable: true,
               },
@@ -346,7 +346,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "SESSION_EXPIRED",
+              code: "session-expired",
               message: "Session cookie is invalid or expired",
               retryable: false,
             },
@@ -405,7 +405,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "SESSION_EXPIRED",
+              code: "session-expired",
               message: "Session cookie is invalid or expired",
               retryable: false,
             },
@@ -430,7 +430,7 @@ export function createAuthMiddleware(
         {
           ok: false,
           error: {
-            code: "UNAUTHORIZED",
+            code: "unauthorized",
             message: "Missing or invalid Authorization header",
             retryable: false,
           },
@@ -452,7 +452,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "UNAUTHORIZED",
+              code: "unauthorized",
               message: "Malformed session token",
               retryable: false,
             },
@@ -467,7 +467,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "HMAC_NOT_CONFIGURED",
+              code: "hmac-not-configured",
               message: "Server configuration error: HMAC signing key not set",
               retryable: false,
             },
@@ -487,7 +487,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "UNAUTHORIZED",
+              code: "unauthorized",
               message: "Invalid session token signature",
               retryable: false,
             },
@@ -503,7 +503,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "UNAUTHORIZED",
+              code: "unauthorized",
               message: "Invalid session token payload",
               retryable: false,
             },
@@ -523,7 +523,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "UNAUTHORIZED",
+              code: "unauthorized",
               message: "Invalid session token issuer",
               retryable: false,
             },
@@ -544,7 +544,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "UNAUTHORIZED",
+              code: "unauthorized",
               message: "Invalid session token audience",
               retryable: false,
             },
@@ -559,7 +559,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "SESSION_EXPIRED",
+              code: "session-expired",
               message: "Session token has expired",
               retryable: false,
             },
@@ -582,7 +582,7 @@ export function createAuthMiddleware(
             {
               ok: false,
               error: {
-                code: "SESSION_REVOKED",
+                code: "session-revoked",
                 message: "Session token has been revoked",
                 retryable: false,
               },
@@ -603,7 +603,7 @@ export function createAuthMiddleware(
                 {
                   ok: false,
                   error: {
-                    code: "SESSION_REVOKED",
+                    code: "session-revoked",
                     message: "Session token has been revoked",
                     retryable: false,
                   },
@@ -617,7 +617,7 @@ export function createAuthMiddleware(
               {
                 ok: false,
                 error: {
-                  code: "UNAUTHORIZED",
+                  code: "unauthorized",
                   message: "Session token verification failed",
                   retryable: true,
                 },
@@ -677,7 +677,7 @@ export function createAuthMiddleware(
         {
           ok: false,
           error: {
-            code: "UNAUTHORIZED",
+            code: "unauthorized",
             message: "Invalid or revoked token",
             retryable: false,
           },
@@ -718,7 +718,7 @@ export function createAuthMiddleware(
           {
             ok: false,
             error: {
-              code: "UNAUTHORIZED",
+              code: "unauthorized",
               message: "Invalid or revoked token",
               retryable: false,
             },

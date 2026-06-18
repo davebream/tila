@@ -92,7 +92,7 @@ export async function archiveJournal(
       body: {
         ok: false,
         error: {
-          code: "DO_ERROR",
+          code: "do-error",
           message: "Failed to fetch archivable events",
         },
       },
@@ -115,7 +115,7 @@ export async function archiveJournal(
       status: 502,
       body: {
         ok: false,
-        error: { code: "R2_ERROR", message: "Failed to write archive to R2" },
+        error: { code: "r2-error", message: "Failed to write archive to R2" },
       },
     };
   }
@@ -139,7 +139,7 @@ export async function archiveJournal(
       body: {
         ok: false,
         error: {
-          code: "CONFIRM_ERROR",
+          code: "confirm-error",
           message: "R2 write succeeded but DO confirm failed",
         },
       },

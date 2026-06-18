@@ -53,7 +53,7 @@ authSessionExchange.post("/", async (c) => {
           {
             ok: false,
             error: {
-              code: "RATE_LIMITED",
+              code: "rate-limited",
               message: "Too many requests",
               retryable: true,
             },
@@ -75,7 +75,7 @@ authSessionExchange.post("/", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid JSON body",
           retryable: false,
         },
@@ -90,7 +90,7 @@ authSessionExchange.post("/", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Missing required fields: token, project_id",
           retryable: false,
         },
@@ -120,7 +120,7 @@ authSessionExchange.post("/", async (c) => {
       {
         ok: false,
         error: {
-          code: "UNAUTHORIZED",
+          code: "unauthorized",
           message: "Invalid token",
           retryable: false,
         },
@@ -135,7 +135,7 @@ authSessionExchange.post("/", async (c) => {
       {
         ok: false,
         error: {
-          code: "UNAUTHORIZED",
+          code: "unauthorized",
           message: "Token not authorized for this project",
           retryable: false,
         },
@@ -165,7 +165,7 @@ authSessionExchange.post("/", async (c) => {
       {
         ok: false,
         error: {
-          code: "INTERNAL_ERROR",
+          code: "internal",
           message: "Session creation failed",
           retryable: true,
         },

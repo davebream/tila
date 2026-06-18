@@ -158,7 +158,7 @@ export async function checkExchangeRateLimit(
         {
           ok: false,
           error: {
-            code: "RATE_LIMITED",
+            code: "rate-limited",
             message: "Too many failed exchange attempts",
             retryable: true,
           },
@@ -305,7 +305,7 @@ async function handleAppExchange(
       {
         ok: false,
         error: {
-          code: "APP_NOT_CONFIGURED",
+          code: "app-not-configured",
           message: "GitHub App is not configured on this server",
           retryable: false,
         },
@@ -321,7 +321,7 @@ async function handleAppExchange(
       {
         ok: false,
         error: {
-          code: "HMAC_NOT_CONFIGURED",
+          code: "hmac-not-configured",
           message: "Server configuration error: HMAC signing key not set",
           retryable: false,
         },
@@ -355,7 +355,7 @@ async function handleAppExchange(
       {
         ok: false,
         error: {
-          code: "GITHUB_AUTH_FAILED",
+          code: "github-auth-failed",
           message: "GitHub authentication failed",
           retryable: false,
         },
@@ -373,7 +373,7 @@ async function handleAppExchange(
       {
         ok: false,
         error: {
-          code: "APP_NOT_CONFIGURED",
+          code: "app-not-configured",
           message: "GitHub App installation not configured for this project",
           retryable: false,
         },
@@ -400,7 +400,7 @@ async function handleAppExchange(
       {
         ok: false,
         error: {
-          code: "GITHUB_API_ERROR",
+          code: "github-api-error",
           message: "Failed to obtain GitHub App installation token",
           retryable: true,
         },
@@ -418,7 +418,7 @@ async function handleAppExchange(
       {
         ok: false,
         error: {
-          code: "REPO_NOT_ALLOWED",
+          code: "repo-not-allowed",
           message: "No repos registered for this project",
           retryable: false,
         },
@@ -452,7 +452,7 @@ async function handleAppExchange(
       {
         ok: false,
         error: {
-          code: "REPO_NOT_ALLOWED",
+          code: "repo-not-allowed",
           message: "Insufficient repository permissions",
           retryable: false,
         },
@@ -493,7 +493,7 @@ authGithub.post("/exchange", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid JSON body",
           retryable: false,
         },
@@ -513,7 +513,7 @@ authGithub.post("/exchange", async (c) => {
       {
         ok: false,
         error: {
-          code: "OIDC_NOT_IMPLEMENTED",
+          code: "oidc-not-implemented",
           message: "OIDC token exchange is not yet supported",
           retryable: false,
         },
@@ -529,7 +529,7 @@ authGithub.post("/exchange", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid request body",
           retryable: false,
         },
@@ -547,7 +547,7 @@ authGithub.post("/exchange", async (c) => {
       {
         ok: false,
         error: {
-          code: "HMAC_NOT_CONFIGURED",
+          code: "hmac-not-configured",
           message: "Server configuration error: HMAC signing key not set",
           retryable: false,
         },
@@ -584,7 +584,7 @@ authGithub.post("/exchange", async (c) => {
       {
         ok: false,
         error: {
-          code: "GITHUB_AUTH_FAILED",
+          code: "github-auth-failed",
           message: "GitHub authentication failed",
           retryable: false,
         },
@@ -602,7 +602,7 @@ authGithub.post("/exchange", async (c) => {
       {
         ok: false,
         error: {
-          code: "REPO_NOT_ALLOWED",
+          code: "repo-not-allowed",
           message: "No repos registered for this project",
           retryable: false,
         },
@@ -636,7 +636,7 @@ authGithub.post("/exchange", async (c) => {
       {
         ok: false,
         error: {
-          code: "REPO_NOT_ALLOWED",
+          code: "repo-not-allowed",
           message: "Insufficient repository permissions",
           retryable: false,
         },
@@ -669,7 +669,7 @@ authGithub.get("/app-info", (c) => {
       {
         ok: false,
         error: {
-          code: "APP_NOT_CONFIGURED",
+          code: "app-not-configured",
           message: "GitHub App is not configured on this server",
           retryable: false,
         },
@@ -701,7 +701,7 @@ authGithub.get("/login", async (c) => {
       {
         ok: false,
         error: {
-          code: "NOT_CONFIGURED",
+          code: "not-configured",
           message: "GitHub App is not configured on this server",
           retryable: false,
         },
@@ -982,7 +982,7 @@ authGithub.post("/app-config", async (c) => {
       {
         ok: false,
         error: {
-          code: "UNAUTHORIZED",
+          code: "unauthorized",
           message: "Missing or invalid Authorization header",
           retryable: false,
         },
@@ -1007,7 +1007,7 @@ authGithub.post("/app-config", async (c) => {
       {
         ok: false,
         error: {
-          code: "UNAUTHORIZED",
+          code: "unauthorized",
           message: "Invalid or revoked token",
           retryable: false,
         },
@@ -1022,7 +1022,7 @@ authGithub.post("/app-config", async (c) => {
       {
         ok: false,
         error: {
-          code: "FORBIDDEN",
+          code: "forbidden",
           message: "This operation requires full token scope",
           retryable: false,
         },
@@ -1047,7 +1047,7 @@ authGithub.post("/app-config", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid JSON body",
           retryable: false,
         },
@@ -1062,7 +1062,7 @@ authGithub.post("/app-config", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid request body",
           retryable: false,
         },
@@ -1108,7 +1108,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid JSON body",
           retryable: false,
         },
@@ -1123,7 +1123,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid request body",
           retryable: false,
         },
@@ -1141,7 +1141,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       {
         ok: false,
         error: {
-          code: "OIDC_NOT_CONFIGURED",
+          code: "oidc-not-configured",
           message: "Server configuration error: OIDC audience not set",
           retryable: false,
         },
@@ -1157,7 +1157,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       {
         ok: false,
         error: {
-          code: "HMAC_NOT_CONFIGURED",
+          code: "hmac-not-configured",
           message: "Server configuration error: HMAC signing key not set",
           retryable: false,
         },
@@ -1198,7 +1198,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       {
         ok: false,
         error: {
-          code: "OIDC_INVALID_TOKEN",
+          code: "oidc-invalid-token",
           message: "OIDC token verification failed",
           retryable: false,
         },
@@ -1235,7 +1235,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       {
         ok: false,
         error: {
-          code: "REPO_NOT_ALLOWED",
+          code: "repo-not-allowed",
           message: "Repository not registered for this project",
           retryable: false,
         },

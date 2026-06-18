@@ -22,7 +22,7 @@ function requireTokenAdmin(c: import("hono").Context<AppEnv>): Response | null {
       {
         ok: false,
         error: {
-          code: "TOKEN_AUTHZ_DENIED",
+          code: "token-authz-denied",
           message: "Repo management requires full scope",
           retryable: false,
         },
@@ -48,7 +48,7 @@ repos.post("/", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "Invalid JSON body",
           retryable: false,
         },
@@ -108,7 +108,7 @@ repos.post("/", async (c) => {
         {
           ok: false,
           error: {
-            code: "REPO_NOT_FOUND",
+            code: "repo-not-found",
             message: `GitHub repo ${owner}/${repo} not found`,
             retryable: false,
           },
@@ -121,7 +121,7 @@ repos.post("/", async (c) => {
         {
           ok: false,
           error: {
-            code: "REPO_ACCESS_DENIED",
+            code: "repo-access-denied",
             message: `Access denied to GitHub repo ${owner}/${repo}`,
             retryable: false,
           },
@@ -134,7 +134,7 @@ repos.post("/", async (c) => {
         {
           ok: false,
           error: {
-            code: "GITHUB_API_TIMEOUT",
+            code: "github-api-timeout",
             message: "GitHub API request timed out",
             retryable: true,
           },
@@ -146,7 +146,7 @@ repos.post("/", async (c) => {
       {
         ok: false,
         error: {
-          code: "GITHUB_API_ERROR",
+          code: "github-api-error",
           message: `GitHub API returned ${result.status}`,
           retryable: true,
         },
@@ -196,7 +196,7 @@ repos.delete("/:repoId", async (c) => {
       {
         ok: false,
         error: {
-          code: "VALIDATION_ERROR",
+          code: "validation-error",
           message: "repoId must be a numeric GitHub repo ID",
           retryable: false,
         },

@@ -25,7 +25,7 @@ export function requirePermission(
         {
           ok: false,
           error: {
-            code: "PROJECT_REQUIRED",
+            code: "project-required",
             message: "Select a project first",
             retryable: false,
           },
@@ -44,7 +44,7 @@ export function requirePermission(
         {
           ok: false,
           error: {
-            code: "PERMISSION_DENIED",
+            code: "permission-denied",
             message: "Insufficient token scope",
             retryable: false,
           },
@@ -65,7 +65,7 @@ export function requirePermission(
         {
           ok: false,
           error: {
-            code: "PERMISSION_DENIED",
+            code: "permission-denied",
             message: `Requires ${level} permission`,
             retryable: false,
           },
@@ -97,7 +97,7 @@ export function requirePermission(
         {
           ok: false,
           error: {
-            code: "PERMISSION_DENIED",
+            code: "permission-denied",
             message: "Insufficient session scope",
             retryable: false,
           },
@@ -111,7 +111,7 @@ export function requirePermission(
       {
         ok: false,
         error: {
-          code: "PERMISSION_DENIED",
+          code: "permission-denied",
           message: "Unknown authentication type",
           retryable: false,
         },

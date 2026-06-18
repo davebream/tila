@@ -135,7 +135,7 @@ sweepRoutes.post("/sweep", async (c) => {
       {
         ok: false,
         error: {
-          code: "FORBIDDEN",
+          code: "forbidden",
           message: "Invalid sweep secret",
           retryable: false,
         },
