@@ -17,6 +17,7 @@ import {
   type JournalEvent,
   type JournalQuery,
   type PatchRecordInput,
+  type PresenceWithStatus,
   type ProjectSummary,
   type PutRecordInput,
   type ReadyFilter,
@@ -515,6 +516,13 @@ export class EmbeddedProject
 
   async listPresence(): Promise<Presence[]> {
     return coordinationOps.listPresence(this.db);
+  }
+
+  async listAllPresence(
+    ttlMs?: number,
+    now?: number,
+  ): Promise<PresenceWithStatus[]> {
+    return coordinationOps.listAllPresence(this.db, ttlMs, now);
   }
 
   async listClaims(): Promise<Claim[]> {

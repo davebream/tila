@@ -13,6 +13,7 @@ export type {
   CoordinationBackend,
   AcquireResult,
   RenewResult,
+  PresenceWithStatus,
 } from "./interfaces/coordination-backend";
 export type {
   ArtifactBackend,
