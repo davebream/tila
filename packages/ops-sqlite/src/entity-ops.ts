@@ -16,12 +16,12 @@ import {
 } from "./artifact-ops";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
-import { SchemaCorruptError } from "./error-map";
 import { assertResourceFence } from "./fence-ops";
 import { checkPendingGates } from "./gate-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import { searchRecords } from "./record-ops";
 import * as schema from "./schema";
+import { SchemaCorruptError } from "./schema-errors";
 import { getSchemaByVersion } from "./schema-ops";
 import { tagExistsConditions } from "./tag-filter-ops";
 

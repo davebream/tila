@@ -26,7 +26,7 @@ import { mapProjectError } from "../../ops-sqlite/src/error-map";
 
 describe("mapProjectError — retryable field", () => {
   it("returns retryable from the error map for FenceError (stale-fence)", () => {
-    const mapped = mapProjectError(new FenceError("stale fence", 0, 1));
+    const mapped = mapProjectError(new FenceError(0, 1));
     expect(mapped).not.toBeNull();
     expect(mapped?.code).toBe("stale-fence");
     // After Task 9: mapped.retryable is present and is a boolean
@@ -48,7 +48,7 @@ describe("DO installProjectErrorHandlers — FenceError → stale-fence", () => 
     const app = new Hono();
     installProjectErrorHandlers(app);
     app.get("/test", () => {
-      throw new FenceError("stale", 0, 1);
+      throw new FenceError(0, 1);
     });
 
     const res = await app.request("/test");
@@ -61,7 +61,7 @@ describe("DO installProjectErrorHandlers — FenceError → stale-fence", () => 
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe("stale-fence");
     // retryable MUST match what mapProjectError returns (centralized source of truth)
-    const mapped = mapProjectError(new FenceError("stale", 0, 1));
+    const mapped = mapProjectError(new FenceError(0, 1));
     expect(body.error.retryable).toBe(mapped?.retryable);
   });
 });

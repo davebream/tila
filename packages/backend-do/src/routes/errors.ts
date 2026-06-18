@@ -21,6 +21,7 @@ export function installProjectErrorHandlers(app: Hono): void {
           mapped.code,
           err.message,
           mapped.extras,
+          mapped.retryable,
         );
       }
     }

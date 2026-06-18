@@ -38,6 +38,7 @@ import {
 } from "@tila/core";
 import {
   type RequestOrigin,
+  SchemaCorruptError,
   TemplateInstantiateError,
   constraintOps,
   coordinationOps,
@@ -70,6 +71,7 @@ import type {
 import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
+  EmbeddedSchemaCorruptError,
   NotFoundError,
   RecordConstraintError,
   ReferenceConstraintError,
@@ -1153,6 +1155,12 @@ export class EmbeddedProject
     } catch (err) {
       if (err instanceof TemplateInstantiateError) {
         throw new TemplateError(err.code, err.message);
+      }
+      // A corrupt stored schema surfaces here via resolveCurrentSchema
+      // (template-ops.ts:174). Map it to the embedded schema-corrupt envelope
+      // (mirroring the DO's 500 `schema-corrupt`) rather than crash unmapped.
+      if (err instanceof SchemaCorruptError) {
+        throw new EmbeddedSchemaCorruptError(err.message);
       }
       throw err;
     }

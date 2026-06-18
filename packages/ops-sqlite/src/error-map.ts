@@ -18,30 +18,15 @@ import {
   RecordNotFoundError,
   RevisionNotFoundError,
 } from "./record-ops";
+// SchemaCorruptError lives in the leaf module ./schema-errors to avoid a
+// circular import: error-map imports EntityNotFoundError from entity-ops, and
+// entity-ops/constraint-ops throw SchemaCorruptError — co-locating the class
+// here left an errorClass `undefined` at mapProjectError's instanceof during
+// module init. Imported for local use in projectErrorResponses and re-exported
+// for back-compat (index.ts and downstream import it from here).
+import { SchemaCorruptError } from "./schema-errors";
 
-// ---------------------------------------------------------------------------
-// SchemaCorruptError
-// ---------------------------------------------------------------------------
-
-/**
- * Thrown when a stored schema definition (in `_schema_history`) fails to parse.
- *
- * Returned as HTTP 500 `schema-corrupt` (non-retryable) from every backend that
- * calls `resolveCurrentSchema` or `enrichEntity`. A corrupt stored schema is a
- * server-side data-integrity failure; the client cannot remedy it by retrying.
- *
- * C3 design note: `resolveCurrentSchema` previously returned `null` on parse
- * failure, silently skipping all constraint checks. This class implements the
- * fail-closed fix: schema present but unparseable → throw; no schema applied → null.
- */
-export class SchemaCorruptError extends Error {
-  readonly code = "schema-corrupt" as const;
-
-  constructor(message: string) {
-    super(message);
-    this.name = "SchemaCorruptError";
-  }
-}
+export { SchemaCorruptError } from "./schema-errors";
 
 // ---------------------------------------------------------------------------
 // Error map types

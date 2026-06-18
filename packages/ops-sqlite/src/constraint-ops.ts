@@ -1,8 +1,8 @@
 import { parseSchemaToml } from "@tila/core";
 import type { TilaSchemaToml } from "@tila/schemas";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import { SchemaCorruptError } from "./error-map";
 import type * as schemaModule from "./schema";
+import { SchemaCorruptError } from "./schema-errors";
 import { getCurrentSchema } from "./schema-ops";
 
 // ---------------------------------------------------------------------------

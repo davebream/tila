@@ -77,3 +77,24 @@ export class TemplateError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * A stored schema definition is present but failed to parse (corrupt TOML).
+ *
+ * Mirrors the DO's `schema-corrupt` 500 response (C3 fail-closed fix). Distinct
+ * from `TemplateError` — this is a server-side data-integrity failure, not a
+ * template-logic error. Do NOT extend `TemplateError`.
+ *
+ * Thrown by the embedded backend when `ops-sqlite`'s `SchemaCorruptError`
+ * propagates through `EmbeddedProject` call sites (e.g. `instantiateTemplate`
+ * via `template-ops.ts:174` → `resolveCurrentSchema`). CLI/SDK/MCP consumers
+ * surface the `schema-corrupt` code rather than an unmapped crash.
+ */
+export class EmbeddedSchemaCorruptError extends Error {
+  readonly code = "schema-corrupt" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "EmbeddedSchemaCorruptError";
+  }
+}

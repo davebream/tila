@@ -32,6 +32,7 @@ export function jsonError(
   code: string,
   message: string,
   extras?: Record<string, unknown>,
+  retryable = false,
 ) {
   return c.json(
     {
@@ -39,7 +40,7 @@ export function jsonError(
       error: {
         code,
         message,
-        retryable: false,
+        retryable,
         ...extras,
       },
     },
