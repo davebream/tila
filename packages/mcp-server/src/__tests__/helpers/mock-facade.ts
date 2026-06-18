@@ -96,6 +96,7 @@ export type MockFacadeShape = {
   schema: Record<"get" | "apply" | "history", Mock>;
   summary: Record<"get", Mock>;
   search: Record<"search", Mock>;
+  indexes: Record<"create" | "addEntry" | "listEntries", Mock>;
   templates: Record<"instantiate" | "list", Mock>;
   tokens: Record<"issue" | "revoke" | "list", Mock>;
   close: Mock;
@@ -154,6 +155,7 @@ export function createMockFacade(): MockFacadeShape {
     schema: fns("get", "apply", "history"),
     summary: fns("get"),
     search: fns("search"),
+    indexes: fns("create", "addEntry", "listEntries"),
     templates: fns("instantiate", "list"),
     tokens: fns("issue", "revoke", "list"),
     close: vi.fn(),
@@ -201,6 +203,7 @@ const _assertMockMatchesFacade: _MockMatchesFacade = {
   schema: true,
   summary: true,
   search: true,
+  indexes: true,
   templates: true,
   tokens: true,
 };
