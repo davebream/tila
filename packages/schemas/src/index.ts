@@ -340,6 +340,9 @@ export {
 // --- Deploy route constants ---
 export { RUN_WORKER_FIRST } from "./deploy-routes";
 
+// --- HTTP response-envelope factories (pure, no Hono/Response) ---
+export { errorEnvelope, okEnvelope } from "./envelope";
+
 // --- Tag schemas (shared across records, entities, and artifacts) ---
 export { TagSchema, type Tag, TagsSchema, type Tags } from "./tags";
 
