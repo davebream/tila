@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
+import { emitUnhandledErrorDatapoint } from "../lib/analytics";
 
 export function errorHandler(err: Error, c: Context): Response {
   if (err instanceof ZodError) {
@@ -41,6 +42,17 @@ export function errorHandler(err: Error, c: Context): Response {
   }
 
   console.error("Unhandled error:", err);
+  // Fire-and-forget distinct datapoint for unhandled 500s — never throws
+  try {
+    if (c.env?.ANALYTICS) {
+      emitUnhandledErrorDatapoint(c.env.ANALYTICS, c.executionCtx, {
+        route: c.req.routePath ?? c.req.path,
+        errorName: err instanceof Error ? err.name : "UnknownError",
+      });
+    }
+  } catch {
+    // Swallow — emission is never load-bearing
+  }
   return c.json(
     {
       ok: false,

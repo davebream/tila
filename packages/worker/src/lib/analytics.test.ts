@@ -37,8 +37,8 @@ describe("emitRequestDatapoint", () => {
 
     expect(ctx.waitUntil).toHaveBeenCalledOnce();
     expect(dataset.writeDataPoint).toHaveBeenCalledWith({
-      blobs: ["/projects/:projectId/entities", "GET", "proj-1", "request"],
-      doubles: [42, 200],
+      blobs: ["/projects/:projectId/entities", "GET", "proj-1", "request", ""],
+      doubles: [42, 200, 0],
       indexes: ["proj-1"],
     });
   });
@@ -364,7 +364,9 @@ describe("analytics middleware — errorCode + retryable extraction", () => {
       let retryable = false;
       if (c.res.status >= 400) {
         try {
-          const body = await c.res.clone().json();
+          const body = (await c.res.clone().json()) as {
+            error?: { code?: string; retryable?: boolean };
+          };
           errorCode = body?.error?.code ?? "";
           retryable = body?.error?.retryable === true;
         } catch {
@@ -429,7 +431,9 @@ describe("analytics middleware — errorCode + retryable extraction", () => {
       let retryable = false;
       if (c.res.status >= 400) {
         try {
-          const body = await c.res.clone().json();
+          const body = (await c.res.clone().json()) as {
+            error?: { code?: string; retryable?: boolean };
+          };
           errorCode = body?.error?.code ?? "";
           retryable = body?.error?.retryable === true;
         } catch {

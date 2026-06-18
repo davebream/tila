@@ -53,12 +53,27 @@ app.use("*", requestIdMiddleware);
 app.use("*", async (c, next) => {
   const start = Date.now();
   await next();
+  let errorCode = "";
+  let retryable = false;
+  if (c.res.status >= 400) {
+    try {
+      const body = await c.res.clone().json();
+      errorCode = (body as { error?: { code?: string } })?.error?.code ?? "";
+      retryable =
+        (body as { error?: { retryable?: boolean } })?.error?.retryable ===
+        true;
+    } catch {
+      // Non-JSON body — tolerated; defaults remain
+    }
+  }
   emitRequestDatapoint(c.env.ANALYTICS, c.executionCtx, {
     route: c.req.routePath ?? c.req.path,
     method: c.req.method,
     projectId: c.get("projectId") ?? "",
     latencyMs: Date.now() - start,
     statusCode: c.res.status,
+    errorCode,
+    retryable,
   });
 });
 
