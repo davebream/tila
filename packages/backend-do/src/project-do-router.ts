@@ -11,6 +11,7 @@ import { createRecordRoutes } from "./routes/record-routes";
 import { createSchemaRoutes } from "./routes/schema-routes";
 import { createSignalRoutes } from "./routes/signal-routes";
 import { createSweepRoutes } from "./routes/sweep-routes";
+import { CORRELATION_ID_KEY } from "./routes/types";
 import type { RouterDeps } from "./routes/types";
 
 export type { RouterDeps } from "./routes/types";
@@ -19,6 +20,19 @@ export function createProjectRouter(deps: RouterDeps) {
   const app = new Hono();
 
   installProjectErrorHandlers(app);
+
+  // Correlation middleware: read X-Request-ID, sanitize (strip control chars,
+  // cap at 128 chars), stash on context, and echo on every response.
+  // Sanitization guards against log-injection on the console.error path.
+  app.use("*", async (c, next) => {
+    const raw = c.req.header("X-Request-ID") ?? "";
+    const sanitized = raw.replace(/[\r\n\t]/g, "_").slice(0, 128);
+    c.set(CORRELATION_ID_KEY as never, sanitized as never);
+    await next();
+    if (sanitized) {
+      c.header("X-Request-ID", sanitized);
+    }
+  });
 
   app.route("/", createAdminRoutes(deps));
   app.route("/", createEntityRoutes(deps));

@@ -4,6 +4,7 @@ import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ZodError } from "zod";
 import { formatZodIssues, jsonError } from "./responses";
+import { CORRELATION_ID_KEY } from "./types";
 
 export function installProjectErrorHandlers(app: Hono): void {
   app.onError((err, c) => {
@@ -24,7 +25,13 @@ export function installProjectErrorHandlers(app: Hono): void {
       }
     }
 
-    console.error("ProjectDO unhandled error:", err);
+    const correlationId =
+      (c.get as (k: string) => string | undefined)(CORRELATION_ID_KEY) ?? "";
+    console.error(
+      "ProjectDO unhandled error:",
+      err,
+      ...(correlationId ? ["requestId:", correlationId] : []),
+    );
     return c.json(
       {
         ok: false,
