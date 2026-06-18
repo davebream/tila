@@ -2,6 +2,8 @@ import { formatRecordResource } from "@tila/schemas";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   acquire,
+  heartbeat,
+  listAllPresence,
   listClaims,
   release,
   renew,
@@ -233,4 +235,28 @@ describe("coordination ops regressions", () => {
   it.todo(
     "covers embedded-layer release ownership via EmbeddedProject once the holder check is enforced",
   );
+});
+
+describe("listAllPresence", () => {
+  it("returns ALL presence rows including stale ones, with active:false for stale", () => {
+    const now = Date.now();
+    const ttlMs = 60_000;
+    // Fresh machine: last_seen = now (active)
+    heartbeat(testDb.db, "machine-fresh", { role: "worker" }, now);
+    // Stale machine: last_seen far in the past (inactive)
+    heartbeat(testDb.db, "machine-stale", { role: "old" }, now - ttlMs - 1000);
+
+    const rows = listAllPresence(testDb.db, ttlMs, now);
+
+    expect(rows).toHaveLength(2);
+
+    const fresh = rows.find((r) => r.machine === "machine-fresh");
+    const stale = rows.find((r) => r.machine === "machine-stale");
+
+    expect(fresh).toBeDefined();
+    expect(fresh?.active).toBe(true);
+
+    expect(stale).toBeDefined();
+    expect(stale?.active).toBe(false);
+  });
 });
