@@ -1,4 +1,4 @@
-import { lte, sql } from "drizzle-orm";
+import { lt, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { deleteTombstonedPointers } from "./artifact-ops";
 import { appendJournal } from "./journal-ops";
@@ -11,11 +11,21 @@ import * as schema from "./schema";
  */
 export const TOMBSTONE_GRACE_MS = 7 * 24 * 60 * 60 * 1000; // 604_800_000
 
+/**
+ * TTL for DO-side idempotency dedup rows in _do_idempotency.
+ * Chosen constant (no D1 idempotency TTL exists to mirror). 7 days is
+ * conservative-by-large-margin vs any client/SDK retry horizon, so a replayed
+ * idempotency key still finds its dedup row well within the window — preserving
+ * the crash-replay guard established by PR #70.
+ */
+export const DO_IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 604_800_000
+
 export interface SweepResult {
   claimsDeleted: number;
   presenceDeleted: number;
   signalsDeleted: number;
   tombstonedPointersDeleted: number;
+  doIdempotencyDeleted: number;
 }
 
 /** Read the row-change count from the last DML statement in a transaction. */
@@ -77,11 +87,19 @@ export function sweep(
     tx.run(sql`DELETE FROM signals WHERE acked_at IS NOT NULL`);
     const ackedDeleted = readChanges(tx);
 
+    // Prune stale DO idempotency dedup rows older than the TTL.
+    // readChanges(tx) must immediately follow this DELETE with no intervening DML.
+    tx.delete(schema.doIdempotency)
+      .where(lt(schema.doIdempotency.created_at, now - DO_IDEMPOTENCY_TTL_MS))
+      .run();
+    const doIdempotencyDeleted = readChanges(tx);
+
     return {
       claimsDeleted,
       presenceDeleted,
       signalsDeleted: expiredDeleted + ackedDeleted,
       tombstonedPointersDeleted,
+      doIdempotencyDeleted,
     };
   });
 }
