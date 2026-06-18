@@ -1,5 +1,6 @@
 import { FenceError } from "@tila/core";
 import { mapProjectError } from "@tila/ops-sqlite";
+import { errorEnvelope } from "@tila/schemas";
 import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ZodError } from "zod";
@@ -34,14 +35,7 @@ export function installProjectErrorHandlers(app: Hono): void {
       ...(correlationId ? ["requestId:", correlationId] : []),
     );
     return c.json(
-      {
-        ok: false,
-        error: {
-          code: "internal",
-          message: "Internal server error",
-          retryable: true,
-        },
-      },
+      errorEnvelope("internal", "Internal server error", true),
       500,
     );
   });
