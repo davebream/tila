@@ -1,4 +1,5 @@
 import type { DoIdempotency } from "@tila/ops-sqlite";
+import { errorEnvelope, okEnvelope } from "@tila/schemas";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
@@ -34,18 +35,7 @@ export function jsonError(
   extras?: Record<string, unknown>,
   retryable = false,
 ) {
-  return c.json(
-    {
-      ok: false,
-      error: {
-        code,
-        message,
-        retryable,
-        ...extras,
-      },
-    },
-    status,
-  );
+  return c.json(errorEnvelope(code, message, retryable, extras), status);
 }
 
 export function formatZodIssues(
@@ -71,5 +61,5 @@ export function jsonOkRows(
   rowsAffected: number,
 ) {
   c.header("X-Rows-Affected", String(rowsAffected));
-  return c.json({ ok: true, ...body });
+  return c.json(okEnvelope(body));
 }

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO } from "../lib/do-forward";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
@@ -30,20 +31,24 @@ doctor.get("/doctor/schema", requirePermission("admin"), async (c) => {
   const stub = c.get("doStub");
 
   // Try the new DO-side diagnostic route first
-  const res = await forwardToDO(stub, "/doctor/schema", "GET");
-  const body = (await res.json()) as Record<string, unknown>;
+  const { json: body } = await forwardTypedDO<Record<string, unknown>>(
+    stub,
+    DO_PATHS.doctorSchema,
+    "GET",
+  );
   if (body.sqlite_version || body.do_code_version) return c.json(body);
 
   // Fallback: the DO is running old code without /doctor/schema.
   // Probe indirectly by attempting a claim acquire and checking the error.
-  const probeRes = await forwardToDO(stub, "/coord/acquire", "POST", {
+  const { response: probeRes, json: probeBody } = await forwardTypedDO<
+    Record<string, unknown>
+  >(stub, DO_PATHS.coordAcquire, "POST", {
     resource: "__probe__schema__",
     machine: "__probe__",
     user: "__probe__",
     mode: "exclusive",
     ttl_ms: 1000,
   });
-  const probeBody = (await probeRes.json()) as Record<string, unknown>;
 
   // If acquire succeeded, release immediately
   if (probeBody.ok) {
@@ -68,7 +73,12 @@ doctor.get("/doctor/probe", requirePermission("admin"), async (c) => {
 
   // 1. DO health check with RTT measurement
   const t0 = Date.now();
-  const doRes = await forwardToDO(stub, "/coord/health", "GET");
+  const { response: doRes, json: doHealth } = await forwardTypedDO<{
+    ok: boolean;
+    expiredClaimsCount: number;
+    journalRows: number;
+    maxSeq: number;
+  }>(stub, DO_PATHS.coordHealth, "GET");
   const doRttMs = Date.now() - t0;
 
   if (!doRes.ok) {
@@ -84,13 +94,6 @@ doctor.get("/doctor/probe", requirePermission("admin"), async (c) => {
       502,
     );
   }
-
-  const doHealth = (await doRes.json()) as {
-    ok: boolean;
-    expiredClaimsCount: number;
-    journalRows: number;
-    maxSeq: number;
-  };
 
   // 2. R2 reachability probe
   let r2Reachable = false;

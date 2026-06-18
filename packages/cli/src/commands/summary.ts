@@ -1,15 +1,11 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { printJson } from "../lib/output";
+import { jsonArg, printJson } from "../lib/output";
 
 export default defineCommand({
   meta: { name: "summary", description: "Show project summary" },
   args: {
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const { summary } = await resolveContext();

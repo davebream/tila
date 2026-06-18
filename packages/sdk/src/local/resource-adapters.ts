@@ -31,7 +31,11 @@ import type {
  * HTTP-only resources (token issuance — a D1 global-store concern with no local
  * equivalent) throw `LocalUnsupportedError` rather than silently no-op.
  */
-import { type GateRecord, parseTilaSchemaToml } from "@tila/core";
+import {
+  type GateRecord,
+  type PresenceWithStatus,
+  parseTilaSchemaToml,
+} from "@tila/core";
 import type {
   AckSignalResponse,
   AcquireSuccessResponse,
@@ -83,6 +87,7 @@ import type {
   SummaryResponse,
   UnifiedSearchResponse,
 } from "@tila/schemas";
+import { okEnvelope } from "@tila/schemas";
 import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
 
@@ -102,12 +107,12 @@ export class LocalUnsupportedError extends Error {
 /** Strip the `fence` to expose the HTTP wire `record` (RecordItem) shape. */
 function toRecordMutateResponse(row: RecordRow): RecordMutateResponse {
   const { fence, ...record } = row;
-  return { ok: true, record, fence, revision: row.revision };
+  return okEnvelope({ record, fence, revision: row.revision });
 }
 
 function toRecordGetResponse(row: RecordRow): RecordGetResponse {
   const { fence, ...record } = row;
-  return { ok: true, record, fence };
+  return okEnvelope({ record, fence });
 }
 
 /**
@@ -452,7 +457,7 @@ function createLocalClaimMethods(project: EmbeddedProject) {
           false,
         );
       }
-      return { ok: true, fence: result.fence, expires_at: result.expires_at };
+      return okEnvelope({ fence: result.fence, expires_at: result.expires_at });
     },
 
     async renew(
@@ -827,17 +832,17 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
     },
 
     async listAll(): Promise<PresenceAllListResponse> {
-      // DIVERGENCE (deferred to Task 14): the remote `presence/all` returns ALL
-      // machines with a computed `active` (last_seen vs TTL cutoff), including
-      // stale ones. `EmbeddedProject` only exposes `listPresence()`, which
-      // already filters to active machines (last_seen > cutoff) — so every row
-      // returned here IS active, making `active: true` correct PER ROW, but
-      // stale machines are omitted (the remote would include them as
-      // active:false). Closing the gap needs a `listAllPresence` lift onto the
-      // CoordinationBackend interface + both impls (coordinationOps already has
-      // the op); that exceeds this method's scope.
-      const presence = await project.listPresence();
-      const machines = presence.map((p) => ({ ...p, active: true }));
+      // C5 fix: call the stale-inclusive backend read and map `active` per row
+      // rather than hardcoding `active: true`. `listAllPresence` returns ALL
+      // presence rows with `active = last_seen > cutoff` computed per row, so
+      // stale machines appear with `active: false` — matching remote semantics.
+      const presence: PresenceWithStatus[] = await project.listAllPresence();
+      const machines = presence.map((p) => ({
+        machine: p.machine,
+        last_seen: p.last_seen,
+        info: p.info,
+        active: p.active,
+      }));
       return { ok: true, machines };
     },
   };
@@ -1025,6 +1030,36 @@ function createLocalTokenMethods() {
 }
 
 /**
+ * Index methods stub for the local backend.
+ *
+ * `indexes` wraps artifact upload + relationship operations that are
+ * HTTP-oriented (multipart upload to R2 via the Worker). The local embedded
+ * backend stores artifacts on disk but does not expose an equivalent
+ * HTTP-facade-compatible `indexes` surface. These stubs throw
+ * `LocalUnsupportedError` so callers get a clean rejection rather than a
+ * mysterious runtime failure.
+ */
+function createLocalIndexMethods() {
+  return {
+    async create(
+      ..._args: Parameters<TilaFacade["indexes"]["create"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("indexes.create");
+    },
+    async addEntry(
+      ..._args: Parameters<TilaFacade["indexes"]["addEntry"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("indexes.addEntry");
+    },
+    async listEntries(
+      ..._args: Parameters<TilaFacade["indexes"]["listEntries"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("indexes.listEntries");
+    },
+  };
+}
+
+/**
  * Build the full local resource-method surface from an `EmbeddedProject` +
  * `EmbeddedArtifactBackend`. The returned object's keys + method shapes mirror
  * the HTTP facade so `createTila`'s two branches are interchangeable.
@@ -1047,6 +1082,7 @@ export function buildLocalResources(
     search: createLocalSearchMethods(project),
     templates: createLocalTemplateMethods(project),
     tokens: createLocalTokenMethods(),
+    indexes: createLocalIndexMethods(),
   };
 }
 
@@ -1089,5 +1125,34 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   search: true,
   templates: true,
   tokens: true,
+  indexes: true,
 };
 void _assertLocalSurfaceMatchesFacade;
+
+/**
+ * @internal Test helper — exposes `toRecordMutateResponse` and
+ * `toRecordGetResponse` for envelope-migration tests (C7).
+ */
+export function testRecordEnvelopes(row: RecordRow) {
+  return {
+    mutate: toRecordMutateResponse(row),
+    get: toRecordGetResponse(row),
+  };
+}
+
+/**
+ * @internal Test helper — exposes the presence method factory with a mock
+ * project so tests can verify `listAll` behavior without spinning up SQLite.
+ */
+export function buildLocalPresenceMethodsForTest(
+  project: Pick<
+    EmbeddedProject,
+    "listPresence" | "listAllPresence" | "heartbeat"
+  >,
+) {
+  return (
+    createLocalPresenceMethods as (
+      p: typeof project,
+    ) => ReturnType<typeof createLocalPresenceMethods>
+  )(project);
+}

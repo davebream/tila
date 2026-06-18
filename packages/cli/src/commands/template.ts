@@ -7,7 +7,7 @@ import {
 import { defineCommand } from "citty";
 import { parse as parseTOML } from "smol-toml";
 import { requireClient, resolveContext } from "../context";
-import { printJson, printJsonError } from "../lib/output";
+import { jsonArg, printJson, printJsonError } from "../lib/output";
 
 /** Fetch and parse the current schema TOML from the backend. */
 async function fetchSchemaToml(
@@ -35,11 +35,7 @@ export default defineCommand({
     list: defineCommand({
       meta: { name: "list", description: "List available templates" },
       args: {
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -81,11 +77,7 @@ export default defineCommand({
           description: "Template name",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();
@@ -155,11 +147,7 @@ export default defineCommand({
           type: "string",
           description: "Variable substitution in key=value format (repeatable)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const ctx = await resolveContext();

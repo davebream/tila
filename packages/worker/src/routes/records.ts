@@ -16,6 +16,7 @@ import { Hono } from "hono";
 import TOML from "smol-toml";
 import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
+import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
@@ -41,19 +42,11 @@ async function resolveRecordHistoryMode(
   analyticsCtx: ReturnType<typeof analyticsCtxFrom>,
 ): Promise<"revision" | "snapshot"> {
   try {
-    const schemaRes = await forwardToDO(
-      stub,
-      "/schema/current",
-      "GET",
-      undefined,
-      undefined,
-      analyticsCtx,
-    );
-    if (!schemaRes.ok) return "revision";
-    const body = (await schemaRes.json()) as {
+    const { response: schemaRes, json: body } = await forwardTypedDO<{
       ok: boolean;
       schema: { definition: string } | null;
-    };
+    }>(stub, DO_PATHS.schemaCurrent, "GET", undefined, undefined, analyticsCtx);
+    if (!schemaRes.ok) return "revision";
     if (!body.ok || !body.schema?.definition) return "revision";
     const parsed = TOML.parse(body.schema.definition);
     const schemaDef = TilaSchemaTomlSchema.safeParse(parsed);
@@ -78,9 +71,12 @@ async function validateSourceArtifactKey(
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     const resource = `record:${type}/${key}`;
-    const res = await forwardToDO(
+    const { response: res, json: body } = await forwardTypedDO<{
+      ok: boolean;
+      pointers: Array<{ r2_key: string }>;
+    }>(
       stub,
-      "/artifact/pointers",
+      DO_PATHS.artifactPointers,
       "GET",
       undefined,
       {
@@ -93,10 +89,6 @@ async function validateSourceArtifactKey(
     if (!res.ok) {
       return { ok: false, message: "Failed to validate source artifact key" };
     }
-    const body = (await res.json()) as {
-      ok: boolean;
-      pointers: Array<{ r2_key: string }>;
-    };
     if (!body.ok || !body.pointers) {
       return { ok: false, message: "Failed to validate source artifact key" };
     }
@@ -154,22 +146,19 @@ records.get("/_types", async (c) => {
   // 1. Fetch in-use types from DO
   let inUseTypes: string[] = [];
   try {
-    const inUseRes = await forwardToDO(
+    const { response: inUseRes, json: inUseBody } = await forwardTypedDO<{
+      ok: boolean;
+      types: string[];
+    }>(
       stub,
-      "/record/types-in-use",
+      DO_PATHS.recordTypesInUse,
       "GET",
       undefined,
       undefined,
       analyticsCtxFrom(c),
     );
-    if (inUseRes.ok) {
-      const inUseBody = (await inUseRes.json()) as {
-        ok: boolean;
-        types: string[];
-      };
-      if (inUseBody.ok) {
-        inUseTypes = inUseBody.types;
-      }
+    if (inUseRes.ok && inUseBody.ok) {
+      inUseTypes = inUseBody.types;
     }
   } catch {
     // Fail open -- inUseTypes stays empty
@@ -178,19 +167,18 @@ records.get("/_types", async (c) => {
   // 2. Fetch declared types from schema TOML
   let declaredTypes: string[] = [];
   try {
-    const schemaRes = await forwardToDO(
+    const { response: schemaRes, json: schemaBody } = await forwardTypedDO<{
+      ok: boolean;
+      schema: { definition: string } | null;
+    }>(
       stub,
-      "/schema/current",
+      DO_PATHS.schemaCurrent,
       "GET",
       undefined,
       undefined,
       analyticsCtxFrom(c),
     );
     if (schemaRes.ok) {
-      const schemaBody = (await schemaRes.json()) as {
-        ok: boolean;
-        schema: { definition: string } | null;
-      };
       if (schemaBody.ok && schemaBody.schema?.definition) {
         const tomlParsed = TOML.parse(schemaBody.schema.definition);
         const schemaDef = TilaSchemaTomlSchema.safeParse(tomlParsed);
@@ -558,7 +546,7 @@ records.patch("/:type/:key{.+}", requirePermission("write"), async (c) => {
   // 2. Write canonical JSON to R2
   // 3. Call DO stamp-artifacts endpoint (best-effort)
   try {
-    const responseBody = (await doResponse.json()) as {
+    type PatchResponseBody = {
       ok: boolean;
       record: {
         value: Record<string, unknown>;
@@ -567,6 +555,7 @@ records.patch("/:type/:key{.+}", requirePermission("write"), async (c) => {
       revision: number;
       fence: number;
     };
+    const responseBody = (await doResponse.json()) as PatchResponseBody;
 
     if (!responseBody.ok) {
       return c.json(

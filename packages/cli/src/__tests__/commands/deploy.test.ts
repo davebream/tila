@@ -48,6 +48,13 @@ const mockPrintJsonError = vi.fn((..._args: unknown[]): void => {
 vi.mock("../../lib/output", () => ({
   printJson: (...args: unknown[]) => mockPrintJson(...args),
   printJsonError: (...args: unknown[]) => mockPrintJsonError(...args),
+  jsonArg: {
+    json: {
+      type: "boolean" as const,
+      description: "Output as structured JSON",
+      default: false,
+    },
+  },
 }));
 
 const mockSpinnerStart = vi.fn();

@@ -80,5 +80,9 @@ describe("dist/index.cjs loads the local stack via the ./local.js rewrite", () =
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+    // Heavy integration: require()s the built CJS bundle and cold-loads the
+    // native SQLite stack before round-tripping a task. Cold native-module load
+    // exceeds the 5s default under CI load, so allow a generous timeout
+    // (mirrors the 120s beforeAll build budget).
+  }, 30_000);
 });

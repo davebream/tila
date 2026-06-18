@@ -1,3 +1,4 @@
+import { errorEnvelope } from "@tila/schemas";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
@@ -8,13 +9,7 @@ export function errorHandler(err: Error, c: Context): Response {
     const message = err.issues
       .map((i) => `${i.path.join(".")}: ${i.message}`)
       .join("; ");
-    return c.json(
-      {
-        ok: false,
-        error: { code: "validation-error", message, retryable: false },
-      },
-      400,
-    );
+    return c.json(errorEnvelope("validation-error", message, false), 400);
   }
 
   if (err instanceof HTTPException) {
@@ -29,14 +24,11 @@ export function errorHandler(err: Error, c: Context): Response {
   // JSON.parse sites are locally try/caught).
   if (err instanceof SyntaxError) {
     return c.json(
-      {
-        ok: false,
-        error: {
-          code: "validation-error",
-          message: "Malformed JSON in request body",
-          retryable: false,
-        },
-      },
+      errorEnvelope(
+        "validation-error",
+        "Malformed JSON in request body",
+        false,
+      ),
       400,
     );
   }
@@ -53,15 +45,5 @@ export function errorHandler(err: Error, c: Context): Response {
   } catch {
     // Swallow — emission is never load-bearing
   }
-  return c.json(
-    {
-      ok: false,
-      error: {
-        code: "internal",
-        message: "Internal server error",
-        retryable: true,
-      },
-    },
-    500,
-  );
+  return c.json(errorEnvelope("internal", "Internal server error", true), 500);
 }

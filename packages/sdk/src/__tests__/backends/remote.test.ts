@@ -93,7 +93,7 @@ describe("RemoteBackend", () => {
 
     it("get() returns null on 404", async () => {
       client.get.mockRejectedValue(
-        new TilaApiError(404, "NOT_FOUND", "Not found", false),
+        new TilaApiError(404, "not-found", "Not found", false),
       );
 
       const backend = await createBackend(client);
@@ -104,7 +104,7 @@ describe("RemoteBackend", () => {
 
     it("get() throws non-404 errors", async () => {
       client.get.mockRejectedValue(
-        new TilaApiError(500, "INTERNAL", "Server error", false),
+        new TilaApiError(500, "internal", "Server error", false),
       );
 
       const backend = await createBackend(client);

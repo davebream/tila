@@ -184,10 +184,10 @@ describe("task relationship commands", () => {
           json: true,
         }),
       ).rejects.toThrow("process.exit(1)");
-      // printJsonError writes { error, code } to stderr via console.error
+      // printJsonError writes { ok:false, code, message } to stderr via console.error
       const output = JSON.parse(errorSpy.mock.calls[0][0] as string);
       expect(output.code).toBe("VALIDATION_ERROR");
-      expect(output.error).toContain("invalid-type");
+      expect(output.message).toContain("invalid-type");
       expect(mockAddRelationship).not.toHaveBeenCalled();
     });
 
@@ -600,7 +600,8 @@ describe("task relationship commands", () => {
 
     it("maps 409 already-exists error to 'Task <id> already exists.'", async () => {
       mockCreate.mockRejectedValue(
-        new TilaApiError(409, "already-exists", "conflict", false),
+        // biome-ignore lint/suspicious/noExplicitAny: test uses a non-registered wire code
+        new TilaApiError(409, "already-exists" as any, "conflict", false),
       );
       const cmd = await loadCommand();
       const newCmd = getSubCommand(cmd, "new");
@@ -617,7 +618,8 @@ describe("task relationship commands", () => {
 
     it("outputs JSON error for duplicate id with --json", async () => {
       mockCreate.mockRejectedValue(
-        new TilaApiError(409, "already-exists", "conflict", false),
+        // biome-ignore lint/suspicious/noExplicitAny: test uses a non-registered wire code
+        new TilaApiError(409, "already-exists" as any, "conflict", false),
       );
       const cmd = await loadCommand();
       const newCmd = getSubCommand(cmd, "new");
@@ -630,10 +632,10 @@ describe("task relationship commands", () => {
           "link-parent": false,
         }),
       ).rejects.toThrow("process.exit(1)");
-      // printJsonError writes { error, code } to stderr via console.error
+      // printJsonError writes { ok:false, code, message } to stderr via console.error
       const output = JSON.parse(errorSpy.mock.calls[0][0] as string);
       expect(output.code).toBe("already-exists");
-      expect(output.error).toContain("epic.x");
+      expect(output.message).toContain("epic.x");
     });
 
     it("plain success --json shape is {ok,id,type,title} (no parent)", async () => {
@@ -754,7 +756,8 @@ describe("task relationship commands", () => {
       );
       const linkError = new TilaApiError(
         422,
-        "leaf-rejection",
+        // biome-ignore lint/suspicious/noExplicitAny: test uses a non-registered wire code
+        "leaf-rejection" as any,
         "Leaf cannot be parent",
         false,
       );

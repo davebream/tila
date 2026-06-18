@@ -1,6 +1,11 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { formatTimestamp, printJson, renderTable } from "../lib/output";
+import {
+  formatTimestamp,
+  jsonArg,
+  printJson,
+  renderTable,
+} from "../lib/output";
 
 // Note: The `active` field is stripped by RemoteBackend.listPresence() because
 // the Presence type (from @tila/schemas) lacks the `active` field. The
@@ -37,11 +42,7 @@ const listCommand = defineCommand({
     description: "Show all machines (active and inactive)",
   },
   args: {
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     await showPresenceList(args.json as boolean);
@@ -56,18 +57,14 @@ const heartbeatCommand = defineCommand({
       description:
         "Machine identity for local mode (server stamps identity in remote mode, default: TILA_MACHINE or os.hostname())",
     },
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const { coordination, machine: defaultMachine } = await resolveContext();
     const machine = (args.machine as string | undefined) ?? defaultMachine;
     await coordination.heartbeat(machine, {});
     if (args.json) {
-      console.log(JSON.stringify({ ok: true }, null, 2));
+      printJson({ ok: true });
       return;
     }
     console.log(`Heartbeat sent for ${machine}`);
@@ -77,11 +74,7 @@ const heartbeatCommand = defineCommand({
 export default defineCommand({
   meta: { name: "presence", description: "Manage agent presence" },
   args: {
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   subCommands: {
     list: listCommand,
