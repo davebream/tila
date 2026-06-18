@@ -19,7 +19,7 @@
     "@tila/core": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@tila/ui": "workspace:*",
-    "hono": "^4.12.23",
+    "hono": "^4.12.26",
     "jose": "^6.2.3",
     "smol-toml": "^1.6.1",
     "zod": "^3.24.0"
@@ -27,7 +27,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.15",
     "@cloudflare/workers-types": "^4.20260602.1",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.21",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9",
     "wrangler": "^4.98.0"
