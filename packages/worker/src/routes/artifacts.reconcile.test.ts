@@ -170,7 +170,7 @@ describe("POST /artifacts/reconcile — C6 R2 repair + permission guard", () => 
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PERMISSION_DENIED");
+    expect(body.error.code).toBe("permission-denied");
   });
 
   it("tombstones a searchable pointer whose R2 blob is absent (head returns null)", async () => {

@@ -44,7 +44,7 @@ tokens.post("/", async (c) => {
   const body = await c.req.json();
   const parsed = TokenIssueRequestSchema.safeParse(body);
   if (!parsed.success)
-    return zodValidationError(c, parsed.error, "VALIDATION_ERROR");
+    return zodValidationError(c, parsed.error, "validation-error");
 
   const { name, note } = parsed.data;
   const plaintext = generateToken();

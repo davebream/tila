@@ -286,7 +286,7 @@ describe("call-site count assertions (C3 regression guard)", () => {
 
     // The RATE_LIMITED 429 response should be authored exactly once (inside the
     // helper); a count > 1 means a block was re-inlined into a route.
-    const rateLimitedLiterals = (src.match(/code: "RATE_LIMITED"/g) ?? [])
+    const rateLimitedLiterals = (src.match(/code: "rate-limited"/g) ?? [])
       .length;
     expect(rateLimitedLiterals).toBe(1);
   });

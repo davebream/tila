@@ -105,7 +105,7 @@ describe("POST /api/repos", () => {
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns 403 for non-full scope token", async () => {
@@ -121,7 +121,7 @@ describe("POST /api/repos", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("TOKEN_AUTHZ_DENIED");
+    expect(body.error.code).toBe("token-authz-denied");
   });
 
   it("returns 404 when GitHub repo not found", async () => {
@@ -139,7 +139,7 @@ describe("POST /api/repos", () => {
     );
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("REPO_NOT_FOUND");
+    expect(body.error.code).toBe("repo-not-found");
   });
 
   it("returns 403 when GitHub access denied", async () => {
@@ -157,7 +157,7 @@ describe("POST /api/repos", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("REPO_ACCESS_DENIED");
+    expect(body.error.code).toBe("repo-access-denied");
   });
 
   it("returns 502 on other GitHub API errors", async () => {
@@ -175,7 +175,7 @@ describe("POST /api/repos", () => {
     );
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("GITHUB_API_ERROR");
+    expect(body.error.code).toBe("github-api-error");
   });
 
   it("handles idempotent re-registration (201)", async () => {
@@ -265,7 +265,7 @@ describe("DELETE /api/repos/:repoId", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("TOKEN_AUTHZ_DENIED");
+    expect(body.error.code).toBe("token-authz-denied");
   });
 
   it("returns 400 for non-numeric repoId", async () => {
@@ -277,7 +277,7 @@ describe("DELETE /api/repos/:repoId", () => {
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns 200 even when repo not found (idempotent delete)", async () => {

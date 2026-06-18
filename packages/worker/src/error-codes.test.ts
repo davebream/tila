@@ -51,10 +51,20 @@ describe("error code casing convention", () => {
     for (const file of files) {
       const content = readFileSync(file, "utf-8");
       const lines = content.split("\n");
+      // Two literal forms emit an error code:
+      //  (1) inline envelope:   code: "SOME_CODE"
+      //  (2) helper arg form:   zodValidationError(c, err, "SOME_CODE")
+      // The helper form is NOT a `code:` literal, so the inline pattern alone
+      // misses it (this is exactly how repos.ts/tokens.ts slipped through).
+      const patterns = [
+        /code:\s*"([A-Z][A-Z0-9_]+)"/g,
+        /zodValidationError\([^)]*?"([A-Z][A-Z0-9_]+)"/g,
+      ];
       for (let i = 0; i < lines.length; i++) {
-        const re = /code:\s*"([A-Z][A-Z0-9_]+)"/g;
-        for (const m of lines[i].matchAll(re)) {
-          violations.push({ file, code: m[1], line: i + 1 });
+        for (const re of patterns) {
+          for (const m of lines[i].matchAll(re)) {
+            violations.push({ file, code: m[1], line: i + 1 });
+          }
         }
       }
     }
@@ -93,9 +103,7 @@ describe("error code casing convention", () => {
       expect(kebabRe.test(code), `Expected kebab code: ${code}`).toBe(true);
       // Construct an error to verify the class accepts these codes
       const err = new OidcVerificationError(
-        code as Parameters<
-          typeof OidcVerificationError.prototype.constructor
-        >[0],
+        code as ConstructorParameters<typeof OidcVerificationError>[0],
         "test",
       );
       expect(err.code).toBe(code);

@@ -430,7 +430,7 @@ describe("project admin routes", () => {
         error: { code: string };
       };
       expect(body.ok).toBe(false);
-      expect(body.error.code).toBe("PEER_POINTER_KEYS_FETCH_FAILED");
+      expect(body.error.code).toBe("peer-pointer-keys-fetch-failed");
       // deleteMany must NOT be called — corrupting shared blobs is not acceptable
       expect(deleteManyMock).not.toHaveBeenCalled();
     });
@@ -440,7 +440,7 @@ describe("project admin routes", () => {
         targetKeys: [],
         peerKeysList: [],
         destroyResponse: Response.json(
-          { ok: false, error: { code: "DESTROY_FAILED" } },
+          { ok: false, error: { code: "destroy-failed" } },
           { status: 500 },
         ),
       });
@@ -609,7 +609,7 @@ describe("project admin routes", () => {
         error: { code: string };
       };
       expect(body.ok).toBe(false);
-      expect(body.error.code).toBe("R2_ERROR");
+      expect(body.error.code).toBe("r2-error");
       // R2 put was attempted; confirm was never reached
       expect(putMock).toHaveBeenCalled();
       expect(forwardToDOMock).not.toHaveBeenCalledWith(
@@ -657,7 +657,7 @@ describe("project admin routes", () => {
         error: { code: string };
       };
       expect(body.ok).toBe(false);
-      expect(body.error.code).toBe("CONFIRM_ERROR");
+      expect(body.error.code).toBe("confirm-error");
       // R2 write succeeded before confirm failed
       expect(putMock).toHaveBeenCalled();
     });
@@ -798,7 +798,7 @@ describe("project admin routes", () => {
       );
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.code).toBe("validation-error");
     });
 
     it("returns 400 on invalid JSON body", async () => {
@@ -814,7 +814,7 @@ describe("project admin routes", () => {
       );
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.code).toBe("validation-error");
     });
 
     it("revokes jti in D1 and cache, returns 200", async () => {

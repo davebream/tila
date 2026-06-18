@@ -136,7 +136,7 @@ describe("infra destroy route", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.code).toBe("forbidden");
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
 
@@ -199,7 +199,7 @@ describe("infra destroy route", () => {
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("CONFIRM_SLUG_MISMATCH");
+    expect(body.error.code).toBe("confirm-slug-mismatch");
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
 
@@ -214,7 +214,7 @@ describe("infra destroy route", () => {
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("CONFIRM_SLUG_MISMATCH");
+    expect(body.error.code).toBe("confirm-slug-mismatch");
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
 
@@ -326,7 +326,7 @@ describe("requireInfraPrincipal middleware", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.code).toBe("forbidden");
   });
 
   it("returns 403 on a wrong bearer", async () => {
@@ -446,7 +446,7 @@ describe("resolveTargetProject middleware", () => {
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(body.error.code).toBe("not-found");
     expect(idFromName).not.toHaveBeenCalled();
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
@@ -516,7 +516,7 @@ describe("resolveTargetProject middleware", () => {
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(body.error.code).toBe("not-found");
   });
 
   it("reaches an archived slug when { includeArchived: true } is set", async () => {
@@ -600,7 +600,7 @@ describe("infra restart route", () => {
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(body.error.code).toBe("not-found");
     expect(idFromName).not.toHaveBeenCalled();
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
@@ -696,7 +696,7 @@ describe("infra store-counts route", () => {
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(body.error.code).toBe("not-found");
     expect(idFromName).not.toHaveBeenCalled();
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
@@ -802,7 +802,7 @@ describe("infra sessions/revoke route", () => {
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(body.error.code).toBe("not-found");
     expect(idFromName).not.toHaveBeenCalled();
     expect(forwardToDOMock).not.toHaveBeenCalled();
     expect(revokeSessionMock).not.toHaveBeenCalled();
@@ -921,7 +921,7 @@ describe("infra archive/journal route", () => {
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_NOT_FOUND");
+    expect(body.error.code).toBe("not-found");
     expect(idFromName).not.toHaveBeenCalled();
     expect(forwardToDOMock).not.toHaveBeenCalled();
     expect(archiveJournalMock).not.toHaveBeenCalled();

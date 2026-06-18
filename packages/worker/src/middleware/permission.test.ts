@@ -123,7 +123,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PERMISSION_DENIED",
+        "permission-denied",
       );
     });
   });
@@ -158,7 +158,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PERMISSION_DENIED",
+        "permission-denied",
       );
     });
   });
@@ -181,7 +181,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PERMISSION_DENIED",
+        "permission-denied",
       );
     });
   });
@@ -192,7 +192,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PROJECT_REQUIRED",
+        "project-required",
       );
     });
 
@@ -201,7 +201,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PROJECT_REQUIRED",
+        "project-required",
       );
     });
 
@@ -210,7 +210,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PROJECT_REQUIRED",
+        "project-required",
       );
     });
   });
@@ -233,7 +233,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PERMISSION_DENIED",
+        "permission-denied",
       );
     });
 
@@ -242,7 +242,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PERMISSION_DENIED",
+        "permission-denied",
       );
     });
 
@@ -257,7 +257,7 @@ describe("requirePermission middleware", () => {
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
-        "PERMISSION_DENIED",
+        "permission-denied",
       );
     });
   });
@@ -305,7 +305,7 @@ describe("project middleware — PROJECT_MISMATCH guard", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_MISMATCH");
+    expect(body.error.code).toBe("project-mismatch");
   });
 
   it("passes through when session token projectId matches route", async () => {
@@ -385,6 +385,6 @@ describe("project middleware — PROJECT_MISMATCH guard", () => {
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("PROJECT_MISMATCH");
+    expect(body.error.code).toBe("project-mismatch");
   });
 });

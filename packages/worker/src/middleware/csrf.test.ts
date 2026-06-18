@@ -55,7 +55,7 @@ describe("csrfGuard", () => {
     const body = (await res.json()) as {
       error: { code: string };
     };
-    expect(body.error.code).toBe("CSRF_MISSING_ORIGIN");
+    expect(body.error.code).toBe("csrf-missing-origin");
   });
 
   it("cookie-auth POST with mismatched Origin returns 403", async () => {
@@ -68,7 +68,7 @@ describe("csrfGuard", () => {
     const body = (await res.json()) as {
       error: { code: string };
     };
-    expect(body.error.code).toBe("CSRF_ORIGIN_MISMATCH");
+    expect(body.error.code).toBe("csrf-origin-mismatch");
   });
 
   it("bearer-auth POST without Origin passes (no CSRF needed)", async () => {
@@ -103,7 +103,7 @@ describe("csrfGuard", () => {
     });
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("CSRF_MISSING_ORIGIN");
+    expect(body.error.code).toBe("csrf-missing-origin");
   });
 
   it("workspace POST with mismatched Origin returns 403 CSRF_ORIGIN_MISMATCH", async () => {
@@ -114,7 +114,7 @@ describe("csrfGuard", () => {
     });
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("CSRF_ORIGIN_MISMATCH");
+    expect(body.error.code).toBe("csrf-origin-mismatch");
   });
 
   it("bearer-auth POST without Origin still passes (regression: not affected by workspace change)", async () => {
@@ -191,7 +191,7 @@ describe("csrfGuard", () => {
       );
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("CSRF_ORIGIN_MISMATCH");
+      expect(body.error.code).toBe("csrf-origin-mismatch");
     });
 
     it("wildcard in CORS_ALLOWED_ORIGINS is ignored (rejected)", async () => {

@@ -540,7 +540,7 @@ describe("POST /api/workspace/select", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("INVALID_SESSION");
+    expect(body.error.code).toBe("invalid-session");
   });
 
   it("returns 400 when project_id is missing", async () => {
@@ -558,7 +558,7 @@ describe("POST /api/workspace/select", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns 400 when project_id exceeds the size cap", async () => {
@@ -576,7 +576,7 @@ describe("POST /api/workspace/select", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("validation-error");
   });
 
   it("returns read scopes when user has only read permission", async () => {
@@ -624,7 +624,7 @@ describe("POST /api/workspace/select", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.code).toBe("forbidden");
   });
 
   it("returns 404 when project has no GitHub App installation", async () => {
@@ -644,7 +644,7 @@ describe("POST /api/workspace/select", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("NOT_FOUND");
+    expect(body.error.code).toBe("not-found");
   });
 
   it("checks rate limit with correct key", async () => {

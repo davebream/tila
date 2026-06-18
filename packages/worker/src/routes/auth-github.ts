@@ -1173,7 +1173,7 @@ authGithub.post("/exchange-oidc", async (c) => {
   } catch (err) {
     // Map OIDC verification errors to HTTP status codes
     if (err instanceof OidcVerificationError) {
-      const statusCode = err.code === "OIDC_JWKS_UNAVAILABLE" ? 502 : 401;
+      const statusCode = err.code === "oidc-jwks-unavailable" ? 502 : 401;
 
       // Record rate-limit failure for auth errors
       if (statusCode === 401) {

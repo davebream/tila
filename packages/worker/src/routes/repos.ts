@@ -59,7 +59,7 @@ repos.post("/", async (c) => {
 
   const parsed = RepoRegisterRequestSchema.safeParse(body);
   if (!parsed.success)
-    return zodValidationError(c, parsed.error, "VALIDATION_ERROR");
+    return zodValidationError(c, parsed.error, "validation-error");
 
   const {
     owner,
