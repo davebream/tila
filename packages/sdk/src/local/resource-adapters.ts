@@ -87,6 +87,7 @@ import type {
   SummaryResponse,
   UnifiedSearchResponse,
 } from "@tila/schemas";
+import { okEnvelope } from "@tila/schemas";
 import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
 
@@ -106,12 +107,12 @@ export class LocalUnsupportedError extends Error {
 /** Strip the `fence` to expose the HTTP wire `record` (RecordItem) shape. */
 function toRecordMutateResponse(row: RecordRow): RecordMutateResponse {
   const { fence, ...record } = row;
-  return { ok: true, record, fence, revision: row.revision };
+  return okEnvelope({ record, fence, revision: row.revision });
 }
 
 function toRecordGetResponse(row: RecordRow): RecordGetResponse {
   const { fence, ...record } = row;
-  return { ok: true, record, fence };
+  return okEnvelope({ record, fence });
 }
 
 /**
@@ -456,7 +457,7 @@ function createLocalClaimMethods(project: EmbeddedProject) {
           false,
         );
       }
-      return { ok: true, fence: result.fence, expires_at: result.expires_at };
+      return okEnvelope({ fence: result.fence, expires_at: result.expires_at });
     },
 
     async renew(
@@ -1127,6 +1128,17 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   indexes: true,
 };
 void _assertLocalSurfaceMatchesFacade;
+
+/**
+ * @internal Test helper — exposes `toRecordMutateResponse` and
+ * `toRecordGetResponse` for envelope-migration tests (C7).
+ */
+export function testRecordEnvelopes(row: RecordRow) {
+  return {
+    mutate: toRecordMutateResponse(row),
+    get: toRecordGetResponse(row),
+  };
+}
 
 /**
  * @internal Test helper — exposes the presence method factory with a mock
