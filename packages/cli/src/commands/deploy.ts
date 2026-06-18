@@ -10,7 +10,7 @@ import {
 } from "../lib/deploy";
 import { loadGithubAppCredentials } from "../lib/github-app-setup";
 import { getInfraSlug, loadInfraConfig } from "../lib/infra-config";
-import { printJson, printJsonError } from "../lib/output";
+import { jsonArg, printJson, printJsonError } from "../lib/output";
 import { resolveCfApiToken, tilaHome } from "../lib/provisioning";
 import { R2_BUCKET_NAME } from "../lib/resource-names";
 
@@ -27,11 +27,7 @@ export default defineCommand({
         "Skip UI deployment (deploy Worker code only, no [assets] block)",
       default: false,
     },
-    json: {
-      type: "boolean",
-      description: "Emit machine-readable JSON to stdout (suppresses prompts)",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const json = args.json === true;

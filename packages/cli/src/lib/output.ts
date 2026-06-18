@@ -9,6 +9,42 @@ import ansis from "ansis";
 import { Table } from "console-table-printer";
 import treeify from "object-treeify";
 import createSpinner from "yocto-spinner";
+import { exitCodeFor } from "./exit-codes";
+
+// --- CLI JSON envelope types (NOT coupled to the HTTP ErrorEnvelope) ---
+
+/**
+ * Standard success envelope for all CLI --json output.
+ * Consumer automation should key on `ok: true` to detect success.
+ */
+export type CliSuccessEnvelope<T> = { ok: true; result: T };
+
+/**
+ * Standard error envelope for all CLI --json output.
+ * `code` is a stable machine-readable error code (from TILA_ERRORS or CLI-local).
+ * `hint` is optional remediation advice.
+ */
+export type CliErrorEnvelope = {
+  ok: false;
+  code: string;
+  message: string;
+  hint?: string;
+};
+
+/**
+ * Shared --json argument declaration. Spread this into every leaf subcommand's
+ * `args` instead of declaring `json: { type: "boolean", ... }` per command.
+ *
+ * Citty 0.2.2 has NO arg inheritance — a root-declared flag never reaches
+ * subcommand `run` contexts. The shared spread ensures every command opts in.
+ */
+export const jsonArg = {
+  json: {
+    type: "boolean" as const,
+    description: "Output as structured JSON",
+    default: false,
+  },
+} as const;
 
 // --- Existing utilities (unchanged) ---
 
@@ -21,26 +57,40 @@ export function printJson(data: unknown): void {
 }
 
 /**
- * Serialize an error as JSON to stderr and exit with code 1.
- * Use for error output in --json mode.
+ * Serialize a successful result as a {@link CliSuccessEnvelope} JSON to stdout.
+ * Prefer this over raw `printJson({ ok: true, ... })` so the envelope shape
+ * is consistent across all commands.
+ */
+export function printJsonSuccess<T>(result: T): void {
+  printJson({ ok: true, result } satisfies CliSuccessEnvelope<T>);
+}
+
+/**
+ * Serialize an error as a {@link CliErrorEnvelope} JSON to stderr and exit.
+ *
+ * The caller is responsible for passing the correct exit code (typically
+ * computed via `exitCodeFor` from `error-boundary`). This function does NOT
+ * import from `error-boundary` to avoid a circular dependency.
  *
  * @param error - Human-readable error message
- * @param code - Machine-readable error code (e.g. "NOT_FOUND", "NETWORK_ERROR")
- * @param details - Optional additional error context
+ * @param code - Machine-readable error code (e.g. "not-found", "do-unreachable")
+ * @param hint - Optional remediation hint shown to the user
+ * @param exitCode - Process exit code (default: 1 / USER_ERROR)
  */
 export function printJsonError(
   error: string,
   code: string,
-  details?: unknown,
+  hint?: string,
+  exitCode = 1,
 ): never {
-  console.error(
-    JSON.stringify(
-      { error, code, ...(details !== undefined ? { details } : {}) },
-      null,
-      2,
-    ),
-  );
-  process.exit(1);
+  const envelope: CliErrorEnvelope = {
+    ok: false,
+    code,
+    message: error,
+    ...(hint !== undefined ? { hint } : {}),
+  };
+  console.error(JSON.stringify(envelope, null, 2));
+  process.exit(exitCode);
 }
 
 /**
@@ -67,6 +117,7 @@ export function tsToIso(epochMs: number): string {
 export function describeCliError(err: unknown): {
   code: string;
   message: string;
+  hint?: string;
 } {
   const e = err as {
     name?: string;
@@ -95,20 +146,24 @@ export function describeCliError(err: unknown): {
 }
 
 /**
- * Render a backend/coordination error as a clean one-line message and exit 1.
+ * Render a backend/coordination error as a clean one-line message and exit.
  *
  * Without this, an uncaught `TilaApiError`/`FenceError` bubbles to citty's
  * top-level handler, which dumps the full error object and bundled stack trace.
- * In `--json` mode the error is emitted as structured JSON via
- * {@link printJsonError}; otherwise a single line is written to stderr.
+ * In `--json` mode the error is emitted as a structured {@link CliErrorEnvelope}
+ * via {@link printJsonError}; otherwise a single line is written to stderr.
+ *
+ * The exit code is determined by `exitCodeFor(code)` — network-class errors
+ * exit 2 (NETWORK_ERROR) so automation can retry; all others exit 1 (USER_ERROR).
  */
 export function failWithCliError(err: unknown, json: boolean): never {
-  const { code, message } = describeCliError(err);
+  const { code, message, hint } = describeCliError(err);
+  const exit = exitCodeFor(code);
   if (json) {
-    printJsonError(message, code);
+    printJsonError(message, code, hint, exit);
   } else {
     console.error(message);
-    process.exit(1);
+    process.exit(exit);
   }
 }
 

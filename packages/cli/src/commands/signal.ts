@@ -1,6 +1,6 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { printJson, printJsonError } from "../lib/output";
+import { jsonArg, printJson, printJsonError } from "../lib/output";
 
 const sendCommand = defineCommand({
   meta: { name: "send", description: "Send a signal to a target" },
@@ -27,11 +27,7 @@ const sendCommand = defineCommand({
       type: "string",
       description: "TTL in seconds (default: 300)",
     },
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const { signal } = await resolveContext();
@@ -81,11 +77,7 @@ const sendCommand = defineCommand({
 const inboxCommand = defineCommand({
   meta: { name: "inbox", description: "Show signals for current token" },
   args: {
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const { signal } = await resolveContext();
@@ -125,11 +117,7 @@ const ackCommand = defineCommand({
       description: "Signal ID",
       required: true,
     },
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const { signal } = await resolveContext();

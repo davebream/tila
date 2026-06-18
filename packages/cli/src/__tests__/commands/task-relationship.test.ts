@@ -600,7 +600,8 @@ describe("task relationship commands", () => {
 
     it("maps 409 already-exists error to 'Task <id> already exists.'", async () => {
       mockCreate.mockRejectedValue(
-        new TilaApiError(409, "already-exists", "conflict", false),
+        // biome-ignore lint/suspicious/noExplicitAny: test uses a non-registered wire code
+        new TilaApiError(409, "already-exists" as any, "conflict", false),
       );
       const cmd = await loadCommand();
       const newCmd = getSubCommand(cmd, "new");
@@ -617,7 +618,8 @@ describe("task relationship commands", () => {
 
     it("outputs JSON error for duplicate id with --json", async () => {
       mockCreate.mockRejectedValue(
-        new TilaApiError(409, "already-exists", "conflict", false),
+        // biome-ignore lint/suspicious/noExplicitAny: test uses a non-registered wire code
+        new TilaApiError(409, "already-exists" as any, "conflict", false),
       );
       const cmd = await loadCommand();
       const newCmd = getSubCommand(cmd, "new");
@@ -754,7 +756,8 @@ describe("task relationship commands", () => {
       );
       const linkError = new TilaApiError(
         422,
-        "leaf-rejection",
+        // biome-ignore lint/suspicious/noExplicitAny: test uses a non-registered wire code
+        "leaf-rejection" as any,
         "Leaf cannot be parent",
         false,
       );

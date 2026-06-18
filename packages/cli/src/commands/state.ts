@@ -1,15 +1,11 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { printJson, renderTable } from "../lib/output";
+import { jsonArg, printJson, renderTable } from "../lib/output";
 
 const listCommand = defineCommand({
   meta: { name: "list", description: "List all active claims" },
   args: {
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const { coordination } = await resolveContext();
@@ -51,11 +47,7 @@ export default defineCommand({
       description: "Resource identifier (e.g. task:T-abc123)",
       required: false,
     },
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   subCommands: {
     list: listCommand,

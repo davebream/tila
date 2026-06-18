@@ -3,7 +3,7 @@ import { type TilaSchemaToml, TilaSchemaTomlSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { parse as parseTOML } from "smol-toml";
 import { resolveContext } from "../context";
-import { printJson, printJsonError } from "../lib/output";
+import { jsonArg, printJson, printJsonError } from "../lib/output";
 import { loadComposedSchema } from "../lib/schema-loader";
 
 /**
@@ -38,11 +38,7 @@ export default defineCommand({
         description: "Preview schema changes without applying",
       },
       args: {
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         // Schema diff is computed LOCALLY via the @tila/core `diffSchemas`
@@ -219,11 +215,7 @@ export default defineCommand({
     show: defineCommand({
       meta: { name: "show", description: "Show current schema" },
       args: {
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { schema } = await resolveContext();
@@ -257,11 +249,7 @@ export default defineCommand({
           type: "string",
           description: "Strategy for destructive changes (relax|force)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { schema } = await resolveContext();
@@ -346,11 +334,7 @@ export default defineCommand({
     status: defineCommand({
       meta: { name: "status", description: "Show schema status" },
       args: {
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { schema } = await resolveContext();

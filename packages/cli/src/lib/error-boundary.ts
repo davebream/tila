@@ -1,5 +1,11 @@
 import type { CommandDef } from "citty";
 import { failWithCliError } from "./output";
+// EXIT_CODES, ExitCode, exitCodeFor are in a separate module to avoid circular deps.
+// error-boundary → output (for failWithCliError)
+// output → exit-codes (for exitCodeFor — no circular dep)
+// error-boundary → exit-codes (re-exported here for callers)
+export { EXIT_CODES, exitCodeFor } from "./exit-codes";
+export type { ExitCode } from "./exit-codes";
 
 // citty's CommandDef generic is invariant (run is contravariant in its args),
 // so a specifically-typed command is not assignable to CommandDef<ArgsDef> and

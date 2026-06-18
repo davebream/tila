@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 import { requireClient, resolveContext } from "../context";
+import { jsonArg, printJson } from "../lib/output";
 
 const queryCommand = defineCommand({
   meta: {
@@ -18,11 +19,7 @@ const queryCommand = defineCommand({
       description:
         "Maximum number of results to return (default: 20, max: 100)",
     },
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const ctx = await resolveContext();
@@ -69,7 +66,7 @@ const queryCommand = defineCommand({
     }
 
     if (args.json) {
-      console.log(JSON.stringify({ results }, null, 2));
+      printJson({ results });
       return;
     }
 
@@ -228,11 +225,7 @@ export default defineCommand({
       description:
         "Maximum number of results to return (default: 20, max: 100)",
     },
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const ctx = await resolveContext();
@@ -283,7 +276,7 @@ export default defineCommand({
     }
 
     if (args.json) {
-      console.log(JSON.stringify({ results }, null, 2));
+      printJson({ results });
       return;
     }
 

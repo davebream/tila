@@ -15,6 +15,7 @@ import {
 import c from "ansis";
 import { defineCommand } from "citty";
 import { type CommandContext, runStartupChecks } from "../context";
+import { jsonArg, printJson } from "../lib/output";
 import { tilaHome } from "../lib/provisioning";
 
 interface CheckResult {
@@ -128,11 +129,7 @@ export default defineCommand({
         "Rebuild missing or stale search docs from artifact pointers (dry-run by default, use --apply to write)",
       default: false,
     },
-    json: {
-      type: "boolean",
-      description: "Output results as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     const jsonMode = args.json as boolean;
@@ -612,9 +609,7 @@ export default defineCommand({
     s?.stop("Checks complete.");
 
     if (jsonMode) {
-      console.log(
-        JSON.stringify({ checks, summary: { passed, warned, failed } }),
-      );
+      printJson({ checks, summary: { passed, warned, failed } });
     } else {
       const lines = checks.map((check) => {
         if (check.status === "pass") return `${c.green("✓")} ${check.detail}`;

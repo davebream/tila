@@ -1,6 +1,6 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { printJson, tsToIso } from "../lib/output";
+import { jsonArg, printJson, tsToIso } from "../lib/output";
 
 export default defineCommand({
   meta: { name: "gate", description: "Manage coordination gates" },
@@ -27,11 +27,7 @@ export default defineCommand({
           type: "string",
           description: "Timeout timestamp (epoch ms, optional)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { gate } = await resolveContext();
@@ -71,11 +67,7 @@ export default defineCommand({
           description:
             "Filter by status (pending, resolved, timed_out, cancelled)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { gate } = await resolveContext();
@@ -117,11 +109,7 @@ export default defineCommand({
           type: "string",
           description: "Resolution message (optional)",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { gate } = await resolveContext();
@@ -144,11 +132,7 @@ export default defineCommand({
           description: "Gate ID",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { gate } = await resolveContext();

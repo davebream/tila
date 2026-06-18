@@ -1,7 +1,7 @@
 import { defineCommand } from "citty";
 import { z } from "zod";
 import { requireClient, resolveContext } from "../context";
-import { printJson, printJsonError } from "../lib/output";
+import { jsonArg, printJson, printJsonError } from "../lib/output";
 
 const ResetResponseSchema = z.object({
   ok: z.literal(true),
@@ -15,11 +15,7 @@ export default defineCommand({
       description: "Skip confirmation prompt",
       default: false,
     },
-    json: {
-      type: "boolean",
-      description: "Output as JSON",
-      default: false,
-    },
+    ...jsonArg,
   },
   async run({ args }) {
     if (!args.confirm) {

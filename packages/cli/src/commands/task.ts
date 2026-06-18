@@ -6,6 +6,7 @@ import {
   failWithCliError,
   formatStatus,
   formatTimestamp,
+  jsonArg,
   printJson,
   printJsonError,
   renderTable,
@@ -75,11 +76,7 @@ const relationshipCommand = defineCommand({
           description: `Relationship type. Canonical: ${CANONICAL_TYPES}. Aliases: parent→parent-child, block→blocks`,
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const rawType = args.type as string;
@@ -142,11 +139,7 @@ const relationshipCommand = defineCommand({
           alias: "t",
           description: "Filter by relationship type",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         // Validate type if provided
@@ -231,11 +224,7 @@ const relationshipCommand = defineCommand({
           description: "Relationship type (required)",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const rawType = args.type as string;
@@ -305,11 +294,7 @@ export default defineCommand({
             "Also create a parent-child relationship edge to --parent (requires --parent)",
           default: false,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         // Validate --link-parent requires --parent
@@ -359,7 +344,10 @@ export default defineCommand({
             created_by: "cli",
           });
         } catch (err) {
-          if (err instanceof TilaApiError && err.code === "already-exists") {
+          if (
+            err instanceof TilaApiError &&
+            (err.code as string) === "already-exists"
+          ) {
             const msg = `Task ${id} already exists.`;
             if (args.json) {
               printJsonError(msg, "already-exists");
@@ -444,11 +432,7 @@ export default defineCommand({
           description: "Compact output (id, title, status, claimed_by)",
           default: false,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         if (args.compact) {
@@ -581,11 +565,7 @@ export default defineCommand({
           type: "string",
           description: "Maximum number of results",
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
         "include-soft-blocked": {
           type: "boolean",
           description: "Include soft-blocked entities (default: excluded)",
@@ -603,7 +583,7 @@ export default defineCommand({
           }),
         );
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, entities }, null, 2));
+          printJson({ ok: true, entities });
           return;
         }
         if (entities.length === 0) {
@@ -631,11 +611,7 @@ export default defineCommand({
       meta: { name: "show", description: "Show task details" },
       args: {
         id: { type: "positional", description: "Task ID", required: true },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { entity } = await resolveContext();
@@ -688,11 +664,7 @@ export default defineCommand({
           required: true,
         },
         fence: { type: "string", description: "Fencing token" },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { entity } = await resolveContext();
@@ -727,11 +699,7 @@ export default defineCommand({
           description: "Outcome (completed|cancelled|deferred)",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { entity } = await resolveContext();
@@ -754,11 +722,7 @@ export default defineCommand({
       meta: { name: "archive", description: "Archive a task" },
       args: {
         id: { type: "positional", description: "Task ID", required: true },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { entity } = await resolveContext();
@@ -775,11 +739,7 @@ export default defineCommand({
       args: {
         id: { type: "positional", description: "Task ID", required: true },
         ttl: { type: "string", description: "TTL in seconds", default: "300" },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { coordination, machine } = await resolveContext();
@@ -815,11 +775,7 @@ export default defineCommand({
           required: true,
         },
         ttl: { type: "string", description: "TTL in seconds", default: "300" },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { coordination, machine } = await resolveContext();
@@ -846,11 +802,7 @@ export default defineCommand({
           description: "Fencing token",
           required: true,
         },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { coordination } = await resolveContext();
@@ -867,11 +819,7 @@ export default defineCommand({
       args: {
         type: { type: "string", description: "Filter by task type" },
         parent: { type: "string", description: "Root parent task ID" },
-        json: {
-          type: "boolean",
-          description: "Output as JSON",
-          default: false,
-        },
+        ...jsonArg,
       },
       async run({ args }) {
         const { entity } = await resolveContext();
@@ -975,11 +923,7 @@ export default defineCommand({
               description: "Slot name (e.g. plan, output, source)",
               required: true,
             },
-            json: {
-              type: "boolean",
-              description: "Output as JSON",
-              default: false,
-            },
+            ...jsonArg,
           },
           async run({ args }) {
             const { entity } = await resolveContext();
@@ -1008,11 +952,7 @@ export default defineCommand({
               description: "Entity (task) ID",
               required: true,
             },
-            json: {
-              type: "boolean",
-              description: "Output as JSON",
-              default: false,
-            },
+            ...jsonArg,
           },
           async run({ args }) {
             const { entity } = await resolveContext();
