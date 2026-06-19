@@ -403,6 +403,32 @@ describe("tila project create (cloudflare)", () => {
     );
   });
 
+  // AC-2 regression (#103): when repo registration soft-fails during create,
+  // the spinner message must name the recovery command `tila repos register`.
+  // Covered behaviorally here via the create flow's spinner.stop seam
+  // (mockClackSpinnerStop) — not only by the contract grep.
+  it("names `tila repos register` when repo registration soft-fails (network error)", async () => {
+    mockExistsSync.mockImplementation((path: unknown) => {
+      if (typeof path === "string" && path.endsWith("github-app.json"))
+        return true;
+      return false;
+    });
+    mockTilaClient.post.mockRejectedValueOnce(
+      new Error("Network error: fetch failed"),
+    );
+
+    await invokeProjectCreate();
+
+    const stopMessages = mockClackSpinnerStop.mock.calls
+      .map((call) => call[0])
+      .filter((arg): arg is string => typeof arg === "string");
+    const softFailMessage = stopMessages.find((msg) =>
+      msg.includes("Repo registration skipped"),
+    );
+    expect(softFailMessage).toBeDefined();
+    expect(softFailMessage).toContain("tila repos register");
+  });
+
   it("writes config.toml with worker_url from infra config", async () => {
     mockExistsSync.mockReturnValue(false);
 
