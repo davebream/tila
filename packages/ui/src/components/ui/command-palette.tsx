@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
-import { useTasks } from "@/hooks/use-api";
+import { useTaskIndex } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -24,7 +24,7 @@ export function CommandPalette({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { data: taskData } = useTasks();
+  const { data: taskData } = useTaskIndex();
   const entities = taskData?.entities ?? [];
 
   const items = useMemo(() => {
