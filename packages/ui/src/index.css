@@ -54,7 +54,7 @@
   --color-secondary: var(--color-n-850);
   --color-secondary-foreground: var(--color-n-100);
   --color-muted: var(--color-n-850);
-  --color-muted-foreground: var(--color-n-400);
+  --color-muted-foreground: var(--color-n-300);
   --color-accent: var(--color-signal-500);
   --color-accent-foreground: var(--color-n-950);
   --color-destructive: var(--color-status-red);
