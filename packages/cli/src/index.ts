@@ -21,8 +21,9 @@ const main = defineCommand({
   },
   subCommands: {
     task: () => load(() => import("./commands/task")),
-    // @deprecated -- prefer "work-unit" for new usage
+    // @deprecated -- both "entity" and "work-unit" are deprecated aliases; use "task"
     entity: () => load(() => import("./commands/entity")),
+    // @deprecated -- "work-unit" is deprecated; use "task"
     "work-unit": () => load(() => import("./commands/work-unit")),
     record: () => load(() => import("./commands/record")),
     disconnect: () => load(() => import("./commands/disconnect")),

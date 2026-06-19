@@ -4,29 +4,27 @@ Command-line interface for [tila](https://github.com/davebream/tila) — a state
 
 ## Installation
 
-`tila-cli` is not published to npm yet. Run from source:
-
 ```bash
-git clone https://github.com/davebream/tila.git
-cd tila
-pnpm install
-pnpm --filter tila-cli dev -- --help
+npm install -g tila-cli
+# or
+brew install tila/tap/tila
+# or
+curl -fsSL https://tila.dev/install.sh | bash
 ```
 
-Use `pnpm --filter tila-cli dev -- <command>` in place of `tila <command>` until packaged binaries are published.
+See the [latest release](https://github.com/davebream/tila/releases/latest) for platform-specific binaries.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `task` | Manage tasks (create, list, show, update, claim, release) |
-| `work-unit` | Manage work units — canonical public alias for entities |
-| `entity` | *(deprecated — use `work-unit`)* Manage entities |
+| `work-unit` | *(deprecated — use `task`)* Alias for `task` |
+| `entity` | *(deprecated — use `task`)* Alias for `task` |
 | `record` | Manage typed records (get, set, patch, list, history, archive) |
 | `artifact` | Manage artifacts (put, search, list) |
 | `init` | Initialize a tila project |
 | `deploy` | Deploy the Worker to Cloudflare |
-| `destroy` | Tear down all project resources |
 | `doctor` | Check project health |
 | `open` | Open the tila dashboard in your browser |
 | `mcp` | MCP server configuration |
@@ -35,14 +33,13 @@ Use `pnpm --filter tila-cli dev -- <command>` in place of `tila <command>` until
 | `presence` | Show all machines (active and inactive) |
 | `journal` | Query the project journal |
 | `schema` | Manage project schema |
-| `search` | Unified full-text search across entities and artifacts |
+| `search` | Unified full-text search across tasks and artifacts |
 | `summary` | Show project summary |
 | `state` | List all active claims |
 | `token` | Manage project API tokens |
-| `template` | Manage entity templates |
+| `template` | Manage task templates |
 | `index` | Manage index artifacts |
 | `config` | View project configuration |
-| `migrate` | Migrate data from another system into tila |
 | `reset` | Reset all project data |
 
 ## Initializing a project

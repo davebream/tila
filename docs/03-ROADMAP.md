@@ -215,7 +215,7 @@ v0.1 is done when all of the following are true. Not negotiable.
 6. **Schema changes work for the four common cases:**
    - Adding a new entity type (auto-applied)
    - Adding a new optional field (auto-applied)
-   - Adding a required field with `default_for_legacy` (auto-applied with default backfill)
+   - Adding a required field with `default_for_legacy` (auto-applied; the legacy default is materialized lazily on read via tolerant reads, existing rows are not rewritten)
    - Making a parent required (rejected without `--strategy=relax|force`)
 7. **`tila doctor` correctly identifies common inconsistencies** when manually induced (orphaned R2 blobs without pointer rows, tombstoned pointers, expired claims awaiting sweep, journal-to-pointer mismatches). Returns exit code 1 (warnings) or 2 (errors) appropriately.
 8. **`tila reset` cleanly drops all project data** and re-initializes.
