@@ -110,8 +110,10 @@ describe("TasksPage", () => {
       expect(screen.getByText("entity-1")).toBeInTheDocument();
     });
 
-    // Hint text should appear
-    expect(screen.getByText(/showing first/i)).toBeInTheDocument();
+    // Hint text should appear with the interpolated count values — guards
+    // the `limit ?? 100` fallback and `total` interpolation against silent
+    // regressions (a static /showing first/ match alone would pass on "null").
+    expect(screen.getByText(/showing first 100 of 250/i)).toBeInTheDocument();
     // Full entity shape is preserved — created_by is visible
     expect(screen.getByText("another-user")).toBeInTheDocument();
   });
