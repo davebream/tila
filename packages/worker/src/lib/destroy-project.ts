@@ -23,7 +23,7 @@ export interface DestroyResult {
  * (POST /_internal/admin/projects/:projectId/destroy) — both wipe identically; they differ
  * only in how the caller is authenticated.
  *
- *   1. Read target pointer keys from the DO (still live).
+ *   1. Read target pointer keys from the DO (still live) — drain all pages.
  *   2. Reference-counted R2 GC: fetch every other project's keys (including
  *      archived) to build the live-key union; delete only keys absent from it.
  *      Re-head each key immediately before deletion to narrow the
@@ -31,6 +31,12 @@ export interface DestroyResult {
  *   3. Delete journal-archive/<projectId>/ prefix.
  *   4. POST /admin/destroy to the DO (last — deleteAll + abort).
  *   5. Probe store-counts on the reconstructed DO to derive doWiped.
+ *
+ * Fail-closed policy:
+ *   - Budget exhaustion (SUBREQUEST_CEILING) mid-drain → r2GcSkipped=true, return 200,
+ *     zero R2 deletions. Covers BOTH the target-project drain and the peer loop.
+ *   - Page/peer fetch ERROR mid-drain → 502-abort (peer-pointer-keys-fetch-failed),
+ *     zero deletions. NOT converted to r2GcSkipped.
  *
  * Note: keys read from peer DOs are used transiently for the union computation
  * only; they are never written or retained beyond this call. (RC-8)
@@ -50,24 +56,45 @@ export async function destroyProjectResources(
   let r2Failed = 0;
   let journalDeleted = 0;
 
-  // ── Step 1: Read target project's pointer keys ──────────────────────────
-  subrequestCount++;
-  const targetKeysRes = await forwardToDO(stub, "/admin/pointer-keys", "GET");
-  if (!targetKeysRes.ok) {
-    return {
-      status: 502,
-      body: {
-        ok: false,
-        error: {
-          code: "pointer-keys-fetch-failed",
-          message: "Failed to read target project pointer keys",
+  // ── Step 1: Read target project's pointer keys — drain all pages ────────
+  const targetKeys: string[] = [];
+  let targetCursor: string | undefined = undefined;
+  let targetDrainDone = false;
+
+  while (!targetDrainDone) {
+    if (subrequestCount >= SUBREQUEST_CEILING) {
+      r2GcSkipped = true;
+      break;
+    }
+    subrequestCount++;
+    const url =
+      targetCursor !== undefined
+        ? `/admin/pointer-keys?cursor=${encodeURIComponent(targetCursor)}`
+        : "/admin/pointer-keys";
+    const targetKeysRes = await forwardToDO(stub, url, "GET");
+    if (!targetKeysRes.ok) {
+      return {
+        status: 502,
+        body: {
+          ok: false,
+          error: {
+            code: "pointer-keys-fetch-failed",
+            message: "Failed to read target project pointer keys",
+          },
         },
-      },
+      };
+    }
+    const page = (await targetKeysRes.json()) as {
+      keys: string[];
+      nextCursor?: string | null;
     };
+    targetKeys.push(...page.keys);
+    if (page.nextCursor) {
+      targetCursor = page.nextCursor;
+    } else {
+      targetDrainDone = true;
+    }
   }
-  const { keys: targetKeys } = (await targetKeysRes.json()) as {
-    keys: string[];
-  };
 
   // ── Step 2: Reference-counted R2 GC ────────────────────────────────────
   const allProjects = await registry.listAllIncludingArchived();
@@ -75,32 +102,54 @@ export async function destroyProjectResources(
 
   const liveKeyUnion = new Set<string>();
 
-  for (const { projectId: otherId } of otherProjects) {
-    if (subrequestCount >= SUBREQUEST_CEILING) {
-      r2GcSkipped = true;
-      break;
-    }
-    subrequestCount++;
-    const otherDoId = env.PROJECT.idFromName(otherId);
-    const otherStub = env.PROJECT.get(otherDoId);
-    const res = await forwardToDO(otherStub, "/admin/pointer-keys", "GET");
-    if (!res.ok) {
-      // Fail GC rather than under-count the union — under-counting risks
-      // deleting blobs another project needs (data corruption).
-      return {
-        status: 502,
-        body: {
-          ok: false,
-          error: {
-            code: "peer-pointer-keys-fetch-failed",
-            message: `Failed to read pointer keys for project ${otherId}`,
-          },
-        },
-      };
-    }
-    const { keys: peerKeys } = (await res.json()) as { keys: string[] };
-    for (const key of peerKeys) {
-      liveKeyUnion.add(key);
+  if (!r2GcSkipped) {
+    for (const { projectId: otherId } of otherProjects) {
+      if (r2GcSkipped) break;
+
+      // Drain all pages for this peer project
+      let peerCursor: string | undefined = undefined;
+      let peerDrainDone = false;
+
+      while (!peerDrainDone) {
+        if (subrequestCount >= SUBREQUEST_CEILING) {
+          r2GcSkipped = true;
+          break;
+        }
+        subrequestCount++;
+        const otherDoId = env.PROJECT.idFromName(otherId);
+        const otherStub = env.PROJECT.get(otherDoId);
+        const url =
+          peerCursor !== undefined
+            ? `/admin/pointer-keys?cursor=${encodeURIComponent(peerCursor)}`
+            : "/admin/pointer-keys";
+        const res = await forwardToDO(otherStub, url, "GET");
+        if (!res.ok) {
+          // Fail GC rather than under-count the union — under-counting risks
+          // deleting blobs another project needs (data corruption).
+          return {
+            status: 502,
+            body: {
+              ok: false,
+              error: {
+                code: "peer-pointer-keys-fetch-failed",
+                message: `Failed to read pointer keys for project ${otherId}`,
+              },
+            },
+          };
+        }
+        const page = (await res.json()) as {
+          keys: string[];
+          nextCursor?: string | null;
+        };
+        for (const key of page.keys) {
+          liveKeyUnion.add(key);
+        }
+        if (page.nextCursor) {
+          peerCursor = page.nextCursor;
+        } else {
+          peerDrainDone = true;
+        }
+      }
     }
   }
 

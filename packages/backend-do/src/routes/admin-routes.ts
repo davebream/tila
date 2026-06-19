@@ -12,8 +12,14 @@ export function createAdminRoutes(deps: RouterDeps): ProjectSubRouter {
   });
 
   app.get("/admin/pointer-keys", (c) => {
-    const keys = artifactOps.listAllPointerKeys(deps.db);
-    return c.json({ keys });
+    const limitParam = c.req.query("limit");
+    const cursor = c.req.query("cursor") ?? undefined;
+    const limit =
+      limitParam !== undefined
+        ? Math.max(1, Number.parseInt(limitParam, 10))
+        : undefined;
+    const result = artifactOps.listAllPointerKeys(deps.db, { limit, cursor });
+    return c.json({ keys: result.keys, nextCursor: result.nextCursor });
   });
 
   app.get("/admin/store-counts", (c) => {
