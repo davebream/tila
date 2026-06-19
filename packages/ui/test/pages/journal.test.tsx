@@ -6,6 +6,13 @@ import { vi } from "vitest";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor } from "../test-utils";
 
+// Several JournalPage cases render hundreds of rows (accumulator trim-notice at
+// MAX_ROWS - PRUNE_COUNT = 400 events) and drive React Query state transitions.
+// On a cold, loaded CI runner these heavy renders exceed vitest's 5s default,
+// causing timeout flakes (the whole file runs ~16s on CI vs <2s locally). Give
+// the file a generous timeout so heavy renders stay deterministic everywhere.
+vi.setConfig({ testTimeout: 20000 });
+
 // Helper to build a minimal journal event
 function makeEvent(seq: number, extra?: Record<string, unknown>) {
   return {
