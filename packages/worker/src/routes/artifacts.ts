@@ -2,13 +2,10 @@ import { R2ArtifactBackend } from "@tila/backend-r2";
 import {
   GREP_DEADLINE_MS,
   GREP_MAX_MATCHES,
-  GREP_MAX_MATCHES_PER_BLOB,
-  GREP_PER_BLOB_BYTE_CAP,
   GREP_TOTAL_BYTE_CAP,
   GrepQueryError,
   compileGrepMatcher,
   matchLine,
-  splitChunkIntoLines,
   validateGrepPattern,
 } from "@tila/core";
 import {
@@ -21,12 +18,23 @@ import { Hono } from "hono";
 import { ZodError, z } from "zod";
 import { ARTIFACT_REPAIR_SCAN_LIMIT } from "../config";
 import { analyticsCtxFrom } from "../lib/analytics";
+import {
+  type GrepCandidate,
+  type GrepResult,
+  type GrepScanState,
+  callPointerWithRetry,
+  compensateAndRespond,
+  makeLineScanAccumulator,
+  scanR2Candidate,
+} from "../lib/artifact-service";
+// Re-export helpers that are tested via the route module (existing tests import from here)
+export {
+  callPointerWithRetry,
+  compensateAndRespond,
+} from "../lib/artifact-service";
 import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO } from "../lib/do-forward";
-import {
-  MAX_BYTES_FOR_NORMALIZATION,
-  normalizeArtifactText,
-} from "../lib/normalize-text";
+import { normalizeArtifactText } from "../lib/normalize-text";
 import { getValidatedSchema } from "../lib/schema-validation";
 import { type ScanRow, buildRebuildCandidates } from "../lib/search-rebuild";
 import { zodValidationError } from "../lib/validation";
@@ -74,133 +82,7 @@ export function isUnsafeArtifactResource(resource: string): boolean {
   return resource.includes("/") || resource.includes("..");
 }
 
-// ---------------------------------------------------------------------------
-// Retry + compensation helpers for the artifact upload route
-// ---------------------------------------------------------------------------
-
-type PointerResult =
-  | { ok: true; response: Response }
-  | { ok: false; response: Response | null; threw: boolean };
-
-/**
- * Calls DO /artifact/pointer with a single retry on transient failure.
- *
- * Retry fires when:
- *   (a) stub.fetch() throws (network error), or
- *   (b) the response status is 5xx (DO internal error).
- *
- * 4xx responses are NOT retried — deterministic failures (undeclared kind,
- * stale fence, validation) cannot be resolved by retry.
- *
- * upsertPointer uses INSERT OR IGNORE, so retries are idempotent.
- */
-export async function callPointerWithRetry(
-  stub: DurableObjectStub,
-  payload: Record<string, unknown>,
-  analyticsCtx:
-    | {
-        analytics: AnalyticsEngineDataset;
-        ctx: ExecutionContext;
-        projectId: string;
-      }
-    | undefined,
-): Promise<PointerResult> {
-  const MAX_ATTEMPTS = 2;
-
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    let response: Response;
-    try {
-      response = await forwardToDO(
-        stub,
-        "/artifact/pointer",
-        "POST",
-        payload,
-        undefined,
-        analyticsCtx,
-      );
-    } catch {
-      // Network error (stub.fetch threw) -- retry if attempts remain
-      if (attempt < MAX_ATTEMPTS - 1) continue;
-      return { ok: false, response: null, threw: true };
-    }
-
-    // 2xx -- success
-    if (response.ok) {
-      return { ok: true, response };
-    }
-
-    // 4xx -- deterministic failure, do NOT retry
-    if (response.status >= 400 && response.status < 500) {
-      return { ok: false, response, threw: false };
-    }
-
-    // 5xx -- transient failure, retry if attempts remain
-    if (attempt < MAX_ATTEMPTS - 1) continue;
-    return { ok: false, response, threw: false };
-  }
-
-  // Should not reach here, but TypeScript needs exhaustive return
-  return { ok: false, response: null, threw: true };
-}
-
-type CompensationResult = {
-  status: 500 | 502;
-  body: {
-    ok: false;
-    error: {
-      code: "upload-failed" | "pointer-registration-failed";
-      message: string;
-      retryable: true;
-      r2Key?: string;
-    };
-  };
-};
-
-/**
- * Attempts R2 delete compensation after all pointer registration attempts fail.
- *
- * Two outcomes:
- *   - R2 delete succeeds: returns 502 upload-failed (no r2Key -- blob cleaned up).
- *   - R2 delete fails: returns 500 pointer-registration-failed with r2Key in body
- *     (blob exists in R2 pending reconciliation; r2Key is the recovery key).
- */
-export async function compensateAndRespond(
-  r2: { delete(key: string): Promise<void> },
-  r2Key: string,
-): Promise<CompensationResult> {
-  try {
-    await r2.delete(r2Key);
-    // Compensation succeeded: blob removed, no pointer row, clean state
-    return {
-      status: 502,
-      body: {
-        ok: false,
-        error: {
-          code: "upload-failed",
-          message:
-            "Artifact upload failed: DO pointer registration failed after retry. Blob cleaned up. Retry the full upload.",
-          retryable: true,
-        },
-      },
-    };
-  } catch {
-    // Compensation also failed: blob exists in R2, no pointer row
-    // Include r2Key so client/SDK can use it for recovery
-    return {
-      status: 500,
-      body: {
-        ok: false,
-        error: {
-          code: "pointer-registration-failed",
-          message:
-            "Artifact upload partially failed: blob stored in R2 but pointer registration failed. Blob pending reconciliation.",
-          retryable: true,
-          r2Key,
-        },
-      },
-    };
-  }
-}
+// callPointerWithRetry and compensateAndRespond live in ../lib/artifact-service
 
 // POST /projects/:projectId/artifacts/text -- text-first artifact write (JSON body)
 artifacts.post("/text", requirePermission("write"), async (c) => {
@@ -611,18 +493,7 @@ artifacts.get("/latest", requirePermission("read"), async (c) => {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Grep candidate type (mirrors GrepCandidate from @tila/ops-sqlite but local)
-// ---------------------------------------------------------------------------
-
-interface GrepCandidate {
-  r2_key: string;
-  kind: string;
-  resource: string | null;
-  mime_type: string;
-  bytes: number;
-  content_inline: string | null;
-}
+// GrepCandidate type lives in ../lib/artifact-service
 
 // GET /projects/:projectId/artifacts/grep -- server-side content grep over artifacts
 // Note: must be registered BEFORE the /:key{.+$} catch-all
@@ -694,20 +565,14 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
   // 4. Scan loop
   const deadline = AbortSignal.timeout(GREP_DEADLINE_MS);
 
-  type GrepResult = {
-    key: string;
-    kind: string;
-    resource: string | null;
-    lines: Array<{ line: number; text: string; col: number }>;
-    truncated?: boolean;
-  };
-
   const results: GrepResult[] = [];
-  let scanned = 0;
-  let skipped = 0;
-  let truncated = false;
-  let totalBytes = 0;
-  let totalMatches = 0;
+  const state: GrepScanState = {
+    totalBytes: 0,
+    totalMatches: 0,
+    truncated: false,
+    scanned: 0,
+    skipped: 0,
+  };
 
   // Separate candidates by inline vs R2-backed
   const inlineCandidates: GrepCandidate[] = [];
@@ -721,102 +586,22 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Shared line-scan accumulator — used by BOTH the inline path and the R2
-  // path so cap/match-accounting logic lives in one place.
-  //
-  // Feed decoded string chunks via `pushChunk(decoded)`. When the blob is
-  // fully consumed, call `flush()` to process the final pending line.
-  //
-  // Callers are responsible for tracking raw byte counts and setting
-  // `blobTruncated` / `truncated` flags before calling `pushChunk` so the
-  // accumulator can stop early.
-  // ---------------------------------------------------------------------------
-
-  function makeLineScanAccumulator() {
-    const blobLines: Array<{ line: number; text: string; col: number }> = [];
-    let blobMatches = 0;
-    let blobTruncated = false;
-    let pending = "";
-    let lineNumber = 0;
-
-    function processLines(lines: string[]): void {
-      for (const line of lines) {
-        lineNumber++;
-        if (blobMatches >= GREP_MAX_MATCHES_PER_BLOB) {
-          blobTruncated = true;
-          break;
-        }
-        if (totalMatches >= GREP_MAX_MATCHES) {
-          truncated = true;
-          break;
-        }
-        const hit = matchLine(matcher, line, lineNumber);
-        if (hit) {
-          blobLines.push(hit);
-          blobMatches++;
-          totalMatches++;
-        }
-      }
-    }
-
-    return {
-      /** Feed a decoded string chunk. Returns true if scanning should stop. */
-      pushChunk(decoded: string): boolean {
-        if (blobTruncated || truncated) return true;
-        const { lines, pending: newPending } = splitChunkIntoLines(
-          pending,
-          decoded,
-        );
-        pending = newPending;
-        processLines(lines);
-        return blobTruncated || truncated;
-      },
-
-      /** Flush the final pending line at EOF. */
-      flush(): void {
-        if (blobTruncated || truncated) return;
-        if (pending) {
-          lineNumber++;
-          if (
-            blobMatches < GREP_MAX_MATCHES_PER_BLOB &&
-            totalMatches < GREP_MAX_MATCHES
-          ) {
-            const hit = matchLine(matcher, pending, lineNumber);
-            if (hit) {
-              blobLines.push(hit);
-              blobMatches++;
-              totalMatches++;
-            }
-          }
-        }
-      },
-
-      get lines() {
-        return blobLines;
-      },
-      get isBlobTruncated() {
-        return blobTruncated;
-      },
-      setBlobTruncated() {
-        blobTruncated = true;
-      },
-    };
-  }
-
   // Process inline candidates first (0 R2 reads)
   for (const candidate of inlineCandidates) {
     if (
       deadline.aborted ||
-      totalBytes >= GREP_TOTAL_BYTE_CAP ||
-      totalMatches >= GREP_MAX_MATCHES
+      state.totalBytes >= GREP_TOTAL_BYTE_CAP ||
+      state.totalMatches >= GREP_MAX_MATCHES
     ) {
-      truncated = true;
+      state.truncated = true;
       break;
     }
 
     const content = candidate.content_inline as string;
-    const acc = makeLineScanAccumulator();
+    const acc = makeLineScanAccumulator(
+      (line, lineNumber) => matchLine(matcher, line, lineNumber),
+      state,
+    );
     // Run the inline content through the shared accumulator (one "chunk" + EOF flush)
     acc.pushChunk(content);
     acc.flush();
@@ -829,107 +614,35 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
         lines: acc.lines,
       });
     }
-    scanned++;
+    state.scanned++;
   }
 
   // Process R2-backed candidates with ≤6 in-flight concurrency
   const CONCURRENCY = 6;
 
-  async function scanR2Candidate(
-    candidate: GrepCandidate,
-  ): Promise<GrepResult | null> {
-    try {
-      const obj = await c.env.ARTIFACTS.get(candidate.r2_key);
-      if (obj == null) {
-        skipped++;
-        return null;
-      }
-
-      // Read raw Uint8Array chunks from the R2 body to track RAW bytes pulled
-      // from R2 (per design spec: GREP_PER_BLOB_BYTE_CAP / GREP_TOTAL_BYTE_CAP
-      // are measured on raw bytes, tracking value.byteLength before decode).
-      // A stateful TextDecoder handles multi-byte code points across chunk
-      // boundaries without re-encoding.
-      const rawReader = obj.body.getReader();
-      const decoder = new TextDecoder("utf-8", { fatal: false });
-
-      const acc = makeLineScanAccumulator();
-      let blobBytes = 0;
-
-      try {
-        while (true) {
-          const { done, value } = await rawReader.read();
-
-          if (done) {
-            // Flush the decoder's internal state for the final incomplete
-            // multi-byte sequence (if any), then push through the accumulator.
-            const tail = decoder.decode(undefined, { stream: false });
-            if (tail) acc.pushChunk(tail);
-            break;
-          }
-
-          // Count RAW bytes before decode — this is the normative byte cap.
-          blobBytes += value.byteLength;
-          totalBytes += value.byteLength;
-
-          // Decode this chunk with streaming to preserve multi-byte boundaries.
-          // Always decode and scan lines from the current chunk before checking
-          // caps — this ensures matches from already-read content are not
-          // silently dropped even when the chunk pushes us over the byte cap.
-          const decoded = decoder.decode(value, { stream: true });
-          acc.pushChunk(decoded);
-
-          // After processing the chunk's lines, set truncation flags so the
-          // NEXT iteration (or the break below) stops further scanning.
-          if (blobBytes > GREP_PER_BLOB_BYTE_CAP) {
-            acc.setBlobTruncated();
-          }
-          if (totalBytes >= GREP_TOTAL_BYTE_CAP || deadline.aborted) {
-            truncated = true;
-          }
-
-          if (acc.isBlobTruncated || truncated) break;
-        }
-      } finally {
-        rawReader.cancel().catch(() => {});
-      }
-
-      // Flush the final pending line at EOF (accumulator handles the guard).
-      acc.flush();
-
-      scanned++;
-
-      if (acc.lines.length > 0) {
-        const result: GrepResult = {
-          key: candidate.r2_key,
-          kind: candidate.kind,
-          resource: candidate.resource,
-          lines: acc.lines,
-        };
-        if (acc.isBlobTruncated) result.truncated = true;
-        return result;
-      }
-      return null;
-    } catch {
-      // R2 get throws OR body stream throws — skip this candidate
-      skipped++;
-      return null;
-    }
-  }
-
   // Process R2 candidates in batches of ≤ CONCURRENCY
   for (let i = 0; i < r2Candidates.length; i += CONCURRENCY) {
     if (
       deadline.aborted ||
-      totalBytes >= GREP_TOTAL_BYTE_CAP ||
-      totalMatches >= GREP_MAX_MATCHES
+      state.totalBytes >= GREP_TOTAL_BYTE_CAP ||
+      state.totalMatches >= GREP_MAX_MATCHES
     ) {
-      truncated = true;
+      state.truncated = true;
       break;
     }
 
     const batch = r2Candidates.slice(i, i + CONCURRENCY);
-    const batchResults = await Promise.all(batch.map(scanR2Candidate));
+    const batchResults = await Promise.all(
+      batch.map((candidate) =>
+        scanR2Candidate(
+          c.env.ARTIFACTS,
+          candidate,
+          (line, lineNumber) => matchLine(matcher, line, lineNumber),
+          state,
+          deadline,
+        ),
+      ),
+    );
 
     for (const result of batchResults) {
       if (result != null) {
@@ -940,15 +653,15 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
 
   // Truncation: if DO returned exactly `limit` candidates, more may exist
   if (candidates.length >= limit) {
-    truncated = true;
+    state.truncated = true;
   }
 
   return c.json({
     ok: true,
     results,
-    scanned,
-    skipped,
-    truncated,
+    scanned: state.scanned,
+    skipped: state.skipped,
+    truncated: state.truncated,
   });
 });
 
