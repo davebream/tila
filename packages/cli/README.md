@@ -37,6 +37,7 @@ See the [latest release](https://github.com/davebream/tila/releases/latest) for 
 | `summary` | Show project summary |
 | `state` | List all active claims |
 | `token` | Manage project API tokens |
+| `repos` | Manage the GitHub repo allowlist (`repos register` to register the configured repo) |
 | `template` | Manage task templates |
 | `index` | Manage index artifacts |
 | `config` | View project configuration |

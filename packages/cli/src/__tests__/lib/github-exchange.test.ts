@@ -206,6 +206,35 @@ describe("resolveGithubRepoToken", () => {
     ).rejects.toThrow(/not registered/i);
   });
 
+  // AC-3 regression (#103): the 403 auth-failure message must name the real
+  // recovery command `tila repos register`, never the phantom "tila admin CLI".
+  // This drives resolveGithubRepoToken's res.status === 403 branch directly
+  // (the reachable behavioral seam for the github-exchange message bug).
+  it("names `tila repos register` and not 'tila admin CLI' in the 403 message", async () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(resolveAppUserToken).mockResolvedValueOnce("ghu_test");
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: { message: "Repository not registered for this project" },
+      }),
+    });
+
+    let thrown: unknown;
+    try {
+      await resolveGithubRepoToken(baseConfig, "/tmp/tila");
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+    expect(message).toContain("tila repos register");
+    expect(message).not.toContain("tila admin CLI");
+  });
+
   it("throws on 500 with status code", async () => {
     vi.mocked(existsSync).mockReturnValue(false);
     vi.mocked(resolveAppUserToken).mockResolvedValueOnce("ghu_test");

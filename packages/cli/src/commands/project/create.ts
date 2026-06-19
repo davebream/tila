@@ -201,19 +201,22 @@ async function runCloudflareProvisioning(
       githubEnabled = true;
     } catch (err) {
       if (err instanceof TilaApiError) {
-        if (s) s.stop(`Repo registration failed: ${err.message}`);
+        if (s)
+          s.stop(
+            `Repo registration failed: ${err.message}. Once resolved, run: tila repos register`,
+          );
       } else if (
         err instanceof Error &&
         err.message.includes("Network error")
       ) {
         if (s)
           s.stop(
-            "Repo registration skipped (Worker not reachable yet — this is normal for first deploy).",
+            "Repo registration skipped (Worker not reachable yet — normal for first deploy). Once the Worker is live, run: tila repos register",
           );
       } else {
         if (s)
           s.stop(
-            `Repo registration failed: ${err instanceof Error ? err.message : String(err)}`,
+            `Repo registration failed: ${err instanceof Error ? err.message : String(err)}. Once resolved, run: tila repos register`,
           );
       }
     }
