@@ -668,9 +668,11 @@ export function searchEntities(
     entity_type?: string;
     limit?: number;
     tagFilter?: string[];
+    /** Internal: skip validation when the caller (searchAll) has already validated. */
+    _skipValidation?: boolean;
   },
 ): EntitySearchResult[] {
-  validateFtsQuery(query.q);
+  if (!query._skipValidation) validateFtsQuery(query.q);
   const limit = Math.min(query.limit ?? 20, 100);
 
   const tagConditions = query.tagFilter?.length
@@ -741,6 +743,9 @@ export function searchAll(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   query: { q: string; limit?: number; tagFilter?: string[] },
 ): UnifiedSearchResult[] {
+  // Validate the FTS query once here rather than once per sub-search.
+  validateFtsQuery(query.q);
+
   const limit = Math.min(query.limit ?? 20, 100);
   // Over-fetch from each source to allow interleaving (3 sources now)
   const perSourceLimit = Math.ceil(limit / 3) + 5;
@@ -749,16 +754,19 @@ export function searchAll(
     q: query.q,
     limit: perSourceLimit,
     tagFilter: query.tagFilter,
+    _skipValidation: true,
   });
   const artifacts = searchArtifacts(db, {
     q: query.q,
     limit: perSourceLimit,
     tagFilter: query.tagFilter,
+    _skipValidation: true,
   });
   const records = searchRecords(db, {
     q: query.q,
     limit: perSourceLimit,
     tagFilter: query.tagFilter,
+    _skipValidation: true,
   });
 
   const entityResults: UnifiedSearchResult[] = entities.map((r) => ({

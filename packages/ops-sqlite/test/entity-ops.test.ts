@@ -10,6 +10,7 @@ import {
   get,
   getCompactEntityStats,
   list,
+  searchAll,
   searchEntities,
   update,
 } from "../src/entity-ops";
@@ -1397,6 +1398,39 @@ describe("FTS lean result (no data blob)", () => {
     expect(results[0].name).toBe("FTS lean test entity");
     expect(results[0].snippet).toBeDefined();
     expect(results[0].indexed_at).toBeTypeOf("number");
+  });
+});
+
+// ── Task 7: FTS validate-once per searchAll ───────────────────────────────────
+describe("searchAll validates FTS query once (not per sub-search)", () => {
+  it("calls validateFtsQuery exactly once across all three sub-searches", async () => {
+    // We spy on validateFtsQuery via the artifact-ops module (it's re-exported from there)
+    const artifactOps = await import("../src/artifact-ops");
+    const spy = vi.spyOn(artifactOps, "validateFtsQuery");
+    spy.mockImplementation(() => {}); // pass-through (no actual validation)
+
+    try {
+      searchAll(testDb.db, { q: "test query" });
+      // validateFtsQuery should be called exactly once (in searchAll),
+      // not 3 times (once per sub-search)
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("standalone searchEntities still validates independently", async () => {
+    const artifactOps = await import("../src/artifact-ops");
+    const spy = vi.spyOn(artifactOps, "validateFtsQuery");
+    spy.mockImplementation(() => {});
+
+    try {
+      searchEntities(testDb.db, { q: "test" });
+      // standalone call must still validate once
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

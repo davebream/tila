@@ -710,9 +710,11 @@ export function searchArtifacts(
     source_only?: boolean;
     limit?: number;
     tagFilter?: string[];
+    /** Internal: skip validation when the caller (searchAll) has already validated. */
+    _skipValidation?: boolean;
   },
 ): ArtifactSearchResult[] {
-  validateFtsQuery(query.q);
+  if (!query._skipValidation) validateFtsQuery(query.q);
   const limit = Math.min(query.limit ?? 20, 100);
 
   // Build dynamic WHERE conditions using Drizzle sql tagged templates
