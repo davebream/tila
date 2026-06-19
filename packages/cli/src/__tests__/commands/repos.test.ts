@@ -237,6 +237,21 @@ describe("tila repos register", () => {
     expect(text).not.toContain("tila_");
   });
 
+  it("surfaces a transient/retryable (502/504) error as safe to re-run, exit 1", async () => {
+    mockPost.mockRejectedValue(
+      new TilaApiError(504, "UNKNOWN", "GitHub API request timed out", true),
+    );
+    const cmd = await loadCommand();
+    const register = getSubCommand(cmd, "register");
+
+    await expect(runCmd(register, {})).rejects.toThrow("process.exit(1)");
+    const text = joinCalls(errSpy);
+    expect(text).toContain("transient");
+    expect(text).toContain("safe to re-run");
+    expect(text).not.toContain("Bearer");
+    expect(text).not.toContain("tila_");
+  });
+
   it("surfaces an actionable message when the Worker is unreachable, exit 1", async () => {
     mockPost.mockRejectedValue(
       new Error(
