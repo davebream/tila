@@ -117,9 +117,15 @@ export function extractSearchText(value: Record<string, unknown>): string {
  */
 export function searchRecords(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  query: { q: string; limit?: number; tagFilter?: string[] },
+  query: {
+    q: string;
+    limit?: number;
+    tagFilter?: string[];
+    /** Internal: skip validation when the caller (searchAll) has already validated. */
+    _skipValidation?: boolean;
+  },
 ): RecordSearchResult[] {
-  validateFtsQuery(query.q);
+  if (!query._skipValidation) validateFtsQuery(query.q);
   const limit = Math.min(query.limit ?? 20, 100);
 
   const tagConditions = query.tagFilter?.length

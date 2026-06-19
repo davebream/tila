@@ -87,16 +87,9 @@ function reindexArtifactBatch(
     }
   });
 
-  // Check if more work remains
-  const remaining = db.get<{ cnt: number }>(sql`
-    SELECT COUNT(*) as cnt
-    FROM artifact_pointers ap
-    WHERE ap.tombstoned = 0
-      AND NOT EXISTS (
-        SELECT 1 FROM artifact_search_docs asd WHERE asd.artifact_key = ap.r2_key
-      )
-  `);
-  const done = (remaining?.cnt ?? 0) === 0;
+  // Determine completion via batch size: if we got fewer rows than requested,
+  // there are no more unindexed artifacts (no extra COUNT query needed).
+  const done = rows.length < batchSize;
 
   return { done, processed: rows.length };
 }

@@ -68,22 +68,9 @@ function makeDeps(
 // ---------------------------------------------------------------------------
 
 describe("GET /admin/pointer-keys", () => {
-  it("returns empty keys array when no pointers exist", async () => {
-    const { db } = createTestDb();
-    const app = createAdminRoutes(makeDeps(db, { abort: vi.fn() }));
+  const now = Date.now();
 
-    const res = await app.request("/admin/pointer-keys");
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { keys: string[] };
-    expect(body).toEqual({ keys: [] });
-  });
-
-  it("returns all pointer keys including tombstoned ones", async () => {
-    const { db } = createTestDb();
-
-    const now = Date.now();
-    // Seed two live pointers + one tombstoned
+  function seedPointers(db: ReturnType<typeof createTestDb>["db"]): void {
     db.insert(schema.artifactPointers)
       .values([
         {
@@ -121,17 +108,87 @@ describe("GET /admin/pointer-keys", () => {
         },
       ])
       .run();
+  }
+
+  it("returns empty keys array and null nextCursor when no pointers exist", async () => {
+    const { db } = createTestDb();
+    const app = createAdminRoutes(makeDeps(db, { abort: vi.fn() }));
+
+    const res = await app.request("/admin/pointer-keys");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      keys: string[];
+      nextCursor: string | null;
+    };
+    expect(body.keys).toEqual([]);
+    expect(body.nextCursor).toBeNull();
+  });
+
+  it("returns all pointer keys including tombstoned ones (no pagination params)", async () => {
+    const { db } = createTestDb();
+    seedPointers(db);
 
     const app = createAdminRoutes(makeDeps(db, { abort: vi.fn() }));
     const res = await app.request("/admin/pointer-keys");
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { keys: string[] };
+    const body = (await res.json()) as {
+      keys: string[];
+      nextCursor: string | null;
+    };
     // Should include tombstoned key too — sorted by r2_key
     expect(body.keys).toHaveLength(3);
     expect(body.keys).toContain("produced/T-1/abc123.txt");
     expect(body.keys).toContain("sources/def456.bin");
     expect(body.keys).toContain("produced/T-3/ghi789.txt");
+    expect(body.nextCursor).toBeNull();
+  });
+
+  it("paginates: returns first page and non-null nextCursor when limit < total", async () => {
+    const { db } = createTestDb();
+    seedPointers(db);
+
+    const app = createAdminRoutes(makeDeps(db, { abort: vi.fn() }));
+    const res = await app.request("/admin/pointer-keys?limit=2");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      keys: string[];
+      nextCursor: string | null;
+    };
+    expect(body.keys).toHaveLength(2);
+    expect(body.nextCursor).not.toBeNull();
+  });
+
+  it("paginates: cursor advances to next page", async () => {
+    const { db } = createTestDb();
+    seedPointers(db);
+
+    const app = createAdminRoutes(makeDeps(db, { abort: vi.fn() }));
+    const res1 = await app.request("/admin/pointer-keys?limit=2");
+    const body1 = (await res1.json()) as {
+      keys: string[];
+      nextCursor: string | null;
+    };
+    expect(body1.nextCursor).not.toBeNull();
+
+    const cursor1 = body1.nextCursor;
+    if (!cursor1) throw new Error("expected nextCursor to be non-null");
+    const res2 = await app.request(
+      `/admin/pointer-keys?limit=2&cursor=${encodeURIComponent(cursor1)}`,
+    );
+    const body2 = (await res2.json()) as {
+      keys: string[];
+      nextCursor: string | null;
+    };
+    expect(body2.keys).toHaveLength(1);
+    expect(body2.nextCursor).toBeNull();
+
+    // All 3 keys, no duplicates
+    const allKeys = [...body1.keys, ...body2.keys];
+    expect(allKeys).toHaveLength(3);
+    expect(new Set(allKeys).size).toBe(3);
   });
 });
 
