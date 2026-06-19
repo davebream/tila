@@ -118,6 +118,37 @@ describe("TasksPage", () => {
     expect(screen.getByText("another-user")).toBeInTheDocument();
   });
 
+  test("type filter chip remove button has svg child (not ASCII x)", async () => {
+    // Render with a route that includes a type query param so the chip appears
+    const user = userEvent.setup();
+    renderWithProviders(<TasksPage />, {
+      route: "/p/test-project/tasks?type=task",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("entity-1")).toBeInTheDocument();
+    });
+
+    // The type chip should be visible with a remove button
+    const removeBtn = screen.getByRole("button", {
+      name: /remove type filter/i,
+    });
+    expect(removeBtn).toBeInTheDocument();
+
+    // Must contain an svg child, NOT the literal text "x"
+    const svgEl = removeBtn.querySelector("svg");
+    expect(svgEl).not.toBeNull();
+    expect(removeBtn.textContent).not.toBe("x");
+
+    // Clicking the remove button should clear the chip
+    await user.click(removeBtn);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /remove type filter/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   test("does not show hint when has_more is false", async () => {
     server.use(
       http.get("*/projects/*/tasks", () => {

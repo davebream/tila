@@ -504,7 +504,18 @@ export function JournalPage() {
                 className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
                 aria-label="Remove resource filter"
               >
-                x
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
+                </svg>
               </button>
             </span>
           )}
@@ -522,7 +533,18 @@ export function JournalPage() {
                 className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
                 aria-label={`Remove kind filter: ${k}`}
               >
-                x
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
+                </svg>
               </button>
             </span>
           ))}
@@ -540,7 +562,18 @@ export function JournalPage() {
                 className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
                 aria-label={`Remove source filter: ${s}`}
               >
-                x
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
+                </svg>
               </button>
             </span>
           ))}
