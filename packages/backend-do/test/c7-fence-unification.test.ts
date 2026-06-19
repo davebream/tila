@@ -27,7 +27,12 @@ import {
 } from "../../ops-sqlite/src";
 
 const { assertResourceFence } = fenceOps;
-const { compactEntity, create: createEntity, update } = entityOps;
+const {
+  compactEntity,
+  create: createEntity,
+  update,
+  getCompactEntityStats,
+} = entityOps;
 const { acquire } = coordinationOps;
 
 // Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
@@ -366,7 +371,8 @@ describe("compactEntity — claim lookup no regression", () => {
       user: string;
     }[];
 
-    const compact = compactEntity(db, entity, allClaims);
+    const stats = getCompactEntityStats(db, [entity.id]);
+    const compact = compactEntity(db, entity, allClaims, stats);
     expect(compact.claimed_by).toBe("machine-a/user-a");
   });
 
@@ -385,7 +391,8 @@ describe("compactEntity — claim lookup no regression", () => {
       { actor: "test" },
     );
 
-    const compact = compactEntity(db, entity, []);
+    const stats = getCompactEntityStats(db, [entity.id]);
+    const compact = compactEntity(db, entity, [], stats);
     expect(compact.claimed_by).toBeNull();
   });
 });
@@ -560,7 +567,8 @@ describe("acquire — entity resource write-path canonicalization", () => {
       user: string;
     }[];
 
-    const compact = compactEntity(db, entity, allClaims);
+    const stats = getCompactEntityStats(db, [entity.id]);
+    const compact = compactEntity(db, entity, allClaims, stats);
     expect(compact.claimed_by).toBe("machine-x/user-x");
   });
 

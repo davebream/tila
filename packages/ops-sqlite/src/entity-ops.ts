@@ -371,14 +371,13 @@ export function compactEntity(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   entity: Entity,
   activeClaims: Array<{ resource: string; machine: string; user: string }>,
-  stats?: CompactEntityStats,
+  stats: CompactEntityStats,
 ): CompactEntity {
   const data = entity.data as Record<string, unknown>;
   const resource = `${entity.type}:${entity.id}`;
   const claim = activeClaims.find((c) => c.resource === resource) ?? null;
-  const fallbackStats = stats ?? getCompactEntityStats(db, [entity.id]);
-  const blockers = fallbackStats.blockersByEntityId.get(entity.id) ?? 0;
-  const artifacts = fallbackStats.artifactsByEntityId.get(entity.id) ?? 0;
+  const blockers = stats.blockersByEntityId.get(entity.id) ?? 0;
+  const artifacts = stats.artifactsByEntityId.get(entity.id) ?? 0;
 
   return {
     id: entity.id,

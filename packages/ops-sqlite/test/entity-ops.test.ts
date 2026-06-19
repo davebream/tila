@@ -1139,13 +1139,54 @@ describe("compactEntity stats batching", () => {
       .run(first.id, first.id, second.id);
 
     const stats = getCompactEntityStats(testDb.db, [first.id, second.id]);
+    const statsFirst = getCompactEntityStats(testDb.db, [first.id]);
+    const statsSecond = getCompactEntityStats(testDb.db, [second.id]);
 
+    // Both pre-fetching bulk stats and per-entity stats must produce the same result
     expect(compactEntity(testDb.db, first, [], stats)).toEqual(
-      compactEntity(testDb.db, first, []),
+      compactEntity(testDb.db, first, [], statsFirst),
     );
     expect(compactEntity(testDb.db, second, [], stats)).toEqual(
-      compactEntity(testDb.db, second, []),
+      compactEntity(testDb.db, second, [], statsSecond),
     );
+  });
+});
+
+describe("compactEntity stats required -- no N+1 fallback", () => {
+  it("compactEntity does not issue per-entity stats queries when stats are pre-fetched", () => {
+    const entity = create(
+      testDb.db,
+      {
+        id: "compact-req-1",
+        type: "task",
+        data: { title: "Req Stats Test", status: "open" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    const stats = getCompactEntityStats(testDb.db, [entity.id]);
+
+    // Count how many SELECT queries involve 'blocker' or 'artifact' stats
+    let statsQueries = 0;
+    const origPrepare = testDb.rawDb.prepare.bind(testDb.rawDb);
+    testDb.rawDb.prepare = (sql: string) => {
+      if (
+        /blockers|artifact_count|entity_relationships.*blocks|entity_artifact/i.test(
+          sql,
+        )
+      ) {
+        statsQueries++;
+      }
+      return origPrepare(sql);
+    };
+
+    compactEntity(testDb.db, entity, [], stats);
+    testDb.rawDb.prepare = origPrepare;
+
+    // With pre-fetched stats, no per-entity stats queries should be issued
+    expect(statsQueries).toBe(0);
   });
 });
 

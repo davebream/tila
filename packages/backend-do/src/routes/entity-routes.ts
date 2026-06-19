@@ -104,9 +104,10 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     const compact = c.req.query("compact") === "true";
     if (compact) {
       const activeClaims = coordinationOps.listClaims(db);
+      const stats = entityOps.getCompactEntityStats(db, [entity.id]);
       return c.json({
         ok: true,
-        entity: entityOps.compactEntity(db, entity, activeClaims),
+        entity: entityOps.compactEntity(db, entity, activeClaims, stats),
       });
     }
 
