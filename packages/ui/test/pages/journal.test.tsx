@@ -6,6 +6,13 @@ import { vi } from "vitest";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor } from "../test-utils";
 
+// Several JournalPage cases render hundreds of rows (accumulator trim-notice at
+// MAX_ROWS - PRUNE_COUNT = 400 events) and drive React Query state transitions.
+// On a cold, loaded CI runner these heavy renders exceed vitest's 5s default,
+// causing timeout flakes (the whole file runs ~16s on CI vs <2s locally). Give
+// the file a generous timeout so heavy renders stay deterministic everywhere.
+vi.setConfig({ testTimeout: 20000 });
+
 // Helper to build a minimal journal event
 function makeEvent(seq: number, extra?: Record<string, unknown>) {
   return {
@@ -382,20 +389,21 @@ describe("JournalPage", () => {
 
     renderWithProviders(<JournalPage />);
 
+    // Wait until the data row AND its links have rendered and settled. A slow
+    // CI runner can paint the "#1" seq cell before the resource link resolves,
+    // so assert the primary link's href inside waitFor (retries until settled)
+    // rather than querying synchronously right after the seq appears.
+    let links: HTMLElement[] = [];
     await waitFor(() => {
       expect(screen.getByText("#1")).toBeInTheDocument();
+      // First row is the header; second row is the data row.
+      const dataRow = screen.getAllByRole("row")[1];
+      links = within(dataRow).getAllByRole("link");
+      // PRIMARY link (first link) must point to /artifacts/... not /tasks/...
+      expect(links[0]?.getAttribute("href")).toMatch(
+        /\/artifacts\/produced\/x\/file\.txt$/,
+      );
     });
-
-    // Find the resource cell — it's the 4th cell in the row
-    const rows = screen.getAllByRole("row");
-    // First row is the header; second row is the data row
-    const dataRow = rows[1];
-    const links = within(dataRow).getAllByRole("link");
-
-    // PRIMARY link (first link) must point to /artifacts/... not /tasks/...
-    expect(links[0].getAttribute("href")).toMatch(
-      /\/artifacts\/produced\/x\/file\.txt$/,
-    );
 
     // No link should end with /tasks/<r2_key>
     for (const link of links) {
