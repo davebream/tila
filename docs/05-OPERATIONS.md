@@ -468,6 +468,46 @@ wrangler secret delete INFRA_DESTROY_TOKEN
 
 Do this as a pre-deploy step for each affected environment. It is a cleanup action to perform up front, not a post-deploy verification — the goal is that the obsolete secret never coexists with the new deployment.
 
+### Sweep Secret (`SWEEP_SECRET`)
+
+`SWEEP_SECRET` authenticates the `/_internal/sweep` endpoint. The Worker compares the `X-Sweep-Secret` request header against this secret using a constant-time comparison (HMAC key `tila-sweep-compare`, distinct from the infra admin key). When `SWEEP_SECRET` is unset or the header value does not match, the endpoint returns **403 Forbidden** — the sweep will not run.
+
+The cron trigger defined in `wrangler.toml` passes this secret automatically on each scheduled invocation. It is **not** the same key as `INFRA_ADMIN_TOKEN` and must be stored as a separate Worker secret.
+
+#### Setup
+
+Generate a 32-byte random value and store it as a Worker secret:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+wrangler secret put SWEEP_SECRET
+```
+
+If `SWEEP_SECRET` is missing, every scheduled sweep invocation returns 403 and logs a `sweep_error` Analytics datapoint. You can verify the secret is set by running:
+
+```bash
+wrangler secret list | grep SWEEP_SECRET
+```
+
+#### Manual trigger with the secret
+
+To trigger the sweep manually (e.g. during incident response):
+
+```bash
+curl -X POST https://<worker-url>/_internal/sweep \
+  -H "X-Sweep-Secret: <your-sweep-secret>"
+```
+
+#### Rotation
+
+Rotate on any suspected compromise or on the same cadence as `INFRA_ADMIN_TOKEN`:
+
+```bash
+wrangler secret put SWEEP_SECRET   # enter new value at the prompt
+```
+
+The old secret is invalidated immediately; the next scheduled cron invocation will use the new value automatically.
+
 ## Troubleshooting
 
 Common failure modes and remediation steps.

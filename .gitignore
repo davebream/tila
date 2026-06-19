@@ -48,7 +48,5 @@ packages/cli-*/bin/tila.exe
 /.playwright-mcp/
 /2026-*-command-*.txt
 /2026-*-caveat*.txt
-OSS-RELEASE-RUNBOOK.md
-
 # Local AI tooling (not published)
 .claude/
