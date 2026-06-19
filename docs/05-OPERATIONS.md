@@ -885,3 +885,41 @@ Pages-only cleanup:
 Otherwise, the orphan is cleaned up automatically the next time you fully decommission the
 environment: `tila infra teardown` calls `deletePagesProject` idempotently as one of its
 teardown steps (a no-op for environments that never had a Pages project).
+
+## Pre-Tag Gates (env-gated, run before every release tag)
+
+These gates exercise live infrastructure. They are **not** part of CI (no live infrastructure in CI) and must be run manually before each release tag.
+
+### Gate 1: DO-state survival after restart
+
+Verifies that Durable Object SQLite state survives an eviction+restart cycle. Catches any regression where state is held only in memory.
+
+**Requirements:**
+- `TILA_BASE_URL` — live worker URL (e.g. `https://your-worker.workers.dev`)
+- `TILA_TOKEN` — an **admin-scoped** token. `POST /projects/:id/admin/restart` is protected by `requirePermission("admin")`. A 403 response means the token is not admin-scoped. Create one with: `tila token create --scope admin`
+
+```bash
+TILA_BASE_URL=https://your-worker.workers.dev \
+TILA_TOKEN=your_admin_token \
+pnpm --filter @tila/integration-tests exec vitest run src/do-eviction.test.ts
+```
+
+The test:
+1. Writes a uniquely-stamped task to the live project.
+2. POSTs `/_internal/projects/:id/admin/restart` — evicts the DO from memory.
+3. Reads the task back — **hard assertion:** if the data is absent, SQLite persistence is broken.
+4. Runs a best-of-3 read latency check — **advisory only:** fails are logged as warnings, never blocking. A latency above 5 000 ms is noted but does not fail the release.
+
+### Gate 2: Full test suite + typecheck
+
+```bash
+pnpm run typecheck && pnpm run check && pnpm test
+```
+
+`pnpm test` includes `pnpm run test:scripts` — the `scripts/*.test.mjs` suite covering version-policy, changelog, license-in-tarball, docs-rename, and repo-hygiene checks.
+
+### Gate 3: Biome formatting gate
+
+`pnpm run check` (Biome `--write`) must produce no diff after running. If it reformats files, stage and commit the result before tagging. CI runs `pnpm lint` (read-only) — format drift that slips past pre-commit will cause a red CI build on the tagged commit.
+
+See also `OSS-RELEASE-RUNBOOK.md §7` for the full pre-tag checklist.

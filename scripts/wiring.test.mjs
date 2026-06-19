@@ -9,9 +9,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(scriptDir, "..");
 
 test("root package.json has test:scripts script containing node --test", async () => {
-  const pkg = JSON.parse(
-    await readFile(join(rootDir, "package.json"), "utf8"),
-  );
+  const pkg = JSON.parse(await readFile(join(rootDir, "package.json"), "utf8"));
 
   assert.ok(
     pkg.scripts?.["test:scripts"],
@@ -24,7 +22,7 @@ test("root package.json has test:scripts script containing node --test", async (
   );
 });
 
-test('root package.json test:scripts glob resolves at least one .test.mjs file', () => {
+test("root package.json test:scripts glob resolves at least one .test.mjs file", () => {
   const files = readdirSync(scriptDir).filter((f) => f.endsWith(".test.mjs"));
   assert.ok(
     files.length > 0,
@@ -33,14 +31,9 @@ test('root package.json test:scripts glob resolves at least one .test.mjs file',
 });
 
 test('root package.json "test" script includes "test:scripts"', async () => {
-  const pkg = JSON.parse(
-    await readFile(join(rootDir, "package.json"), "utf8"),
-  );
+  const pkg = JSON.parse(await readFile(join(rootDir, "package.json"), "utf8"));
 
-  assert.ok(
-    pkg.scripts?.test,
-    'package.json must have a "test" script',
-  );
+  assert.ok(pkg.scripts?.test, 'package.json must have a "test" script');
   assert.match(
     pkg.scripts.test,
     /test:scripts/,
