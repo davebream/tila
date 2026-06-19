@@ -71,7 +71,7 @@ describe("CommandPalette", () => {
     });
   });
 
-  test("Tab stays within the dialog — does not escape to document body", async () => {
+  test("Tab keeps focus within the dialog content (focus-trap)", async () => {
     const user = userEvent.setup();
     renderWithProviders(<PaletteHarness initialOpen />);
 
@@ -79,17 +79,19 @@ describe("CommandPalette", () => {
       expect(screen.getByRole("combobox")).toBeInTheDocument();
     });
 
-    // Tab once — focus should remain somewhere inside the dialog, not on body
-    await user.tab();
-    expect(document.activeElement).not.toBe(document.body);
+    // Radix Dialog.Content exposes role="dialog" with the aria-label we set —
+    // query it by role so the containment assertion actually executes (a
+    // [data-radix-dialog-content] selector never matches and silently degrades
+    // the check to a vacuous !== body fallback).
+    const dialog = screen.getByRole("dialog", { name: "Command palette" });
 
-    // The active element should be inside the dialog content
-    const dialog = document.querySelector("[data-radix-dialog-content]");
-    if (dialog) {
+    // Tab through several focusables; Radix FocusScope keeps focus inside the
+    // dialog content. If the Dialog wrap (Task 10) were removed, focus would
+    // escape to an element outside `dialog` and this would fail — so the
+    // assertion genuinely guards the focus-trap, not just "not body".
+    for (let i = 0; i < 5; i++) {
+      await user.tab();
       expect(dialog.contains(document.activeElement)).toBe(true);
-    } else {
-      // Fallback: at minimum focus should not escape to body
-      expect(document.activeElement).not.toBe(document.body);
     }
   });
 });
