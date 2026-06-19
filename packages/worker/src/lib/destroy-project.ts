@@ -12,6 +12,13 @@ import { forwardToDO } from "./do-forward";
  */
 const SUBREQUEST_CEILING = 800;
 
+/**
+ * Page size sent as ?limit= on every /admin/pointer-keys fetch. Bounds the
+ * per-page key set so the DO never returns an unbounded in-memory array.
+ * 500 is chosen to stay well under the DO response-size budget.
+ */
+const POINTER_KEYS_PAGE_SIZE = 500;
+
 export interface DestroyResult {
   status: number;
   body: Record<string, unknown>;
@@ -45,7 +52,10 @@ export async function destroyProjectResources(
   env: Env,
   stub: DurableObjectStub,
   projectId: string,
+  /** Override the subrequest ceiling — for testing only. Do NOT set in production. */
+  _subrequestCeiling?: number,
 ): Promise<DestroyResult> {
+  const ceiling = _subrequestCeiling ?? SUBREQUEST_CEILING;
   const r2 = new R2ArtifactBackend(env.ARTIFACTS);
   const registry = new D1ProjectRegistry(env.DB);
 
@@ -62,15 +72,15 @@ export async function destroyProjectResources(
   let targetDrainDone = false;
 
   while (!targetDrainDone) {
-    if (subrequestCount >= SUBREQUEST_CEILING) {
+    if (subrequestCount >= ceiling) {
       r2GcSkipped = true;
       break;
     }
     subrequestCount++;
     const url =
       targetCursor !== undefined
-        ? `/admin/pointer-keys?cursor=${encodeURIComponent(targetCursor)}`
-        : "/admin/pointer-keys";
+        ? `/admin/pointer-keys?limit=${POINTER_KEYS_PAGE_SIZE}&cursor=${encodeURIComponent(targetCursor)}`
+        : `/admin/pointer-keys?limit=${POINTER_KEYS_PAGE_SIZE}`;
     const targetKeysRes = await forwardToDO(stub, url, "GET");
     if (!targetKeysRes.ok) {
       return {
@@ -111,7 +121,7 @@ export async function destroyProjectResources(
       let peerDrainDone = false;
 
       while (!peerDrainDone) {
-        if (subrequestCount >= SUBREQUEST_CEILING) {
+        if (subrequestCount >= ceiling) {
           r2GcSkipped = true;
           break;
         }
@@ -120,8 +130,8 @@ export async function destroyProjectResources(
         const otherStub = env.PROJECT.get(otherDoId);
         const url =
           peerCursor !== undefined
-            ? `/admin/pointer-keys?cursor=${encodeURIComponent(peerCursor)}`
-            : "/admin/pointer-keys";
+            ? `/admin/pointer-keys?limit=${POINTER_KEYS_PAGE_SIZE}&cursor=${encodeURIComponent(peerCursor)}`
+            : `/admin/pointer-keys?limit=${POINTER_KEYS_PAGE_SIZE}`;
         const res = await forwardToDO(otherStub, url, "GET");
         if (!res.ok) {
           // Fail GC rather than under-count the union — under-counting risks
@@ -161,7 +171,7 @@ export async function destroyProjectResources(
     // concurrent-adoption race window. Skip keys that are no longer in R2.
     const confirmedToDelete: string[] = [];
     for (const key of toDelete) {
-      if (subrequestCount >= SUBREQUEST_CEILING) {
+      if (subrequestCount >= ceiling) {
         r2GcSkipped = true;
         break;
       }
