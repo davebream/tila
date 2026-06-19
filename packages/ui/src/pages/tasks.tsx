@@ -321,7 +321,7 @@ export function TasksPage() {
           role="grid"
           onKeyDown={handleTableKeyDown}
         >
-          <Table aria-label="Tasks">
+          <Table aria-label="Tasks" aria-rowcount={entities.length}>
             <TableHeader>
               <TableRow>
                 <SortableHead
@@ -367,6 +367,7 @@ export function TasksPage() {
                 return (
                   <TableRow
                     key={entity.id}
+                    aria-rowindex={idx + 1}
                     className={`group/row ${selectedId === entity.id ? "bg-tint-blue-08" : ""} ${focused ? "bg-[var(--color-row-hover)]" : ""}`}
                   >
                     <TableCell>
