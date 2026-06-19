@@ -1,12 +1,16 @@
 /**
- * Unit tests for the POST /reconcile Worker route — C6 R2 blob-existence repair
- * and permission guard.
+ * Unit tests for the POST /reconcile Worker route — C6 R2 blob-existence repair,
+ * permission guard, and composite-cursor pagination (C1).
  *
  * Tests:
  *   1. Read-only token is rejected with 403.
  *   2. Searchable pointer whose R2 blob is absent → DO tombstone called.
  *   3. Searchable pointer whose R2 blob is present → DO tombstone NOT called.
  *   4. R2 head() throws → repairErrors incremented, no abort.
+ *   5. Returns nextCursor=null when R2 is empty.
+ *   6. Scans at most `limit` objects per call, returns nextCursor when truncated.
+ *   7. nextCursor round-trips across produced/→sources/ (multi-page, sequential drain).
+ *   8. Oversized limit is clamped to max 1000.
  */
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
@@ -67,7 +71,6 @@ function makeDoStub(): {
       }
       calls.push({ path: url.pathname, body });
 
-      // Return a plausible response for each path
       if (url.pathname === "/artifact/reconcile") {
         return new Response(
           JSON.stringify({ ok: true, orphans_found: 0, orphans_recovered: 0 }),
@@ -75,7 +78,6 @@ function makeDoStub(): {
         );
       }
       if (url.pathname === "/artifact/searchable-pointers") {
-        // Return one searchable pointer
         return new Response(
           JSON.stringify({
             ok: true,
@@ -106,16 +108,33 @@ function makeDoStub(): {
   return { stub, calls };
 }
 
+type R2ListResult = {
+  objects: Array<{
+    key: string;
+    size: number;
+    customMetadata?: Record<string, string>;
+  }>;
+  truncated: boolean;
+  cursor?: string;
+};
+
+type R2ListFn = (opts: {
+  prefix?: string;
+  limit?: number;
+  cursor?: string;
+}) => Promise<R2ListResult>;
+
 /** Build a minimal Hono app wrapping the reconcile route handler. */
 async function makeReconcileApp(opts: {
   tokenResult: D1TokenResult;
   r2Head: (key: string) => Promise<R2Object | null>;
   doStub: DurableObjectStub;
-  r2ListWithMetadata?: () => Promise<
-    Array<{ key: string; size: number; metadata: Record<string, string> }>
-  >;
+  r2List?: R2ListFn;
 }) {
   const { artifacts } = await import("./artifacts");
+
+  const r2List =
+    opts.r2List ?? (async () => ({ objects: [], truncated: false }));
 
   const mockEnv = {
     DB: {} as D1Database,
@@ -125,7 +144,13 @@ async function makeReconcileApp(opts: {
     } as unknown as DurableObjectNamespace,
     ARTIFACTS: {
       head: vi.fn(opts.r2Head),
-      list: vi.fn(async () => ({ objects: [] })),
+      list: vi.fn(
+        async (listOpts: {
+          prefix?: string;
+          limit?: number;
+          cursor?: string;
+        }) => r2List(listOpts),
+      ),
       get: vi.fn(async () => null),
       put: vi.fn(),
       delete: vi.fn(),
@@ -136,18 +161,22 @@ async function makeReconcileApp(opts: {
   } as unknown as Env;
 
   const app = new Hono<AppEnv>();
-  // Inject minimal context variables
   app.use("/*", async (c, next) => {
     c.set("tokenResult", opts.tokenResult);
     c.set("doStub", opts.doStub);
     c.set("projectId", "proj-1");
-    // source/sourceVersion are optional in HonoVariables (string | undefined)
-    // leave them unset (undefined) rather than setting null
     return next();
   });
   app.route("/artifacts", artifacts);
 
   return { app, env: mockEnv };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers to decode composite cursor (mirrors implementation)
+// ---------------------------------------------------------------------------
+function decodeCursor(cursor: string): { prefix: string; inner?: string } {
+  return JSON.parse(Buffer.from(cursor, "base64url").toString("utf-8"));
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +206,7 @@ describe("POST /artifacts/reconcile — C6 R2 repair + permission guard", () => 
     const { stub, calls } = makeDoStub();
     const { app, env } = await makeReconcileApp({
       tokenResult: makeWriteToken(),
-      r2Head: async (_key) => null, // blob missing
+      r2Head: async (_key) => null,
       doStub: stub,
     });
 
@@ -193,7 +222,6 @@ describe("POST /artifacts/reconcile — C6 R2 repair + permission guard", () => 
     const body = (await res.json()) as { repairErrors: number };
     expect(body.repairErrors).toBe(0);
 
-    // DO tombstone should have been called
     const tombstoneCall = calls.find((c) => c.path === "/artifact/tombstone");
     expect(tombstoneCall).toBeDefined();
     expect((tombstoneCall?.body as { r2_key: string }).r2_key).toBe(
@@ -205,7 +233,7 @@ describe("POST /artifacts/reconcile — C6 R2 repair + permission guard", () => 
     const { stub, calls } = makeDoStub();
     const { app, env } = await makeReconcileApp({
       tokenResult: makeWriteToken(),
-      r2Head: async () => ({ key: "produced/T-1/blob.md" }) as R2Object, // blob present
+      r2Head: async () => ({ key: "produced/T-1/blob.md" }) as R2Object,
       doStub: stub,
     });
 
@@ -242,5 +270,192 @@ describe("POST /artifacts/reconcile — C6 R2 repair + permission guard", () => 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { repairErrors: number };
     expect(body.repairErrors).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Composite-cursor pagination tests (C1)
+// ---------------------------------------------------------------------------
+
+describe("POST /artifacts/reconcile — composite-cursor pagination (C1)", () => {
+  it("returns nextCursor=null and scans 0 objects when R2 is empty", async () => {
+    const { stub } = makeDoStub();
+    const { app, env } = await makeReconcileApp({
+      tokenResult: makeWriteToken(),
+      r2Head: async () => null,
+      doStub: stub,
+      r2List: async () => ({ objects: [], truncated: false }),
+    });
+
+    const res = await app.fetch(
+      new Request("http://localhost/artifacts/reconcile?limit=5", {
+        method: "POST",
+      }),
+      env,
+      makeCtx(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { nextCursor: unknown; scanned: number };
+    expect(body.nextCursor).toBeNull();
+    expect(body.scanned).toBe(0);
+  });
+
+  it("scans at most `limit` R2 objects and returns nextCursor when more remain", async () => {
+    const { stub } = makeDoStub();
+
+    const { app, env } = await makeReconcileApp({
+      tokenResult: makeWriteToken(),
+      r2Head: async () => null,
+      doStub: stub,
+      r2List: async (o) => {
+        if ((o.prefix ?? "").startsWith("produced/")) {
+          return {
+            objects: [
+              { key: "produced/a/f1.md", size: 10 },
+              { key: "produced/a/f2.md", size: 10 },
+            ],
+            truncated: true,
+            cursor: "r2-cursor-produced",
+          };
+        }
+        return { objects: [], truncated: false };
+      },
+    });
+
+    const res = await app.fetch(
+      new Request("http://localhost/artifacts/reconcile?limit=2", {
+        method: "POST",
+      }),
+      env,
+      makeCtx(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { nextCursor: unknown; scanned: number };
+
+    expect(body.nextCursor).not.toBeNull();
+    expect(typeof body.nextCursor).toBe("string");
+    expect(body.scanned).toBe(2);
+
+    // Composite cursor must encode prefix=produced
+    const decoded = decodeCursor(body.nextCursor as string);
+    expect(decoded.prefix).toBe("produced");
+    expect(decoded.inner).toBe("r2-cursor-produced");
+  });
+
+  it("nextCursor round-trips across produced/→sources/ exhausting all objects exactly once", async () => {
+    const { stub } = makeDoStub();
+
+    // produced/: page1=[f1], page2=[f2]; sources/: page1=[g1]; limit=1 per call
+    const r2List: R2ListFn = async (o) => {
+      const pfx = o.prefix ?? "";
+      const cur = o.cursor;
+      if (pfx.startsWith("produced/")) {
+        if (!cur)
+          return {
+            objects: [{ key: "produced/a/f1.md", size: 10 }],
+            truncated: true,
+            cursor: "p2",
+          };
+        return {
+          objects: [{ key: "produced/a/f2.md", size: 10 }],
+          truncated: false,
+        };
+      }
+      if (pfx.startsWith("sources/")) {
+        if (!cur)
+          return {
+            objects: [{ key: "sources/b/g1.md", size: 20 }],
+            truncated: false,
+          };
+      }
+      return { objects: [], truncated: false };
+    };
+
+    const { app, env } = await makeReconcileApp({
+      tokenResult: makeWriteToken(),
+      r2Head: async () => null,
+      doStub: stub,
+      r2List,
+    });
+
+    // Call 1: limit=1 → f1.md → nextCursor points into produced/ with inner=p2
+    const res1 = await app.fetch(
+      new Request("http://localhost/artifacts/reconcile?limit=1", {
+        method: "POST",
+      }),
+      env,
+      makeCtx(),
+    );
+    expect(res1.status).toBe(200);
+    const b1 = (await res1.json()) as {
+      nextCursor: string | null;
+      scanned: number;
+    };
+    expect(b1.scanned).toBe(1);
+    expect(b1.nextCursor).not.toBeNull();
+    const c1 = b1.nextCursor as string;
+    expect(decodeCursor(c1).prefix).toBe("produced");
+
+    // Call 2: limit=1, cursor=c1 → f2.md (second produced/ page) → nextCursor points into sources/
+    const res2 = await app.fetch(
+      new Request(
+        `http://localhost/artifacts/reconcile?limit=1&cursor=${encodeURIComponent(c1)}`,
+        { method: "POST" },
+      ),
+      env,
+      makeCtx(),
+    );
+    expect(res2.status).toBe(200);
+    const b2 = (await res2.json()) as {
+      nextCursor: string | null;
+      scanned: number;
+    };
+    expect(b2.scanned).toBe(1);
+    expect(b2.nextCursor).not.toBeNull();
+    const c2 = b2.nextCursor as string;
+    // After produced/ exhausted, cursor moves into sources/
+    expect(decodeCursor(c2).prefix).toBe("sources");
+
+    // Call 3: limit=1, cursor=c2 → g1.md → nextCursor=null (sources/ exhausted)
+    const res3 = await app.fetch(
+      new Request(
+        `http://localhost/artifacts/reconcile?limit=1&cursor=${encodeURIComponent(c2)}`,
+        { method: "POST" },
+      ),
+      env,
+      makeCtx(),
+    );
+    expect(res3.status).toBe(200);
+    const b3 = (await res3.json()) as {
+      nextCursor: string | null;
+      scanned: number;
+    };
+    expect(b3.scanned).toBe(1);
+    expect(b3.nextCursor).toBeNull();
+  });
+
+  it("clamps oversized limit to max 1000", async () => {
+    const { stub } = makeDoStub();
+    let capturedLimit: number | undefined;
+
+    const { app, env } = await makeReconcileApp({
+      tokenResult: makeWriteToken(),
+      r2Head: async () => null,
+      doStub: stub,
+      r2List: async (o) => {
+        capturedLimit = o.limit;
+        return { objects: [], truncated: false };
+      },
+    });
+
+    const res = await app.fetch(
+      new Request("http://localhost/artifacts/reconcile?limit=99999", {
+        method: "POST",
+      }),
+      env,
+      makeCtx(),
+    );
+    expect(res.status).toBe(200);
+    expect(capturedLimit).toBeLessThanOrEqual(1000);
   });
 });

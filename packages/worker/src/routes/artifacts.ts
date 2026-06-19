@@ -1128,23 +1128,124 @@ artifacts.get(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Composite cursor helpers for the reconcile scan (C1)
+// ---------------------------------------------------------------------------
+
+const RECONCILE_SCAN_MAX_LIMIT = 1000;
+const RECONCILE_SCAN_DEFAULT_LIMIT = 500;
+
+type ReconcilePrefix = "produced" | "sources";
+
+interface CompositeCursor {
+  prefix: ReconcilePrefix;
+  inner?: string; // R2 cursor within that prefix; absent on first page of a prefix
+}
+
+function encodeCompositeCursor(c: CompositeCursor): string {
+  return btoa(JSON.stringify(c))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function decodeCompositeCursor(s: string): CompositeCursor | null {
+  try {
+    const padded =
+      s.replace(/-/g, "+").replace(/_/g, "/") +
+      "=".repeat((4 - (s.length % 4)) % 4);
+    return JSON.parse(atob(padded)) as CompositeCursor;
+  } catch {
+    return null;
+  }
+}
+
 // POST /projects/:projectId/artifacts/reconcile -- cross-backend orphan recovery
 // Note: must be registered BEFORE the /:key{.+$} catch-all
 artifacts.post("/reconcile", requirePermission("write"), async (c) => {
   const apply = c.req.query("apply") === "true";
   const r2 = new R2ArtifactBackend(c.env.ARTIFACTS);
 
-  // List all R2 blobs with metadata under both prefixes
-  const producedBlobs = await r2.listWithMetadata("produced/");
-  const sourceBlobs = await r2.listWithMetadata("sources/");
-  const allBlobs = [...producedBlobs, ...sourceBlobs];
+  // Parse pagination params
+  const rawLimit = Number(c.req.query("limit") ?? RECONCILE_SCAN_DEFAULT_LIMIT);
+  const limit =
+    Number.isNaN(rawLimit) || rawLimit <= 0
+      ? RECONCILE_SCAN_DEFAULT_LIMIT
+      : Math.min(rawLimit, RECONCILE_SCAN_MAX_LIMIT);
+
+  const rawCursor = c.req.query("cursor");
+  let startPrefix: ReconcilePrefix = "produced";
+  let startInner: string | undefined;
+  if (rawCursor) {
+    const decoded = decodeCompositeCursor(rawCursor);
+    if (decoded) {
+      startPrefix = decoded.prefix;
+      startInner = decoded.inner;
+    }
+  }
+
+  // Bounded scan: drain `produced/` first, then `sources/`, carrying remaining
+  // budget from the first prefix into the second within the same call.
+  type BlobItem = {
+    key: string;
+    size: number;
+    metadata: Record<string, string>;
+  };
+  const allBlobs: BlobItem[] = [];
+  let nextCursor: string | null = null;
+  let remaining = limit;
+
+  const prefixOrder: ReconcilePrefix[] =
+    startPrefix === "produced" ? ["produced", "sources"] : ["sources"];
+
+  for (let pi = 0; pi < prefixOrder.length; pi++) {
+    const prefix = prefixOrder[pi];
+    const isStartPrefix = prefix === startPrefix;
+    const innerCursor = isStartPrefix ? startInner : undefined;
+
+    // If budget exhausted, emit a cursor pointing to the start of this prefix
+    // (which we haven't listed yet) so the caller resumes here next time.
+    if (remaining <= 0) {
+      nextCursor = encodeCompositeCursor({ prefix, inner: undefined });
+      break;
+    }
+
+    const listed = await c.env.ARTIFACTS.list({
+      prefix: `${prefix}/`,
+      limit: remaining,
+      cursor: innerCursor,
+      include: ["customMetadata"],
+    } as R2ListOptions);
+
+    const objects = listed.objects.map((o) => ({
+      key: o.key,
+      size: o.size,
+      metadata:
+        (o as unknown as { customMetadata?: Record<string, string> })
+          .customMetadata ?? {},
+    }));
+    allBlobs.push(...objects);
+    remaining -= objects.length;
+
+    if (listed.truncated) {
+      // More objects remain in this prefix — build a cursor pointing here
+      const r2Cursor = (listed as unknown as { cursor?: string }).cursor;
+      nextCursor = encodeCompositeCursor({ prefix, inner: r2Cursor });
+      break;
+    }
+
+    // This prefix exhausted; loop continues to next prefix (sources/) if any.
+    // If this was the last prefix (sources/), nextCursor stays null.
+  }
+
+  const scanned = allBlobs.length;
 
   // Enrich blobs with search text for searchable MIME types.
   // Mirrors the search-rebuild pattern (buildRebuildCandidates).
   // Non-searchable and oversized blobs are returned unchanged.
   const SEARCHABLE_MIMES = new Set(["text/markdown", "text/plain"]);
   const enrichedBlobs: Array<
-    (typeof allBlobs)[number] & {
+    BlobItem & {
       search_title?: string | null;
       search_body_text?: string | null;
     }
@@ -1261,7 +1362,10 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     }
   }
 
-  return c.json({ ...doBody, repairErrors }, doResponse.status as 200);
+  return c.json(
+    { ...doBody, repairErrors, scanned, nextCursor },
+    doResponse.status as 200,
+  );
 });
 
 // POST /projects/:projectId/artifacts/search-rebuild -- rebuild search docs from artifact pointers
