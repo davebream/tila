@@ -123,38 +123,22 @@ invocation time with a clear error:
 |------|-------------------|
 | `tila_artifact_put` (binary/base64 multipart upload to R2) | `tila_artifact_write_text` (content-addressed text artifacts) |
 
-## Tools (41)
+## Tools (40)
 
-### Entities & Tasks
+> Tool names are derived from source registration. `work-unit` and `entity` are deprecated aliases for `task`; use `tila_task_*` tools.
 
-| Tool | Description |
-|------|-------------|
-| `tila_task_create` | Create a new entity (task, epic, etc.) |
-| `tila_task_list` | List entities (compact format) |
-| `tila_task_show` | Get entity details with relationships |
-| `tila_task_update` | Update entity data (requires fence) |
-| `tila_task_ready` | List entities ready for work |
-
-### Work Units
+### Tasks
 
 | Tool | Description |
 |------|-------------|
-| `tila_work_unit_create` | Create a new work unit |
-| `tila_work_unit_list` | List work units (compact format) |
-| `tila_work_unit_show` | Get work unit details with relationships |
-| `tila_work_unit_update` | Update work unit data (requires fence) |
-| `tila_work_unit_ready` | List work units ready for work |
-| `tila_work_unit_archive` | Archive a work unit (requires fence) |
-| `tila_work_unit_relationships_add` | Add a relationship between work units |
-| `tila_work_unit_relationships_list` | List relationships for a work unit |
-
-### Entity Management
-
-| Tool | Description |
-|------|-------------|
-| `tila_entity_archive` | Archive an entity (requires fence) |
-| `tila_entity_relationships_add` | Add a relationship between entities |
-| `tila_entity_relationships_list` | List relationships for an entity |
+| `tila_task_create` | Create a new task (task, epic, etc.) |
+| `tila_task_list` | List tasks (compact format) |
+| `tila_task_show` | Get task details with relationships |
+| `tila_task_update` | Update task data (requires fence) |
+| `tila_task_archive` | Archive a task (requires fence) |
+| `tila_task_ready` | List tasks ready for work |
+| `tila_task_relationships_add` | Add a relationship between tasks |
+| `tila_task_relationships_list` | List relationships for a task |
 
 ### Claims
 
@@ -170,6 +154,7 @@ invocation time with a clear error:
 |------|-------------|
 | `tila_record_get` | Get a record by type and key |
 | `tila_record_set` | Set (full replace) a record's value (requires fence) |
+| `tila_record_put` | Put (upsert) a record's value (requires fence) |
 | `tila_record_patch` | Apply JSON Merge Patch to a record (requires fence) |
 | `tila_record_list` | List records of a given type (metadata only) |
 | `tila_record_history` | Get revision history for a record |
@@ -181,10 +166,14 @@ invocation time with a clear error:
 | Tool | Description |
 |------|-------------|
 | `tila_artifact_put` | Upload an artifact (base64 content) |
+| `tila_artifact_write_text` | Write a text artifact (content-addressed) |
+| `tila_artifact_read_text` | Read a text artifact by key |
+| `tila_artifact_get_latest` | Get the latest artifact for a prefix |
+| `tila_artifact_grep` | Search artifact content with grep |
 | `tila_artifact_search` | Full-text search across artifacts |
-| `tila_search` | Unified search across entities and artifacts |
 | `tila_artifact_relationships_add` | Add a relationship between artifacts |
 | `tila_artifact_relationships_list` | List relationships for an artifact |
+| `tila_search` | Unified search across tasks and artifacts |
 
 ### Gates
 
@@ -202,14 +191,19 @@ invocation time with a clear error:
 | `tila_signal_list` | List unacknowledged signals in inbox |
 | `tila_signal_ack` | Acknowledge a signal |
 
-### Other
+### Journal, Schema & Templates
 
 | Tool | Description |
 |------|-------------|
 | `tila_journal_list` | Query the project event journal |
 | `tila_schema_update` | Apply a new TOML schema definition |
-| `tila_template_list` | List available entity templates |
-| `tila_template_instantiate` | Create entities from a template |
+| `tila_template_list` | List available task templates |
+| `tila_template_instantiate` | Create tasks from a template |
+
+### Presence & Summary
+
+| Tool | Description |
+|------|-------------|
 | `tila_presence_heartbeat` | Record a heartbeat to mark agent as online |
 | `tila_summary` | Get compact project summary |
 
