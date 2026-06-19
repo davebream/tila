@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import { useTaskIndex } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { Dialog } from "radix-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
@@ -221,8 +222,6 @@ export function CommandPalette({
     if (e.key === "Escape") {
       e.preventDefault();
       onClose();
-    } else if (e.key === "Tab") {
-      e.preventDefault();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelectedIndex((i) => Math.min(i + 1, flatItems.length - 1));
@@ -236,137 +235,134 @@ export function CommandPalette({
     }
   }
 
-  if (!open) return null;
-
   let flatIndex = -1;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[80px]"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
+    <Dialog.Root
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
     >
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: scrim is a backdrop, keyboard close is handled by Escape on the palette container */}
-      <div
-        className="absolute inset-0 bg-background/70"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* palette */}
-      <div
-        className="relative z-10 mx-4 flex w-full max-w-[640px] max-h-[480px] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-overlay"
-        onKeyDown={handleKeyDown}
-      >
-        {/* input row */}
-        <div className="flex items-center gap-2.5 border-b border-border px-3.5 py-3">
-          <span className="font-mono text-[11px] text-fg-faint">›</span>
-          <input
-            ref={inputRef}
-            type="text"
-            role="combobox"
-            aria-expanded={flatItems.length > 0}
-            aria-controls="command-palette-listbox"
-            aria-activedescendant={
-              flatItems[selectedIndex]
-                ? `palette-item-${flatItems[selectedIndex].id}`
-                : undefined
-            }
-            className="flex-1 bg-transparent font-mono text-[13px] text-foreground placeholder:text-muted-foreground outline-none"
-            placeholder="Search tasks, pages..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <Kbd>esc</Kbd>
-        </div>
-
-        {/* results */}
-        <div
-          className="flex-1 overflow-y-auto"
-          id="command-palette-listbox"
-          role="listbox"
-          aria-label="Search results"
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-background/70" />
+        <Dialog.Content
+          aria-label="Command palette"
+          onKeyDown={handleKeyDown}
+          className="fixed inset-0 z-50 flex items-start justify-center pt-[80px] outline-none"
         >
-          {flatItems.length === 0 ? (
-            <div className="px-3.5 py-6 text-center font-mono text-[12px] text-muted-foreground">
-              No results
+          {/* palette */}
+          <div className="relative z-10 mx-4 flex w-full max-w-[640px] max-h-[480px] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-overlay">
+            {/* input row */}
+            <div className="flex items-center gap-2.5 border-b border-border px-3.5 py-3">
+              <span className="font-mono text-[11px] text-fg-faint">›</span>
+              <input
+                ref={inputRef}
+                type="text"
+                role="combobox"
+                aria-expanded={flatItems.length > 0}
+                aria-controls="command-palette-listbox"
+                aria-activedescendant={
+                  flatItems[selectedIndex]
+                    ? `palette-item-${flatItems[selectedIndex].id}`
+                    : undefined
+                }
+                className="flex-1 bg-transparent font-mono text-[13px] text-foreground placeholder:text-muted-foreground outline-none"
+                placeholder="Search tasks, pages..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <Kbd>esc</Kbd>
             </div>
-          ) : (
-            Array.from(groups.entries()).map(([group, groupItems]) => (
-              <div key={group} className="py-2">
-                <div className="tila-label px-3.5 py-1">
-                  {group} · {groupItems.length}
-                </div>
-                {groupItems.map((item) => {
-                  flatIndex++;
-                  const idx = flatIndex;
-                  const selected = idx === selectedIndex;
-                  return (
-                    <div
-                      key={item.id}
-                      id={`palette-item-${item.id}`}
-                      role="option"
-                      aria-selected={selected}
-                      className="flex cursor-pointer items-center gap-2.5 px-3.5 py-[7px]"
-                      style={{
-                        background: selected
-                          ? "var(--color-tint-blue-12)"
-                          : "transparent",
-                      }}
-                      onClick={() => go(item)}
-                      onKeyDown={(e) => e.key === "Enter" && go(item)}
-                      onMouseEnter={() => setSelectedIndex(idx)}
-                    >
-                      <span
-                        className="flex-1 font-mono text-[12px]"
-                        style={{
-                          color: selected
-                            ? "var(--color-fg-strong)"
-                            : "var(--color-foreground)",
-                        }}
-                      >
-                        {item.label}
-                      </span>
-                      {item.badge && (
-                        <Badge variant={item.badge.variant}>
-                          {item.badge.text}
-                        </Badge>
-                      )}
-                      {item.meta && !item.badge && (
-                        <span className="font-mono text-[11px] text-fg-faint">
-                          {item.meta}
-                        </span>
-                      )}
-                      {selected && <Kbd>↵</Kbd>}
-                    </div>
-                  );
-                })}
-              </div>
-            ))
-          )}
-        </div>
 
-        {/* footer hints */}
-        <div className="flex items-center justify-between border-t border-border bg-card px-3.5 py-2">
-          <div className="flex gap-3.5 font-mono text-[11px] text-fg-faint">
-            <span>
-              <Kbd>↑↓</Kbd> navigate
-            </span>
-            <span>
-              <Kbd>↵</Kbd> open
-            </span>
-            <span>
-              <Kbd>esc</Kbd> close
-            </span>
+            {/* results */}
+            <div
+              className="flex-1 overflow-y-auto"
+              id="command-palette-listbox"
+              role="listbox"
+              aria-label="Search results"
+            >
+              {flatItems.length === 0 ? (
+                <div className="px-3.5 py-6 text-center font-mono text-[12px] text-muted-foreground">
+                  No results
+                </div>
+              ) : (
+                Array.from(groups.entries()).map(([group, groupItems]) => (
+                  <div key={group} className="py-2">
+                    <div className="tila-label px-3.5 py-1">
+                      {group} · {groupItems.length}
+                    </div>
+                    {groupItems.map((item) => {
+                      flatIndex++;
+                      const idx = flatIndex;
+                      const selected = idx === selectedIndex;
+                      return (
+                        <div
+                          key={item.id}
+                          id={`palette-item-${item.id}`}
+                          role="option"
+                          aria-selected={selected}
+                          className="flex cursor-pointer items-center gap-2.5 px-3.5 py-[7px]"
+                          style={{
+                            background: selected
+                              ? "var(--color-tint-blue-12)"
+                              : "transparent",
+                          }}
+                          onClick={() => go(item)}
+                          onKeyDown={(e) => e.key === "Enter" && go(item)}
+                          onMouseEnter={() => setSelectedIndex(idx)}
+                        >
+                          <span
+                            className="flex-1 font-mono text-[12px]"
+                            style={{
+                              color: selected
+                                ? "var(--color-fg-strong)"
+                                : "var(--color-foreground)",
+                            }}
+                          >
+                            {item.label}
+                          </span>
+                          {item.badge && (
+                            <Badge variant={item.badge.variant}>
+                              {item.badge.text}
+                            </Badge>
+                          )}
+                          {item.meta && !item.badge && (
+                            <span className="font-mono text-[11px] text-fg-faint">
+                              {item.meta}
+                            </span>
+                          )}
+                          {selected && <Kbd>↵</Kbd>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* footer hints */}
+            <div className="flex items-center justify-between border-t border-border bg-card px-3.5 py-2">
+              <div className="flex gap-3.5 font-mono text-[11px] text-fg-faint">
+                <span>
+                  <Kbd>↑↓</Kbd> navigate
+                </span>
+                <span>
+                  <Kbd>↵</Kbd> open
+                </span>
+                <span>
+                  <Kbd>esc</Kbd> close
+                </span>
+              </div>
+              {flatItems.length > 0 && (
+                <span className="tila-num font-mono text-[11px] text-fg-faint">
+                  {flatItems.length} results
+                </span>
+              )}
+            </div>
           </div>
-          {flatItems.length > 0 && (
-            <span className="tila-num font-mono text-[11px] text-fg-faint">
-              {flatItems.length} results
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
