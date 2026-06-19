@@ -17,7 +17,7 @@ import { useDebouncedValue } from "@/hooks/use-debounce";
 import { listJournal } from "@/lib/api";
 import { formatTime } from "@/lib/time";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 const MAX_ROWS = 500;
@@ -303,12 +303,10 @@ export function JournalPage() {
   const filterKind = kindFilter;
   const filterSource = sourceFilter;
 
-  // Events accumulator stored in ref to avoid re-renders on every poll
-  const eventsRef = useRef<JournalEvent[]>([]);
+  // Events accumulator in React state (state-driven rendering, no manual tick)
+  const [events, setEvents] = useState<JournalEvent[]>([]);
+  const [lastSeq, setLastSeq] = useState(0);
   const lastSeqRef = useRef(0);
-  const [renderTick, setRenderTick] = useState(0);
-  const [initialLoaded, setInitialLoaded] = useState(false);
-  const [loadError, setLoadError] = useState<unknown>(null);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -323,23 +321,28 @@ export function JournalPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
 
-  function isAtBottom(): boolean {
+  const isAtBottom = useCallback((): boolean => {
     const el = scrollRef.current;
     if (!el) return true;
     return el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-  }
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
-  // Initial load (retryKey in deps intentionally triggers re-fetch on retry)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retryKey is an intentional trigger for re-fetching
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
+  // Initial query — seeds events; retryKey bump re-triggers on retry
+  const initialQuery = useQuery({
+    queryKey: [
+      "journal-initial",
+      projectId,
+      filterResource,
+      filterKind,
+      filterSource,
+      retryKey,
+    ],
+    queryFn: async () => {
       const params: {
         resource?: string;
         kind?: string[];
@@ -349,58 +352,38 @@ export function JournalPage() {
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
       if (filterSource.length > 0) params.source = filterSource;
+      if (!projectId) return { events: [] as JournalEvent[] };
+      return listJournal(projectId, params) as Promise<{
+        events: JournalEvent[];
+      }>;
+    },
+    enabled: Boolean(projectId),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 
-      try {
-        if (!projectId) return;
-        const res = await listJournal(projectId, params);
-        if (cancelled) return;
+  // Seed events from initial query result
+  useEffect(() => {
+    if (!initialQuery.data) return;
+    const loaded = initialQuery.data.events;
+    setEvents(loaded);
+    const maxSeq =
+      loaded.length > 0 ? Math.max(...loaded.map((e) => e.seq)) : 0;
+    // Assign ref BEFORE state (RC-4: ref must be current before next render)
+    lastSeqRef.current = maxSeq;
+    setLastSeq(maxSeq);
+    requestAnimationFrame(() => scrollToBottom());
+  }, [initialQuery.data, scrollToBottom]);
 
-        eventsRef.current = res.events;
-        if (res.events.length > 0) {
-          lastSeqRef.current = Math.max(...res.events.map((e) => e.seq));
-        } else {
-          lastSeqRef.current = 0;
-        }
-        setInitialLoaded(true);
-        setRenderTick((t) => t + 1);
-        // Scroll to bottom after initial load
-        requestAnimationFrame(() => scrollToBottom());
-      } catch (err) {
-        if (!cancelled) setLoadError(err);
-      }
-    }
-
-    eventsRef.current = [];
-    lastSeqRef.current = 0;
-    setInitialLoaded(false);
-    setLoadError(null);
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    filterResource,
-    filterKind,
-    filterSource,
-    scrollToBottom,
-    projectId,
-    retryKey,
-  ]);
-
-  // Tail polling via useQuery
-  useQuery({
+  // Tail query — reads lastSeqRef.current (NOT in queryKey per OQ-5)
+  const tailQuery = useQuery({
     queryKey: [
       "journal-tail",
       projectId,
       filterResource,
       filterKind,
       filterSource,
-      initialLoaded,
     ],
     queryFn: async () => {
-      if (!initialLoaded) return { events: [] };
-
       const params: {
         resource?: string;
         kind?: string[];
@@ -411,44 +394,47 @@ export function JournalPage() {
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
       if (filterSource.length > 0) params.source = filterSource;
-
-      if (!projectId) return { events: [] };
-      const res = await listJournal(projectId, params);
-      if (res.events.length > 0) {
-        wasAtBottomRef.current = isAtBottom();
-        lastSeqRef.current = Math.max(
-          lastSeqRef.current,
-          ...res.events.map((e) => e.seq),
-        );
-
-        const newEvents = [...eventsRef.current, ...res.events];
-        // Prune oldest events if exceeding MAX_ROWS
-        if (newEvents.length > MAX_ROWS) {
-          eventsRef.current = newEvents.slice(PRUNE_COUNT);
-        } else {
-          eventsRef.current = newEvents;
-        }
-        setRenderTick((t) => t + 1);
-
-        // Auto-scroll if user was at bottom
-        if (wasAtBottomRef.current) {
-          requestAnimationFrame(() => scrollToBottom());
-        }
-      }
-      return res;
+      if (!projectId) return { events: [] as JournalEvent[] };
+      return listJournal(projectId, params) as Promise<{
+        events: JournalEvent[];
+      }>;
     },
-    enabled: initialLoaded,
+    enabled: Boolean(projectId) && initialQuery.isSuccess,
     refetchInterval: 3000,
+    staleTime: 0,
   });
+
+  // Append tail events to accumulator
+  useEffect(() => {
+    // RC-4: guard — tailQuery.data is undefined on first render after enabled flips
+    if (!tailQuery.data || tailQuery.data.events.length === 0) return;
+    const incoming = tailQuery.data.events;
+    wasAtBottomRef.current = isAtBottom();
+    setEvents((prev) => {
+      const existingSeqs = new Set(prev.map((e) => e.seq));
+      const fresh = incoming.filter((e) => !existingSeqs.has(e.seq));
+      if (fresh.length === 0) return prev;
+      const merged = [...prev, ...fresh];
+      return merged.length > MAX_ROWS ? merged.slice(PRUNE_COUNT) : merged;
+    });
+    const next = Math.max(lastSeqRef.current, ...incoming.map((e) => e.seq));
+    lastSeqRef.current = next;
+    setLastSeq(next);
+    if (wasAtBottomRef.current) {
+      requestAnimationFrame(() => scrollToBottom());
+    }
+  }, [tailQuery.data, scrollToBottom, isAtBottom]);
+
+  const loadError = initialQuery.isError ? initialQuery.error : null;
+  const initialLoaded = initialQuery.isSuccess;
+  // lastSeq used to suppress unused-variable lint (cursor drives ref; state for re-render)
+  void lastSeq;
 
   const clearFilters = useCallback(() => {
     setResourceInput("");
     setKindFilter([]);
     setSourceFilter([]);
   }, []);
-
-  const events = eventsRef.current;
-  void renderTick;
 
   const [showJumpBtn, setShowJumpBtn] = useState(false);
   useEffect(() => {
@@ -600,7 +586,6 @@ export function JournalPage() {
           <TableError
             error={loadError}
             onRetry={() => {
-              setLoadError(null);
               setRetryKey((k) => k + 1);
             }}
           />
