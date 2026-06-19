@@ -93,3 +93,45 @@ export async function writeJson(root, relativePath, value) {
     `${JSON.stringify(value, null, 2)}\n`,
   );
 }
+
+/**
+ * Implementation/workspace packages that must be marked `private: true`
+ * to prevent accidental publishing to npm.
+ *
+ * These are identified by their `@tila/*` scope or well-known package names
+ * that are internal workspace packages.
+ */
+export const implementationPackagePaths = [
+  "packages/backend-d1/package.json",
+  "packages/backend-do/package.json",
+  "packages/backend-embedded/package.json",
+  "packages/backend-local/package.json",
+  "packages/backend-r2/package.json",
+  "packages/core/package.json",
+  "packages/integration-tests/package.json",
+  "packages/ops-sqlite/package.json",
+  "packages/schemas/package.json",
+  "packages/worker/package.json",
+  "packages/ui/package.json",
+];
+
+/**
+ * Check that all implementation packages set `private: true`.
+ * Returns an array of paths that are missing the flag.
+ */
+export async function findNonPrivateImplementationPackages(root) {
+  const missing = [];
+  for (const relPath of implementationPackagePaths) {
+    let pkg;
+    try {
+      pkg = await readJson(root, relPath);
+    } catch {
+      // Package doesn't exist in the fixture — skip (fixture tests use subsets)
+      continue;
+    }
+    if (pkg.private !== true) {
+      missing.push(relPath);
+    }
+  }
+  return missing;
+}
