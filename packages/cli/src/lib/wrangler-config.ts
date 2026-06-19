@@ -178,17 +178,41 @@ const MAX_FILES = 20_000;
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MiB
 
 /**
+ * Narrow file-enumeration interface used by `assertAssetLimits`.
+ * Callers may inject a synthetic implementation for testing without touching real fs.
+ */
+export interface AssetLimitFs {
+  readdirSync(dir: string, opts: { withFileTypes: true }): fs.Dirent[];
+  statSync(p: string): { size: number };
+}
+
+/**
+ * Real-fs adapter — the default used by production callers.
+ * Declared as a typed constant so TypeScript resolves the narrow interface
+ * without needing to reconcile fs's overloaded signatures.
+ */
+export const REAL_ASSET_FS: AssetLimitFs = {
+  readdirSync: (dir, opts) => fs.readdirSync(dir, opts),
+  statSync: (p) => fs.statSync(p),
+};
+
+/**
  * Walk `distDir` recursively and assert Cloudflare Static Assets limits:
  * - Max 20,000 files
  * - Max 25 MiB per file
  *
  * Throws a descriptive error before wrangler errors mid-upload.
+ * An optional `fsImpl` seam may be injected for testing; production callers
+ * omit it and use the real-fs default.
  */
-export function assertAssetLimits(distDir: string): void {
+export function assertAssetLimits(
+  distDir: string,
+  fsImpl: AssetLimitFs = REAL_ASSET_FS,
+): void {
   let fileCount = 0;
 
   function walk(dir: string): void {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const entries = fsImpl.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -202,7 +226,7 @@ export function assertAssetLimits(distDir: string): void {
           );
         }
 
-        const stat = fs.statSync(fullPath);
+        const stat = fsImpl.statSync(fullPath);
         if (stat.size > MAX_FILE_SIZE_BYTES) {
           const sizeMiB = (stat.size / (1024 * 1024)).toFixed(1);
           throw new Error(
