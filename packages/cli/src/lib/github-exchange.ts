@@ -232,7 +232,7 @@ export async function resolveGithubRepoToken(
 
     if (res.status === 403) {
       throw new Error(
-        `GitHub repo is not registered for this tila project.\n${detail}\n\nAsk a project admin to register your repo via the tila admin CLI.`,
+        `GitHub repo is not registered for this tila project.\n${detail}\n\nAsk a project admin to register your repo by running: tila repos register`,
       );
     }
 
