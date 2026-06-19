@@ -158,21 +158,29 @@ function ResourceLink({
         : typeof data.key === "string"
           ? data.key
           : null;
+    const taskResource =
+      typeof data.resource === "string" && data.resource.startsWith("task:")
+        ? data.resource.slice(5)
+        : null;
     return (
       <span>
-        <Link
-          to={`${p}/tasks/${resource}`}
-          className="text-signal-blue hover:text-signal-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue rounded-sm"
-        >
-          {resource}
-        </Link>
-        {r2Key && (
+        {r2Key ? (
+          <Link
+            to={`${p}/artifacts/${r2Key}`}
+            className="text-signal-blue hover:text-signal-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue rounded-sm"
+          >
+            {display}
+          </Link>
+        ) : (
+          <span>{display}</span>
+        )}
+        {taskResource && (
           <>
             {" "}
             <Link
-              to={`${p}/artifacts/${r2Key}`}
+              to={`${p}/tasks/${taskResource}`}
               className="text-signal-blue hover:text-signal-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue rounded-sm"
-              title="View artifact"
+              title="View task"
             >
               {"↗"}
             </Link>

@@ -1,5 +1,8 @@
 import { JournalPage } from "@/pages/journal";
+import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
+import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor } from "../test-utils";
 
 describe("JournalPage", () => {
@@ -121,5 +124,55 @@ describe("JournalPage", () => {
     await waitFor(() => {
       expect(screen.queryByText(/"type":/)).not.toBeInTheDocument();
     });
+  });
+
+  // Task 11: artifact-vs-task branch in ResourceLink
+  test("artifact event primary link targets artifact view not task", async () => {
+    // Override the journal handler to return an artifact event WITH r2_key
+    server.use(
+      http.get("*/projects/*/journal", () => {
+        return HttpResponse.json({
+          ok: true,
+          events: [
+            {
+              seq: 1,
+              t: Date.now() - 5000,
+              kind: "artifact.produced",
+              resource: "produced/x/file.txt",
+              actor: "test-user",
+              token_id: null,
+              fence: null,
+              data: { r2_key: "produced/x/file.txt" },
+              source: "cli",
+              source_version: "0.4.2",
+            },
+          ],
+        });
+      }),
+    );
+
+    renderWithProviders(<JournalPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("#1")).toBeInTheDocument();
+    });
+
+    // Find the resource cell — it's the 4th cell in the row
+    const rows = screen.getAllByRole("row");
+    // First row is the header; second row is the data row
+    const dataRow = rows[1];
+    const links = within(dataRow).getAllByRole("link");
+
+    // PRIMARY link (first link) must point to /artifacts/... not /tasks/...
+    expect(links[0].getAttribute("href")).toMatch(
+      /\/artifacts\/produced\/x\/file\.txt$/,
+    );
+
+    // No link should end with /tasks/<r2_key>
+    for (const link of links) {
+      expect(link.getAttribute("href")).not.toMatch(
+        /\/tasks\/produced\/x\/file\.txt$/,
+      );
+    }
   });
 });
