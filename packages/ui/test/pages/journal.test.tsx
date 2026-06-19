@@ -382,20 +382,21 @@ describe("JournalPage", () => {
 
     renderWithProviders(<JournalPage />);
 
+    // Wait until the data row AND its links have rendered and settled. A slow
+    // CI runner can paint the "#1" seq cell before the resource link resolves,
+    // so assert the primary link's href inside waitFor (retries until settled)
+    // rather than querying synchronously right after the seq appears.
+    let links: HTMLElement[] = [];
     await waitFor(() => {
       expect(screen.getByText("#1")).toBeInTheDocument();
+      // First row is the header; second row is the data row.
+      const dataRow = screen.getAllByRole("row")[1];
+      links = within(dataRow).getAllByRole("link");
+      // PRIMARY link (first link) must point to /artifacts/... not /tasks/...
+      expect(links[0]?.getAttribute("href")).toMatch(
+        /\/artifacts\/produced\/x\/file\.txt$/,
+      );
     });
-
-    // Find the resource cell — it's the 4th cell in the row
-    const rows = screen.getAllByRole("row");
-    // First row is the header; second row is the data row
-    const dataRow = rows[1];
-    const links = within(dataRow).getAllByRole("link");
-
-    // PRIMARY link (first link) must point to /artifacts/... not /tasks/...
-    expect(links[0].getAttribute("href")).toMatch(
-      /\/artifacts\/produced\/x\/file\.txt$/,
-    );
 
     // No link should end with /tasks/<r2_key>
     for (const link of links) {
