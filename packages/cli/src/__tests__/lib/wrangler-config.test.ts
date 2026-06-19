@@ -26,6 +26,7 @@ import {
   resolveWorkerMainPath,
 } from "../../lib/provisioning";
 import {
+  type AssetLimitFs,
   assertAssetLimits,
   generateWranglerConfig,
 } from "../../lib/wrangler-config";
@@ -284,14 +285,42 @@ describe("assertAssetLimits", () => {
     expect(() => assertAssetLimits(tmpDir)).toThrow(/25 MiB/);
   });
 
-  it("throws when file count exceeds 20,000", { timeout: 20_000 }, () => {
-    // Write 20,001 files — use a subdirectory to keep FS clean
-    const subDir = path.join(tmpDir, "files");
-    fs.mkdirSync(subDir);
-    for (let i = 0; i < 20_001; i++) {
-      fs.writeFileSync(path.join(subDir, `f${i}.txt`), "x");
+  it("throws when file count exceeds 20,000", () => {
+    // Synthetic fsImpl — zero real file writes.
+    // SENTINEL is a non-existent path derived from tmpDir so that a future
+    // regression dropping the injected fsImpl fails loudly with ENOENT instead
+    // of silently re-reading a real directory (regression fence).
+    const SENTINEL = path.join(tmpDir, "synthetic");
+
+    function makeDirent(name: string, isDir: boolean): fs.Dirent {
+      return {
+        name,
+        isDirectory: () => isDir,
+        isFile: () => !isDir,
+      } as unknown as fs.Dirent;
     }
-    expect(() => assertAssetLimits(tmpDir)).toThrow(/20,000/);
+
+    const fakeFs: AssetLimitFs = {
+      readdirSync(dir: string): fs.Dirent[] {
+        // Dispatch on dir to avoid infinite recursion on unrecognized paths.
+        if (dir === SENTINEL) {
+          return [makeDirent("files", true)];
+        }
+        if (dir === path.join(SENTINEL, "files")) {
+          return Array.from({ length: 20_001 }, (_, i) =>
+            makeDirent(`f${i}.txt`, false),
+          );
+        }
+        return [];
+      },
+      statSync(_: string): { size: number } {
+        return { size: 1 };
+      },
+    };
+
+    // /20,000/ uniquely identifies the file-count branch — the only error message
+    // in assertAssetLimits containing "20,000" — so the assertion cannot pass via the wrong error.
+    expect(() => assertAssetLimits(SENTINEL, fakeFs)).toThrow(/20,000/);
   });
 
   it("error message includes the file path for oversized file", () => {
