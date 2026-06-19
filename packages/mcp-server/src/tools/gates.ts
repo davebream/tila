@@ -56,7 +56,7 @@ export function registerGateTools(
 
   server.tool(
     "tila_gate_resolve",
-    "Resolve a pending gate, unblocking work on the associated entity. The entity becomes eligible for the ready set again.",
+    "Resolve a pending gate, unblocking work on the associated entity. The entity becomes eligible for the ready set again. Requires write permission — no fencing token needed; any agent with project write access can resolve a gate, not only the original gate creator (see decision §21).",
     {
       gate_id: z.string().describe("Gate ID to resolve (starts with 'gate-')"),
       resolution: z
@@ -78,7 +78,7 @@ export function registerGateTools(
 
   server.tool(
     "tila_gate_cancel",
-    "Cancel (delete) a pending gate, removing the coordination constraint. The entity becomes eligible for the ready set again if no other gates remain.",
+    "Cancel (delete) a pending gate, removing the coordination constraint. The entity becomes eligible for the ready set again if no other gates remain. Requires write permission — no fencing token needed; any agent with project write access can cancel a gate (see decision §21).",
     {
       gate_id: z.string().describe("Gate ID to cancel (starts with 'gate-')"),
     },

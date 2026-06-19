@@ -412,6 +412,8 @@ Check these signals:
 
 **Code reference:** `packages/ops-sqlite/src/gate-ops.ts` — `resolveGate` and `cancelGate` each carry a comment pointing to this section.
 
+**MCP surface:** `tila_gate_resolve` and `tila_gate_cancel` in `packages/mcp-server/src/tools/gates.ts` surface this rule in their tool descriptions: both explicitly state that write permission suffices and no fencing token is required. This ensures AI agents using the MCP server understand they can resolve or cancel any gate in a project they have write access to, regardless of which agent created the gate.
+
 This document is the constitution. It changes when reality requires it, not when speculation suggests it might.
 
 ---

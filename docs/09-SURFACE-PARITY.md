@@ -6,14 +6,14 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 
 | Capability | HTTP | CLI | SDK | MCP | Notes |
 |---|---|---|---|---|---|
-| Entity create | Y | Y | Y | Y | |
-| Entity list | Y | Y | Y | Y | |
-| Entity show | Y | Y | Y | Y | |
-| Entity update | Y | Y | Y | Y | Requires fence |
-| Entity archive | Y | Y | Y | Y | Requires fence |
-| Entity relationships (add/list) | Y | - | Y | Y | CLI: use `tila entity show` for related entities |
-| Entity artifact-refs (add/list) | Y | Y | Y | - | |
-| Work unit (all of above) | Y | Y | Y | Y | Public alias for entities |
+| Task create | Y | Y | Y | Y | |
+| Task list | Y | Y | Y | Y | |
+| Task show | Y | Y | Y | Y | |
+| Task update | Y | Y | Y | Y | Requires fence |
+| Task archive | Y | Y | Y | Y | Requires fence |
+| Task relationships (add/list) | Y | - | Y | Y | CLI: use `tila task show` for related tasks |
+| Task artifact-refs (add/list) | Y | Y | Y | - | |
+| `work-unit` / `entity` (deprecated aliases) | Y | Y | Y | - | Both are deprecated; use `tila task *` |
 | Claim acquire | Y | Y | Y | Y | |
 | Claim release | Y | Y | Y | Y | |
 | Claim list | Y | Y | Y | Y | |
@@ -53,16 +53,16 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 **MCP intentional gaps:**
 - **Artifact download** -- MCP agents upload artifacts (content addressed); downloading binary blobs is not an agent workflow.
 - **Artifact/index list** -- Use `tila_artifact_search` or `tila_search` for discovery; listing all artifacts is a human admin operation.
-- **Gate list** -- Gates are visible via `tila_task_show` (entity detail includes gate status). A dedicated list is admin tooling.
+- **Gate list** -- Gates are visible via `tila_task_show` (task detail includes gate status). A dedicated list is admin tooling.
 - **Schema show** -- Available as `project-schema` MCP resource (read via resource subscription, not tool invocation).
 - **Presence list** -- Available as `project-presence` MCP resource.
 - **Claim state/renew** -- Admin operations for manual claim management.
-- **Entity artifact-refs** -- Use `tila_artifact_put` with `resource` parameter to associate artifacts during upload.
+- **Task artifact-refs** -- Use `tila_artifact_put` with `resource` parameter to associate artifacts during upload.
 
 **SDK intentional gaps:**
 - **Token management** -- Admin surface only; SDK consumers authenticate with existing tokens.
 - **Doctor/reset** -- Infrastructure operations; not programmatic API surface.
 
 **CLI intentional gaps:**
-- **Entity relationships (add/list)** -- Use `tila entity show <id>` which includes relationships in its detail output.
+- **Task relationships (add/list)** -- Use `tila task show <id>` which includes relationships in its detail output.
 - **Claim renew** -- Admin operation; use `tila claim acquire` with longer TTL instead.

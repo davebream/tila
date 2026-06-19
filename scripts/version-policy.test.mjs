@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { findNonPrivateImplementationPackages } from "./version-policy-lib.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -298,4 +299,15 @@ test("homebrew formula has no PLACEHOLDER tokens and version matches product ver
       `homebrew formula download URL tag "v${m[1]}" must match product version "v${productVersion}"`,
     );
   }
+});
+
+test('implementation/workspace packages all set "private": true to prevent accidental publishing', async () => {
+  const repoRoot = join(scriptDir, "..");
+  const missing = await findNonPrivateImplementationPackages(repoRoot);
+
+  assert.equal(
+    missing.length,
+    0,
+    `The following implementation packages are missing "private": true:\n${missing.map((p) => `  ${p}`).join("\n")}\n\nAdd '"private": true' to each package.json to prevent accidental npm publish.`,
+  );
 });

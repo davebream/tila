@@ -73,3 +73,11 @@ run_worker_first = ["/api/*", "/auth/*", "/projects/*", "/_internal/*"]
 #   When unset, those routes return 404 (the endpoints are invisible).
 #   Managed by the CLI: `tila infra provision` sets it; `tila infra provision --rotate-admin-token` rotates it.
 #   Set manually: wrangler secret put INFRA_ADMIN_TOKEN
+#
+# SWEEP_SECRET — bearer secret for the /_internal/sweep endpoint (X-Sweep-Secret header)
+#   Protects the daily cron sweep trigger from unauthorized callers. When unset, the sweep
+#   endpoint rejects all requests with 403. Generate a random value and store as a secret:
+#     node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+#     wrangler secret put SWEEP_SECRET
+#   The cron handler in wrangler.toml sends this value in the X-Sweep-Secret header on
+#   each scheduled invocation.
