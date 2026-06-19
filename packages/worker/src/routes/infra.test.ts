@@ -150,10 +150,15 @@ describe("infra destroy route", () => {
     let call = 0;
     forwardToDOMock.mockImplementation(
       (_stub: unknown, path: string, method: string) => {
-        if (path === "/admin/pointer-keys" && method === "GET") {
+        if (path.startsWith("/admin/pointer-keys") && method === "GET") {
           call++;
+          // Paged pointer-keys contract (Task 8): single page, nextCursor:null
+          // ends the drain. The worker now sends ?limit=… so match by prefix.
           return Promise.resolve(
-            Response.json({ keys: call === 1 ? ["produced/T-1/a.bin"] : [] }),
+            Response.json({
+              keys: call === 1 ? ["produced/T-1/a.bin"] : [],
+              nextCursor: null,
+            }),
           );
         }
         if (path === "/admin/destroy" && method === "POST") {
