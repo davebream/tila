@@ -14,6 +14,7 @@ import {
   getInstallationAccessToken,
   mintAppJwt,
 } from "../lib/github-app";
+import { PERMISSION_HIERARCHY } from "../lib/github-permission";
 import { hashToken } from "../lib/hash-token";
 import { invalidateSession } from "../lib/session-cache";
 import type {
@@ -33,15 +34,6 @@ const PROJECT_SESSION_TTL_MS = COOKIE_SESSION_TTL_SECONDS * 1000;
 const WorkspaceSelectRequestSchema = z.object({
   project_id: z.string().min(1).max(128),
 });
-
-const PERMISSION_HIERARCHY: Record<string, number> = {
-  none: 0,
-  read: 1,
-  triage: 2,
-  write: 3,
-  maintain: 4,
-  admin: 5,
-};
 
 function permissionToScope(perm: string): string {
   return (PERMISSION_HIERARCHY[perm] ?? 0) >= PERMISSION_HIERARCHY.write
