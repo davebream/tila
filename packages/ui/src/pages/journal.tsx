@@ -305,7 +305,8 @@ export function JournalPage() {
 
   // Events accumulator in React state (state-driven rendering, no manual tick)
   const [events, setEvents] = useState<JournalEvent[]>([]);
-  const [lastSeq, setLastSeq] = useState(0);
+  // Cursor lives entirely in the ref (read in the tail queryFn, not in any
+  // queryKey per OQ-5); renders are driven by setEvents, so no cursor state.
   const lastSeqRef = useRef(0);
   const [retryKey, setRetryKey] = useState(0);
 
@@ -368,9 +369,7 @@ export function JournalPage() {
     setEvents(loaded);
     const maxSeq =
       loaded.length > 0 ? Math.max(...loaded.map((e) => e.seq)) : 0;
-    // Assign ref BEFORE state (RC-4: ref must be current before next render)
     lastSeqRef.current = maxSeq;
-    setLastSeq(maxSeq);
     requestAnimationFrame(() => scrollToBottom());
   }, [initialQuery.data, scrollToBottom]);
 
@@ -417,9 +416,10 @@ export function JournalPage() {
       const merged = [...prev, ...fresh];
       return merged.length > MAX_ROWS ? merged.slice(PRUNE_COUNT) : merged;
     });
-    const next = Math.max(lastSeqRef.current, ...incoming.map((e) => e.seq));
-    lastSeqRef.current = next;
-    setLastSeq(next);
+    lastSeqRef.current = Math.max(
+      lastSeqRef.current,
+      ...incoming.map((e) => e.seq),
+    );
     if (wasAtBottomRef.current) {
       requestAnimationFrame(() => scrollToBottom());
     }
@@ -427,8 +427,6 @@ export function JournalPage() {
 
   const loadError = initialQuery.isError ? initialQuery.error : null;
   const initialLoaded = initialQuery.isSuccess;
-  // lastSeq used to suppress unused-variable lint (cursor drives ref; state for re-render)
-  void lastSeq;
 
   const clearFilters = useCallback(() => {
     setResourceInput("");

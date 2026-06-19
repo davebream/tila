@@ -273,8 +273,11 @@ describe("JournalPage", () => {
         { timeout: 5000 },
       );
 
-      // Seq 4 must appear at least once
-      expect(screen.getAllByText("#4").length).toBeGreaterThan(0);
+      // Seq 4 must appear EXACTLY once — this is the load-bearing dedup
+      // assertion: without the Set-based seq-dedup, the overlapping tail batch
+      // (4,5 over an existing 1-4) would render #4 twice. toHaveLength(1)
+      // genuinely fails if the dedup is removed (toBeGreaterThan(0) would not).
+      expect(screen.getAllByText("#4")).toHaveLength(1);
     }, 10000);
   });
 
