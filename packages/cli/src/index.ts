@@ -41,6 +41,7 @@ const main = defineCommand({
     deploy: () => load(() => import("./commands/deploy")),
     reset: () => load(() => import("./commands/reset")),
     token: () => load(() => import("./commands/token")),
+    repos: () => load(() => import("./commands/repos")),
     summary: () => load(() => import("./commands/summary")),
     gate: () => load(() => import("./commands/gate")),
     template: () => load(() => import("./commands/template")),
