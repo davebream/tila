@@ -16,7 +16,11 @@ import {
 } from "./artifact-ops";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
-import { assertResourceFence } from "./fence-ops";
+import {
+  assertResourceFence,
+  assertResourceFenceWithCanonical,
+  resolveEntityResourceDirect,
+} from "./fence-ops";
 import { checkPendingGates } from "./gate-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import { searchRecords } from "./record-ops";
@@ -177,14 +181,18 @@ export function create(
       )`,
     );
 
-    const row = tx
-      .select()
-      .from(schema.entities)
-      .where(eq(schema.entities.id, input.id))
-      .get();
-
-    const entity = rowToEntity(row as typeof schema.entities.$inferSelect);
-    entity.tags = normalizedTags;
+    // Construct the return value from validated inputs — no post-write SELECT needed.
+    const entity: Entity = {
+      id: input.id,
+      type: input.type,
+      schema_version: schemaVersion,
+      data: input.data,
+      archived: 0,
+      created_at: now,
+      updated_at: now,
+      created_by: input.created_by,
+      tags: normalizedTags,
+    };
     return entity;
   });
 }
@@ -469,7 +477,12 @@ export function update(
       // requireLiveClaim closes the zombie-write window where an expired lease's
       // fence still numerically matches current_fence (entity fences do not bump
       // on write).
-      assertResourceFence(tx, id, fence, { requireLiveClaim: true });
+      // Use the fast path: we already have `existing.type` from the SELECT above,
+      // so construct the canonical resource string directly without another DB read.
+      const canonicalResource = resolveEntityResourceDirect(existing.type, id);
+      assertResourceFenceWithCanonical(tx, canonicalResource, fence, {
+        requireLiveClaim: true,
+      });
 
       // Gate enforcement: block terminal transitions if pending gates exist.
       // Non-terminal status changes and updates without a status field are unaffected.
@@ -525,15 +538,21 @@ export function update(
       )`,
       );
 
-      const updated = tx
-        .select()
-        .from(schema.entities)
-        .where(eq(schema.entities.id, id))
-        .get();
-
-      const entity = rowToEntity(
-        updated as typeof schema.entities.$inferSelect,
-      );
+      // Construct the return value from mergedData + the already-read `existing` row.
+      // This avoids the post-write SELECT while preserving all passthrough fields:
+      // created_at, created_by, type, and schema_version come from `existing`;
+      // data comes from `mergedData` (the merged patch applied by the UPDATE above).
+      const entity: Entity = {
+        id: existing.id,
+        type: existing.type,
+        schema_version: existing.schema_version,
+        data: mergedData,
+        archived: existing.archived,
+        created_at: existing.created_at,
+        updated_at: now,
+        created_by: existing.created_by,
+        tags: [],
+      };
 
       // Attach final tags: if we updated them, use normalizedTags; else read current tags
       if (normalizedTags !== undefined) {
@@ -584,7 +603,13 @@ export function archive(
       // requireLiveClaim closes the zombie-write window where an expired lease's
       // fence still numerically matches current_fence (entity fences do not bump
       // on write).
-      assertResourceFence(tx, id, fence, { requireLiveClaim: true });
+      // Use the fast path: we already have `existing.type` from the SELECT above.
+      assertResourceFenceWithCanonical(
+        tx,
+        resolveEntityResourceDirect(existing.type, id),
+        fence,
+        { requireLiveClaim: true },
+      );
 
       // Gate enforcement: archive is a terminal operation -- always check gates.
       // If GateBlockedError is thrown, the transaction rolls back cleanly.
@@ -627,7 +652,6 @@ export interface EntitySearchResult {
   entity_id: string;
   entity_type: string;
   name: string | null;
-  data: Record<string, unknown>;
   indexed_at: number;
   snippet: string | null;
 }
@@ -663,7 +687,6 @@ export function searchEntities(
       entity_id: string;
       entity_type: string;
       name: string | null;
-      data: string;
       indexed_at: number;
       snippet: string | null;
     }>(sql`
@@ -671,7 +694,6 @@ export function searchEntities(
         d.entity_id,
         d.entity_type,
         d.name,
-        e.data,
         d.indexed_at,
         snippet(entity_search_docs_fts, 0, '<b>', '</b>', '...', 10) AS snippet
       FROM entity_search_docs_fts fts
@@ -689,7 +711,6 @@ export function searchEntities(
       entity_id: r.entity_id,
       entity_type: r.entity_type,
       name: r.name,
-      data: JSON.parse(r.data) as Record<string, unknown>,
       indexed_at: r.indexed_at,
       snippet: r.snippet,
     }));

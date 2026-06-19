@@ -89,6 +89,20 @@ export function resolveEntityResource(
 }
 
 /**
+ * Construct the canonical `<type>:<id>` resource string for an entity when
+ * the caller already holds the entity's type (e.g. from the `existing` row
+ * read earlier in the transaction). Avoids the entity-existence DB lookup that
+ * `resolveEntityResource` performs.
+ *
+ * Use this fast path ONLY when the type is known to be correct (already
+ * fetched from the DB). Fall back to `resolveEntityResource` when only a raw
+ * resource string is available (coordination-ops, records, etc.).
+ */
+export function resolveEntityResourceDirect(type: string, id: string): string {
+  return `${type}:${id}`;
+}
+
+/**
  * Look up a fence row by exact resource key.
  * Returns the fence row or undefined if absent.
  */
@@ -146,6 +160,38 @@ export interface AssertResourceFenceOptions {
    * tracked as a follow-up).
    */
   requireLiveClaim?: boolean;
+}
+
+/**
+ * Assert a fence for an entity resource whose canonical `<type>:<id>` form is
+ * already known (i.e. the caller holds the `existing` DB row). Skips the
+ * `resolveEntityResource` entity-existence lookup that `assertResourceFence`
+ * performs when given a bare id.
+ *
+ * Use this in `update()` / `archive()` after the initial entity SELECT when
+ * the type is already in hand. The fence assertion logic is identical to
+ * `assertResourceFence` — only the resolution step is short-circuited.
+ */
+export function assertResourceFenceWithCanonical(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  canonical: string,
+  fence: number,
+  opts: AssertResourceFenceOptions = {},
+): void {
+  const { now = Date.now(), requireLiveClaim = false } = opts;
+
+  const canonicalFence = lookupFence(db, canonical);
+  if (!canonicalFence) {
+    throw new FenceNotFoundError(canonical);
+  }
+  assertFence(canonicalFence.current_fence, fence);
+
+  if (requireLiveClaim) {
+    const claim = lookupClaim(db, canonical);
+    if (!claim || claim.expires_at <= now) {
+      throw new ExpiredClaimError(canonical);
+    }
+  }
 }
 
 export function assertResourceFence(
