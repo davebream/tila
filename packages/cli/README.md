@@ -39,6 +39,7 @@ Use `pnpm --filter tila-cli dev -- <command>` in place of `tila <command>` until
 | `summary` | Show project summary |
 | `state` | List all active claims |
 | `token` | Manage project API tokens |
+| `repos` | Manage the GitHub repo allowlist (`repos register` to register the configured repo) |
 | `template` | Manage entity templates |
 | `index` | Manage index artifacts |
 | `config` | View project configuration |
