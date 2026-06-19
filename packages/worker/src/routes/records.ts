@@ -7,17 +7,16 @@ import {
   RecordSetRequestSchema,
   RecordUnarchiveRequestSchema,
   RecordValueSchema,
-  TilaSchemaTomlSchema,
   canonicalJson,
   canonicalJsonSha256,
   parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
-import TOML from "smol-toml";
 import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
+import { getValidatedSchema } from "../lib/schema-validation";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
@@ -32,29 +31,19 @@ export const records = new Hono<{
 // ---------------------------------------------------------------------------
 
 /**
- * Fetches the project schema from the DO and returns the `history` mode
- * for the given record type. Fail-open: returns "revision" if schema is
- * unavailable or type is undeclared.
+ * Returns the `history` mode for the given record type. Fail-open: returns
+ * "revision" if schema is unavailable, unparseable, or type is undeclared.
+ *
+ * Uses the per-isolate schema cache (30s TTL) — no per-write DO round-trip.
  */
 async function resolveRecordHistoryMode(
   stub: DurableObjectStub,
+  projectId: string,
   type: string,
-  analyticsCtx: ReturnType<typeof analyticsCtxFrom>,
 ): Promise<"revision" | "snapshot"> {
-  try {
-    const { response: schemaRes, json: body } = await forwardTypedDO<{
-      ok: boolean;
-      schema: { definition: string } | null;
-    }>(stub, DO_PATHS.schemaCurrent, "GET", undefined, undefined, analyticsCtx);
-    if (!schemaRes.ok) return "revision";
-    if (!body.ok || !body.schema?.definition) return "revision";
-    const parsed = TOML.parse(body.schema.definition);
-    const schemaDef = TilaSchemaTomlSchema.safeParse(parsed);
-    if (!schemaDef.success) return "revision";
-    return schemaDef.data.records?.[type]?.history ?? "revision";
-  } catch {
-    return "revision";
-  }
+  const result = await getValidatedSchema(stub, projectId);
+  if (!result.ok) return "revision";
+  return result.schema.records?.[type]?.history ?? "revision";
 }
 
 /**
@@ -164,32 +153,13 @@ records.get("/_types", async (c) => {
     // Fail open -- inUseTypes stays empty
   }
 
-  // 2. Fetch declared types from schema TOML
+  // 2. Fetch declared types from schema TOML (via per-isolate cache — no extra DO round-trip)
   let declaredTypes: string[] = [];
-  try {
-    const { response: schemaRes, json: schemaBody } = await forwardTypedDO<{
-      ok: boolean;
-      schema: { definition: string } | null;
-    }>(
-      stub,
-      DO_PATHS.schemaCurrent,
-      "GET",
-      undefined,
-      undefined,
-      analyticsCtxFrom(c),
-    );
-    if (schemaRes.ok) {
-      if (schemaBody.ok && schemaBody.schema?.definition) {
-        const tomlParsed = TOML.parse(schemaBody.schema.definition);
-        const schemaDef = TilaSchemaTomlSchema.safeParse(tomlParsed);
-        if (schemaDef.success) {
-          declaredTypes = Object.keys(schemaDef.data.records ?? {}).sort();
-        }
-      }
-    }
-  } catch {
-    // TOML parse failure or schema fetch failure -- declaredTypes stays empty (permissive)
+  const schemaResult = await getValidatedSchema(stub, c.get("projectId"));
+  if (schemaResult.ok) {
+    declaredTypes = Object.keys(schemaResult.schema.records ?? {}).sort();
   }
+  // schema absent, parse error, or validate error: declaredTypes stays empty (permissive)
 
   // 3. Merge, deduplicate, sort
   const types = [...new Set([...declaredTypes, ...inUseTypes])].sort();
@@ -314,7 +284,11 @@ records.post("/:type/~/put/:key{.+}", requirePermission("write"), async (c) => {
   const analyticsCtx = analyticsCtxFrom(c);
 
   // Snapshot artifact flow: resolve history mode before DO call
-  const historyMode = await resolveRecordHistoryMode(stub, type, analyticsCtx);
+  const historyMode = await resolveRecordHistoryMode(
+    stub,
+    c.get("projectId"),
+    type,
+  );
 
   // Validate source_artifact_key if present
   if (parsed.data.source_artifact_key) {
@@ -430,7 +404,11 @@ records.put("/:type/:key{.+}", requirePermission("write"), async (c) => {
   const analyticsCtx = analyticsCtxFrom(c);
 
   // Snapshot artifact flow: resolve history mode before DO call
-  const historyMode = await resolveRecordHistoryMode(stub, type, analyticsCtx);
+  const historyMode = await resolveRecordHistoryMode(
+    stub,
+    c.get("projectId"),
+    type,
+  );
 
   // Validate source_artifact_key if present
   if (parsed.data.source_artifact_key) {
@@ -517,7 +495,11 @@ records.patch("/:type/:key{.+}", requirePermission("write"), async (c) => {
   const analyticsCtx = analyticsCtxFrom(c);
 
   // Check history mode before mutation (fail-open: if schema unavailable, treat as revision)
-  const historyMode = await resolveRecordHistoryMode(stub, type, analyticsCtx);
+  const historyMode = await resolveRecordHistoryMode(
+    stub,
+    c.get("projectId"),
+    type,
+  );
 
   // Forward patch to DO (DO performs merge-patch and returns the merged value)
   const doResponse = await forwardToDO(
@@ -714,7 +696,11 @@ records.post("/:type", requirePermission("write"), async (c) => {
   const recordKey = parsed.data.key;
 
   // Snapshot artifact flow: resolve history mode before DO call
-  const historyMode = await resolveRecordHistoryMode(stub, type, analyticsCtx);
+  const historyMode = await resolveRecordHistoryMode(
+    stub,
+    c.get("projectId"),
+    type,
+  );
 
   // Validate source_artifact_key if present
   if (parsed.data.source_artifact_key) {

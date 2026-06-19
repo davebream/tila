@@ -15,11 +15,9 @@ import {
   ArtifactGrepQuerySchema,
   ArtifactSearchQuerySchema,
   ArtifactTextWriteRequestSchema,
-  TilaSchemaTomlSchema,
   parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
-import TOML from "smol-toml";
 import { ZodError, z } from "zod";
 import { ARTIFACT_REPAIR_SCAN_LIMIT } from "../config";
 import { analyticsCtxFrom } from "../lib/analytics";
@@ -29,6 +27,7 @@ import {
   MAX_BYTES_FOR_NORMALIZATION,
   normalizeArtifactText,
 } from "../lib/normalize-text";
+import { getValidatedSchema } from "../lib/schema-validation";
 import { type ScanRow, buildRebuildCandidates } from "../lib/search-rebuild";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
@@ -1014,48 +1013,28 @@ artifacts.post("/relationship", requirePermission("write"), async (c) => {
 
   // TOML-runtime type validation: if artifact_relationships.types is declared, validate against it
   // This is additive to any static enum check — when types is not declared, any type is accepted.
-  const { json: schemaBody } = await forwardTypedDO<{
-    ok: boolean;
-    schema: { definition: string } | null;
-  }>(
-    stub,
-    DO_PATHS.schemaCurrent,
-    "GET",
-    undefined,
-    undefined,
-    analyticsCtxFrom(c),
-  );
+  // Uses the per-isolate schema cache (30s TTL) — no per-write DO round-trip.
+  const schemaResult = await getValidatedSchema(stub, c.get("projectId"));
 
-  if (schemaBody.ok && schemaBody.schema?.definition) {
-    try {
-      const tomlParsed = TOML.parse(schemaBody.schema.definition);
-      const schemaDef = TilaSchemaTomlSchema.safeParse(tomlParsed);
-      if (schemaDef.success) {
-        const declaredTypes = schemaDef.data.artifact_relationships?.types;
-        if (declaredTypes && declaredTypes.length > 0) {
-          if (!declaredTypes.includes(body.type)) {
-            return c.json(
-              {
-                ok: false,
-                error: {
-                  code: "invalid-relationship-type",
-                  message: `Type "${body.type}" is not declared in tila.schema.toml. Valid types: ${declaredTypes.join(", ")}`,
-                  retryable: false,
-                },
-              },
-              422,
-            );
-          }
-        }
+  if (schemaResult.ok) {
+    const declaredTypes = schemaResult.schema.artifact_relationships?.types;
+    if (declaredTypes && declaredTypes.length > 0) {
+      if (!declaredTypes.includes(body.type)) {
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "invalid-relationship-type",
+              message: `Type "${body.type}" is not declared in tila.schema.toml. Valid types: ${declaredTypes.join(", ")}`,
+              retryable: false,
+            },
+          },
+          422,
+        );
       }
-    } catch {
-      // TOML parse failure: log warning and allow through (permissive default)
-      console.warn(
-        "Failed to parse tila.schema.toml for relationship type validation",
-      );
     }
   }
-  // No schema or no types declared: allow any type (permissive default)
+  // No schema, parse error, or no types declared: allow any type (permissive default)
 
   const tokenResult = c.get("tokenResult");
   return forwardToDO(

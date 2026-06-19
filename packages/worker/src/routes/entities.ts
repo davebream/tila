@@ -5,15 +5,14 @@ import {
   CreateEntityRequestSchema,
   DeleteEntityRelationshipRequestSchema,
   ListEntityRelationshipsRequestSchema,
-  TilaSchemaTomlSchema,
   UpdateEntityRequestSchema,
   parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
-import TOML from "smol-toml";
 import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
+import { getValidatedSchema } from "../lib/schema-validation";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
@@ -272,50 +271,31 @@ entities.post(
     const parsed = AddEntityArtifactReferenceRequestSchema.safeParse(raw);
     if (!parsed.success) return zodValidationError(c, parsed.error);
 
-    // TOML slot validation: fetch current schema and validate slot if declared
+    // TOML slot validation: fetch current schema and validate slot if declared.
+    // Uses the per-isolate schema cache (30s TTL) — no per-write DO round-trip.
     const stub = c.get("doStub");
-    const schemaRes = await forwardToDO(
-      stub,
-      "/schema/current",
-      "GET",
-      undefined,
-      undefined,
-      analyticsCtxFrom(c),
-    );
-    const schemaBody = (await schemaRes.json()) as {
-      ok: boolean;
-      schema: { definition: string } | null;
-    };
+    const schemaResult = await getValidatedSchema(stub, c.get("projectId"));
 
-    if (schemaBody.ok && schemaBody.schema?.definition) {
-      try {
-        const tomlParsed = TOML.parse(schemaBody.schema.definition);
-        const schemaDef = TilaSchemaTomlSchema.safeParse(tomlParsed);
-        if (schemaDef.success) {
-          const declaredSlots =
-            schemaDef.data.entity_artifact_references?.slots;
-          if (declaredSlots && declaredSlots.length > 0) {
-            if (!declaredSlots.includes(parsed.data.slot)) {
-              return c.json(
-                {
-                  ok: false,
-                  error: {
-                    code: "invalid-slot",
-                    message: `Slot "${parsed.data.slot}" is not declared in tila.schema.toml. Valid slots: ${declaredSlots.join(", ")}`,
-                    retryable: false,
-                  },
-                },
-                422,
-              );
-            }
-          }
+    if (schemaResult.ok) {
+      const declaredSlots =
+        schemaResult.schema.entity_artifact_references?.slots;
+      if (declaredSlots && declaredSlots.length > 0) {
+        if (!declaredSlots.includes(parsed.data.slot)) {
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "invalid-slot",
+                message: `Slot "${parsed.data.slot}" is not declared in tila.schema.toml. Valid slots: ${declaredSlots.join(", ")}`,
+                retryable: false,
+              },
+            },
+            422,
+          );
         }
-      } catch {
-        // TOML parse failure: log warning and allow through (permissive default)
-        console.warn("Failed to parse tila.schema.toml for slot validation");
       }
     }
-    // No schema or no slots declared: allow any slot (permissive default)
+    // No schema, parse error, or no slots declared: allow any slot (permissive default)
 
     const tokenResult = c.get("tokenResult");
     return forwardToDO(
