@@ -2,6 +2,7 @@ import { ApplyStrategySchema } from "@tila/schemas";
 import { Hono } from "hono";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
+import { bustSchemaCache } from "../lib/schema-cache";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
 
@@ -88,7 +89,7 @@ schemaRoutes.post("/", requirePermission("write"), async (c) => {
 
   const tokenResult = c.get("tokenResult");
   const stub = c.get("doStub");
-  return forwardToDO(
+  const res = await forwardToDO(
     stub,
     "/schema/apply",
     "POST",
@@ -103,4 +104,14 @@ schemaRoutes.post("/", requirePermission("write"), async (c) => {
     undefined,
     analyticsCtxFrom(c),
   );
+
+  // Bust the per-isolate schema cache on a successful schema write (both
+  // CREATE and UPDATE land here via /schema/apply). This enforces the
+  // ≤30s cross-isolate staleness contract for the local isolate: the next
+  // schema-validation call in this isolate will re-fetch from the DO.
+  if (res.ok) {
+    bustSchemaCache(c.get("projectId"));
+  }
+
+  return res;
 });

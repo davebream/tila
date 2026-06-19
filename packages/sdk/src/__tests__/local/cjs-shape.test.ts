@@ -31,17 +31,23 @@ describe("better-sqlite3 CJS shape normalization (R8)", () => {
     vi.resetModules();
   });
 
-  it("handles the `.default` (synthesized) export shape", async () => {
-    vi.resetModules();
-    vi.doMock("better-sqlite3", () => ({ default: RealDatabase }));
-    const { createNodeConnection } = await import("../../local/connection");
+  // Loading the real native better-sqlite3 + opening a DB can exceed the 5s
+  // default on a cold, loaded CI runner; a generous timeout keeps it stable.
+  it(
+    "handles the `.default` (synthesized) export shape",
+    { timeout: 20000 },
+    async () => {
+      vi.resetModules();
+      vi.doMock("better-sqlite3", () => ({ default: RealDatabase }));
+      const { createNodeConnection } = await import("../../local/connection");
 
-    const conn = await createNodeConnection(join(dir, "a.db"), {
-      skipFilesystemCheck: true,
-    });
-    expect(conn.db).toBeDefined();
-    conn.close();
-  });
+      const conn = await createNodeConnection(join(dir, "a.db"), {
+        skipFilesystemCheck: true,
+      });
+      expect(conn.db).toBeDefined();
+      conn.close();
+    },
+  );
 
   it("normalization `mod.default ?? mod` resolves the constructor for both shapes", () => {
     // The "namespace IS the callable constructor" CJS shape cannot be produced

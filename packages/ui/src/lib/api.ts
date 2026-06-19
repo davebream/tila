@@ -4,6 +4,7 @@ import type {
   EntityDetailResponse,
   EntityListResponse,
   JournalResponse,
+  PaginatedEntityListResponse,
   PresenceAllListResponse,
   RecordGetResponse,
   RecordHistoryResponse,
@@ -130,8 +131,13 @@ export async function listTasks(
     status?: string | string[];
     parent?: string;
     archived?: string;
+    compact?: boolean;
+    sort?: "created_at" | "updated_at" | "type" | "title" | "status";
+    order?: "asc" | "desc";
+    limit?: number;
+    offset?: number;
   },
-): Promise<EntityListResponse> {
+): Promise<EntityListResponse | PaginatedEntityListResponse> {
   const stringParams: Record<string, string | undefined> = {};
   if (params?.type) {
     stringParams.type = Array.isArray(params.type)
@@ -145,7 +151,16 @@ export async function listTasks(
   }
   if (params?.parent) stringParams.parent = params.parent;
   if (params?.archived) stringParams.archived = params.archived;
-  return request<EntityListResponse>(projectId, "/tasks", stringParams);
+  if (params?.compact) stringParams.compact = "true";
+  if (params?.sort) stringParams.sort = params.sort;
+  if (params?.order) stringParams.order = params.order;
+  if (params?.limit !== undefined) stringParams.limit = String(params.limit);
+  if (params?.offset !== undefined) stringParams.offset = String(params.offset);
+  return request<EntityListResponse | PaginatedEntityListResponse>(
+    projectId,
+    "/tasks",
+    stringParams,
+  );
 }
 
 export async function getTaskDetail(

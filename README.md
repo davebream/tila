@@ -9,7 +9,7 @@ Coordination primitives that prevent races.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.2.0 released. APIs are stable enough to build against; expect breaking changes before v1.0.
+> **Status:** [v0.2.7 released](https://github.com/davebream/tila/releases/latest). APIs are stable enough to build against; expect breaking changes before v1.0.
 
 </div>
 
@@ -152,7 +152,7 @@ These projects solve adjacent problems and work well alongside tila:
 
 ## For AI coding agents
 
-The `tila-mcp-server` and `tila-sdk` packages are published on npm (current: v0.2.0). The MCP Registry id is `io.github.davebream/tila` (see the [MCP Registry](https://registry.modelcontextprotocol.io)). Three ways to connect:
+The `tila-mcp-server` and `tila-sdk` packages are published on npm (see [latest release](https://github.com/davebream/tila/releases/latest)). The MCP Registry id is `io.github.davebream/tila` (see the [MCP Registry](https://registry.modelcontextprotocol.io)). Three ways to connect:
 
 **1. One command** (auto-detects your editor)
 ```sh
@@ -342,7 +342,7 @@ Your Cloudflare account holds the durable state. Backups are your responsibility
 <details>
 <summary><b>Is this stable?</b></summary>
 
-v0.2.0 is released and tagged. APIs are stable enough to build against, but expect breaking changes before v1.0. Pin to specific versions.
+See the [latest release](https://github.com/davebream/tila/releases/latest) for the current version. APIs are stable enough to build against, but expect breaking changes before v1.0. Pin to a specific version.
 </details>
 
 <details>

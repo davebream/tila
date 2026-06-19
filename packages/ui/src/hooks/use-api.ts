@@ -34,6 +34,11 @@ export function useTasks(params?: {
   status?: string | string[];
   parent?: string;
   archived?: string;
+  compact?: boolean;
+  sort?: "created_at" | "updated_at" | "type" | "title" | "status";
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
 }) {
   const { projectId } = useAuth();
   return useQuery({
@@ -41,6 +46,23 @@ export function useTasks(params?: {
     queryFn: () => listTasks(requireProjectId(projectId), params),
     enabled: Boolean(projectId),
     refetchInterval: 5000,
+  });
+}
+
+export function useTaskIndex() {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["task-index", projectId],
+    queryFn: () =>
+      listTasks(requireProjectId(projectId), {
+        compact: true,
+        limit: 200,
+        sort: "updated_at",
+        order: "desc",
+      }),
+    enabled: Boolean(projectId),
+    refetchInterval: 15000,
+    staleTime: 5000,
   });
 }
 

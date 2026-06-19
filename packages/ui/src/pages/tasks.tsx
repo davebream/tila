@@ -21,6 +21,7 @@ import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { relativeTime } from "@/lib/time";
+import type { PaginatedEntityListResponse } from "@tila/schemas";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useMatch, useNavigate, useSearchParams } from "react-router";
 
@@ -96,8 +97,19 @@ export function TasksPage() {
     setSearchParams(params, { replace: true });
   }, [typeFilter, idFilter, sort, setSearchParams]);
 
+  // Map UI sort key to server sort field; "id" is unsupported server-side so omit it
+  const serverSort =
+    sort?.key === "updated"
+      ? "updated_at"
+      : sort?.key === "type"
+        ? "type"
+        : undefined;
+
   const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useTasks({
     type: typeFilter.length > 0 ? typeFilter : undefined,
+    limit: 100,
+    sort: serverSort,
+    order: sort?.dir,
   });
   const allEntities = data?.entities ?? [];
 
@@ -114,21 +126,14 @@ export function TasksPage() {
       const q = debouncedIdFilter.toLowerCase().trim();
       filtered = allEntities.filter((e) => e.id.toLowerCase().includes(q));
     }
-    if (!sort) return filtered;
+    // Server already handles updated_at and type sort; client sort only for "id"
+    if (!sort || sort.key !== "id") return filtered;
     const dir = sort.dir === "asc" ? 1 : -1;
-    return [...filtered].sort((a, b) => {
-      switch (sort.key) {
-        case "updated":
-          return (a.updated_at - b.updated_at) * dir;
-        case "type":
-          return a.type.localeCompare(b.type) * dir;
-        case "id":
-          return a.id.localeCompare(b.id) * dir;
-        default:
-          return 0;
-      }
-    });
+    return [...filtered].sort((a, b) => a.id.localeCompare(b.id) * dir);
   }, [allEntities, debouncedIdFilter, sort]);
+
+  const hasPaginationHint =
+    data !== undefined && "has_more" in data && data.has_more;
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -165,6 +170,12 @@ export function TasksPage() {
         {entities.length > 0 && (
           <span className="tila-num rounded-full border border-border bg-card px-[7px] py-px font-mono text-[11px] text-fg-faint">
             {entities.length}
+          </span>
+        )}
+        {hasPaginationHint && (
+          <span className="font-mono text-[11px] text-fg-faint">
+            Showing first {(data as PaginatedEntityListResponse).limit ?? 100}{" "}
+            of {(data as PaginatedEntityListResponse).total}
           </span>
         )}
         <LastRefreshed dataUpdatedAt={dataUpdatedAt} />
@@ -216,7 +227,18 @@ export function TasksPage() {
                 className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
                 aria-label={`Remove type filter: ${t}`}
               >
-                x
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
+                </svg>
               </button>
             </span>
           ))}
@@ -229,7 +251,18 @@ export function TasksPage() {
                 className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
                 aria-label="Remove ID filter"
               >
-                x
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
+                </svg>
               </button>
             </span>
           )}
@@ -288,7 +321,7 @@ export function TasksPage() {
           role="grid"
           onKeyDown={handleTableKeyDown}
         >
-          <Table aria-label="Tasks">
+          <Table aria-label="Tasks" aria-rowcount={entities.length}>
             <TableHeader>
               <TableRow>
                 <SortableHead
@@ -334,6 +367,7 @@ export function TasksPage() {
                 return (
                   <TableRow
                     key={entity.id}
+                    aria-rowindex={idx + 1}
                     className={`group/row ${selectedId === entity.id ? "bg-tint-blue-08" : ""} ${focused ? "bg-[var(--color-row-hover)]" : ""}`}
                   >
                     <TableCell>

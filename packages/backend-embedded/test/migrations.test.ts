@@ -10,12 +10,14 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–20 minus 15
- * (v15 = DO-only journal-archive watermark). The embedded-only idempotency
- * overlay is appended at IDEMPOTENCY_MIGRATION_VERSION, above the shared range.
+ * Canonical shared versions present in the embedded set: 1–22 minus 15 and 21
+ * (v15 = DO-only journal-archive watermark, v21 = DO-only idempotency table).
+ * v22 (idx_entities_archived) is shared — the partial index applies to the
+ * embedded entities table too. The embedded-only idempotency overlay is appended
+ * at IDEMPOTENCY_MIGRATION_VERSION, above the shared range.
  */
 const CANONICAL_VERSIONS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 22,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,

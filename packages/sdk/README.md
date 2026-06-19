@@ -17,36 +17,40 @@ npm install zod
 ## Quick Start
 
 ```typescript
-import { TilaClient, createEntityMethods } from "tila-sdk";
+import { createTila } from "tila-sdk";
 
-const client = new TilaClient({
-  baseUrl: process.env.TILA_URL!,
-  token: process.env.TILA_TOKEN!,
-});
+const tila = await createTila(
+  {
+    project_id: "my-project",
+    backend: "cloudflare",
+    worker_url: process.env.TILA_URL!,
+    schema_version: 1,
+    tila_version: "0",
+    created_at: "",
+  },
+  process.env.TILA_TOKEN!,
+);
 
-const projectId = "my-project";
-const entities = createEntityMethods(client, projectId);
-
-// Create an entity
-const task = await entities.create("task-1", "task", {
+// Create a task
+const task = await tila.tasks.create("task-1", "task", {
   title: "Process dataset",
   status: "pending",
 });
 
 // Read it back
-const detail = await entities.get("task-1");
+const detail = await tila.tasks.get("task-1");
 
-// List entities by type
-const list = await entities.list({ type: "task" });
+// List tasks by type
+const list = await tila.tasks.list({ type: "task" });
 
 // Update with new data
-const updated = await entities.update("task-1", {
+const updated = await tila.tasks.update("task-1", {
   status: "in-progress",
   assignee: "agent-7",
 });
 
 // Archive when done
-await entities.archive("task-1");
+await tila.tasks.archive("task-1");
 ```
 
 ### `createTila` — one facade, local or remote

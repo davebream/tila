@@ -54,7 +54,7 @@
   --color-secondary: var(--color-n-850);
   --color-secondary-foreground: var(--color-n-100);
   --color-muted: var(--color-n-850);
-  --color-muted-foreground: var(--color-n-400);
+  --color-muted-foreground: var(--color-n-300);
   --color-accent: var(--color-signal-500);
   --color-accent-foreground: var(--color-n-950);
   --color-destructive: var(--color-status-red);
@@ -108,8 +108,8 @@
 
   /* ── Font families ── */
   --font-logo: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", "JetBrains Mono", "IBM Plex Mono", ui-monospace,
-    monospace;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "Fira Code",
+    "Cascadia Code", Menlo, Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
 

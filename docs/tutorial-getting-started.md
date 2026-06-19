@@ -7,7 +7,7 @@ This tutorial walks you through the full tila lifecycle: initializing a project,
 - A [Cloudflare API token](https://dash.cloudflare.com/profile/api-tokens) (`export CLOUDFLARE_API_TOKEN=...`)
 - [wrangler](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed (used for Worker deployment and D1 migrations)
 
-> **Unsigned binaries (v0.1.0):** macOS: `xattr -d com.apple.quarantine ./tila-darwin-*`. Windows: click "Run anyway" in SmartScreen.
+> **Unsigned binaries** (see [latest release](https://github.com/davebream/tila/releases/latest)): macOS: `xattr -d com.apple.quarantine ./tila-darwin-*`. Windows: click "Run anyway" in SmartScreen.
 
 ---
 

@@ -652,6 +652,21 @@ ON _do_idempotency(created_at);
 `;
 
 /**
+ * Partial index on entities to accelerate the FTS join on active (non-archived)
+ * entities. The FTS search queries join entities on `e.id` with `WHERE e.archived = 0`;
+ * this index covers that filter on the join key.
+ *
+ * Shape: entities(id) WHERE archived = 0
+ * Chosen over bare entities(archived) because the FTS join predicate is on e.id
+ * and this partial covering form avoids a full table scan for the archived filter.
+ * Validated informally via EXPLAIN QUERY PLAN; planner-selection is informational
+ * (migration-applies is the blocking guarantee).
+ */
+export const MIGRATION_0022 = `
+CREATE INDEX IF NOT EXISTS idx_entities_archived ON entities(id) WHERE archived = 0;
+`;
+
+/**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
  * The runner executes only versions not yet recorded in _migrations.
@@ -678,4 +693,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 19, sql: MIGRATION_0019 },
   { version: 20, run: runMigration0020 },
   { version: 21, sql: MIGRATION_0021 },
+  { version: 22, sql: MIGRATION_0022 },
 ];

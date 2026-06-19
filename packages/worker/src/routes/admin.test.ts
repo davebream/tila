@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { destroyProjectResources } from "../lib/destroy-project";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 
 const forwardToDOMock = vi.fn();
@@ -233,7 +234,10 @@ describe("project admin routes", () => {
       let peerCallCount = 0;
       forwardToDOMock.mockImplementation(
         (_stub: unknown, path: string, method: string) => {
-          if (path === "/admin/pointer-keys" && method === "GET") {
+          if (path.startsWith("/admin/pointer-keys") && method === "GET") {
+            // Assert the limit param is always present
+            const urlObj = new URL(path, "http://x");
+            expect(urlObj.searchParams.get("limit")).not.toBeNull();
             const isFirstCall = peerCallCount === 0;
             peerCallCount++;
             if (isFirstCall) {
@@ -404,7 +408,7 @@ describe("project admin routes", () => {
       let peerCallCount = 0;
       forwardToDOMock.mockImplementation(
         (_stub: unknown, path: string, method: string) => {
-          if (path === "/admin/pointer-keys" && method === "GET") {
+          if (path.startsWith("/admin/pointer-keys") && method === "GET") {
             const isFirst = peerCallCount === 0;
             peerCallCount++;
             if (isFirst) {
@@ -433,6 +437,406 @@ describe("project admin routes", () => {
       expect(body.error.code).toBe("peer-pointer-keys-fetch-failed");
       // deleteMany must NOT be called — corrupting shared blobs is not acceptable
       expect(deleteManyMock).not.toHaveBeenCalled();
+    });
+
+    // ── Task 8 required assertions ─────────────────────────────────────────
+
+    it("(t8-b) drains all pages for target + peers before computing liveKeyUnion", async () => {
+      // Target has 2 pages: page1={keys:["a"],nextCursor:"a"}, page2={keys:["b"],nextCursor:null}
+      // Peer has 2 pages: page1={keys:["c"],nextCursor:"c"}, page2={keys:["a"],nextCursor:null}
+      // Only "b" is absent from the live-key union — it should be deleted.
+      // "a" is present in the peer, so it should be kept.
+      listAllIncludingArchivedMock.mockResolvedValue([
+        { projectId: "proj-target" },
+        { projectId: "proj-peer" },
+      ]);
+      headMock.mockResolvedValue({ key: "b", size: 100 });
+      deleteManyMock.mockResolvedValue({ deleted: 1, failed: [] });
+      deleteByPrefixMock.mockResolvedValue({ deleted: 0, failed: [] });
+
+      // Simulate the paged responses manually:
+      // target page 1: /admin/pointer-keys (no cursor)
+      // target page 2: /admin/pointer-keys?cursor=a
+      // peer page 1: /admin/pointer-keys (no cursor)
+      // peer page 2: /admin/pointer-keys?cursor=c
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, method: string) => {
+          if (method === "GET" && path.startsWith("/admin/pointer-keys")) {
+            const urlObj = new URL(path, "http://x");
+            const cursor = urlObj.searchParams.get("cursor");
+            if (cursor === null) {
+              // First page (works for both target and peer)
+              // We use call order to differentiate target vs peer
+              const calls = forwardToDOMock.mock.calls.filter(
+                (args: unknown[]) =>
+                  args[2] === "GET" &&
+                  typeof args[1] === "string" &&
+                  args[1].startsWith("/admin/pointer-keys"),
+              ).length;
+              if (calls <= 1) {
+                // Target first page
+                return Promise.resolve(
+                  Response.json({ keys: ["a"], nextCursor: "a" }),
+                );
+              }
+              // Peer first page
+              return Promise.resolve(
+                Response.json({ keys: ["c"], nextCursor: "c" }),
+              );
+            }
+            if (cursor === "a") {
+              // Target second page
+              return Promise.resolve(
+                Response.json({ keys: ["b"], nextCursor: null }),
+              );
+            }
+            if (cursor === "c") {
+              // Peer second page — includes "a" (shared with target)
+              return Promise.resolve(
+                Response.json({ keys: ["a"], nextCursor: null }),
+              );
+            }
+          }
+          if (path === "/admin/destroy" && method === "POST") {
+            return Promise.resolve(Response.json({ ok: true }));
+          }
+          if (path === "/admin/store-counts" && method === "GET") {
+            return Promise.resolve(
+              Response.json({
+                counts: {
+                  domain: { entities: 0, artifact_pointers: 0 },
+                  schemaHistory: 1,
+                },
+              }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(app, "/admin/destroy", "POST");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        r2Deleted: number;
+        r2Kept: number;
+      };
+      expect(body.ok).toBe(true);
+      // "b" not in peer union → deleted; "a" in peer union → kept
+      expect(body.r2Deleted).toBe(1);
+      expect(body.r2Kept).toBe(1);
+      expect(deleteManyMock).toHaveBeenCalledWith(["b"]);
+    });
+
+    it("(t8-c) budget exhaustion during TARGET drain sets r2GcSkipped, returns 200, zero deletions", async () => {
+      // Simulate: target page 1 succeeds but we're already near the ceiling.
+      // The ceiling is 800. We need to consume it DURING the target drain.
+      // Trick: use a very low ceiling simulation is hard without modifying the
+      // constant. Instead, we verify that the existing ceiling logic now covers
+      // the target drain too.
+      //
+      // We replicate the existing (d) test but with the target itself having many pages,
+      // consuming the budget before we even reach the peer loop.
+      // Since SUBREQUEST_CEILING = 800, we need 800+ target pages.
+      // Each page = 1 subrequest. So 801 target pages exhaust the budget.
+      //
+      // Instead, we simulate with a mock that returns nextCursor forever until
+      // the budget is depleted, to verify that the loop breaks on budget exhaustion
+      // and sets r2GcSkipped.
+      //
+      // Since the ceiling is 800 and is hard-coded, and there's only 1 subrequest
+      // counted for step 1 in the old code, the new code counts ALL target drain
+      // pages. We can verify this works by checking:
+      // - many peers (>800) → same as before: r2GcSkipped + 200 (existing test (d) covers this)
+      // - Alternatively, mock target to return a nextCursor on the FIRST fetch,
+      //   forcing a second target fetch, and count that both are charged.
+      //
+      // The safest verifiable assertion: with 800 peers and a target that returns
+      // nextCursor=null on first page (single page), the existing behavior holds.
+      // For the NEW behavior: target returning nextCursor on first call consumes 2
+      // subrequests before peers, reducing available peer budget.
+      //
+      // Minimal verifiable test: target has 1 page (null nextCursor), 799 peers each
+      // consuming 1 subrequest → budget hits ceiling during PEER loop → r2GcSkipped + 200.
+      // This is already covered by test (d). The NEW protection ensures target pages
+      // also count. We test it directly:
+      // Target: page 1 returns nextCursor="x", page 2 returns nextCursor=null.
+      // So target drain = 2 subrequests. Then 799 peer fetches = 801 total → skipped.
+      const PEER_COUNT = 799;
+      const peerProjects = Array.from({ length: PEER_COUNT }, (_, i) => ({
+        projectId: `proj-peer-${i}`,
+      }));
+      listAllIncludingArchivedMock.mockResolvedValue([
+        ...peerProjects,
+        { projectId: "proj-target" },
+      ]);
+      deleteByPrefixMock.mockResolvedValue({ deleted: 3, failed: [] });
+
+      let targetFetchCount = 0;
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, method: string) => {
+          if (method === "GET" && path.startsWith("/admin/pointer-keys")) {
+            const urlObj = new URL(path, "http://x");
+            const cursor = urlObj.searchParams.get("cursor");
+            if (targetFetchCount === 0) {
+              targetFetchCount++;
+              // Target first page: has nextCursor → forces a second subrequest
+              return Promise.resolve(
+                Response.json({
+                  keys: ["target-key"],
+                  nextCursor: "target-key",
+                }),
+              );
+            }
+            if (targetFetchCount === 1 && cursor === "target-key") {
+              targetFetchCount++;
+              // Target second page: done
+              return Promise.resolve(
+                Response.json({ keys: [], nextCursor: null }),
+              );
+            }
+            // Peer pages
+            return Promise.resolve(
+              Response.json({ keys: ["shared.bin"], nextCursor: null }),
+            );
+          }
+          if (path === "/admin/destroy" && method === "POST") {
+            return Promise.resolve(Response.json({ ok: true }));
+          }
+          if (path === "/admin/store-counts" && method === "GET") {
+            return Promise.resolve(
+              Response.json({
+                counts: {
+                  domain: { entities: 0, artifact_pointers: 0 },
+                  schemaHistory: 1,
+                },
+              }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(app, "/admin/destroy", "POST");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        r2GcSkipped: boolean;
+        r2Deleted: number;
+      };
+      expect(body.ok).toBe(true);
+      expect(body.r2GcSkipped).toBe(true);
+      // Zero deletions when GC is skipped
+      expect(body.r2Deleted).toBe(0);
+      // deleteMany must NOT be called
+      expect(deleteManyMock).not.toHaveBeenCalled();
+      // Journal delete and DO wipe still run
+      expect(deleteByPrefixMock).toHaveBeenCalledWith(
+        "journal-archive/proj-target/",
+      );
+    });
+
+    it("(t8-d) fetch ERROR during target drain → 502-abort, zero deletions (NOT r2GcSkipped)", async () => {
+      // Target fetch itself fails (not budget exhaustion — a real HTTP error).
+      // Must preserve 502 with pointer-keys-fetch-failed code, NOT r2GcSkipped.
+      listAllIncludingArchivedMock.mockResolvedValue([
+        { projectId: "proj-target" },
+      ]);
+
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, method: string) => {
+          if (method === "GET" && path.startsWith("/admin/pointer-keys")) {
+            // Target fetch returns a non-ok response
+            return Promise.resolve(
+              new Response(JSON.stringify({ ok: false }), { status: 500 }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(app, "/admin/destroy", "POST");
+
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as {
+        ok: boolean;
+        error: { code: string };
+        r2GcSkipped?: boolean;
+      };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe("pointer-keys-fetch-failed");
+      // CRITICAL: must NOT be r2GcSkipped — that would change the 502 to 200
+      expect(body.r2GcSkipped).toBeUndefined();
+      // deleteMany must NOT be called
+      expect(deleteManyMock).not.toHaveBeenCalled();
+    });
+
+    it("(t8-e) pointer-keys fetches carry a limit param and pagination is fully drained across 2+ pages", async () => {
+      // Target has 3 pages (each sized to match the limit the caller sent).
+      // A peer has 2 pages. The mock validates the limit param is present and
+      // returns pages sized exactly by the received limit.
+      // Only keys absent from the peer union should be deleted.
+      //
+      // Target pages:
+      //   page 1: keys=["t1","t2"], nextCursor="c1"
+      //   page 2: keys=["t3","t4"], nextCursor="c2"
+      //   page 3: keys=["t5"],      nextCursor=null
+      // Peer pages:
+      //   page 1: keys=["t1","t2"], nextCursor="p1"
+      //   page 2: keys=["t3"],      nextCursor=null
+      // => liveKeyUnion = {t1,t2,t3}
+      // => toDelete from target = ["t4","t5"]
+      listAllIncludingArchivedMock.mockResolvedValue([
+        { projectId: "proj-target" },
+        { projectId: "proj-peer" },
+      ]);
+      headMock.mockResolvedValue({ key: "any", size: 10 }); // all confirmed
+      deleteManyMock.mockResolvedValue({ deleted: 2, failed: [] });
+      deleteByPrefixMock.mockResolvedValue({ deleted: 0, failed: [] });
+
+      // Track which pointer-key requests came in and assert limit is present
+      const receivedLimits: string[] = [];
+      let drainCallCount = 0; // index into target+peer page sequence
+
+      // Sequence (by call order):
+      //   0 → target page 1 (no cursor)
+      //   1 → target page 2 (cursor=c1)
+      //   2 → target page 3 (cursor=c2)
+      //   3 → peer page 1  (no cursor)
+      //   4 → peer page 2  (cursor=p1)
+      const pages = [
+        { keys: ["t1", "t2"], nextCursor: "c1" },
+        { keys: ["t3", "t4"], nextCursor: "c2" },
+        { keys: ["t5"], nextCursor: null },
+        { keys: ["t1", "t2"], nextCursor: "p1" },
+        { keys: ["t3"], nextCursor: null },
+      ];
+
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, method: string) => {
+          if (method === "GET" && path.startsWith("/admin/pointer-keys")) {
+            const urlObj = new URL(path, "http://x");
+            const limit = urlObj.searchParams.get("limit");
+            expect(limit).not.toBeNull();
+            if (limit) receivedLimits.push(limit);
+            const page = pages[drainCallCount++] ?? {
+              keys: [],
+              nextCursor: null,
+            };
+            return Promise.resolve(Response.json(page));
+          }
+          if (path === "/admin/destroy" && method === "POST") {
+            return Promise.resolve(Response.json({ ok: true }));
+          }
+          if (path === "/admin/store-counts" && method === "GET") {
+            return Promise.resolve(
+              Response.json({
+                counts: {
+                  domain: { entities: 0, artifact_pointers: 0 },
+                  schemaHistory: 1,
+                },
+              }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+      );
+
+      const app = createApp("full");
+      const res = await req(app, "/admin/destroy", "POST");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        r2Deleted: number;
+        r2Kept: number;
+      };
+      expect(body.ok).toBe(true);
+      // All 5 drain calls carried a limit param
+      expect(drainCallCount).toBe(5);
+      expect(receivedLimits).toHaveLength(5);
+      for (const lim of receivedLimits) {
+        expect(Number(lim)).toBeGreaterThan(0);
+      }
+      // t4 and t5 not in peer union → deleted (2); t1,t2,t3 kept (3)
+      expect(body.r2Deleted).toBe(2);
+      expect(body.r2Kept).toBe(3);
+      expect(deleteManyMock).toHaveBeenCalledWith(
+        expect.arrayContaining(["t4", "t5"]),
+      );
+    });
+
+    it("(t8-f) budget exhaustion DURING TARGET drain sets r2GcSkipped before peer loop is entered", async () => {
+      // Use a low ceiling (2) so it is exhausted mid-target-drain.
+      // Target: 3 pages (needs 3 subrequests) — ceiling hits after page 2.
+      // Peers: 0 reachable peers (listAllIncludingArchived returns only target).
+      // Expected: r2GcSkipped=true, status 200, deleteMany NOT called,
+      //   and the peer loop was never entered (no peer pointer-key fetch calls).
+      listAllIncludingArchivedMock.mockResolvedValue([
+        { projectId: "proj-target" },
+      ]);
+      deleteByPrefixMock.mockResolvedValue({ deleted: 0, failed: [] });
+
+      const targetPages = [
+        { keys: ["k1"], nextCursor: "c1" },
+        { keys: ["k2"], nextCursor: "c2" },
+        { keys: ["k3"], nextCursor: null }, // would be page 3 — never reached
+      ];
+      let targetPageIdx = 0;
+
+      forwardToDOMock.mockImplementation(
+        (_stub: unknown, path: string, method: string) => {
+          if (method === "GET" && path.startsWith("/admin/pointer-keys")) {
+            const page = targetPages[targetPageIdx++] ?? {
+              keys: [],
+              nextCursor: null,
+            };
+            return Promise.resolve(Response.json(page));
+          }
+          if (path === "/admin/destroy" && method === "POST") {
+            return Promise.resolve(Response.json({ ok: true }));
+          }
+          if (path === "/admin/store-counts" && method === "GET") {
+            return Promise.resolve(
+              Response.json({
+                counts: {
+                  domain: { entities: 0, artifact_pointers: 0 },
+                  schemaHistory: 1,
+                },
+              }),
+            );
+          }
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+      );
+
+      // Call destroyProjectResources directly with ceiling=2 so the target
+      // drain hits the budget before the peer loop is entered.
+      const result = await destroyProjectResources(
+        mockEnv as Env,
+        {} as DurableObjectStub,
+        "proj-target",
+        2, // _subrequestCeiling override
+      );
+
+      expect(result.status).toBe(200);
+      const body = result.body as {
+        ok: boolean;
+        r2GcSkipped: boolean;
+        r2Deleted: number;
+      };
+      expect(body.ok).toBe(true);
+      expect(body.r2GcSkipped).toBe(true);
+      // Zero deletions — GC was skipped entirely
+      expect(body.r2Deleted).toBe(0);
+      expect(deleteManyMock).not.toHaveBeenCalled();
+      // Only 2 target-page fetches happened (ceiling=2); page 3 was never fetched
+      expect(targetPageIdx).toBe(2);
     });
 
     it("(g) surfaces failure when DO destroy returns a non-ok body", async () => {

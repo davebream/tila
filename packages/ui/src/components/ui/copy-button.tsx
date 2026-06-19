@@ -34,7 +34,7 @@ export function CopyButton({
       onClick={copy}
       aria-label={`Copy ${value}`}
       className={cn(
-        "inline-flex cursor-pointer items-center rounded-sm p-1.5 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal-blue",
+        "inline-flex cursor-pointer items-center rounded-sm p-1.5 text-muted-foreground opacity-40 transition-opacity group-hover/row:opacity-100 hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal-blue",
         className,
       )}
     >

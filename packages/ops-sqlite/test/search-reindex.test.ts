@@ -197,6 +197,53 @@ describe("resetEntitySearchDocs -- full rebuild repairs stale rows", () => {
   });
 });
 
+describe("reindexArtifactBatch -- done-check uses rows.length, not a COUNT query", () => {
+  it("does not issue a COUNT query when batch is full (more work may remain)", () => {
+    const { db, rawDb } = testDb;
+
+    // Insert exactly batchSize=2 unindexed artifacts
+    insertArtifact(rawDb, "artifacts/count-check-a1");
+    insertArtifact(rawDb, "artifacts/count-check-a2");
+    insertArtifact(rawDb, "artifacts/count-check-a3");
+
+    let countQueries = 0;
+    const origPrepare = rawDb.prepare.bind(rawDb);
+    rawDb.prepare = (sql: string) => {
+      if (/SELECT\s+COUNT/i.test(sql)) countQueries++;
+      return origPrepare(sql);
+    };
+
+    // First batch processes 2 (= batchSize), so done=false
+    const r = reindexBatch(db, { kind: "artifact", batchSize: 2 });
+    rawDb.prepare = origPrepare; // restore
+
+    expect(r.done).toBe(false);
+    expect(r.processed).toBe(2);
+    expect(countQueries).toBe(0); // no COUNT(*) should be issued
+  });
+
+  it("does not issue a COUNT query when batch is partial (done=true via rows.length < batchSize)", () => {
+    const { db, rawDb } = testDb;
+
+    // Insert only 1 unindexed artifact with batchSize=2 → rows.length=1 < 2 → done
+    insertArtifact(rawDb, "artifacts/partial-a1");
+
+    let countQueries = 0;
+    const origPrepare = rawDb.prepare.bind(rawDb);
+    rawDb.prepare = (sql: string) => {
+      if (/SELECT\s+COUNT/i.test(sql)) countQueries++;
+      return origPrepare(sql);
+    };
+
+    const r = reindexBatch(db, { kind: "artifact", batchSize: 2 });
+    rawDb.prepare = origPrepare;
+
+    expect(r.done).toBe(true); // rows.length (1) < batchSize (2)
+    expect(r.processed).toBe(1);
+    expect(countQueries).toBe(0);
+  });
+});
+
 describe("reindexBatch -- mixed state", () => {
   it("processes only unindexed artifacts when some already have search docs", () => {
     const { db, rawDb } = testDb;

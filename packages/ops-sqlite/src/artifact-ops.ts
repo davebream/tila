@@ -710,9 +710,11 @@ export function searchArtifacts(
     source_only?: boolean;
     limit?: number;
     tagFilter?: string[];
+    /** Internal: skip validation when the caller (searchAll) has already validated. */
+    _skipValidation?: boolean;
   },
 ): ArtifactSearchResult[] {
-  validateFtsQuery(query.q);
+  if (!query._skipValidation) validateFtsQuery(query.q);
   const limit = Math.min(query.limit ?? 20, 100);
 
   // Build dynamic WHERE conditions using Drizzle sql tagged templates
@@ -827,22 +829,69 @@ export function listSearchablePointers(
   );
 }
 
+export interface ListAllPointerKeysResult {
+  keys: string[];
+  nextCursor: string | null;
+}
+
+export interface ListAllPointerKeysOpts {
+  /** Maximum number of keys to return. When absent, returns all keys. */
+  limit?: number;
+  /** Keyset cursor: return only keys strictly after this r2_key. */
+  cursor?: string;
+}
+
 /**
- * Returns every r2_key in artifact_pointers — tombstoned records included, no limit.
+ * Returns r2_keys from artifact_pointers — tombstoned records included.
  * Used by the project destroy flow to enumerate all blobs a project references so
  * reference-counted GC can decide which keys to delete.
  *
+ * Supports cursor-based keyset pagination via `opts.limit` + `opts.cursor`.
+ * When no `limit` is supplied all keys are returned in one page.
  * Ordered by r2_key (PK) for stable, reproducible output.
+ *
+ * Drain completeness contract: callers that use pagination MUST drain all pages
+ * (loop until nextCursor === null) before acting on the accumulated key set.
  */
 export function listAllPointerKeys(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-): string[] {
-  const rows = db
+  opts?: ListAllPointerKeysOpts,
+): ListAllPointerKeysResult {
+  const { limit, cursor } = opts ?? {};
+
+  const baseQuery = db
     .select({ r2_key: schema.artifactPointers.r2_key })
     .from(schema.artifactPointers)
-    .orderBy(schema.artifactPointers.r2_key)
-    .all();
-  return rows.map((r) => r.r2_key);
+    .orderBy(schema.artifactPointers.r2_key);
+
+  let rows: { r2_key: string }[];
+
+  if (limit !== undefined) {
+    // Fetch one extra row to detect whether a next page exists.
+    if (cursor !== undefined) {
+      rows = baseQuery
+        .where(gt(schema.artifactPointers.r2_key, cursor))
+        .limit(limit + 1)
+        .all();
+    } else {
+      rows = baseQuery.limit(limit + 1).all();
+    }
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const keys = pageRows.map((r) => r.r2_key);
+    const nextCursor = hasMore ? (keys[keys.length - 1] ?? null) : null;
+    return { keys, nextCursor };
+  }
+
+  // No limit — return all (backward-compatible for internal callers that need
+  // the full set and manage their own memory budget).
+  if (cursor !== undefined) {
+    rows = baseQuery.where(gt(schema.artifactPointers.r2_key, cursor)).all();
+  } else {
+    rows = baseQuery.all();
+  }
+  return { keys: rows.map((r) => r.r2_key), nextCursor: null };
 }
 
 export function reconcilePointers(

@@ -10,9 +10,11 @@ import {
   get,
   getCompactEntityStats,
   list,
+  searchAll,
   searchEntities,
   update,
 } from "../src/entity-ops";
+import { resolveEntityResourceDirect } from "../src/fence-ops";
 import { listJournal } from "../src/journal-ops";
 import { type TestDb, createTestDb } from "./helpers";
 
@@ -1138,12 +1140,321 @@ describe("compactEntity stats batching", () => {
       .run(first.id, first.id, second.id);
 
     const stats = getCompactEntityStats(testDb.db, [first.id, second.id]);
+    const statsFirst = getCompactEntityStats(testDb.db, [first.id]);
+    const statsSecond = getCompactEntityStats(testDb.db, [second.id]);
 
+    // Both pre-fetching bulk stats and per-entity stats must produce the same result
     expect(compactEntity(testDb.db, first, [], stats)).toEqual(
-      compactEntity(testDb.db, first, []),
+      compactEntity(testDb.db, first, [], statsFirst),
     );
     expect(compactEntity(testDb.db, second, [], stats)).toEqual(
-      compactEntity(testDb.db, second, []),
+      compactEntity(testDb.db, second, [], statsSecond),
     );
+  });
+});
+
+describe("compactEntity stats required -- no N+1 fallback", () => {
+  it("compactEntity does not issue per-entity stats queries when stats are pre-fetched", () => {
+    const entity = create(
+      testDb.db,
+      {
+        id: "compact-req-1",
+        type: "task",
+        data: { title: "Req Stats Test", status: "open" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    const stats = getCompactEntityStats(testDb.db, [entity.id]);
+
+    // Count how many SELECT queries involve 'blocker' or 'artifact' stats
+    let statsQueries = 0;
+    const origPrepare = testDb.rawDb.prepare.bind(testDb.rawDb);
+    testDb.rawDb.prepare = (sql: string) => {
+      if (
+        /blockers|artifact_count|entity_relationships.*blocks|entity_artifact/i.test(
+          sql,
+        )
+      ) {
+        statsQueries++;
+      }
+      return origPrepare(sql);
+    };
+
+    compactEntity(testDb.db, entity, [], stats);
+    testDb.rawDb.prepare = origPrepare;
+
+    // With pre-fetched stats, no per-entity stats queries should be issued
+    expect(statsQueries).toBe(0);
+  });
+});
+
+// ── Task 1: resolveEntityResourceDirect ──────────────────────────────────────
+describe("resolveEntityResourceDirect", () => {
+  it("returns canonical <type>:<id> without a DB read", () => {
+    // No DB call needed — just type + id concatenation
+    expect(resolveEntityResourceDirect("task", "abc-123")).toBe("task:abc-123");
+    expect(resolveEntityResourceDirect("epic", "xyz-999")).toBe("epic:xyz-999");
+  });
+
+  it("update() uses resolveEntityResourceDirect — only one entity SELECT (no extra resolveEntityResource DB read)", () => {
+    // Use a fresh DB so no Drizzle statement cache exists when we install the spy.
+    // The old double-read path called `resolveEntityResource` inside
+    // `assertResourceFence`, which issued a second SELECT on entities to
+    // canonicalize the bare id. The new path calls `resolveEntityResourceDirect`
+    // (no DB hit) and then `assertResourceFenceWithCanonical` directly, so only
+    // ONE entity-by-id SELECT should be prepared during the call to `update()`.
+    const freshDb = createTestDb();
+
+    // Install the prepare spy BEFORE any ops run on freshDb so all statement
+    // compilations are captured (better-sqlite3 caches compiled statements; a spy
+    // installed after first use misses already-cached SQL).
+    let entityByIdSelectCount = 0;
+    const origPrepare = freshDb.rawDb.prepare.bind(freshDb.rawDb);
+    vi.spyOn(freshDb.rawDb, "prepare").mockImplementation((sql: string) => {
+      // Match SELECT statements that query entities by id.
+      // Drizzle generates: select "entities"."id" ... from "entities" where "entities"."id" = ?
+      if (
+        /^\s*select/i.test(sql) &&
+        /"entities"/i.test(sql) &&
+        /"entities"\."id"\s*=\s*\?/i.test(sql)
+      ) {
+        entityByIdSelectCount++;
+      }
+      return origPrepare(sql);
+    });
+
+    create(
+      freshDb.db,
+      {
+        id: "e-dedup-resolve",
+        type: "task",
+        data: { name: "Resolve dedup test", status: "open" },
+        created_by: "actor-1",
+      },
+      1,
+      { actor: "actor-1" },
+    );
+
+    const fence = acquire(
+      freshDb.db,
+      "e-dedup-resolve",
+      "test-actor",
+      "test-actor",
+      "exclusive",
+      60_000,
+    ).fence;
+
+    // Reset the counter after setup: we only care about entity reads during update().
+    entityByIdSelectCount = 0;
+
+    update(freshDb.db, "e-dedup-resolve", { name: "Updated" }, fence, {
+      actor: "actor-1",
+    });
+
+    freshDb.rawDb.close();
+    vi.restoreAllMocks();
+
+    // The initial `existing` row fetch is the only entity-by-id SELECT.
+    // If someone reverts to assertResourceFence (old path), resolveEntityResource
+    // issues a second SELECT -> this count becomes 2 and the test fails.
+    expect(entityByIdSelectCount).toBe(1);
+  });
+});
+
+// ── Task 2: eliminate post-write SELECT in create()/update() ─────────────────
+describe("post-write SELECT elimination", () => {
+  it("create() returns entity with correct fields (constructed from inputs, not post-write SELECT)", () => {
+    const entity = create(
+      testDb.db,
+      {
+        id: "e-no-postread-create",
+        type: "milestone",
+        data: { name: "No post-read", status: "planned" },
+        created_by: "agent-create",
+        tags: ["env:test"],
+      },
+      3,
+      { actor: "agent-create" },
+    );
+
+    // All fields should be correctly set from inputs
+    expect(entity.id).toBe("e-no-postread-create");
+    expect(entity.type).toBe("milestone");
+    expect(entity.schema_version).toBe(3);
+    expect(entity.data).toEqual({ name: "No post-read", status: "planned" });
+    expect(entity.archived).toBe(0);
+    expect(entity.created_by).toBe("agent-create");
+    expect(entity.tags).toEqual(["env:test"]);
+    expect(entity.created_at).toBeTypeOf("number");
+    expect(entity.updated_at).toBeTypeOf("number");
+  });
+
+  it("update() preserves created_at, created_by, type, schema_version from existing row", () => {
+    // Create with specific metadata
+    const created = create(
+      testDb.db,
+      {
+        id: "e-passthrough",
+        type: "epic",
+        data: { name: "Original", status: "open", extra: "preserved-field" },
+        created_by: "original-creator",
+        tags: ["env:prod"],
+      },
+      2,
+      { actor: "original-creator" },
+    );
+
+    const fence = acquireFence("e-passthrough");
+
+    // Update with partial data (only name changed, extra should survive)
+    const updated = update(
+      testDb.db,
+      "e-passthrough",
+      { name: "Updated name" },
+      fence,
+      { actor: "updater" },
+      // undefined tags → preserve
+    );
+
+    // Immutable creation metadata preserved
+    expect(updated.created_at).toBe(created.created_at);
+    expect(updated.created_by).toBe("original-creator");
+    expect(updated.type).toBe("epic");
+    expect(updated.schema_version).toBe(2);
+
+    // Passthrough fields from existing data survive merge
+    expect(updated.data).toMatchObject({
+      name: "Updated name",
+      status: "open",
+      extra: "preserved-field",
+    });
+
+    // Tags preserved (undefined → no change)
+    expect(updated.tags).toEqual(["env:prod"]);
+
+    // updated_at is refreshed
+    expect(updated.updated_at).toBeTypeOf("number");
+  });
+
+  it("update() with tags fallback — when tags undefined, returns current DB tags", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-tags-fallback",
+        type: "task",
+        data: { name: "Tags fallback test" },
+        created_by: "actor",
+        tags: ["alpha", "beta"],
+      },
+      1,
+      { actor: "actor" },
+    );
+    const fence = acquireFence("e-tags-fallback");
+
+    const updated = update(
+      testDb.db,
+      "e-tags-fallback",
+      { name: "Updated" },
+      fence,
+      { actor: "actor" },
+      // undefined tags
+    );
+
+    expect(updated.tags).toEqual(["alpha", "beta"]);
+  });
+});
+
+// ── Task 3: drop e.data from entity FTS SELECT ────────────────────────────────
+describe("FTS lean result (no data blob)", () => {
+  it("searchEntities result does not contain a 'data' field", () => {
+    create(
+      testDb.db,
+      {
+        id: "e-fts-lean-1",
+        type: "task",
+        data: {
+          name: "FTS lean test entity",
+          status: "open",
+          secret: "s3cr3t",
+        },
+        created_by: "a",
+      },
+      1,
+      { actor: "a" },
+    );
+
+    const results = searchEntities(testDb.db, { q: "lean" });
+    expect(results.length).toBeGreaterThan(0);
+    // The result must NOT have a 'data' property
+    expect(Object.prototype.hasOwnProperty.call(results[0], "data")).toBe(
+      false,
+    );
+    // Required fields still present
+    expect(results[0].entity_id).toBe("e-fts-lean-1");
+    expect(results[0].entity_type).toBe("task");
+    expect(results[0].name).toBe("FTS lean test entity");
+    expect(results[0].snippet).toBeDefined();
+    expect(results[0].indexed_at).toBeTypeOf("number");
+  });
+});
+
+// ── Task 7: FTS validate-once per searchAll ───────────────────────────────────
+describe("searchAll validates FTS query once (not per sub-search)", () => {
+  it("calls validateFtsQuery exactly once across all three sub-searches", async () => {
+    // We spy on validateFtsQuery via the artifact-ops module (it's re-exported from there)
+    const artifactOps = await import("../src/artifact-ops");
+    const spy = vi.spyOn(artifactOps, "validateFtsQuery");
+    spy.mockImplementation(() => {}); // pass-through (no actual validation)
+
+    try {
+      searchAll(testDb.db, { q: "test query" });
+      // validateFtsQuery should be called exactly once (in searchAll),
+      // not 3 times (once per sub-search)
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("standalone searchEntities still validates independently", async () => {
+    const artifactOps = await import("../src/artifact-ops");
+    const spy = vi.spyOn(artifactOps, "validateFtsQuery");
+    spy.mockImplementation(() => {});
+
+    try {
+      searchEntities(testDb.db, { q: "test" });
+      // standalone call must still validate once
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+// ── Task 4: MIGRATION_0022 archived index ─────────────────────────────────────
+describe("MIGRATION_0022 archived index", () => {
+  it("migration version 22 exists and applies cleanly", () => {
+    // The helpers.ts createTestDb() applies all MIGRATIONS — if v22 exists it was
+    // already applied by our testDb setup. Verify the index exists in sqlite_master.
+    const indexRow = testDb.rawDb
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_entities_archived'",
+      )
+      .get() as { name: string } | undefined;
+    expect(indexRow).toBeDefined();
+    expect(indexRow?.name).toBe("idx_entities_archived");
+  });
+
+  it("re-running MIGRATION_0022 SQL against an already-migrated DB is a no-op (idempotency via IF NOT EXISTS)", async () => {
+    // The testDb already applied all migrations including v22.
+    // Re-executing the v22 DDL should not throw because it uses CREATE INDEX IF NOT EXISTS.
+    const { MIGRATION_0022 } = await import("../src/migrations-sql");
+    const { patchMigration } = await import("./helpers");
+    expect(() =>
+      testDb.rawDb.exec(patchMigration(MIGRATION_0022)),
+    ).not.toThrow();
   });
 });

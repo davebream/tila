@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
  *
  *   (a) Add entity type — auto-applied
  *   (b) Add optional field — auto-applied
- *   (c) Add required field with default_for_legacy — auto-applied with backfill
+ *   (c) Add required field with default_for_legacy — auto-applied; the legacy
+ *       default is materialized lazily on read via tolerant reads, existing rows
+ *       are not rewritten (no eager backfill UPDATE)
  *   (d) Make parent required — rejected without --strategy, accepted with strategy
  *
  * Plus a bonus no-change idempotency case.
