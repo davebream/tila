@@ -1157,10 +1157,35 @@ describe("resolveEntityResourceDirect", () => {
     expect(resolveEntityResourceDirect("epic", "xyz-999")).toBe("epic:xyz-999");
   });
 
-  it("update() uses resolveEntityResourceDirect — fence assertion resolves without extra DB reads", () => {
-    // Create entity and acquire claim
+  it("update() uses resolveEntityResourceDirect — only one entity SELECT (no extra resolveEntityResource DB read)", () => {
+    // Use a fresh DB so no Drizzle statement cache exists when we install the spy.
+    // The old double-read path called `resolveEntityResource` inside
+    // `assertResourceFence`, which issued a second SELECT on entities to
+    // canonicalize the bare id. The new path calls `resolveEntityResourceDirect`
+    // (no DB hit) and then `assertResourceFenceWithCanonical` directly, so only
+    // ONE entity-by-id SELECT should be prepared during the call to `update()`.
+    const freshDb = createTestDb();
+
+    // Install the prepare spy BEFORE any ops run on freshDb so all statement
+    // compilations are captured (better-sqlite3 caches compiled statements; a spy
+    // installed after first use misses already-cached SQL).
+    let entityByIdSelectCount = 0;
+    const origPrepare = freshDb.rawDb.prepare.bind(freshDb.rawDb);
+    vi.spyOn(freshDb.rawDb, "prepare").mockImplementation((sql: string) => {
+      // Match SELECT statements that query entities by id.
+      // Drizzle generates: select "entities"."id" ... from "entities" where "entities"."id" = ?
+      if (
+        /^\s*select/i.test(sql) &&
+        /"entities"/i.test(sql) &&
+        /"entities"\."id"\s*=\s*\?/i.test(sql)
+      ) {
+        entityByIdSelectCount++;
+      }
+      return origPrepare(sql);
+    });
+
     create(
-      testDb.db,
+      freshDb.db,
       {
         id: "e-dedup-resolve",
         type: "task",
@@ -1170,22 +1195,30 @@ describe("resolveEntityResourceDirect", () => {
       1,
       { actor: "actor-1" },
     );
-    const fence = acquireFence("e-dedup-resolve");
 
-    // Spy on DB prepare to count entity-lookup calls during update
-    const prepSpy = vi.spyOn(testDb.rawDb, "prepare");
+    const fence = acquire(
+      freshDb.db,
+      "e-dedup-resolve",
+      "test-actor",
+      "test-actor",
+      "exclusive",
+      60_000,
+    ).fence;
 
-    update(testDb.db, "e-dedup-resolve", { name: "Updated" }, fence, {
+    // Reset the counter after setup: we only care about entity reads during update().
+    entityByIdSelectCount = 0;
+
+    update(freshDb.db, "e-dedup-resolve", { name: "Updated" }, fence, {
       actor: "actor-1",
     });
 
-    // The spy is coarse — we just assert update succeeds (fence valid) and the
-    // direct resolve path is used (no EntityNotFoundError / FenceNotFoundError).
-    // The structural change (resolveEntityResourceDirect) is verified by the
-    // export test above + typecheck.
-    prepSpy.mockRestore();
-    const result = get(testDb.db, "e-dedup-resolve");
-    expect(result?.data).toMatchObject({ name: "Updated", status: "open" });
+    freshDb.rawDb.close();
+    vi.restoreAllMocks();
+
+    // The initial `existing` row fetch is the only entity-by-id SELECT.
+    // If someone reverts to assertResourceFence (old path), resolveEntityResource
+    // issues a second SELECT -> this count becomes 2 and the test fails.
+    expect(entityByIdSelectCount).toBe(1);
   });
 });
 

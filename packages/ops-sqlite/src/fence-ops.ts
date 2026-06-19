@@ -180,16 +180,24 @@ export function assertResourceFenceWithCanonical(
 ): void {
   const { now = Date.now(), requireLiveClaim = false } = opts;
 
+  // Error payloads use the bare entity id (the part after the colon in the
+  // canonical `<type>:<id>` form) to match the original `assertResourceFence`
+  // behaviour, which throws with the raw `resource` argument passed in.
+  // Callers of this function always supply a bare entity id as the `resource`
+  // they received, so preserving that form keeps error payloads identical.
+  const colonIdx = canonical.indexOf(":");
+  const bareId = colonIdx >= 0 ? canonical.slice(colonIdx + 1) : canonical;
+
   const canonicalFence = lookupFence(db, canonical);
   if (!canonicalFence) {
-    throw new FenceNotFoundError(canonical);
+    throw new FenceNotFoundError(bareId);
   }
   assertFence(canonicalFence.current_fence, fence);
 
   if (requireLiveClaim) {
     const claim = lookupClaim(db, canonical);
     if (!claim || claim.expires_at <= now) {
-      throw new ExpiredClaimError(canonical);
+      throw new ExpiredClaimError(bareId);
     }
   }
 }
