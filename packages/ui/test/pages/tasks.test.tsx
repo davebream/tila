@@ -77,4 +77,110 @@ describe("TasksPage", () => {
     });
     expect(screen.getByText("entity-1")).toBeInTheDocument();
   });
+
+  test("shows showing-first hint when has_more is true", async () => {
+    server.use(
+      http.get("*/projects/*/tasks", () => {
+        return HttpResponse.json({
+          ok: true,
+          entities: [
+            {
+              id: "entity-1",
+              type: "task",
+              schema_version: 1,
+              data: { title: "Test Task 1" },
+              archived: 0,
+              created_at: Date.now() - 10000,
+              updated_at: Date.now() - 5000,
+              created_by: "another-user",
+              tags: [],
+            },
+          ],
+          total: 250,
+          limit: 100,
+          offset: 0,
+          has_more: true,
+        });
+      }),
+    );
+
+    renderWithProviders(<TasksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("entity-1")).toBeInTheDocument();
+    });
+
+    // Hint text should appear with the interpolated count values — guards
+    // the `limit ?? 100` fallback and `total` interpolation against silent
+    // regressions (a static /showing first/ match alone would pass on "null").
+    expect(screen.getByText(/showing first 100 of 250/i)).toBeInTheDocument();
+    // Full entity shape is preserved — created_by is visible
+    expect(screen.getByText("another-user")).toBeInTheDocument();
+  });
+
+  test("type filter chip remove button has svg child (not ASCII x)", async () => {
+    // Render with a route that includes a type query param so the chip appears
+    const user = userEvent.setup();
+    renderWithProviders(<TasksPage />, {
+      route: "/p/test-project/tasks?type=task",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("entity-1")).toBeInTheDocument();
+    });
+
+    // The type chip should be visible with a remove button
+    const removeBtn = screen.getByRole("button", {
+      name: /remove type filter/i,
+    });
+    expect(removeBtn).toBeInTheDocument();
+
+    // Must contain an svg child, NOT the literal text "x"
+    const svgEl = removeBtn.querySelector("svg");
+    expect(svgEl).not.toBeNull();
+    expect(removeBtn.textContent).not.toBe("x");
+
+    // Clicking the remove button should clear the chip
+    await user.click(removeBtn);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /remove type filter/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  test("does not show hint when has_more is false", async () => {
+    server.use(
+      http.get("*/projects/*/tasks", () => {
+        return HttpResponse.json({
+          ok: true,
+          entities: [
+            {
+              id: "entity-1",
+              type: "task",
+              schema_version: 1,
+              data: {},
+              archived: 0,
+              created_at: Date.now() - 10000,
+              updated_at: Date.now() - 5000,
+              created_by: "test-user",
+              tags: [],
+            },
+          ],
+          total: 1,
+          limit: 100,
+          offset: 0,
+          has_more: false,
+        });
+      }),
+    );
+
+    renderWithProviders(<TasksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("entity-1")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/showing first/i)).not.toBeInTheDocument();
+  });
 });
