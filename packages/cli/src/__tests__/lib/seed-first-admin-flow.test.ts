@@ -49,7 +49,6 @@ describe("runFirstAdminSeed", () => {
     const client = makeMockClient();
     const result = await runFirstAdminSeed({
       flag: "octocat",
-      token: "raw-token",
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       client: client as any,
       accountId: "acc-1",
@@ -80,7 +79,6 @@ describe("runFirstAdminSeed", () => {
     const client = makeMockClient();
     const result = await runFirstAdminSeed({
       flag: "12345",
-      token: "raw-token",
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       client: client as any,
       accountId: "acc-1",
@@ -104,7 +102,6 @@ describe("runFirstAdminSeed", () => {
     const client = makeMockClient();
     const result = await runFirstAdminSeed({
       flag: "unknownuser",
-      token: "raw-token",
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       client: client as any,
       accountId: "acc-1",
@@ -128,7 +125,6 @@ describe("runFirstAdminSeed", () => {
     const client = makeMockClient();
     const result = await runFirstAdminSeed({
       flag: "someuser",
-      token: "raw-token",
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       client: client as any,
       accountId: "acc-1",

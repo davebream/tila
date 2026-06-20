@@ -34,7 +34,6 @@ export interface SeedOutcomeDecision {
  */
 export async function runFirstAdminSeed(opts: {
   flag: string;
-  token: string;
   client: Cloudflare;
   accountId: string;
   databaseId: string;

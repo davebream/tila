@@ -212,7 +212,6 @@ async function runCloudflareProvisioning(
     if (s) s.start("Seeding first admin...");
     firstAdminSeedResult = await runFirstAdminSeed({
       flag: adminGithubUser,
-      token: rawToken,
       client: cf,
       accountId,
       databaseId: d1DatabaseId,

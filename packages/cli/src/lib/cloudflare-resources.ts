@@ -455,10 +455,7 @@ export async function seedFirstAdmin(opts: {
  * input. Only the regex-validated, encodeURIComponent-encoded login is
  * interpolated into the path.
  */
-export async function resolveGithubUserId(
-  value: string,
-  _token?: string,
-): Promise<number> {
+export async function resolveGithubUserId(value: string): Promise<number> {
   // Numeric id — passthrough, no fetch needed
   if (/^\d+$/.test(value)) {
     return Number(value);
