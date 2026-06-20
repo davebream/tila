@@ -35,6 +35,13 @@ vi.mock("../../lib/cloudflare-resources", () => ({
   createCustomDomain: (...args: unknown[]) => mockCreateCustomDomain(...args),
 }));
 
+const mockRunFirstAdminSeed = vi.fn();
+const mockApplySeedOutcome = vi.fn();
+vi.mock("../../lib/seed-first-admin-flow", () => ({
+  runFirstAdminSeed: (...args: unknown[]) => mockRunFirstAdminSeed(...args),
+  applySeedOutcome: (...args: unknown[]) => mockApplySeedOutcome(...args),
+}));
+
 const mockCreateCloudflareClient = vi.fn();
 vi.mock("../../lib/cloudflare-client", () => ({
   createCloudflareClient: (...args: unknown[]) =>
@@ -276,6 +283,20 @@ describe("tila project create (cloudflare)", () => {
     mockInsertTokenAndProject.mockResolvedValue(undefined);
     mockRunMcpInitPrompt.mockResolvedValue(undefined);
 
+    // Seed-first-admin defaults (no seeding unless test overrides flag)
+    mockRunFirstAdminSeed.mockResolvedValue({
+      seeded: true,
+      githubUserId: 583231,
+      login: "octocat",
+    });
+    mockApplySeedOutcome.mockReturnValue({
+      exitCode: 0,
+      json: {
+        first_admin_seeded: true,
+        first_admin: { github_user_id: 583231, login: "octocat" },
+      },
+    });
+
     // Client defaults
     mockCreateCliClient.mockReturnValue(mockTilaClient);
     mockTilaClient.post.mockResolvedValue({ ok: true });
@@ -427,6 +448,89 @@ describe("tila project create (cloudflare)", () => {
     );
     expect(softFailMessage).toBeDefined();
     expect(softFailMessage).toContain("tila repos register");
+  });
+
+  it("--admin-github-user happy path: calls runFirstAdminSeed and includes first_admin in --json output", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockRunFirstAdminSeed.mockResolvedValue({
+      seeded: true,
+      githubUserId: 583231,
+      login: "octocat",
+    });
+    mockApplySeedOutcome.mockReturnValue({
+      exitCode: 0,
+      json: {
+        first_admin_seeded: true,
+        first_admin: { github_user_id: 583231, login: "octocat" },
+      },
+    });
+
+    const consoleSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation((...args: unknown[]) => {
+        // pass-through captured for assertion
+        void args;
+      });
+
+    await invokeProjectCreate({
+      "skip-github": true,
+      "admin-github-user": "octocat",
+      json: true,
+    });
+
+    expect(mockRunFirstAdminSeed).toHaveBeenCalledWith(
+      expect.objectContaining({ flag: "octocat", slug: "test-project" }),
+    );
+    expect(mockApplySeedOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ seeded: true }),
+      expect.objectContaining({ json: true }),
+    );
+
+    // printJson calls console.log(JSON.stringify(data, null, 2))
+    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("");
+    const parsed = JSON.parse(output) as Record<string, unknown>;
+    expect(parsed.first_admin_seeded).toBe(true);
+
+    consoleSpy.mockRestore();
+  });
+
+  it("--admin-github-user: exits non-zero and emits first_admin_seeded:false when seed fails", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockRunFirstAdminSeed.mockResolvedValue({
+      seeded: false,
+      error: "user not found",
+    });
+    mockApplySeedOutcome.mockReturnValue({
+      exitCode: 1,
+      json: {
+        first_admin_seeded: false,
+        error: "user not found",
+        code: "ADMIN_SEED_FAILED",
+      },
+      message:
+        "Failed to seed first admin: user not found. Re-run with numeric id or use --token.",
+    });
+
+    const consoleSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation((...args: unknown[]) => {
+        void args;
+      });
+
+    await expect(
+      invokeProjectCreate({
+        "skip-github": true,
+        "admin-github-user": "baduser",
+        json: true,
+      }),
+    ).rejects.toThrow("process.exit(1)");
+
+    // printJson is called before process.exit(1) on failure
+    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("");
+    const parsed = JSON.parse(output) as Record<string, unknown>;
+    expect(parsed.first_admin_seeded).toBe(false);
+
+    consoleSpy.mockRestore();
   });
 
   it("writes config.toml with worker_url from infra config", async () => {

@@ -981,3 +981,63 @@ describe("round-trip", () => {
     expect(body.error.code).toBe("last-admin");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task 6 / C5 regression: full-scope D1 token on empty roster (OR-4 lock)
+//
+// Locks require-project-admin.ts:117-122 — the full-scope D1 bypass branch.
+// The anti-tautology pair asserts that a non-full / unauthenticated caller
+// is DENIED on the same empty roster, proving the test exercises the
+// full-scope bypass specifically (not a misconfigured open endpoint).
+// ─────────────────────────────────────────────────────────────────────────────
+describe("C5 regression: full-scope D1 token on empty roster", () => {
+  it("full-scope D1 token can LIST against an empty roster (200)", async () => {
+    // storeState.grants is empty (reset in beforeEach)
+    const app = createApp(fullD1Token());
+    const res = await req(app, "/admins");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; admins: unknown[] };
+    expect(body.ok).toBe(true);
+    expect(body.admins).toHaveLength(0);
+  });
+
+  it("full-scope D1 token can GRANT against an empty roster (200)", async () => {
+    const app = createApp(fullD1Token());
+    const res = await req(app, "/admins", "POST", { github_user_id: 7777 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; granted: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.granted).toBe(true);
+  });
+
+  it("full-scope D1 token can REVOKE against an empty roster (200, revoked:false)", async () => {
+    // No row to revoke — server returns revoked:false (idempotent soft-delete)
+    const app = createApp(fullD1Token());
+    const res = await req(app, "/admins/7777", "DELETE");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; revoked: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.revoked).toBe(false);
+  });
+
+  // Anti-tautology: prove the tests above exercise the full-scope bypass,
+  // not a misconfigured open endpoint. A non-full d1-token and an
+  // unauthenticated bearer are denied on the same empty roster.
+  it("anti-tautology: non-full d1-token is DENIED on empty roster (403)", async () => {
+    const app = createApp(nonFullD1Token());
+    const listRes = await req(app, "/admins");
+    expect(listRes.status).toBe(403);
+
+    const postRes = await req(app, "/admins", "POST", { github_user_id: 7777 });
+    expect(postRes.status).toBe(403);
+
+    const deleteRes = await req(app, "/admins/7777", "DELETE");
+    expect(deleteRes.status).toBe(403);
+  });
+
+  it("anti-tautology: cookie-session is DENIED on empty roster (403)", async () => {
+    const app = createApp(cookieSession());
+    const res = await req(app, "/admins");
+    expect(res.status).toBe(403);
+  });
+});

@@ -31,6 +31,10 @@ import {
   resolveProjectName,
   tilaHome,
 } from "../../lib/provisioning";
+import {
+  applySeedOutcome,
+  runFirstAdminSeed,
+} from "../../lib/seed-first-admin-flow";
 
 export default defineCommand({
   meta: {
@@ -54,6 +58,12 @@ export default defineCommand({
       description: "Skip GitHub App repo registration",
       default: false,
     },
+    "admin-github-user": {
+      type: "string",
+      required: false,
+      description:
+        "GitHub user id or login to seed as the first project admin (cloud only). Ignored for --local backends.",
+    },
     json: {
       type: "boolean",
       description:
@@ -63,12 +73,17 @@ export default defineCommand({
   },
   async run({ args }) {
     if (args.local) {
-      await runLocalProvisioning(args.name, args.json);
+      await runLocalProvisioning(
+        args.name,
+        args.json,
+        args["admin-github-user"],
+      );
     } else {
       await runCloudflareProvisioning(
         args["skip-github"],
         args.name,
         args.json,
+        args["admin-github-user"],
       );
     }
   },
@@ -78,6 +93,7 @@ async function runCloudflareProvisioning(
   skipGithub = false,
   nameFlag?: string,
   json = false,
+  adminGithubUser?: string,
 ): Promise<void> {
   const cwd = process.cwd();
   const tilaDir = join(cwd, ".tila");
@@ -183,6 +199,43 @@ async function runCloudflareProvisioning(
     });
   }
 
+  // Step 8c: Seed first admin if --admin-github-user was supplied (cloud path only).
+  // Seed failure is FATAL when the flag was supplied — an empty roster is the
+  // chicken-and-egg state this flow exists to eliminate.
+  // Rollback note: no compensating delete on failure. _projects and _tokens
+  // are already inserted and INSERT OR IGNORE makes a re-run idempotent.
+  // Recovery path: re-run `project create` or use the --token fallback (C5).
+  let firstAdminSeedResult: Awaited<
+    ReturnType<typeof runFirstAdminSeed>
+  > | null = null;
+  if (adminGithubUser) {
+    if (s) s.start("Seeding first admin...");
+    firstAdminSeedResult = await runFirstAdminSeed({
+      flag: adminGithubUser,
+      client: cf,
+      accountId,
+      databaseId: d1DatabaseId,
+      slug,
+    });
+    if (s)
+      s.stop(
+        firstAdminSeedResult.seeded
+          ? "First admin seeded."
+          : "First admin seed failed.",
+      );
+
+    const decision = applySeedOutcome(firstAdminSeedResult, { json });
+    if (decision.exitCode !== 0) {
+      // Failure is fatal — emit error and exit non-zero BEFORE the success printJson
+      if (json) {
+        printJson({ ...decision.json });
+      } else {
+        p.cancel(decision.message ?? "Failed to seed first admin.");
+      }
+      process.exit(1);
+    }
+  }
+
   // Step 9: Register repo
   let githubEnabled = false;
   if (githubCredentials && repoInfo && !skipGithub) {
@@ -272,10 +325,24 @@ async function runCloudflareProvisioning(
 
   // Step 11: Success summary
   if (json) {
-    printJson({ project_id: slug, worker_url: workerUrl, token: rawToken });
+    const seedDecision = firstAdminSeedResult
+      ? applySeedOutcome(firstAdminSeedResult, { json: true })
+      : null;
+    printJson({
+      project_id: slug,
+      worker_url: workerUrl,
+      token: rawToken,
+      ...(seedDecision?.json ?? {}),
+    });
     return;
   }
   let summaryLines = `Worker:   ${workerUrl}\nProject:  ${slug}\nToken:    written to .tila/.env`;
+  if (firstAdminSeedResult?.seeded) {
+    const adminLabel = firstAdminSeedResult.login
+      ? `${firstAdminSeedResult.login} (id: ${firstAdminSeedResult.githubUserId})`
+      : `id: ${firstAdminSeedResult.githubUserId}`;
+    summaryLines += `\nFirst admin: ${adminLabel}`;
+  }
   if (githubEnabled && githubCredentials) {
     summaryLines += `\nApp ID:   ${githubCredentials.app_id}`;
     summaryLines += "\nAuth:     github-repo";
@@ -292,6 +359,7 @@ async function runCloudflareProvisioning(
 async function runLocalProvisioning(
   nameFlag?: string,
   json = false,
+  adminGithubUser?: string,
 ): Promise<void> {
   const cwd = process.cwd();
   const tilaDir = join(cwd, ".tila");
@@ -303,6 +371,19 @@ async function runLocalProvisioning(
         "To re-initialize, remove .tila/config.toml first.",
     );
     process.exit(1);
+  }
+
+  // Step 1b: Guard --admin-github-user + --local: warn and ignore (no D1 for local backend)
+  if (adminGithubUser) {
+    if (json) {
+      p.log.warn(
+        "--admin-github-user is ignored for local backends (_admin_grants is a D1-only table)",
+      );
+    } else {
+      p.log.warn(
+        "--admin-github-user is ignored for local backends. The _admin_grants table is D1-only (cloud projects only).",
+      );
+    }
   }
 
   // Step 2: Project name (prompt or flag)
