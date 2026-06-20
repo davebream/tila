@@ -1,11 +1,11 @@
 /**
  * Token management authorization tests.
  *
- * Verifies that the requireTokenAdmin() scope guard:
- * - Allows full-scoped tokens to proceed to business logic
- * - Rejects non-full-scoped tokens with 403 TOKEN_AUTHZ_DENIED
+ * Verifies that the requireD1TokenHttp() gate:
+ * - Allows full-scope D1 tokens to proceed to business logic
+ * - Rejects non-full-scope tokens with 403 token-authz-denied
  *
- * See docs/01-DECISIONS.md §20 — Token management authorization: flat-admin in v0.1
+ * See docs/01-DECISIONS.md §20 — Token management authorization: D1 token required
  */
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
@@ -71,7 +71,7 @@ function createApp(scopes: string): Hono<AppEnv> {
   return app;
 }
 
-describe("Token authz — requireTokenAdmin guard", () => {
+describe("Token authz — requireD1TokenHttp guard", () => {
   describe("authorized (scopes = full)", () => {
     const app = createApp("full");
 
