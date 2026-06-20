@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -120,4 +121,28 @@ export const revokedJti = sqliteTable(
     revoked_at: integer("revoked_at").notNull(),
   },
   (table) => [index("idx_revoked_jti_project").on(table.project_id)],
+);
+
+// --- _admin_grants ---
+// Per-project admin roster for GitHub-scoped governance (epic #95).
+// Soft-delete model: revoke sets revoked_at rather than deleting rows,
+// preserving the audit trail. Partial unique index scopes uniqueness to
+// active (non-revoked) grants only, allowing re-grant after revoke.
+export const adminGrants = sqliteTable(
+  "_admin_grants",
+  {
+    project_id: text("project_id").notNull(),
+    github_host: text("github_host").notNull().default("github.com"),
+    github_user_id: integer("github_user_id").notNull(),
+    github_login_snapshot: text("github_login_snapshot"), // display/audit only, never identity
+    granted_by_user_id: integer("granted_by_user_id"), // NULL only for infra-owner-seeded rows
+    granted_at: integer("granted_at").notNull(), // Unix seconds (not ms); cf. _revoked_jti which uses ms
+    revoked_at: integer("revoked_at"), // Unix seconds (not ms); cf. _revoked_jti which uses ms
+    revoked_by_user_id: integer("revoked_by_user_id"),
+  },
+  (table) => [
+    uniqueIndex("idx_admin_grants_active")
+      .on(table.project_id, table.github_host, table.github_user_id)
+      .where(sql`${table.revoked_at} is null`),
+  ],
 );
