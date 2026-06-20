@@ -51,6 +51,17 @@ export const TILA_ERRORS = {
   INVALID_QUERY: "invalid-query",
   INVALID_SLOT: "invalid-slot",
   INVALID_RELATIONSHIP_TYPE: "invalid-relationship-type",
+  // Repo allowlist route (POST/DELETE /api/repos) — kebab-case wire values.
+  // token-authz-denied is emitted by the require-project-admin middleware guarding
+  // these management routes (the same value is also emitted on /api/tokens routes, so
+  // the REPO_ prefix is a readability alias — consumers branch on the value); the other
+  // four come from routes/repos.ts. Distinct key from the existing (unused) SCREAMING
+  // TOKEN_AUTHZ_DENIED above.
+  REPO_TOKEN_AUTHZ_DENIED: "token-authz-denied",
+  REPO_ACCESS_DENIED: "repo-access-denied",
+  REPO_NOT_FOUND: "repo-not-found",
+  GITHUB_API_TIMEOUT: "github-api-timeout",
+  GITHUB_API_ERROR: "github-api-error",
   // SDK-generated for non-HTTP artifact failures (no wire code from server)
   ARTIFACT_GET_FAILED: "artifact-get-failed",
   ARTIFACT_GET_LATEST_FAILED: "artifact-get-latest-failed",
