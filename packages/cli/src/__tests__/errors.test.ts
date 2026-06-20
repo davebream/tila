@@ -18,10 +18,10 @@ describe("describeCliError remediation hints", () => {
     expect(result.hint).toMatch(/retry|network|connect/i);
   });
 
-  it("returns hint for INTERNAL_ERROR (network class)", () => {
+  it("returns hint for internal (network class)", () => {
     const err = Object.assign(new Error("Server error"), {
       name: "TilaApiError",
-      code: TILA_ERRORS.INTERNAL_ERROR,
+      code: TILA_ERRORS.INTERNAL,
     });
     const result = describeCliError(err);
     expect(result.hint).toBeDefined();

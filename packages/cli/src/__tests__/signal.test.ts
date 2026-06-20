@@ -15,9 +15,7 @@ describe("signal error code mapping (C1↔C2 seam)", () => {
     expect(exitCodeFor(TILA_ERRORS.DO_UNREACHABLE)).toBe(
       EXIT_CODES.NETWORK_ERROR,
     );
-    expect(exitCodeFor(TILA_ERRORS.INTERNAL_ERROR)).toBe(
-      EXIT_CODES.NETWORK_ERROR,
-    );
+    expect(exitCodeFor(TILA_ERRORS.INTERNAL)).toBe(EXIT_CODES.NETWORK_ERROR);
     expect(exitCodeFor(TILA_ERRORS.RATE_LIMITED)).toBe(
       EXIT_CODES.NETWORK_ERROR,
     );

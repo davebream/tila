@@ -69,14 +69,11 @@ describe("task update --field loud-fail", () => {
 describe("C1↔C2 seam: signal failure emits real TILA_ERRORS code → exitCodeFor classifies to exit 1", () => {
   it("exitCodeFor maps the real NETWORK_ERROR from signal send → exit 2", async () => {
     const { exitCodeFor } = await import("../lib/exit-codes");
-    // After C2 fixes, signal.ts maps network failures to TILA_ERRORS.DO_UNREACHABLE
-    // or TILA_ERRORS.INTERNAL_ERROR — both should be exit 2
+    // After C2 fixes, signal.ts maps network failures to real TILA_ERRORS values.
     expect(exitCodeFor(TILA_ERRORS.DO_UNREACHABLE)).toBe(
       EXIT_CODES.NETWORK_ERROR,
     );
-    expect(exitCodeFor(TILA_ERRORS.INTERNAL_ERROR)).toBe(
-      EXIT_CODES.NETWORK_ERROR,
-    );
+    expect(exitCodeFor(TILA_ERRORS.INTERNAL)).toBe(EXIT_CODES.NETWORK_ERROR);
   });
 
   it("exitCodeFor maps VALIDATION_ERROR from invalid payload → exit 1 (user error)", async () => {
@@ -84,9 +81,6 @@ describe("C1↔C2 seam: signal failure emits real TILA_ERRORS code → exitCodeF
     // signal.ts :54 INVALID_PAYLOAD → mapped to VALIDATION_ERROR_DO in C2
     // which classifies to USER_ERROR
     expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR_DO)).toBe(
-      EXIT_CODES.USER_ERROR,
-    );
-    expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR)).toBe(
       EXIT_CODES.USER_ERROR,
     );
   });

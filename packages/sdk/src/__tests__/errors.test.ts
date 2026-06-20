@@ -8,11 +8,44 @@ import {
 
 describe("toTilaErrorCode normalizer", () => {
   it("passes through known wire codes unchanged", () => {
-    expect(toTilaErrorCode("UNAUTHORIZED")).toBe("UNAUTHORIZED");
+    expect(toTilaErrorCode("unauthorized")).toBe("unauthorized");
+    expect(toTilaErrorCode("rate-limited")).toBe("rate-limited");
     expect(toTilaErrorCode("stale-fence")).toBe("stale-fence");
     expect(toTilaErrorCode("not-found")).toBe("not-found");
     expect(toTilaErrorCode("UNKNOWN")).toBe("UNKNOWN");
     expect(toTilaErrorCode("do-unreachable")).toBe("do-unreachable");
+  });
+
+  it("passes through worker-emitted kebab auth and middleware codes", () => {
+    const workerWireCodes = [
+      "unauthorized",
+      "session-expired",
+      "rate-limited",
+      "hmac-not-configured",
+      "session-revoked",
+      "permission-denied",
+      "project-mismatch",
+      "csrf-missing-origin",
+      "csrf-origin-mismatch",
+      "repo-not-allowed",
+      "github-auth-failed",
+      "token-name-conflict",
+      "token-not-found",
+      "validation-error",
+      "internal",
+    ] as const;
+
+    for (const code of workerWireCodes) {
+      expect(toTilaErrorCode(code)).toBe(code);
+      expect(toTilaErrorCode(code)).not.toBe("UNKNOWN");
+    }
+  });
+
+  it("normalizes stale SCREAMING worker codes to UNKNOWN", () => {
+    expect(toTilaErrorCode("UNAUTHORIZED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("RATE_LIMITED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("HMAC_NOT_CONFIGURED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("VALIDATION_ERROR")).toBe("UNKNOWN");
   });
 
   it("normalizes unknown wire strings to UNKNOWN", () => {
@@ -82,18 +115,51 @@ describe("TilaApiError.code is TilaErrorCode", () => {
   });
 });
 
-describe("TILA_ERRORS orphan-code reconciliation (#114)", () => {
-  // These assertions guard the specific reconciliation in #114: the legacy
-  // SCREAMING `TOKEN_AUTHZ_DENIED` entry mapped to a wire value the server never
-  // emits, while the live value `"token-authz-denied"` is exposed via
-  // `REPO_TOKEN_AUTHZ_DENIED`.
-  //
-  // NOTE: there is deliberately no "every value is server-emitted" partition test.
-  // The map has a broader, pre-existing SCREAMING-vs-kebab divergence with worker
-  // emission (e.g. the worker emits kebab `unauthorized`/`session-expired`/
-  // `rate-limited`, while the map declares SCREAMING `UNAUTHORIZED`/`SESSION_EXPIRED`/
-  // `RATE_LIMITED` that the worker never emits). A faithful server-emission test
-  // would fail on ~14 such entries — out of scope for #114, tracked as a follow-up.
+describe("TILA_ERRORS server-emitted code reconciliation", () => {
+  const SDK_ONLY_ERROR_CODES = new Set<string>([
+    "artifact-get-failed",
+    "artifact-get-latest-failed",
+    "UNKNOWN",
+  ]);
+
+  const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "unauthorized",
+    "session-expired",
+    "rate-limited",
+    "permission-denied",
+    "project-mismatch",
+    "csrf-missing-origin",
+    "csrf-origin-mismatch",
+    "do-unreachable",
+    "repo-not-allowed",
+    "github-auth-failed",
+    "hmac-not-configured",
+    "session-revoked",
+    "token-name-conflict",
+    "token-not-found",
+    "stale-fence",
+    "not-found",
+    "gate-already-settled",
+    "no-fence",
+    "gate-fence-conflict",
+    "internal",
+    "constraint-violation",
+    "idempotency-key-conflict",
+    "validation-error",
+    "already-held",
+    "renew-failed",
+    "release-ownership-denied",
+    "bad-request",
+    "missing-query",
+    "invalid-query",
+    "invalid-slot",
+    "invalid-relationship-type",
+    "token-authz-denied",
+    "repo-access-denied",
+    "repo-not-found",
+    "github-api-timeout",
+    "github-api-error",
+  ]);
 
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {
     // Test A — the orphan's wire value is gone (fails RED before the entry is removed).
@@ -108,11 +174,22 @@ describe("TILA_ERRORS orphan-code reconciliation (#114)", () => {
     expect(hits).toEqual([["REPO_TOKEN_AUTHZ_DENIED", "token-authz-denied"]]);
   });
 
+  it("maps every non-SDK-only value to a server-emitted wire code", () => {
+    const unmappedServerCodes = Object.entries(TILA_ERRORS).filter(
+      ([, value]) =>
+        !SDK_ONLY_ERROR_CODES.has(value) &&
+        !SERVER_EMITTED_TILA_ERROR_CODES.has(value),
+    );
+
+    expect(
+      unmappedServerCodes,
+      `TILA_ERRORS values not present in server emission set: ${JSON.stringify(
+        unmappedServerCodes,
+      )}`,
+    ).toEqual([]);
+  });
+
   it("has no two keys mapping to the same wire value", () => {
-    // Test C — generalizable orphan-class guard. This catches re-introducing a
-    // SECOND key for an already-mapped wire value (the shape that let the orphan in).
-    // It does NOT catch a new uniquely-valued unemitted orphan — that broader
-    // guarantee depends on the SCREAMING/kebab follow-up reconciliation.
     const values = Object.values(TILA_ERRORS);
     const seen = new Map<string, string[]>();
     for (const [key, value] of Object.entries(TILA_ERRORS)) {
