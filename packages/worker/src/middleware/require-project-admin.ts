@@ -219,6 +219,56 @@ export async function requireProjectAdminHttp(
   );
 }
 
+/**
+ * Strict inline gate for /api/tokens routes (mint, revoke, list).
+ * Returns null (pass) iff the resolved principal is a full-scope D1 API token.
+ * All other principals — GitHub sessions (bearer or cookie), workspace sessions,
+ * and non-full or absent D1 tokens — receive a 403.
+ *
+ * Checks `kind === "d1-token"` FIRST (before `scopes`) because cookie-sessions
+ * may carry `scopes: "full"` (see the comment in requireProjectAdminHttp above).
+ * The `&&` short-circuits on kind, preventing a browser session from slipping
+ * through a bare `scopes === "full"` check.
+ *
+ * Does NOT call autoAdminGrants or read the repo_admin_auto_admin flag —
+ * the session allow-path is intentionally removed for token management.
+ */
+export async function requireD1TokenHttp(
+  c: import("hono").Context<AdminEnv>,
+): Promise<Response | null> {
+  // (1) Defensive: missing/malformed tokenResult ⇒ fail-closed (never throws).
+  const tokenResult = c.get("tokenResult");
+  if (!tokenResult || typeof tokenResult.kind !== "string") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "token-authz-denied",
+          message: "Token management requires a full-scope D1 API token",
+          retryable: false,
+        },
+      },
+      403,
+    );
+  }
+  // (2) Kind-discriminated strict check — kind MUST come first (see doc above).
+  if (tokenResult.kind === "d1-token" && tokenResult.scopes === "full") {
+    return null;
+  }
+  // (3) All other principals denied.
+  return c.json(
+    {
+      ok: false,
+      error: {
+        code: "token-authz-denied",
+        message: "Token management requires a full-scope D1 API token",
+        retryable: false,
+      },
+    },
+    403,
+  );
+}
+
 function deny(c: Parameters<MiddlewareHandler<AdminEnv>>[0]) {
   return c.json(
     {
