@@ -246,6 +246,65 @@ export function emitSweepRollupDatapoint(
   }
 }
 
+/**
+ * Outcome values for admin roster operations (grant or revoke).
+ * Enumerated here so Tasks 5/6/7 (route handlers) stay consistent.
+ */
+export type AdminRosterOutcome =
+  | "success"
+  | "denied"
+  | "last-admin"
+  | "login-unresolved"
+  | "github-user-not-found"
+  | "github-error";
+
+/**
+ * Audit datapoint for admin roster grant/revoke operations. Emitted on both
+ * success and in-handler denials (409 last-admin, 422 login-unresolved, 404,
+ * 502) to leave a forensic footprint. 403s from requireProjectAdmin cannot be
+ * intercepted here (middleware short-circuits before the handler runs).
+ *
+ * Best-effort: swallows all errors and never throws into the request path.
+ * `ctx` is optional: when absent the write runs inline (matching the pattern
+ * used by emitInfraAdminDatapoint and sweep emitters).
+ *
+ * Blobs: [projectId, action, outcome, "admin_roster"]
+ * Doubles: [statusCode]
+ * Indexes: [projectId || "unknown"]
+ */
+export function emitAdminRosterDatapoint(
+  analytics: AnalyticsEngineDataset | undefined,
+  ctx: ExecutionContext | undefined,
+  fields: {
+    projectId: string;
+    action: "grant" | "revoke";
+    outcome: AdminRosterOutcome;
+    statusCode: number;
+  },
+): void {
+  if (!analytics) return;
+  try {
+    const write = () =>
+      analytics.writeDataPoint({
+        blobs: [
+          fields.projectId,
+          fields.action,
+          fields.outcome,
+          "admin_roster",
+        ],
+        doubles: [fields.statusCode],
+        indexes: [fields.projectId || "unknown"],
+      });
+    if (ctx) {
+      ctx.waitUntil(Promise.resolve(write()));
+    } else {
+      write();
+    }
+  } catch {
+    // Swallow -- emission is never load-bearing
+  }
+}
+
 export function emitDoOperationDatapoint(
   analytics: AnalyticsEngineDataset,
   ctx: ExecutionContext,
