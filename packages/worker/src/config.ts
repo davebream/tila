@@ -176,3 +176,9 @@ export const JTI_REVCHECK_TTL_MS = 60_000; // 60 seconds
  * Oldest entry is evicted on overflow (same pattern as isolateFailMap).
  */
 export const JTI_REV_CACHE_MAX_SIZE = 2000;
+
+/** TTL for the per-isolate admin-grants roster cache (≤10s per OR-2; fail-closed). */
+export const ADMIN_GRANTS_CACHE_TTL_MS = 10_000; // 10 seconds
+
+/** Maximum number of roster entries in the per-isolate admin-grants cache (oldest-evict on overflow). */
+export const ADMIN_GRANTS_CACHE_MAX_SIZE = 2000;
