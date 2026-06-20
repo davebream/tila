@@ -299,16 +299,6 @@ describe("token routes — D1 token gate (real gate, cases 10-12b)", () => {
     __clearProjectAutoAdminCache();
   });
 
-  // POSITIVE CONTROL: pre-swap, the old gate (requireProjectAdminHttp) admits
-  // a flag-on admin session. This confirms the RED cases below are genuine
-  // admits (not deny-by-throw). DELETE this entire `it` block in Task 4.
-  it("pre-swap control: old gate admits flag-on admin session", async () => {
-    const app = createApp(makeSessionToken("admin"));
-    const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
-    // Pre-swap: requireProjectAdminHttp admits a flag-on admin session → 200
-    expect(res.status).toBe(200);
-  });
-
   // d1-token "full" ⇒ pass (happy-path baseline)
   it("case 10b: d1-token full-scope ⇒ pass (GET /api/tokens)", async () => {
     const app = createApp(makeD1Token("full"));

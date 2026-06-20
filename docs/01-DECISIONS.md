@@ -418,24 +418,26 @@ This document is the constitution. It changes when reality requires it, not when
 
 ---
 
-## 20. Token management authorization: flat-admin in v0.1
+## 20. Token management authorization: D1 token required
 
-**Decision:** Every active token with `scopes = "full"` is a project administrator for all token-management operations. There is no admin/non-admin distinction in v0.1.
+**Decision:** Token management (mint, revoke, list) requires a full-scope **D1 API token**. A GitHub session — even one admitted as auto-admin by the `repo_admin_auto_admin` flag (#101) — is denied. This closes the session→token privilege escalation path prohibited by epic #95's invariant ("a roster grant must NOT become equivalent to holding the infra secret").
 
 **Who can perform token operations:**
 
 | Operation | Authorized | Scope required |
 |-----------|-----------|----------------|
-| Issue a new token (`POST /api/tokens`) | Any active full-scoped token | `full` |
-| List all project tokens (`GET /api/tokens`) | Any active full-scoped token | `full` |
-| Revoke any token (`DELETE /api/tokens/:name`) | Any active full-scoped token (including self-revocation) | `full` |
-| Inspect token audit metadata (created_by, revoked_by, token_id in list response) | Any active full-scoped token | `full` |
+| Issue a new token (`POST /api/tokens`) | Full-scope D1 API token only | `kind="d1-token"` AND `scopes="full"` |
+| List all project tokens (`GET /api/tokens`) | Full-scope D1 API token only | `kind="d1-token"` AND `scopes="full"` |
+| Revoke any token (`DELETE /api/tokens/:name`) | Full-scope D1 API token only (including self-revocation) | `kind="d1-token"` AND `scopes="full"` |
+| Inspect token audit metadata (created_by, revoked_by, token_id in list response) | Full-scope D1 API token only | `kind="d1-token"` AND `scopes="full"` |
 
-**Why flat-admin is correct for v0.1:**
+**Principal split:** repo registration (`POST /api/repos`) and roster management (`/admins`) remain on the `requireProjectAdminHttp` / `requireProjectAdmin` gates that admit both D1 tokens and flag-gated auto-admin sessions. The token plane is D1-token-only — an auto-admin session that can grant admins and register repos is still denied token minting. This is the split enforced by epic #95.
+
+**Why D1-token-only is correct:**
 
 - `scopes = "full"` is the only scope value issued — hardcoded in `D1TokenStore.issue()` (see `packages/backend-d1/src/token-store.ts`).
 - The v0.2 roadmap (§16: "Token scopes and rotation with overlap windows") introduces fine-grained scopes. Until then, every token holder is a peer administrator within their project.
-- Token routes enforce this policy via an inline `requireTokenAdmin()` guard that rejects non-`"full"` tokens with HTTP 403 and error code `TOKEN_AUTHZ_DENIED`. In v0.1 this guard never fires — it is a forward-compatibility hook.
+- Token routes enforce this policy via the `requireD1TokenHttp` inline gate that checks `kind === "d1-token" && scopes === "full"` (kind checked first — load-bearing, because cookie-sessions can carry `scopes:"full"`). It rejects all other principals with HTTP 403 and error code `token-authz-denied`.
 
 **Known limitation:** The `/_internal/sweep` route follows the same flat-admin pattern (any full token can trigger sweep). This is acceptable for v0.1 and may be gated separately in v0.2.
 
