@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import { applyAdminGrant } from "../lib/admin-grant";
 import { archiveJournal, revokeSession } from "../lib/admin-ops";
 import { emitInfraAdminDatapoint } from "../lib/analytics";
 import { constantTimeSecretMatch } from "../lib/constant-time-compare";
@@ -310,5 +311,102 @@ infra.post(
       statusCode: result.status,
     });
     return c.json(result.body, result.status as ContentfulStatusCode);
+  },
+);
+
+/**
+ * POST /admin/projects/:projectId/admins — break-glass first-admin seeder.
+ *
+ * Guarded by the inherited `requireInfraPrincipal` (404 when INFRA_ADMIN_TOKEN
+ * is unset, 403 on mismatch via constant-time compare) and `resolveTargetProject`
+ * (fail-closed on unknown project, 404 PROJECT_NOT_FOUND).
+ *
+ * Delegates to the shared `applyAdminGrant` helper with `grantedByUserId = null`
+ * (infra/owner-seeded grants have no acting GitHub user identity).
+ *
+ * SECURITY: This handler writes D1 ONLY — it must NEVER call `c.get("doStub").fetch()`.
+ * resolveTargetProject sets a lazy doStub on the context, but the seeder must not
+ * materialize the DO (a DO request would run migrations against the target's SQLite).
+ *
+ * Analytics mapping (outcome → emitInfraAdminDatapoint):
+ *   success               → "admin-seeded"
+ *   validation-error      → "validation-error"
+ *   login-unresolved      → "login-unresolved"
+ *   github-user-not-found → "github-user-not-found"
+ *   github-error          → "github-error"
+ *
+ * Auth-failure datapoints are NOT re-emitted here — requireInfraPrincipal owns them.
+ */
+infra.post(
+  "/admin/projects/:projectId/admins",
+  resolveTargetProject(),
+  async (c) => {
+    const projectId = c.get("projectId");
+
+    // Parse JSON body.
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+        projectId,
+        outcome: "validation-error",
+        statusCode: 400,
+      });
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "validation-error",
+            message: "Invalid JSON body",
+            retryable: false,
+          },
+        },
+        400,
+      );
+    }
+
+    // Delegate to shared helper. grantedByUserId = null → infra-seeded grant.
+    const result = await applyAdminGrant(c.env, projectId, body, null);
+
+    // Outcome → analytics label mapping (infra vocabulary).
+    const outcomeLabel: Record<string, string> = {
+      success: "admin-seeded",
+      "validation-error": "validation-error",
+      "login-unresolved": "login-unresolved",
+      "github-user-not-found": "github-user-not-found",
+      "github-error": "github-error",
+    };
+
+    if (!result.ok) {
+      const label = outcomeLabel[result.outcome] ?? result.outcome;
+      emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+        projectId,
+        outcome: label,
+        statusCode: result.status,
+      });
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: result.code,
+            message: result.message,
+            retryable: result.status === 502,
+          },
+        },
+        result.status,
+      );
+    }
+
+    emitInfraAdminDatapoint(c.env.ANALYTICS, execCtxOf(c), {
+      projectId,
+      outcome: "admin-seeded",
+      statusCode: 200,
+    });
+    return c.json({
+      ok: true,
+      github_user_id: result.githubUserId,
+      granted: result.granted,
+    });
   },
 );

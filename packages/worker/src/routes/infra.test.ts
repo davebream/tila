@@ -28,6 +28,13 @@ vi.mock("@tila/backend-d1", () => ({
   ),
 }));
 
+// ─── applyAdminGrant mock for seeder tests ────────────────────────────────────
+// Controlled at the module level so each seeder test can override the return value.
+const applyAdminGrantMock = vi.fn();
+vi.mock("../lib/admin-grant", () => ({
+  applyAdminGrant: (...args: unknown[]) => applyAdminGrantMock(...args),
+}));
+
 const deleteManyMock = vi.fn();
 const deleteByPrefixMock = vi.fn();
 const headMock = vi.fn();
@@ -986,5 +993,243 @@ describe("infra archive/journal route", () => {
     expect(arg.blobs).toContain("infra_admin");
     expect(arg.blobs).toContain("journal-archived");
     expect(arg.blobs).toContain("proj-target");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// infra admin seeder route — POST /_internal/admin/projects/:projectId/admins
+//
+// Security invariants:
+//   - 404 when INFRA_ADMIN_TOKEN is unset (endpoint invisible)
+//   - 403 on wrong bearer
+//   - 404 on unknown project (resolveTargetProject)
+//   - delegates to applyAdminGrant(env, projectId, body, grantedByUserId=null)
+//   - NEVER calls doStub.fetch() — writes D1 only, must not wake the DO
+//   - emits emitInfraAdminDatapoint with outcome "admin-seeded" on success
+//   - emits outcome "validation-error" on 400
+//   - does NOT re-emit auth-failure (requireInfraPrincipal owns it)
+// ─────────────────────────────────────────────────────────────────────────────
+describe("infra admin seeder route", () => {
+  const TOKEN = "s3cret-infra-token";
+  const AUTH = { Authorization: `Bearer ${TOKEN}` };
+
+  function req(
+    app: Hono<AppEnv>,
+    projectId: string,
+    env: Partial<Env>,
+    headers: Record<string, string> = {},
+    body?: unknown,
+  ) {
+    return app.request(
+      `/_internal/admin/projects/${projectId}/admins`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      env as Env,
+    );
+  }
+
+  beforeEach(() => {
+    applyAdminGrantMock.mockReset();
+    getMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+    getIncludingArchivedMock
+      .mockReset()
+      .mockResolvedValue({ displayName: "Target", cloudflareAccountId: "acc" });
+  });
+
+  it("returns 404 when INFRA_ADMIN_TOKEN is unset (endpoint invisible)", async () => {
+    const app = createApp();
+    const res = await req(app, "proj-target", makeEnv(), AUTH, {
+      github_user_id: 1001,
+    });
+    expect(res.status).toBe(404);
+    expect(applyAdminGrantMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 on wrong bearer", async () => {
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(
+      app,
+      "proj-target",
+      env,
+      { Authorization: "Bearer wrong-token" },
+      { github_user_id: 1001 },
+    );
+    expect(res.status).toBe(403);
+    expect(applyAdminGrantMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 on unknown project (resolveTargetProject)", async () => {
+    getMock.mockResolvedValue(null);
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-ghost", env, AUTH, {
+      github_user_id: 1001,
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("not-found");
+    expect(applyAdminGrantMock).not.toHaveBeenCalled();
+  });
+
+  it("happy-path: valid token + known project + {github_user_id} → 200 {ok,granted:true}", async () => {
+    applyAdminGrantMock.mockResolvedValue({
+      ok: true,
+      githubUserId: 1001,
+      granted: true,
+      outcome: "success",
+      status: 200,
+    });
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH, {
+      github_user_id: 1001,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      github_user_id: number;
+      granted: boolean;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.github_user_id).toBe(1001);
+    expect(body.granted).toBe(true);
+    // grantedByUserId must be null (infra-seeded)
+    expect(applyAdminGrantMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "proj-target",
+      expect.anything(),
+      null,
+    );
+  });
+
+  it("idempotent re-seed: granted:false", async () => {
+    applyAdminGrantMock.mockResolvedValue({
+      ok: true,
+      githubUserId: 1001,
+      granted: false,
+      outcome: "success",
+      status: 200,
+    });
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH, {
+      github_user_id: 1001,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { granted: boolean };
+    expect(body.granted).toBe(false);
+  });
+
+  it("login with no GitHub App → 422 (login-unresolved)", async () => {
+    applyAdminGrantMock.mockResolvedValue({
+      ok: false,
+      outcome: "login-unresolved",
+      status: 422,
+      code: "login-unresolved",
+      message: "GitHub App not configured",
+    });
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
+    const res = await req(app, "proj-target", env, AUTH, { login: "alice" });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("login-unresolved");
+  });
+
+  it("malformed body → 400 validation-error (emits validation-error datapoint)", async () => {
+    applyAdminGrantMock.mockResolvedValue({
+      ok: false,
+      outcome: "validation-error",
+      status: 400,
+      code: "validation-error",
+      message: "Provide exactly one of github_user_id or login",
+    });
+    const writeDataPoint = vi.fn();
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+    const res = await req(app, "proj-target", env, AUTH, {});
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("validation-error");
+    // emitInfraAdminDatapoint must have been called with "validation-error"
+    expect(writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["validation-error", "infra_admin"]),
+      }),
+    );
+  });
+
+  it("DO-materialization guard: doStub.fetch is NEVER called on the happy-path", async () => {
+    applyAdminGrantMock.mockResolvedValue({
+      ok: true,
+      githubUserId: 1001,
+      granted: true,
+      outcome: "success",
+      status: 200,
+    });
+    // Build an app with a spy on the DO namespace's `get` (which materializes a stub)
+    // and a spy on the returned stub's `fetch`.
+    const doFetchSpy = vi.fn();
+    const doGetSpy = vi.fn(
+      () => ({ fetch: doFetchSpy }) as unknown as DurableObjectStub,
+    );
+    const doIdFromNameSpy = vi.fn(
+      () => ({ toString: () => "id" }) as DurableObjectId,
+    );
+    const spyDO = {
+      idFromName: doIdFromNameSpy,
+      get: doGetSpy,
+      idFromString: () => ({ toString: () => "id" }) as DurableObjectId,
+      newUniqueId: () => ({ toString: () => "id" }) as DurableObjectId,
+      jurisdiction: () => ({}) as DurableObjectNamespace,
+    } as unknown as DurableObjectNamespace;
+
+    const app = createApp();
+    const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN, PROJECT: spyDO });
+    const res = await req(app, "proj-target", env, AUTH, {
+      github_user_id: 1001,
+    });
+    expect(res.status).toBe(200);
+    // The seeder writes D1 only — must never materialize the DO or call doStub.fetch()
+    expect(doFetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("success: emits admin-seeded datapoint", async () => {
+    applyAdminGrantMock.mockResolvedValue({
+      ok: true,
+      githubUserId: 1001,
+      granted: true,
+      outcome: "success",
+      status: 200,
+    });
+    const writeDataPoint = vi.fn();
+    const app = createApp();
+    const env = makeEnv({
+      INFRA_ADMIN_TOKEN: TOKEN,
+      ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+    });
+    const res = await req(app, "proj-target", env, AUTH, {
+      github_user_id: 1001,
+    });
+    expect(res.status).toBe(200);
+    expect(writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining([
+          "admin-seeded",
+          "infra_admin",
+          "proj-target",
+        ]),
+        doubles: [200],
+      }),
+    );
   });
 });
