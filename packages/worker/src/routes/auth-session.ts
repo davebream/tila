@@ -157,6 +157,7 @@ authSessionExchange.post("/", async (c) => {
       tokenHash,
       actorName: tokenResult.name,
       scopes: tokenResult.scopes,
+      permission: tokenResult.scopes === "full" ? "admin" : "read",
       expiresAt,
     });
   } catch (err) {

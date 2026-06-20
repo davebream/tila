@@ -916,6 +916,7 @@ authGithub.get("/oauth/callback", async (c) => {
       tokenHash: "",
       actorName: user.login,
       scopes: "",
+      permission: "read",
       expiresAt,
     });
   } catch (err) {

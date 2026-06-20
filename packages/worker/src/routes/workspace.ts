@@ -14,7 +14,10 @@ import {
   getInstallationAccessToken,
   mintAppJwt,
 } from "../lib/github-app";
-import { PERMISSION_HIERARCHY } from "../lib/github-permission";
+import {
+  PERMISSION_HIERARCHY,
+  normalizeGitHubPermission,
+} from "../lib/github-permission";
 import { hashToken } from "../lib/hash-token";
 import { invalidateSession } from "../lib/session-cache";
 import type {
@@ -327,12 +330,14 @@ workspace.post("/select", async (c) => {
   const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
   const scopes = permissionToScope(bestPermission);
 
+  const permission = normalizeGitHubPermission(bestPermission);
   await sessionStore.create({
     sessionHash: newSessionHash,
     projectId,
     tokenHash: "",
     actorName: login,
     scopes,
+    permission,
     expiresAt,
   });
 
@@ -387,6 +392,7 @@ workspace.post("/deselect", async (c) => {
     tokenHash: "",
     actorName: session.name,
     scopes: "",
+    permission: "read",
     expiresAt,
   });
 
