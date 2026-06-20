@@ -176,6 +176,49 @@ export async function autoAdminGrants(
   return getProjectAutoAdminCached(db, projectId);
 }
 
+/**
+ * Async admin gate for token/repo routes (C5).
+ * These routes mount WITHOUT projectMiddleware, so projectId is sourced from
+ * tokenResult.projectId (not c.get("projectId"), which is empty on these mounts).
+ *
+ * Pass paths (return null):
+ *   1. d1-token with scopes === "full" — kind-discriminated to avoid misreading
+ *      GitHub sessions (which carry scopes: permission) or cookie-sessions
+ *      (which may inherit a d1-token's scopes value).
+ *   2. autoAdminGrants(db, tokenResult, tokenResult.projectId) — flag-gated
+ *      admin-tier session (bearer or cookie).
+ *
+ * Deny path (return 403 JSON): everything else.
+ * AC-2: with the flag off, autoAdminGrants returns false ⇒ only d1-token full-scope
+ * passes, byte-identical to the pre-101 baseline.
+ */
+export async function requireProjectAdminHttp(
+  c: import("hono").Context<AdminEnv>,
+): Promise<Response | null> {
+  const tokenResult = c.get("tokenResult");
+  // (1) Kind-discriminated full-scope D1 token check.
+  if (tokenResult.kind === "d1-token" && tokenResult.scopes === "full") {
+    return null;
+  }
+  // (2) Flag-gated auto-admin (bearer or cookie-session with admin permission).
+  // projectId comes from tokenResult because these routes have no projectMiddleware.
+  if (await autoAdminGrants(c.env.DB, tokenResult, tokenResult.projectId)) {
+    return null;
+  }
+  return c.json(
+    {
+      ok: false,
+      error: {
+        code: "token-authz-denied",
+        message:
+          "Repo/token management requires full scope or an admin session",
+        retryable: false,
+      },
+    },
+    403,
+  );
+}
+
 function deny(c: Parameters<MiddlewareHandler<AdminEnv>>[0]) {
   return c.json(
     {

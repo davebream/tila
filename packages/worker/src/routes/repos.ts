@@ -4,38 +4,16 @@ import { Hono } from "hono";
 import { getInstallationAccessToken, mintAppJwt } from "../lib/github-app";
 import { getRepoMetadata } from "../lib/github-client";
 import { zodValidationError } from "../lib/validation";
+import { requireProjectAdminHttp } from "../middleware/require-project-admin";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
 export const repos = new Hono<AppEnv>();
 
-/**
- * Scope guard for repo management routes.
- * Replicates requireTokenAdmin from tokens.ts verbatim.
- * Returns a 403 Response if the caller lacks full scope, or null if authorized.
- */
-function requireTokenAdmin(c: import("hono").Context<AppEnv>): Response | null {
-  const { scopes } = c.get("tokenResult");
-  if (scopes !== "full") {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "token-authz-denied",
-          message: "Repo management requires full scope",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-  return null;
-}
-
 // POST /api/repos -- Register a GitHub repo in the allowlist
 repos.post("/", async (c) => {
-  const authz = requireTokenAdmin(c);
+  const authz = await requireProjectAdminHttp(c);
   if (authz) return authz;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;
@@ -184,7 +162,7 @@ repos.post("/", async (c) => {
 
 // DELETE /api/repos/:repoId -- Remove a repo from the allowlist (idempotent)
 repos.delete("/:repoId", async (c) => {
-  const authz = requireTokenAdmin(c);
+  const authz = await requireProjectAdminHttp(c);
   if (authz) return authz;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;

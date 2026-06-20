@@ -233,7 +233,7 @@ describe("requireProjectAdmin middleware", () => {
   });
 
   describe("non-bearer / unknown kinds", () => {
-    it('denies cookie-session even with permission="admin"', async () => {
+    it("denies cookie-session when auto-admin flag is off", async () => {
       const app = createTestApp(makeCookieSessionToken("admin"));
       expectDenied(await fetchStatus(app));
       expect(mockIsActiveAdmin).toHaveBeenCalledTimes(0);
