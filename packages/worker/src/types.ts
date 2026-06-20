@@ -54,6 +54,7 @@ export interface CookieSessionTokenResult {
   tokenId: string; // "" for cookie sessions
   sessionHash: string;
   expiresAt: number;
+  permission: string;
 }
 
 export interface WorkspaceSessionTokenResult {

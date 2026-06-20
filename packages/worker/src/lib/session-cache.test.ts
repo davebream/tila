@@ -15,6 +15,7 @@ const makeSessionResult = (
   tokenHash: "tok-hash-abc",
   name: "testuser",
   scopes: "full",
+  permission: "read",
   expiresAt: Date.now() + 3_600_000, // 1 hour
   ...overrides,
 });

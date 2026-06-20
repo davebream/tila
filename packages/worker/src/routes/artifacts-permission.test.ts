@@ -15,7 +15,7 @@
  */
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import type { Env, HonoVariables } from "../types";
+import type { CookieSessionTokenResult, Env, HonoVariables } from "../types";
 import { artifacts } from "./artifacts";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -56,7 +56,7 @@ function createApp(
   return app;
 }
 
-function readCookieSession(): HonoVariables["tokenResult"] {
+function readCookieSession(): CookieSessionTokenResult {
   return {
     kind: "cookie-session" as const,
     projectId: "proj-1",
@@ -65,11 +65,17 @@ function readCookieSession(): HonoVariables["tokenResult"] {
     tokenId: "",
     sessionHash: "cs-hash",
     expiresAt: Date.now() + 3600_000,
+    permission: "read",
   };
 }
 
-function fullCookieSession(): HonoVariables["tokenResult"] {
-  return { ...readCookieSession(), name: "gh-admin", scopes: "full" };
+function fullCookieSession(): CookieSessionTokenResult {
+  return {
+    ...readCookieSession(),
+    name: "gh-admin",
+    scopes: "full",
+    permission: "admin",
+  };
 }
 
 describe("artifacts route permission guards", () => {

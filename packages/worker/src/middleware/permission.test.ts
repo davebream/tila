@@ -48,7 +48,10 @@ function makeSessionToken(permission: string): SessionTokenResult {
   };
 }
 
-function makeCookieSessionToken(scopes: string): CookieSessionTokenResult {
+function makeCookieSessionToken(
+  scopes: string,
+  permission = "read",
+): CookieSessionTokenResult {
   return {
     kind: "cookie-session",
     projectId: "proj-1",
@@ -57,6 +60,7 @@ function makeCookieSessionToken(scopes: string): CookieSessionTokenResult {
     tokenId: "",
     sessionHash: "test-hash",
     expiresAt: Date.now() + 3600_000,
+    permission,
   };
 }
 
@@ -164,25 +168,94 @@ describe("requirePermission middleware", () => {
   });
 
   describe("cookie-session tokens", () => {
-    it("allows cookie-session with scopes=full for read-level route", async () => {
-      const app = createTestApp("read", makeCookieSessionToken("full"));
+    it("allows cookie-session with permission=admin for read-level route", async () => {
+      const app = createTestApp(
+        "read",
+        makeCookieSessionToken("full", "admin"),
+      );
       const { status } = await fetch200or403(app);
       expect(status).toBe(200);
     });
 
-    it("allows cookie-session with scopes=full for write-level route", async () => {
-      const app = createTestApp("write", makeCookieSessionToken("full"));
+    it("allows cookie-session with permission=admin for write-level route", async () => {
+      const app = createTestApp(
+        "write",
+        makeCookieSessionToken("full", "admin"),
+      );
       const { status } = await fetch200or403(app);
       expect(status).toBe(200);
     });
 
-    it("blocks cookie-session with non-full scopes", async () => {
-      const app = createTestApp("write", makeCookieSessionToken("read"));
+    it("allows cookie-session with permission=write for write-level route", async () => {
+      const app = createTestApp(
+        "write",
+        makeCookieSessionToken("full", "write"),
+      );
+      const { status } = await fetch200or403(app);
+      expect(status).toBe(200);
+    });
+
+    it("blocks cookie-session with permission=write on admin-level route (AC-2)", async () => {
+      // AC-2: a GitHub write user must NOT reach admin-gated routes via cookie
+      const app = createTestApp(
+        "admin",
+        makeCookieSessionToken("full", "write"),
+      );
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(
         "permission-denied",
       );
+    });
+
+    it("blocks cookie-session with permission=read on write-level route", async () => {
+      const app = createTestApp(
+        "write",
+        makeCookieSessionToken("read", "read"),
+      );
+      const { status, body } = await fetch200or403(app);
+      expect(status).toBe(403);
+      expect((body as { error: { code: string } }).error.code).toBe(
+        "permission-denied",
+      );
+    });
+
+    it("parity: cookie write→write guard behaves same as bearer write→write (AC-1)", async () => {
+      const cookieApp = createTestApp(
+        "write",
+        makeCookieSessionToken("full", "write"),
+      );
+      const bearerApp = createTestApp("write", makeSessionToken("write"));
+      const cookieResult = await fetch200or403(cookieApp);
+      const bearerResult = await fetch200or403(bearerApp);
+      expect(cookieResult.status).toBe(bearerResult.status);
+    });
+
+    it("parity: cookie write→admin guard behaves same as bearer write→admin (AC-1, AC-2)", async () => {
+      const cookieApp = createTestApp(
+        "admin",
+        makeCookieSessionToken("full", "write"),
+      );
+      const bearerApp = createTestApp("admin", makeSessionToken("write"));
+      const cookieResult = await fetch200or403(cookieApp);
+      const bearerResult = await fetch200or403(bearerApp);
+      // Both should be 403 — write does not reach admin
+      expect(cookieResult.status).toBe(403);
+      expect(bearerResult.status).toBe(403);
+      expect(cookieResult.status).toBe(bearerResult.status);
+    });
+
+    it("parity: cookie admin→admin guard behaves same as bearer admin→admin (AC-1)", async () => {
+      const cookieApp = createTestApp(
+        "admin",
+        makeCookieSessionToken("full", "admin"),
+      );
+      const bearerApp = createTestApp("admin", makeSessionToken("admin"));
+      const cookieResult = await fetch200or403(cookieApp);
+      const bearerResult = await fetch200or403(bearerApp);
+      // Both should be 200
+      expect(cookieResult.status).toBe(200);
+      expect(bearerResult.status).toBe(200);
     });
   });
 
@@ -246,14 +319,20 @@ describe("requirePermission middleware", () => {
       );
     });
 
-    it("allows cookie-session with scopes=full for admin-level route", async () => {
-      const app = createTestApp("admin", makeCookieSessionToken("full"));
+    it("allows cookie-session with permission=admin for admin-level route", async () => {
+      const app = createTestApp(
+        "admin",
+        makeCookieSessionToken("full", "admin"),
+      );
       const { status } = await fetch200or403(app);
       expect(status).toBe(200);
     });
 
-    it("blocks cookie-session with non-full scopes on admin-level route", async () => {
-      const app = createTestApp("admin", makeCookieSessionToken("read"));
+    it("blocks cookie-session with permission=read on admin-level route", async () => {
+      const app = createTestApp(
+        "admin",
+        makeCookieSessionToken("read", "read"),
+      );
       const { status, body } = await fetch200or403(app);
       expect(status).toBe(403);
       expect((body as { error: { code: string } }).error.code).toBe(

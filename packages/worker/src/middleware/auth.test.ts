@@ -154,6 +154,7 @@ const VALID_SESSION: SessionResult = {
   tokenHash: "tok-hash-1",
   name: "test-user",
   scopes: "write",
+  permission: "write",
   expiresAt: Date.now() + 60_000,
 };
 
@@ -921,6 +922,7 @@ describe("auth middleware", () => {
         tokenHash: "ws-tok-hash",
         name: "gh-alice",
         scopes: "",
+        permission: "read",
         expiresAt: Date.now() + 60_000,
       };
       mockGetSessionFromCache.mockReturnValue(undefined);
@@ -959,6 +961,7 @@ describe("auth middleware", () => {
         tokenHash: "ws-tok-hash-2",
         name: "gh-bob",
         scopes: "",
+        permission: "read",
         expiresAt: Date.now() + 60_000,
       };
       mockGetSessionFromCache.mockReturnValue(cachedWorkspace);
@@ -1018,6 +1021,69 @@ describe("auth middleware", () => {
       expect(body.claims.kind).toBe("cookie-session");
       expect(body.claims.projectId).toBe("proj-1");
       expect(body.authKind).toBe("cookie");
+    });
+
+    it("D1 project session with permission:'admin' → CookieSessionTokenResult carries permission:'admin'", async () => {
+      const adminSession: SessionResult = {
+        projectId: "proj-1",
+        tokenHash: "tok-hash-admin",
+        name: "admin-user",
+        scopes: "full",
+        permission: "admin",
+        expiresAt: Date.now() + 60_000,
+      };
+      mockGetSessionFromCache.mockReturnValue(undefined);
+      mockSessionValidate.mockResolvedValueOnce(adminSession);
+
+      const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
+      app.use("/*", createAuthMiddleware());
+      app.get("/test", (c) =>
+        c.json({ ok: true, claims: c.get("tokenResult") }),
+      );
+
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", { Cookie: "tila_session=admin-cookie" }),
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        claims: { kind: string; permission: string };
+      };
+      expect(body.claims.kind).toBe("cookie-session");
+      expect(body.claims.permission).toBe("admin");
+    });
+
+    it("cache-hit project session with permission:'write' → CookieSessionTokenResult carries permission:'write'", async () => {
+      const writeSession: SessionResult = {
+        projectId: "proj-1",
+        tokenHash: "tok-hash-write",
+        name: "write-user",
+        scopes: "full",
+        permission: "write",
+        expiresAt: Date.now() + 60_000,
+      };
+      mockGetSessionFromCache.mockReturnValue(writeSession);
+
+      const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
+      app.use("/*", createAuthMiddleware());
+      app.get("/test", (c) =>
+        c.json({ ok: true, claims: c.get("tokenResult") }),
+      );
+
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", { Cookie: "tila_session=write-cookie" }),
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        claims: { kind: string; permission: string };
+      };
+      expect(body.claims.kind).toBe("cookie-session");
+      expect(body.claims.permission).toBe("write");
+      // D1 should NOT have been called — this was a cache hit
+      expect(mockSessionValidate).not.toHaveBeenCalled();
     });
   });
 
