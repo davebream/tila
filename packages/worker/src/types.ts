@@ -44,6 +44,11 @@ export interface SessionTokenResult {
   githubLogin: string;
   permission: string;
   expiresAt: number;
+  // Optional immutable identity from the verified JWT payload, used by the
+  // admin-grants roster lookup. Optional so existing kind:"session" test
+  // factories stay valid; production always populates both from parsed.data.
+  githubUserId?: number;
+  githubHost?: string;
 }
 
 export interface CookieSessionTokenResult {

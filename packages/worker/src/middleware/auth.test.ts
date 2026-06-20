@@ -578,6 +578,26 @@ describe("auth middleware", () => {
       expect(body.claims.githubRepoId).toBe(99999);
     });
 
+    it("surfaces githubUserId and githubHost from the verified payload on the session tokenResult", async () => {
+      const token = await mintSessionToken({
+        github_user_id: 778899,
+        github_host: "github.com",
+      });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        claims: SessionTokenResult;
+      };
+      expect(body.claims.kind).toBe("session");
+      expect(body.claims.githubUserId).toBe(778899);
+      expect(body.claims.githubHost).toBe("github.com");
+    });
+
     it("returns 401 SESSION_EXPIRED for an expired session token", async () => {
       const token = await mintSessionToken({
         expires_at: Math.floor(Date.now() / 1000) - 10,

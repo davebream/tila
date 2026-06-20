@@ -642,6 +642,9 @@ export function createAuthMiddleware(
         githubLogin: payload.github_login,
         permission: payload.permission,
         expiresAt: payload.expires_at,
+        // SECURITY: source ONLY from the verified payload (parsed.data), never the pre-validation object.
+        githubUserId: payload.github_user_id,
+        githubHost: payload.github_host,
       };
 
       c.set("tokenResult", sessionResult);
