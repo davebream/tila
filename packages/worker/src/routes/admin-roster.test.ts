@@ -850,7 +850,7 @@ describe("DELETE /admins/:githubUserId", () => {
   });
 
   it("after revoke, same-isolate requireProjectAdmin denies the revoked user (no TTL wait)", async () => {
-    // Seed user 4242 as an admin
+    // Seed user 4242 as an active admin in the store.
     storeState.grants.push({
       project_id: "proj-target",
       github_host: "github.com",
@@ -862,16 +862,26 @@ describe("DELETE /admins/:githubUserId", () => {
       revoked_by_user_id: null,
     });
 
+    // Step 1: Drive a passing requireProjectAdmin check to seed a positive cache
+    // entry ({isAdmin: true}) for this user/project/host triple. Without this step,
+    // the post-revoke 403 could be a cache MISS rather than a proven cache PURGE.
     const sessionToken = bearerSession(4242);
-    // Use d1-token to issue the revoke (not self-revoke check)
+    const primeApp = createApp(sessionToken);
+    const primeRes = await req(primeApp, "/admins");
+    expect(primeRes.status).toBe(200); // confirms cache was seeded with {isAdmin:true}
+
+    // Step 2: Revoke the grant via d1-token (not self-revoke path).
+    // After this, storeState.grants has revoked_at set, so isActiveAdmin returns false.
     const revokerApp = createApp(fullD1Token());
     await req(revokerApp, "/admins/4242", "DELETE");
 
-    // Now check that the same isolate denies user 4242 even though we didn't
-    // wait for TTL — the cache entry should have been purged by revokeAdminGrantInCache.
-    // We need to seed a positive cache entry first to prove purge, not just miss.
-    // The bearerSession call above seeded storeState.grants but the revoke has removed it.
-    // However requireProjectAdmin will re-query and get false now.
+    // Step 3: Assert that requireProjectAdmin now DENIES user 4242 WITHOUT waiting
+    // for TTL expiry. This is the cache-purge proof:
+    //   - If revokeAdminGrantInCache were a no-op, the stale {isAdmin:true} cache
+    //     entry from step 1 would still be live → the user would be ALLOWED (200)
+    //     and this assertion would FAIL.
+    //   - Because the revoke correctly purges the entry, requireProjectAdmin must
+    //     do a fresh D1 lookup → isActiveAdmin returns false → DENIED (403).
     const deniedApp = createApp(sessionToken);
     const res = await req(deniedApp, "/admins");
     expect(res.status).toBe(403);
