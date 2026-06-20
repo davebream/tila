@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { generateToken, hashToken } from "../lib/hash";
 import { zodValidationError } from "../lib/validation";
 import { invalidate } from "../middleware/auth";
-import { requireProjectAdminHttp } from "../middleware/require-project-admin";
+import { requireD1TokenHttp } from "../middleware/require-project-admin";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -13,7 +13,7 @@ export const tokens = new Hono<AppEnv>();
 
 // POST /api/tokens -- Issue a new token
 tokens.post("/", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireD1TokenHttp(c);
   if (authz) return authz;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;
@@ -78,7 +78,7 @@ tokens.post("/", async (c) => {
 
 // DELETE /api/tokens/:name -- Revoke a token
 tokens.delete("/:name", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireD1TokenHttp(c);
   if (authz) return authz;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;
@@ -122,7 +122,7 @@ tokens.delete("/:name", async (c) => {
 
 // GET /api/tokens -- List all tokens for the project
 tokens.get("/", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireD1TokenHttp(c);
   if (authz) return authz;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;

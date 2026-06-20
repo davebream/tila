@@ -29,6 +29,7 @@ import {
   __clearAdminGrantsCache,
   __clearProjectAutoAdminCache,
   autoAdminGrants,
+  requireD1TokenHttp,
   requireProjectAdmin,
   requireProjectAdminHttp,
   revokeAdminGrantInCache,
@@ -584,6 +585,131 @@ describe("requireProjectAdminHttp — direct gate unit tests", () => {
     expect(token.scopes).toBe("full");
     const result = await callGate(token);
     await expectDeny403(result);
+  });
+});
+
+// =============================================================================
+// requireD1TokenHttp — direct gate unit tests (D1-token-only strict gate)
+// =============================================================================
+// Reuses the makeHttpCtx stub and factory functions from the
+// requireProjectAdminHttp block above. The real gate logic runs without
+// mocking it — only @tila/backend-d1 is mocked (module boundary seam).
+// =============================================================================
+describe("requireD1TokenHttp — direct gate unit tests", () => {
+  beforeEach(() => {
+    mockIsActiveAdmin.mockReset();
+    mockGetRepoAdminAutoAdmin.mockReset();
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
+  });
+
+  /** Minimal Hono Context stub for requireD1TokenHttp (same shape as requireProjectAdminHttp). */
+  function makeHttpCtx(
+    tokenResult: UnifiedTokenResult | undefined,
+  ): import("hono").Context<{ Bindings: Env; Variables: HonoVariables }> {
+    return {
+      get: (key: string) => {
+        if (key === "tokenResult") return tokenResult;
+        return undefined;
+      },
+      env: mockEnv,
+      json: (body: unknown, status?: number) =>
+        new Response(JSON.stringify(body), {
+          status: status ?? 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    } as unknown as import("hono").Context<{
+      Bindings: Env;
+      Variables: HonoVariables;
+    }>;
+  }
+
+  async function expectDeny403D1(result: Response | null): Promise<void> {
+    expect(result).not.toBeNull();
+    if (result == null) return;
+    expect(result.status).toBe(403);
+    const body = (await result.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  }
+
+  // Case D1: d1-token scopes:"full" ⇒ null (pass).
+  it("d1-token scopes:full ⇒ null (admit)", async () => {
+    const result = await requireD1TokenHttp(makeHttpCtx(makeD1Token("full")));
+    expect(result).toBeNull();
+    // Gate must NOT read the auto-admin flag — pure principal-shape check.
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case D2: d1-token scopes:"read" ⇒ 403.
+  it("d1-token scopes:read ⇒ 403 token-authz-denied", async () => {
+    const result = await requireD1TokenHttp(makeHttpCtx(makeD1Token("read")));
+    await expectDeny403D1(result);
+  });
+
+  // Case D3: d1-token scopes:"" (empty) ⇒ 403 (pins strict === "full").
+  it('d1-token scopes:"" ⇒ 403 token-authz-denied', async () => {
+    const result = await requireD1TokenHttp(makeHttpCtx(makeD1Token("")));
+    await expectDeny403D1(result);
+  });
+
+  // Case D4: bearer session permission:"admin" with flag ON ⇒ 403.
+  it("bearer session admin + flag ON ⇒ 403 (closed escalation)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result = await requireD1TokenHttp(
+      makeHttpCtx(makeSessionToken({ permission: "admin" })),
+    );
+    await expectDeny403D1(result);
+  });
+
+  // Case D5: cookie-session permission:"admin" scopes:"full" + flag ON ⇒ 403.
+  // Proves kind-ordering: cookie carries scopes:"full" yet is denied because
+  // kind === "d1-token" is checked first.
+  it("cookie-session admin scopes:full + flag ON ⇒ 403 (kind checked first)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const cookieToken = makeCookieSessionToken("admin");
+    // Confirm the cookie token carries scopes:"full" (it does — see factory).
+    expect(cookieToken.scopes).toBe("full");
+    const result = await requireD1TokenHttp(makeHttpCtx(cookieToken));
+    await expectDeny403D1(result);
+  });
+
+  // Case D6: workspace-session ⇒ 403.
+  it("workspace-session ⇒ 403 token-authz-denied", async () => {
+    const result = await requireD1TokenHttp(
+      makeHttpCtx(makeWorkspaceSessionToken()),
+    );
+    await expectDeny403D1(result);
+  });
+
+  // Case D7: undefined tokenResult ⇒ 403 AND resolves without throwing.
+  // The resolves assertion is load-bearing: a regression removing the defensive
+  // guard would throw synchronously on undefined.kind and fail here.
+  it("undefined tokenResult ⇒ resolves to 403 (no throw)", async () => {
+    const ctx = makeHttpCtx(undefined as unknown as UnifiedTokenResult);
+    await expect(requireD1TokenHttp(ctx)).resolves.toBeTruthy();
+    const result = await requireD1TokenHttp(ctx);
+    await expectDeny403D1(result);
+  });
+
+  // Split invariant: same admin-tier session with flag ON ⇒
+  //   requireProjectAdminHttp returns null (admits) AND requireD1TokenHttp returns 403.
+  it("SPLIT INVARIANT: flag-on admin session admitted by requireProjectAdminHttp but denied by requireD1TokenHttp", async () => {
+    // requireProjectAdminHttp reads the flag — mock it to return true.
+    mockGetRepoAdminAutoAdmin.mockResolvedValue(true);
+    const sessionToken = makeSessionToken({ permission: "admin" });
+
+    const adminResult = await requireProjectAdminHttp(
+      makeHttpCtx(sessionToken),
+    );
+    expect(adminResult).toBeNull(); // admitted by the looser gate
+
+    // Reset cache between calls (flag cache is per-projectId).
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
+    mockGetRepoAdminAutoAdmin.mockResolvedValue(true);
+
+    const d1Result = await requireD1TokenHttp(makeHttpCtx(sessionToken));
+    await expectDeny403D1(d1Result); // denied by the strict gate
   });
 });
 
