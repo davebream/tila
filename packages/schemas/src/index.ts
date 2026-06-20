@@ -352,6 +352,9 @@ export { errorEnvelope, okEnvelope } from "./envelope";
 // --- Tag schemas (shared across records, entities, and artifacts) ---
 export { TagSchema, type Tag, TagsSchema, type Tags } from "./tags";
 
+// --- GitHub validation constants ---
+export { GITHUB_LOGIN_REGEX } from "./github";
+
 // --- Record schemas ---
 export {
   RecordTypeSchema,
