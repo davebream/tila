@@ -180,7 +180,7 @@ describe("tila repos register", () => {
     mockPost.mockRejectedValue(
       new TilaApiError(
         403,
-        "UNKNOWN",
+        "token-authz-denied",
         "Repo management requires full scope",
         false,
       ),
@@ -201,7 +201,7 @@ describe("tila repos register", () => {
     mockPost.mockRejectedValue(
       new TilaApiError(
         403,
-        "UNKNOWN",
+        "repo-access-denied",
         "Access denied to GitHub repo acme/widgets",
         false,
       ),
@@ -222,7 +222,7 @@ describe("tila repos register", () => {
     mockPost.mockRejectedValue(
       new TilaApiError(
         404,
-        "UNKNOWN",
+        "repo-not-found",
         "GitHub repo acme/widgets not found",
         false,
       ),
@@ -239,7 +239,12 @@ describe("tila repos register", () => {
 
   it("surfaces a transient/retryable (502/504) error as safe to re-run, exit 1", async () => {
     mockPost.mockRejectedValue(
-      new TilaApiError(504, "UNKNOWN", "GitHub API request timed out", true),
+      new TilaApiError(
+        504,
+        "github-api-timeout",
+        "GitHub API request timed out",
+        true,
+      ),
     );
     const cmd = await loadCommand();
     const register = getSubCommand(cmd, "register");
@@ -248,6 +253,21 @@ describe("tila repos register", () => {
     const text = joinCalls(errSpy);
     expect(text).toContain("transient");
     expect(text).toContain("safe to re-run");
+    expect(text).not.toContain("Bearer");
+    expect(text).not.toContain("tila_");
+  });
+
+  it("falls back to generic HTTP 403 message for an un-typed 403 (UNKNOWN code, no full-scope guidance)", async () => {
+    mockPost.mockRejectedValue(
+      new TilaApiError(403, "UNKNOWN", "permission-denied message", false),
+    );
+    const cmd = await loadCommand();
+    const register = getSubCommand(cmd, "register");
+
+    await expect(runCmd(register, {})).rejects.toThrow("process.exit(1)");
+    const text = joinCalls(errSpy);
+    expect(text).toContain("Registration failed (HTTP 403)");
+    expect(text).not.toContain("full-scope token");
     expect(text).not.toContain("Bearer");
     expect(text).not.toContain("tila_");
   });

@@ -1,6 +1,6 @@
 import { RepoRegisterResponseSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
-import { TilaApiError } from "tila-sdk";
+import { TILA_ERRORS, TilaApiError } from "tila-sdk";
 import { requireClient, resolveContext } from "../context";
 import { jsonArg, printJson, printJsonError } from "../lib/output";
 
@@ -94,52 +94,44 @@ export default defineCommand({
           console.log(`Repo ${result.full_name} registered.`);
           console.log("Re-running this command is safe (idempotent).");
         } catch (err) {
-          // ERROR BRANCHING — branch on status + message + retryable, NOT
-          // err.code. The SDK's toTilaErrorCode() collapses every repos-route
-          // wire code (token-authz-denied, repo-access-denied, repo-not-found,
-          // github-api-timeout, github-api-error) to "UNKNOWN" because none are
-          // in TILA_ERRORS, so err.code carries no disambiguating signal here.
-          //
-          // The only signal separating the two 403s is the Worker's curated
-          // message. These substring checks are pinned to the message text in
-          // packages/worker/src/routes/repos.ts — if a server message changes,
-          // this branching must change with it.
           if (err instanceof TilaApiError) {
-            if (err.status === 403 && err.message.includes("full scope")) {
-              const msg =
-                "Registering a repo requires a full-scope token. Use the full-scope bootstrap token issued at `tila project create`.";
-              if (args.json) {
-                printJsonError(msg, "FORBIDDEN");
-              } else {
-                console.error(`Error: ${msg}`);
+            switch (err.code) {
+              case TILA_ERRORS.REPO_TOKEN_AUTHZ_DENIED: {
+                const msg =
+                  "Registering a repo requires a full-scope token. Use the full-scope bootstrap token issued at `tila project create`.";
+                if (args.json) {
+                  printJsonError(msg, "FORBIDDEN");
+                } else {
+                  console.error(`Error: ${msg}`);
+                }
+                process.exit(1);
+                return;
               }
-              process.exit(1);
-              return;
-            }
-            if (err.status === 403) {
-              // repo-access-denied: the Worker's GitHub token cannot see the
-              // repo — NOT a token-scope problem, so do not misdirect the user.
-              const msg = `The tila Worker's GitHub token cannot access ${owner}/${repo}. Check the GitHub App installation / repo visibility.`;
-              if (args.json) {
-                printJsonError(msg, "REPO_ACCESS_DENIED");
-              } else {
-                console.error(`Error: ${msg}`);
+              case TILA_ERRORS.REPO_ACCESS_DENIED: {
+                // The Worker's GitHub token cannot see the repo —
+                // NOT a token-scope problem, so do not misdirect the user.
+                const msg = `The tila Worker's GitHub token cannot access ${owner}/${repo}. Check the GitHub App installation / repo visibility.`;
+                if (args.json) {
+                  printJsonError(msg, "REPO_ACCESS_DENIED");
+                } else {
+                  console.error(`Error: ${msg}`);
+                }
+                process.exit(1);
+                return;
               }
-              process.exit(1);
-              return;
-            }
-            if (err.status === 404) {
-              const msg = `GitHub repo ${owner}/${repo} not found (renamed or deleted?). Verify owner/repo.`;
-              if (args.json) {
-                printJsonError(msg, "REPO_NOT_FOUND");
-              } else {
-                console.error(`Error: ${msg}`);
+              case TILA_ERRORS.REPO_NOT_FOUND: {
+                const msg = `GitHub repo ${owner}/${repo} not found (renamed or deleted?). Verify owner/repo.`;
+                if (args.json) {
+                  printJsonError(msg, "REPO_NOT_FOUND");
+                } else {
+                  console.error(`Error: ${msg}`);
+                }
+                process.exit(1);
+                return;
               }
-              process.exit(1);
-              return;
             }
             if (err.retryable) {
-              // 502/504 — github-api-error / github-api-timeout.
+              // github-api-timeout / github-api-error and any future retryable code.
               const msg = `${err.message} (transient — safe to re-run \`tila repos register\`).`;
               if (args.json) {
                 printJsonError(msg, "RETRYABLE");
@@ -149,8 +141,8 @@ export default defineCommand({
               process.exit(1);
               return;
             }
-            // Any other TilaApiError — surface status + curated message only,
-            // never a raw response body/headers.
+            // Any other TilaApiError (e.g. un-typed 403) — surface status +
+            // curated message only, never a raw response body/headers.
             const msg = `Registration failed (HTTP ${err.status}): ${err.message}`;
             if (args.json) {
               printJsonError(msg, "UNKNOWN");
