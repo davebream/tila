@@ -23,6 +23,27 @@ describe("toTilaErrorCode normalizer", () => {
   });
 });
 
+describe("repos-route error codes round-trip through toTilaErrorCode", () => {
+  const reposWireCodes = [
+    "token-authz-denied",
+    "repo-access-denied",
+    "repo-not-found",
+    "github-api-timeout",
+    "github-api-error",
+  ] as const;
+
+  for (const code of reposWireCodes) {
+    it(`toTilaErrorCode("${code}") returns the code unchanged (not "UNKNOWN")`, () => {
+      expect(toTilaErrorCode(code)).toBe(code);
+      expect(toTilaErrorCode(code)).not.toBe("UNKNOWN");
+    });
+
+    it(`"${code}" is a member of Object.values(TILA_ERRORS)`, () => {
+      expect(Object.values(TILA_ERRORS)).toContain(code);
+    });
+  }
+});
+
 describe("TilaApiError.code is TilaErrorCode", () => {
   it("has code typed as TilaErrorCode — known code", () => {
     const err = new TilaApiError(409, "stale-fence", "stale", false);
