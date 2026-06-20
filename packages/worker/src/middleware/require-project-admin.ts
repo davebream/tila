@@ -4,6 +4,7 @@ import {
   ADMIN_GRANTS_CACHE_MAX_SIZE,
   ADMIN_GRANTS_CACHE_TTL_MS,
 } from "../config";
+import { adminCacheKey } from "../lib/admin-cache-key";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 import { ADMIN_PERMISSION } from "./permission";
 
@@ -20,8 +21,8 @@ type AdminEnv = { Bindings: Env; Variables: HonoVariables };
 //   - Fail-closed: a D1 lookup error DENIES and is NEVER cached (a second call
 //     within the TTL re-queries D1).
 //
-// Key: `${projectId}:${githubHost}:${githubUserId}` — projectId is part of the
-// key so a positive entry for one project can never satisfy another.
+// Key format is defined by adminCacheKey() in lib/admin-cache-key.ts — projectId
+// is part of the key so a positive entry for one project can never satisfy another.
 const adminGrantsCache = new Map<
   string,
   { isAdmin: boolean; cachedAt: number }
@@ -325,7 +326,11 @@ export const requireProjectAdmin: MiddlewareHandler<AdminEnv> = async (
 
     // host must be canonical across grant + mint paths; #98 is github.com-only —
     // defer GHES normalization (follow-up).
-    const cacheKey = `${projectId}:${githubHost}:${githubUserId}`;
+    const cacheKey = adminCacheKey({
+      host: githubHost,
+      projectId,
+      userId: githubUserId,
+    });
     const cached = getAdminGrantFromCache(cacheKey);
     // Roster cache HIT — positive: admit immediately (no flag read needed).
     // Roster cache HIT — negative: skip the D1 roster lookup but still try

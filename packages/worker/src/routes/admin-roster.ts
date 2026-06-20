@@ -1,6 +1,7 @@
 import { AdminGrantsStore } from "@tila/backend-d1";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { adminCacheKey } from "../lib/admin-cache-key";
 import { applyAdminGrant } from "../lib/admin-grant";
 import {
   type AdminRosterOutcome,
@@ -222,13 +223,13 @@ adminRoster.delete("/:githubUserId", requireProjectAdmin, async (c) => {
   );
 
   // ── Same-isolate cache purge ────────────────────────────────────────────
-  // Cache key MUST match require-project-admin.ts:137:
-  //   `${projectId}:${githubHost}:${githubUserId}`
-  // The literal "github.com" here is tied to that middleware key.
-  // CROSS-MODULE INVARIANT: if the host token in require-project-admin.ts:137
-  // ever changes (e.g. GHES support), this purge key must change in lockstep.
-  // Failing to do so would leave a stale cache entry for the revoked user.
-  revokeAdminGrantInCache(`${projectId}:github.com:${targetUserId}`);
+  // Both this revoke purge and the roster lookup in require-project-admin.ts
+  // call adminCacheKey() from lib/admin-cache-key.ts — the shared function
+  // enforces byte-identical key format. If GHES/multi-host support lands,
+  // update the host argument here to match the lookup site's githubHost value.
+  revokeAdminGrantInCache(
+    adminCacheKey({ host: "github.com", projectId, userId: targetUserId }),
+  );
 
   emit(c, "revoke", "success", 200);
   return c.json({

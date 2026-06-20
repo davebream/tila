@@ -1,7 +1,8 @@
 export interface AdminCacheKeyParts {
   host: string;
   projectId: string;
-  userId: string;
+  /** GitHub user ID — may be numeric; coerced to string in the key. */
+  userId: string | number;
 }
 
 /**
