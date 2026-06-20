@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import * as p from "@clack/prompts";
+import { GITHUB_LOGIN_REGEX } from "@tila/schemas";
 import type { Cloudflare } from "./cloudflare-client";
 import {
   type MigrationResult,
@@ -400,4 +401,110 @@ export async function deleteWorkerSecret(
     }
     throw err;
   }
+}
+
+/**
+ * Seed the first admin grant directly into D1 via a parameterized
+ * INSERT OR IGNORE INTO _admin_grants. Mirrors insertTokenAndProject's
+ * param style (Unix seconds, string params).
+ *
+ * granted_by_user_id is NULL — marks this as an owner/infra-seeded row.
+ * INSERT OR IGNORE against the partial unique index idx_admin_grants_active
+ * makes re-running idempotent (no duplicate active row).
+ *
+ * Rollback note: there is no compensating delete on failure. _projects and
+ * _tokens are already inserted before this call. Re-running project create
+ * (or using the C5 --token fallback) is the recovery path.
+ */
+export async function seedFirstAdmin(opts: {
+  client: Cloudflare;
+  accountId: string;
+  databaseId: string;
+  slug: string;
+  githubUserId: number;
+  githubLoginSnapshot?: string;
+}): Promise<void> {
+  const grantedAt = String(Math.floor(Date.now() / 1000));
+
+  await opts.client.d1.database.query(opts.databaseId, {
+    account_id: opts.accountId,
+    sql: "INSERT OR IGNORE INTO _admin_grants (project_id, github_host, github_user_id, github_login_snapshot, granted_by_user_id, granted_at) VALUES (?, 'github.com', ?, ?, NULL, ?)",
+    params: [
+      opts.slug,
+      String(opts.githubUserId),
+      opts.githubLoginSnapshot ?? null,
+      grantedAt,
+    ] as string[],
+  });
+}
+
+/**
+ * Resolve a GitHub user id from either a numeric id string or a login name.
+ *
+ * - All-digits input → passthrough (no fetch).
+ * - Login input → validate against GITHUB_LOGIN_REGEX (single source of truth
+ *   from @tila/schemas), then GET https://api.github.com/users/{encodeURIComponent(login)}.
+ *   Sends GITHUB_TOKEN or GH_TOKEN as a bearer when present (never logged).
+ *
+ * Error mapping (all non-200/404 → "pass a numeric id" hint):
+ *   404              → user not found
+ *   401/403/429/5xx  → could not resolve login; pass a numeric id
+ *   timeout/network  → could not resolve login; pass a numeric id
+ *
+ * Security: the base URL is hardcoded — the hostname is never derived from
+ * input. Only the regex-validated, encodeURIComponent-encoded login is
+ * interpolated into the path.
+ */
+export async function resolveGithubUserId(
+  value: string,
+  _token?: string,
+): Promise<number> {
+  // Numeric id — passthrough, no fetch needed
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
+
+  // Validate login format before any outbound call
+  if (!GITHUB_LOGIN_REGEX.test(value)) {
+    throw new Error(
+      `Invalid GitHub login "${value}": not a valid GitHub username (must match /^[a-z\\d](?:[a-z\\d]|-(?=[a-z\\d])){0,38}$/i)`,
+    );
+  }
+
+  const url = `https://api.github.com/users/${encodeURIComponent(value)}`;
+
+  // GITHUB_TOKEN preferred, GH_TOKEN as fallback — never log the token value
+  const githubToken =
+    process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefined;
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+  };
+  if (githubToken) {
+    headers.Authorization = `Bearer ${githubToken}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    throw new Error(
+      `Could not resolve GitHub login "${value}" (network error or timeout). Re-run with a numeric --admin-github-user id instead of a login, or pass a numeric id directly.`,
+    );
+  }
+
+  if (response.status === 404) {
+    throw new Error(`GitHub user "${value}" not found.`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Could not resolve GitHub login "${value}" (GitHub API returned HTTP ${response.status}). Re-run with a numeric --admin-github-user id (pass a numeric id instead of a login).`,
+    );
+  }
+
+  const json = (await response.json()) as { id: number };
+  return json.id;
 }

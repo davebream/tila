@@ -523,3 +523,340 @@ describe("setWorkerSecret", () => {
 });
 
 // ensurePagesProject and deployToPages removed in Option A refactor (wrangler deploy path)
+
+// --------------------------------------------------------------------------
+// seedFirstAdmin
+// --------------------------------------------------------------------------
+
+describe("seedFirstAdmin", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("issues a parameterized INSERT OR IGNORE into _admin_grants with numeric id", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      {},
+    );
+
+    const { seedFirstAdmin } = await import("../../lib/cloudflare-resources");
+    await seedFirstAdmin({
+      client,
+      accountId: "acc-1",
+      databaseId: "db-uuid",
+      slug: "my-proj",
+      githubUserId: 12345,
+      githubLoginSnapshot: "octocat",
+    });
+
+    expect(client.d1.database.query).toHaveBeenCalledTimes(1);
+    const call = (client.d1.database.query as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(call[0]).toBe("db-uuid");
+    expect(call[1].account_id).toBe("acc-1");
+    expect(call[1].sql).toContain("INSERT OR IGNORE INTO _admin_grants");
+    expect(call[1].sql).toContain("github.com");
+    // Params: [slug, githubUserId as string, githubLoginSnapshot, grantedAt]
+    const params: string[] = call[1].params;
+    expect(params[0]).toBe("my-proj");
+    expect(params[1]).toBe("12345");
+    expect(params[2]).toBe("octocat");
+    // params[3] is grantedAt (Unix seconds string) — must be numeric string
+    expect(/^\d+$/.test(params[3])).toBe(true);
+    // Unix seconds (not milliseconds): should be a 10-digit number
+    expect(params[3].length).toBe(10);
+  });
+
+  it("passes NULL (null) for githubLoginSnapshot when omitted", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
+      {},
+    );
+
+    const { seedFirstAdmin } = await import("../../lib/cloudflare-resources");
+    await seedFirstAdmin({
+      client,
+      accountId: "acc-1",
+      databaseId: "db-uuid",
+      slug: "my-proj",
+      githubUserId: 999,
+    });
+
+    const call = (client.d1.database.query as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    const params: (string | null)[] = call[1].params;
+    expect(params[0]).toBe("my-proj");
+    expect(params[1]).toBe("999");
+    expect(params[2]).toBeNull(); // no snapshot
+  });
+
+  it("propagates D1 SDK errors", async () => {
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("D1 error"),
+    );
+
+    const { seedFirstAdmin } = await import("../../lib/cloudflare-resources");
+    await expect(
+      seedFirstAdmin({
+        client,
+        accountId: "acc-1",
+        databaseId: "db-uuid",
+        slug: "my-proj",
+        githubUserId: 1,
+      }),
+    ).rejects.toThrow("D1 error");
+  });
+});
+
+// --------------------------------------------------------------------------
+// resolveGithubUserId
+// --------------------------------------------------------------------------
+
+describe("resolveGithubUserId — passthrough for numeric ids", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("returns the numeric id directly without any fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    const result = await resolveGithubUserId("123");
+    expect(result).toBe(123);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns large numeric id correctly", async () => {
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    expect(await resolveGithubUserId("9999999")).toBe(9999999);
+  });
+});
+
+describe("resolveGithubUserId — login resolution via GitHub API", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("fetches from api.github.com/users/{encodeURIComponent(login)} and returns id", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 583231, login: "octocat" }),
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    const result = await resolveGithubUserId("octocat");
+    expect(result).toBe(583231);
+
+    const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(calledUrl).toContain("api.github.com/users/octocat");
+  });
+
+  it("URL-encodes the login in the request URL", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 100, login: "user-name" }),
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await resolveGithubUserId("user-name");
+    const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(calledUrl).toContain(encodeURIComponent("user-name"));
+  });
+
+  it("sends Authorization header when GITHUB_TOKEN is set", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "ghp_test_token");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 42, login: "someuser" }),
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await resolveGithubUserId("someuser");
+    const calledInit = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(calledInit.headers?.Authorization).toBe("Bearer ghp_test_token");
+    vi.unstubAllEnvs();
+  });
+
+  it("sends Authorization header when GH_TOKEN is set (fallback, no GITHUB_TOKEN)", async () => {
+    // Clear GITHUB_TOKEN so GH_TOKEN fallback is exercised
+    vi.stubEnv("GITHUB_TOKEN", "");
+    vi.stubEnv("GH_TOKEN", "ghp_gh_token");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 43, login: "otheruser" }),
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await resolveGithubUserId("otheruser");
+    const calledInit = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(calledInit.headers?.Authorization).toBe("Bearer ghp_gh_token");
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("resolveGithubUserId — failure status map", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("throws user-not-found error on 404", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 404,
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("unknownuser")).rejects.toThrow(
+      /not found/i,
+    );
+  });
+
+  it("throws with numeric-id hint on 401", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 401,
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("somelogin")).rejects.toThrow(
+      /pass a numeric/i,
+    );
+  });
+
+  it("throws with numeric-id hint on 403", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 403,
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("somelogin")).rejects.toThrow(
+      /pass a numeric/i,
+    );
+  });
+
+  it("throws with numeric-id hint on 429 (rate limit)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 429,
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("somelogin")).rejects.toThrow(
+      /pass a numeric/i,
+    );
+  });
+
+  it("throws with numeric-id hint on 5xx", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 503,
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("somelogin")).rejects.toThrow(
+      /pass a numeric/i,
+    );
+  });
+
+  it("throws with numeric-id hint on network timeout/error", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("fetch failed: connection timeout"),
+    );
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("somelogin")).rejects.toThrow(
+      /pass a numeric/i,
+    );
+  });
+});
+
+describe("resolveGithubUserId — login regex parity with GITHUB_LOGIN_REGEX", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.resetModules();
+  });
+
+  it("rejects logins that start with a hyphen", async () => {
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("-badlogin")).rejects.toThrow(
+      /invalid.*login|not a valid/i,
+    );
+  });
+
+  it("rejects logins that end with a hyphen", async () => {
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId("badlogin-")).rejects.toThrow(
+      /invalid.*login|not a valid/i,
+    );
+  });
+
+  it("rejects logins longer than 39 characters", async () => {
+    const longLogin = "a".repeat(40);
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(resolveGithubUserId(longLogin)).rejects.toThrow(
+      /invalid.*login|not a valid/i,
+    );
+  });
+
+  it("accepts a valid login (alphanumeric + hyphens within)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 55, login: "valid-user" }),
+    } as Response);
+
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    const id = await resolveGithubUserId("valid-user");
+    expect(id).toBe(55);
+  });
+
+  it("rejects empty string", async () => {
+    const { resolveGithubUserId } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    // Empty string is all-digits (empty) — but actually "" is not digits-only
+    // It fails the login regex (no characters) → error
+    await expect(resolveGithubUserId("")).rejects.toThrow();
+  });
+});
