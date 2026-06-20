@@ -6,6 +6,7 @@ import type {
   Env,
   HonoVariables,
   SessionTokenResult,
+  UnifiedTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
 
@@ -29,6 +30,7 @@ import {
   __clearProjectAutoAdminCache,
   autoAdminGrants,
   requireProjectAdmin,
+  requireProjectAdminHttp,
   revokeAdminGrantInCache,
 } from "./require-project-admin";
 
@@ -455,6 +457,133 @@ describe("requireProjectAdmin — auto-admin (cases 1-9)", () => {
     expect(status).toBe(200);
     expect(mockIsActiveAdmin).toHaveBeenCalledTimes(0);
     expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+});
+
+// =============================================================================
+// requireProjectAdminHttp — direct unit tests (the 9 cases from issue #101)
+// =============================================================================
+// Build a minimal Hono Context stub: requireProjectAdminHttp only accesses
+//   c.get("tokenResult"), c.env.DB, and c.json(body, status).
+// The real gate logic (including autoAdminGrants) runs without mocking it.
+// =============================================================================
+describe("requireProjectAdminHttp — direct gate unit tests", () => {
+  beforeEach(() => {
+    mockIsActiveAdmin.mockReset();
+    mockGetRepoAdminAutoAdmin.mockReset();
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
+  });
+
+  /** Minimal Hono Context stub for requireProjectAdminHttp. */
+  function makeHttpCtx(
+    tokenResult: UnifiedTokenResult,
+  ): import("hono").Context<{ Bindings: Env; Variables: HonoVariables }> {
+    return {
+      get: (key: string) => {
+        if (key === "tokenResult") return tokenResult;
+        return undefined;
+      },
+      env: mockEnv,
+      json: (body: unknown, status?: number) =>
+        new Response(JSON.stringify(body), {
+          status: status ?? 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    } as unknown as import("hono").Context<{
+      Bindings: Env;
+      Variables: HonoVariables;
+    }>;
+  }
+
+  function callGate(tokenResult: UnifiedTokenResult): Promise<Response | null> {
+    return requireProjectAdminHttp(makeHttpCtx(tokenResult));
+  }
+
+  function expectAdmit(result: Response | null): void {
+    expect(result).toBeNull();
+  }
+
+  async function expectDeny403(result: Response | null): Promise<void> {
+    expect(result).not.toBeNull();
+    if (result == null) return; // type narrowing guard (assertion above already fails if null)
+    expect(result.status).toBe(403);
+    const body = (await result.json()) as {
+      error: { code: string };
+    };
+    expect(body.error.code).toBe("token-authz-denied");
+  }
+
+  // Case 1: d1-token with scopes:"full" ⇒ null (admit), NO flag read.
+  it("case 1: d1-token full-scope ⇒ null (admit), auto-admin flag NOT read", async () => {
+    const result = await callGate(makeD1Token("full"));
+    expectAdmit(result);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 2: d1-token with scopes:"read" ⇒ 403.
+  it("case 2: d1-token read-scope ⇒ 403 token-authz-denied", async () => {
+    const result = await callGate(makeD1Token("read"));
+    await expectDeny403(result);
+  });
+
+  // Case 3: bearer session, permission:"admin", flag ON ⇒ null (admit).
+  it("case 3: bearer session admin + flag ON ⇒ null (admit)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result = await callGate(makeSessionToken({ permission: "admin" }));
+    expectAdmit(result);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(1);
+  });
+
+  // Case 4: bearer session, permission:"admin", flag OFF ⇒ 403.
+  it("case 4: bearer session admin + flag OFF ⇒ 403", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false);
+    const result = await callGate(makeSessionToken({ permission: "admin" }));
+    await expectDeny403(result);
+  });
+
+  // Case 5: cookie-session, permission:"admin", flag ON ⇒ null (admit, browser→mint path).
+  it("case 5: cookie-session admin + flag ON ⇒ null (admit, browser path)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result = await callGate(makeCookieSessionToken("admin"));
+    expectAdmit(result);
+  });
+
+  // Case 6: cookie-session, permission:"admin", flag OFF ⇒ 403.
+  it("case 6: cookie-session admin + flag OFF ⇒ 403", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false);
+    const result = await callGate(makeCookieSessionToken("admin"));
+    await expectDeny403(result);
+  });
+
+  // Case 7: bearer session, permission:"write", flag ON ⇒ 403 (only admin tier).
+  it("case 7: bearer session write + flag ON ⇒ 403 (non-admin tier never admitted)", async () => {
+    // autoAdminGrants returns false for non-admin permission without querying D1.
+    const result = await callGate(makeSessionToken({ permission: "write" }));
+    await expectDeny403(result);
+    // autoAdminGrants must short-circuit before reading the flag
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 8: workspace-session (empty projectId) ⇒ 403 (fail-closed).
+  it("case 8: workspace-session ⇒ 403 (fail-closed)", async () => {
+    const result = await callGate(makeWorkspaceSessionToken());
+    await expectDeny403(result);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 9: regression-proof of kind-discriminated check.
+  // A cookie-session whose `scopes` field happens to be "full" but has
+  // `permission:"read"` and flag OFF must NOT be admitted — proves the gate
+  // uses `kind === "d1-token" && scopes === "full"`, not a bare `scopes === "full"`.
+  it('case 9 (regression): non-d1-token with scopes:"full" but permission:"read" + flag OFF ⇒ 403', async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false);
+    // makeCookieSessionToken already sets scopes:"full" internally (see factory above).
+    const token = makeCookieSessionToken("read");
+    // Verify the scopes field is indeed "full" to confirm the regression scenario.
+    expect(token.scopes).toBe("full");
+    const result = await callGate(token);
+    await expectDeny403(result);
   });
 });
 
