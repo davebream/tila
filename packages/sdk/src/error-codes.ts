@@ -4,34 +4,28 @@
  * Keys are normalized identifiers. Values are the exact wire-format strings
  * returned by the worker and DO layers.
  *
- * NOTE: The codebase uses two conventions for error codes:
- * - SCREAMING_SNAKE_CASE for worker/auth-layer codes ("UNAUTHORIZED", "SESSION_EXPIRED")
- * - kebab-case for DO-layer codes ("stale-fence", "not-found")
- * TILA_ERRORS preserves both conventions in its values. The _UPPER suffix on
- * VALIDATION_ERROR_UPPER disambiguates the two distinct wire values for
- * "validation error" used in different layers.
+ * Server-emitted wire values use kebab-case. SCREAMING_SNAKE_CASE is reserved
+ * for local fallback or CLI-only error labels that are not returned by the API.
  */
 export const TILA_ERRORS = {
-  // Auth / middleware (worker layer — SCREAMING_SNAKE_CASE wire values)
-  UNAUTHORIZED: "UNAUTHORIZED",
-  SESSION_EXPIRED: "SESSION_EXPIRED",
-  RATE_LIMITED: "RATE_LIMITED",
-  PERMISSION_DENIED: "PERMISSION_DENIED",
-  PROJECT_MISMATCH: "PROJECT_MISMATCH",
-  CSRF_MISSING_ORIGIN: "CSRF_MISSING_ORIGIN",
-  CSRF_ORIGIN_MISMATCH: "CSRF_ORIGIN_MISMATCH",
-  INTERNAL_ERROR: "INTERNAL_ERROR",
+  // Auth / middleware (worker layer)
+  UNAUTHORIZED: "unauthorized",
+  SESSION_EXPIRED: "session-expired",
+  RATE_LIMITED: "rate-limited",
+  PERMISSION_DENIED: "permission-denied",
+  PROJECT_MISMATCH: "project-mismatch",
+  CSRF_MISSING_ORIGIN: "csrf-missing-origin",
+  CSRF_ORIGIN_MISMATCH: "csrf-origin-mismatch",
   DO_UNREACHABLE: "do-unreachable",
   // Auth endpoint specific
-  REPO_NOT_ALLOWED: "REPO_NOT_ALLOWED",
-  GITHUB_AUTH_FAILED: "GITHUB_AUTH_FAILED",
-  HMAC_NOT_CONFIGURED: "HMAC_NOT_CONFIGURED",
+  REPO_NOT_ALLOWED: "repo-not-allowed",
+  GITHUB_AUTH_FAILED: "github-auth-failed",
+  HMAC_NOT_CONFIGURED: "hmac-not-configured",
+  SESSION_REVOKED: "session-revoked",
   // Token endpoint specific
-  TOKEN_NAME_CONFLICT: "TOKEN_NAME_CONFLICT",
-  TOKEN_NOT_FOUND: "TOKEN_NOT_FOUND",
-  // Validation (worker layer uses SCREAMING_SNAKE for this code)
-  VALIDATION_ERROR: "VALIDATION_ERROR",
-  // DO errors (project-do-router — kebab-case wire values)
+  TOKEN_NAME_CONFLICT: "token-name-conflict",
+  TOKEN_NOT_FOUND: "token-not-found",
+  // DO errors (project-do-router)
   STALE_FENCE: "stale-fence",
   NOT_FOUND: "not-found",
   GATE_ALREADY_SETTLED: "gate-already-settled",
@@ -40,7 +34,7 @@ export const TILA_ERRORS = {
   INTERNAL: "internal",
   CONSTRAINT_VIOLATION: "constraint-violation",
   IDEMPOTENCY_KEY_CONFLICT: "idempotency-key-conflict",
-  // DO-layer validation uses kebab-case (distinct from VALIDATION_ERROR above)
+  // Shared validation error emitted by worker routes and DO-layer adapters.
   VALIDATION_ERROR_DO: "validation-error",
   ALREADY_HELD: "already-held",
   RENEW_FAILED: "renew-failed",
