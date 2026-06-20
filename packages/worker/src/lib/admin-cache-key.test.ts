@@ -22,4 +22,10 @@ describe("adminCacheKey", () => {
       "p:h:u",
     );
   });
+
+  it("coerces a numeric userId to its decimal string (production lookup passes a number)", () => {
+    expect(
+      adminCacheKey({ host: "github.com", projectId: "p1", userId: 4242 }),
+    ).toBe("p1:github.com:4242");
+  });
 });
