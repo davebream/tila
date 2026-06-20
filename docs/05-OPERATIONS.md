@@ -923,3 +923,57 @@ pnpm run typecheck && pnpm run check && pnpm test
 `pnpm run check` (Biome `--write`) must produce no diff after running. If it reformats files, stage and commit the result before tagging. CI runs `pnpm lint` (read-only) — format drift that slips past pre-commit will cause a red CI build on the tagged commit.
 
 See also `OSS-RELEASE-RUNBOOK.md §7` for the full pre-tag checklist.
+
+---
+
+## Admin Bootstrap: Break-glass Seeder and CI Token Fallback
+
+This section covers the two admin-bootstrap escape hatches for cases where the normal admin roster is empty (chicken-and-egg bootstrap state).
+
+### Break-glass `/_internal` seeder
+
+The `POST /_internal/admin/projects/:projectId/admins` endpoint seeds an admin directly in D1 without going through the roster auth check. It is guarded by `requireInfraPrincipal` (the `INFRA_ADMIN_TOKEN` Worker secret):
+
+- The endpoint is **404-invisible** when `INFRA_ADMIN_TOKEN` is unset — it does not exist until the secret is configured.
+- Authentication: `Authorization: Bearer <INFRA_ADMIN_TOKEN>` header.
+- The endpoint writes D1 only and never materializes the Durable Object.
+- Accepts `{ github_user_id: <number> }` or `{ login: "<string>" }` (server resolves login via the GitHub App).
+- Returns `{ ok: true, github_user_id, granted }` on success; 422 on login-unresolved (GitHub App not configured); 404 on unknown project.
+
+**When to use:** CI pipelines where a Worker is deployed and the GitHub App is configured, but no admin has been seeded yet.
+
+```bash
+# Seed an admin via the break-glass seeder
+curl -X POST https://<worker-url>/_internal/admin/projects/<projectId>/admins \
+  -H "Authorization: Bearer $INFRA_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"github_user_id": <your-github-user-id>}'
+```
+
+### `TILA_TOKEN` / `--token` CLI bootstrap fallback
+
+The `tila admin` command group accepts a full-scope D1 init token as a bypass credential. When supplied, it creates the HTTP client directly (no Cloudflare auth steps required — no `CLOUDFLARE_API_TOKEN` needed).
+
+**Token precedence:** `--token` flag > `TILA_TOKEN` env var > normal `resolveContext()` token resolution.
+
+**Security:**
+- Prefer `TILA_TOKEN` (env var) over `--token` — the `--token` value is visible to other local users in `ps aux`.
+- `TILA_TOKEN` is a full-scope secret: mask it in CI logs and do NOT set it in persistent shell rc files (`.bashrc` / `.zshrc`). Treat it with the same care as `CLOUDFLARE_API_TOKEN`.
+- The admin commands never persist the token to disk.
+- Only **full-scope** D1 tokens bypass the admin roster check. Read-only or project-scoped tokens are denied.
+
+**When to use:** CI automation where the roster is empty and you hold the full-scope D1 init token issued by `tila project create`.
+
+```bash
+# In CI (preferred — env var is not visible in ps aux)
+export TILA_TOKEN=<your-d1-init-token>
+tila admin grant <github-user-id>
+
+# Interactive one-off (--token is visible in ps aux — a warning is printed)
+tila admin grant <github-user-id> --token <your-d1-init-token>
+
+# List current admins to verify
+tila admin list
+```
+
+The full-scope D1 init token is printed by `tila project create` in `--json` mode (`token` field) and written to `.tila/.env` on disk. It bypasses `requireProjectAdmin` at `packages/worker/src/middleware/require-project-admin.ts` lines 117-122.

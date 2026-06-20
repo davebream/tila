@@ -17,6 +17,24 @@ vi.mock("../../context", () => ({
   })),
 }));
 
+// Mocks for the --token / TILA_TOKEN bypass path (C5).
+// findConfig returns the config directly; createCliClient returns a mock client.
+vi.mock("../../config", () => ({
+  findConfig: vi.fn(() => ({
+    project_id: "proj-test",
+    worker_url: "https://worker.example.com",
+    backend: "cloudflare",
+  })),
+}));
+
+vi.mock("../../lib/client-factory", () => ({
+  createCliClient: vi.fn(() => ({
+    get: mockGet,
+    post: mockPost,
+    delete: mockDelete,
+  })),
+}));
+
 const loadCommand = async () => {
   const mod = await import("../../commands/admin");
   return mod.default;
@@ -408,5 +426,163 @@ describe("tila admin revoke", () => {
       "process.exit(1)",
     );
     expect(mockDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("tila admin — --token / TILA_TOKEN override (C5 bootstrap)", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let isTTYOriginal: boolean | undefined;
+
+  beforeEach(async () => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code})`);
+    }) as never);
+    mockConfig = cloudflareConfig();
+    mockGet.mockReset();
+    mockPost.mockReset();
+    mockDelete.mockReset();
+    // Ensure no TILA_TOKEN in env by default
+    process.env.TILA_TOKEN = undefined;
+    // Default: non-TTY (CI mode — no warning expected)
+    isTTYOriginal = process.stdout.isTTY;
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: false,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    warnSpy.mockRestore();
+    exitSpy.mockRestore();
+    process.env.TILA_TOKEN = undefined;
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: isTTYOriginal,
+      configurable: true,
+    });
+  });
+
+  it("--token bypasses resolveContext and calls createCliClient directly", async () => {
+    const { createCliClient } = await import("../../lib/client-factory");
+    const createCliClientMock = vi.mocked(createCliClient);
+    createCliClientMock.mockReturnValue({
+      get: mockGet,
+      post: mockPost,
+      delete: mockDelete,
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any);
+
+    const { resolveContext } = await import("../../context");
+    const resolveContextMock = vi.mocked(resolveContext);
+    resolveContextMock.mockReset();
+
+    mockGet.mockResolvedValue(LIST_RESPONSE);
+    const cmd = await loadCommand();
+    const list = getSubCommand(cmd, "list");
+
+    await runCmd(list, { token: "my-d1-token" });
+
+    // createCliClient should be called with the token (not resolveContext)
+    expect(createCliClientMock).toHaveBeenCalledWith(
+      "https://worker.example.com",
+      "my-d1-token",
+    );
+    // resolveContext should NOT have been called
+    expect(resolveContextMock).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("TILA_TOKEN env var bypasses resolveContext", async () => {
+    process.env.TILA_TOKEN = "env-d1-token";
+
+    const { createCliClient } = await import("../../lib/client-factory");
+    const createCliClientMock = vi.mocked(createCliClient);
+    createCliClientMock.mockReturnValue({
+      get: mockGet,
+      post: mockPost,
+      delete: mockDelete,
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any);
+
+    const { resolveContext } = await import("../../context");
+    const resolveContextMock = vi.mocked(resolveContext);
+    resolveContextMock.mockReset();
+
+    mockPost.mockResolvedValue(GRANT_RESPONSE);
+    const cmd = await loadCommand();
+    const grant = getSubCommand(cmd, "grant");
+
+    await runCmd(grant, { user: "5555" });
+
+    expect(createCliClientMock).toHaveBeenCalledWith(
+      "https://worker.example.com",
+      "env-d1-token",
+    );
+    expect(resolveContextMock).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("--token with isTTY=true prints process-table warning", async () => {
+    // Simulate interactive TTY
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: true,
+      configurable: true,
+    });
+
+    const { createCliClient } = await import("../../lib/client-factory");
+    const createCliClientMock = vi.mocked(createCliClient);
+    createCliClientMock.mockReturnValue({
+      get: mockGet,
+      post: mockPost,
+      delete: mockDelete,
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any);
+
+    mockGet.mockResolvedValue(LIST_RESPONSE);
+    const cmd = await loadCommand();
+    const list = getSubCommand(cmd, "list");
+
+    await runCmd(list, { token: "my-d1-token" });
+
+    // Should warn about process table visibility
+    const warnText = (warnSpy.mock.calls as unknown[][])
+      .map((c) => String(c[0]))
+      .join("\n");
+    expect(warnText).toMatch(/ps aux|process table/i);
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("TILA_TOKEN with isTTY=true does NOT print warning (env var is safe)", async () => {
+    process.env.TILA_TOKEN = "env-d1-token";
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: true,
+      configurable: true,
+    });
+
+    const { createCliClient } = await import("../../lib/client-factory");
+    const createCliClientMock = vi.mocked(createCliClient);
+    createCliClientMock.mockReturnValue({
+      get: mockGet,
+      post: mockPost,
+      delete: mockDelete,
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any);
+
+    mockGet.mockResolvedValue(LIST_RESPONSE);
+    const cmd = await loadCommand();
+    const list = getSubCommand(cmd, "list");
+
+    await runCmd(list, {}); // no --token arg, only env var
+
+    // No process-table warning for env var usage
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 });
