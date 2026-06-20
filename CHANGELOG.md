@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Auth:** Privilege-escalation-by-transport gap closed. A GitHub *write* user's browser cookie no longer satisfies `requirePermission("admin")`; the cookie session now carries a normalized permission tier (`read`/`write`/`admin`) derived from the user's actual GitHub role, and the admin gate maps it through the same `PERMISSION_LEVELS` table that the bearer path uses.
+
+### Added
+
+- **API:** `GET /auth/session/status` now returns two additional fields: `permission` (effective permission tier: `read`, `write`, `admin`, or `none`) and `canManageTokens` (boolean, true only when the effective permission is `admin`). The change is additive and backward-compatible; existing consumers that only read `ok` and `projectId` are unaffected.
+
 ### Changed
 
 - **BREAKING — HTTP error codes are now uniformly kebab-case.** Worker auth/admin-plane error responses previously emitted SCREAMING_SNAKE `error.code` values (e.g. `UNAUTHORIZED`, `RATE_LIMITED`, `VALIDATION_ERROR`, `PROJECT_NOT_FOUND`) while the resource plane used kebab-case. All codes are now kebab-case (`^[a-z][a-z0-9-]*$`), and four cross-plane duplicates are collapsed onto the existing kebab spelling: `VALIDATION_ERROR`→`validation-error`, `NOT_FOUND` and `PROJECT_NOT_FOUND`→`not-found`, `INTERNAL_ERROR`→`internal`. OIDC verification codes (`OIDC_*`) are likewise kebab-cased. Consumers branching on `error.code` must migrate to the kebab values (SDK typed error-code union tracked in #75). `error.retryable` and HTTP status codes are unchanged.
