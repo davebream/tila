@@ -63,6 +63,21 @@ export function __clearAdminGrantsCache(): void {
   adminGrantsCache.clear();
 }
 
+/**
+ * Immediately evict a specific admin-grants cache entry (true purge — `delete`,
+ * NOT a flag-set). Called by the DELETE /admins/:githubUserId route so the
+ * revoking isolate denies the de-admined user without waiting for TTL expiry.
+ *
+ * Security note: the cache stores `{ isAdmin: true|false }` where `true` means
+ * ALLOW. Using `delete` ensures the next request re-queries D1 (which now
+ * returns false after `AdminGrantsStore.revoke`). A set-to-false would NOT
+ * grant admin for the TTL; however, delete is the correct semantics because it
+ * guarantees a fresh D1 round-trip regardless of what revoke produced.
+ */
+export function revokeAdminGrantInCache(cacheKey: string): void {
+  adminGrantsCache.delete(cacheKey);
+}
+
 function deny(c: Parameters<MiddlewareHandler<AdminEnv>>[0]) {
   return c.json(
     {

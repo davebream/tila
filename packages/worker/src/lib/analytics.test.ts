@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import type { Env, HonoVariables } from "../types";
 import {
+  emitAdminRosterDatapoint,
   emitDoOperationDatapoint,
   emitRequestDatapoint,
   emitSweepErrorDatapoint,
@@ -735,6 +736,112 @@ describe("emitSweepRollupDatapoint", () => {
 
     expect(() =>
       emitSweepRollupDatapoint(dataset, undefined, fields),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// emitAdminRosterDatapoint (Task 2 — Phase 1 helpers)
+// ---------------------------------------------------------------------------
+
+describe("emitAdminRosterDatapoint", () => {
+  it("emits correct blobs/doubles/indexes for action=grant, outcome=success", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitAdminRosterDatapoint(dataset, ctx, {
+      projectId: "proj-1",
+      action: "grant",
+      outcome: "success",
+      statusCode: 200,
+    });
+
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith({
+      blobs: ["proj-1", "grant", "success", "admin_roster"],
+      doubles: [200],
+      indexes: ["proj-1"],
+    });
+  });
+
+  it("emits correct blobs/doubles/indexes for action=revoke, outcome=denied", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitAdminRosterDatapoint(dataset, ctx, {
+      projectId: "proj-2",
+      action: "revoke",
+      outcome: "denied",
+      statusCode: 403,
+    });
+
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith({
+      blobs: ["proj-2", "revoke", "denied", "admin_roster"],
+      doubles: [403],
+      indexes: ["proj-2"],
+    });
+  });
+
+  it("uses 'unknown' index when projectId is empty", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitAdminRosterDatapoint(dataset, ctx, {
+      projectId: "",
+      action: "grant",
+      outcome: "success",
+      statusCode: 200,
+    });
+
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ indexes: ["unknown"] }),
+    );
+  });
+
+  it("writes inline (no waitUntil) when ctx is undefined", () => {
+    const dataset = makeMockDataset();
+
+    emitAdminRosterDatapoint(dataset, undefined, {
+      projectId: "proj-1",
+      action: "grant",
+      outcome: "success",
+      statusCode: 200,
+    });
+
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith({
+      blobs: ["proj-1", "grant", "success", "admin_roster"],
+      doubles: [200],
+      indexes: ["proj-1"],
+    });
+  });
+
+  it("is a no-op when analytics is undefined", () => {
+    expect(() =>
+      emitAdminRosterDatapoint(undefined, undefined, {
+        projectId: "proj-1",
+        action: "grant",
+        outcome: "success",
+        statusCode: 200,
+      }),
+    ).not.toThrow();
+  });
+
+  it("swallows errors when writeDataPoint throws", () => {
+    const dataset = {
+      writeDataPoint: vi.fn(() => {
+        throw new Error("AE down");
+      }),
+    } as unknown as AnalyticsEngineDataset;
+    const ctx = makeMockCtx();
+
+    expect(() =>
+      emitAdminRosterDatapoint(dataset, ctx, {
+        projectId: "proj-1",
+        action: "revoke",
+        outcome: "last-admin",
+        statusCode: 409,
+      }),
     ).not.toThrow();
   });
 });

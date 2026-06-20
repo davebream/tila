@@ -14,6 +14,7 @@ import { sourceResolution } from "./middleware/source-resolution";
 import { tokenEstimateMiddleware } from "./middleware/token-estimate";
 import { versionCheckMiddleware } from "./middleware/version-check";
 import { admin } from "./routes/admin";
+import { adminRoster } from "./routes/admin-roster";
 import { artifacts } from "./routes/artifacts";
 import { authGithub } from "./routes/auth-github";
 import {
@@ -191,6 +192,7 @@ projectRoutes.route("/templates", templates);
 projectRoutes.route("/records", records);
 projectRoutes.route("/search", search);
 projectRoutes.route("/admin", admin);
+projectRoutes.route("/admins", adminRoster);
 projectRoutes.route("/", doctor);
 
 app.route("/projects/:projectId", projectRoutes);
