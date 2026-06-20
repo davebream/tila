@@ -28,7 +28,6 @@ export const TILA_ERRORS = {
   HMAC_NOT_CONFIGURED: "HMAC_NOT_CONFIGURED",
   // Token endpoint specific
   TOKEN_NAME_CONFLICT: "TOKEN_NAME_CONFLICT",
-  TOKEN_AUTHZ_DENIED: "TOKEN_AUTHZ_DENIED",
   TOKEN_NOT_FOUND: "TOKEN_NOT_FOUND",
   // Validation (worker layer uses SCREAMING_SNAKE for this code)
   VALIDATION_ERROR: "VALIDATION_ERROR",
@@ -55,8 +54,7 @@ export const TILA_ERRORS = {
   // token-authz-denied is emitted by the require-project-admin middleware guarding
   // these management routes (the same value is also emitted on /api/tokens routes, so
   // the REPO_ prefix is a readability alias — consumers branch on the value); the other
-  // four come from routes/repos.ts. Distinct key from the existing (unused) SCREAMING
-  // TOKEN_AUTHZ_DENIED above.
+  // four come from routes/repos.ts.
   REPO_TOKEN_AUTHZ_DENIED: "token-authz-denied",
   REPO_ACCESS_DENIED: "repo-access-denied",
   REPO_NOT_FOUND: "repo-not-found",
