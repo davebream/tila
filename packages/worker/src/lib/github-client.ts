@@ -89,6 +89,50 @@ export async function getAuthenticatedUser(
 }
 
 /**
+ * Resolve a GitHub login to a { login, id } pair via GET /users/{login}.
+ *
+ * Uses the GitHub App installation token (or any bearer token) passed as
+ * `token`. Returns null when the login is unknown (404). Throws on other
+ * non-2xx responses or on network/abort errors.
+ *
+ * The token parameter is NEVER logged.
+ *
+ * @param token - Bearer token (e.g. GitHub App installation access token)
+ * @param login - GitHub username to resolve
+ * @param apiBase - GitHub API base URL (default: https://api.github.com)
+ */
+export async function getUserByLogin(
+  token: string,
+  login: string,
+  apiBase = "https://api.github.com",
+): Promise<{ login: string; id: number } | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GITHUB_API_TIMEOUT_MS);
+
+  try {
+    const res = await githubFetch(`${apiBase}/users/${login}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    });
+
+    if (res.status === 404) {
+      return null;
+    }
+
+    if (!res.ok) {
+      throw new Error(`GitHub API returned ${res.status} for user ${login}`);
+    }
+
+    const data = (await res.json()) as { login: string; id: number };
+    return { login: data.login, id: data.id };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
  * Get repository metadata (id, full_name) by owner/repo.
  * Returns a result object instead of throwing, so the caller can map
  * HTTP status codes (404 -> REPO_NOT_FOUND, 403 -> REPO_ACCESS_DENIED).
