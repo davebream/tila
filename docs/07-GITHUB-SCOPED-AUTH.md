@@ -161,7 +161,19 @@ Acceptable admin paths:
 
 - Cloudflare admin runs `tila infra provision` + `tila project create` and registers the initial repo.
 - A bootstrap/admin tila token registers additional repos.
-- A GitHub user with repository admin permission registers the repo through an existing admin session.
+- **Per-project opt-in** (`repo_admin_auto_admin`, default off): when enabled, a GitHub session
+  with `admin`-tier repository permission — either a CLI bearer session or a browser cookie
+  session — is admitted to all project-admin operations without needing an explicit entry in
+  the `_admin_grants` roster. Covered operations include managing the admin roster, DO restart,
+  repo registration, and token management. When the flag is off (the default), these operations
+  require a D1 full-scope token.
+
+  To enable for a specific project:
+
+  ```bash
+  wrangler d1 execute <DB> --command \
+    "UPDATE _projects SET repo_admin_auto_admin = 1 WHERE project_id = '<id>'"
+  ```
 
 Normal repo members may use an already registered repo, but must not be able to add unrelated repos to the same tila instance.
 
