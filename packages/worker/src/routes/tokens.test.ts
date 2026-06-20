@@ -21,7 +21,10 @@ vi.mock("../lib/token-cache", async (importOriginal) => {
   };
 });
 
-// Mock D1TokenStore and D1SessionStore at the boundary — no live D1 needed.
+// Mock D1TokenStore, D1SessionStore, AdminGrantsStore, and D1ProjectRegistry
+// at the boundary — no live D1 needed.
+// AdminGrantsStore and D1ProjectRegistry are imported by require-project-admin.ts
+// and MUST be present in this factory or `new undefined()` throws at first gate use.
 const mockRevoke = vi.fn();
 const mockIssue = vi.fn().mockResolvedValue(undefined);
 const mockList = vi.fn().mockResolvedValue([]);
@@ -40,28 +43,36 @@ vi.mock("@tila/backend-d1", () => ({
       deleteByTokenHash = mockDeleteByTokenHash;
     } as unknown as () => unknown,
   ),
+  // AdminGrantsStore: stub — isActiveAdmin is not on the admit path for
+  // requireD1TokenHttp (no roster lookup), but the export must exist so the
+  // import in require-project-admin.ts resolves without throwing.
+  AdminGrantsStore: vi.fn().mockImplementation(
+    class {
+      isActiveAdmin = vi.fn().mockResolvedValue(false);
+    } as unknown as () => unknown,
+  ),
+  // D1ProjectRegistry: getRepoAdminAutoAdmin must resolve to true so that
+  // requireProjectAdminHttp admits a flag-on admin session pre-swap — this
+  // produces a genuine RED (session is admitted) rather than a deny-by-throw.
+  D1ProjectRegistry: vi.fn().mockImplementation(
+    class {
+      getRepoAdminAutoAdmin = vi.fn().mockResolvedValue(true);
+    } as unknown as () => unknown,
+  ),
 }));
 
-// Mock require-project-admin so we can control requireProjectAdminHttp.
-const mockRequireProjectAdminHttp = vi.fn<() => Promise<Response | null>>();
-
-vi.mock("../middleware/require-project-admin", async (importOriginal) => {
-  const actual =
-    await importOriginal<
-      typeof import("../middleware/require-project-admin")
-    >();
-  return {
-    ...actual,
-    requireProjectAdminHttp: mockRequireProjectAdminHttp,
-  };
-});
-
 // Import route AFTER mocks are set up.
+// requireProjectAdminHttp and requireD1TokenHttp run REAL logic (no gate mock).
 const { tokens } = await import("./tokens");
+import {
+  __clearAdminGrantsCache,
+  __clearProjectAutoAdminCache,
+} from "../middleware/require-project-admin";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
 // Mock env — D1TokenStore is fully mocked so DB value is never actually used.
+// DB must be present so the real gate can construct D1ProjectRegistry(c.env.DB).
 const mockEnv = { DB: {} } as unknown as Env;
 
 function makeD1Token(scopes: string): D1TokenResult {
@@ -143,25 +154,14 @@ function createApp(
   return app;
 }
 
-const deny403 = () =>
-  new Response(
-    JSON.stringify({
-      ok: false,
-      error: {
-        code: "token-authz-denied",
-        message:
-          "Repo/token management requires full scope or an admin session",
-        retryable: false,
-      },
-    }),
-    { status: 403, headers: { "Content-Type": "application/json" } },
-  );
-
 describe("DELETE /api/tokens/:name", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: gate passes (d1-token full-scope baseline)
-    mockRequireProjectAdminHttp.mockResolvedValue(null);
+    mockRevoke.mockResolvedValue({ revoked: true, tokenHash: null });
+    mockIssue.mockResolvedValue({ tokenId: "new-tid" });
+    mockList.mockResolvedValue([]);
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
   });
 
   it("calls invalidate(tokenHash) synchronously on successful revoke", async () => {
@@ -281,47 +281,44 @@ describe("DELETE /api/tokens/:name", () => {
 });
 
 // ============================================================================
-// Auto-admin gate on token routes (design Testing-Strategy cases 10-12b)
+// Gate tests on token routes — real gate runs (no mock override)
+// These cases drive REAL principals through requireD1TokenHttp (post-swap) and
+// verify the correct 403/pass behavior. The D1ProjectRegistry mock resolves
+// getRepoAdminAutoAdmin → true so requireProjectAdminHttp (pre-swap) admits
+// flag-on admin sessions, giving a genuine RED before the Task 4 swap.
 // ============================================================================
-describe("token routes — auto-admin gate (cases 10-12b)", () => {
+describe("token routes — D1 token gate (real gate, cases 10-12b)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRevoke.mockResolvedValue({ revoked: true, tokenHash: null });
     mockIssue.mockResolvedValue({ tokenId: "new-tid" });
     mockList.mockResolvedValue([]);
+    // Clear per-isolate caches so stale entries from other cases do not
+    // contaminate the auto-admin flag lookup path.
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
   });
 
-  // Case 10: flag off + admin session ⇒ 403; d1-token full-scope ⇒ allowed (AC-2 baseline)
-  it("case 10a: flag off + admin session ⇒ 403 (AC-2)", async () => {
-    mockRequireProjectAdminHttp.mockResolvedValue(deny403());
+  // POSITIVE CONTROL: pre-swap, the old gate (requireProjectAdminHttp) admits
+  // a flag-on admin session. This confirms the RED cases below are genuine
+  // admits (not deny-by-throw). DELETE this entire `it` block in Task 4.
+  it("pre-swap control: old gate admits flag-on admin session", async () => {
     const app = createApp(makeSessionToken("admin"));
     const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("token-authz-denied");
+    // Pre-swap: requireProjectAdminHttp admits a flag-on admin session → 200
+    expect(res.status).toBe(200);
   });
 
-  it("case 10b: d1-token full-scope ⇒ allowed (AC-2 baseline regression)", async () => {
-    mockRequireProjectAdminHttp.mockResolvedValue(null); // gate passes
+  // d1-token "full" ⇒ pass (happy-path baseline)
+  it("case 10b: d1-token full-scope ⇒ pass (GET /api/tokens)", async () => {
     const app = createApp(makeD1Token("full"));
     const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
     expect(res.status).toBe(200);
   });
 
-  // Case 11: flag on + admin BEARER session ⇒ allowed at tokens.ts route
-  it("case 11: flag on + admin bearer session ⇒ allowed at GET /api/tokens", async () => {
-    mockRequireProjectAdminHttp.mockResolvedValue(null); // gate passes (flag on)
-    const app = createApp(makeSessionToken("admin"));
-    const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
-    expect(res.status).toBe(200);
-  });
-
-  // Case 11b: flag on + admin COOKIE-session ⇒ allowed at POST /api/tokens (mint)
-  //           flag off + admin cookie-session ⇒ 403 (security-sensitive browser→mint path)
-  it("case 11b-allow: flag on + admin cookie-session ⇒ allowed at POST /api/tokens (mint)", async () => {
-    mockRequireProjectAdminHttp.mockResolvedValue(null); // gate passes (flag on)
+  it("case 10b: d1-token full-scope ⇒ pass (POST /api/tokens)", async () => {
     mockIssue.mockResolvedValue({ tokenId: "minted-tid" });
-    const app = createApp(makeCookieSessionToken("admin"));
+    const app = createApp(makeD1Token("full"));
     const res = await app.request(
       "/api/tokens",
       {
@@ -331,12 +328,104 @@ describe("token routes — auto-admin gate (cases 10-12b)", () => {
       },
       mockEnv,
     );
-    // Gate passes → hits route body; issue is mocked → 201
     expect(res.status).toBe(201);
   });
 
-  it("case 11b-deny: flag off + admin cookie-session ⇒ 403 at POST /api/tokens (security gate)", async () => {
-    mockRequireProjectAdminHttp.mockResolvedValue(deny403());
+  it("case 10b: d1-token full-scope ⇒ pass (DELETE /api/tokens/:name)", async () => {
+    const app = createApp(makeD1Token("full"));
+    const res = await app.request(
+      "/api/tokens/some-token",
+      { method: "DELETE" },
+      mockEnv,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  // d1-token "read" ⇒ 403
+  it("d1-token read-scope ⇒ 403 (GET)", async () => {
+    const app = createApp(makeD1Token("read"));
+    const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  it("d1-token read-scope ⇒ 403 (POST)", async () => {
+    const app = createApp(makeD1Token("read"));
+    const res = await app.request(
+      "/api/tokens",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "new-token" }),
+      },
+      mockEnv,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  it("d1-token read-scope ⇒ 403 (DELETE)", async () => {
+    const app = createApp(makeD1Token("read"));
+    const res = await app.request(
+      "/api/tokens/some-token",
+      { method: "DELETE" },
+      mockEnv,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  // d1-token "" (empty scope) ⇒ 403 — pins strict === "full"
+  it("d1-token empty-scope ⇒ 403 (GET)", async () => {
+    const app = createApp(makeD1Token(""));
+    const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  // flag-on admin session ⇒ 403 (RED before Task 4 swap, GREEN after swap)
+  it("case 11: flag-on admin bearer session ⇒ 403 (GET)", async () => {
+    const app = createApp(makeSessionToken("admin"));
+    const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  it("case 11: flag-on admin bearer session ⇒ 403 (POST)", async () => {
+    const app = createApp(makeSessionToken("admin"));
+    const res = await app.request(
+      "/api/tokens",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "new-token" }),
+      },
+      mockEnv,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  it("case 11: flag-on admin bearer session ⇒ 403 (DELETE)", async () => {
+    const app = createApp(makeSessionToken("admin"));
+    const res = await app.request(
+      "/api/tokens/some-token",
+      { method: "DELETE" },
+      mockEnv,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  // flag-on admin cookie-session ⇒ 403 (RED before Task 4 swap, GREEN after swap)
+  it("case 11b: flag-on admin cookie-session ⇒ 403 (POST)", async () => {
     const app = createApp(makeCookieSessionToken("admin"));
     const res = await app.request(
       "/api/tokens",
@@ -352,19 +441,28 @@ describe("token routes — auto-admin gate (cases 10-12b)", () => {
     expect(body.error.code).toBe("token-authz-denied");
   });
 
-  // Case 12: flag on + non-admin session ⇒ 403
-  it("case 12: flag on + non-admin session (write permission) ⇒ 403", async () => {
-    mockRequireProjectAdminHttp.mockResolvedValue(deny403());
-    const app = createApp(makeSessionToken("write"));
+  it("case 11b: flag-on admin cookie-session ⇒ 403 (GET)", async () => {
+    const app = createApp(makeCookieSessionToken("admin"));
     const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("token-authz-denied");
   });
 
-  // Case 12b: workspace-session / empty-projectId ⇒ 403 (fail-closed contract)
-  it("case 12b: workspace-session ⇒ 403 (fail-closed)", async () => {
-    mockRequireProjectAdminHttp.mockResolvedValue(deny403());
+  it("case 11b: flag-on admin cookie-session ⇒ 403 (DELETE)", async () => {
+    const app = createApp(makeCookieSessionToken("admin"));
+    const res = await app.request(
+      "/api/tokens/some-token",
+      { method: "DELETE" },
+      mockEnv,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("token-authz-denied");
+  });
+
+  // workspace-session ⇒ 403 (fail-closed)
+  it("case 12b: workspace-session ⇒ 403 (GET)", async () => {
     const app = createApp(makeWorkspaceSessionToken());
     const res = await app.request("/api/tokens", { method: "GET" }, mockEnv);
     expect(res.status).toBe(403);
