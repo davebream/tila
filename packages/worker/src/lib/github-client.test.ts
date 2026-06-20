@@ -92,4 +92,11 @@ describe("getUserByLogin", () => {
     const headers = init?.headers as Record<string, string>;
     expect(headers?.Authorization).toBe("Bearer ghs_secret_token");
   });
+
+  it("throws on AbortError / timeout (DOMException AbortError)", async () => {
+    // Stub fetch to reject with an AbortError (simulates GITHUB_API_TIMEOUT_MS firing).
+    mockFetch.mockRejectedValueOnce(new DOMException("aborted", "AbortError"));
+
+    await expect(getUserByLogin("ghs_token123", "octocat")).rejects.toThrow();
+  });
 });

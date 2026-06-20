@@ -110,12 +110,15 @@ export async function getUserByLogin(
   const timeout = setTimeout(() => controller.abort(), GITHUB_API_TIMEOUT_MS);
 
   try {
-    const res = await githubFetch(`${apiBase}/users/${login}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
+    const res = await githubFetch(
+      `${apiBase}/users/${encodeURIComponent(login)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
       },
-      signal: controller.signal,
-    });
+    );
 
     if (res.status === 404) {
       return null;
