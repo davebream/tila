@@ -18,3 +18,8 @@ export {
   type GitHubAppConfigRow,
 } from "./github-app-config";
 export { D1RevokedJtiStore } from "./revoked-jti-store";
+export {
+  AdminGrantsStore,
+  type AdminGrantRow,
+  type GrantParams,
+} from "./admin-grants";
