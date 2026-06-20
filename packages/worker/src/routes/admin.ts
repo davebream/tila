@@ -6,6 +6,7 @@ import { archiveJournal, revokeSession } from "../lib/admin-ops";
 import { destroyProjectResources } from "../lib/destroy-project";
 import { forwardToDO } from "../lib/do-forward";
 import { requirePermission } from "../middleware/permission";
+import { requireProjectAdmin } from "../middleware/require-project-admin";
 import type { Env, HonoVariables } from "../types";
 
 type AdminEnv = { Bindings: Env; Variables: HonoVariables };
@@ -15,6 +16,8 @@ type AdminEnv = { Bindings: Env; Variables: HonoVariables };
  * can reach them. GitHub session tokens (kind "session") with
  * permission==="admin" pass requirePermission("admin") but must not be
  * allowed to trigger destructive infra-owner operations.
+ *
+ * INVARIANT: requireProjectAdmin must NEVER replace or weaken requireD1Token on destroy/archive/store-counts/sessions.revoke (irreversible ops).
  */
 export const requireD1Token: MiddlewareHandler<AdminEnv> = async (c, next) => {
   const tokenResult = c.get("tokenResult");
@@ -39,7 +42,7 @@ const RevokeSessionRequestSchema = z.object({
   jti: z.string().uuid().max(64),
 });
 
-admin.post("/restart", requirePermission("admin"), async (c) => {
+admin.post("/restart", requireProjectAdmin, async (c) => {
   const stub = c.get("doStub");
   return forwardToDO(stub, "/admin/restart", "POST");
 });

@@ -49,6 +49,15 @@ vi.mock("@tila/backend-r2", () => ({
   ),
 }));
 
+// /admin/restart is gated by requireProjectAdmin; mock it pass-through here so
+// admin.test.ts stays focused on routing. Real denial coverage lives in
+// admin-authz.test.ts (uses the genuine middleware).
+vi.mock("../middleware/require-project-admin", () => ({
+  requireProjectAdmin: vi
+    .fn()
+    .mockImplementation((_c: unknown, next: () => Promise<void>) => next()),
+}));
+
 const { admin } = await import("./admin");
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -154,14 +163,9 @@ describe("project admin routes", () => {
     );
   });
 
-  it("blocks restart for non-admin tokens", async () => {
-    const app = createApp("read");
-
-    const res = await req(app, "/admin/restart", "POST");
-
-    expect(res.status).toBe(403);
-    expect(forwardToDOMock).not.toHaveBeenCalled();
-  });
+  // Restart denial coverage (roster non-member, null identity) lives in
+  // admin-authz.test.ts, which exercises the REAL requireProjectAdmin. Here it
+  // is mocked pass-through, so this file can no longer assert restart denial.
 
   describe("GET /admin/store-counts", () => {
     it("forwards to DO for full-scope d1-token and returns counts", async () => {
