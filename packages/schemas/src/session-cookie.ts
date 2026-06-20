@@ -16,5 +16,7 @@ export type SessionExchangeResponse = z.infer<
 export const SessionStatusResponseSchema = z.object({
   ok: z.literal(true),
   projectId: z.string(),
+  permission: z.string(),
+  canManageTokens: z.boolean(),
 });
 export type SessionStatusResponse = z.infer<typeof SessionStatusResponseSchema>;
