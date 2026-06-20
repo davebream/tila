@@ -524,6 +524,7 @@ describe("POST /api/workspace/select", () => {
       tokenId: "",
       sessionHash: "abc123",
       expiresAt: Date.now() + 3600_000,
+      permission: "admin",
     };
 
     const app = createApp(nonWorkspaceToken);

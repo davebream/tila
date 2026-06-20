@@ -55,7 +55,16 @@ function makeEnv(r2Overrides: Partial<R2Bucket> = {}): Env {
   } as unknown as Env;
 }
 
-function makeCookieSession(scopes: string): CookieSessionTokenResult {
+function makeCookieSession(
+  scopes: string,
+  permission?: string,
+): CookieSessionTokenResult {
+  // Derive permission from scopes if not explicitly provided,
+  // mirroring the normalizeGitHubPermission logic used in production.
+  // "full" scopes → "admin"; "read" → "read"; unknown → "none" (fail closed).
+  const resolvedPermission =
+    permission ??
+    (scopes === "full" ? "admin" : scopes === "read" ? "read" : "none");
   return {
     kind: "cookie-session",
     projectId: "proj-1",
@@ -64,6 +73,7 @@ function makeCookieSession(scopes: string): CookieSessionTokenResult {
     tokenId: "",
     sessionHash: "test-hash",
     expiresAt: Date.now() + 3_600_000,
+    permission: resolvedPermission,
   };
 }
 
@@ -159,7 +169,7 @@ describe("C10 — requirePermission cookie-session read scope", () => {
     };
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe("permission-denied");
-    expect(body.error.message).toBe("Insufficient session scope");
+    expect(body.error.message).toBe("Requires write permission");
     expect(body.error.retryable).toBe(false);
   });
 

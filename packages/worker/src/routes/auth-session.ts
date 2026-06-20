@@ -9,7 +9,7 @@ import { COOKIE_SESSION_TTL_SECONDS } from "../config";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import { hashToken } from "../lib/hash-token";
 import { invalidateSession } from "../lib/session-cache";
-import type { Env, HonoVariables } from "../types";
+import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -157,6 +157,7 @@ authSessionExchange.post("/", async (c) => {
       tokenHash,
       actorName: tokenResult.name,
       scopes: tokenResult.scopes,
+      permission: tokenResult.scopes === "full" ? "admin" : "read",
       expiresAt,
     });
   } catch (err) {
@@ -216,8 +217,36 @@ authSessionProtected.post("/logout", async (c) => {
   return c.json({ ok: true });
 });
 
+function effectivePermission(
+  tokenResult: UnifiedTokenResult,
+): "read" | "write" | "admin" | "none" {
+  switch (tokenResult.kind) {
+    case "session":
+    case "cookie-session":
+      return tokenResult.permission as "read" | "write" | "admin";
+    case "d1-token":
+      return tokenResult.scopes === "full" ? "admin" : "read";
+    case "workspace-session":
+      return "none";
+    default: {
+      const _exhaustive: never = tokenResult;
+      return "none";
+    }
+  }
+}
+
+function canManageTokens(tokenResult: UnifiedTokenResult): boolean {
+  return effectivePermission(tokenResult) === "admin";
+}
+
 // GET /auth/session/status — return current session info
 authSessionProtected.get("/status", (c) => {
   const tokenResult = c.get("tokenResult");
-  return c.json({ ok: true, projectId: tokenResult.projectId });
+  const permission = effectivePermission(tokenResult);
+  return c.json({
+    ok: true,
+    projectId: tokenResult.projectId,
+    permission,
+    canManageTokens: canManageTokens(tokenResult),
+  });
 });

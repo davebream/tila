@@ -75,21 +75,14 @@ export function requirePermission(
     }
 
     if (tokenResult.kind === "cookie-session") {
-      // Map cookie-session scopes onto the PERMISSION_LEVELS hierarchy.
-      // "full" → admin level (preserves existing "full passes every guard" behavior,
-      //           including admin routes — must NOT be mapped to write).
-      // "read" → read level (allows read-only viewers to use read-guarded routes).
-      // anything else → 0 (deny).
-      let sessionLevel: number;
-      if (tokenResult.scopes === "full") {
-        sessionLevel = PERMISSION_LEVELS.admin;
-      } else if (tokenResult.scopes === "read") {
-        sessionLevel = PERMISSION_LEVELS.read;
-      } else {
-        sessionLevel = 0;
-      }
+      // Map cookie-session normalized permission onto the PERMISSION_LEVELS hierarchy.
+      // Uses the persisted GitHub-derived permission tier ("read"/"write"/"admin"),
+      // same as the bearer session branch above — closes the privilege-escalation gap
+      // where a GitHub *write* user could previously reach admin routes via cookie
+      // (because the old code mapped scopes:"full" → admin unconditionally).
+      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
 
-      if (sessionLevel >= (PERMISSION_LEVELS[level] ?? 0)) {
+      if (userLevel >= (PERMISSION_LEVELS[level] ?? 0)) {
         return next();
       }
 
@@ -98,7 +91,7 @@ export function requirePermission(
           ok: false,
           error: {
             code: "permission-denied",
-            message: "Insufficient session scope",
+            message: `Requires ${level} permission`,
             retryable: false,
           },
         },

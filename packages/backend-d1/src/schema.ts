@@ -79,6 +79,7 @@ export const sessions = sqliteTable(
     token_hash: text("token_hash").notNull(),
     actor_name: text("actor_name").notNull(),
     scopes: text("scopes").notNull().default("full"),
+    permission: text("permission").notNull().default("read"),
     created_at: integer("created_at").notNull(),
     expires_at: integer("expires_at").notNull(),
   },

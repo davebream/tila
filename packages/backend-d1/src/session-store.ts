@@ -7,6 +7,7 @@ export interface SessionResult {
   tokenHash: string;
   name: string;
   scopes: string;
+  permission: string;
   expiresAt: number;
 }
 
@@ -23,6 +24,7 @@ export class D1SessionStore {
     tokenHash: string;
     actorName: string;
     scopes: string;
+    permission: string;
     expiresAt: number;
   }): Promise<void> {
     await this.db.insert(sessions).values({
@@ -31,6 +33,7 @@ export class D1SessionStore {
       token_hash: params.tokenHash,
       actor_name: params.actorName,
       scopes: params.scopes,
+      permission: params.permission,
       created_at: Date.now(),
       expires_at: params.expiresAt,
     });
@@ -53,6 +56,7 @@ export class D1SessionStore {
       tokenHash: row.token_hash,
       name: row.actor_name,
       scopes: row.scopes,
+      permission: row.permission,
       expiresAt: row.expires_at,
     };
   }

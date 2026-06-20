@@ -278,6 +278,7 @@ describe("GET /auth/session/status", () => {
       name: "actor",
       scopes: "full",
       expiresAt: Date.now() + 3_600_000,
+      permission: "admin",
     });
     const app = makeProtectedApp();
 
@@ -292,5 +293,66 @@ describe("GET /auth/session/status", () => {
     const body = (await res.json()) as { ok: boolean; projectId: string };
     expect(body.ok).toBe(true);
     expect(body.projectId).toBe("test-project");
+  });
+
+  it("returns canManageTokens=true for admin cookie session", async () => {
+    mockSessionValidate.mockResolvedValue({
+      projectId: "test-project",
+      tokenHash: "tok-hash",
+      name: "actor",
+      scopes: "full",
+      expiresAt: Date.now() + 3_600_000,
+      permission: "admin",
+    });
+    const app = makeProtectedApp();
+
+    const res = await app.request(
+      "/auth/session/status",
+      { headers: { Cookie: "tila_session=some-uuid" } },
+      testEnv,
+      mockCtx,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      projectId: string;
+      permission: string;
+      canManageTokens: boolean;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.projectId).toBe("test-project");
+    expect(body.permission).toBe("admin");
+    expect(body.canManageTokens).toBe(true);
+  });
+
+  it("returns canManageTokens=false for write cookie session", async () => {
+    mockSessionValidate.mockResolvedValue({
+      projectId: "test-project",
+      tokenHash: "tok-hash-write",
+      name: "actor",
+      scopes: "read",
+      expiresAt: Date.now() + 3_600_000,
+      permission: "write",
+    });
+    const app = makeProtectedApp();
+
+    // Use a different cookie value to avoid hitting the session cache from a prior test
+    const res = await app.request(
+      "/auth/session/status",
+      { headers: { Cookie: "tila_session=write-uuid" } },
+      testEnv,
+      mockCtx,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      projectId: string;
+      permission: string;
+      canManageTokens: boolean;
+    };
+    expect(body.permission).toBe("write");
+    expect(body.canManageTokens).toBe(false);
   });
 });

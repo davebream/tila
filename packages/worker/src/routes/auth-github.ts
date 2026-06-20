@@ -33,6 +33,10 @@ import {
   getAuthenticatedUser,
   getRepoPermission,
 } from "../lib/github-client";
+import {
+  PERMISSION_HIERARCHY,
+  normalizeGitHubPermission,
+} from "../lib/github-permission";
 import { hashToken } from "../lib/hash-token";
 import { OidcVerificationError, verifyOidcToken } from "../lib/oidc-verify";
 import { parseCookieHeader } from "../lib/parse-cookie";
@@ -46,33 +50,10 @@ type AppEnv = { Bindings: Env; Variables: HonoVariables };
 const OAUTH_STATE_ISSUER = "tila-oauth-state";
 const OAUTH_STATE_AUDIENCE = "tila-oauth-callback";
 
-const PERMISSION_HIERARCHY: Record<string, number> = {
-  none: 0,
-  read: 1,
-  triage: 2,
-  write: 3,
-  maintain: 4,
-  admin: 5,
-};
-
 function permissionMeetsMinimum(actual: string, minimum: string): boolean {
   return (
     (PERMISSION_HIERARCHY[actual] ?? 0) >= (PERMISSION_HIERARCHY[minimum] ?? 0)
   );
-}
-
-/**
- * Normalize GitHub permission levels to tila session permission.
- * GitHub returns: none, read, triage, write, maintain, admin
- * Tila sessions use: read, write, admin
- */
-function normalizePermission(
-  githubPermission: string,
-): "read" | "write" | "admin" {
-  const level = PERMISSION_HIERARCHY[githubPermission] ?? 0;
-  if (level >= PERMISSION_HIERARCHY.admin) return "admin";
-  if (level >= PERMISSION_HIERARCHY.write) return "write";
-  return "read";
 }
 
 /**
@@ -241,7 +222,7 @@ async function mintAndStoreSession(opts: {
 
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = now + SESSION_TTL_SECONDS;
-  const normalizedPerm = normalizePermission(userPermission);
+  const normalizedPerm = normalizeGitHubPermission(userPermission);
   // jti: random nonce for per-token revocation (C9). crypto.randomUUID() is
   // available in the Workers runtime and is cryptographically random.
   const jti = crypto.randomUUID();
@@ -935,6 +916,7 @@ authGithub.get("/oauth/callback", async (c) => {
       tokenHash: "",
       actorName: user.login,
       scopes: "",
+      permission: "read",
       expiresAt,
     });
   } catch (err) {

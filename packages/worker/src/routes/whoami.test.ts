@@ -102,6 +102,7 @@ describe("GET /whoami", () => {
       tokenId: "",
       sessionHash: "hash-789",
       expiresAt,
+      permission: "write",
     };
 
     const app = createApp(tokenResult);

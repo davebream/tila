@@ -219,6 +219,7 @@ function buildSessionTokenResult(
     name: string;
     scopes: string;
     expiresAt: number;
+    permission?: string;
   },
 ): {
   tokenResult: WorkspaceSessionTokenResult | CookieSessionTokenResult;
@@ -248,6 +249,7 @@ function buildSessionTokenResult(
       tokenId: "",
       sessionHash,
       expiresAt: cached.expiresAt,
+      permission: cached.permission ?? "read",
     } satisfies CookieSessionTokenResult,
     authKind: "cookie",
   };
