@@ -75,4 +75,30 @@ export class D1ProjectRegistry {
 
     return rows;
   }
+
+  /** Per-project repo-admin auto-admin opt-in. Returns false for unknown or
+   *  archived projects (fail-closed; archived projects never auto-admit). */
+  async getRepoAdminAutoAdmin(projectId: string): Promise<boolean> {
+    const rows = await this.drizzle
+      .select({ flag: projects.repo_admin_auto_admin })
+      .from(projects)
+      .where(and(eq(projects.project_id, projectId), eq(projects.archived, 0)))
+      .limit(1);
+    return rows[0]?.flag === 1;
+  }
+
+  /** Operator/test setter. Targets by project_id (no archived filter, so the flag
+   *  may be pre-set on a not-yet-active project); a non-matching projectId updates
+   *  zero rows. Note the intentional asymmetry with getRepoAdminAutoAdmin, which
+   *  filters archived=0: setting the flag on an archived project is a silent no-op
+   *  at read time (archived projects do not serve), by design. */
+  async setRepoAdminAutoAdmin(
+    projectId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.drizzle
+      .update(projects)
+      .set({ repo_admin_auto_admin: enabled ? 1 : 0 })
+      .where(eq(projects.project_id, projectId));
+  }
 }

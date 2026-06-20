@@ -128,7 +128,9 @@ describe("Token authz — requireTokenAdmin guard", () => {
       };
       expect(body.ok).toBe(false);
       expect(body.error.code).toBe("token-authz-denied");
-      expect(body.error.message).toBe("Token management requires full scope");
+      expect(body.error.message).toBe(
+        "Repo/token management requires full scope or an admin session",
+      );
       expect(body.error.retryable).toBe(false);
     });
 

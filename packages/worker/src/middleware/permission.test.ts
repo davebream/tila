@@ -8,7 +8,59 @@ import type {
   SessionTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
-import { requirePermission } from "./permission";
+import { ADMIN_PERMISSION, requirePermission } from "./permission";
+
+// Prove ADMIN_PERMISSION is the single source of truth for the admin tier —
+// a rename of the bare "admin" literal without updating this constant would
+// make PERMISSION_LEVELS["admin"] === undefined (0), breaking admin routing.
+describe("ADMIN_PERMISSION constant", () => {
+  it("is the key used for the top-tier level in PERMISSION_LEVELS", () => {
+    // Import is module-private; we verify via the exported constant's behavior
+    // by asserting that requirePermission("admin") admits a session token whose
+    // permission equals ADMIN_PERMISSION — and that ADMIN_PERMISSION is "admin".
+    expect(ADMIN_PERMISSION).toBe("admin");
+  });
+
+  it("PERMISSION_LEVELS[ADMIN_PERMISSION] === 3 (admin is the highest level)", async () => {
+    // Drive a real middleware invocation: a session with permission=ADMIN_PERMISSION
+    // on an admin-level route must pass. If PERMISSION_LEVELS used a bare "admin"
+    // literal instead of [ADMIN_PERMISSION], a rename of ADMIN_PERMISSION would
+    // silently break this assertion.
+    const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
+    app.use("/*", async (c, next) => {
+      c.set("tokenResult", {
+        kind: "session",
+        projectId: "proj-1",
+        name: "u",
+        scopes: ADMIN_PERMISSION,
+        tokenId: "",
+        githubRepoId: 1,
+        githubLogin: "u",
+        permission: ADMIN_PERMISSION,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
+      return next();
+    });
+    app.use("/*", requirePermission("admin"));
+    app.get("/test", (c) => c.json({ ok: true }));
+    const mockEnv = {
+      DB: {} as D1Database,
+      PROJECT: {} as DurableObjectNamespace,
+      ARTIFACTS: {} as R2Bucket,
+      ANALYTICS: {} as AnalyticsEngineDataset,
+    } as unknown as Env;
+    const mockCtx = {
+      waitUntil: vi.fn(),
+      passThroughOnException: vi.fn(),
+    } as unknown as ExecutionContext;
+    const res = await app.fetch(
+      new Request("http://localhost/test"),
+      mockEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+});
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 

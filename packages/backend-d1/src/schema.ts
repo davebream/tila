@@ -16,6 +16,7 @@ export const projects = sqliteTable("_projects", {
   cloudflare_account_id: text("cloudflare_account_id").notNull(),
   schema_version: integer("schema_version").notNull().default(1),
   archived: integer("archived").notNull().default(0),
+  repo_admin_auto_admin: integer("repo_admin_auto_admin").notNull().default(0),
 });
 
 // --- _tokens ---

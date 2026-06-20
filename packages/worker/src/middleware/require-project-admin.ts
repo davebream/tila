@@ -1,10 +1,11 @@
-import { AdminGrantsStore } from "@tila/backend-d1";
+import { AdminGrantsStore, D1ProjectRegistry } from "@tila/backend-d1";
 import type { MiddlewareHandler } from "hono";
 import {
   ADMIN_GRANTS_CACHE_MAX_SIZE,
   ADMIN_GRANTS_CACHE_TTL_MS,
 } from "../config";
-import type { Env, HonoVariables } from "../types";
+import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
+import { ADMIN_PERMISSION } from "./permission";
 
 // AdminEnv is declared LOCALLY here, not imported from routes/admin.ts: the
 // middleware must not depend on the route module (that would invert the
@@ -78,6 +79,146 @@ export function revokeAdminGrantInCache(cacheKey: string): void {
   adminGrantsCache.delete(cacheKey);
 }
 
+// --- Per-isolate project auto-admin flag cache (#101) ----------------------
+// Caches the `repo_admin_auto_admin` flag per projectId to avoid a D1 read on
+// every request that falls through the roster lookup. Mirrors the
+// adminGrantsCache above:
+//   - TTL expiry on read (stale entries deleted), reusing ADMIN_GRANTS_CACHE_TTL_MS.
+//   - Size-capped at ADMIN_GRANTS_CACHE_MAX_SIZE; oldest entry evicted on overflow.
+//   - Fail-closed: a D1 error returns false and is NEVER cached; next call re-queries.
+//
+// Key: projectId — the flag is per-project, not per-user.
+const projectAutoAdminCache = new Map<
+  string,
+  { enabled: boolean; cachedAt: number }
+>();
+
+/** Test-only: clear the per-isolate auto-admin flag cache. */
+export function __clearProjectAutoAdminCache(): void {
+  projectAutoAdminCache.clear();
+}
+
+/**
+ * Read the cached auto-admin flag for a project. Returns the cached boolean if
+ * present and not stale, null on miss or TTL expiry (caller should query D1).
+ * Stale entries are deleted on read.
+ */
+function getProjectAutoAdminFromCache(projectId: string): boolean | null {
+  const entry = projectAutoAdminCache.get(projectId);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > ADMIN_GRANTS_CACHE_TTL_MS) {
+    projectAutoAdminCache.delete(projectId);
+    return null;
+  }
+  return entry.enabled;
+}
+
+/**
+ * Read the `repo_admin_auto_admin` flag from D1 (with per-isolate cache).
+ * Fail-closed: any D1 error returns false and is NEVER cached.
+ */
+async function getProjectAutoAdminCached(
+  db: D1Database,
+  projectId: string,
+): Promise<boolean> {
+  const cached = getProjectAutoAdminFromCache(projectId);
+  if (cached !== null) return cached;
+
+  let enabled: boolean;
+  try {
+    const registry = new D1ProjectRegistry(db);
+    enabled = await registry.getRepoAdminAutoAdmin(projectId);
+  } catch {
+    // Fail-closed: error not cached; next call re-queries D1.
+    return false;
+  }
+
+  // Cache the successful result; insert with oldest-entry eviction on overflow.
+  if (
+    !projectAutoAdminCache.has(projectId) &&
+    projectAutoAdminCache.size >= ADMIN_GRANTS_CACHE_MAX_SIZE
+  ) {
+    const oldest = projectAutoAdminCache.keys().next().value;
+    if (oldest !== undefined) {
+      projectAutoAdminCache.delete(oldest);
+    }
+  }
+  projectAutoAdminCache.set(projectId, { enabled, cachedAt: Date.now() });
+  return enabled;
+}
+
+/**
+ * #101 auto-admin: returns true iff the project has opted in (repo_admin_auto_admin)
+ * AND the caller is an admin-tier GitHub session (bearer OR cookie). Fail-closed:
+ * any non-session kind, any non-"admin" permission, or any D1 error returns false.
+ * The flag read is cached per-isolate; errors are never cached.
+ *
+ * IMPORTANT — discriminated-union narrowing:
+ * The kind check is written as EARLY-RETURN guards BEFORE reading `permission`,
+ * NOT as a single compound boolean. `permission` is absent on D1TokenResult and
+ * WorkspaceSessionTokenResult; TypeScript does not narrow it across a disjunction,
+ * so a compound check would not typecheck.
+ */
+export async function autoAdminGrants(
+  db: D1Database,
+  tokenResult: UnifiedTokenResult,
+  projectId: string,
+): Promise<boolean> {
+  if (!projectId) return false;
+  // Only GitHub sessions carry a normalized permission tier.
+  // Bearer ("session") and browser ("cookie-session") are both admitted.
+  if (tokenResult.kind !== "session" && tokenResult.kind !== "cookie-session") {
+    return false;
+  }
+  // Only the exact admin tier qualifies — sourced from ADMIN_PERMISSION to keep
+  // the tier vocabulary in sync with permission.ts (design D5).
+  if (tokenResult.permission !== ADMIN_PERMISSION) return false;
+  return getProjectAutoAdminCached(db, projectId);
+}
+
+/**
+ * Async admin gate for token/repo routes (C5).
+ * These routes mount WITHOUT projectMiddleware, so projectId is sourced from
+ * tokenResult.projectId (not c.get("projectId"), which is empty on these mounts).
+ *
+ * Pass paths (return null):
+ *   1. d1-token with scopes === "full" — kind-discriminated to avoid misreading
+ *      GitHub sessions (which carry scopes: permission) or cookie-sessions
+ *      (which may inherit a d1-token's scopes value).
+ *   2. autoAdminGrants(db, tokenResult, tokenResult.projectId) — flag-gated
+ *      admin-tier session (bearer or cookie).
+ *
+ * Deny path (return 403 JSON): everything else.
+ * AC-2: with the flag off, autoAdminGrants returns false ⇒ only d1-token full-scope
+ * passes, byte-identical to the pre-101 baseline.
+ */
+export async function requireProjectAdminHttp(
+  c: import("hono").Context<AdminEnv>,
+): Promise<Response | null> {
+  const tokenResult = c.get("tokenResult");
+  // (1) Kind-discriminated full-scope D1 token check.
+  if (tokenResult.kind === "d1-token" && tokenResult.scopes === "full") {
+    return null;
+  }
+  // (2) Flag-gated auto-admin (bearer or cookie-session with admin permission).
+  // projectId comes from tokenResult because these routes have no projectMiddleware.
+  if (await autoAdminGrants(c.env.DB, tokenResult, tokenResult.projectId)) {
+    return null;
+  }
+  return c.json(
+    {
+      ok: false,
+      error: {
+        code: "token-authz-denied",
+        message:
+          "Repo/token management requires full scope or an admin session",
+        retryable: false,
+      },
+    },
+    403,
+  );
+}
+
 function deny(c: Parameters<MiddlewareHandler<AdminEnv>>[0]) {
   return c.json(
     {
@@ -136,28 +277,50 @@ export const requireProjectAdmin: MiddlewareHandler<AdminEnv> = async (
     // defer GHES normalization (follow-up).
     const cacheKey = `${projectId}:${githubHost}:${githubUserId}`;
     const cached = getAdminGrantFromCache(cacheKey);
-    if (cached !== null) {
-      return cached ? next() : deny(c);
+    // Roster cache HIT — positive: admit immediately (no flag read needed).
+    // Roster cache HIT — negative: skip the D1 roster lookup but still try
+    //   auto-admin below (the flag is a separate allow path).
+    if (cached === true) {
+      return next();
     }
 
-    let isAdmin: boolean;
-    try {
-      // Both store construction AND the awaited lookup are inside the try:
-      // a throw from either path DENIES and the error is NOT cached.
-      const store = new AdminGrantsStore(c.env.DB);
-      isAdmin = await store.isActiveAdmin(projectId, githubHost, githubUserId);
-    } catch {
-      return deny(c);
+    if (cached === null) {
+      // Cache miss — query D1 for roster membership.
+      let isAdmin: boolean;
+      try {
+        // Both store construction AND the awaited lookup are inside the try:
+        // a throw from either path DENIES and the error is NOT cached.
+        const store = new AdminGrantsStore(c.env.DB);
+        isAdmin = await store.isActiveAdmin(
+          projectId,
+          githubHost,
+          githubUserId,
+        );
+      } catch {
+        return deny(c);
+      }
+
+      setAdminGrantInCache(cacheKey, { isAdmin, cachedAt: Date.now() });
+
+      if (isAdmin) return next();
     }
 
-    setAdminGrantInCache(cacheKey, { isAdmin, cachedAt: Date.now() });
-
-    // Extension point (#101): a repo-admin auto-admin branch would slot in here,
-    // granting admin to GitHub repo-admins even without an explicit roster grant.
-    // Not built — no `autoAdmin` config exists yet.
-    return isAdmin ? next() : deny(c);
+    // (#101) Roster miss (or cached-false) — try the per-project auto-admin flag.
+    if (await autoAdminGrants(c.env.DB, tokenResult, projectId)) return next();
+    return deny(c);
   }
 
-  // (4) cookie-session, workspace-session, or any other kind → deny.
+  // (3b) Cookie-session → auto-admin only (no roster identity to look up).
+  // projectId from c.get("projectId") because projectMiddleware runs at these
+  // requireProjectAdmin sites and populates the variable; do NOT use
+  // tokenResult.projectId here (that convention is for tokens/repos routes only).
+  if (tokenResult.kind === "cookie-session") {
+    const cookieProjectId = c.get("projectId");
+    if (await autoAdminGrants(c.env.DB, tokenResult, cookieProjectId))
+      return next();
+    return deny(c);
+  }
+
+  // (4) workspace-session, or any other kind → deny.
   return deny(c);
 };

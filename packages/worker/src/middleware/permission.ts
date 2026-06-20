@@ -3,10 +3,17 @@ import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
+/**
+ * Single source of truth for the admin-tier label.
+ * Used by PERMISSION_LEVELS (below) and by the auto-admin helper in
+ * require-project-admin.ts to keep the tier vocabulary in sync.
+ */
+export const ADMIN_PERMISSION = "admin";
+
 const PERMISSION_LEVELS: Record<string, number> = {
   read: 1,
   write: 2,
-  admin: 3,
+  [ADMIN_PERMISSION]: 3,
 };
 
 /**

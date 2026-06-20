@@ -6,23 +6,31 @@ import type {
   Env,
   HonoVariables,
   SessionTokenResult,
+  UnifiedTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
 
 // --- Test seam (committed) -------------------------------------------------
-// The middleware constructs `new AdminGrantsStore(c.env.DB)` directly, so the
-// module boundary is the seam. Every constructed instance shares the same
-// stubbable `isActiveAdmin` mock.
+// The middleware constructs `new AdminGrantsStore(c.env.DB)` and
+// `new D1ProjectRegistry(c.env.DB)` directly, so the module boundary is the
+// seam. Every constructed instance shares the same stubbable mock.
 const mockIsActiveAdmin = vi.fn();
+const mockGetRepoAdminAutoAdmin = vi.fn();
 vi.mock("@tila/backend-d1", () => ({
   AdminGrantsStore: class {
     isActiveAdmin = mockIsActiveAdmin;
+  },
+  D1ProjectRegistry: class {
+    getRepoAdminAutoAdmin = mockGetRepoAdminAutoAdmin;
   },
 }));
 
 import {
   __clearAdminGrantsCache,
+  __clearProjectAutoAdminCache,
+  autoAdminGrants,
   requireProjectAdmin,
+  requireProjectAdminHttp,
   revokeAdminGrantInCache,
 } from "./require-project-admin";
 
@@ -55,17 +63,19 @@ function makeSessionToken(
     projectId?: string;
     githubUserId?: number | undefined;
     githubHost?: string | undefined;
+    permission?: string;
   } = {},
 ): SessionTokenResult {
+  const permission = opts.permission ?? "admin";
   return {
     kind: "session",
     projectId: opts.projectId ?? "proj-1",
     name: "testuser",
-    scopes: "admin",
+    scopes: permission,
     tokenId: "",
     githubRepoId: 99999,
     githubLogin: "testuser",
-    permission: "admin",
+    permission,
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
     githubUserId: "githubUserId" in opts ? opts.githubUserId : 4242,
     githubHost: "githubHost" in opts ? opts.githubHost : "github.com",
@@ -150,9 +160,11 @@ function expectDenied(result: { status: number; body: unknown }): void {
 describe("requireProjectAdmin middleware", () => {
   beforeEach(() => {
     mockIsActiveAdmin.mockReset();
+    mockGetRepoAdminAutoAdmin.mockReset();
     // Fixtures reuse proj-1/4242; a leaked positive entry would false-green a
     // later deny case before isActiveAdmin is consulted.
     __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
   });
 
   describe("d1-token", () => {
@@ -223,7 +235,7 @@ describe("requireProjectAdmin middleware", () => {
   });
 
   describe("non-bearer / unknown kinds", () => {
-    it('denies cookie-session even with permission="admin"', async () => {
+    it("denies cookie-session when auto-admin flag is off", async () => {
       const app = createTestApp(makeCookieSessionToken("admin"));
       expectDenied(await fetchStatus(app));
       expect(mockIsActiveAdmin).toHaveBeenCalledTimes(0);
@@ -332,5 +344,333 @@ describe("requireProjectAdmin middleware", () => {
         vi.useRealTimers();
       }
     });
+  });
+});
+
+// =============================================================================
+// Auto-admin (repo_admin_auto_admin flag) — design Testing-Strategy cases 1-9
+// =============================================================================
+describe("requireProjectAdmin — auto-admin (cases 1-9)", () => {
+  beforeEach(() => {
+    mockIsActiveAdmin.mockReset();
+    mockGetRepoAdminAutoAdmin.mockReset();
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
+  });
+
+  // Case 1: flag off + bearer admin + no roster ⇒ 403 (AC-2)
+  it("case 1: flag off, bearer admin, no roster row ⇒ 403", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(false);
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false); // flag off
+    const app = createTestApp(makeSessionToken());
+    expectDenied(await fetchStatus(app));
+  });
+
+  // Case 2: flag on + bearer admin + no roster row ⇒ next (AC-1 roster)
+  it("case 2: flag on, bearer admin, no roster row ⇒ next (auto-admin)", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(false);
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true); // flag on
+    const app = createTestApp(makeSessionToken());
+    const { status } = await fetchStatus(app);
+    expect(status).toBe(200);
+  });
+
+  // Case 3: flag on + bearer write/read ⇒ 403 (admin-only; non-admin tier never auto-admitted)
+  it("case 3: flag on, bearer write permission ⇒ 403 (only admin tier auto-admitted)", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(false);
+    // getRepoAdminAutoAdmin should NOT be called because permission is not "admin"
+    const app = createTestApp(makeSessionToken({ permission: "write" }));
+    expectDenied(await fetchStatus(app));
+    // The auto-admin flag should never be read when permission != admin
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  it("case 3b: flag on, bearer read permission ⇒ 403", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(false);
+    const app = createTestApp(makeSessionToken({ permission: "read" }));
+    expectDenied(await fetchStatus(app));
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 4: flag on + cookie-session admin ⇒ next (Finding 5 — browser path)
+  it("case 4: flag on, cookie-session admin ⇒ next (auto-admin for browser path)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true); // flag on
+    const app = createTestApp(makeCookieSessionToken("admin"));
+    const { status } = await fetchStatus(app);
+    expect(status).toBe(200);
+    // roster should NOT be consulted for cookie-session
+    expect(mockIsActiveAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 5: flag off + cookie-session admin ⇒ 403 (AC-2 for cookie path)
+  it("case 5: flag off, cookie-session admin ⇒ 403 (AC-2)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false); // flag off
+    const app = createTestApp(makeCookieSessionToken("admin"));
+    expectDenied(await fetchStatus(app));
+  });
+
+  // Case 6: flag on + bearer rostered ⇒ next with NO flag read (roster short-circuits)
+  it("case 6: flag on, bearer rostered ⇒ next, auto-admin flag NOT read (roster short-circuits)", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(true); // roster hit
+    const app = createTestApp(makeSessionToken());
+    const { status } = await fetchStatus(app);
+    expect(status).toBe(200);
+    // Flag must NOT be queried when roster already admits the user
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 7: D1 flag read throws ⇒ 403, not cached (re-query on 2nd call)
+  it("case 7: D1 flag read throws ⇒ 403, error not cached (re-queries on 2nd call)", async () => {
+    mockIsActiveAdmin.mockResolvedValue(false);
+    mockGetRepoAdminAutoAdmin.mockRejectedValueOnce(new Error("D1 flag down"));
+    const app1 = createTestApp(makeSessionToken());
+    expectDenied(await fetchStatus(app1));
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(1);
+
+    // 2nd call within TTL: if error were cached, getRepoAdminAutoAdmin would
+    // NOT be called. It MUST be re-called → call count == 2.
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const app2 = createTestApp(makeSessionToken());
+    const { status } = await fetchStatus(app2);
+    expect(status).toBe(200);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(2);
+  });
+
+  // Case 8: cache hit avoids second D1 read within TTL
+  it("case 8: cache hit — second auto-admin check within TTL avoids D1 re-read", async () => {
+    mockIsActiveAdmin.mockResolvedValue(false);
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true); // only one D1 call expected
+    const app1 = createTestApp(makeSessionToken());
+    expect((await fetchStatus(app1)).status).toBe(200);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(1);
+
+    // 2nd request: flag cached → no further D1 read
+    const app2 = createTestApp(makeSessionToken());
+    expect((await fetchStatus(app2)).status).toBe(200);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(1); // still 1
+  });
+
+  // Case 9: d1-token full-scope ⇒ next (regression — must not be affected by auto-admin)
+  it("case 9: d1-token full-scope ⇒ next (regression, unaffected by auto-admin changes)", async () => {
+    const app = createTestApp(makeD1Token("full"));
+    const { status } = await fetchStatus(app);
+    expect(status).toBe(200);
+    expect(mockIsActiveAdmin).toHaveBeenCalledTimes(0);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+});
+
+// =============================================================================
+// requireProjectAdminHttp — direct unit tests (the 9 cases from issue #101)
+// =============================================================================
+// Build a minimal Hono Context stub: requireProjectAdminHttp only accesses
+//   c.get("tokenResult"), c.env.DB, and c.json(body, status).
+// The real gate logic (including autoAdminGrants) runs without mocking it.
+// =============================================================================
+describe("requireProjectAdminHttp — direct gate unit tests", () => {
+  beforeEach(() => {
+    mockIsActiveAdmin.mockReset();
+    mockGetRepoAdminAutoAdmin.mockReset();
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
+  });
+
+  /** Minimal Hono Context stub for requireProjectAdminHttp. */
+  function makeHttpCtx(
+    tokenResult: UnifiedTokenResult,
+  ): import("hono").Context<{ Bindings: Env; Variables: HonoVariables }> {
+    return {
+      get: (key: string) => {
+        if (key === "tokenResult") return tokenResult;
+        return undefined;
+      },
+      env: mockEnv,
+      json: (body: unknown, status?: number) =>
+        new Response(JSON.stringify(body), {
+          status: status ?? 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    } as unknown as import("hono").Context<{
+      Bindings: Env;
+      Variables: HonoVariables;
+    }>;
+  }
+
+  function callGate(tokenResult: UnifiedTokenResult): Promise<Response | null> {
+    return requireProjectAdminHttp(makeHttpCtx(tokenResult));
+  }
+
+  function expectAdmit(result: Response | null): void {
+    expect(result).toBeNull();
+  }
+
+  async function expectDeny403(result: Response | null): Promise<void> {
+    expect(result).not.toBeNull();
+    if (result == null) return; // type narrowing guard (assertion above already fails if null)
+    expect(result.status).toBe(403);
+    const body = (await result.json()) as {
+      error: { code: string };
+    };
+    expect(body.error.code).toBe("token-authz-denied");
+  }
+
+  // Case 1: d1-token with scopes:"full" ⇒ null (admit), NO flag read.
+  it("case 1: d1-token full-scope ⇒ null (admit), auto-admin flag NOT read", async () => {
+    const result = await callGate(makeD1Token("full"));
+    expectAdmit(result);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 2: d1-token with scopes:"read" ⇒ 403.
+  it("case 2: d1-token read-scope ⇒ 403 token-authz-denied", async () => {
+    const result = await callGate(makeD1Token("read"));
+    await expectDeny403(result);
+  });
+
+  // Case 3: bearer session, permission:"admin", flag ON ⇒ null (admit).
+  it("case 3: bearer session admin + flag ON ⇒ null (admit)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result = await callGate(makeSessionToken({ permission: "admin" }));
+    expectAdmit(result);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(1);
+  });
+
+  // Case 4: bearer session, permission:"admin", flag OFF ⇒ 403.
+  it("case 4: bearer session admin + flag OFF ⇒ 403", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false);
+    const result = await callGate(makeSessionToken({ permission: "admin" }));
+    await expectDeny403(result);
+  });
+
+  // Case 5: cookie-session, permission:"admin", flag ON ⇒ null (admit, browser→mint path).
+  it("case 5: cookie-session admin + flag ON ⇒ null (admit, browser path)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result = await callGate(makeCookieSessionToken("admin"));
+    expectAdmit(result);
+  });
+
+  // Case 6: cookie-session, permission:"admin", flag OFF ⇒ 403.
+  it("case 6: cookie-session admin + flag OFF ⇒ 403", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false);
+    const result = await callGate(makeCookieSessionToken("admin"));
+    await expectDeny403(result);
+  });
+
+  // Case 7: bearer session, permission:"write", flag ON ⇒ 403 (only admin tier).
+  it("case 7: bearer session write + flag ON ⇒ 403 (non-admin tier never admitted)", async () => {
+    // autoAdminGrants returns false for non-admin permission without querying D1.
+    const result = await callGate(makeSessionToken({ permission: "write" }));
+    await expectDeny403(result);
+    // autoAdminGrants must short-circuit before reading the flag
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 8: workspace-session (empty projectId) ⇒ 403 (fail-closed).
+  it("case 8: workspace-session ⇒ 403 (fail-closed)", async () => {
+    const result = await callGate(makeWorkspaceSessionToken());
+    await expectDeny403(result);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  // Case 9: regression-proof of kind-discriminated check.
+  // A cookie-session whose `scopes` field happens to be "full" but has
+  // `permission:"read"` and flag OFF must NOT be admitted — proves the gate
+  // uses `kind === "d1-token" && scopes === "full"`, not a bare `scopes === "full"`.
+  it('case 9 (regression): non-d1-token with scopes:"full" but permission:"read" + flag OFF ⇒ 403', async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(false);
+    // makeCookieSessionToken already sets scopes:"full" internally (see factory above).
+    const token = makeCookieSessionToken("read");
+    // Verify the scopes field is indeed "full" to confirm the regression scenario.
+    expect(token.scopes).toBe("full");
+    const result = await callGate(token);
+    await expectDeny403(result);
+  });
+});
+
+// Standalone autoAdminGrants function tests
+describe("autoAdminGrants helper", () => {
+  beforeEach(() => {
+    mockGetRepoAdminAutoAdmin.mockReset();
+    __clearProjectAutoAdminCache();
+  });
+
+  it("returns false for non-session kind (d1-token)", async () => {
+    const result = await autoAdminGrants(
+      {} as D1Database,
+      makeD1Token("full"),
+      "proj-1",
+    );
+    expect(result).toBe(false);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  it("returns false for workspace-session kind", async () => {
+    const result = await autoAdminGrants(
+      {} as D1Database,
+      makeWorkspaceSessionToken(),
+      "proj-1",
+    );
+    expect(result).toBe(false);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  it("returns false for admin session when projectId is empty", async () => {
+    const result = await autoAdminGrants(
+      {} as D1Database,
+      makeSessionToken(),
+      "",
+    );
+    expect(result).toBe(false);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  it("returns false for session with non-admin permission (write)", async () => {
+    const result = await autoAdminGrants(
+      {} as D1Database,
+      makeSessionToken({ permission: "write" }),
+      "proj-1",
+    );
+    expect(result).toBe(false);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(0);
+  });
+
+  it("returns true for admin bearer session when flag is on", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result = await autoAdminGrants(
+      {} as D1Database,
+      makeSessionToken(),
+      "proj-1",
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns true for admin cookie-session when flag is on", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result = await autoAdminGrants(
+      {} as D1Database,
+      makeCookieSessionToken("admin"),
+      "proj-1",
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false (fail-closed) on D1 error, without caching", async () => {
+    mockGetRepoAdminAutoAdmin.mockRejectedValueOnce(new Error("D1 error"));
+    const result = await autoAdminGrants(
+      {} as D1Database,
+      makeSessionToken(),
+      "proj-1",
+    );
+    expect(result).toBe(false);
+
+    // 2nd call — error must NOT have been cached
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const result2 = await autoAdminGrants(
+      {} as D1Database,
+      makeSessionToken(),
+      "proj-1",
+    );
+    expect(result2).toBe(true);
+    expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(2);
   });
 });

@@ -11,7 +11,8 @@ const CREATE_PROJECTS = `
     created_by TEXT NOT NULL DEFAULT '',
     cloudflare_account_id TEXT NOT NULL DEFAULT '',
     schema_version INTEGER NOT NULL DEFAULT 1,
-    archived INTEGER NOT NULL DEFAULT 0
+    archived INTEGER NOT NULL DEFAULT 0,
+    repo_admin_auto_admin INTEGER NOT NULL DEFAULT 0
   );
 `;
 
@@ -140,5 +141,56 @@ describe("D1ProjectRegistry.listAll", () => {
     const registry = new D1ProjectRegistry(d1Shim as unknown as D1Database);
     const result = await registry.listAll();
     expect(result).toEqual([{ projectId: "proj-1" }, { projectId: "proj-3" }]);
+  });
+});
+
+describe("D1ProjectRegistry.getRepoAdminAutoAdmin / setRepoAdminAutoAdmin", () => {
+  it("returns false for a freshly-inserted project (default column value 0)", async () => {
+    const sqlite = createTestDb();
+    sqlite.exec(`
+      INSERT INTO _projects (project_id, cloudflare_account_id, archived) VALUES ('proj-new', 'acc-1', 0);
+    `);
+    const d1Shim = createD1Shim(sqlite);
+    const registry = new D1ProjectRegistry(d1Shim as unknown as D1Database);
+
+    const result = await registry.getRepoAdminAutoAdmin("proj-new");
+    expect(result).toBe(false);
+  });
+
+  it("returns true after setRepoAdminAutoAdmin(id, true)", async () => {
+    const sqlite = createTestDb();
+    sqlite.exec(`
+      INSERT INTO _projects (project_id, cloudflare_account_id, archived) VALUES ('proj-opt', 'acc-1', 0);
+    `);
+    const d1Shim = createD1Shim(sqlite);
+    const registry = new D1ProjectRegistry(d1Shim as unknown as D1Database);
+
+    await registry.setRepoAdminAutoAdmin("proj-opt", true);
+    const result = await registry.getRepoAdminAutoAdmin("proj-opt");
+    expect(result).toBe(true);
+  });
+
+  it("returns false for an unknown projectId (fail-closed)", async () => {
+    const sqlite = createTestDb();
+    const d1Shim = createD1Shim(sqlite);
+    const registry = new D1ProjectRegistry(d1Shim as unknown as D1Database);
+
+    const result = await registry.getRepoAdminAutoAdmin("does-not-exist");
+    expect(result).toBe(false);
+  });
+
+  it("returns false for an archived project even after flag is set (get filters archived=0)", async () => {
+    const sqlite = createTestDb();
+    sqlite.exec(`
+      INSERT INTO _projects (project_id, cloudflare_account_id, archived) VALUES ('proj-arch', 'acc-1', 1);
+    `);
+    const d1Shim = createD1Shim(sqlite);
+    const registry = new D1ProjectRegistry(d1Shim as unknown as D1Database);
+
+    // set targets by project_id only (no archived filter), so the flag gets written
+    await registry.setRepoAdminAutoAdmin("proj-arch", true);
+    // get filters archived=0, so archived projects always return false
+    const result = await registry.getRepoAdminAutoAdmin("proj-arch");
+    expect(result).toBe(false);
   });
 });
