@@ -215,16 +215,4 @@ describe("AdminGrantsStore", () => {
       expect(after.cnt).toBe(before.cnt);
     });
   });
-
-  describe("SQL conflict clause guard", () => {
-    it("grant SQL includes partial-index conflict clause in correct position", () => {
-      // Build a representative grant SQL string and verify it contains the
-      // conflict-target predicate BEFORE DO NOTHING (not after).
-      // This guards against accidentally switching to onConflictDoNothing()
-      // which emits the predicate after DO NOTHING (syntax error in SQLite).
-      const sql =
-        "INSERT INTO _admin_grants (project_id, github_host, github_user_id, github_login_snapshot, granted_by_user_id, granted_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (project_id, github_host, github_user_id) WHERE revoked_at IS NULL DO NOTHING";
-      expect(sql.includes("WHERE revoked_at IS NULL DO NOTHING")).toBe(true);
-    });
-  });
 });

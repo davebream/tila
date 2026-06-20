@@ -17,8 +17,16 @@ export interface GrantParams {
   grantedByUserId?: number;
 }
 
+import { and, eq, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { adminGrants } from "./schema";
+
 export class AdminGrantsStore {
-  constructor(private db: D1Database) {}
+  private drizzle;
+
+  constructor(private db: D1Database) {
+    this.drizzle = drizzle(this.db);
+  }
 
   /**
    * Idempotent grant. Uses a raw parameterized SQL string with the partial
@@ -59,32 +67,37 @@ export class AdminGrantsStore {
   ): Promise<void> {
     const revokedAt = Math.floor(Date.now() / 1000);
 
-    await this.db
-      .prepare(
-        "UPDATE _admin_grants SET revoked_at = ?, revoked_by_user_id = ? WHERE project_id = ? AND github_host = ? AND github_user_id = ? AND revoked_at IS NULL",
-      )
-      .bind(
-        revokedAt,
-        revokedByUserId ?? null,
-        projectId,
-        githubHost,
-        githubUserId,
-      )
-      .run();
+    await this.drizzle
+      .update(adminGrants)
+      .set({
+        revoked_at: revokedAt,
+        revoked_by_user_id: revokedByUserId ?? null,
+      })
+      .where(
+        and(
+          eq(adminGrants.project_id, projectId),
+          eq(adminGrants.github_host, githubHost),
+          eq(adminGrants.github_user_id, githubUserId),
+          isNull(adminGrants.revoked_at),
+        ),
+      );
   }
 
   /**
    * List all active (non-revoked) grants for a project.
    */
   async list(projectId: string): Promise<AdminGrantRow[]> {
-    const result = await this.db
-      .prepare(
-        "SELECT * FROM _admin_grants WHERE project_id = ? AND revoked_at IS NULL",
-      )
-      .bind(projectId)
-      .all<AdminGrantRow>();
+    const rows = await this.drizzle
+      .select()
+      .from(adminGrants)
+      .where(
+        and(
+          eq(adminGrants.project_id, projectId),
+          isNull(adminGrants.revoked_at),
+        ),
+      );
 
-    return result.results;
+    return rows as AdminGrantRow[];
   }
 
   /**
@@ -95,13 +108,19 @@ export class AdminGrantsStore {
     githubHost: string,
     githubUserId: number,
   ): Promise<boolean> {
-    const result = await this.db
-      .prepare(
-        "SELECT 1 FROM _admin_grants WHERE project_id = ? AND github_host = ? AND github_user_id = ? AND revoked_at IS NULL LIMIT 1",
+    const rows = await this.drizzle
+      .select()
+      .from(adminGrants)
+      .where(
+        and(
+          eq(adminGrants.project_id, projectId),
+          eq(adminGrants.github_host, githubHost),
+          eq(adminGrants.github_user_id, githubUserId),
+          isNull(adminGrants.revoked_at),
+        ),
       )
-      .bind(projectId, githubHost, githubUserId)
-      .all();
+      .limit(1);
 
-    return result.results.length > 0;
+    return rows.length > 0;
   }
 }
