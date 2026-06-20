@@ -23,6 +23,7 @@ vi.mock("@tila/backend-d1", () => ({
 import {
   __clearAdminGrantsCache,
   requireProjectAdmin,
+  revokeAdminGrantInCache,
 } from "./require-project-admin";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -284,6 +285,29 @@ describe("requireProjectAdmin middleware", () => {
       const app2 = createTestApp(makeSessionToken());
       expect((await fetchStatus(app2)).status).toBe(200);
       expect(mockIsActiveAdmin).toHaveBeenCalledTimes(1);
+    });
+
+    it("revokeAdminGrantInCache: DELETE semantics — post-purge allows when D1 flips to true", async () => {
+      // Seed a positive cache entry by driving a passing admin request.
+      mockIsActiveAdmin.mockResolvedValueOnce(true);
+      const app1 = createTestApp(makeSessionToken());
+      const { status: status1 } = await fetchStatus(app1);
+      expect(status1).toBe(200);
+      expect(mockIsActiveAdmin).toHaveBeenCalledTimes(1);
+
+      // Now purge the cache entry for this user.
+      // cacheKey format: `${projectId}:${githubHost}:${githubUserId}` = "proj-1:github.com:4242"
+      revokeAdminGrantInCache("proj-1:github.com:4242");
+
+      // Flip the mock so D1 returns true on the NEXT lookup — proves the entry was
+      // DELETED (not set to false): a set-to-false implementation would still deny.
+      mockIsActiveAdmin.mockResolvedValueOnce(true);
+      const app2 = createTestApp(makeSessionToken());
+      const { status: status2 } = await fetchStatus(app2);
+      // The cache was purged → D1 re-queried → returns true → ALLOWED.
+      expect(status2).toBe(200);
+      // isActiveAdmin must have been called again (fresh D1 round-trip), not served from cache.
+      expect(mockIsActiveAdmin).toHaveBeenCalledTimes(2);
     });
 
     it("revocation observed once cached entry expires (distinct triples)", async () => {
