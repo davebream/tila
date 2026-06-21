@@ -324,7 +324,7 @@ describe("exchangeGitHubToken", () => {
         JSON.stringify({
           ok: false,
           error: {
-            code: "REPO_NOT_ALLOWED",
+            code: "repo-not-allowed",
             message: "not allowed",
             retryable: false,
           },

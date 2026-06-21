@@ -20,14 +20,10 @@ describe("exitCodeFor", () => {
     );
   });
 
-  it("maps RATE_LIMITED to NETWORK_ERROR (2)", () => {
+  it("maps rate-limited to NETWORK_ERROR (2)", () => {
     expect(exitCodeFor(TILA_ERRORS.RATE_LIMITED)).toBe(
       EXIT_CODES.NETWORK_ERROR,
     );
-  });
-
-  it("maps internal to NETWORK_ERROR (2)", () => {
-    expect(exitCodeFor(TILA_ERRORS.INTERNAL)).toBe(EXIT_CODES.NETWORK_ERROR);
   });
 
   it("maps internal (kebab) to NETWORK_ERROR (2)", () => {
@@ -38,7 +34,7 @@ describe("exitCodeFor", () => {
     expect(exitCodeFor(TILA_ERRORS.STALE_FENCE)).toBe(EXIT_CODES.USER_ERROR);
   });
 
-  it("maps UNAUTHORIZED to USER_ERROR (1)", () => {
+  it("maps unauthorized to USER_ERROR (1)", () => {
     expect(exitCodeFor(TILA_ERRORS.UNAUTHORIZED)).toBe(EXIT_CODES.USER_ERROR);
   });
 
@@ -46,7 +42,7 @@ describe("exitCodeFor", () => {
     expect(exitCodeFor(TILA_ERRORS.ALREADY_HELD)).toBe(EXIT_CODES.USER_ERROR);
   });
 
-  it("maps VALIDATION_ERROR to USER_ERROR (1)", () => {
+  it("maps validation-error to USER_ERROR (1)", () => {
     expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR)).toBe(
       EXIT_CODES.USER_ERROR,
     );

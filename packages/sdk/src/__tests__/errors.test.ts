@@ -82,10 +82,43 @@ const SDK_LOCAL_WIRE_CODES = new Set<string>([
 describe("toTilaErrorCode normalizer", () => {
   it("passes through known wire codes unchanged", () => {
     expect(toTilaErrorCode("unauthorized")).toBe("unauthorized");
+    expect(toTilaErrorCode("rate-limited")).toBe("rate-limited");
     expect(toTilaErrorCode("stale-fence")).toBe("stale-fence");
     expect(toTilaErrorCode("not-found")).toBe("not-found");
     expect(toTilaErrorCode("UNKNOWN")).toBe("UNKNOWN");
     expect(toTilaErrorCode("do-unreachable")).toBe("do-unreachable");
+  });
+
+  it("passes through worker-emitted kebab auth and middleware codes", () => {
+    const workerWireCodes = [
+      "unauthorized",
+      "session-expired",
+      "rate-limited",
+      "hmac-not-configured",
+      "session-revoked",
+      "permission-denied",
+      "project-mismatch",
+      "csrf-missing-origin",
+      "csrf-origin-mismatch",
+      "repo-not-allowed",
+      "github-auth-failed",
+      "token-name-conflict",
+      "token-not-found",
+      "validation-error",
+      "internal",
+    ] as const;
+
+    for (const code of workerWireCodes) {
+      expect(toTilaErrorCode(code)).toBe(code);
+      expect(toTilaErrorCode(code)).not.toBe("UNKNOWN");
+    }
+  });
+
+  it("normalizes stale SCREAMING worker codes to UNKNOWN", () => {
+    expect(toTilaErrorCode("UNAUTHORIZED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("RATE_LIMITED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("HMAC_NOT_CONFIGURED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("VALIDATION_ERROR")).toBe("UNKNOWN");
   });
 
   it("normalizes unknown wire strings to UNKNOWN", () => {
@@ -156,7 +189,52 @@ describe("TilaApiError.code is TilaErrorCode", () => {
   });
 });
 
-describe("TILA_ERRORS orphan-code reconciliation (#114, #117)", () => {
+describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
+  const SDK_ONLY_ERROR_CODES = new Set<string>([
+    "artifact-get-failed",
+    "artifact-get-latest-failed",
+    "UNKNOWN",
+  ]);
+
+  const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "unauthorized",
+    "session-expired",
+    "rate-limited",
+    "permission-denied",
+    "project-mismatch",
+    "csrf-missing-origin",
+    "csrf-origin-mismatch",
+    "do-unreachable",
+    "repo-not-allowed",
+    "github-auth-failed",
+    "hmac-not-configured",
+    "session-revoked",
+    "token-name-conflict",
+    "token-not-found",
+    "stale-fence",
+    "not-found",
+    "gate-already-settled",
+    "no-fence",
+    "gate-fence-conflict",
+    "internal",
+    "constraint-violation",
+    "idempotency-key-conflict",
+    "validation-error",
+    "already-held",
+    "renew-failed",
+    "release-ownership-denied",
+    "bad-request",
+    "missing-query",
+    "invalid-query",
+    "invalid-slot",
+    "invalid-relationship-type",
+    "token-authz-denied",
+    "repo-access-denied",
+    "repo-not-found",
+    "github-api-timeout",
+    "github-api-error",
+  ]);
+
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {
     expect(Object.values(TILA_ERRORS)).not.toContain("TOKEN_AUTHZ_DENIED");
   });
@@ -166,6 +244,21 @@ describe("TILA_ERRORS orphan-code reconciliation (#114, #117)", () => {
       ([, value]) => value === "token-authz-denied",
     );
     expect(hits).toEqual([["REPO_TOKEN_AUTHZ_DENIED", "token-authz-denied"]]);
+  });
+
+  it("maps every non-SDK-only value to a server-emitted wire code", () => {
+    const unmappedServerCodes = Object.entries(TILA_ERRORS).filter(
+      ([, value]) =>
+        !SDK_ONLY_ERROR_CODES.has(value) &&
+        !SERVER_EMITTED_TILA_ERROR_CODES.has(value),
+    );
+
+    expect(
+      unmappedServerCodes,
+      `TILA_ERRORS values not present in server emission set: ${JSON.stringify(
+        unmappedServerCodes,
+      )}`,
+    ).toEqual([]);
   });
 
   it("has no two keys mapping to the same wire value", () => {

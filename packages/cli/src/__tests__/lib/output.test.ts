@@ -93,6 +93,23 @@ describe("output utilities", () => {
     });
   });
 
+  describe("describeCliError", () => {
+    it("adds the rate-limit remediation hint for kebab wire codes", async () => {
+      const { TILA_ERRORS, TilaApiError } = await import("tila-sdk");
+      const { describeCliError } = await import("../../lib/output");
+
+      const result = describeCliError(
+        new TilaApiError(429, TILA_ERRORS.RATE_LIMITED, "too many", true),
+      );
+
+      expect(result).toEqual({
+        code: "rate-limited",
+        message: "too many",
+        hint: "The server is rate-limiting requests. Wait a moment and retry.",
+      });
+    });
+  });
+
   describe("formatStatus", () => {
     it("returns a string for known statuses", async () => {
       const { formatStatus } = await import("../../lib/output");

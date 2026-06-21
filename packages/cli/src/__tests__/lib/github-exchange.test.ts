@@ -206,6 +206,23 @@ describe("resolveGithubRepoToken", () => {
     ).rejects.toThrow(/not registered/i);
   });
 
+  it("shows HMAC setup guidance when the worker returns hmac-not-configured", async () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(resolveAppUserToken).mockResolvedValueOnce("ghu_test");
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        error: { code: "hmac-not-configured", message: "missing HMAC key" },
+      }),
+    });
+
+    await expect(
+      resolveGithubRepoToken(baseConfig, "/tmp/tila"),
+    ).rejects.toThrow(/GITHUB_SESSION_HMAC_KEY/);
+  });
+
   // AC-3 regression (#103): the 403 auth-failure message must name the real
   // recovery command `tila repos register`, never the phantom "tila admin CLI".
   // This drives resolveGithubRepoToken's res.status === 403 branch directly
