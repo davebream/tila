@@ -26,7 +26,7 @@ export function validateField(raw: string): { key: string; value: string } {
       ),
       {
         name: "TilaApiError",
-        code: TILA_ERRORS.VALIDATION_ERROR_DO,
+        code: TILA_ERRORS.VALIDATION_ERROR,
       },
     );
     throw err;
@@ -40,7 +40,7 @@ export function validateField(raw: string): { key: string; value: string } {
       ),
       {
         name: "TilaApiError",
-        code: TILA_ERRORS.VALIDATION_ERROR_DO,
+        code: TILA_ERRORS.VALIDATION_ERROR,
       },
     );
     throw err;
@@ -65,7 +65,7 @@ export function parseFieldArg(
       const e = err as { code?: string; message?: string };
       printJsonError(
         e.message ?? String(err),
-        e.code ?? TILA_ERRORS.VALIDATION_ERROR_DO,
+        e.code ?? TILA_ERRORS.VALIDATION_ERROR,
         "Use key=value format, e.g. --field status=open",
         1,
       );

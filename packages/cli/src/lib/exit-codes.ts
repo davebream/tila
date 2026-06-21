@@ -32,8 +32,7 @@ export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
  */
 const NETWORK_ERROR_CODES = new Set<string>([
   TILA_ERRORS.DO_UNREACHABLE, // "do-unreachable"
-  TILA_ERRORS.RATE_LIMITED, // "RATE_LIMITED"
-  TILA_ERRORS.INTERNAL_ERROR, // "INTERNAL_ERROR"
+  TILA_ERRORS.RATE_LIMITED, // "rate-limited"
   TILA_ERRORS.INTERNAL, // "internal"
   // SDK-generated fetch/network failures (no HTTP code from server)
   "fetch-failed",
