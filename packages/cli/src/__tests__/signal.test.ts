@@ -15,17 +15,15 @@ describe("signal error code mapping (C1↔C2 seam)", () => {
     expect(exitCodeFor(TILA_ERRORS.DO_UNREACHABLE)).toBe(
       EXIT_CODES.NETWORK_ERROR,
     );
-    expect(exitCodeFor(TILA_ERRORS.INTERNAL_ERROR)).toBe(
-      EXIT_CODES.NETWORK_ERROR,
-    );
+    expect(exitCodeFor(TILA_ERRORS.INTERNAL)).toBe(EXIT_CODES.NETWORK_ERROR);
     expect(exitCodeFor(TILA_ERRORS.RATE_LIMITED)).toBe(
       EXIT_CODES.NETWORK_ERROR,
     );
   });
 
-  it("VALIDATION_ERROR_DO (used for invalid payload) is classified as USER_ERROR (exit 1)", () => {
-    // signal send :54 INVALID_PAYLOAD → TILA_ERRORS.VALIDATION_ERROR_DO after C2
-    expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR_DO)).toBe(
+  it("VALIDATION_ERROR (used for invalid payload) is classified as USER_ERROR (exit 1)", () => {
+    // signal send :54 INVALID_PAYLOAD → TILA_ERRORS.VALIDATION_ERROR after C2
+    expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR)).toBe(
       EXIT_CODES.USER_ERROR,
     );
   });

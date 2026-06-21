@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
+import { TILA_ERRORS } from "tila-sdk";
 import { resolveAppUserToken } from "./github-oauth-device";
 
 interface SessionCache {
@@ -236,7 +237,7 @@ export async function resolveGithubRepoToken(
       );
     }
 
-    if (errorCode === "HMAC_NOT_CONFIGURED") {
+    if (errorCode === TILA_ERRORS.HMAC_NOT_CONFIGURED) {
       throw new Error(
         "HMAC signing key not configured on the tila Worker.\n\nAn admin must set the GITHUB_SESSION_HMAC_KEY secret:\n  npx wrangler secret put GITHUB_SESSION_HMAC_KEY\n\nGenerate a 32-byte base64url key:\n  openssl rand -base64 32",
       );

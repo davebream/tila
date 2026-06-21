@@ -1,6 +1,6 @@
 import { EntityRelationshipTypeSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
-import { TilaApiError } from "tila-sdk";
+import { TILA_ERRORS, TilaApiError } from "tila-sdk";
 import { resolveContext } from "../context";
 import { parseFieldArg } from "../lib/field-validator";
 import {
@@ -85,7 +85,7 @@ const relationshipCommand = defineCommand({
         if (!resolvedType) {
           const msg = `Invalid relationship type "${rawType}". Accepted: ${CANONICAL_TYPES}`;
           if (args.json) {
-            printJsonError(msg, "VALIDATION_ERROR");
+            printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
           } else {
             console.error(msg);
             process.exit(1);
@@ -150,7 +150,7 @@ const relationshipCommand = defineCommand({
           if (!rt) {
             const msg = `Invalid relationship type "${args.type}". Accepted: ${CANONICAL_TYPES}`;
             if (args.json) {
-              printJsonError(msg, "VALIDATION_ERROR");
+              printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
             } else {
               console.error(msg);
               process.exit(1);
@@ -233,7 +233,7 @@ const relationshipCommand = defineCommand({
         if (!resolvedType) {
           const msg = `Invalid relationship type "${rawType}". Accepted: ${CANONICAL_TYPES}`;
           if (args.json) {
-            printJsonError(msg, "VALIDATION_ERROR");
+            printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
           } else {
             console.error(msg);
             process.exit(1);
@@ -303,7 +303,7 @@ export default defineCommand({
           if (args.json) {
             printJsonError(
               "--link-parent requires --parent",
-              "VALIDATION_ERROR",
+              TILA_ERRORS.VALIDATION_ERROR,
             );
           } else {
             console.error("--link-parent requires --parent");
@@ -319,7 +319,7 @@ export default defineCommand({
         if (!id.trim() || id.includes("/")) {
           const msg = "Task id must not contain '/' or be empty.";
           if (args.json) {
-            printJsonError(msg, "VALIDATION_ERROR");
+            printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
           } else {
             console.error(msg);
             process.exit(1);

@@ -106,10 +106,10 @@ describe("failWithCliError exit code routing", () => {
     expect(exitSpy).toHaveBeenCalledWith(EXIT_CODES.USER_ERROR);
   });
 
-  it("exits with NETWORK_ERROR (2) for INTERNAL_ERROR in non-json mode", () => {
+  it("exits with NETWORK_ERROR (2) for internal in non-json mode", () => {
     const err = Object.assign(new Error("internal"), {
       name: "TilaApiError",
-      code: TILA_ERRORS.INTERNAL_ERROR,
+      code: TILA_ERRORS.INTERNAL,
     });
     failWithCliError(err, false);
     expect(exitSpy).toHaveBeenCalledWith(EXIT_CODES.NETWORK_ERROR);

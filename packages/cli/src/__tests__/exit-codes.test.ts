@@ -26,10 +26,8 @@ describe("exitCodeFor", () => {
     );
   });
 
-  it("maps INTERNAL_ERROR to NETWORK_ERROR (2)", () => {
-    expect(exitCodeFor(TILA_ERRORS.INTERNAL_ERROR)).toBe(
-      EXIT_CODES.NETWORK_ERROR,
-    );
+  it("maps internal to NETWORK_ERROR (2)", () => {
+    expect(exitCodeFor(TILA_ERRORS.INTERNAL)).toBe(EXIT_CODES.NETWORK_ERROR);
   });
 
   it("maps internal (kebab) to NETWORK_ERROR (2)", () => {
