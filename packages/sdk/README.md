@@ -356,18 +356,15 @@ try {
 
 ### Error Code Conventions
 
-tila uses two wire-format conventions for error codes:
+All HTTP `error.code` values use **kebab-case** (`^[a-z][a-z0-9-]*$`), e.g. `"unauthorized"`, `"stale-fence"`, `"validation-error"`.
 
-- **Worker/auth layer:** `SCREAMING_SNAKE_CASE` -- e.g., `"UNAUTHORIZED"`, `"SESSION_EXPIRED"`, `"RATE_LIMITED"`
-- **DO (Durable Object) layer:** `kebab-case` -- e.g., `"stale-fence"`, `"not-found"`, `"already-held"`
-
-The `TILA_ERRORS` constant object normalizes both under typed keys so you never hardcode string literals:
+The `TILA_ERRORS` constant object maps typed keys to exact wire strings so you never hardcode literals:
 
 ```typescript
-TILA_ERRORS.UNAUTHORIZED    // "UNAUTHORIZED"  (worker layer)
-TILA_ERRORS.STALE_FENCE     // "stale-fence"   (DO layer)
-TILA_ERRORS.NOT_FOUND       // "not-found"     (DO layer)
-TILA_ERRORS.RATE_LIMITED    // "RATE_LIMITED"  (worker layer)
+TILA_ERRORS.UNAUTHORIZED    // "unauthorized"
+TILA_ERRORS.STALE_FENCE     // "stale-fence"
+TILA_ERRORS.NOT_FOUND       // "not-found"
+TILA_ERRORS.RATE_LIMITED    // "rate-limited"
 ```
 
 ### Retry Wrapper

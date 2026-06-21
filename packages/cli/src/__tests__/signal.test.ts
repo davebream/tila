@@ -21,9 +21,9 @@ describe("signal error code mapping (C1↔C2 seam)", () => {
     );
   });
 
-  it("VALIDATION_ERROR_DO (used for invalid payload) is classified as USER_ERROR (exit 1)", () => {
-    // signal send :54 INVALID_PAYLOAD → TILA_ERRORS.VALIDATION_ERROR_DO after C2
-    expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR_DO)).toBe(
+  it("VALIDATION_ERROR (used for invalid payload) is classified as USER_ERROR (exit 1)", () => {
+    // signal send :54 INVALID_PAYLOAD → TILA_ERRORS.VALIDATION_ERROR after C2
+    expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR)).toBe(
       EXIT_CODES.USER_ERROR,
     );
   });

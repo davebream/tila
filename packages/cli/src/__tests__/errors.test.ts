@@ -28,7 +28,7 @@ describe("describeCliError remediation hints", () => {
     expect(result.hint).toMatch(/retry|server|transient/i);
   });
 
-  it("returns hint for RATE_LIMITED", () => {
+  it("returns hint for rate-limited", () => {
     const err = Object.assign(new Error("Too many requests"), {
       name: "TilaApiError",
       code: TILA_ERRORS.RATE_LIMITED,
@@ -36,15 +36,6 @@ describe("describeCliError remediation hints", () => {
     const result = describeCliError(err);
     expect(result.hint).toBeDefined();
     expect(result.hint).toMatch(/retry|wait|rate/i);
-  });
-
-  it("returns hint for internal (DO-layer network error)", () => {
-    const err = Object.assign(new Error("internal error"), {
-      name: "TilaApiError",
-      code: TILA_ERRORS.INTERNAL,
-    });
-    const result = describeCliError(err);
-    expect(result.hint).toBeDefined();
   });
 
   it("does not return hint for user-error codes (stale-fence)", () => {

@@ -1,16 +1,14 @@
 /**
  * Typed error code constants for all tila API error responses.
  *
- * Keys are normalized identifiers. Values are the exact wire-format strings
- * returned by the worker and DO layers.
- *
- * Server-emitted wire values use kebab-case. SCREAMING_SNAKE_CASE is reserved
- * for local fallback or CLI-only error labels that are not returned by the API.
+ * Keys are normalized identifiers. Values are the exact kebab-case wire-format
+ * strings returned by the worker and DO layers.
  */
 export const TILA_ERRORS = {
   // Auth / middleware (worker layer)
   UNAUTHORIZED: "unauthorized",
   SESSION_EXPIRED: "session-expired",
+  SESSION_REVOKED: "session-revoked",
   RATE_LIMITED: "rate-limited",
   PERMISSION_DENIED: "permission-denied",
   PROJECT_MISMATCH: "project-mismatch",
@@ -21,11 +19,12 @@ export const TILA_ERRORS = {
   REPO_NOT_ALLOWED: "repo-not-allowed",
   GITHUB_AUTH_FAILED: "github-auth-failed",
   HMAC_NOT_CONFIGURED: "hmac-not-configured",
-  SESSION_REVOKED: "session-revoked",
   // Token endpoint specific
   TOKEN_NAME_CONFLICT: "token-name-conflict",
   TOKEN_NOT_FOUND: "token-not-found",
-  // DO errors (project-do-router)
+  // Validation (worker + DO layers)
+  VALIDATION_ERROR: "validation-error",
+  // DO errors (project-do-router — kebab-case wire values)
   STALE_FENCE: "stale-fence",
   NOT_FOUND: "not-found",
   GATE_ALREADY_SETTLED: "gate-already-settled",
@@ -34,8 +33,6 @@ export const TILA_ERRORS = {
   INTERNAL: "internal",
   CONSTRAINT_VIOLATION: "constraint-violation",
   IDEMPOTENCY_KEY_CONFLICT: "idempotency-key-conflict",
-  // Shared validation error emitted by worker routes and DO-layer adapters.
-  VALIDATION_ERROR_DO: "validation-error",
   ALREADY_HELD: "already-held",
   RENEW_FAILED: "renew-failed",
   RELEASE_OWNERSHIP_DENIED: "release-ownership-denied",

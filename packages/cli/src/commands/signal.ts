@@ -55,7 +55,7 @@ const sendCommand = defineCommand({
         // :54 — use real TILA_ERRORS code instead of ad-hoc "INVALID_PAYLOAD"
         printJsonError(
           "Invalid JSON in --payload",
-          TILA_ERRORS.VALIDATION_ERROR_DO,
+          TILA_ERRORS.VALIDATION_ERROR,
           'Pass valid JSON, e.g. --payload \'{"key":"value"}\'',
           1,
         );

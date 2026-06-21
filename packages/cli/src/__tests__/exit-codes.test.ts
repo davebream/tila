@@ -43,7 +43,7 @@ describe("exitCodeFor", () => {
   });
 
   it("maps validation-error to USER_ERROR (1)", () => {
-    expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR_DO)).toBe(
+    expect(exitCodeFor(TILA_ERRORS.VALIDATION_ERROR)).toBe(
       EXIT_CODES.USER_ERROR,
     );
   });
