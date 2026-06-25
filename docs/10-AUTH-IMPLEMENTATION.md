@@ -1032,4 +1032,75 @@ Cookie-authenticated mutation requests require matching `Origin` header (lines 1
 
 ---
 
+## 12. Multi-Instance Auth Surfaces (epic #122)
+
+Epic #122 added the server-side mechanisms that let one client safely address many independent
+deployments. The consolidated narrative — the client `~/.tila` store, resolution precedence, the
+revocation SLA, the threat model, and the migration guide — lives in
+[`docs/13-MULTI-INSTANCE-AUTH.md`](13-MULTI-INSTANCE-AUTH.md). This section documents the
+server-side implementation detail.
+
+> **D1 migration location.** All epic #122 D1 migrations live under
+> `packages/worker/migrations/global/` (the global D1 store), even though D1 is conceptually owned
+> by `@tila/backend-d1`. Do not look for them under `packages/backend-d1/`.
+
+### Instance-ID binding (WI-E)
+
+Each deployment has a stable `instance_id` stored as a D1 singleton in `_deployment_meta`
+(`migrations/global/0017_deployment_meta.sql`, one row enforced by `CHECK (id = 1)`). It is resolved
+once per isolate by `ensureDeploymentInstanceId(db)` (`packages/worker/src/lib/deployment-instance.ts`)
+and bound into every minted session token as the `instance_id` claim
+(`packages/worker/src/routes/auth-github.ts`). The auth middleware
+(`packages/worker/src/middleware/auth.ts`) compares the claimed id to the running deployment's:
+a mismatch is rejected with `instance-mismatch` (`retryable: false`); an absent claim (legacy
+pre-binding token) is accepted; an unverifiable deployment id with a present claim fails closed
+(`instance-mismatch`, `retryable: true`). This is the cross-deployment replay defense.
+
+### Subject-level revocation (WI-C)
+
+`_revoked_subjects` (`migrations/global/0019_revoked_subjects.sql`) is a bulk kill-switch keyed by
+the canonical principal `(project_id, identity_host, subject_id)`. The principal is derived
+identically at write and verify time via `canonicalizePrincipal(host, subject)`
+(`packages/backend-d1/src/principal.ts`). The revoke upsert is monotonic
+(`revoked_before = MAX(revoked_before, excluded.revoked_before)`,
+`packages/backend-d1/src/revoked-subjects-store.ts`). The middleware reads it per request and denies
+`subject-revoked` when the token predates the cutoff. This complements the per-`jti` kill-switch
+(`_revoked_jti`, decision C9 in [`docs/01-DECISIONS.md`](01-DECISIONS.md)). The revocation SLA and GC
+are documented in [`docs/13`](13-MULTI-INSTANCE-AUTH.md) § Revocation and SLA.
+
+### Tiered session TTL (WI-H)
+
+Session TTL is now permission-tiered (`SESSION_TTL_SECONDS_BY_TIER` in
+`packages/worker/src/config.ts`): `read` 3600s, `write` 900s, `admin` 300s. This supersedes the flat
+1-hour expiry noted in §3 for write/admin sessions — higher privilege expires sooner. Destructive
+admin-tier routes additionally re-verify the user's live GitHub permission
+(`reverifySessionPermission`, `packages/worker/src/lib/permission-recheck.ts`; fail-closed on D1
+error, fail-open with backoff on a GitHub transient error), denying `permission-revoked` when access
+was withdrawn after the session was minted.
+
+### OIDC principals (WI-B2)
+
+Generic (non-GitHub) OIDC exchange authorizes a `(project_id, issuer, subject)` triple from
+`_oidc_principals` (`migrations/global/0021_oidc_principals.sql`), the OIDC analog of
+`_project_repos`, defaulting to `permission='read'`. The project's `oidc_issuer` / `oidc_audience`
+columns (`migrations/global/0020_projects_oidc.sql`) configure the exchange; `POST /exchange-oidc`
+returns `oidc-not-configured` when they are absent.
+
+### DPoP sender-constraining (WI-G)
+
+A session token may be sender-constrained to a JWK thumbprint stored as the `cnf.jkt` claim, with the
+thumbprint column `_tokens.cnf_jkt` (`migrations/global/0022_tokens_cnf_jkt.sql`). When present, the
+middleware requires a matching DPoP proof per request; absent binding is accepted (legacy). Detail:
+[`docs/07-GITHUB-SCOPED-AUTH.md`](07-GITHUB-SCOPED-AUTH.md) § DPoP Sender-Constrained Tokens.
+
+### `HASH_PEPPER` rotation
+
+Setting or rotating `HASH_PEPPER` re-hashes every token digest (see §2 Hashing) and is **not
+zero-downtime** — existing D1 API tokens must be re-issued and sessions re-authenticate within their
+TTL. A dual-verify path is a tracked follow-up, not yet implemented. Migration guidance:
+[`docs/13`](13-MULTI-INSTANCE-AUTH.md) § Migration Guide; operational runbook:
+[`docs/05-OPERATIONS.md`](05-OPERATIONS.md) § Auth: Revocation & Pepper Rotation.
+
+---
+
 **End of Auth Implementation Documentation**

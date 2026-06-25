@@ -419,3 +419,14 @@ Migration **copies** legacy data into `~/.tila` and leaves the original `.tila/.
 legacy files — they still resolve via the legacy-fallback rung. Once you have verified the new
 store works, the legacy files are safe to delete.
 
+## Multi-Instance Deployments
+
+GitHub-scoped auth is **per-deployment-sovereign**: each tila deployment validates only its own
+sessions, against its own D1, and binds every session it mints to its own stable `instance_id` so a
+session minted by one deployment cannot be replayed against another. There is no central control
+plane — addressing many deployments from one machine is a client-side concern, handled by the
+`~/.tila` registry and the resolver precedence described above (§ Legacy migration).
+
+For the full multi-instance model — the four-tier credential store, the revocation SLA, the threat
+model, and the migration guide — see [`docs/13-MULTI-INSTANCE-AUTH.md`](13-MULTI-INSTANCE-AUTH.md).
+
