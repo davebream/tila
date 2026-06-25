@@ -139,7 +139,10 @@ function envOr(name: string): string | undefined {
  * keychain (from the OS keychain via AuthStore) credential sources.
  */
 function extractToken(instance: ResolvedInstance): string {
-  if (instance.credential.source === "inline-token") {
+  if (
+    instance.credential.source === "inline-token" ||
+    instance.credential.source === "legacy"
+  ) {
     return instance.credential.token;
   }
   // keychain source: CredentialRecord

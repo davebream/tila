@@ -373,3 +373,49 @@ tila token revoke my-old-token
 
 Update any CI secrets or scripts to use the new token after rotation.
 
+## Legacy migration (WI-M)
+
+The home-directory store (`~/.tila`: `instances.toml` registry + OS keychain credentials +
+`infra/<slug>.toml` per-slug infra) is back-compatible with the older project-local layout
+(`.tila/.env`, `.tila/.session`, and a flat `.tila/infra.toml` / `~/.tila/infra.toml`). Migration
+is **additive and non-destructive** — nothing is deleted.
+
+### Legacy-fallback resolver precedence
+
+The instance resolver tries sources in priority order: explicit flag (`--token`/`--instance`) →
+env (`TILA_TOKEN`, and `TILA_API_TOKEN` as an alias) → repo pointer (`.tila/config.toml`) →
+current context (the registry) → **legacy fallback** (lowest priority). The legacy rung reads a
+discovered `.tila/.env` / `.tila/.session` token and resolves it as an explicit-possession
+credential (like an inline `--token`) bound to the repo's `worker_url`. Because it is the lowest
+rung, **any trusted registry instance always wins** — so once an instance is registered, the
+machine store is used and a stale legacy token can never cause a 401. A corrupt legacy file is
+skipped (it never crashes a command), and the legacy token never appears in `tila doctor` output.
+
+### Promotion: lazy and eager
+
+- **Lazy** — on a user-triggered write path (`tila link`, `tila switch`) the CLI copies any legacy
+  credential and infra into `~/.tila` after the command succeeds. Never on read-only commands,
+  and **never under CI or a non-interactive shell**.
+- **Eager** — `tila auth migrate` does the same for all discovered legacy data and splits each flat
+  `infra.toml` into the per-slug store (non-secret metadata to `~/.tila/infra/<slug>.toml`, secrets
+  to the OS keychain). It is interactive-only and refuses under CI / non-TTY.
+
+```bash
+tila auth migrate --dry-run   # show what would be migrated; change nothing
+tila auth migrate             # migrate (prompts for confirmation)
+tila auth migrate --yes       # migrate without the confirmation prompt
+tila auth migrate --json      # machine-readable report
+```
+
+The report lists instances registered, credentials promoted, and infra slugs split. **Secret
+values are never printed** — secrets are referenced by field name only (e.g.
+`hmac_key, sweep_secret promoted to keychain for slug tila`). World-readable legacy files
+(mode looser than `0600`) get a warning advising you to rotate the credential after migrating.
+
+### Rollback (copy-and-leave)
+
+Migration **copies** legacy data into `~/.tila` and leaves the original `.tila/.env`,
+`.tila/.session`, and `infra.toml` files in place. If you need to roll back, just keep using the
+legacy files — they still resolve via the legacy-fallback rung. Once you have verified the new
+store works, the legacy files are safe to delete.
+

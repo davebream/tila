@@ -25,7 +25,10 @@ import type { CredentialRecord, InstanceKey } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { findConfig, writeConfigFile } from "../config";
 import { globalFlagArgs } from "../lib/global-flags";
-import { buildAuthStore } from "../lib/instance-context";
+import {
+  buildAuthStore,
+  maybePromoteLegacyAfterWrite,
+} from "../lib/instance-context";
 import {
   eprintln,
   jsonArg,
@@ -153,6 +156,7 @@ export default defineCommand({
 
       await authStore.putCredential(instanceKey, credRecord);
     } catch (err) {
+      // Note: maybePromoteLegacyAfterWrite is NOT called here — the primary action failed.
       if (err instanceof CredentialWriteRefusedError) {
         const reason = err.message.includes("CI")
           ? "CI environments cannot write credentials to the keychain. Use --token inline or TILA_TOKEN env var."
@@ -197,6 +201,10 @@ export default defineCommand({
         "Warning: Could not update .tila/config.toml with instance_key. Credential was stored successfully.",
       );
     }
+
+    // --- Step 4b: Best-effort lazy legacy promotion (WI-M, C3) ---
+    // Fire-and-forget after the primary write succeeds; errors are swallowed inside.
+    await maybePromoteLegacyAfterWrite(authStore, canonicalUrl);
 
     // --- Step 5: Success output ---
     if (args.json) {

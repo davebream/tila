@@ -46,6 +46,7 @@ vi.mock("../../lib/instance-context", () => ({
   }),
   loadRepoPointer: vi.fn(() => null),
   writeCurrentContext: vi.fn(),
+  maybePromoteLegacyAfterWrite: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ---- citty helper -------------------------------------------------------
@@ -434,5 +435,59 @@ describe("auth token", () => {
       // expected
     }
     expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
+  // Regression: the "legacy" credential variant (WI-M) has no .record —
+  // only a bare .token. These tests verify the handler does NOT crash.
+  it("writes bare legacy token to stdout (legacy branch)", async () => {
+    const LEGACY = "legacy-bare-token-abc123";
+    mockResolveInstanceContext.mockResolvedValue({
+      ok: true,
+      instance: {
+        instance_key: null,
+        worker_url: FIXTURE_URL,
+        credentialSource: "legacy" as const,
+        credential: { source: "legacy" as const, token: LEGACY },
+        trust: { kind: "trusted" as const },
+      },
+      trace: [],
+    });
+
+    const auth = await loadAuth();
+    const tokenCmd = getSubCommand(auth, "token");
+    // Must not throw (regression: accessing .record on legacy would crash)
+    await expect(runCmd(tokenCmd, { json: false })).resolves.toBeUndefined();
+
+    const out = allStdout();
+    expect(out).toBe(`${LEGACY}\n`);
+  });
+
+  it("--json emits legacy shape: { token, token_type:Bearer, expires_at:null, source:'legacy' }", async () => {
+    const LEGACY = "legacy-json-shape-tok-xyz";
+    mockResolveInstanceContext.mockResolvedValue({
+      ok: true,
+      instance: {
+        instance_key: null,
+        worker_url: FIXTURE_URL,
+        credentialSource: "legacy" as const,
+        credential: { source: "legacy" as const, token: LEGACY },
+        trust: { kind: "trusted" as const },
+      },
+      trace: [],
+    });
+
+    const auth = await loadAuth();
+    const tokenCmd = getSubCommand(auth, "token");
+    await runCmd(tokenCmd, { json: true });
+
+    const out = allStdout();
+    const parsed = JSON.parse(out);
+    expect(parsed).toEqual({
+      token: LEGACY,
+      token_type: "Bearer",
+      expires_at: null,
+      instance_key: null,
+      source: "legacy",
+    });
   });
 });

@@ -15,7 +15,11 @@
 import type { InstanceKey } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { globalFlagArgs } from "../lib/global-flags";
-import { buildAuthStore, writeCurrentContext } from "../lib/instance-context";
+import {
+  buildAuthStore,
+  maybePromoteLegacyAfterWrite,
+  writeCurrentContext,
+} from "../lib/instance-context";
 import {
   eprintln,
   jsonArg,
@@ -57,6 +61,10 @@ export default defineCommand({
 
     // Write — the ONLY authorized call-site for current_context mutation
     await writeCurrentContext(authStore, key);
+
+    // Best-effort lazy legacy promotion (WI-M, C3): after switching to the new
+    // instance, migrate any legacy credentials into the store. Errors are swallowed.
+    await maybePromoteLegacyAfterWrite(authStore, instance.worker_url);
 
     if (args.json) {
       printJsonSuccess({ instance_key: key, worker_url: instance.worker_url });

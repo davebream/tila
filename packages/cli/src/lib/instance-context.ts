@@ -13,14 +13,19 @@
  * directly. This is enforced by a unit test in instance-context.test.ts.
  */
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   AuthStore,
   KeyringSecretStore,
   TilaPaths,
   processEnvProbe,
+  promoteLegacy,
   resolveWithTrace,
 } from "@tila/auth-store";
 import type {
+  EnvProbe,
+  LegacyLocations,
   RepoPointer,
   ResolveInput,
   ResolveOutcome,
@@ -28,8 +33,9 @@ import type {
   ResolverEnv,
 } from "@tila/auth-store";
 import type { InstanceKey } from "@tila/schemas";
-import { findConfig } from "../config";
+import { findConfig, findTilaDir } from "../config";
 import { getGlobalFlags } from "./global-flags";
+import { tilaHome } from "./provisioning";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -126,6 +132,11 @@ export interface ResolveInstanceContextOpts {
   env?: ResolverEnv;
   /** Override flag-derived ResolveInput.flags (for testing inline token paths). */
   flags?: ResolveInput["flags"];
+  /**
+   * Override the legacy locations (for testing the legacy-fallback rung).
+   * Production auto-builds from findTilaDir() + tilaHome()/infra.toml.
+   */
+  legacy?: LegacyLocations;
 }
 
 /**
@@ -179,12 +190,22 @@ export async function resolveInstanceContext(
     tilaHomeOverridden: Boolean(process.env.TILA_HOME),
   };
 
+  // Build legacy locations for the lowest-priority legacy-fallback rung (WI-M).
+  // opts.legacy overrides for test injection; production auto-discovers from cwd walk-up.
+  const homeInfraPath = join(tilaHome(), "infra.toml");
+  const builtLegacy: LegacyLocations = {
+    projectTilaDir: findTilaDir(),
+    homeInfraToml: existsSync(homeInfraPath) ? homeInfraPath : null,
+  };
+  const legacy = opts.legacy ?? builtLegacy;
+
   const input: ResolveInput = {
     flags: resolveFlags,
     envReader: (name: string) => process.env[name],
     env,
     authStore,
     repoPointer: repoPointer ?? undefined,
+    legacy,
   };
 
   return resolveWithTrace(input);
@@ -228,4 +249,43 @@ export function toInstanceMetadata(
     credentialSource: resolved.credentialSource,
     trust: resolved.trust,
   };
+}
+
+// ---------------------------------------------------------------------------
+// maybePromoteLegacyAfterWrite — lazy promotion on write paths (WI-M, C3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Best-effort lazy promotion of legacy credentials on user-triggered write paths.
+ *
+ * MUST NOT be called from resolveInstanceContext (read path) — enforced by test.
+ * Call sites: tila link (after putCredential), tila switch (after writeCurrentContext).
+ *
+ * Builds LegacyLocations from the current filesystem state, then calls promoteLegacy.
+ * Swallows all errors — the command's primary action already succeeded.
+ * Skips silently under CI / non-TTY (guard lives inside promoteLegacy).
+ */
+export async function maybePromoteLegacyAfterWrite(
+  authStore: AuthStore,
+  workerUrl: string,
+  env?: EnvProbe,
+): Promise<void> {
+  const homeInfraPath = join(tilaHome(), "infra.toml");
+  const legacy: LegacyLocations = {
+    projectTilaDir: findTilaDir(),
+    homeInfraToml: existsSync(homeInfraPath) ? homeInfraPath : null,
+  };
+  try {
+    await promoteLegacy({
+      authStore,
+      legacy,
+      env: env ?? processEnvProbe,
+      workerUrl,
+    });
+  } catch (err) {
+    // Best-effort: never propagate promotion failure to the calling command.
+    process.stderr.write(
+      `[tila] Warning: lazy legacy promotion failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
 }

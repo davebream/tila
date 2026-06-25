@@ -58,6 +58,24 @@ export {
 export { AuthStore } from "./auth-store.js";
 export type { NewInstanceInput, InfraRecord } from "./auth-store.js";
 
+// WI-M Phase 1 — infra split helper
+export { splitInfraConfig } from "./infra-split.js";
+
+// WI-M Phase 3 — promoteLegacy
+export { promoteLegacy } from "./promote.js";
+export type { PromoteOptions, PromoteResult } from "./promote.js";
+
+// WI-M Phase 1 — legacy credential / infra reader
+export {
+  readLegacyCredential,
+  readLegacyInfraBlobs,
+} from "./legacy-reader.js";
+export type {
+  LegacyLocations,
+  LegacyCredential,
+  LegacyInfraBlob,
+} from "./legacy-reader.js";
+
 // Re-export TilaPaths for consumers that need to construct instances
 export { TilaPaths } from "./paths.js";
 export type { SegmentKind } from "./paths.js";

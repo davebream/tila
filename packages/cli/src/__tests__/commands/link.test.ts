@@ -45,6 +45,7 @@ vi.mock("../../lib/instance-context", () => ({
   resolveInstanceContext: vi.fn(),
   toInstanceMetadata: vi.fn(),
   loadRepoPointer: vi.fn(() => null),
+  maybePromoteLegacyAfterWrite: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../config", () => ({
