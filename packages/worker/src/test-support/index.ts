@@ -37,6 +37,7 @@ export {
 export {
   backendD1MockFactory,
   resetBackendD1Mocks,
+  configureRevokedJtiIsRevoked,
   mockSessionValidate,
   mockSessionCreate,
   mockRevokedJtiIsRevoked,

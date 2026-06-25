@@ -35,8 +35,11 @@ type AppEnv = { Bindings: Env; Variables: HonoVariables };
  *
  * @param env - The Env for this app (from makeAuthEnv)
  * @param opts.mountProjectRoute - Mount projectMiddleware + a stub probe route for
- *   project-mismatch tests. The probe returns 200 on success, allowing the test
- *   to distinguish 200 (match), 403 project-mismatch, or 401 unauthorized.
+ *   project-mismatch tests. The mismatch guard (project.ts:31,36) fires after the
+ *   DO stub is constructed via idFromName/get, but before any stub.fetch() call —
+ *   no DO fetch round-trip occurs on the mismatch path. The probe returns 200 on
+ *   success, allowing the test to distinguish 200 (match), 403 project-mismatch,
+ *   or 401 unauthorized.
  * @param opts.rateLimitStore - Override rate-limit store injected into createAuthMiddleware.
  */
 export function createAuthTestApp(

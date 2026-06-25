@@ -76,8 +76,9 @@ describe("GitHub auth exchange flow", () => {
     //
     // createAuthTestApp with { mountProjectRoute: true } wires:
     //   authMiddleware → protectedRoutes → projectMiddleware → GET /projects/:projectId/_probe
-    // The PROJECT DO stub in makeAuthEnv resolves fetch() with 200 so projectMiddleware
-    // can proceed past the DO stub to reach the project-mismatch guard.
+    // The PROJECT DO stub in makeAuthEnv is constructed via idFromName/get; the
+    // project-mismatch guard (project.ts:31,36) is reached after the stub is constructed
+    // but BEFORE any DO fetch() round-trip — no stub.fetch() call occurs on this path.
     const app = createAuthTestApp(env, { mountProjectRoute: true });
     const token = await authFixtures.mintSessionToken({
       project_id: "project-a",

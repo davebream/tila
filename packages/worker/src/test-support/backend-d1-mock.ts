@@ -30,7 +30,7 @@ export const mockSessionValidate: Mock = vi.fn().mockResolvedValue(null);
 export const mockSessionCreate: Mock = vi.fn().mockResolvedValue(undefined);
 
 /** D1RevokedJtiStore.isRevoked — return true to simulate a revoked jti */
-export let mockRevokedJtiIsRevoked: Mock = vi.fn().mockResolvedValue(false);
+export const mockRevokedJtiIsRevoked: Mock = vi.fn().mockResolvedValue(false);
 
 /** D1RevokedJtiStore.revoke */
 export const mockRevokedJtiRevoke: Mock = vi.fn().mockResolvedValue(undefined);
@@ -99,7 +99,7 @@ export function backendD1MockFactory(): Record<string, unknown> {
     ),
     D1RevokedJtiStore: vi.fn().mockImplementation(
       class {
-        isRevoked = (...args: unknown[]) => mockRevokedJtiIsRevoked(...args);
+        isRevoked = mockRevokedJtiIsRevoked;
         revoke = mockRevokedJtiRevoke;
       } as unknown as () => unknown,
     ),
@@ -137,23 +137,29 @@ export function backendD1MockFactory(): Record<string, unknown> {
 }
 
 /**
+ * Configure D1RevokedJtiStore.isRevoked to return a specific value from within
+ * the module scope, ensuring the delegating closure in the mock class reads the
+ * correct fn after a reset (avoids ESM live-binding cross-package propagation issues).
+ *
+ * Call AFTER resetBackendD1Mocks() has run (e.g. in the test body after beforeEach).
+ */
+export function configureRevokedJtiIsRevoked(returnValue: boolean): void {
+  mockRevokedJtiIsRevoked.mockResolvedValue(returnValue);
+}
+
+/**
  * Reset all mock handles to their default no-op implementations.
  * Call in beforeEach to prevent cross-test contamination.
  */
 export function resetBackendD1Mocks(): void {
   mockSessionValidate.mockReset().mockResolvedValue(null);
   mockSessionCreate.mockReset().mockResolvedValue(undefined);
-  // WHY let + delegating closure (not .mockReset()):
-  // `mockRevokedJtiIsRevoked` is a `let` export. The D1RevokedJtiStore mock in
-  // backendD1MockFactory() reads it at call time via a delegating closure
-  //   `isRevoked = (...args) => mockRevokedJtiIsRevoked(...args)`
-  // rather than capturing it once at construction. This means a test can
-  // reassign the module-level binding (e.g. `mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(true)`)
-  // and the already-constructed store instance will call the NEW fn. ESM live-binding
-  // re-export lets consumers' override (imported as a named binding) also propagate
-  // after reset. If this were a `const` with `.mockReset()`, the closure inside the
-  // mock class would stay captured to the original fn and override propagation would break.
-  mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(false);
+  // mockRevokedJtiIsRevoked is a stable const — same fn object across resets.
+  // D1RevokedJtiStore.isRevoked is assigned directly to this fn (not a closure),
+  // so instances always call this same fn object. Cross-package consumers that
+  // import the handle always see the same fn object. Use configureRevokedJtiIsRevoked()
+  // to set return value from outside this module.
+  mockRevokedJtiIsRevoked.mockReset().mockResolvedValue(false);
   mockRevokedJtiRevoke.mockReset().mockResolvedValue(undefined);
   mockTokenValidate.mockReset().mockResolvedValue(null);
   mockTokenUpdateLastUsedAt.mockReset().mockResolvedValue(undefined);
