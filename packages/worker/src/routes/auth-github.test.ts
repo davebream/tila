@@ -2760,9 +2760,12 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
       testEnv,
     );
 
-    expect(mockIdempotencyStore).toHaveBeenCalledTimes(2);
-    const firstKey = (mockIdempotencyStore.mock.calls[0] as [string])[0];
-    const secondKey = (mockIdempotencyStore.mock.calls[1] as [string])[0];
+    // WI-I: the exchange now claims the key via reserve() (not store()); the
+    // idempotency key is reserve()'s first arg and still carries the jkt suffix,
+    // so the two exchanges use distinct keys.
+    expect(mockIdempotencyReserve).toHaveBeenCalledTimes(2);
+    const firstKey = (mockIdempotencyReserve.mock.calls[0] as [string])[0];
+    const secondKey = (mockIdempotencyReserve.mock.calls[1] as [string])[0];
     expect(firstKey).not.toBe(secondKey);
   });
 
