@@ -12,6 +12,11 @@ export {
   RepoAllowlistStore,
   type RepoAllowlistRow,
 } from "./repo-allowlist";
+export {
+  OidcPrincipalsStore,
+  type OidcPrincipalRow,
+  type RegisterOidcPrincipalParams,
+} from "./oidc-principals";
 export { D1SessionStore, type SessionResult } from "./session-store";
 export {
   GitHubAppConfigStore,

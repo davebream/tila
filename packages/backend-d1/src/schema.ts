@@ -17,6 +17,10 @@ export const projects = sqliteTable("_projects", {
   schema_version: integer("schema_version").notNull().default(1),
   archived: integer("archived").notNull().default(0),
   repo_admin_auto_admin: integer("repo_admin_auto_admin").notNull().default(0),
+  // Generic (non-GitHub) OIDC exchange config (WI-B2). Both NULL until an
+  // operator configures it; the exchange route denies unless both are set.
+  oidc_issuer: text("oidc_issuer"),
+  oidc_audience: text("oidc_audience"),
 });
 
 // --- _tokens ---
@@ -68,6 +72,30 @@ export const projectRepos = sqliteTable(
       table.project_id,
       table.github_host,
       table.github_repo_id,
+    ),
+  ],
+);
+
+// --- _oidc_principals (WI-B2) ---
+// Non-GitHub analog of _project_repos: authorizes a specific (issuer, subject)
+// pair to exchange an OIDC token for a tila session. `permission` defaults to
+// least privilege ("read"). Lookup is keyed on (project_id, issuer, subject).
+export const oidcPrincipals = sqliteTable(
+  "_oidc_principals",
+  {
+    project_id: text("project_id").notNull(),
+    issuer: text("issuer").notNull(),
+    subject: text("subject").notNull(),
+    permission: text("permission").notNull().default("read"),
+    enabled: integer("enabled").notNull().default(1),
+    created_at: integer("created_at").notNull(),
+    created_by: text("created_by").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_oidc_principals_lookup").on(
+      table.project_id,
+      table.issuer,
+      table.subject,
     ),
   ],
 );
