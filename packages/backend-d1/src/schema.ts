@@ -17,6 +17,9 @@ export const projects = sqliteTable("_projects", {
   schema_version: integer("schema_version").notNull().default(1),
   archived: integer("archived").notNull().default(0),
   repo_admin_auto_admin: integer("repo_admin_auto_admin").notNull().default(0),
+  // WI-B2: nullable OIDC config (migration 0020). NULL = OIDC not configured for this project.
+  oidc_issuer: text("oidc_issuer"),
+  oidc_audience: text("oidc_audience"),
 });
 
 // --- _tokens ---
@@ -171,6 +174,31 @@ export const adminGrants = sqliteTable(
     uniqueIndex("idx_admin_grants_active_subject")
       .on(table.project_id, table.identity_host, table.subject_id)
       .where(sql`${table.revoked_at} is null`),
+  ],
+);
+
+// --- _oidc_principals ---
+// Non-GitHub OIDC principal allowlist (WI-B2, epic #122).
+// Authorizes (project_id, issuer, subject) triples for generic OIDC token exchange.
+// Analog of _project_repos for non-GitHub workloads; permission defaults to 'read' (least privilege).
+// created_at is Unix seconds (not ms) — matching _project_repos / _admin_grants.
+export const oidcPrincipals = sqliteTable(
+  "_oidc_principals",
+  {
+    project_id: text("project_id").notNull(),
+    issuer: text("issuer").notNull(),
+    subject: text("subject").notNull(),
+    permission: text("permission").notNull().default("read"),
+    enabled: integer("enabled").notNull().default(1),
+    created_at: integer("created_at").notNull(),
+    created_by: text("created_by").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_oidc_principals_lookup").on(
+      table.project_id,
+      table.issuer,
+      table.subject,
+    ),
   ],
 );
 

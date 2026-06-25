@@ -78,11 +78,30 @@ export interface WorkspaceSessionTokenResult {
   expiresAt: number; // milliseconds
 }
 
+/**
+ * Token result for a generic (non-GitHub) OIDC session.
+ * Carries no GitHub fields by construction — an OIDC principal is structurally
+ * unreachable from the admin-roster path (require-project-admin.ts).
+ * Created by the /api/auth/oidc/exchange route (Phase 4).
+ */
+export interface OidcSessionTokenResult {
+  kind: "oidc-session";
+  projectId: string;
+  name: string;
+  scopes: string;
+  tokenId: ""; // always empty — OIDC sessions have no D1 token row
+  permission: string;
+  expiresAt: number;
+  oidcIssuer: string;
+  oidcSubject: string;
+}
+
 export type UnifiedTokenResult =
   | D1TokenResult
   | SessionTokenResult
   | CookieSessionTokenResult
-  | WorkspaceSessionTokenResult;
+  | WorkspaceSessionTokenResult
+  | OidcSessionTokenResult;
 
 export interface HonoVariables {
   tokenResult: UnifiedTokenResult;

@@ -49,6 +49,7 @@ import type {
   D1TokenResult,
   Env,
   HonoVariables,
+  OidcSessionTokenResult,
   SessionTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
@@ -690,8 +691,17 @@ export function createAuthMiddleware(
         );
       }
 
-      // Validate payload schema
-      const parsed = SessionPayloadSchema.safeParse(payloadObj);
+      // Validate payload schema.
+      // Default-fill sub_type:"github" for legacy tokens that predate the
+      // discriminated union (security A-2: do NOT mutate the JOSE-verified
+      // payloadObj — build a new parse input instead).
+      const payloadForParse =
+        typeof payloadObj === "object" &&
+        payloadObj !== null &&
+        !("sub_type" in payloadObj)
+          ? { sub_type: "github", ...(payloadObj as Record<string, unknown>) }
+          : payloadObj;
+      const parsed = SessionPayloadSchema.safeParse(payloadForParse);
       if (!parsed.success) {
         return c.json(
           {
@@ -899,11 +909,18 @@ export function createAuthMiddleware(
       // Identity is derived from the VERIFIED payload (parsed.data) ONLY, through
       // the shared canonicalizePrincipal so the (identity_host, subject_id) pair
       // matches byte-for-byte whatever was written when the tombstone was set.
+      // OIDC sessions: use (oidc_issuer, oidc_subject) as the canonical identity
+      // so the same kill-switch covers all session kinds. The issuer becomes the
+      // identity_host column; it cannot collide with github.com principals because
+      // OIDC issuers are https:// URIs.
       {
-        const { identityHost, subjectId } = canonicalizePrincipal(
-          payload.github_host,
-          payload.github_user_id,
-        );
+        const { identityHost, subjectId } =
+          payload.sub_type === "oidc"
+            ? canonicalizePrincipal(payload.oidc_issuer, payload.oidc_subject)
+            : canonicalizePrincipal(
+                payload.github_host,
+                payload.github_user_id,
+              );
         const cacheKey = subjectCacheKey(
           payload.project_id,
           identityHost,
@@ -918,10 +935,16 @@ export function createAuthMiddleware(
           // Cache miss or stale — query D1 (fail-closed on error, like the jti path)
           try {
             const revokedSubjectsStore = new D1RevokedSubjectsStore(c.env.DB);
+            // Use the same identity axes that canonicalizePrincipal consumed
+            // above so the cache-key and the D1 lookup stay consistent.
+            const [hostArg, subjectArg] =
+              payload.sub_type === "oidc"
+                ? ([payload.oidc_issuer, payload.oidc_subject] as const)
+                : ([payload.github_host, payload.github_user_id] as const);
             revokedBefore = await revokedSubjectsStore.getRevokedBefore(
               payload.project_id,
-              payload.github_host,
-              payload.github_user_id,
+              hostArg,
+              subjectArg,
             );
             setSubjectRevInCache(cacheKey, {
               revokedBefore,
@@ -979,27 +1002,52 @@ export function createAuthMiddleware(
       // --- WI-G: DPoP enforcement for bound session tokens ---
       // If the session payload carries a `cnf.jkt` thumbprint binding, enforce
       // a DPoP proof for this request. Absent binding ⇒ skip (legacy accept).
+      // OIDC sessions never carry `cnf` (binding is out of scope for the CI
+      // runner profile), so this is structurally a no-op on the OIDC branch.
       if (payload.cnf?.jkt) {
         const dpopResult = await enforceDpop(c, payload.cnf.jkt);
         if (dpopResult !== null) return dpopResult;
       }
 
-      // Set session token result
-      const sessionResult: SessionTokenResult = {
-        kind: "session",
-        projectId: payload.project_id,
-        name: payload.github_login,
-        scopes: payload.permission,
-        tokenId: "",
-        githubRepoId: payload.github_repo_id,
-        githubLogin: payload.github_login,
-        permission: payload.permission,
-        expiresAt: payload.expires_at,
-        // SECURITY: source ONLY from the verified payload (parsed.data), never the pre-validation object.
-        githubUserId: payload.github_user_id,
-        githubHost: payload.github_host,
-        jti: payload.jti,
-      };
+      // Set token result — branch on sub_type.
+      // SECURITY: source ONLY from the verified payload (parsed.data), never the
+      // pre-validation payloadObj. The OIDC branch produces no GitHub fields by
+      // construction, making the admin-roster structurally unreachable.
+      let tokenKindResult: SessionTokenResult | OidcSessionTokenResult;
+      if (payload.sub_type === "oidc") {
+        const oidcResult: OidcSessionTokenResult = {
+          kind: "oidc-session",
+          projectId: payload.project_id,
+          name: payload.actor_name,
+          scopes: payload.permission,
+          tokenId: "",
+          permission: payload.permission,
+          expiresAt: payload.expires_at,
+          oidcIssuer: payload.oidc_issuer,
+          oidcSubject: payload.oidc_subject,
+        };
+        tokenKindResult = oidcResult;
+      } else {
+        const sessionResult: SessionTokenResult = {
+          kind: "session",
+          projectId: payload.project_id,
+          name: payload.github_login,
+          scopes: payload.permission,
+          tokenId: "",
+          githubRepoId: payload.github_repo_id,
+          githubLogin: payload.github_login,
+          permission: payload.permission,
+          expiresAt: payload.expires_at,
+          githubUserId: payload.github_user_id,
+          githubHost: payload.github_host,
+          jti: payload.jti,
+        };
+        tokenKindResult = sessionResult;
+      }
+      // Keep local reference for back-compat: downstream code in this file still
+      // refers to sessionResult for cookie/workspace paths above; the naming below
+      // shadows by reassignment. Use the alias for clarity.
+      const sessionResult = tokenKindResult;
 
       c.set("tokenResult", sessionResult);
       c.set("authKind", "bearer");

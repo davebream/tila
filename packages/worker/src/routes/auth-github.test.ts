@@ -2467,6 +2467,7 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
     const { SessionPayloadSchema } = await import("@tila/schemas");
     const result = SessionPayloadSchema.safeParse({
       project_id: "proj-1",
+      sub_type: "github",
       github_host: "github.com",
       github_repo_id: 123,
       github_login: "alice",
@@ -2483,6 +2484,7 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
     const { SessionPayloadSchema } = await import("@tila/schemas");
     const result = SessionPayloadSchema.safeParse({
       project_id: "proj-1",
+      sub_type: "github",
       github_host: "github.com",
       github_repo_id: 123,
       github_login: "alice",

@@ -16,6 +16,11 @@ export {
   RepoAllowlistStore,
   type RepoAllowlistRow,
 } from "./repo-allowlist";
+export {
+  OidcPrincipalsStore,
+  type OidcPrincipalRow,
+  type OidcRegisterParams,
+} from "./oidc-principals";
 export { D1SessionStore, type SessionResult } from "./session-store";
 export {
   GitHubAppConfigStore,
@@ -23,6 +28,11 @@ export {
 } from "./github-app-config";
 export { D1RevokedJtiStore } from "./revoked-jti-store";
 export { D1RevokedSubjectsStore } from "./revoked-subjects-store";
+export {
+  revokePrincipalBatch,
+  type RevokePrincipalParams,
+  type RevokePrincipalResult,
+} from "./offboard";
 export {
   AdminGrantsStore,
   type AdminGrantRow,

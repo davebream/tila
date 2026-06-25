@@ -99,7 +99,12 @@ describe("SchemaHistoryResponseSchema", () => {
 });
 
 describe("SessionPayloadSchema — instance_id field", () => {
+  // WI-B2: SessionPayloadSchema is now a discriminated union on sub_type.
+  // Legacy tokens (no sub_type) are back-filled to "github" by the auth
+  // middleware before schema parsing — not by the schema itself. Tests here
+  // supply sub_type explicitly to reflect the new contract.
   const basePayload = {
+    sub_type: "github" as const,
     project_id: "proj-abc",
     github_host: "github.com",
     github_repo_id: 12345,
@@ -119,7 +124,7 @@ describe("SessionPayloadSchema — instance_id field", () => {
     }
   });
 
-  it("parses a payload WITHOUT instance_id (optional — legacy tokens must still parse)", () => {
+  it("parses a payload WITHOUT instance_id (optional — new tokens without instance_id must still parse)", () => {
     const result = SessionPayloadSchema.safeParse(basePayload);
     expect(result.success).toBe(true);
     if (result.success) {

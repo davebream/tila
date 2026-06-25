@@ -5,6 +5,7 @@ import type {
   D1TokenResult,
   Env,
   HonoVariables,
+  OidcSessionTokenResult,
   SessionTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
@@ -760,6 +761,102 @@ describe("requirePermission — Layer B re-verify (recheckInScope)", () => {
     const session = makeSessionToken("admin"); // no jti
     const app = createRecheckApp("admin", session);
     const { status } = await fetchWithMethod(app, "GET");
+    expect(status).toBe(200);
+    expect(mockGetInstallation).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 (T9): oidc-session permission gate tests (security R-1)
+// ---------------------------------------------------------------------------
+
+function makeOidcSessionToken(permission: string): OidcSessionTokenResult {
+  return {
+    kind: "oidc-session",
+    projectId: "proj-oidc",
+    name: "user@example.com",
+    scopes: permission,
+    tokenId: "",
+    permission,
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    oidcIssuer: "https://idp.example.com",
+    oidcSubject: "user@example.com",
+  };
+}
+
+describe("requirePermission — oidc-session kind (security R-1)", () => {
+  function createOidcApp(
+    requiredLevel: "read" | "write" | "admin",
+    tokenResult: OidcSessionTokenResult,
+  ): Hono<AppEnv> {
+    const app = new Hono<AppEnv>();
+    app.use("/*", async (c, next) => {
+      c.set("tokenResult", tokenResult);
+      return next();
+    });
+    app.use("/*", requirePermission(requiredLevel));
+    app.get("/test", (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  async function fetchOidc(
+    app: Hono<AppEnv>,
+  ): Promise<{ status: number; body: unknown }> {
+    const res = await app.fetch(
+      new Request("http://localhost/test"),
+      mockEnv,
+      mockCtx,
+    );
+    const body = await res.json();
+    return { status: res.status, body };
+  }
+
+  it("write-permission oidc-session passes a write-gate", async () => {
+    const { status } = await fetchOidc(
+      createOidcApp("write", makeOidcSessionToken("write")),
+    );
+    expect(status).toBe(200);
+  });
+
+  it("write-permission oidc-session passes a read-gate", async () => {
+    const { status } = await fetchOidc(
+      createOidcApp("read", makeOidcSessionToken("write")),
+    );
+    expect(status).toBe(200);
+  });
+
+  it("read-permission oidc-session is denied at a write-gate with permission-denied", async () => {
+    const { status, body } = await fetchOidc(
+      createOidcApp("write", makeOidcSessionToken("read")),
+    );
+    expect(status).toBe(403);
+    expect((body as { error: { code: string } }).error.code).toBe(
+      "permission-denied",
+    );
+  });
+
+  it("admin-permission oidc-session passes requirePermission('admin')", async () => {
+    const { status } = await fetchOidc(
+      createOidcApp("admin", makeOidcSessionToken("admin")),
+    );
+    expect(status).toBe(200);
+  });
+
+  it("read-permission oidc-session is denied at admin gate", async () => {
+    const { status } = await fetchOidc(
+      createOidcApp("admin", makeOidcSessionToken("read")),
+    );
+    expect(status).toBe(403);
+  });
+
+  it("oidc-session admin gate does NOT trigger GitHub re-verify (no mockGetInstallation call)", async () => {
+    // An oidc-session with admin permission passing an admin-level gate must NOT
+    // call reverifySessionPermission (which reads githubHost/githubRepoId — fields
+    // absent from OidcSessionTokenResult). The snapshot permission check alone suffices.
+    mockGetInstallation.mockReset();
+    const { status } = await fetchOidc(
+      createOidcApp("admin", makeOidcSessionToken("admin")),
+    );
     expect(status).toBe(200);
     expect(mockGetInstallation).not.toHaveBeenCalled();
   });
