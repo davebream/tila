@@ -1,9 +1,38 @@
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import {
+  AuthStore,
+  KeyringSecretStore,
+  TilaPaths,
+  createProvider,
+  resolveWithTrace,
+} from "@tila/auth-store";
+import type {
+  Clock,
+  CredentialKind,
+  CredentialProvider,
+  EnvProbe,
+  MintedCredential,
+  Prompter,
+  ProviderContext,
+  ProviderPorts,
+  RepoPointer,
+  ResolveInput,
+  ResolvedInstance,
+  ResolverEnv,
+  RunCommand,
+  SecretStore,
+} from "@tila/auth-store";
+import type {
+  CredentialProviderConfig,
+  CredentialRecord,
+  InstanceKey,
+  RefreshRecord,
+} from "@tila/schemas";
 import { TilaProjectConfigSchema } from "@tila/schemas";
 import { parse } from "smol-toml";
-import { createGithubTokenProvider } from "./github-auth";
 
 /**
  * Resolved MCP server config. Discriminated union keyed on `mode`:
@@ -104,6 +133,135 @@ function envOr(name: string): string | undefined {
 }
 
 /**
+ * Extract the credential token from a ResolvedInstance.
+ *
+ * Handles both inline-token (from --token / TILA_TOKEN) and
+ * keychain (from the OS keychain via AuthStore) credential sources.
+ */
+function extractToken(instance: ResolvedInstance): string {
+  if (instance.credential.source === "inline-token") {
+    return instance.credential.token;
+  }
+  // keychain source: CredentialRecord
+  return instance.credential.record.token;
+}
+
+/** A NOOP runCommand for the MCP server's headless ProviderPorts. */
+const headlessRunCommand: RunCommand = async (command, args) => {
+  const result = await new Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+  }>((resolve) => {
+    execFile(command, args, { timeout: 30_000 }, (err, stdout, stderr) => {
+      const exitCode =
+        err != null ? (typeof err.code === "number" ? err.code : 1) : 0;
+      resolve({ exitCode, stdout, stderr });
+    });
+  });
+  return result;
+};
+
+/**
+ * Attempt a non-interactive (HTTP-only) credential refresh for the given
+ * instance key. Returns the refreshed token on success, or null on any failure.
+ *
+ * CRITICAL (C3): worker_url is sourced from the registry-pinned instanceRecord,
+ * NOT from config.toml. The resolver trust gate fires in resolveWithTrace before
+ * this function; if the refresh URL were taken from user-controlled config, a
+ * malicious project config could redirect the refresh exchange after the trust
+ * gate already rejected the spoofed URL.
+ *
+ * R5: when minted.refresh_token is present (rotation), persist it too, but swallow
+ * a putRefresh-only failure so a successful credential write is never discarded.
+ */
+async function attemptRefresh(
+  authStore: AuthStore,
+  instanceKey: InstanceKey,
+  envProbe: EnvProbe,
+  providerFactory: (kind: CredentialKind) => CredentialProvider,
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
+  const refreshRecord = await authStore.getRefresh(instanceKey);
+  if (!refreshRecord) return null;
+
+  // CRITICAL (C3): use the registry-pinned worker_url, never config.toml
+  const instanceRecord = await authStore.getInstance(instanceKey);
+  if (!instanceRecord) return null;
+
+  const kind: CredentialKind =
+    instanceRecord.credential_provider?.kind ?? "github";
+  const provider = providerFactory(kind);
+
+  const noopPrompter: Prompter = {
+    displayDeviceCode: async () => {
+      throw new Error(
+        "MCP server is headless — run 'tila auth login' from a terminal to refresh credentials",
+      );
+    },
+  };
+
+  const realClock: Clock = {
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  };
+
+  const ports: ProviderPorts = {
+    fetch: fetchImpl,
+    prompter: noopPrompter,
+    env: envProbe,
+    clock: realClock,
+    runCommand: headlessRunCommand,
+  };
+
+  // CRITICAL (C3): worker_url from registry record (immutable), NOT repoPointer
+  const ctx: ProviderContext = {
+    instance_key: instanceKey,
+    worker_url: instanceRecord.worker_url,
+    ports,
+    config:
+      instanceRecord.credential_provider ??
+      ({ kind } as CredentialProviderConfig),
+  };
+
+  try {
+    const minted: MintedCredential = await provider.refresh(ctx, refreshRecord);
+
+    const credRecord: CredentialRecord = {
+      instance_key: instanceKey,
+      obtained_at: Date.now(),
+      token: minted.token,
+      token_type: minted.token_type,
+      expires_at: minted.expires_at,
+      scope: minted.scope,
+    };
+
+    await authStore.putCredential(instanceKey, credRecord);
+
+    // R5: persist rotated refresh token, swallow putRefresh-only failure
+    if (minted.refresh_token) {
+      try {
+        const newRefreshRecord: RefreshRecord = {
+          instance_key: instanceKey,
+          refresh_token: minted.refresh_token,
+          expires_at: minted.refresh_expires_at ?? null,
+          obtained_at: Date.now(),
+        };
+        await authStore.putRefresh(instanceKey, newRefreshRecord);
+      } catch (err) {
+        process.stderr.write(
+          `tila-mcp-server: warning: failed to persist rotated refresh token: ${(err as Error).message}\n`,
+        );
+      }
+    }
+
+    return minted.token;
+  } catch {
+    return null; // refresh failed — caller emits actionable error
+  }
+}
+
+/**
  * Resolve MCP server config from environment and .tila/config.toml.
  * Throws with actionable error messages on missing required values.
  *
@@ -118,16 +276,24 @@ function envOr(name: string): string | undefined {
  * Remote priority:
  *   apiUrl:    TILA_API_URL env -> config.toml worker_url
  *   projectId: TILA_PROJECT_ID env -> config.toml project_id
- *   getToken:  tila-token mode: static TILA_API_TOKEN / .tila/.env
- *              github-repo mode: session cache -> OIDC -> error
+ *   getToken:  Priority 1 (tila-token): static TILA_API_TOKEN / .tila/.env wins unconditionally
+ *              Priority 2 (resolver path): AuthStore + resolveWithTrace (keychain-backed,
+ *                HTTP-only refresh for refreshable provider kinds)
  *
- * Local priority (config value -> TILA_* env -> default):
- *   dbPath:        config.local.db_path     -> TILA_DB_PATH
- *   artifactsPath: config.local.artifacts_path -> TILA_ARTIFACTS_PATH
- *   org:           config.local.org         -> TILA_ORG -> OS username
- *   projectId:     config.project_id        -> TILA_PROJECT_ID
+ * DESKTOP DAEMON NOTE: the MCP server is an stdio subprocess with process.stdin.isTTY === false.
+ * Both the AuthStore EnvProbe and the resolver ResolverEnv are constructed with isTTY: true so
+ * the keychain read path and credential write path are both enabled. isCI is kept from the real
+ * process.env.CI so genuine CI still fails closed to the TILA_API_TOKEN path.
+ *
+ * @param deps — injectable seam for testing (defaults to production implementations)
  */
-export async function resolveServerConfig(): Promise<McpServerConfig> {
+export async function resolveServerConfig(deps?: {
+  secretStore?: SecretStore;
+  envProbe?: EnvProbe;
+  resolverEnv?: ResolverEnv;
+  providerFactory?: (kind: CredentialKind) => CredentialProvider;
+  fetchImpl?: typeof fetch;
+}): Promise<McpServerConfig> {
   const rawConfig = findConfigRaw();
   const tilaDir = findTilaDir();
   const config = rawConfig
@@ -215,51 +381,128 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // Priority 1: TILA_API_TOKEN in env or .tila/.env wins unconditionally.
+  // The static token is the explicit credential; return immediately without
+  // constructing an AuthStore or reading TILA_INSTANCE.
+  // -------------------------------------------------------------------------
+  const apiToken = resolveToken(tilaDir);
+  if (apiToken) {
+    return {
+      mode: "remote",
+      apiUrl,
+      projectId,
+      authMode: "tila-token",
+      getToken: () => Promise.resolve(apiToken),
+    };
+  }
+
   if (authMode === "github-repo") {
-    // Validate that the config has the required [github] section
-    if (!config?.success || !config.data.github) {
-      throw new Error(
-        "Auth mode is github-repo but [github] section is missing from .tila/config.toml.\nAdd a [github] section with owner and repo fields.",
-      );
-    }
+    // -------------------------------------------------------------------------
+    // Priority 2: Resolver path (keychain-backed + HTTP-only refresh).
+    //
+    // DESKTOP DAEMON: the MCP server is a stdio subprocess (process.stdin.isTTY
+    // === false). Both the AuthStore EnvProbe and resolver ResolverEnv MUST use
+    // isTTY: true so the keychain read gate (evaluateCiPolicy) and credential
+    // write gate (AuthStore.#assertWriteAllowed) are both enabled. isCI is kept
+    // from the real process.env.CI so genuine CI still fails closed.
+    // -------------------------------------------------------------------------
+    const isCI = Boolean(process.env.CI);
 
-    // Validate that worker_url is set (required for OIDC audience and exchange endpoint)
-    const workerUrl = config.data.worker_url;
-    if (!workerUrl) {
-      throw new Error(
-        "Auth mode is github-repo but worker_url is missing from .tila/config.toml.\nAdd worker_url to .tila/config.toml.",
-      );
-    }
+    const secretStore = deps?.secretStore ?? new KeyringSecretStore();
+    // Daemon env: isTTY overridden to true (MCP server is a desktop daemon, not CI)
+    const daemonEnvProbe: EnvProbe = deps?.envProbe ?? {
+      isCI,
+      isTTY: true,
+    };
+    const daemonResolverEnv: ResolverEnv = deps?.resolverEnv ?? {
+      isCI,
+      isTTY: true,
+      tilaHomeOverridden: Boolean(process.env.TILA_HOME),
+    };
+    const providerFactory = deps?.providerFactory ?? createProvider;
+    const fetchImpl = deps?.fetchImpl ?? globalThis.fetch;
 
-    const githubTilaDir = tilaDir ?? join(process.cwd(), CONFIG_DIR);
+    const tilaPaths = new TilaPaths();
+    const authStore = new AuthStore({
+      paths: tilaPaths,
+      secrets: secretStore,
+      env: daemonEnvProbe,
+    });
+
+    // Build the repo pointer from config.toml if present.
+    // NOTE: instance_key is nested at config.data.instance?.instance_key (string | undefined)
+    // and must be cast to InstanceKey | null. The resolver will fall through to
+    // the current-context rung when instance_key is null (no [instance] section).
+    const repoPointer: RepoPointer =
+      config?.success && config.data.instance?.instance_key
+        ? {
+            instance_key: config.data.instance.instance_key as InstanceKey,
+            worker_url: apiUrl,
+          }
+        : {
+            instance_key: null,
+            worker_url: apiUrl,
+          };
+
+    const getToken = async (): Promise<string> => {
+      const input: ResolveInput = {
+        envReader: (n) => process.env[n],
+        env: daemonResolverEnv,
+        authStore,
+        repoPointer,
+      };
+
+      const outcome = await resolveWithTrace(input);
+      if (outcome.ok) {
+        return extractToken(outcome.instance);
+      }
+
+      // Resolver failed (e.g. expired credential). Resolve the instance key for
+      // the refresh path. Priority: TILA_INSTANCE env → config.toml → current_context.
+      const rawTilaInstance = process.env.TILA_INSTANCE?.trim();
+      const instanceKey: InstanceKey | null =
+        (rawTilaInstance && rawTilaInstance.length > 0
+          ? (rawTilaInstance as InstanceKey)
+          : null) ??
+        (config?.success && config.data.instance?.instance_key
+          ? (config.data.instance.instance_key as InstanceKey)
+          : null) ??
+        (await authStore.getCurrentContext());
+
+      if (instanceKey) {
+        const refreshed = await attemptRefresh(
+          authStore,
+          instanceKey,
+          daemonEnvProbe,
+          providerFactory,
+          fetchImpl,
+        );
+        if (refreshed !== null) return refreshed;
+      }
+
+      // Refresh impossible — write actionable message to stderr (R2) AND throw.
+      // getToken() runs at startup before the transport connects; a bare throw shows
+      // only "server disconnected" in the client's MCP log pane. Writing to stderr
+      // ensures the "tila auth login" instruction is visible.
+      const msg = `Tila auth failed: ${outcome.error.message}\nRun 'tila auth login' from a terminal to re-authenticate.`;
+      process.stderr.write(`${msg}\n`);
+      throw new Error(msg);
+    };
 
     return {
       mode: "remote",
       apiUrl,
       projectId,
       authMode: "github-repo",
-      getToken: createGithubTokenProvider(
-        { project_id: projectId, worker_url: workerUrl },
-        githubTilaDir,
-      ),
+      getToken,
     };
   }
 
-  // tila-token mode (default, backward-compatible)
-  const apiToken = resolveToken(tilaDir);
-  if (!apiToken) {
-    throw new Error(
-      "No API token found. Set TILA_API_TOKEN environment variable or add it to .tila/.env:\n  TILA_API_TOKEN=your-token",
-    );
-  }
-
-  return {
-    mode: "remote",
-    apiUrl,
-    projectId,
-    authMode: "tila-token",
-    getToken: () => Promise.resolve(apiToken),
-  };
+  // tila-token mode with no static token — throw the existing actionable error.
+  throw new Error(
+    "No API token found. Set TILA_API_TOKEN environment variable or add it to .tila/.env:\n  TILA_API_TOKEN=your-token",
+  );
 }
 
 /**
