@@ -68,6 +68,7 @@ const main = defineCommand({
     switch: () => load(() => import("./commands/switch")),
     instances: () => load(() => import("./commands/instances")),
     shell: () => load(() => import("./commands/shell")),
+    link: () => load(() => import("./commands/link")),
     summary: () => load(() => import("./commands/summary")),
     gate: () => load(() => import("./commands/gate")),
     template: () => load(() => import("./commands/template")),

@@ -179,7 +179,7 @@ afterEach(() => {
 
 async function loadShellCmd(): Promise<CommandDef> {
   const mod = await import("../../commands/shell");
-  return mod.default;
+  return mod.default as unknown as CommandDef;
 }
 
 // ---- tests --------------------------------------------------------------
@@ -243,7 +243,7 @@ describe("tila shell --instance", () => {
 
     // stderr should have an error message
     const stderrOutput = stderrWriteSpy.mock.calls
-      .map((c) => String(c[0]))
+      .map((c: unknown[]) => String(c[0]))
       .join("\n");
     expect(stderrOutput).toContain("ENOENT");
   });
@@ -259,7 +259,7 @@ describe("tila shell --instance", () => {
     ).rejects.toThrow("process.exit(1)");
 
     const stderrOutput = stderrWriteSpy.mock.calls
-      .map((c) => String(c[0]))
+      .map((c: unknown[]) => String(c[0]))
       .join("\n");
     expect(stderrOutput).toMatch(/unknown instance|nonexistent-instance/i);
   });
