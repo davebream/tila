@@ -8,6 +8,7 @@
 import ansis from "ansis";
 import { Table } from "console-table-printer";
 import treeify from "object-treeify";
+import { TILA_ERRORS } from "tila-sdk";
 import createSpinner from "yocto-spinner";
 import { EXIT_CODES, exitCodeFor } from "./exit-codes";
 
@@ -157,7 +158,7 @@ export function describeCliError(err: unknown): {
 function _remediationHint(code: string): string | undefined {
   if (exitCodeFor(code) === EXIT_CODES.NETWORK_ERROR) {
     switch (code) {
-      case "RATE_LIMITED":
+      case TILA_ERRORS.RATE_LIMITED:
         return "The server is rate-limiting requests. Wait a moment and retry.";
       case "do-unreachable":
         return "The project backend is unreachable. Check your network connection and retry.";

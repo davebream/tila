@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TilaApiError } from "../client";
 import {
@@ -6,13 +8,117 @@ import {
   toTilaErrorCode,
 } from "../error-codes";
 
+/** Recursively collect all .ts files (excluding .test.ts) under a directory. */
+function collectSourceFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      results.push(...collectSourceFiles(full));
+    } else if (full.endsWith(".ts") && !full.endsWith(".test.ts")) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+/** Collect error.code string literals from a source file's content. */
+function collectEmittedCodesFromContent(content: string): string[] {
+  const codes: string[] = [];
+  const patterns = [
+    /code:\s*"([a-z][a-z0-9-]*)"/g,
+    /zodValidationError\([^)]*?"([a-z][a-z0-9-]*)"/g,
+    /jsonError\(\s*c\s*,\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
+    // multiline jsonError(c,\n  409,\n  "already-held", ...)
+    /jsonError\(\s*\n\s*c\s*,\s*\n\s*\d+\s*,\s*\n\s*"([a-z][a-z0-9-]*)"/g,
+  ];
+
+  for (const re of patterns) {
+    for (const m of content.matchAll(re)) {
+      codes.push(m[1]);
+    }
+  }
+
+  return codes;
+}
+
+/** Collect error.code string literals emitted under a source directory. */
+function collectWorkerEmittedCodes(dir: string): Set<string> {
+  const codes = new Set<string>();
+
+  for (const file of collectSourceFiles(dir)) {
+    const content = readFileSync(file, "utf-8");
+    for (const code of collectEmittedCodesFromContent(content)) {
+      codes.add(code);
+    }
+  }
+
+  return codes;
+}
+
+const WORKER_SRC_DIR = join(__dirname, "../../../worker/src");
+const OPS_SQLITE_SRC_DIR = join(__dirname, "../../../ops-sqlite/src");
+const BACKEND_DO_SRC_DIR = join(__dirname, "../../../backend-do/src");
+
+/** Collect error.code literals from server packages that emit HTTP errors. */
+function collectServerEmittedCodes(): Set<string> {
+  const codes = new Set<string>();
+  for (const dir of [WORKER_SRC_DIR, OPS_SQLITE_SRC_DIR, BACKEND_DO_SRC_DIR]) {
+    for (const code of collectWorkerEmittedCodes(dir)) {
+      codes.add(code);
+    }
+  }
+  return codes;
+}
+
+/** SDK-generated codes — not emitted by the worker HTTP layer. */
+const SDK_LOCAL_WIRE_CODES = new Set<string>([
+  TILA_ERRORS.UNKNOWN,
+  TILA_ERRORS.ARTIFACT_GET_FAILED,
+  TILA_ERRORS.ARTIFACT_GET_LATEST_FAILED,
+]);
+
 describe("toTilaErrorCode normalizer", () => {
   it("passes through known wire codes unchanged", () => {
-    expect(toTilaErrorCode("UNAUTHORIZED")).toBe("UNAUTHORIZED");
+    expect(toTilaErrorCode("unauthorized")).toBe("unauthorized");
+    expect(toTilaErrorCode("rate-limited")).toBe("rate-limited");
     expect(toTilaErrorCode("stale-fence")).toBe("stale-fence");
     expect(toTilaErrorCode("not-found")).toBe("not-found");
     expect(toTilaErrorCode("UNKNOWN")).toBe("UNKNOWN");
     expect(toTilaErrorCode("do-unreachable")).toBe("do-unreachable");
+  });
+
+  it("passes through worker-emitted kebab auth and middleware codes", () => {
+    const workerWireCodes = [
+      "unauthorized",
+      "session-expired",
+      "rate-limited",
+      "hmac-not-configured",
+      "session-revoked",
+      "permission-denied",
+      "project-mismatch",
+      "csrf-missing-origin",
+      "csrf-origin-mismatch",
+      "repo-not-allowed",
+      "github-auth-failed",
+      "token-name-conflict",
+      "token-not-found",
+      "validation-error",
+      "internal",
+    ] as const;
+
+    for (const code of workerWireCodes) {
+      expect(toTilaErrorCode(code)).toBe(code);
+      expect(toTilaErrorCode(code)).not.toBe("UNKNOWN");
+    }
+  });
+
+  it("normalizes stale SCREAMING worker codes to UNKNOWN", () => {
+    expect(toTilaErrorCode("UNAUTHORIZED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("RATE_LIMITED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("HMAC_NOT_CONFIGURED")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("VALIDATION_ERROR")).toBe("UNKNOWN");
   });
 
   it("normalizes unknown wire strings to UNKNOWN", () => {
@@ -20,6 +126,7 @@ describe("toTilaErrorCode normalizer", () => {
     expect(toTilaErrorCode("INVALID_PAYLOAD")).toBe("UNKNOWN");
     expect(toTilaErrorCode("some-future-code")).toBe("UNKNOWN");
     expect(toTilaErrorCode("")).toBe("UNKNOWN");
+    expect(toTilaErrorCode("UNAUTHORIZED")).toBe("UNKNOWN");
   });
 });
 
@@ -82,37 +189,79 @@ describe("TilaApiError.code is TilaErrorCode", () => {
   });
 });
 
-describe("TILA_ERRORS orphan-code reconciliation (#114)", () => {
-  // These assertions guard the specific reconciliation in #114: the legacy
-  // SCREAMING `TOKEN_AUTHZ_DENIED` entry mapped to a wire value the server never
-  // emits, while the live value `"token-authz-denied"` is exposed via
-  // `REPO_TOKEN_AUTHZ_DENIED`.
-  //
-  // NOTE: there is deliberately no "every value is server-emitted" partition test.
-  // The map has a broader, pre-existing SCREAMING-vs-kebab divergence with worker
-  // emission (e.g. the worker emits kebab `unauthorized`/`session-expired`/
-  // `rate-limited`, while the map declares SCREAMING `UNAUTHORIZED`/`SESSION_EXPIRED`/
-  // `RATE_LIMITED` that the worker never emits). A faithful server-emission test
-  // would fail on ~14 such entries — out of scope for #114, tracked as a follow-up.
+describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
+  const SDK_ONLY_ERROR_CODES = new Set<string>([
+    "artifact-get-failed",
+    "artifact-get-latest-failed",
+    "UNKNOWN",
+  ]);
+
+  const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "unauthorized",
+    "session-expired",
+    "rate-limited",
+    "permission-denied",
+    "project-mismatch",
+    "csrf-missing-origin",
+    "csrf-origin-mismatch",
+    "do-unreachable",
+    "repo-not-allowed",
+    "github-auth-failed",
+    "hmac-not-configured",
+    "session-revoked",
+    "token-name-conflict",
+    "token-not-found",
+    "stale-fence",
+    "not-found",
+    "gate-already-settled",
+    "no-fence",
+    "gate-fence-conflict",
+    "internal",
+    "constraint-violation",
+    "idempotency-key-conflict",
+    "validation-error",
+    "already-held",
+    "renew-failed",
+    "release-ownership-denied",
+    "bad-request",
+    "missing-query",
+    "invalid-query",
+    "invalid-slot",
+    "invalid-relationship-type",
+    "token-authz-denied",
+    "repo-access-denied",
+    "repo-not-found",
+    "github-api-timeout",
+    "github-api-error",
+  ]);
 
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {
-    // Test A — the orphan's wire value is gone (fails RED before the entry is removed).
     expect(Object.values(TILA_ERRORS)).not.toContain("TOKEN_AUTHZ_DENIED");
   });
 
   it('maps "token-authz-denied" from exactly one key (REPO_TOKEN_AUTHZ_DENIED)', () => {
-    // Test B — exactly one key carries the live wire value, and it is the kebab key.
     const hits = Object.entries(TILA_ERRORS).filter(
       ([, value]) => value === "token-authz-denied",
     );
     expect(hits).toEqual([["REPO_TOKEN_AUTHZ_DENIED", "token-authz-denied"]]);
   });
 
+  it("maps every non-SDK-only value to a server-emitted wire code", () => {
+    const unmappedServerCodes = Object.entries(TILA_ERRORS).filter(
+      ([, value]) =>
+        !SDK_ONLY_ERROR_CODES.has(value) &&
+        !SERVER_EMITTED_TILA_ERROR_CODES.has(value),
+    );
+
+    expect(
+      unmappedServerCodes,
+      `TILA_ERRORS values not present in server emission set: ${JSON.stringify(
+        unmappedServerCodes,
+      )}`,
+    ).toEqual([]);
+  });
+
   it("has no two keys mapping to the same wire value", () => {
-    // Test C — generalizable orphan-class guard. This catches re-introducing a
-    // SECOND key for an already-mapped wire value (the shape that let the orphan in).
-    // It does NOT catch a new uniquely-valued unemitted orphan — that broader
-    // guarantee depends on the SCREAMING/kebab follow-up reconciliation.
     const values = Object.values(TILA_ERRORS);
     const seen = new Map<string, string[]>();
     for (const [key, value] of Object.entries(TILA_ERRORS)) {
@@ -128,5 +277,22 @@ describe("TILA_ERRORS orphan-code reconciliation (#114)", () => {
       `Duplicate TILA_ERRORS wire values: ${JSON.stringify(duplicates)}`,
     ).toEqual([]);
     expect(values.length).toBe(new Set(values).size);
+  });
+
+  it("every map value is emitted by the worker or is SDK-local (#117)", () => {
+    const workerCodes = collectServerEmittedCodes();
+    const unmapped: string[] = [];
+
+    for (const value of Object.values(TILA_ERRORS)) {
+      if (SDK_LOCAL_WIRE_CODES.has(value)) continue;
+      if (!workerCodes.has(value)) {
+        unmapped.push(value);
+      }
+    }
+
+    expect(
+      unmapped,
+      `TILA_ERRORS values not found in worker emission scan: ${unmapped.join(", ")}`,
+    ).toEqual([]);
   });
 });

@@ -186,7 +186,7 @@ describe("task relationship commands", () => {
       ).rejects.toThrow("process.exit(1)");
       // printJsonError writes { ok:false, code, message } to stderr via console.error
       const output = JSON.parse(errorSpy.mock.calls[0][0] as string);
-      expect(output.code).toBe("VALIDATION_ERROR");
+      expect(output.code).toBe("validation-error");
       expect(output.message).toContain("invalid-type");
       expect(mockAddRelationship).not.toHaveBeenCalled();
     });

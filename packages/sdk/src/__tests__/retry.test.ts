@@ -41,7 +41,7 @@ describe("withRetry", () => {
   it("retries TilaApiError with retryable: true", async () => {
     const retryableErr = new TilaApiError(
       429,
-      "RATE_LIMITED",
+      "rate-limited",
       "rate limited",
       true,
     );

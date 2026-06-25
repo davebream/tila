@@ -38,7 +38,7 @@ export class AdminGrantsStore {
    */
   async grant(params: GrantParams): Promise<void> {
     const host = params.githubHost ?? "github.com";
-    const grantedAt = Math.floor(Date.now() / 1000);
+    const grantedAt = Math.floor(Date.now() / 1000); // seconds (flag-only; never numerically compared)
 
     await this.db
       .prepare(
@@ -65,7 +65,7 @@ export class AdminGrantsStore {
     githubUserId: number,
     revokedByUserId?: number,
   ): Promise<void> {
-    const revokedAt = Math.floor(Date.now() / 1000);
+    const revokedAt = Math.floor(Date.now() / 1000); // seconds (flag-only; never numerically compared)
 
     await this.drizzle
       .update(adminGrants)

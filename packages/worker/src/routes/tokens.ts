@@ -2,6 +2,7 @@ import { D1SessionStore, D1TokenStore } from "@tila/backend-d1";
 import { TokenIssueRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
 import { generateToken, hashToken } from "../lib/hash";
+import { nowSeconds } from "../lib/time";
 import { zodValidationError } from "../lib/validation";
 import { invalidate } from "../middleware/auth";
 import { requireD1TokenHttp } from "../middleware/require-project-admin";
@@ -29,7 +30,7 @@ tokens.post("/", async (c) => {
   // auth-github app-config, auth-session exchange). Bare here would break
   // validation the moment an operator sets HASH_PEPPER.
   const tokenHash = await hashToken(plaintext, c.env.HASH_PEPPER);
-  const createdAt = Math.floor(Date.now() / 1000);
+  const createdAt = nowSeconds();
 
   const store = new D1TokenStore(c.env.DB);
   let tokenId: string;
@@ -116,7 +117,7 @@ tokens.delete("/:name", async (c) => {
   return c.json({
     ok: true,
     name,
-    revoked_at: Math.floor(Date.now() / 1000),
+    revoked_at: nowSeconds(),
   });
 });
 
