@@ -11,11 +11,27 @@ import type {
 } from "../types";
 
 // --- Test seam (committed) -------------------------------------------------
-// The middleware constructs `new AdminGrantsStore(c.env.DB)` and
-// `new D1ProjectRegistry(c.env.DB)` directly, so the module boundary is the
-// seam. Every constructed instance shares the same stubbable mock.
-const mockIsActiveAdmin = vi.fn();
-const mockGetRepoAdminAutoAdmin = vi.fn();
+// The middleware constructs @tila/backend-d1 stores directly, so the module
+// boundary is the seam. Every constructed instance shares the same stubbable mock.
+// Extended for Task 8 (WI-H) to also include GitHubAppConfigStore and
+// RepoAllowlistStore needed by reverifySessionPermission (called from the
+// auto-admin session path).
+const {
+  mockIsActiveAdmin,
+  mockGetRepoAdminAutoAdmin,
+  mockGetInstallation,
+  mockIsRegistered,
+  mockMintAppJwt,
+  mockGetInstallationAccessToken,
+} = vi.hoisted(() => ({
+  mockIsActiveAdmin: vi.fn(),
+  mockGetRepoAdminAutoAdmin: vi.fn(),
+  mockGetInstallation: vi.fn(),
+  mockIsRegistered: vi.fn(),
+  mockMintAppJwt: vi.fn(),
+  mockGetInstallationAccessToken: vi.fn(),
+}));
+
 vi.mock("@tila/backend-d1", () => ({
   AdminGrantsStore: class {
     isActiveAdmin = mockIsActiveAdmin;
@@ -23,8 +39,60 @@ vi.mock("@tila/backend-d1", () => ({
   D1ProjectRegistry: class {
     getRepoAdminAutoAdmin = mockGetRepoAdminAutoAdmin;
   },
+  // Extended for Task 8 (WI-H): permission re-verify stores
+  GitHubAppConfigStore: vi.fn().mockImplementation(
+    class {
+      getInstallation = mockGetInstallation;
+    } as unknown as () => unknown,
+  ),
+  RepoAllowlistStore: vi.fn().mockImplementation(
+    class {
+      isRegistered = mockIsRegistered;
+    } as unknown as () => unknown,
+  ),
 }));
 
+// Mock github-app module for the permission re-verify path (Task 8, WI-H).
+// Same pattern as permission-recheck.test.ts: checkUserMembershipStatus delegates
+// to global.fetch so test cases drive it through real HTTP status codes.
+vi.mock("../lib/github-app", () => ({
+  mintAppJwt: mockMintAppJwt,
+  getInstallationAccessToken: mockGetInstallationAccessToken,
+  GitHubAppTokenError: class GitHubAppTokenError extends Error {
+    readonly status: number;
+    constructor(status: number, message?: string) {
+      super(message ?? `GitHub API returned ${status}`);
+      this.name = "GitHubAppTokenError";
+      this.status = status;
+    }
+  },
+  checkUserMembershipStatus: async (
+    installationToken: string,
+    owner: string,
+    repo: string,
+    login: string,
+    apiBase = "https://api.github.com",
+  ) => {
+    try {
+      const res = await fetch(
+        `${apiBase}/repos/${owner}/${repo}/collaborators/${login}/permission`,
+        { headers: { Authorization: `Bearer ${installationToken}` } },
+      );
+      if (res.status === 200) {
+        const data = (await res.json()) as { permission: string };
+        return { kind: "permission" as const, value: data.permission };
+      }
+      if (res.status === 404) {
+        return { kind: "absent" as const };
+      }
+      return { kind: "error" as const };
+    } catch {
+      return { kind: "error" as const };
+    }
+  },
+}));
+
+import { _resetPermissionRecheckCacheForTest } from "../lib/permission-recheck";
 import {
   __clearAdminGrantsCache,
   __clearProjectAutoAdminCache,
@@ -65,6 +133,7 @@ function makeSessionToken(
     githubUserId?: number | undefined;
     githubHost?: string | undefined;
     permission?: string;
+    jti?: string;
   } = {},
 ): SessionTokenResult {
   const permission = opts.permission ?? "admin";
@@ -80,6 +149,7 @@ function makeSessionToken(
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
     githubUserId: "githubUserId" in opts ? opts.githubUserId : 4242,
     githubHost: "githubHost" in opts ? opts.githubHost : "github.com",
+    ...("jti" in opts ? { jti: opts.jti } : {}),
   };
 }
 
@@ -798,5 +868,243 @@ describe("autoAdminGrants helper", () => {
     );
     expect(result2).toBe(true);
     expect(mockGetRepoAdminAutoAdmin).toHaveBeenCalledTimes(2);
+  });
+});
+
+// =============================================================================
+// Task 8 (WI-H): Layer B re-verify wired into requireProjectAdmin* auto-admin path
+//
+// Seam: vi.mock("@tila/backend-d1") + vi.mock("../lib/github-app") + global.fetch.
+// Only the autoAdminGrants SESSION path is re-verified; cookie-session, d1-token,
+// and roster-admit paths are unchanged (scope decision per plan).
+// =============================================================================
+
+/** Env that includes GitHub App secrets so reverifySessionPermission can proceed. */
+const recheckEnv = {
+  DB: {} as D1Database,
+  PROJECT: {} as DurableObjectNamespace,
+  ARTIFACTS: {} as R2Bucket,
+  ANALYTICS: {} as AnalyticsEngineDataset,
+  GITHUB_APP_ID: "12345",
+  GITHUB_APP_PRIVATE_KEY: "FAKE_KEY",
+} as unknown as Env;
+
+/** Hono context stub with App secrets — for auto-admin re-verify tests. */
+function makeRecheckCtx(
+  tokenResult: UnifiedTokenResult,
+  projectId = "proj-1",
+): import("hono").Context<{ Bindings: Env; Variables: HonoVariables }> {
+  return {
+    get: (key: string) => {
+      if (key === "tokenResult") return tokenResult;
+      if (key === "projectId") return projectId;
+      return undefined;
+    },
+    env: recheckEnv,
+    json: (body: unknown, status?: number) =>
+      new Response(JSON.stringify(body), {
+        status: status ?? 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  } as unknown as import("hono").Context<{
+    Bindings: Env;
+    Variables: HonoVariables;
+  }>;
+}
+
+describe("requireProjectAdminHttp + requireProjectAdmin — Layer B re-verify on auto-admin session path (Task 8)", () => {
+  beforeEach(() => {
+    mockIsActiveAdmin.mockReset();
+    mockGetRepoAdminAutoAdmin.mockReset();
+    mockGetInstallation.mockReset();
+    mockIsRegistered.mockReset();
+    mockMintAppJwt.mockReset();
+    mockGetInstallationAccessToken.mockReset();
+    __clearAdminGrantsCache();
+    __clearProjectAutoAdminCache();
+    _resetPermissionRecheckCacheForTest();
+    vi.restoreAllMocks();
+  });
+
+  // Shared helpers
+  function setupRevokedGitHub(): void {
+    // GitHub now returns 404 (user revoked)
+    mockGetInstallation.mockResolvedValue({ installation_id: 88 });
+    mockIsRegistered.mockResolvedValue({
+      github_owner: "myorg",
+      github_repo: "myrepo",
+    });
+    mockMintAppJwt.mockResolvedValue("app-jwt");
+    mockGetInstallationAccessToken.mockResolvedValue("install-token");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 404 }),
+    );
+  }
+
+  function setupStillAdmin(): void {
+    mockGetInstallation.mockResolvedValue({ installation_id: 88 });
+    mockIsRegistered.mockResolvedValue({
+      github_owner: "myorg",
+      github_repo: "myrepo",
+    });
+    mockMintAppJwt.mockResolvedValue("app-jwt");
+    mockGetInstallationAccessToken.mockResolvedValue("install-token");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ permission: "admin" }), { status: 200 }),
+    );
+  }
+
+  function setupNoInstall(): void {
+    // No App installation → not-possible → allow (existing auto-admin allowed)
+    mockGetInstallation.mockResolvedValue(null);
+  }
+
+  // (a) auto-admin session with jti + GitHub revoked → 403 permission-revoked
+  // requireProjectAdminHttp path (repos.post / repos.delete)
+  it("(a) requireProjectAdminHttp: auto-admin session (flag on, admin) + revoked on GitHub → 403 permission-revoked", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    setupRevokedGitHub();
+    const session = makeSessionToken({
+      permission: "admin",
+      jti: "jti-http-a1",
+    });
+    const result = await requireProjectAdminHttp(makeRecheckCtx(session));
+    expect(result).not.toBeNull();
+    if (result == null) return; // type-narrowing guard (assertion above fires first)
+    expect(result.status).toBe(403);
+    const body = (await result.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("permission-revoked");
+  });
+
+  // (b) auto-admin session with jti + still admin on GitHub → null (admit)
+  it("(b) requireProjectAdminHttp: auto-admin session still admin on GitHub → null (admit)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    setupStillAdmin();
+    const session = makeSessionToken({
+      permission: "admin",
+      jti: "jti-http-b1",
+    });
+    const result = await requireProjectAdminHttp(makeRecheckCtx(session));
+    expect(result).toBeNull();
+  });
+
+  // (c) d1-token full-scope → null (no re-verify)
+  it("(c) requireProjectAdminHttp: d1-token full-scope → null (no re-verify)", async () => {
+    const result = await requireProjectAdminHttp(
+      makeRecheckCtx(makeD1Token("full")),
+    );
+    expect(result).toBeNull();
+    expect(mockGetInstallation).not.toHaveBeenCalled();
+  });
+
+  // (d) roster-admit session via requireProjectAdmin → next (no GitHub re-verify — roster path unchanged)
+  it("(d) requireProjectAdmin: roster-admit session → next, no GitHub re-verify", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(true);
+    const session = makeSessionToken({
+      permission: "admin",
+      jti: "jti-roster-d1",
+    });
+    const app = new Hono<AppEnv>();
+    app.use("/*", async (c, next) => {
+      c.set("tokenResult", session);
+      c.set("projectId", "proj-1");
+      return next();
+    });
+    app.use("/*", requireProjectAdmin);
+    app.get("/test", (c) => c.json({ ok: true }));
+    const res = await app.fetch(
+      new Request("http://localhost/test"),
+      recheckEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(200);
+    // Roster short-circuits → auto-admin not reached → no re-verify
+    expect(mockGetInstallation).not.toHaveBeenCalled();
+  });
+
+  // (e) re-verify not-possible (no App install) → falls back to existing auto-admin allow
+  it("(e) requireProjectAdminHttp: re-verify not-possible (no App install) → allow (not-possible fallback)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    setupNoInstall();
+    const session = makeSessionToken({
+      permission: "admin",
+      jti: "jti-http-e1",
+    });
+    const result = await requireProjectAdminHttp(makeRecheckCtx(session));
+    expect(result).toBeNull();
+  });
+
+  // (a2) auto-admin session with jti + revoked — requireProjectAdmin path (adminRoster / admin.post)
+  it("(a2) requireProjectAdmin: auto-admin session (flag on, admin) + revoked on GitHub → 403 permission-revoked", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(false); // not in roster
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true); // auto-admin flag on
+    setupRevokedGitHub();
+    const session = makeSessionToken({
+      permission: "admin",
+      jti: "jti-admin-a2",
+    });
+    const app = new Hono<AppEnv>();
+    app.use("/*", async (c, next) => {
+      c.set("tokenResult", session);
+      c.set("projectId", "proj-1");
+      return next();
+    });
+    app.use("/*", requireProjectAdmin);
+    app.get("/test", (c) => c.json({ ok: true }));
+    const res = await app.fetch(
+      new Request("http://localhost/test"),
+      recheckEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("permission-revoked");
+  });
+
+  // (b2) auto-admin session + still admin — requireProjectAdmin path → 200
+  it("(b2) requireProjectAdmin: auto-admin session still admin → 200 (admit)", async () => {
+    mockIsActiveAdmin.mockResolvedValueOnce(false);
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    setupStillAdmin();
+    const session = makeSessionToken({
+      permission: "admin",
+      jti: "jti-admin-b2",
+    });
+    const app = new Hono<AppEnv>();
+    app.use("/*", async (c, next) => {
+      c.set("tokenResult", session);
+      c.set("projectId", "proj-1");
+      return next();
+    });
+    app.use("/*", requireProjectAdmin);
+    app.get("/test", (c) => c.json({ ok: true }));
+    const res = await app.fetch(
+      new Request("http://localhost/test"),
+      recheckEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  // cookie-session auto-admin path unchanged (out of scope per plan)
+  it("cookie-session auto-admin path: no GitHub re-verify (out of scope, unchanged)", async () => {
+    mockGetRepoAdminAutoAdmin.mockResolvedValueOnce(true);
+    const cookie = makeCookieSessionToken("admin");
+    const app = new Hono<AppEnv>();
+    app.use("/*", async (c, next) => {
+      c.set("tokenResult", cookie);
+      c.set("projectId", "proj-1");
+      return next();
+    });
+    app.use("/*", requireProjectAdmin);
+    app.get("/test", (c) => c.json({ ok: true }));
+    const res = await app.fetch(
+      new Request("http://localhost/test"),
+      recheckEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(200);
+    // Cookie path must NOT trigger re-verify
+    expect(mockGetInstallation).not.toHaveBeenCalled();
   });
 });
