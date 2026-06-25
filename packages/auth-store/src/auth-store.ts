@@ -19,6 +19,7 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import {
+  type CredentialProviderConfig,
   type CredentialRecord,
   CredentialRecordSchema,
   type InfraSecrets,
@@ -240,6 +241,38 @@ export class AuthStore {
     await writeRegistry(this.paths, registry);
   }
 
+  /**
+   * Set or update the credential_provider configuration for an instance.
+   *
+   * Uses the same full-record splice pattern as markTrusted so all other fields
+   * (worker_url, instance_id_source, instance_key, trust, created_at, label) are
+   * preserved verbatim. This field is mutable policy — NOT identity — so it does
+   * not trigger ImmutableInstanceKeyError.
+   *
+   * Throws InstanceNotFoundError if the key does not exist.
+   */
+  async setCredentialProvider(
+    key: InstanceKey,
+    config: CredentialProviderConfig,
+  ): Promise<void> {
+    const registry = await readRegistry(this.paths);
+    if (!registry) {
+      throw new InstanceNotFoundError(key);
+    }
+
+    const idx = registry.instances.findIndex((r) => r.instance_key === key);
+    if (idx === -1) {
+      throw new InstanceNotFoundError(key);
+    }
+
+    registry.instances[idx] = {
+      ...registry.instances[idx],
+      credential_provider: config,
+    };
+
+    await writeRegistry(this.paths, registry);
+  }
+
   // --------------------------------------------------------------------------
   // Tier 2: Credentials
   // --------------------------------------------------------------------------
@@ -269,8 +302,13 @@ export class AuthStore {
       throw new InstanceKeyMismatchError(key, parsed.instance_key);
     }
 
-    // Expiry check (default: filter expired unless allowExpired is set)
-    if (!opts?.allowExpired && parsed.expires_at < Date.now()) {
+    // Expiry check (default: filter expired unless allowExpired is set).
+    // null expires_at = non-expiring (mirror getRefresh behavior at auth-store.ts:330).
+    if (
+      !opts?.allowExpired &&
+      parsed.expires_at !== null &&
+      parsed.expires_at < Date.now()
+    ) {
       return null;
     }
 

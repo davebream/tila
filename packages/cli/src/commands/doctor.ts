@@ -487,6 +487,37 @@ export default defineCommand({
       }
     }
 
+    // Check 8b: oidc-generic issuer-trust hint
+    // When any registered instance uses oidc-generic, surface a hint reminding
+    // the operator to verify the Worker trusts the issuer. Worker-side issuer
+    // allowlist configuration is out of scope for WI-K (T3 operator step).
+    try {
+      const { AuthStore, TilaPaths, KeyringSecretStore, processEnvProbe } =
+        await import("@tila/auth-store");
+      const { tilaHome } = await import("../lib/provisioning.js");
+      void tilaHome(); // tilaHome() sets up TILA_HOME env support
+      const paths = new TilaPaths();
+      const store = new AuthStore({
+        paths,
+        secrets: new KeyringSecretStore(),
+        env: { isCI: processEnvProbe.isCI, isTTY: processEnvProbe.isTTY },
+      });
+
+      // Find all instances with oidc-generic credential_provider
+      const instances = await store.listInstances();
+      for (const inst of instances) {
+        if (inst.credential_provider?.kind === "oidc-generic") {
+          addCheck(
+            "oidc-generic-issuer-trust",
+            "warn",
+            `Instance uses oidc-generic issuer: ${inst.credential_provider.issuer} — verify the Worker trusts this issuer (T3 allowlist).`,
+          );
+        }
+      }
+    } catch {
+      // Non-fatal: auth-store or keyring may be unavailable; skip silently
+    }
+
     // Check 9: Reconcile (optional, --reconcile flag)
     const doReconcile = !!(args.reconcile || args.apply);
     if (doReconcile) {

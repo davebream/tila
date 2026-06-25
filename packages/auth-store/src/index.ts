@@ -1,5 +1,35 @@
 // @tila/auth-store — runtime-agnostic client-side auth persistence
 
+// WI-K credential provider contract (Phase 1)
+export { createProvider } from "./providers/index.js";
+export type {
+  CredentialKind,
+  MintedCredential,
+  CredentialProvider,
+  ProviderContext,
+  ProviderPorts,
+  Clock,
+  Prompter,
+  RunCommand,
+  RunCommandResult,
+} from "./providers/types.js";
+
+// WI-K Phase 2 — device-flow helper + ports
+export { runDeviceFlow } from "./providers/device-flow.js";
+export type { DeviceFlowResult } from "./providers/device-flow.js";
+export { DeviceFlowError } from "./errors.js";
+export type { DeviceFlowErrorReason } from "./errors.js";
+export {
+  FakeFetch,
+  FakeClock,
+  FakePrompter,
+  FakeRunCommand,
+} from "./providers/ports.js";
+export type {
+  FakeFetchCall,
+  DisplayDeviceCodeCall,
+} from "./providers/ports.js";
+
 // Phase 2 exports
 export type { SecretStore, EnvProbe } from "./secret-store.js";
 export { probeSecretStore, processEnvProbe } from "./secret-store.js";
@@ -11,6 +41,8 @@ export {
   InstanceKeyMismatchError,
   ImmutableInstanceKeyError,
   InstanceNotFoundError,
+  UnknownCredentialProviderError,
+  MissingClientIdError,
 } from "./errors.js";
 export { FakeSecretStore, ThrowingSecretStore } from "./testing.js";
 export type { ThrowMode } from "./testing.js";
