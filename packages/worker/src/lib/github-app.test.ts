@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  GitHubAppTokenError,
   checkUserMembership,
+  checkUserMembershipStatus,
   getInstallationAccessToken,
   listInstallationRepositories,
   mintAppJwt,
@@ -160,6 +162,7 @@ describe("checkUserMembership", () => {
   it("should return permission on 200 response", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       json: async () => ({ permission: "admin" }),
     });
     global.fetch = mockFetch;
@@ -216,6 +219,7 @@ describe("checkUserMembership", () => {
   it("should respect custom apiBase", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       json: async () => ({ permission: "write" }),
     });
     global.fetch = mockFetch;
@@ -415,5 +419,157 @@ describe("listInstallationRepositories", () => {
     await expect(listInstallationRepositories("invalid_token")).rejects.toThrow(
       "GitHub API returned 401",
     );
+  });
+});
+
+describe("checkUserMembershipStatus", () => {
+  it("returns {kind:'permission',value} on 200 response", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ permission: "admin" }),
+    });
+    global.fetch = mockFetch;
+
+    const result = await checkUserMembershipStatus(
+      "installation_token",
+      "octocat",
+      "hello-world",
+      "monalisa",
+    );
+
+    expect(result).toEqual({ kind: "permission", value: "admin" });
+  });
+
+  it("returns {kind:'absent'} on 404 response", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    });
+    global.fetch = mockFetch;
+
+    const result = await checkUserMembershipStatus(
+      "installation_token",
+      "octocat",
+      "private-repo",
+      "stranger",
+    );
+
+    expect(result).toEqual({ kind: "absent" });
+  });
+
+  it("returns {kind:'error'} on non-200/non-404 response (500)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+    global.fetch = mockFetch;
+
+    const result = await checkUserMembershipStatus(
+      "installation_token",
+      "octocat",
+      "hello-world",
+      "monalisa",
+    );
+
+    expect(result).toEqual({ kind: "error" });
+  });
+
+  it("returns {kind:'error'} on network throw", async () => {
+    const mockFetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    global.fetch = mockFetch;
+
+    const result = await checkUserMembershipStatus(
+      "installation_token",
+      "octocat",
+      "hello-world",
+      "monalisa",
+    );
+
+    expect(result).toEqual({ kind: "error" });
+  });
+});
+
+describe("checkUserMembership (thin wrapper over checkUserMembershipStatus)", () => {
+  it("returns permission value on 200", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ permission: "admin" }),
+    });
+    global.fetch = mockFetch;
+
+    const result = await checkUserMembership(
+      "installation_token",
+      "octocat",
+      "hello-world",
+      "monalisa",
+    );
+
+    expect(result).toBe("admin");
+  });
+
+  it("returns null on 404", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    });
+    global.fetch = mockFetch;
+
+    const result = await checkUserMembership(
+      "installation_token",
+      "octocat",
+      "private-repo",
+      "stranger",
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null on 500", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+    global.fetch = mockFetch;
+
+    const result = await checkUserMembership(
+      "installation_token",
+      "octocat",
+      "hello-world",
+      "monalisa",
+    );
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("GitHubAppTokenError", () => {
+  it("getInstallationAccessToken throws GitHubAppTokenError with .status on 404", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    });
+    global.fetch = mockFetch;
+
+    const err = await getInstallationAccessToken("app_jwt", 789).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(GitHubAppTokenError);
+    expect((err as GitHubAppTokenError).status).toBe(404);
+  });
+
+  it("getInstallationAccessToken throws GitHubAppTokenError with .status on 500", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+    global.fetch = mockFetch;
+
+    const err = await getInstallationAccessToken("app_jwt", 789).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(GitHubAppTokenError);
+    expect((err as GitHubAppTokenError).status).toBe(500);
   });
 });

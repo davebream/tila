@@ -719,6 +719,7 @@ export function createAuthMiddleware(
         // SECURITY: source ONLY from the verified payload (parsed.data), never the pre-validation object.
         githubUserId: payload.github_user_id,
         githubHost: payload.github_host,
+        jti: payload.jti,
       };
 
       c.set("tokenResult", sessionResult);

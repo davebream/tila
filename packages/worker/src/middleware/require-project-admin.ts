@@ -5,7 +5,13 @@ import {
   ADMIN_GRANTS_CACHE_TTL_MS,
 } from "../config";
 import { adminCacheKey } from "../lib/admin-cache-key";
-import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
+import { reverifySessionPermission } from "../lib/permission-recheck";
+import type {
+  Env,
+  HonoVariables,
+  SessionTokenResult,
+  UnifiedTokenResult,
+} from "../types";
 import { ADMIN_PERMISSION } from "./permission";
 
 // AdminEnv is declared LOCALLY here, not imported from routes/admin.ts: the
@@ -178,6 +184,44 @@ export async function autoAdminGrants(
 }
 
 /**
+ * Layer B re-verify for the auto-admin session admit path (WI-H, Task 8).
+ *
+ * Called ONLY when `autoAdminGrants` has returned true AND the principal is a
+ * `kind === "session"` (bearer GitHub session). Cookie-sessions are excluded:
+ * they lack `githubRepoId` (needed for `isRegistered`) so re-verify is not
+ * possible for them; they remain out of scope per the plan scope decision.
+ *
+ * Returns null (admit) on allow/not-possible, or a 403 Response on deny.
+ * Mirrors the `reverifyOrDeny` pattern from permission.ts but uses the
+ * "token-authz-denied" code for the Http path and "permission-denied" for
+ * the middleware path — each caller produces the matching error shape.
+ *
+ * @param c       - Hono context (admin env, must have c.env for App secrets)
+ * @param session - The narrowed SessionTokenResult (kind:"session")
+ */
+async function reverifyAutoAdminOrDeny(
+  c: import("hono").Context<AdminEnv>,
+  session: SessionTokenResult,
+): Promise<Response | null> {
+  const verdict = await reverifySessionPermission(c, session, "admin");
+  if (verdict.decision === "deny") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "permission-revoked",
+          message: "Repository permission was revoked or downgraded",
+          retryable: false,
+        },
+      },
+      403,
+    );
+  }
+  // allow (grant / not-possible / transient) — proceed; return null (no deny).
+  return null;
+}
+
+/**
  * Async admin gate for token/repo routes (C5).
  * These routes mount WITHOUT projectMiddleware, so projectId is sourced from
  * tokenResult.projectId (not c.get("projectId"), which is empty on these mounts).
@@ -204,6 +248,13 @@ export async function requireProjectAdminHttp(
   // (2) Flag-gated auto-admin (bearer or cookie-session with admin permission).
   // projectId comes from tokenResult because these routes have no projectMiddleware.
   if (await autoAdminGrants(c.env.DB, tokenResult, tokenResult.projectId)) {
+    // Layer B (WI-H): re-verify live GitHub permission for bearer sessions only.
+    // Cookie-sessions lack githubRepoId needed by reverifySessionPermission and are
+    // out of scope per the plan scope decision; they admit here unchanged.
+    if (tokenResult.kind === "session") {
+      const denyResp = await reverifyAutoAdminOrDeny(c, tokenResult);
+      if (denyResp !== null) return denyResp;
+    }
     return null;
   }
   return c.json(
@@ -361,7 +412,13 @@ export const requireProjectAdmin: MiddlewareHandler<AdminEnv> = async (
     }
 
     // (#101) Roster miss (or cached-false) — try the per-project auto-admin flag.
-    if (await autoAdminGrants(c.env.DB, tokenResult, projectId)) return next();
+    if (await autoAdminGrants(c.env.DB, tokenResult, projectId)) {
+      // Layer B (WI-H): re-verify live GitHub permission for the snapshot-trusting
+      // auto-admin path. `tokenResult` is narrowed to `kind:"session"` here.
+      const denyResp = await reverifyAutoAdminOrDeny(c, tokenResult);
+      if (denyResp !== null) return denyResp;
+      return next();
+    }
     return deny(c);
   }
 

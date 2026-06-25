@@ -2209,3 +2209,237 @@ describe("instance_id binding in minted session JWT and login response", () => {
     expect(jwtPayload.instance_id).toBe(KNOWN_INSTANCE_ID);
   });
 });
+
+// ── WI-H: Tiered TTL tests ────────────────────────────────────────────────────
+// Coverage: ≥5 assertions proving both per-path wiring and the full tier map.
+// PAT path covers all three tiers; App and OIDC paths cover one tier each.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("WI-H tiered TTL: PAT /exchange path (all three tiers)", () => {
+  const envWithOidc = {
+    ...testEnv,
+    GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
+  } as unknown as Env;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue(false);
+    mockIdempotencyCheck.mockResolvedValue(null);
+    mockListForProject.mockResolvedValue([MOCK_REPO]);
+    mockGitHubAppConfigGetInstallation.mockResolvedValue(null);
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "testuser", id: 1 });
+  });
+
+  it("PAT: read permission → expires_at - issued_at == 3600", async () => {
+    const app = createApp();
+    mockGetRepoPermission.mockResolvedValue("read");
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_read",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      expires_at: number;
+      issued_at?: number;
+      session_token: string;
+    };
+    // Decode JWT payload to get issued_at
+    const parts = body.session_token.split(".");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(payloadStr) as {
+      issued_at: number;
+      expires_at: number;
+    };
+    expect(body.expires_at - payload.issued_at).toBe(3600);
+  });
+
+  it("PAT: write permission → expires_at - issued_at == 900", async () => {
+    const app = createApp();
+    mockGetRepoPermission.mockResolvedValue("write");
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_write",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      expires_at: number;
+      session_token: string;
+    };
+    const parts = body.session_token.split(".");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(payloadStr) as { issued_at: number };
+    expect(body.expires_at - payload.issued_at).toBe(900);
+  });
+
+  it("PAT: admin permission → expires_at - issued_at == 300", async () => {
+    const app = createApp();
+    mockGetRepoPermission.mockResolvedValue("admin");
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_admin",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      expires_at: number;
+      session_token: string;
+    };
+    const parts = body.session_token.split(".");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(payloadStr) as { issued_at: number };
+    expect(body.expires_at - payload.issued_at).toBe(300);
+  });
+});
+
+describe("WI-H tiered TTL: App /exchange path", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue(false);
+    mockIdempotencyCheck.mockResolvedValue(null);
+    mockListForProject.mockResolvedValue([MOCK_REPO]);
+    mockGitHubAppConfigGetInstallation.mockResolvedValue({
+      project_id: "test-project",
+      installation_id: 12345,
+      created_at: 1000000,
+      created_by: "admin",
+    });
+    mockMintAppJwt.mockResolvedValue("app-jwt-fake");
+    mockGetInstallationAccessToken.mockResolvedValue("ghs_install_token_fake");
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "appuser", id: 2 });
+  });
+
+  it("App path: write permission → expires_at - issued_at == 900", async () => {
+    const app = createApp();
+    const envWithApp = {
+      ...testEnv,
+      GITHUB_APP_ID: TEST_APP_ID,
+      GITHUB_APP_PRIVATE_KEY: TEST_APP_PRIVATE_KEY,
+    } as unknown as Env;
+
+    mockCheckUserMembership.mockResolvedValue("write");
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          user_token: "ghu_user_token_fake",
+          auth_method: "user_token",
+        }),
+      },
+      envWithApp,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      expires_at: number;
+      session_token: string;
+    };
+    const parts = body.session_token.split(".");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(payloadStr) as { issued_at: number };
+    expect(body.expires_at - payload.issued_at).toBe(900);
+  });
+});
+
+describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
+  const envWithOidc = {
+    ...testEnv,
+    GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
+  } as unknown as Env;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue(false);
+    mockIdempotencyCheck.mockResolvedValue(null);
+    mockVerifyOidcToken.mockResolvedValue({
+      iss: "https://token.actions.githubusercontent.com",
+      aud: "https://tila.example.com",
+      sub: "repo:test-org/test-repo:ref:refs/heads/main",
+      exp: Math.floor(Date.now() / 1000) + 600,
+      iat: Math.floor(Date.now() / 1000),
+      nbf: Math.floor(Date.now() / 1000),
+      jti: "oidc-jti-tier-test",
+      repository: "test-org/test-repo",
+      repository_id: 99999,
+      repository_owner: "test-org",
+      repository_owner_id: 12345,
+      actor: "testuser",
+      actor_id: 54321,
+      ref: "refs/heads/main",
+      sha: "abc123",
+      workflow: "CI",
+      run_id: 111,
+      run_number: 42,
+      run_attempt: 1,
+      environment: "production",
+      event_name: "push",
+      repository_visibility: "private",
+      job_workflow_ref:
+        "test-org/test-repo/.github/workflows/ci.yml@refs/heads/main",
+    });
+  });
+
+  it("OIDC path: admin permission → expires_at - issued_at == 300", async () => {
+    const app = createApp();
+
+    mockIsRegistered.mockResolvedValue({
+      ...MOCK_REPO,
+      oidc_permission: "admin",
+    });
+
+    const res = await app.request(
+      "/api/auth/github/exchange-oidc",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        }),
+      },
+      envWithOidc,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      expires_at: number;
+      session_token: string;
+    };
+    const parts = body.session_token.split(".");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(payloadStr) as { issued_at: number };
+    expect(body.expires_at - payload.issued_at).toBe(300);
+  });
+});

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CookieSessionTokenResult,
   D1TokenResult,
@@ -8,6 +8,86 @@ import type {
   SessionTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
+
+// ---------------------------------------------------------------------------
+// Module-level mocks for the re-verify (Layer B) test cases.
+// These mocks target the same seam as permission-recheck.test.ts:
+//   - @tila/backend-d1 store methods (getInstallation, isRegistered)
+//   - global.fetch (used transitively by githubFetch → checkUserMembershipStatus)
+//   - ./github-app (mintAppJwt, getInstallationAccessToken, GitHubAppTokenError)
+// Hoisted so factories are available inside vi.mock() closures.
+// ---------------------------------------------------------------------------
+const {
+  mockGetInstallation,
+  mockIsRegistered,
+  mockMintAppJwt,
+  mockGetInstallationAccessToken,
+} = vi.hoisted(() => ({
+  mockGetInstallation: vi.fn(),
+  mockIsRegistered: vi.fn(),
+  mockMintAppJwt: vi.fn(),
+  mockGetInstallationAccessToken: vi.fn(),
+}));
+
+vi.mock("@tila/backend-d1", () => ({
+  GitHubAppConfigStore: vi.fn().mockImplementation(
+    class {
+      getInstallation = mockGetInstallation;
+    } as unknown as () => unknown,
+  ),
+  RepoAllowlistStore: vi.fn().mockImplementation(
+    class {
+      isRegistered = mockIsRegistered;
+    } as unknown as () => unknown,
+  ),
+  // Existing tests also need AdminGrantsStore / D1ProjectRegistry (via project.ts import in the
+  // project-middleware tests at the bottom of this file)
+  AdminGrantsStore: class {
+    isActiveAdmin = vi.fn();
+  },
+  D1ProjectRegistry: class {
+    getRepoAdminAutoAdmin = vi.fn();
+  },
+}));
+
+vi.mock("../lib/github-app", () => ({
+  mintAppJwt: mockMintAppJwt,
+  getInstallationAccessToken: mockGetInstallationAccessToken,
+  GitHubAppTokenError: class GitHubAppTokenError extends Error {
+    readonly status: number;
+    constructor(status: number, message?: string) {
+      super(message ?? `GitHub API returned ${status}`);
+      this.name = "GitHubAppTokenError";
+      this.status = status;
+    }
+  },
+  checkUserMembershipStatus: async (
+    installationToken: string,
+    owner: string,
+    repo: string,
+    login: string,
+    apiBase = "https://api.github.com",
+  ) => {
+    try {
+      const res = await fetch(
+        `${apiBase}/repos/${owner}/${repo}/collaborators/${login}/permission`,
+        { headers: { Authorization: `Bearer ${installationToken}` } },
+      );
+      if (res.status === 200) {
+        const data = (await res.json()) as { permission: string };
+        return { kind: "permission" as const, value: data.permission };
+      }
+      if (res.status === 404) {
+        return { kind: "absent" as const };
+      }
+      return { kind: "error" as const };
+    } catch {
+      return { kind: "error" as const };
+    }
+  },
+}));
+
+import { _resetPermissionRecheckCacheForTest } from "../lib/permission-recheck";
 import { ADMIN_PERMISSION, requirePermission } from "./permission";
 
 // Prove ADMIN_PERMISSION is the single source of truth for the admin tier —
@@ -86,7 +166,10 @@ function makeD1Token(scopes: string): D1TokenResult {
   };
 }
 
-function makeSessionToken(permission: string): SessionTokenResult {
+function makeSessionToken(
+  permission: string,
+  jti?: string,
+): SessionTokenResult {
   return {
     kind: "session",
     projectId: "proj-1",
@@ -97,6 +180,8 @@ function makeSessionToken(permission: string): SessionTokenResult {
     githubLogin: "testuser",
     permission,
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    githubHost: "github.com",
+    ...(jti !== undefined ? { jti } : {}),
   };
 }
 
@@ -517,5 +602,165 @@ describe("project middleware — PROJECT_MISMATCH guard", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("project-mismatch");
+  });
+});
+
+// =============================================================================
+// requirePermission + Layer B re-verify integration (Task 7, WI-H)
+// Seam: vi.mock("@tila/backend-d1") + vi.mock("../lib/github-app") + global.fetch
+// Reset _resetPermissionRecheckCacheForTest between cases.
+// =============================================================================
+
+/**
+ * Build a Hono app with the full re-verify env (includes GITHUB_APP_* secrets)
+ * and a given token. Supports any HTTP method so DELETE routes can be exercised.
+ */
+function createRecheckApp(
+  requiredLevel: "read" | "write" | "admin",
+  tokenResult:
+    | D1TokenResult
+    | SessionTokenResult
+    | CookieSessionTokenResult
+    | WorkspaceSessionTokenResult,
+): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.use("/*", async (c, next) => {
+    c.set("tokenResult", tokenResult);
+    return next();
+  });
+  app.use("/*", requirePermission(requiredLevel));
+  app.get("/test", (c) => c.json({ ok: true }));
+  app.delete("/test", (c) => c.json({ ok: true }));
+  app.post("/test", (c) => c.json({ ok: true }));
+  return app;
+}
+
+/** Env that includes App secrets so re-verify can proceed */
+const recheckEnv = {
+  DB: {} as D1Database,
+  PROJECT: {} as DurableObjectNamespace,
+  ARTIFACTS: {} as R2Bucket,
+  ANALYTICS: {} as AnalyticsEngineDataset,
+  GITHUB_APP_ID: "12345",
+  GITHUB_APP_PRIVATE_KEY: "FAKE_KEY",
+} as unknown as Env;
+
+async function fetchWithMethod(
+  app: Hono<AppEnv>,
+  method: "GET" | "DELETE" | "POST",
+): Promise<{ status: number; body: unknown }> {
+  const res = await app.fetch(
+    new Request("http://localhost/test", { method }),
+    recheckEnv,
+    mockCtx,
+  );
+  const body = await res.json();
+  return { status: res.status, body };
+}
+
+describe("requirePermission — Layer B re-verify (recheckInScope)", () => {
+  beforeEach(() => {
+    _resetPermissionRecheckCacheForTest();
+    mockGetInstallation.mockReset();
+    mockIsRegistered.mockReset();
+    mockMintAppJwt.mockReset();
+    mockGetInstallationAccessToken.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  // Helpers shared across cases
+  function setupRevokedGitHubAccess(): void {
+    // GitHub now returns 404 (user no longer a collaborator)
+    mockGetInstallation.mockResolvedValue({ installation_id: 99 });
+    mockIsRegistered.mockResolvedValue({
+      github_owner: "myorg",
+      github_repo: "myrepo",
+    });
+    mockMintAppJwt.mockResolvedValue("app-jwt");
+    mockGetInstallationAccessToken.mockResolvedValue("install-token");
+    // global.fetch returns 404 → checkUserMembershipStatus → {kind:"absent"}
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 404 }),
+    );
+  }
+
+  function setupStillAdmin(): void {
+    // GitHub returns 200 with admin permission
+    mockGetInstallation.mockResolvedValue({ installation_id: 99 });
+    mockIsRegistered.mockResolvedValue({
+      github_owner: "myorg",
+      github_repo: "myrepo",
+    });
+    mockMintAppJwt.mockResolvedValue("app-jwt");
+    mockGetInstallationAccessToken.mockResolvedValue("install-token");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ permission: "admin" }), { status: 200 }),
+    );
+  }
+
+  it("admin route + session with jti + revoked GitHub access → 403 permission-revoked", async () => {
+    setupRevokedGitHubAccess();
+    const session = makeSessionToken("admin", "jti-revoked-1");
+    const app = createRecheckApp("admin", session);
+    const { status, body } = await fetchWithMethod(app, "GET");
+    expect(status).toBe(403);
+    expect((body as { error: { code: string } }).error.code).toBe(
+      "permission-revoked",
+    );
+  });
+
+  it("admin route + session with jti + still admin on GitHub → 200 (next)", async () => {
+    setupStillAdmin();
+    const session = makeSessionToken("admin", "jti-still-admin-1");
+    const app = createRecheckApp("admin", session);
+    const { status } = await fetchWithMethod(app, "GET");
+    expect(status).toBe(200);
+  });
+
+  it("write+DELETE route + session with jti + revoked GitHub access → 403 permission-revoked", async () => {
+    setupRevokedGitHubAccess();
+    const session = makeSessionToken("write", "jti-delete-revoked-1");
+    const app = createRecheckApp("write", session);
+    const { status, body } = await fetchWithMethod(app, "DELETE");
+    expect(status).toBe(403);
+    expect((body as { error: { code: string } }).error.code).toBe(
+      "permission-revoked",
+    );
+  });
+
+  it("write+POST route + session with jti → no re-verify, passes on snapshot alone", async () => {
+    // No D1/GitHub mocks needed — re-verify must NOT fire for POST on write route
+    const session = makeSessionToken("write", "jti-post-1");
+    const app = createRecheckApp("write", session);
+    const { status } = await fetchWithMethod(app, "POST");
+    expect(status).toBe(200);
+    // getInstallation must not be called (no re-verify)
+    expect(mockGetInstallation).not.toHaveBeenCalled();
+  });
+
+  it("d1-token admin path: no re-verify (d1-token branch unchanged)", async () => {
+    const app = createRecheckApp("admin", makeD1Token("full"));
+    const { status } = await fetchWithMethod(app, "GET");
+    expect(status).toBe(200);
+    expect(mockGetInstallation).not.toHaveBeenCalled();
+  });
+
+  it("cookie-session admin path: no re-verify (cookie branch unchanged)", async () => {
+    const app = createRecheckApp(
+      "admin",
+      makeCookieSessionToken("full", "admin"),
+    );
+    const { status } = await fetchWithMethod(app, "GET");
+    expect(status).toBe(200);
+    expect(mockGetInstallation).not.toHaveBeenCalled();
+  });
+
+  it("session without jti: no re-verify (pre-C9 token passes on snapshot)", async () => {
+    // no jti set → reverifySessionPermission skips re-check
+    const session = makeSessionToken("admin"); // no jti
+    const app = createRecheckApp("admin", session);
+    const { status } = await fetchWithMethod(app, "GET");
+    expect(status).toBe(200);
+    expect(mockGetInstallation).not.toHaveBeenCalled();
   });
 });

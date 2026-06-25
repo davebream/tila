@@ -4,8 +4,17 @@
  * should be defined here and imported by the relevant modules.
  */
 
-/** HMAC bearer-token TTL in seconds (1 hour). Stateless — not revocable. */
-export const SESSION_TTL_SECONDS = 3600;
+/** Bearer-session TTL by permission tier, in seconds. read keeps the 1h window; write/admin
+ *  are shortened to minutes to bound post-offboarding exposure (WI-H / #131). */
+export const SESSION_TTL_SECONDS_BY_TIER = {
+  read: 3600, // 1 hour (unchanged)
+  write: 900, // 15 minutes
+  admin: 300, // 5 minutes
+} as const satisfies Record<"read" | "write" | "admin", number>;
+
+/** @deprecated Back-compat alias = the read tier. Existing importers keep compiling; new code
+ *  should select from SESSION_TTL_SECONDS_BY_TIER. */
+export const SESSION_TTL_SECONDS = SESSION_TTL_SECONDS_BY_TIER.read;
 
 /**
  * Cookie-session TTL in seconds (8 hours).
@@ -182,3 +191,27 @@ export const ADMIN_GRANTS_CACHE_TTL_MS = 10_000; // 10 seconds
 
 /** Maximum number of roster entries in the per-isolate admin-grants cache (oldest-evict on overflow). */
 export const ADMIN_GRANTS_CACHE_MAX_SIZE = 2000;
+
+/**
+ * TTL for the per-isolate permission re-check cache (Layer B, WI-H).
+ * A cached positive result (permission still sufficient) is accepted for at most
+ * this long before another GitHub round-trip is required. Mirrors
+ * JTI_REVCHECK_TTL_MS — both are 60-second staleness windows.
+ */
+export const PERMISSION_RECHECK_TTL_MS = 60_000; // 60 seconds
+
+/**
+ * Back-off window for a cached negative permission result (Layer B, WI-H).
+ * After a confirmed downgrade / absent result, the deny is re-asserted for
+ * this duration before the next re-check is attempted (prevents hammering
+ * the GitHub API after a mass-offboarding event).
+ */
+export const PERMISSION_RECHECK_BACKOFF_MS = 10_000; // 10 seconds
+
+/**
+ * Maximum number of jti entries in the per-isolate permission re-check cache (Layer B, WI-H).
+ * Consistent with JTI_REV_CACHE_MAX_SIZE, ISOLATE_RL_MAX_MAP_SIZE, and MAX_DEBOUNCE_MAP_SIZE —
+ * all per-isolate maps are capped to prevent unbounded memory growth.
+ * Oldest entry is evicted on overflow (same pattern as isolateFailMap / jtiRevCache).
+ */
+export const PERMISSION_RECHECK_CACHE_MAX_SIZE = 2000;
