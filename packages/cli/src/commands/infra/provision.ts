@@ -28,6 +28,8 @@ import {
   loadInfraConfig,
   writeInfraConfig,
 } from "../../lib/infra-config";
+import { resolveInfraConfig } from "../../lib/infra-fallback";
+import { buildAuthStore } from "../../lib/instance-context";
 import { printJsonError } from "../../lib/output";
 import {
   generateHmacKey,
@@ -88,10 +90,10 @@ async function runForceRedeploy(
   rotateAdminToken: boolean,
   headless = false,
 ): Promise<void> {
-  // Load existing infra.toml
-  let infraConfig: ReturnType<typeof loadInfraConfig>;
+  // Load existing infra config — prefer per-slug store, fall back to flat file
+  let infraConfig: Awaited<ReturnType<typeof resolveInfraConfig>>;
   try {
-    infraConfig = loadInfraConfig(tilaDir);
+    infraConfig = await resolveInfraConfig(tilaDir, buildAuthStore());
   } catch {
     p.cancel("No infra.toml found. Run full `tila infra provision` first.");
     process.exit(1);
@@ -322,11 +324,12 @@ export default defineCommand({
 
     const cf = createCloudflareClient(cfToken);
 
-    // Load existing infra.toml once — reused for GitHub App detection.
-    let existingInfra: Awaited<ReturnType<typeof loadInfraConfig>> | null =
+    // Load existing infra config once — prefer per-slug store, fall back to flat file.
+    // Used for GitHub App detection and infra admin token continuity.
+    let existingInfra: Awaited<ReturnType<typeof resolveInfraConfig>> | null =
       null;
     try {
-      existingInfra = loadInfraConfig(tilaDir);
+      existingInfra = await resolveInfraConfig(tilaDir, buildAuthStore());
     } catch (err) {
       console.warn(
         `[tila] Failed to load existing infra.toml: ${err instanceof Error ? err.message : String(err)}`,
