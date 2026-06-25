@@ -14,10 +14,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // We declare the mock factory first; the actual mock implementation is
 // injected per-test via `mockOidcFetch`.
-const mockOidcFetch = vi.fn<(url: string) => Promise<Response>>();
+const mockOidcFetch =
+  vi.fn<(url: string, init?: unknown) => Promise<Response>>();
 
 vi.mock("./oidc-fetch", () => ({
-  oidcFetch: (url: string, init?: unknown) => mockOidcFetch(url, init as never),
+  oidcFetch: (url: string, init?: unknown) => mockOidcFetch(url, init),
   // Re-export OidcFetchError so it can be thrown from the mock when needed.
   OidcFetchError: class OidcFetchError extends Error {
     code: string;

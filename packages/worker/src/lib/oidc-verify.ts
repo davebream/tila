@@ -317,7 +317,7 @@ export async function verifyOidcJwt(
 
   if (!key) {
     await fetchJwks(issuer, jwksUri);
-    key = jwksCache.get(ck) ?? null;
+    key = jwksCache.get(ck);
   }
 
   if (!key) {
