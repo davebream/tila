@@ -18,7 +18,9 @@ import {
   RATE_LIMIT_MAX_FAILURES,
   RATE_LIMIT_WINDOW_MS,
 } from "../config";
+import { emitInstanceMismatchDatapoint } from "../lib/analytics";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
+import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
 import { hashToken } from "../lib/hash-token";
 import { parseCookieHeader } from "../lib/parse-cookie";
 import {
@@ -631,6 +633,78 @@ export function createAuthMiddleware(
           }
         }
         // cached === false means "confirmed not revoked within TTL" — proceed
+      }
+
+      // --- C5: instance_id binding validation (kind:"session" Bearer/JWT only) ---
+      // Validation policy:
+      //   - match (present + equals this deployment)  → accept, no datapoint
+      //   - mismatch (present + differs)              → reject 401 "instance-mismatch" + emit "mismatch"
+      //   - absent (legacy pre-binding token)         → accept + emit "legacy"
+      //   - resolver throws + present claim           → reject 401 "instance-mismatch" + emit "resolve-failed"
+      //   - resolver throws + absent claim            → accept (legacy) + emit "legacy"
+      {
+        const claimedId = payload.instance_id;
+        let deploymentId: string | null = null;
+        let resolveError = false;
+
+        try {
+          deploymentId = await ensureDeploymentInstanceId(c.env.DB);
+        } catch {
+          resolveError = true;
+        }
+
+        if (resolveError) {
+          // D1 outage on a cold isolate
+          if (claimedId !== undefined) {
+            // Present claim but unverifiable — fail closed
+            emitInstanceMismatchDatapoint(c.env.ANALYTICS, c.executionCtx, {
+              projectId: payload.project_id,
+              outcome: "resolve-failed",
+            });
+            return c.json(
+              {
+                ok: false,
+                code: "instance-mismatch",
+                error: {
+                  code: "instance-mismatch",
+                  message: "Deployment instance could not be verified",
+                  retryable: true,
+                },
+              },
+              401,
+            );
+          }
+          // Absent claim + resolve failure → accept (legacy path), emit "legacy"
+          emitInstanceMismatchDatapoint(c.env.ANALYTICS, c.executionCtx, {
+            projectId: payload.project_id,
+            outcome: "legacy",
+          });
+        } else if (claimedId === undefined) {
+          // No instance_id in token — legacy token, accept during transition window
+          emitInstanceMismatchDatapoint(c.env.ANALYTICS, c.executionCtx, {
+            projectId: payload.project_id,
+            outcome: "legacy",
+          });
+        } else if (claimedId !== deploymentId) {
+          // Present and mismatches — cross-deployment replay (B2)
+          emitInstanceMismatchDatapoint(c.env.ANALYTICS, c.executionCtx, {
+            projectId: payload.project_id,
+            outcome: "mismatch",
+          });
+          return c.json(
+            {
+              ok: false,
+              code: "instance-mismatch",
+              error: {
+                code: "instance-mismatch",
+                message: "Session token was issued for a different deployment",
+                retryable: false,
+              },
+            },
+            401,
+          );
+        }
+        // match (claimedId === deploymentId) → accept silently
       }
 
       // Set session token result

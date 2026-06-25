@@ -29,6 +29,26 @@ import {
   createAuthMiddleware,
 } from "./auth";
 
+// Mock deployment-instance module for Task 8 tests (instance_id validation)
+const mockEnsureDeploymentInstanceId =
+  vi.fn<(db: D1Database) => Promise<string>>();
+vi.mock("../lib/deployment-instance", () => ({
+  ensureDeploymentInstanceId: (db: D1Database) =>
+    mockEnsureDeploymentInstanceId(db),
+  __resetInstanceCache: vi.fn(),
+}));
+
+// Mock analytics module for Task 8 instance mismatch datapoint assertions
+const mockEmitInstanceMismatchDatapoint = vi.fn();
+vi.mock("../lib/analytics", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../lib/analytics")>();
+  return {
+    ...original,
+    emitInstanceMismatchDatapoint: (...args: unknown[]) =>
+      mockEmitInstanceMismatchDatapoint(...args),
+  };
+});
+
 // --- Session token test helpers ---
 
 // 32-byte test HMAC key (same derivation as auth-github.test.ts)
@@ -226,6 +246,11 @@ beforeEach(() => {
   mockInvalidateSession.mockReset();
   mockSessionValidate.mockReset();
   mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(false);
+  // Task 8: reset instance cache + mocks between tests
+  mockEnsureDeploymentInstanceId.mockReset();
+  mockEmitInstanceMismatchDatapoint.mockReset();
+  // Default: resolve to a known deployment instance id
+  mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
 });
 
 afterEach(() => {
@@ -1630,5 +1655,179 @@ describe("auth middleware", () => {
       expect(res.status).toBe(200);
       expect(mockValidate).toHaveBeenCalledWith(tokenHash);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 8: instance_id validation in the Bearer/JWT branch (C5)
+// ---------------------------------------------------------------------------
+
+describe("auth middleware — instance_id validation (Bearer/JWT branch only)", () => {
+  const DEPLOYMENT_ID = "deployment-A";
+
+  /** Helper to fetch a session-token request through the auth middleware. */
+  async function fetchWithInstanceEnv(
+    app: ReturnType<typeof createTestApp>,
+    token: string,
+    deploymentId = DEPLOYMENT_ID,
+  ): Promise<Response> {
+    mockEnsureDeploymentInstanceId.mockResolvedValue(deploymentId);
+    return app.fetch(
+      new Request("http://localhost/test", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      {
+        DB: {} as D1Database,
+        PROJECT: {} as DurableObjectNamespace,
+        ARTIFACTS: {} as R2Bucket,
+        ANALYTICS: {
+          writeDataPoint: vi.fn(),
+        } as unknown as AnalyticsEngineDataset,
+        GITHUB_SESSION_HMAC_KEY: TEST_HMAC_KEY,
+      },
+      {
+        waitUntil: mockWaitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext,
+    );
+  }
+
+  // (a) Matching instance_id → request proceeds (200)
+  it("(a) matching instance_id allows the request through", async () => {
+    const token = await mintSessionToken({ instance_id: DEPLOYMENT_ID });
+    const app = createTestApp();
+
+    const res = await fetchWithInstanceEnv(app, token, DEPLOYMENT_ID);
+
+    expect(res.status).toBe(200);
+    expect(mockEmitInstanceMismatchDatapoint).not.toHaveBeenCalled();
+  });
+
+  // (b) Present but mismatching instance_id → 401 instance-mismatch + mismatch datapoint
+  it("(b) mismatching instance_id returns 401 instance-mismatch + emits mismatch datapoint", async () => {
+    const token = await mintSessionToken({ instance_id: "deployment-B" });
+    const app = createTestApp();
+
+    const res = await fetchWithInstanceEnv(app, token, DEPLOYMENT_ID);
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { ok: boolean; code: string };
+    expect(body.code).toBe("instance-mismatch");
+    expect(mockEmitInstanceMismatchDatapoint).toHaveBeenCalledOnce();
+    const callArgs = mockEmitInstanceMismatchDatapoint.mock.calls[0];
+    expect(callArgs[2]).toMatchObject({ outcome: "mismatch" });
+  });
+
+  // (c) Absent instance_id claim → proceeds + legacy datapoint
+  it("(c) absent instance_id claim allows request + emits legacy datapoint", async () => {
+    // Token minted WITHOUT instance_id (legacy token)
+    const token = await mintSessionToken();
+    const app = createTestApp();
+
+    const res = await fetchWithInstanceEnv(app, token, DEPLOYMENT_ID);
+
+    expect(res.status).toBe(200);
+    expect(mockEmitInstanceMismatchDatapoint).toHaveBeenCalledOnce();
+    const callArgs = mockEmitInstanceMismatchDatapoint.mock.calls[0];
+    expect(callArgs[2]).toMatchObject({ outcome: "legacy" });
+  });
+
+  // (d) ensureDeploymentInstanceId throws + present claim → 401 resolve-failed
+  it("(d) resolver throws + present instance_id returns 401 resolve-failed", async () => {
+    const token = await mintSessionToken({ instance_id: "some-id" });
+    mockEnsureDeploymentInstanceId.mockRejectedValue(
+      new Error("D1 unavailable"),
+    );
+    const app = createTestApp();
+
+    const res = await app.fetch(
+      new Request("http://localhost/test", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      {
+        DB: {} as D1Database,
+        PROJECT: {} as DurableObjectNamespace,
+        ARTIFACTS: {} as R2Bucket,
+        ANALYTICS: {
+          writeDataPoint: vi.fn(),
+        } as unknown as AnalyticsEngineDataset,
+        GITHUB_SESSION_HMAC_KEY: TEST_HMAC_KEY,
+      },
+      {
+        waitUntil: mockWaitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext,
+    );
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { ok: boolean; code: string };
+    expect(body.code).toBe("instance-mismatch");
+    expect(mockEmitInstanceMismatchDatapoint).toHaveBeenCalledOnce();
+    const callArgs = mockEmitInstanceMismatchDatapoint.mock.calls[0];
+    expect(callArgs[2]).toMatchObject({ outcome: "resolve-failed" });
+  });
+
+  // (e) ensureDeploymentInstanceId throws + absent claim → proceeds (legacy path)
+  it("(e) resolver throws + absent instance_id allows request through (legacy)", async () => {
+    const token = await mintSessionToken(); // no instance_id
+    mockEnsureDeploymentInstanceId.mockRejectedValue(
+      new Error("D1 unavailable"),
+    );
+    const app = createTestApp();
+
+    const res = await app.fetch(
+      new Request("http://localhost/test", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      {
+        DB: {} as D1Database,
+        PROJECT: {} as DurableObjectNamespace,
+        ARTIFACTS: {} as R2Bucket,
+        ANALYTICS: {
+          writeDataPoint: vi.fn(),
+        } as unknown as AnalyticsEngineDataset,
+        GITHUB_SESSION_HMAC_KEY: TEST_HMAC_KEY,
+      },
+      {
+        waitUntil: mockWaitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext,
+    );
+
+    expect(res.status).toBe(200);
+    // Resolver threw but no instance_id present — accept and emit legacy
+    expect(mockEmitInstanceMismatchDatapoint).toHaveBeenCalledOnce();
+    const callArgs = mockEmitInstanceMismatchDatapoint.mock.calls[0];
+    expect(callArgs[2]).toMatchObject({ outcome: "legacy" });
+  });
+
+  // (f) Cookie-session request is unaffected by the instance_id check
+  it("(f) cookie-session request bypasses instance_id validation entirely", async () => {
+    mockGetSessionFromCache.mockReturnValue(VALID_SESSION);
+    const app = createTestApp();
+
+    const res = await app.fetch(
+      new Request("http://localhost/test", {
+        headers: { Cookie: "tila_session=some-opaque-session-token" },
+      }),
+      {
+        DB: {} as D1Database,
+        PROJECT: {} as DurableObjectNamespace,
+        ARTIFACTS: {} as R2Bucket,
+        ANALYTICS: {
+          writeDataPoint: vi.fn(),
+        } as unknown as AnalyticsEngineDataset,
+        GITHUB_SESSION_HMAC_KEY: TEST_HMAC_KEY,
+      },
+      {
+        waitUntil: mockWaitUntil,
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext,
+    );
+
+    expect(res.status).toBe(200);
+    // ensureDeploymentInstanceId must NOT be called for cookie sessions
+    expect(mockEnsureDeploymentInstanceId).not.toHaveBeenCalled();
+    expect(mockEmitInstanceMismatchDatapoint).not.toHaveBeenCalled();
   });
 });
