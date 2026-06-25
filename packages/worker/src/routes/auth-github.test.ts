@@ -59,6 +59,13 @@ const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 const mockRateLimitRecordFailure = vi.fn().mockResolvedValue(undefined);
 const mockIdempotencyCheck = vi.fn().mockResolvedValue(null);
 const mockIdempotencyStore = vi.fn().mockResolvedValue(undefined);
+// WI-I reservation primitive. Default: acquire succeeds so the happy-path
+// exchange tests proceed to mint; finalize succeeds; release is a no-op.
+// Individual tests override these to exercise in-flight (409) / finalized (replay)
+// / release-on-failure behavior.
+const mockIdempotencyReserve = vi.fn().mockResolvedValue({ state: "acquired" });
+const mockIdempotencyFinalize = vi.fn().mockResolvedValue(true);
+const mockIdempotencyRelease = vi.fn().mockResolvedValue(undefined);
 const mockListForProject = vi.fn().mockResolvedValue([]);
 const mockIsRegistered = vi.fn().mockResolvedValue(null);
 const mockGitHubAppConfigSetInstallation = vi.fn().mockResolvedValue(undefined);
@@ -85,6 +92,9 @@ vi.mock("@tila/backend-d1", () => ({
     class {
       check = mockIdempotencyCheck;
       store = mockIdempotencyStore;
+      reserve = mockIdempotencyReserve;
+      finalize = mockIdempotencyFinalize;
+      release = mockIdempotencyRelease;
     } as unknown as () => unknown,
   ),
   RepoAllowlistStore: vi.fn().mockImplementation(
@@ -174,6 +184,9 @@ describe("POST /api/auth/github/exchange", () => {
     vi.clearAllMocks();
     mockRateLimitCheck.mockResolvedValue(false);
     mockIdempotencyCheck.mockResolvedValue(null);
+    mockIdempotencyReserve.mockResolvedValue({ state: "acquired" });
+    mockIdempotencyFinalize.mockResolvedValue(true);
+    mockIdempotencyRelease.mockResolvedValue(undefined);
     mockListForProject.mockResolvedValue([]);
     mockRateLimitRecordFailure.mockResolvedValue(undefined);
     mockGitHubAppConfigGetInstallation.mockResolvedValue(null);
@@ -321,6 +334,127 @@ describe("POST /api/auth/github/exchange", () => {
     expect(body.github_login).toBe("testuser");
     expect(body.permission).toBe("write");
     expect(body.expires_at).toBeGreaterThan(Date.now() / 1000);
+  });
+
+  // WI-I: atomic claim-row reservation around /exchange.
+  it("WI-I: /exchange returns 409 (no mint) when the reservation is in-flight", async () => {
+    const app = createApp();
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "testuser", id: 1 });
+    mockListForProject.mockResolvedValue([MOCK_REPO]);
+    mockGetRepoPermission.mockResolvedValue("write");
+    mockIdempotencyReserve.mockResolvedValueOnce({ state: "in-flight" });
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_valid",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      error: { code: string; retryable: boolean };
+    };
+    expect(body.error.code).toBe("exchange-in-progress");
+    expect(body.error.retryable).toBe(true);
+    // No GitHub round-trip and no mint for the loser.
+    expect(mockGetAuthenticatedUser).not.toHaveBeenCalled();
+    expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
+  });
+
+  it("WI-I: /exchange replays a finalized reservation body without re-minting", async () => {
+    const app = createApp();
+    const finalized = {
+      ok: true,
+      session_token: "tila_s.cached-token",
+      project_id: "test-project",
+      github_login: "cacheduser",
+      permission: "read",
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    };
+    mockIdempotencyReserve.mockResolvedValueOnce({
+      state: "finalized",
+      statusCode: 200,
+      body: JSON.stringify(finalized),
+    });
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_valid",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      session_token: string;
+      github_login: string;
+    };
+    expect(body.session_token).toBe("tila_s.cached-token");
+    expect(body.github_login).toBe("cacheduser");
+    // Winner already minted; this caller must not re-run the exchange.
+    expect(mockGetAuthenticatedUser).not.toHaveBeenCalled();
+    expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
+  });
+
+  it("WI-I: /exchange releases the reservation on GitHub auth failure (no finalize)", async () => {
+    const app = createApp();
+    mockGetAuthenticatedUser.mockRejectedValueOnce(new Error("bad token"));
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_bad",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(403);
+    // Reservation released so a legitimate retry is never permanently blocked;
+    // the key was never finalized.
+    expect(mockIdempotencyRelease).toHaveBeenCalledTimes(1);
+    expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
+  });
+
+  it("WI-I: /exchange finalizes the reservation on success", async () => {
+    const app = createApp();
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "testuser", id: 1 });
+    mockListForProject.mockResolvedValue([MOCK_REPO]);
+    mockGetRepoPermission.mockResolvedValue("write");
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_valid",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockIdempotencyFinalize).toHaveBeenCalledTimes(1);
+    expect(mockIdempotencyRelease).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limited", async () => {
@@ -2409,6 +2543,58 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
       job_workflow_ref:
         "test-org/test-repo/.github/workflows/ci.yml@refs/heads/main",
     });
+  });
+
+  it("WI-I: OIDC path returns 409 (no mint) when the reservation is in-flight", async () => {
+    const app = createApp();
+    mockIsRegistered.mockResolvedValue({
+      ...MOCK_REPO,
+      oidc_permission: "read",
+    });
+    mockIdempotencyReserve.mockResolvedValueOnce({ state: "in-flight" });
+
+    const res = await app.request(
+      "/api/auth/github/exchange-oidc",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        }),
+      },
+      envWithOidc,
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("exchange-in-progress");
+    expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
+  });
+
+  it("WI-I: OIDC path releases the reservation when the repo is not registered (no finalize)", async () => {
+    const app = createApp();
+    // reserve defaults to "acquired"; isRegistered → null drives the in-try 403.
+    mockIsRegistered.mockResolvedValue(null);
+
+    const res = await app.request(
+      "/api/auth/github/exchange-oidc",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        }),
+      },
+      envWithOidc,
+    );
+
+    expect(res.status).toBe(403);
+    // The OIDC finally-block (an independent copy of the release pattern) must
+    // release the claim on this failure path so a retry is never blocked.
+    expect(mockIdempotencyRelease).toHaveBeenCalledTimes(1);
+    expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
   });
 
   it("OIDC path: admin permission → expires_at - issued_at == 300", async () => {
