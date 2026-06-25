@@ -193,27 +193,29 @@ const tokenCmd = defineCommand({
     const { instance } = outcome;
     const cred = instance.credential;
 
-    // Extract raw token from the union
-    const token =
-      cred.source === "inline-token" ? cred.token : cred.record.token;
+    // Extract raw token from the union.
+    // "keychain" carries a CredentialRecord; "inline-token" and "legacy" carry
+    // a bare token directly on the variant object.
+    const token = cred.source === "keychain" ? cred.record.token : cred.token;
 
     if (args.json) {
       // JSON goes to stdout (opt-in)
-      if (cred.source === "inline-token") {
-        printJson({
-          token,
-          token_type: "Bearer",
-          expires_at: null,
-          instance_key: null,
-          source: "inline-token",
-        });
-      } else {
+      if (cred.source === "keychain") {
         printJson({
           token: cred.record.token,
           token_type: cred.record.token_type,
           expires_at: cred.record.expires_at,
           instance_key: instance.instance_key,
           source: "keychain",
+        });
+      } else {
+        // "inline-token" and "legacy" — bare token, no expiry metadata
+        printJson({
+          token,
+          token_type: "Bearer",
+          expires_at: null,
+          instance_key: instance.instance_key ?? null,
+          source: cred.source,
         });
       }
       return;
