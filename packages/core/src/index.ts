@@ -125,3 +125,15 @@ export {
   splitChunkIntoLines,
   type GrepMatcher,
 } from "./grep";
+
+// Hardened OIDC egress wrapper (shared by @tila/worker + @tila/auth-store)
+export {
+  OIDC_EGRESS_TIMEOUT_MS,
+  OIDC_EGRESS_MAX_BYTES,
+  OidcEgressError,
+  isBlockedHost,
+  oidcEgressFetch,
+  type OidcEgressErrorCode,
+  type OidcEgressInit,
+  type OidcEgressOptions,
+} from "./oidc-egress";
