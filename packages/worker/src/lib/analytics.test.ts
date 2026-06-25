@@ -4,6 +4,7 @@ import type { Env, HonoVariables } from "../types";
 import {
   emitAdminRosterDatapoint,
   emitDoOperationDatapoint,
+  emitInstanceMismatchDatapoint,
   emitRequestDatapoint,
   emitSweepErrorDatapoint,
   emitSweepProjectDatapoint,
@@ -841,6 +842,91 @@ describe("emitAdminRosterDatapoint", () => {
         action: "revoke",
         outcome: "last-admin",
         statusCode: 409,
+      }),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// emitInstanceMismatchDatapoint (Task 6 — C8 instance mismatch analytics)
+// ---------------------------------------------------------------------------
+
+describe("emitInstanceMismatchDatapoint", () => {
+  it("emits instance_mismatch blob + outcome 'mismatch' and does NOT include claimed id in indexes", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitInstanceMismatchDatapoint(dataset, ctx, {
+      projectId: "proj-1",
+      outcome: "mismatch",
+    });
+
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith({
+      blobs: ["proj-1", "mismatch", "instance_mismatch"],
+      doubles: [1],
+      indexes: ["proj-1"],
+    });
+  });
+
+  it("emits outcome 'legacy' for absent-claim tokens", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitInstanceMismatchDatapoint(dataset, ctx, {
+      projectId: "proj-1",
+      outcome: "legacy",
+    });
+
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["legacy", "instance_mismatch"]),
+      }),
+    );
+  });
+
+  it("emits outcome 'resolve-failed' when deployment id is unresolvable", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitInstanceMismatchDatapoint(dataset, ctx, {
+      projectId: "proj-1",
+      outcome: "resolve-failed",
+    });
+
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["resolve-failed", "instance_mismatch"]),
+      }),
+    );
+  });
+
+  it("uses 'anonymous' index when projectId is empty", () => {
+    const dataset = makeMockDataset();
+    const ctx = makeMockCtx();
+
+    emitInstanceMismatchDatapoint(dataset, ctx, {
+      projectId: "",
+      outcome: "mismatch",
+    });
+
+    expect(dataset.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ indexes: ["anonymous"] }),
+    );
+  });
+
+  it("swallows errors when writeDataPoint throws", () => {
+    const dataset = {
+      writeDataPoint: vi.fn(() => {
+        throw new Error("AE down");
+      }),
+    } as unknown as AnalyticsEngineDataset;
+    const ctx = makeMockCtx();
+
+    expect(() =>
+      emitInstanceMismatchDatapoint(dataset, ctx, {
+        projectId: "proj-1",
+        outcome: "mismatch",
       }),
     ).not.toThrow();
   });
