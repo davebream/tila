@@ -11,6 +11,7 @@ import {
   deleteWorkerSecret,
   ensureD1Database,
   ensureR2Bucket,
+  queryD1,
   setWorkerSecrets,
 } from "../../lib/cloudflare-resources";
 import { deployWorkerWithAssets, describeUiOutcome } from "../../lib/deploy";
@@ -357,6 +358,19 @@ export default defineCommand({
     // Step 5: Apply D1 migrations
     const migrationsDir = resolveMigrationsDir();
     await applyD1Migrations(cf, whoami.account_id, d1Id, migrationsDir);
+
+    // Step 5b: Seed the stable deployment instance id into _deployment_meta.
+    // ON CONFLICT DO NOTHING ensures a re-provision never changes (and therefore
+    // never invalidates) an already-issued instance_id.
+    const instanceId = crypto.randomUUID();
+    await queryD1(
+      cf,
+      whoami.account_id,
+      d1Id,
+      "INSERT INTO _deployment_meta (id, instance_id, created_at) VALUES (1, ?, ?) ON CONFLICT(id) DO NOTHING",
+      [instanceId, String(Date.now())],
+    );
+    p.log.info(`Deployment instance id: ${instanceId}`);
 
     // Step 6: R2 artifact bucket
     s.start("Setting up R2 artifact bucket...");
