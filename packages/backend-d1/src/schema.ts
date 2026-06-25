@@ -155,13 +155,13 @@ export const adminGrants = sqliteTable(
     revoked_at: integer("revoked_at"), // Unix seconds (not ms); cf. _revoked_jti which uses ms
     revoked_by_user_id: integer("revoked_by_user_id"),
     // Canonical principal identity (WI-C). Populated via canonicalizePrincipal().
-    // subject_id NOT NULL DEFAULT '' mirrors migration 0013 to avoid NULL-distinct
+    // subject_id NOT NULL DEFAULT '' mirrors migration 0018 to avoid NULL-distinct
     // partial-index loophole (every NULL is DISTINCT in a UNIQUE index).
     identity_host: text("identity_host").notNull().default("github.com"),
     subject_id: text("subject_id").notNull().default(""),
   },
   (table) => [
-    // idx_admin_grants_active_subject replaced idx_admin_grants_active (migration 0013).
+    // idx_admin_grants_active_subject replaced idx_admin_grants_active (migration 0018).
     // Keyed on canonical columns (not legacy github_*) so canonicalizePrincipal()
     // parity is enforced at the index level.
     uniqueIndex("idx_admin_grants_active_subject")

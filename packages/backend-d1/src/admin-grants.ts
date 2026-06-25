@@ -38,7 +38,7 @@ export class AdminGrantsStore {
    * SQLite syntax error and does not bind the partial index.
    *
    * Conflict target uses canonical (identity_host, subject_id) columns per
-   * migration 0013 (WI-C). Legacy github_host / github_user_id are still
+   * migration 0018 (WI-C). Legacy github_host / github_user_id are still
    * populated because they remain NOT NULL.
    */
   async grant(params: GrantParams): Promise<void> {
