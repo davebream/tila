@@ -1,27 +1,25 @@
 /**
  * Credential provider factory — createProvider(kind) registry.
  *
- * Phase-1 contract: known kinds are inline-throwing stubs (no imports of
- * unwritten modules). Each later phase replaces the placeholder with a real
- * import. Unknown kinds throw UnknownCredentialProviderError immediately.
+ * Phase-3 update: github provider is now wired with a real implementation.
+ * oidc-generic, tila-token, exec remain inline-throwing placeholders until
+ * their respective phases (4 and 5).
  */
 
 import { UnknownCredentialProviderError } from "../errors.js";
+import { createGithubProvider } from "./github.js";
 import type { CredentialKind, CredentialProvider } from "./types.js";
 
 /**
  * Return a CredentialProvider for the given kind.
  *
- * Phase 1: github, oidc-generic, tila-token, exec are wired as inline-throwing
- * placeholders so pnpm run typecheck stays green with no unwritten imports.
- * Phase 2+: placeholders are replaced with real implementations.
+ * Phase 3: github is wired with a real implementation (C4).
+ * oidc-generic, tila-token, exec remain inline-throwing placeholders.
  */
 export function createProvider(kind: CredentialKind): CredentialProvider {
   switch (kind) {
     case "github":
-      throw new Error(
-        "github provider not implemented until Phase 3 (Task 4 / C4)",
-      );
+      return createGithubProvider();
     case "oidc-generic":
       throw new Error(
         "oidc-generic provider not implemented until Phase 5 (Task 6 / C5)",

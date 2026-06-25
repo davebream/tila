@@ -86,11 +86,18 @@ export interface ProviderPorts {
 // --- ProviderContext ---
 // Passed to every provider method. Contains the resolved instance identity,
 // injected ports, and the per-instance provider config.
+//
+// client_id is an optional caller-resolved field used by the github provider.
+// The github provider does NOT fetch client_id itself (no hidden network/fs
+// side-channel) — the CLI caller (C7) resolves it and passes it here.
+// Absent client_id → the github provider throws MissingClientIdError.
 export interface ProviderContext {
   instance_key: InstanceKey;
   worker_url: string;
   ports: ProviderPorts;
   config: CredentialProviderConfig;
+  /** Caller-resolved GitHub App client_id. Required for the github provider. */
+  client_id?: string;
 }
 
 // --- CredentialProvider ---

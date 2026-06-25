@@ -42,6 +42,7 @@ export {
   ImmutableInstanceKeyError,
   InstanceNotFoundError,
   UnknownCredentialProviderError,
+  MissingClientIdError,
 } from "./errors.js";
 export { FakeSecretStore, ThrowingSecretStore } from "./testing.js";
 export type { ThrowMode } from "./testing.js";

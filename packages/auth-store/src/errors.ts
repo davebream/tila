@@ -164,6 +164,23 @@ export class UnknownCredentialProviderError extends Error {
 }
 
 // ----------------------------------------------------------------------------
+// MissingClientIdError
+// Thrown by the github provider when ProviderContext.client_id is absent.
+// The caller (CLI / C7) is responsible for resolving the client_id and passing
+// it in the context — the provider must not make hidden network/fs calls for it.
+// ----------------------------------------------------------------------------
+export class MissingClientIdError extends Error {
+  readonly code = "MISSING_CLIENT_ID" as const;
+
+  constructor(
+    message = "client_id is required in ProviderContext for the github provider — the caller must resolve it before calling mint()",
+  ) {
+    super(message);
+    this.name = "MissingClientIdError";
+  }
+}
+
+// ----------------------------------------------------------------------------
 // DeviceFlowError
 // Thrown by runDeviceFlow() when the RFC 8628 device flow cannot complete.
 // `reason` carries the terminal classification so callers can branch without
