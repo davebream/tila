@@ -26,7 +26,12 @@ whoami.get("/whoami", async (c) => {
     token_name: string;
     scopes: string;
     token_id: string;
-    auth_kind?: "d1-token" | "session" | "cookie-session" | "workspace-session";
+    auth_kind?:
+      | "d1-token"
+      | "session"
+      | "cookie-session"
+      | "workspace-session"
+      | "oidc-session";
     github_login?: string;
     permission?: string;
     expires_at?: number;

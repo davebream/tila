@@ -247,6 +247,10 @@ async function mintAndStoreSession(opts: {
 
   const payload = {
     project_id: projectId,
+    // sub_type discriminator: new mints always stamp "github" explicitly.
+    // The auth middleware default-fills absent sub_type to "github" for
+    // legacy tokens issued before this field existed (critic Finding 2).
+    sub_type: "github",
     github_host: matchedRepo.github_host,
     github_repo_id: matchedRepo.github_repo_id,
     github_login: githubUser.login,
