@@ -34,6 +34,10 @@ export const tokens = sqliteTable(
     revoked_at: integer("revoked_at"), // Unix seconds
     revoked_by: text("revoked_by"),
     token_id: text("token_id").notNull().unique(),
+    // DPoP sender-constraint (WI-G): RFC 7638 SHA-256 JWK thumbprint supplied by
+    // the client at issue time. NULL = unbound (legacy accept); non-NULL = the
+    // bearer must present a valid DPoP proof on every request.
+    cnf_jkt: text("cnf_jkt"),
   },
   (table) => [index("idx_tokens_project").on(table.project_id)],
 );
