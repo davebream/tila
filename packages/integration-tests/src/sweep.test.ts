@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+// FEATURE-PENDING: sweep tests are pool-workers-dependent (require DO + D1 + R2 bindings
+// via @cloudflare/vitest-pool-workers). Until that infrastructure is wired, all sweep
+// test bodies use expect(true).toBe(true) as structural placeholders. No behavior change.
+
 /**
  * Sweep lifecycle integration tests.
  *

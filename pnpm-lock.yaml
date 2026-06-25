@@ -330,6 +330,9 @@ importers:
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
+      '@tila/worker':
+        specifier: workspace:*
+        version: link:../worker
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
