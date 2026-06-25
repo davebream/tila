@@ -20,6 +20,7 @@ import {
   RATE_LIMIT_MAX_FAILURES,
   RATE_LIMIT_WINDOW_MS,
   SESSION_TTL_SECONDS,
+  SESSION_TTL_SECONDS_BY_TIER,
 } from "../config";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
@@ -235,8 +236,11 @@ async function mintAndStoreSession(opts: {
   } = opts;
 
   const now = nowSeconds();
-  const expiresAt = now + SESSION_TTL_SECONDS;
   const normalizedPerm = normalizeGitHubPermission(userPermission);
+  const ttlSeconds =
+    SESSION_TTL_SECONDS_BY_TIER[normalizedPerm] ??
+    SESSION_TTL_SECONDS_BY_TIER.read;
+  const expiresAt = now + ttlSeconds;
   // jti: random nonce for per-token revocation (C9). crypto.randomUUID() is
   // available in the Workers runtime and is cryptographically random.
   const jti = crypto.randomUUID();
