@@ -1711,8 +1711,8 @@ describe("auth middleware — instance_id validation (Bearer/JWT branch only)", 
     const res = await fetchWithInstanceEnv(app, token, DEPLOYMENT_ID);
 
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { ok: boolean; code: string };
-    expect(body.code).toBe("instance-mismatch");
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.error.code).toBe("instance-mismatch");
     expect(mockEmitInstanceMismatchDatapoint).toHaveBeenCalledOnce();
     const callArgs = mockEmitInstanceMismatchDatapoint.mock.calls[0];
     expect(callArgs[2]).toMatchObject({ outcome: "mismatch" });
@@ -1760,8 +1760,8 @@ describe("auth middleware — instance_id validation (Bearer/JWT branch only)", 
     );
 
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { ok: boolean; code: string };
-    expect(body.code).toBe("instance-mismatch");
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.error.code).toBe("instance-mismatch");
     expect(mockEmitInstanceMismatchDatapoint).toHaveBeenCalledOnce();
     const callArgs = mockEmitInstanceMismatchDatapoint.mock.calls[0];
     expect(callArgs[2]).toMatchObject({ outcome: "resolve-failed" });

@@ -664,7 +664,6 @@ export function createAuthMiddleware(
             return c.json(
               {
                 ok: false,
-                code: "instance-mismatch",
                 error: {
                   code: "instance-mismatch",
                   message: "Deployment instance could not be verified",
@@ -694,7 +693,6 @@ export function createAuthMiddleware(
           return c.json(
             {
               ok: false,
-              code: "instance-mismatch",
               error: {
                 code: "instance-mismatch",
                 message: "Session token was issued for a different deployment",
