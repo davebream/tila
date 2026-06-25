@@ -3,20 +3,19 @@ import { z } from "zod";
 export const SessionPermissionSchema = z.enum(["read", "write", "admin"]);
 export type SessionPermission = z.infer<typeof SessionPermissionSchema>;
 
-export const SessionPayloadSchema = z.object({
+/**
+ * Shared base fields common to all session payload types.
+ * `issued_at` has a lower bound (~year 2001 in Unix seconds) as defense-in-depth
+ * against a wrong-unit mint bug: a future mint that passed Date.now() (ms) instead
+ * of nowSeconds() would otherwise produce an issued_at ~1000x too large, making
+ * the token look issued far in the future and silently bypassing the
+ * subject-revocation kill-switch comparison (WI-C). Anything below ~1e9 is a
+ * clear seconds-vs-ms mistake; fail the schema parse instead of failing open.
+ */
+const SessionBaseSchema = z.object({
   project_id: z.string().min(1),
-  github_host: z.string().min(1),
-  github_repo_id: z.number().int(),
-  github_login: z.string().min(1),
-  github_user_id: z.number().int(),
   permission: SessionPermissionSchema,
   expires_at: z.number().int(),
-  // Lower bound (~year 2001 in Unix seconds) is defense-in-depth against a
-  // wrong-unit mint bug: a future mint that passed Date.now() (ms) instead of
-  // nowSeconds() would otherwise produce an issued_at ~1000x too large, making
-  // the token look issued far in the future and silently bypassing the
-  // subject-revocation kill-switch comparison (WI-C). Anything below ~1e9 is a
-  // clear seconds-vs-ms mistake; fail the schema parse instead of failing open.
   issued_at: z.number().int().min(1_000_000_000),
   iss: z.string().optional(),
   aud: z.union([z.string(), z.array(z.string())]).optional(),
@@ -35,6 +34,46 @@ export const SessionPayloadSchema = z.object({
    */
   instance_id: z.string().optional(),
 });
+
+/**
+ * GitHub-backed session payload. All GitHub identity fields are required.
+ * `sub_type` must be present and equal `"github"` for the discriminated union.
+ * Back-compat note: tokens minted before this field was added carry no `sub_type`.
+ * The auth middleware (auth.ts) default-fills `sub_type: "github"` on the raw
+ * payload before the discriminated parse so legacy GitHub sessions keep validating.
+ */
+export const GitHubSessionPayloadSchema = SessionBaseSchema.extend({
+  sub_type: z.literal("github"),
+  github_host: z.string().min(1),
+  github_repo_id: z.number().int(),
+  github_login: z.string().min(1),
+  github_user_id: z.number().int(),
+});
+
+/**
+ * Generic OIDC session payload. Carries no GitHub fields by construction.
+ * This makes it type-impossible for an OIDC principal to reach GitHub-coupled
+ * authorization (the admin roster), which already fails closed on a missing
+ * GitHub identity.
+ *
+ * Security A-4: `oidc_subject` max(255) is enforced at the schema layer as the
+ * canonical point. The route handler also has a defense-in-depth guard.
+ */
+export const OidcSessionPayloadSchema = SessionBaseSchema.extend({
+  sub_type: z.literal("oidc"),
+  oidc_issuer: z.string().min(1),
+  oidc_subject: z.string().min(1).max(255),
+  actor_name: z.string().min(1).max(255),
+});
+
+/**
+ * Discriminated union on `sub_type`. Callers that consume tokens minted before
+ * this change must default-fill `sub_type: "github"` before parsing (auth.ts).
+ */
+export const SessionPayloadSchema = z.discriminatedUnion("sub_type", [
+  GitHubSessionPayloadSchema,
+  OidcSessionPayloadSchema,
+]);
 export type SessionPayload = z.infer<typeof SessionPayloadSchema>;
 
 export const GitHubExchangeRequestSchema = z.object({
@@ -65,6 +104,27 @@ export const GitHubExchangeResponseSchema = z.object({
 export type GitHubExchangeResponse = z.infer<
   typeof GitHubExchangeResponseSchema
 >;
+
+/**
+ * Response body for the generic OIDC exchange route (`POST /api/auth/oidc/exchange`).
+ * Mirrors `GitHubExchangeResponseSchema` but carries OIDC identity fields instead of
+ * GitHub fields.
+ */
+export const OidcExchangeResponseSchema = z.object({
+  ok: z.literal(true),
+  session_token: z.string(),
+  expires_at: z.number().int(),
+  project_id: z.string(),
+  oidc_issuer: z.string(),
+  oidc_subject: z.string(),
+  permission: SessionPermissionSchema,
+  /**
+   * Stable deployment instance id. Optional for the same back-compat reason as
+   * `GitHubExchangeResponseSchema.instance_id`.
+   */
+  instance_id: z.string().optional(),
+});
+export type OidcExchangeResponse = z.infer<typeof OidcExchangeResponseSchema>;
 
 export const GitHubAppInstallationConfigSchema = z.object({
   project_id: z.string().min(1),
