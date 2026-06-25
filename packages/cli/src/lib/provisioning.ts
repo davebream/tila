@@ -260,6 +260,12 @@ export function ensureGitignored(
 /**
  * Hash a raw token using SHA-256 (matching the Worker auth middleware).
  * Returns lowercase hex string.
+ *
+ * NOTE: this is bare SHA-256, while the Worker hashes with HASH_PEPPER when set.
+ * Under a set pepper a CLI-minted bootstrap hash would mismatch the Worker lookup —
+ * a pre-existing SEC-1 migration gap, out of scope for the token-format change
+ * (see the T5 design Open Questions). The hash stays over the FULL token string,
+ * so the new tila_d1_ format flows through it unchanged.
  */
 export function hashToken(rawToken: string): string {
   return createHash("sha256").update(rawToken).digest("hex");
@@ -268,6 +274,10 @@ export function hashToken(rawToken: string): string {
 /**
  * The prefix for D1 long-lived API tokens.
  * Format: tila_d1_<64-hex-entropy><8-hex-checksum> (80 chars total)
+ *
+ * Format spec single source of truth: packages/worker/src/lib/token-format.ts
+ * (WebCrypto mirror) and the T5 design C1. Parity between the two runtimes is
+ * pinned by the shared fixed-entropy fixture asserted in both test suites.
  */
 export const D1_TOKEN_PREFIX = "tila_d1_";
 
@@ -276,8 +286,10 @@ export const D1_TOKEN_PREFIX = "tila_d1_";
  * Format: tila_d1_<64-hex-entropy><8-hex-checksum> (80 chars total)
  *
  * The checksum is the first 4 bytes (8 hex chars) of SHA-256(raw entropy bytes).
- * It is computed pre-pepper, over the raw bytes — not the hex string.
- * Storage hash remains over the full token string via hashToken().
+ * It is computed pre-pepper, over the raw bytes — not the hex string. Authenticity
+ * is still determined solely by the peppered hash lookup in D1; the checksum is a
+ * public, integrity-only typo/corruption pre-filter. Storage hash remains over the
+ * full token string via hashToken().
  */
 export function generateRawToken(): string {
   const entropy = randomBytes(32);
