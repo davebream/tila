@@ -27,6 +27,7 @@ import {
   setSessionInCache,
 } from "../lib/session-cache";
 import { type TokenClaims, getFromCache, setInCache } from "../lib/token-cache";
+import { D1_TOKEN_PREFIX, verifyD1TokenChecksum } from "../lib/token-format";
 import type {
   CookieSessionTokenResult,
   D1TokenResult,
@@ -652,7 +653,52 @@ export function createAuthMiddleware(
       return next();
     }
 
-    // --- D1 token path (existing, unchanged) ---
+    // --- D1 token path ---
+
+    // Local helper: record one rate-limit failure for `ip` (swallow D1 errors).
+    // Used by: negative-cache reject, D1-miss reject, and checksum reject.
+    // Preserves the exact same error-handling shape that was previously inlined twice.
+    async function recordRateLimitFailure(): Promise<void> {
+      if (!ip) return;
+      const store = opts.rateLimitStore ?? new D1RateLimitStore(c.env.DB);
+      try {
+        await store.recordFailure(ip, RATE_LIMIT_WINDOW_MS);
+      } catch {
+        // Swallow — missed increment is acceptable
+        try {
+          c.env.ANALYTICS.writeDataPoint({
+            blobs: ["auth", "rate_limit_d1_error", "record_failure"],
+            doubles: [1],
+            indexes: ["rate-limit"],
+          });
+        } catch {
+          // Analytics emission is never load-bearing
+        }
+      }
+    }
+
+    // 2.5. Pre-hash checksum reject (tila_d1_ tokens only)
+    // Fast-reject a structurally invalid tila_d1_ token before any hash or D1 lookup.
+    // Non-tila_d1_ tokens (legacy tila_<hex>, tila_dev_token_localonly) skip this
+    // branch entirely and flow to the hash/D1 path unchanged (migration-free).
+    // A bad-checksum token still records a rate-limit failure so the pre-hash
+    // fast path cannot be used to probe auth without counting against the IP budget.
+    if (rawToken.startsWith(D1_TOKEN_PREFIX)) {
+      if ((await verifyD1TokenChecksum(rawToken)) === "bad-checksum") {
+        await recordRateLimitFailure();
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "unauthorized",
+              message: "Malformed token",
+              retryable: false,
+            },
+          },
+          401,
+        );
+      }
+    }
 
     // 3. Hash
     const tokenHash = await hashToken(rawToken, c.env.HASH_PEPPER);
@@ -661,23 +707,7 @@ export function createAuthMiddleware(
     const cached = getFromCache(tokenHash);
     if (cached === null) {
       // Negative cache hit -- invalid/revoked token
-      if (ip) {
-        const store = opts.rateLimitStore ?? new D1RateLimitStore(c.env.DB);
-        try {
-          await store.recordFailure(ip, RATE_LIMIT_WINDOW_MS);
-        } catch {
-          // Swallow — missed increment is acceptable
-          try {
-            c.env.ANALYTICS.writeDataPoint({
-              blobs: ["auth", "rate_limit_d1_error", "record_failure"],
-              doubles: [1],
-              indexes: ["rate-limit"],
-            });
-          } catch {
-            // Analytics emission is never load-bearing
-          }
-        }
-      }
+      await recordRateLimitFailure();
       return c.json(
         {
           ok: false,
@@ -702,23 +732,7 @@ export function createAuthMiddleware(
       const result = await tokenStore.validate(tokenHash);
       if (!result) {
         setInCache(tokenHash, null); // negative cache
-        if (ip) {
-          const store = opts.rateLimitStore ?? new D1RateLimitStore(c.env.DB);
-          try {
-            await store.recordFailure(ip, RATE_LIMIT_WINDOW_MS);
-          } catch {
-            // Swallow — missed increment is acceptable
-            try {
-              c.env.ANALYTICS.writeDataPoint({
-                blobs: ["auth", "rate_limit_d1_error", "record_failure"],
-                doubles: [1],
-                indexes: ["rate-limit"],
-              });
-            } catch {
-              // Analytics emission is never load-bearing
-            }
-          }
-        }
+        await recordRateLimitFailure();
         return c.json(
           {
             ok: false,

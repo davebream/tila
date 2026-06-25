@@ -1,14 +1,11 @@
 export { hashToken } from "./hash-token";
+import { mintD1Token } from "./token-format";
 
 /**
- * Generate a cryptographically random token with the tila_ prefix.
- * Format: tila_ + 64 hex characters (32 bytes = 256-bit entropy).
+ * Generate a cryptographically random D1 token.
+ * Format: tila_d1_<64 hex entropy><8 hex checksum> (80 chars total).
+ * Uses mintD1Token() from token-format.ts (WebCrypto-based).
  */
-export function generateToken(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  const hex = Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return `tila_${hex}`;
+export async function generateToken(): Promise<string> {
+  return mintD1Token();
 }

@@ -1509,4 +1509,126 @@ describe("auth middleware", () => {
       warnSpy.mockRestore();
     });
   });
+
+  // --- tila_d1_ token-format: mint + pre-hash checksum reject (Task 2) ---
+  describe("tila_d1_ token format", () => {
+    /**
+     * Fixed fixture — cross-runtime anchor (same as token-format.test.ts):
+     *   entropy: 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20
+     *   checksum: ae216c2e  (SHA-256 of those 32 bytes, first 4 bytes as hex)
+     */
+    const FIXTURE_TOKEN =
+      "tila_d1_0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20ae216c2e";
+
+    // A valid tila_d1_ token with a corrupted checksum (last char flipped)
+    const CORRUPTED_CHECKSUM_TOKEN =
+      "tila_d1_0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20ae216c2f";
+
+    // A legacy tila_<hex> token (64 hex chars after tila_)
+    const LEGACY_TOKEN = `tila_${"ab".repeat(32)}`;
+
+    it("a freshly mintD1Token() bearer authenticates end-to-end (happy path)", async () => {
+      // Dynamically import mintD1Token and compute token + hash
+      const { mintD1Token } = await import("../lib/token-format");
+      const token = await mintD1Token();
+      // Compute the storage hash exactly as the middleware will (bare SHA-256 — no pepper in test env)
+      const tokenHash = await hashToken(token, undefined);
+      // Seed the positive result into the mock
+      mockValidate.mockResolvedValueOnce(CLAIMS);
+
+      const mockRateLimitStore = new MockRateLimitStore();
+      const app = createTestApp({ rateLimitStore: mockRateLimitStore });
+
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+      // D1TokenStore.validate must have been called (checksum passed, token went to D1)
+      expect(mockValidate).toHaveBeenCalledTimes(1);
+      // Called with the storage hash of the full token string
+      expect(mockValidate).toHaveBeenCalledWith(tokenHash);
+    });
+
+    it("a corrupted-checksum tila_d1_ bearer returns 401 and validate is never called", async () => {
+      const mockRateLimitStore = new MockRateLimitStore();
+      const getClientIP: GetClientIP = () => "10.0.0.1";
+      const app = createTestApp({
+        rateLimitStore: mockRateLimitStore,
+        getClientIP,
+      });
+
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", {
+          Authorization: `Bearer ${CORRUPTED_CHECKSUM_TOKEN}`,
+        }),
+      );
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as {
+        ok: boolean;
+        error: { code: string; message: string };
+      };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe("unauthorized");
+      expect(body.error.message).toBe("Malformed token");
+
+      // D1TokenStore.validate MUST NOT have been called — fast-rejected before hash/D1
+      expect(mockValidate).not.toHaveBeenCalled();
+    });
+
+    it("a bad-checksum tila_d1_ bearer records exactly one rate-limit failure", async () => {
+      const recordFailureSpy = vi.fn().mockResolvedValue(undefined);
+      const mockRateLimitStore: RateLimitStoreInterface = {
+        check: vi.fn().mockResolvedValue(false),
+        recordFailure: recordFailureSpy,
+      };
+      const getClientIP: GetClientIP = () => "10.0.0.2";
+      const app = createTestApp({
+        rateLimitStore: mockRateLimitStore,
+        getClientIP,
+      });
+
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", {
+          Authorization: `Bearer ${CORRUPTED_CHECKSUM_TOKEN}`,
+        }),
+      );
+      expect(res.status).toBe(401);
+
+      // Exactly one rate-limit failure recorded — not zero, not two
+      expect(recordFailureSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a legacy tila_<hex> bearer skips checksum and flows to hash/D1 path", async () => {
+      mockValidate.mockResolvedValueOnce(CLAIMS);
+      const mockRateLimitStore = new MockRateLimitStore();
+      const app = createTestApp({ rateLimitStore: mockRateLimitStore });
+
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${LEGACY_TOKEN}` }),
+      );
+      expect(res.status).toBe(200);
+      // D1 validate WAS called — legacy token went through the normal hash/D1 path
+      expect(mockValidate).toHaveBeenCalledTimes(1);
+    });
+
+    it("fixture token passes checksum verify and authenticates when hash is seeded", async () => {
+      // Compute the hash of the fixture token (bare SHA-256 — no pepper in test env)
+      const tokenHash = await hashToken(FIXTURE_TOKEN, undefined);
+      mockValidate.mockResolvedValueOnce(CLAIMS);
+
+      const app = createTestApp();
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${FIXTURE_TOKEN}` }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockValidate).toHaveBeenCalledWith(tokenHash);
+    });
+  });
 });
