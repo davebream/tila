@@ -23,3 +23,7 @@ export {
   type AdminGrantRow,
   type GrantParams,
 } from "./admin-grants";
+export {
+  D1DeploymentMetaStore,
+  DeploymentIdUnavailable,
+} from "./deployment-meta";
