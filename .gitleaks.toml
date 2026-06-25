@@ -3,3 +3,19 @@ paths = [
   '''^\.claude/worktrees/''',
   '''^\.worktrees/''',
 ]
+# Deterministic, non-secret test vectors for the tila_d1_ token format: the entropy is
+# the sequential bytes 0x01..0x20 (never random, never a real token). The trailing
+# [0-9a-f]{8} intentionally matches any checksum on that fixed entropy so it covers BOTH
+# the valid fixture (…ae216c2e) and its one-char tamper variant (…ae216c2f), which appear
+# as literals in the worker auth tests. Anchoring the full 64-hex entropy keeps this from
+# allowlisting any genuinely random token (1/2^256 collision), so real-token detection is
+# fully intact.
+regexes = [
+  '''tila_d1_0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20[0-9a-f]{8}''',
+]
+
+[[rules]]
+id = "tila-d1-token"
+description = "tila D1 long-lived API token"
+regex = '''tila_d1_[0-9a-f]{72}'''
+keywords = ["tila_d1_"]

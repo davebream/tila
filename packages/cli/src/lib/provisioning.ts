@@ -260,17 +260,85 @@ export function ensureGitignored(
 /**
  * Hash a raw token using SHA-256 (matching the Worker auth middleware).
  * Returns lowercase hex string.
+ *
+ * NOTE: this is bare SHA-256, while the Worker hashes with HASH_PEPPER when set.
+ * Under a set pepper a CLI-minted bootstrap hash would mismatch the Worker lookup —
+ * a pre-existing SEC-1 migration gap, out of scope for the token-format change
+ * (see the T5 design Open Questions). The hash stays over the FULL token string,
+ * so the new tila_d1_ format flows through it unchanged.
  */
 export function hashToken(rawToken: string): string {
   return createHash("sha256").update(rawToken).digest("hex");
 }
 
 /**
- * Generate a raw API token with the tila_ prefix and 256-bit entropy.
- * Format: tila_<64-hex-chars> (69 chars total)
+ * The prefix for D1 long-lived API tokens.
+ * Format: tila_d1_<64-hex-entropy><8-hex-checksum> (80 chars total)
+ *
+ * Format spec single source of truth: packages/worker/src/lib/token-format.ts
+ * (WebCrypto mirror) and the T5 design C1. Parity between the two runtimes is
+ * pinned by the shared fixed-entropy fixture asserted in both test suites.
+ */
+export const D1_TOKEN_PREFIX = "tila_d1_";
+
+/**
+ * Generate a raw D1 API token with checksum.
+ * Format: tila_d1_<64-hex-entropy><8-hex-checksum> (80 chars total)
+ *
+ * The checksum is the first 4 bytes (8 hex chars) of SHA-256(raw entropy bytes).
+ * It is computed pre-pepper, over the raw bytes — not the hex string. Authenticity
+ * is still determined solely by the peppered hash lookup in D1; the checksum is a
+ * public, integrity-only typo/corruption pre-filter. Storage hash remains over the
+ * full token string via hashToken().
  */
 export function generateRawToken(): string {
-  return `tila_${randomBytes(32).toString("hex")}`;
+  const entropy = randomBytes(32);
+  const checksum = createHash("sha256")
+    .update(entropy)
+    .digest("hex")
+    .slice(0, 8);
+  return D1_TOKEN_PREFIX + entropy.toString("hex") + checksum;
+}
+
+/**
+ * Verify the structural checksum of a D1 token.
+ *
+ * Returns:
+ *   "ok"           — the token has a valid tila_d1_ prefix and the embedded
+ *                    checksum matches the recomputed value
+ *   "bad-checksum" — the token has a tila_d1_ prefix but fails the shape
+ *                    guard or checksum comparison
+ *   "not-d1-token" — the token does not have the tila_d1_ prefix (legacy
+ *                    tokens, dev tokens, session tokens, etc.) — callers
+ *                    should not reject these, just skip the checksum gate
+ *
+ * This function is synchronous (Node crypto), pepper-free, and total
+ * (never throws). It is a pre-filter only — authenticity is still
+ * determined by the peppered hash lookup in D1.
+ */
+export function verifyD1TokenChecksum(
+  token: string,
+): "ok" | "bad-checksum" | "not-d1-token" {
+  if (!token.startsWith(D1_TOKEN_PREFIX)) {
+    return "not-d1-token";
+  }
+  const body = token.slice(D1_TOKEN_PREFIX.length);
+  // Body must be exactly 72 lowercase hex chars (64 entropy + 8 checksum)
+  if (!/^[0-9a-f]{72}$/.test(body)) {
+    return "bad-checksum";
+  }
+  const entropyHex = body.slice(0, 64);
+  const embedded = body.slice(64); // 8 hex chars
+  try {
+    const entropyBytes = Buffer.from(entropyHex, "hex");
+    const expected = createHash("sha256")
+      .update(entropyBytes)
+      .digest("hex")
+      .slice(0, 8);
+    return embedded === expected ? "ok" : "bad-checksum";
+  } catch {
+    return "bad-checksum";
+  }
 }
 
 /**
