@@ -291,6 +291,28 @@ describe("POST /api/auth/oidc/exchange", () => {
     expect(typeof body.expires_at).toBe("number");
   });
 
+  // (a2) instance_id binding — minted oidc-session token must carry instance_id (WI-E B2 replay protection)
+  it("(a2) minted session JWT payload carries instance_id equal to resolved deployment id", async () => {
+    const app = makeApp();
+    const res = await post(app, makeEnv(), makeRequestBody());
+    const body = (await res.json()) as Record<string, unknown>;
+
+    expect(res.status).toBe(200);
+    expect(typeof body.session_token).toBe("string");
+
+    // Decode the JWT payload (tila_s.<header>.<payload>.<sig> — parts[2] is payload)
+    const token = body.session_token as string;
+    // Strip the "tila_s." prefix to get the raw JWT
+    const rawJwt = token.replace(/^tila_s\./, "");
+    const parts = rawJwt.split(".");
+    expect(parts.length).toBe(3);
+    const payloadJson = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+    const jwtPayload = JSON.parse(payloadJson) as Record<string, unknown>;
+
+    // instance_id must be present and equal to the mock-resolved deployment id
+    expect(jwtPayload.instance_id).toBe("test-instance-id");
+  });
+
   // (b) Project has null oidc_issuer/oidc_audience → 404 oidc-not-configured
   it("(b) returns 404 oidc-not-configured when project has null oidc_issuer", async () => {
     const app = makeApp();
@@ -354,8 +376,12 @@ describe("POST /api/auth/oidc/exchange", () => {
     expect((body.error as Record<string, unknown>).code).toBe(
       "issuer-discovery-failed",
     );
-    // issuer-rejected analytics datapoint should be emitted
-    expect(analytics.writeDataPoint).toHaveBeenCalled();
+    // issuer-rejected analytics datapoint should be emitted with correct blobs
+    expect(analytics.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["issuer_rejected"]),
+      }),
+    );
     // recordExchangeFailure should have been called (rate limit store)
     expect(mockRateLimitRecordFailure).toHaveBeenCalled();
   });
@@ -374,7 +400,12 @@ describe("POST /api/auth/oidc/exchange", () => {
     const body = (await res.json()) as Record<string, unknown>;
 
     expect(res.status).toBe(401);
-    expect(analytics.writeDataPoint).toHaveBeenCalled();
+    // issuer-rejected analytics must carry the correct blob
+    expect(analytics.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["issuer_rejected"]),
+      }),
+    );
     expect(mockRateLimitRecordFailure).toHaveBeenCalled();
     void body;
   });
@@ -430,8 +461,12 @@ describe("POST /api/auth/oidc/exchange", () => {
     expect((body.error as Record<string, unknown>).code).toBe(
       "principal-not-allowed",
     );
-    // principal-not-allowed analytics datapoint
-    expect(analytics.writeDataPoint).toHaveBeenCalled();
+    // principal-not-allowed analytics must carry the correct blob
+    expect(analytics.writeDataPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blobs: expect.arrayContaining(["principal_not_allowed"]),
+      }),
+    );
     // recordExchangeFailure
     expect(mockRateLimitRecordFailure).toHaveBeenCalled();
   });

@@ -31,14 +31,16 @@ import {
   OidcExchangeRequestSchema,
   SessionPermissionSchema,
 } from "@tila/schemas";
-import { type Context, Hono } from "hono";
-import { RATE_LIMIT_WINDOW_MS, SESSION_TTL_SECONDS_BY_TIER } from "../config";
-import { OidcDiscoveryError, resolveJwksUri } from "../lib/oidc-discovery";
+import { Hono } from "hono";
+import { SESSION_TTL_SECONDS_BY_TIER } from "../config";
+import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
+import { resolveJwksUri } from "../lib/oidc-discovery";
 import { OidcVerificationError, verifyOidcJwt } from "../lib/oidc-verify";
-import { asEpochSeconds, nowSeconds } from "../lib/time";
+import { nowSeconds } from "../lib/time";
 import type { Env, HonoVariables } from "../types";
 import {
   checkExchangeRateLimit,
+  checkIdempotentExchange,
   mintSessionToken,
   recordExchangeFailure,
 } from "./auth-github";
@@ -80,32 +82,6 @@ function emitPrincipalNotAllowedAnalytics(env: {
   } catch {
     // Analytics is never load-bearing
   }
-}
-
-// ---------------------------------------------------------------------------
-// Idempotency helper (inline, avoids re-importing checkIdempotentExchange
-// which takes a raw db param not needed here)
-// ---------------------------------------------------------------------------
-
-async function checkCachedExchange(
-  store: D1IdempotencyStore,
-  key: string,
-  projectId: string,
-  db: D1Database,
-): Promise<Record<string, unknown> | null> {
-  const cached = await store.check(key, projectId);
-  if (!cached) return null;
-  try {
-    const body = JSON.parse(cached.body) as { expires_at?: number };
-    if (body.expires_at && asEpochSeconds(body.expires_at) > nowSeconds()) {
-      return body;
-    }
-    // Stale — delete so the next request re-exchanges
-    await db.prepare("DELETE FROM _idempotency WHERE key = ?").bind(key).run();
-  } catch {
-    // Malformed cache entry — proceed with fresh exchange
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +328,7 @@ authOidc.post("/exchange", async (c) => {
   const idempotencyKey = `oidc-generic:${project_id}:${oidcIssuer}:${hasJti ? jti : `${subject}:${iat}`}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
-  const cachedBody = await checkCachedExchange(
+  const cachedBody = await checkIdempotentExchange(
     idempotencyStore,
     idempotencyKey,
     project_id,
@@ -397,7 +373,27 @@ authOidc.post("/exchange", async (c) => {
   }
   const permission = permissionParsed.success ? permissionParsed.data : "read";
 
-  // 11. Mint and store OIDC session
+  // 11. Resolve deployment instance id (B2 replay protection — WI-E).
+  // Failure here propagates as 500 — we must not mint an unbound token.
+  let instanceId: string;
+  try {
+    instanceId = await ensureDeploymentInstanceId(c.env.DB);
+  } catch (err) {
+    console.error("[auth-oidc] ensureDeploymentInstanceId failed:", err);
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "config-unavailable",
+          message: "Deployment instance id temporarily unavailable",
+          retryable: true,
+        },
+      },
+      502,
+    );
+  }
+
+  // 12. Mint and store OIDC session
   const responseBody = await mintAndStoreOidcSession({
     projectId: project_id,
     oidcIssuer,
@@ -406,6 +402,7 @@ authOidc.post("/exchange", async (c) => {
     hmacKey,
     idempotencyStore,
     idempotencyKey,
+    instanceId,
   });
 
   return c.json(responseBody, 200);
@@ -423,6 +420,13 @@ async function mintAndStoreOidcSession(opts: {
   hmacKey: string;
   idempotencyStore: D1IdempotencyStore;
   idempotencyKey: string;
+  /**
+   * Stable deployment instance id — resolved at the call site via
+   * `ensureDeploymentInstanceId(env.DB)` before calling this function.
+   * Binding this id into the session payload closes the B2 cross-deployment
+   * replay vector (WI-E) for oidc-session tokens.
+   */
+  instanceId: string;
 }): Promise<Record<string, unknown>> {
   const {
     projectId,
@@ -432,6 +436,7 @@ async function mintAndStoreOidcSession(opts: {
     hmacKey,
     idempotencyStore,
     idempotencyKey,
+    instanceId,
   } = opts;
 
   const now = nowSeconds();
@@ -451,6 +456,8 @@ async function mintAndStoreOidcSession(opts: {
     expires_at: expiresAt,
     issued_at: now,
     jti: sessionJti,
+    // instance_id binds this session to the specific deployment (B2 replay fix, WI-E).
+    instance_id: instanceId,
   };
 
   // Wrap mintSessionToken in try/catch — an HMAC error must never yield a partial grant
