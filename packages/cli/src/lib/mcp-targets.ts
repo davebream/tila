@@ -32,6 +32,7 @@ export interface RunMcpInitOptions {
   targets: string[];
   dryRun: boolean;
   cwd: string;
+  instanceKey?: string;
 }
 
 // ─── Static definitions ──────────────────────────────────────────────────────
@@ -88,13 +89,18 @@ export function buildMcpEntry(config?: {
   apiUrl?: string;
   projectId?: string;
   authMode?: "tila-token" | "github-repo";
+  instanceKey?: string | null;
 }): McpServerEntry {
   const env: Record<string, string> = {
     TILA_API_URL: config?.apiUrl ?? "${TILA_API_URL}",
     TILA_PROJECT_ID: config?.projectId ?? "${TILA_PROJECT_ID}",
   };
 
-  if (config?.authMode !== "github-repo") {
+  if (config?.instanceKey) {
+    // Pointer mode: write the non-secret instance identifier; omit TILA_API_TOKEN
+    // so a pre-existing baked token cannot silently shadow the keychain path.
+    env.TILA_INSTANCE = config.instanceKey;
+  } else if (config?.authMode !== "github-repo") {
     env.TILA_API_TOKEN = "${TILA_API_TOKEN}";
   }
 
@@ -245,6 +251,7 @@ export async function runMcpInit({
   targets,
   dryRun,
   cwd,
+  instanceKey,
 }: RunMcpInitOptions): Promise<void> {
   // Load config once upfront
   const tilaConfig = findConfig(cwd);
@@ -252,7 +259,14 @@ export async function runMcpInit({
     apiUrl: tilaConfig?.worker_url,
     projectId: tilaConfig?.project_id,
     authMode: tilaConfig?.auth?.mode,
+    instanceKey,
   });
+
+  if (instanceKey) {
+    p.log.info(
+      "TILA_INSTANCE is a non-secret instance identifier — the credential stays in your keychain.",
+    );
+  }
 
   let warnedPlaceholder = false;
   if (!tilaConfig) {
