@@ -3,6 +3,13 @@ paths = [
   '''^\.claude/worktrees/''',
   '''^\.worktrees/''',
 ]
+# Deterministic, non-secret test vector for the tila_d1_ token format: the entropy is
+# the sequential bytes 0x01..0x20 (never random, never a real token). Allowing it keeps
+# the format's test fixtures from tripping the tila-d1-token rule below, while leaving
+# detection of genuinely random tokens fully intact.
+regexes = [
+  '''tila_d1_0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20[0-9a-f]{8}''',
+]
 
 [[rules]]
 id = "tila-d1-token"
