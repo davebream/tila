@@ -3,3 +3,9 @@ paths = [
   '''^\.claude/worktrees/''',
   '''^\.worktrees/''',
 ]
+
+[[rules]]
+id = "tila-d1-token"
+description = "tila D1 long-lived API token"
+regex = '''tila_d1_[0-9a-f]{72}'''
+keywords = ["tila_d1_"]
