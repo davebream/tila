@@ -97,7 +97,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env.TILA_HOME = undefined;
+  process.env.TILA_HOME = ""; // empty string is falsy — TilaPaths falls back to os.homedir()
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -139,6 +139,7 @@ describe("non-TTY guard", () => {
 
     const instances = await store.listInstances();
     expect(instances).toHaveLength(0);
+    expect(secrets._store.size).toBe(0);
   });
 });
 
@@ -226,6 +227,10 @@ describe("already-present guard", () => {
     const cred = await store.getCredential(result.instanceKey as InstanceKey);
     expect(cred).not.toBeNull();
     expect(cred?.token).toBe("recovery-tok");
+
+    // Recovery must reuse the existing partial instance (no dedup-on-write regression)
+    expect(result.instanceKey).toBe(partialKey);
+    expect((await store.listInstances()).length).toBe(1);
   });
 });
 
@@ -262,11 +267,10 @@ describe(".env token promotion", () => {
     expect(result.skippedReason).toBeUndefined();
     expect(result.promotedCredential).toBe(true);
 
-    const cred = await store.getCredential(result.instanceKey as InstanceKey, {
-      allowExpired: true,
-    });
+    const cred = await store.getCredential(result.instanceKey as InstanceKey);
     expect(cred).not.toBeNull();
     expect(cred?.expires_at).toBeNull();
+    expect(cred?.token).toBe("env-no-expiry");
   });
 });
 
@@ -281,6 +285,7 @@ describe("infra promotion", () => {
     const result = await promoteLegacy(makeOpts());
     expect(result.skippedReason).toBeUndefined();
     expect(result.promotedInfraSlugs).toContain("tila");
+    expect(result.promotedCredential).toBe(false);
 
     const infra = await store.getInfra("tila");
     expect(infra).not.toBeNull();
