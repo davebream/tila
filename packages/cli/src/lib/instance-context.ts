@@ -60,8 +60,7 @@ export interface InstanceMetadata {
 export function buildAuthStore(): AuthStore {
   const paths = new TilaPaths();
   const secrets = new KeyringSecretStore();
-  const env = processEnvProbe();
-  return new AuthStore({ paths, secrets, env });
+  return new AuthStore({ paths, secrets, env: processEnvProbe });
 }
 
 // ---------------------------------------------------------------------------
