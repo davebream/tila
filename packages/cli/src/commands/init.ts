@@ -146,5 +146,8 @@ export default defineCommand({
     await runMcpInitPrompt(cwd);
 
     p.log.success("Project initialized. Ready to use tila.");
+    p.log.info(
+      "Tip: run `tila link <worker_url>` to store credentials in the OS keychain for multi-instance auth.",
+    );
   },
 });

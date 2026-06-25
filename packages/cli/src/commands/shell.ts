@@ -25,11 +25,8 @@ export default defineCommand({
       "Spawn a sub-shell pinned to an instance (per-shell isolation; use `switch` for global)",
   },
   args: {
-    instance: {
-      type: "string" as const,
-      description: "Instance key to pin in the sub-shell",
-      required: true,
-    },
+    // Note: --instance comes from ...globalFlagArgs. It is required at runtime
+    // (validated below) since citty 0.2.2 does not support required on spread args.
     ...jsonArg,
     ...globalFlagArgs,
   },
