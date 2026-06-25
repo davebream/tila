@@ -61,6 +61,10 @@ export type { NewInstanceInput, InfraRecord } from "./auth-store.js";
 // WI-M Phase 1 — infra split helper
 export { splitInfraConfig } from "./infra-split.js";
 
+// WI-M Phase 3 — promoteLegacy
+export { promoteLegacy } from "./promote.js";
+export type { PromoteOptions, PromoteResult } from "./promote.js";
+
 // WI-M Phase 1 — legacy credential / infra reader
 export {
   readLegacyCredential,
