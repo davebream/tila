@@ -24,7 +24,34 @@ import { AsyncEntry } from "@napi-rs/keyring";
 import { KeychainUnavailableError } from "./errors.js";
 import type { SecretStore } from "./secret-store.js";
 
+/**
+ * Minimal interface matching the @napi-rs/keyring AsyncEntry surface used by
+ * KeyringSecretStore. Extracted so tests can inject a stub without touching
+ * the real OS keychain.
+ */
+export interface KeyringEntryLike {
+  getPassword(): Promise<string | null | undefined>;
+  setPassword(secret: string): Promise<void>;
+  deleteCredential(): Promise<boolean>;
+}
+
+/** Factory that produces a KeyringEntryLike for a given service + account pair. */
+export type KeyringEntryFactory = (
+  service: string,
+  account: string,
+) => KeyringEntryLike;
+
+/** Default factory wired to the real @napi-rs/keyring AsyncEntry. */
+const defaultEntryFactory: KeyringEntryFactory = (service, account) =>
+  new AsyncEntry(service, account);
+
 export class KeyringSecretStore implements SecretStore {
+  private readonly makeEntry: KeyringEntryFactory;
+
+  constructor(makeEntry: KeyringEntryFactory = defaultEntryFactory) {
+    this.makeEntry = makeEntry;
+  }
+
   /**
    * Retrieve the stored secret.
    *
@@ -33,7 +60,7 @@ export class KeyringSecretStore implements SecretStore {
    */
   async get(service: string, account: string): Promise<string | null> {
     try {
-      const entry = new AsyncEntry(service, account);
+      const entry = this.makeEntry(service, account);
       const result = await entry.getPassword();
       // @napi-rs/keyring returns null (runtime) / undefined (types) when absent
       if (result === null || result === undefined) {
@@ -52,7 +79,7 @@ export class KeyringSecretStore implements SecretStore {
    */
   async set(service: string, account: string, secret: string): Promise<void> {
     try {
-      const entry = new AsyncEntry(service, account);
+      const entry = this.makeEntry(service, account);
       await entry.setPassword(secret);
     } catch (err) {
       throw new KeychainUnavailableError("set", err);
@@ -67,7 +94,7 @@ export class KeyringSecretStore implements SecretStore {
    */
   async delete(service: string, account: string): Promise<void> {
     try {
-      const entry = new AsyncEntry(service, account);
+      const entry = this.makeEntry(service, account);
       await entry.deleteCredential();
       // deleteCredential returns false when entry is absent — that is fine per
       // the SecretStore contract ("does not throw if the entry is absent").
