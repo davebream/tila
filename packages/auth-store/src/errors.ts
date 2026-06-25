@@ -61,3 +61,71 @@ export class CredentialWriteRefusedError extends Error {
     this.name = "CredentialWriteRefusedError";
   }
 }
+
+// ----------------------------------------------------------------------------
+// InstanceNotTrustedError
+// Thrown when putCredential/putRefresh is called for an instance whose
+// trust.trusted !== true. Storage-layer confused-deputy defense.
+// ----------------------------------------------------------------------------
+export class InstanceNotTrustedError extends Error {
+  readonly code = "INSTANCE_NOT_TRUSTED" as const;
+
+  constructor(public readonly instanceKey: string) {
+    super(`Instance "${instanceKey}" is not trusted — call markTrusted first`);
+    this.name = "InstanceNotTrustedError";
+  }
+}
+
+// ----------------------------------------------------------------------------
+// InstanceKeyMismatchError
+// Thrown when a stored credential's bound instance_key disagrees with the
+// lookup key — a tamper signal.
+// ----------------------------------------------------------------------------
+export class InstanceKeyMismatchError extends Error {
+  readonly code = "INSTANCE_KEY_MISMATCH" as const;
+
+  constructor(
+    public readonly expected: string,
+    public readonly actual: string,
+  ) {
+    super(
+      `Instance key mismatch: looked up "${expected}" but record is bound to "${actual}"`,
+    );
+    this.name = "InstanceKeyMismatchError";
+  }
+}
+
+// ----------------------------------------------------------------------------
+// ImmutableInstanceKeyError
+// Thrown when registerInstance is called with the same logical identity but
+// a different instance_key (or conflicting fields). The key is pinned at
+// first registration and cannot be changed (cooperative guard, not crypto).
+// ----------------------------------------------------------------------------
+export class ImmutableInstanceKeyError extends Error {
+  readonly code = "IMMUTABLE_INSTANCE_KEY" as const;
+
+  constructor(
+    public readonly instanceKey: string,
+    message?: string,
+  ) {
+    super(
+      message ??
+        `Instance key "${instanceKey}" is already registered with different properties — re-keying is not allowed`,
+    );
+    this.name = "ImmutableInstanceKeyError";
+  }
+}
+
+// ----------------------------------------------------------------------------
+// InstanceNotFoundError
+// Thrown when an operation requires an existing instance (setCurrentContext,
+// markTrusted) but no matching record exists in the registry.
+// ----------------------------------------------------------------------------
+export class InstanceNotFoundError extends Error {
+  readonly code = "INSTANCE_NOT_FOUND" as const;
+
+  constructor(public readonly instanceKey: string) {
+    super(`Instance "${instanceKey}" not found in the registry`);
+    this.name = "InstanceNotFoundError";
+  }
+}
