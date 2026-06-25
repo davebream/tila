@@ -1,5 +1,6 @@
 import { type CommandDef, defineCommand, runMain } from "citty";
 import { withErrorBoundary } from "./lib/error-boundary";
+import { parseGlobalFlags, setGlobalFlags } from "./lib/global-flags";
 import { VERSION as version } from "./version";
 
 // Wrap each lazily-loaded command tree so an uncaught backend error (e.g. a
@@ -13,11 +14,30 @@ type CommandModule = { default: CommandDef<any> };
 const load = (loader: () => Promise<CommandModule>): Promise<CommandDef> =>
   loader().then((m) => withErrorBoundary(m.default));
 
+// Pre-dispatch: parse global flags before citty processes argv.
+// Citty 0.2.2 has NO arg inheritance, so --instance/--token/--project must be
+// extracted here and stored in the singleton for commands to read via getGlobalFlags().
+setGlobalFlags(parseGlobalFlags(process.argv.slice(2)));
+
 const main = defineCommand({
   meta: {
     name: "tila",
     version,
     description: "State and coordination engine for multi-machine agentic work",
+  },
+  args: {
+    instance: {
+      type: "string" as const,
+      description: "Override the active instance key",
+    },
+    token: {
+      type: "string" as const,
+      description: "Use an inline bearer token (bypass keychain)",
+    },
+    project: {
+      type: "string" as const,
+      description: "Assert or select a project (maps to worker_url)",
+    },
   },
   subCommands: {
     task: () => load(() => import("./commands/task")),
@@ -44,13 +64,17 @@ const main = defineCommand({
     token: () => load(() => import("./commands/token")),
     repos: () => load(() => import("./commands/repos")),
     admin: () => load(() => import("./commands/admin")),
+    auth: () => load(() => import("./commands/auth")),
+    switch: () => load(() => import("./commands/switch")),
+    instances: () => load(() => import("./commands/instances")),
+    shell: () => load(() => import("./commands/shell")),
+    link: () => load(() => import("./commands/link")),
     summary: () => load(() => import("./commands/summary")),
     gate: () => load(() => import("./commands/gate")),
     template: () => load(() => import("./commands/template")),
     search: () => load(() => import("./commands/search")),
     infra: () => load(() => import("./commands/infra")),
     project: () => load(() => import("./commands/project")),
-    auth: () => load(() => import("./commands/auth")),
   },
 });
 

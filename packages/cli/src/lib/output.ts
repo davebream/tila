@@ -277,3 +277,77 @@ export function formatTimestamp(epochMs: number): string {
 export function renderTree(data: Record<string, unknown>): void {
   console.log(treeify(data));
 }
+
+// --- Auth-store output helpers (WI-L) ---
+
+/**
+ * Write a message to stderr with a trailing newline.
+ * Use for agent-facing commands that must keep stdout clean (e.g. `auth token`).
+ */
+export function eprintln(msg: string): void {
+  process.stderr.write(`${msg}\n`);
+}
+
+/**
+ * Serialize data as JSON to stderr with 2-space indentation and a trailing newline.
+ * Use for error/diagnostic JSON that must not contaminate stdout.
+ */
+export function eprintJson(data: unknown): void {
+  process.stderr.write(`${JSON.stringify(data, null, 2)}\n`);
+}
+
+/**
+ * Format an epoch-millisecond timestamp as a relative human-readable expiry string.
+ *
+ * Input is epoch MILLISECONDS (matching CredentialRecord.expires_at).
+ * Do NOT pass epoch seconds here — that produces a 1000× wrong result.
+ *
+ * Returns:
+ * - "no expiry" for null
+ * - "expired" for past timestamps
+ * - "in Nm" or "in Nh Nm" for future timestamps
+ */
+export function formatExpiry(expiresAtMs: number | null): string {
+  if (expiresAtMs === null) return ansis.dim("no expiry");
+
+  const diffMs = expiresAtMs - Date.now();
+  if (diffMs <= 0) return ansis.red("expired");
+
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0) {
+    return ansis.green(`in ${hours}h ${minutes}m`);
+  }
+  return ansis.yellow(`in ${minutes}m`);
+}
+
+/**
+ * Format a TrustDecision as a colored one-word badge.
+ * trusted=green, untrusted/spoof=red, ci-*=yellow
+ */
+export function formatTrust(
+  decision: import("@tila/auth-store").TrustDecision,
+): string {
+  switch (decision.kind) {
+    case "trusted":
+      return ansis.green("trusted");
+    case "untrusted-needs-login":
+      return ansis.red(`untrusted (${decision.reason})`);
+    case "spoof-worker-url-mismatch":
+      return ansis.red("spoof-url-mismatch");
+    case "ci-home-store-disabled":
+      return ansis.yellow("ci-home-store-disabled");
+    case "ci-tila-home-untrusted":
+      return ansis.yellow("ci-home-untrusted");
+  }
+}
+
+/**
+ * Format the "resolves here?" marker for auth status display.
+ * Returns a colored bullet (●=active, ○=inactive).
+ */
+export function formatResolvesHere(isActive: boolean): string {
+  return isActive ? ansis.green("● yes") : ansis.dim("○ no");
+}

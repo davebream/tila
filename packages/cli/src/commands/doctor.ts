@@ -2,6 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
 import {
+  InstanceKeyMismatchError,
+  KeychainUnavailableError,
+} from "@tila/auth-store";
+import {
   DoctorProbeResponseSchema,
   DoctorSchemaResponseSchema,
   GitHubAppInfoResponseSchema,
@@ -15,6 +19,11 @@ import {
 import c from "ansis";
 import { defineCommand } from "citty";
 import { type CommandContext, runStartupChecks } from "../context";
+import {
+  buildAuthStore,
+  resolveInstanceContext,
+  toInstanceMetadata,
+} from "../lib/instance-context";
 import { jsonArg, printJson } from "../lib/output";
 import { tilaHome } from "../lib/provisioning";
 
@@ -145,6 +154,188 @@ export default defineCommand({
 
     const s = jsonMode ? null : p.spinner();
 
+    // -----------------------------------------------------------------------
+    // Auth-store diagnostic block (repo-independent, runs before startup checks)
+    // -----------------------------------------------------------------------
+    const tilahomePath = tilaHome();
+    if (!existsSync(tilahomePath)) {
+      // ~/.tila not found — skip all sub-checks with a single informational pass row
+      addCheck(
+        "auth-store",
+        "pass",
+        "~/.tila not found — no auth store configured (run `tila link <url>` to register an instance)",
+      );
+    } else {
+      const authStore = buildAuthStore();
+
+      // 1. store-backend: probe keychain accessibility
+      try {
+        await authStore.probe();
+        addCheck(
+          "auth-store/store-backend",
+          "pass",
+          "Keychain backend accessible",
+        );
+      } catch (err) {
+        if (err instanceof KeychainUnavailableError) {
+          addCheck(
+            "auth-store/store-backend",
+            "warn",
+            `Keychain unavailable (step: ${err.step}) — credential operations will degrade to env-var fallback`,
+          );
+        } else {
+          addCheck(
+            "auth-store/store-backend",
+            "fail",
+            `Store backend error: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      // 2. resolve-trace: run instance resolution, render matched rung via toInstanceMetadata
+      // SECURITY: NEVER serialize outcome.instance.credential — use toInstanceMetadata() only
+      const outcome = await resolveInstanceContext({ authStore });
+      if (outcome.ok) {
+        const matchedStep = outcome.trace.find((step) => step.matched);
+        const meta = toInstanceMetadata(outcome.instance);
+        addCheck(
+          "auth-store/resolve-trace",
+          "pass",
+          `Resolved via ${matchedStep?.rung ?? "unknown"}: instance=${meta.instance_key ?? "(inline)"} url=${meta.worker_url} trust=${meta.trust.kind}`,
+        );
+      } else {
+        const traceLines = outcome.trace
+          .filter((step) => step.attempted)
+          .map((step) => `  [${step.rung}] ${step.detail}`)
+          .join("\n");
+        addCheck(
+          "auth-store/resolve-trace",
+          "warn",
+          `Resolution failed: ${outcome.error.message}${traceLines ? `\n${traceLines}` : ""}`,
+        );
+      }
+
+      // 3 + 4. orphaned-creds and stale-alias: shared registry + context read
+      try {
+        const instances = await authStore.listInstances();
+        const currentContext = await authStore.getCurrentContext();
+
+        // 3. orphaned-creds: trusted instance with no credential or key mismatch
+        const orphaned: string[] = [];
+        for (const inst of instances) {
+          if (inst.trust.trusted) {
+            try {
+              const cred = await authStore.getCredential(inst.instance_key, {
+                allowExpired: true,
+              });
+              if (!cred) {
+                orphaned.push(
+                  `${inst.instance_key}: trusted but no credential found`,
+                );
+              }
+            } catch (credErr) {
+              if (credErr instanceof InstanceKeyMismatchError) {
+                orphaned.push(
+                  `${inst.instance_key}: key mismatch (expected=${credErr.expected} actual=${credErr.actual})`,
+                );
+              } else if (!(credErr instanceof KeychainUnavailableError)) {
+                // KeychainUnavailableError already reported in store-backend — skip
+                orphaned.push(
+                  `${inst.instance_key}: credential error (${credErr instanceof Error ? credErr.message : String(credErr)})`,
+                );
+              }
+            }
+          }
+        }
+        if (orphaned.length > 0) {
+          addCheck(
+            "auth-store/orphaned-creds",
+            "warn",
+            `Orphaned trusted instances:\n${orphaned.map((o) => `  ${o}`).join("\n")}`,
+          );
+        } else {
+          addCheck(
+            "auth-store/orphaned-creds",
+            "pass",
+            "No orphaned credentials",
+          );
+        }
+
+        // 4. stale-alias: current_context not in registry → dangling pin
+        if (currentContext !== null) {
+          const found = instances.some(
+            (i) => i.instance_key === currentContext,
+          );
+          if (!found) {
+            addCheck(
+              "auth-store/stale-alias",
+              "fail",
+              `Dangling pin: current_context '${currentContext}' not found in registry. Run 'tila switch <key>' or 'tila instances forget ${currentContext}'.`,
+            );
+          } else {
+            addCheck(
+              "auth-store/stale-alias",
+              "pass",
+              `Current context '${currentContext}' is registered`,
+            );
+          }
+        } else {
+          addCheck(
+            "auth-store/stale-alias",
+            "pass",
+            "No current context pinned",
+          );
+        }
+      } catch (err) {
+        addCheck(
+          "auth-store/orphaned-creds",
+          "fail",
+          `Registry check failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        addCheck(
+          "auth-store/stale-alias",
+          "fail",
+          "Skipped (registry check failed)",
+        );
+      }
+
+      // 5. ambiguous-inference: >1 conflicting matched rungs in trace
+      {
+        const matchedRungs = outcome.trace.filter((step) => step.matched);
+        if (matchedRungs.length > 1) {
+          const winnerRung = matchedRungs[0].rung;
+          const allRungs = matchedRungs.map((step) => step.rung).join(", ");
+          addCheck(
+            "auth-store/ambiguous-inference",
+            "warn",
+            `Ambiguous resolution: multiple rungs matched (${allRungs}); winning rung: ${winnerRung}`,
+          );
+        } else {
+          addCheck(
+            "auth-store/ambiguous-inference",
+            "pass",
+            matchedRungs.length === 1
+              ? `Unambiguous resolution via ${matchedRungs[0].rung}`
+              : "No signals matched (resolution failed)",
+          );
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper: render accumulated checks to output (used by early-exit branches)
+    // -----------------------------------------------------------------------
+    function renderAuthChecks(): void {
+      if (checks.length === 0) return;
+      const lines = checks.map((check) => {
+        if (check.status === "pass") return `${c.green("✓")} ${check.detail}`;
+        if (check.status === "warn")
+          return `${c.yellow("!")} ${c.yellow(check.detail)}`;
+        return `${c.red("✗")} ${c.red(check.detail)}`;
+      });
+      p.note(lines.join("\n"), "Auth-store checks");
+    }
+
     // Run the 5-step startup check sequence
     let ctx: CommandContext;
     try {
@@ -154,36 +345,51 @@ export default defineCommand({
     } catch (err) {
       s?.stop("Startup checks failed.");
       const msg = err instanceof Error ? err.message : String(err);
+      // Include accumulated auth-store checks — never silently drop them
+      const startupCheck: CheckResult = {
+        name: "startup",
+        status: "fail",
+        detail: msg,
+      };
+      const allChecks = [...checks, startupCheck];
+      const passed = allChecks.filter((ck) => ck.status === "pass").length;
+      const warned = allChecks.filter((ck) => ck.status === "warn").length;
+      const failed = allChecks.filter((ck) => ck.status === "fail").length;
       if (jsonMode) {
         console.log(
           JSON.stringify({
-            checks: [{ name: "startup", status: "fail", detail: msg }],
-            summary: { passed: 0, warned: 0, failed: 1 },
+            checks: allChecks,
+            summary: { passed, warned, failed },
           }),
         );
       } else {
+        renderAuthChecks();
         p.cancel(msg);
       }
       process.exit(2);
+      return;
     }
 
     if (ctx.config.backend === "local") {
+      // Include already-accumulated auth-store checks in output (never drop them)
+      const localCheck: CheckResult = {
+        name: "backend",
+        status: "fail",
+        detail: "Local mode — remote checks require tila init",
+      };
+      const allChecks = [...checks, localCheck];
+      const passed = allChecks.filter((ck) => ck.status === "pass").length;
+      const warned = allChecks.filter((ck) => ck.status === "warn").length;
+      const failed = allChecks.filter((ck) => ck.status === "fail").length;
       // Guard p.cancel with !jsonMode so doctor --json local emits only JSON (C2)
       if (jsonMode) {
-        printJson({
-          checks: [
-            {
-              name: "backend",
-              status: "fail",
-              detail: "Local mode — remote checks require tila init",
-            },
-          ],
-          summary: { passed: 0, warned: 0, failed: 1 },
-        });
+        printJson({ checks: allChecks, summary: { passed, warned, failed } });
       } else {
+        renderAuthChecks();
         p.cancel("This command requires a remote connection (tila init).");
       }
       process.exit(1);
+      return;
     }
 
     addCheck("project", "pass", `Project: ${ctx.config.project_id}`);
