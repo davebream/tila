@@ -64,7 +64,7 @@ function permissionMeetsMinimum(actual: string, minimum: string): boolean {
  * The token starts with "tila_s." prefix for routing in auth middleware.
  * Full token format: tila_s.<jwtHeader>.<jwtPayload>.<jwtSignature>
  */
-async function mintSessionToken(
+export async function mintSessionToken(
   payload: Record<string, unknown>,
   hmacKeyRaw: string,
 ): Promise<string> {

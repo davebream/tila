@@ -17,6 +17,7 @@ import { admin } from "./routes/admin";
 import { adminRoster } from "./routes/admin-roster";
 import { artifacts } from "./routes/artifacts";
 import { authGithub } from "./routes/auth-github";
+import { authOidc } from "./routes/auth-oidc";
 import {
   authSessionExchange,
   authSessionProtected,
@@ -96,6 +97,9 @@ app.route("/api", health);
 
 // GitHub auth exchange -- pre-auth (no auth middleware on this path)
 app.route("/api/auth/github", authGithub);
+
+// Generic (non-GitHub) OIDC exchange -- pre-auth (WI-B2)
+app.route("/api/auth/oidc", authOidc);
 
 // Browser-friendly OAuth login alias (redirects to /api/auth/github/login)
 app.get("/auth/github/login", (c) => c.redirect("/api/auth/github/login", 302));

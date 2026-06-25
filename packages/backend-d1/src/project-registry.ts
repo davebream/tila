@@ -54,6 +54,30 @@ export class D1ProjectRegistry {
     };
   }
 
+  /**
+   * Generic (non-GitHub) OIDC config for a project (WI-B2). Returns null when
+   * the project does not exist, is archived, or has not configured BOTH
+   * oidc_issuer and oidc_audience — callers cannot distinguish these cases
+   * (the exchange route maps all of them to a single "oidc-not-configured"
+   * deny, avoiding project-existence disclosure).
+   */
+  async getOidcConfig(
+    projectId: string,
+  ): Promise<{ issuer: string; audience: string } | null> {
+    const rows = await this.drizzle
+      .select({
+        oidcIssuer: projects.oidc_issuer,
+        oidcAudience: projects.oidc_audience,
+      })
+      .from(projects)
+      .where(and(eq(projects.project_id, projectId), eq(projects.archived, 0)))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row || !row.oidcIssuer || !row.oidcAudience) return null;
+    return { issuer: row.oidcIssuer, audience: row.oidcAudience };
+  }
+
   async listAll(): Promise<{ projectId: string }[]> {
     const rows = await this.drizzle
       .select({ projectId: projects.project_id })
