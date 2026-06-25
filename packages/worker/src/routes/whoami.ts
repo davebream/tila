@@ -1,12 +1,23 @@
 import { Hono } from "hono";
+import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 
 type WhoamiEnv = { Bindings: Env; Variables: HonoVariables };
 
 export const whoami = new Hono<WhoamiEnv>();
 
-whoami.get("/whoami", (c) => {
+whoami.get("/whoami", async (c) => {
   const token = c.get("tokenResult") as UnifiedTokenResult;
+
+  // Resolve the deployment's own stable instance id (for client credential keying).
+  // Best-effort: if the deployment id is unavailable (D1 outage on a cold isolate),
+  // return the response without the field rather than failing the request.
+  let instanceId: string | undefined;
+  try {
+    instanceId = await ensureDeploymentInstanceId(c.env.DB);
+  } catch {
+    // Non-fatal — whoami still returns all other fields
+  }
 
   // Build response conditionally based on token kind
   const response: {
@@ -19,6 +30,7 @@ whoami.get("/whoami", (c) => {
     github_login?: string;
     permission?: string;
     expires_at?: number;
+    instance_id?: string;
   } = {
     ok: true as const,
     project_id: token.projectId,
@@ -27,6 +39,10 @@ whoami.get("/whoami", (c) => {
     token_id: token.tokenId,
     auth_kind: token.kind,
   };
+
+  if (instanceId !== undefined) {
+    response.instance_id = instanceId;
+  }
 
   // Add session-specific fields
   if (token.kind === "session") {
