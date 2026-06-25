@@ -11,13 +11,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { PromoteResult } from "@tila/auth-store";
+import type { PromoteOptions, PromoteResult } from "@tila/auth-store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted ensures mockPromoteLegacy is available inside the hoisted vi.mock factory.
 const { mockPromoteLegacy } = vi.hoisted(() => ({
   mockPromoteLegacy: vi
-    .fn<[unknown], Promise<PromoteResult>>()
+    .fn<(opts: PromoteOptions) => Promise<PromoteResult>>()
     .mockResolvedValue({
       promotedCredential: false,
       promotedInfraSlugs: [],

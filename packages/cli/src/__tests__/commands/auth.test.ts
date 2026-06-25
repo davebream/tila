@@ -46,6 +46,7 @@ vi.mock("../../lib/instance-context", () => ({
   }),
   loadRepoPointer: vi.fn(() => null),
   writeCurrentContext: vi.fn(),
+  maybePromoteLegacyAfterWrite: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ---- citty helper -------------------------------------------------------

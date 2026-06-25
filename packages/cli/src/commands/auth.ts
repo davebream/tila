@@ -11,10 +11,15 @@
  * auth status uses toInstanceMetadata() which strips the credential field.
  */
 
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
-import { FakeSecretStore } from "@tila/auth-store";
+import {
+  FakeSecretStore,
+  promoteLegacy,
+  readLegacyCredential,
+} from "@tila/auth-store";
+import type { LegacyLocations } from "@tila/auth-store";
 import type { InstanceRecord } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { findConfig, findTilaDir } from "../config";
@@ -37,6 +42,7 @@ import {
   printJsonSuccess,
   renderTable,
 } from "../lib/output";
+import { tilaHome } from "../lib/provisioning";
 
 // ---------------------------------------------------------------------------
 // auth status (WI-L)
@@ -410,6 +416,198 @@ async function recoverTilaTokenMode(tilaDir: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// auth migrate (WI-M) — eagerly promote all discovered legacy credentials
+// ---------------------------------------------------------------------------
+
+const migrateCmd = defineCommand({
+  meta: {
+    name: "migrate",
+    description:
+      "Eagerly promote legacy .tila/.env / .tila/.session credentials into the ~/.tila store",
+  },
+  args: {
+    "dry-run": {
+      type: "boolean" as const,
+      description: "Print what would be promoted without writing anything",
+      default: false,
+    },
+    yes: {
+      type: "boolean" as const,
+      description: "Skip confirmation prompts",
+      default: false,
+    },
+    ...jsonArg,
+    ...globalFlagArgs,
+  },
+  async run({ args }) {
+    // Headless guard — mirrors recoverCmd: only interactive terminals may migrate.
+    const isHeadless = Boolean(process.env.CI) || !process.stdout.isTTY;
+
+    if (isHeadless) {
+      eprintln(
+        "Error: tila auth migrate requires an interactive terminal.\n\n" +
+          "In CI or headless environments, use TILA_TOKEN or --token inline instead.\n" +
+          "To migrate interactively: run `tila auth migrate` from a TTY terminal.",
+      );
+      process.exit(1);
+      return;
+    }
+
+    const authStore = buildAuthStore();
+
+    // Build legacy locations
+    const homeInfraTomlPath = join(tilaHome(), "infra.toml");
+    const projectTilaDir = findTilaDir();
+    const legacy: LegacyLocations = {
+      projectTilaDir,
+      homeInfraToml: existsSync(homeInfraTomlPath) ? homeInfraTomlPath : null,
+    };
+
+    // Determine worker_url candidates: from repo config + existing registry
+    const workerUrls: string[] = [];
+    const repoConfig = findConfig();
+    if (repoConfig?.worker_url) {
+      workerUrls.push(repoConfig.worker_url);
+    }
+    const existingInstances = await authStore.listInstances();
+    for (const inst of existingInstances) {
+      if (!workerUrls.includes(inst.worker_url)) {
+        workerUrls.push(inst.worker_url);
+      }
+    }
+
+    if (
+      workerUrls.length === 0 &&
+      !legacy.homeInfraToml &&
+      !legacy.projectTilaDir
+    ) {
+      if (args.json) {
+        printJsonSuccess({
+          message:
+            "No legacy locations or worker URLs discovered — nothing to migrate.",
+          instances_registered: 0,
+          credentials_promoted: 0,
+          infra_slugs_split: [],
+        });
+      } else {
+        console.log(
+          "No legacy locations or worker URLs discovered — nothing to migrate.",
+        );
+      }
+      return;
+    }
+
+    // Check for insecure legacy files and warn
+    const insecurePaths: string[] = [];
+    if (projectTilaDir) {
+      for (const filename of [".env", ".session"]) {
+        const filePath = join(projectTilaDir, filename);
+        if (existsSync(filePath)) {
+          try {
+            const mode = statSync(filePath).mode;
+            if ((mode & 0o077) !== 0) {
+              insecurePaths.push(filePath);
+            }
+          } catch {
+            // non-fatal
+          }
+        }
+      }
+    }
+
+    // Determine what will be promoted (for --dry-run and reporting)
+    const dryRun = args["dry-run"] as boolean;
+
+    // Determine legacy source paths for footer message
+    const legacySourcePaths: string[] = [];
+    if (projectTilaDir) {
+      for (const filename of [".env", ".session", "infra.toml"]) {
+        const filePath = join(projectTilaDir, filename);
+        if (existsSync(filePath)) {
+          legacySourcePaths.push(filePath);
+        }
+      }
+    }
+    if (legacy.homeInfraToml && existsSync(legacy.homeInfraToml)) {
+      legacySourcePaths.push(legacy.homeInfraToml);
+    }
+
+    // Call promoteLegacy for each discovered worker_url
+    let totalCredentials = 0;
+    const totalInfraSlugs: string[] = [];
+    const registeredKeys: string[] = [];
+
+    // If no worker_urls but we have infra only, still try with first available
+    const urlsToTry = workerUrls.length > 0 ? workerUrls : [];
+
+    for (const workerUrl of urlsToTry) {
+      const result = await promoteLegacy({
+        authStore,
+        legacy,
+        env: { isCI: false, isTTY: true },
+        workerUrl,
+        dryRun,
+      });
+
+      if (result.promotedCredential) totalCredentials++;
+      for (const slug of result.promotedInfraSlugs) {
+        if (!totalInfraSlugs.includes(slug)) totalInfraSlugs.push(slug);
+      }
+      if (
+        result.instanceKey &&
+        !registeredKeys.includes(String(result.instanceKey))
+      ) {
+        registeredKeys.push(String(result.instanceKey));
+      }
+    }
+
+    // Emit insecure-permission warnings (SECURITY: field names only, never values)
+    for (const filePath of insecurePaths) {
+      const warning = `Warning: ${filePath} has world/group-readable permissions (mode suggests 0644 or wider). Other users on this system may have read your token. Consider rotating credentials after migration.`;
+      if (args.json) {
+        eprintln(`[tila] ${warning}`);
+      } else {
+        console.warn(`[tila] ${warning}`);
+      }
+    }
+
+    // Build report (SECURITY: secret field names referenced, never values)
+    const report = {
+      dry_run: dryRun,
+      instances_registered: registeredKeys.length,
+      credentials_promoted: totalCredentials,
+      infra_slugs_split: totalInfraSlugs,
+      // SECURITY: infra secret fields promoted by NAME only — never their values
+      infra_secrets_promoted_fields:
+        totalInfraSlugs.length > 0
+          ? ["hmac_key", "sweep_secret", "infra_admin_token"].filter(Boolean)
+          : [],
+    };
+
+    if (args.json) {
+      printJsonSuccess(report);
+    } else {
+      if (dryRun) {
+        console.log("Dry-run mode — no changes written.\n");
+      }
+      console.log(`Instances registered: ${report.instances_registered}`);
+      console.log(`Credentials promoted: ${report.credentials_promoted}`);
+      if (report.infra_slugs_split.length > 0) {
+        console.log(
+          `Infra slugs split: ${report.infra_slugs_split.join(", ")} (secret fields: hmac_key, sweep_secret, infra_admin_token)`,
+        );
+      }
+
+      if (legacySourcePaths.length > 0 && !dryRun) {
+        console.log(
+          `\nLegacy files left in place — safe to delete after verifying:\n${legacySourcePaths.map((p) => `  ${p}`).join("\n")}`,
+        );
+      }
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
 // auth command group
 // ---------------------------------------------------------------------------
 
@@ -419,6 +617,7 @@ export default defineCommand({
     description: "Manage tila authentication (instances, tokens, status)",
   },
   subCommands: {
+    migrate: migrateCmd,
     recover: recoverCmd,
     status: statusCmd,
     token: tokenCmd,
