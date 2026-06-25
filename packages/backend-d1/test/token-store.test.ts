@@ -14,7 +14,8 @@ const CREATE_TOKENS = `
     last_used_at INTEGER,
     revoked_at INTEGER,
     revoked_by TEXT,
-    token_id TEXT
+    token_id TEXT,
+    cnf_jkt TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_tokens_project ON _tokens(project_id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_token_id ON _tokens(token_id);
@@ -277,6 +278,65 @@ describe("D1TokenStore", () => {
       expect(list).toHaveLength(2);
       expect(list[0].name).toBe("new-token");
       expect(list[1].name).toBe("old-token");
+    });
+  });
+
+  describe("cnf_jkt DPoP binding", () => {
+    it("issue() without cnfJkt stores NULL and validate() returns cnfJkt: null", async () => {
+      const { store } = createTestStore();
+      await store.issue({
+        tokenHash: "hash-nojkt",
+        projectId: "proj-1",
+        name: "unbound-token",
+        createdBy: "user-1",
+        createdAt: 1700000000,
+      });
+
+      const result = await store.validate("hash-nojkt");
+      expect(result).not.toBeNull();
+      expect(result?.cnfJkt).toBeNull();
+    });
+
+    it("issue() with cnfJkt persists it and validate() returns it", async () => {
+      const { store } = createTestStore();
+      const jkt = "A".repeat(43);
+      await store.issue({
+        tokenHash: "hash-jkt",
+        projectId: "proj-1",
+        name: "bound-token",
+        createdBy: "user-1",
+        createdAt: 1700000000,
+        cnfJkt: jkt,
+      });
+
+      const result = await store.validate("hash-jkt");
+      expect(result).not.toBeNull();
+      expect(result?.cnfJkt).toBe(jkt);
+    });
+
+    it("validate() round-trips cnfJkt correctly across two tokens", async () => {
+      const { store } = createTestStore();
+      const jkt = "B".repeat(43);
+      await store.issue({
+        tokenHash: "hash-bound",
+        projectId: "proj-1",
+        name: "bound",
+        createdBy: "user-1",
+        createdAt: 1700000001,
+        cnfJkt: jkt,
+      });
+      await store.issue({
+        tokenHash: "hash-unbound",
+        projectId: "proj-1",
+        name: "unbound",
+        createdBy: "user-1",
+        createdAt: 1700000002,
+      });
+
+      const bound = await store.validate("hash-bound");
+      const unbound = await store.validate("hash-unbound");
+      expect(bound?.cnfJkt).toBe(jkt);
+      expect(unbound?.cnfJkt).toBeNull();
     });
   });
 

@@ -7,6 +7,8 @@ export interface TokenResult {
   name: string;
   scopes: string;
   tokenId: string;
+  /** RFC 7638 SHA-256 JWK thumbprint for DPoP sender-constraint. Null = unbound. */
+  cnfJkt: string | null;
 }
 
 export interface TokenRow {
@@ -35,6 +37,7 @@ export class D1TokenStore {
         name: tokens.name,
         scopes: tokens.scopes,
         tokenId: tokens.token_id,
+        cnfJkt: tokens.cnf_jkt,
       })
       .from(tokens)
       .where(and(eq(tokens.token_hash, tokenHash), isNull(tokens.revoked_at)))
@@ -57,6 +60,8 @@ export class D1TokenStore {
     note?: string;
     createdBy: string;
     createdAt: number;
+    /** Optional DPoP JWK thumbprint. Omit or pass undefined to issue an unbound token. */
+    cnfJkt?: string;
   }): Promise<{ tokenId: string }> {
     const tokenId = crypto.randomUUID();
     await this.drizzle.insert(tokens).values({
@@ -68,6 +73,7 @@ export class D1TokenStore {
       created_at: params.createdAt,
       created_by: params.createdBy,
       token_id: tokenId,
+      cnf_jkt: params.cnfJkt ?? null,
     });
     return { tokenId };
   }
