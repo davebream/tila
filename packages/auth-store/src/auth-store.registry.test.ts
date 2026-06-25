@@ -182,6 +182,46 @@ describe("AuthStore registry tier", () => {
     ).rejects.toBeInstanceOf(ImmutableInstanceKeyError);
   });
 
+  it("re-registering with same key+worker_url but different instance_id_source throws ImmutableInstanceKeyError", async () => {
+    const key = makeKey("immutable-key-source-001");
+    await store.registerInstance({
+      instance_key: key,
+      instance_id_source: "server",
+      worker_url: "https://worker.example.com",
+    });
+
+    // Same key and worker_url, but different instance_id_source — must throw
+    await expect(
+      store.registerInstance({
+        instance_key: key,
+        instance_id_source: "client-uuid",
+        worker_url: "https://worker.example.com",
+      }),
+    ).rejects.toBeInstanceOf(ImmutableInstanceKeyError);
+  });
+
+  it("re-registering with same key+worker_url+instance_id_source but different label is idempotent (label ignored)", async () => {
+    const key = makeKey("label-only-diff-key-001");
+    const first = await store.registerInstance({
+      instance_key: key,
+      instance_id_source: "server",
+      worker_url: "https://worker.example.com",
+      label: "Original Label",
+    });
+
+    // Same immutable identity, only label differs — silently returns existing record
+    const second = await store.registerInstance({
+      instance_key: key,
+      instance_id_source: "server",
+      worker_url: "https://worker.example.com",
+      label: "New Label",
+    });
+
+    expect(second.created_at).toBe(first.created_at);
+    // Label is not updated — existing record returned unchanged
+    expect(second.label).toBe("Original Label");
+  });
+
   it("markTrusted flips trust.trusted to true and records trusted_at", async () => {
     const key = makeKey("trust-key-001");
     await store.registerInstance({

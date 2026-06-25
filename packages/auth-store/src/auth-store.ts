@@ -146,11 +146,22 @@ export class AuthStore {
     );
 
     if (existing) {
-      // Verify key is consistent (same worker_url = same logical instance)
-      if (existing.worker_url !== input.worker_url) {
+      // A re-register is idempotent ONLY when the full immutable identity matches.
+      // Pinned fields: instance_key (the lookup key), worker_url, instance_id_source.
+      // Any difference in these fields is a conflict — throw ImmutableInstanceKeyError.
+      // Note: `label` is mutable metadata; a label-only difference is silently ignored
+      // and the existing record is returned unchanged (simpler than a partial update).
+      if (
+        existing.worker_url !== input.worker_url ||
+        existing.instance_id_source !== input.instance_id_source
+      ) {
+        const conflict =
+          existing.worker_url !== input.worker_url
+            ? `worker_url "${existing.worker_url}" → "${input.worker_url}"`
+            : `instance_id_source "${existing.instance_id_source}" → "${input.instance_id_source}"`;
         throw new ImmutableInstanceKeyError(
           input.instance_key,
-          `Instance key "${input.instance_key}" is already registered with worker_url "${existing.worker_url}" — cannot re-register with "${input.worker_url}"`,
+          `Instance key "${input.instance_key}" is already registered — cannot re-register with conflicting ${conflict}`,
         );
       }
       // Idempotent: return the existing record unchanged
@@ -371,10 +382,17 @@ export class AuthStore {
    *
    * Write ordering: secrets are written to the keychain BEFORE the meta is
    * written to disk (same invariant as credential writes — crash-safe).
+   *
+   * Infra secrets are equally sensitive as credential secrets — apply the same
+   * fail-closed guards (assertWriteAllowed + probeSecretStore) before any
+   * keychain write. The probe is only needed when there are secrets to write.
    */
   async putInfra(slug: string, rec: InfraRecord): Promise<void> {
-    // Write secrets first (keychain), then meta (disk) — write-ordering invariant
     if (rec.secrets !== null) {
+      // Apply the same CI/non-TTY fail-closed guard used by putCredential/putRefresh
+      this.#assertWriteAllowed();
+      await probeSecretStore(this.secrets); // single-use probe before each write
+      // SECRET written first (write-ordering invariant)
       await this.secrets.set(SVC_INFRA, slug, JSON.stringify(rec.secrets));
     }
     await writeInfraMeta(this.paths, slug, rec.meta);
