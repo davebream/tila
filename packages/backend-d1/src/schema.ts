@@ -124,6 +124,15 @@ export const revokedJti = sqliteTable(
   (table) => [index("idx_revoked_jti_project").on(table.project_id)],
 );
 
+// --- _deployment_meta ---
+// Singleton row (CHECK (id = 1)) holding the stable per-deployment instance id.
+// Written once at provision time (CLI C7) and backfilled idempotently at runtime (C2).
+export const deploymentMeta = sqliteTable("_deployment_meta", {
+  id: integer("id").primaryKey(),
+  instance_id: text("instance_id").notNull(),
+  created_at: integer("created_at").notNull(),
+});
+
 // --- _admin_grants ---
 // Per-project admin roster for GitHub-scoped governance (epic #95).
 // Soft-delete model: revoke sets revoked_at rather than deleting rows,
