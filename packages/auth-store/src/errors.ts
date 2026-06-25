@@ -181,6 +181,48 @@ export class MissingClientIdError extends Error {
 }
 
 // ----------------------------------------------------------------------------
+// MissingTokenError
+// Thrown by the tila-token provider when no bearer token can be resolved from
+// the caller-supplied context (flag/env/config precedence all absent or empty).
+// ----------------------------------------------------------------------------
+export class MissingTokenError extends Error {
+  readonly code = "MISSING_TOKEN" as const;
+
+  constructor(
+    message = "No tila bearer token found — pass one via --token flag, TILA_TOKEN env var, or set it in the instance config",
+  ) {
+    super(message);
+    this.name = "MissingTokenError";
+  }
+}
+
+// ----------------------------------------------------------------------------
+// ExecCredentialError
+// Thrown by the exec provider when the subprocess exits non-zero, times out,
+// produces unparseable stdout, or returns a JSON output missing the token field.
+// The `token` field in stdout is NEVER included in this error's message.
+// ----------------------------------------------------------------------------
+export type ExecCredentialErrorReason =
+  | "non-zero-exit" // process exited with non-zero status
+  | "timeout" // process killed after deadline
+  | "invalid-json" // stdout could not be parsed as JSON
+  | "missing-token"; // JSON parsed but `token` field absent/empty
+
+export class ExecCredentialError extends Error {
+  readonly code = "EXEC_CREDENTIAL_ERROR" as const;
+
+  constructor(
+    public readonly reason: ExecCredentialErrorReason,
+    message: string,
+    /** Captured/truncated stderr. Never contains the token value. */
+    public readonly stderr: string = "",
+  ) {
+    super(message);
+    this.name = "ExecCredentialError";
+  }
+}
+
+// ----------------------------------------------------------------------------
 // DeviceFlowError
 // Thrown by runDeviceFlow() when the RFC 8628 device flow cannot complete.
 // `reason` carries the terminal classification so callers can branch without

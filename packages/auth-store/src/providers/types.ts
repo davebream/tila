@@ -98,6 +98,12 @@ export interface ProviderContext {
   config: CredentialProviderConfig;
   /** Caller-resolved GitHub App client_id. Required for the github provider. */
   client_id?: string;
+  /**
+   * Caller-resolved bearer token for the tila-token provider.
+   * The CLI caller resolves precedence (--token flag → TILA_TOKEN env → config file)
+   * and places the winner here. The tila-token provider never touches the env or FS.
+   */
+  resolved_token?: string;
 }
 
 // --- CredentialProvider ---

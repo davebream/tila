@@ -30,9 +30,9 @@ describe("createProvider factory", () => {
   });
 
   it("still-unimplemented kinds throw placeholder (not UnknownCredentialProviderError)", () => {
-    // Phase-3 update: github is now a real provider (no longer throws).
-    // oidc-generic, tila-token, exec remain inline-throwing placeholders.
-    const stubKinds = ["oidc-generic", "tila-token", "exec"] as const;
+    // Phase-4 update: github, tila-token, exec are now real providers.
+    // Only oidc-generic remains an inline-throwing placeholder until Phase 5 (C5).
+    const stubKinds = ["oidc-generic"] as const;
     for (const kind of stubKinds) {
       expect(() => createProvider(kind)).toThrow();
       try {
@@ -47,6 +47,16 @@ describe("createProvider factory", () => {
   it("github kind returns a real provider with kind='github' (Phase 3 wired)", () => {
     const provider = createProvider("github");
     expect(provider.kind).toBe("github");
+  });
+
+  it("tila-token kind returns a real provider with kind='tila-token' (Phase 4 wired)", () => {
+    const provider = createProvider("tila-token");
+    expect(provider.kind).toBe("tila-token");
+  });
+
+  it("exec kind returns a real provider with kind='exec' (Phase 4 wired)", () => {
+    const provider = createProvider("exec");
+    expect(provider.kind).toBe("exec");
   });
 });
 
