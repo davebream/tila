@@ -23,6 +23,7 @@ import {
 } from "../config";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
+import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
 import {
   checkUserMembership,
   getInstallationAccessToken,
@@ -213,6 +214,14 @@ async function mintAndStoreSession(opts: {
   hmacKey: string;
   idempotencyStore: D1IdempotencyStore;
   idempotencyKey: string;
+  /**
+   * Stable deployment instance id — resolved at the call site via
+   * `ensureDeploymentInstanceId(env.DB)` before calling this function.
+   * Keeping resolution outside the function makes it binding-pure and
+   * unit-testable. A `DeploymentIdUnavailable` throw at the call site
+   * propagates as a 5xx (better than minting an unbound token).
+   */
+  instanceId: string;
 }): Promise<{ responseBody: Record<string, unknown> }> {
   const {
     projectId,
@@ -222,6 +231,7 @@ async function mintAndStoreSession(opts: {
     hmacKey,
     idempotencyStore,
     idempotencyKey,
+    instanceId,
   } = opts;
 
   const now = nowSeconds();
@@ -241,6 +251,9 @@ async function mintAndStoreSession(opts: {
     expires_at: expiresAt,
     issued_at: now,
     jti,
+    // instance_id binds this session to the specific deployment (B2 replay fix).
+    // Phase 3 (middleware/auth.ts) reads this claim to reject cross-deployment tokens.
+    instance_id: instanceId,
   };
 
   const sessionToken = await mintSessionToken(payload, hmacKey);
@@ -253,6 +266,12 @@ async function mintAndStoreSession(opts: {
     github_login: githubUser.login,
     github_repo_id: matchedRepo.github_repo_id,
     permission: normalizedPerm,
+    // NOTE (WI-J2/T11): a stale _idempotency cache entry created before this WI
+    // deploys will replay a responseBody WITHOUT instance_id for up to the JWT TTL
+    // window. The JWT claim itself is unaffected (always present for fresh mints).
+    // Consumers keying on the response-body field should expect a possible transient
+    // miss during the first TTL window post-deploy.
+    instance_id: instanceId,
   };
 
   try {
@@ -447,6 +466,7 @@ async function handleAppExchange(
   }
 
   // Mint session token, store idempotency, and build response
+  const instanceId = await ensureDeploymentInstanceId(c.env.DB);
   const { responseBody } = await mintAndStoreSession({
     projectId: project_id,
     matchedRepo,
@@ -455,6 +475,7 @@ async function handleAppExchange(
     hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
     idempotencyStore,
     idempotencyKey,
+    instanceId,
   });
 
   return c.json(responseBody, 200);
@@ -631,6 +652,7 @@ authGithub.post("/exchange", async (c) => {
   }
 
   // Mint session token, store idempotency, and build response
+  const instanceId = await ensureDeploymentInstanceId(c.env.DB);
   const { responseBody } = await mintAndStoreSession({
     projectId: project_id,
     matchedRepo,
@@ -639,6 +661,7 @@ authGithub.post("/exchange", async (c) => {
     hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
     idempotencyStore,
     idempotencyKey,
+    instanceId,
   });
 
   return c.json(responseBody, 200);
@@ -1246,6 +1269,7 @@ authGithub.post("/exchange-oidc", async (c) => {
   // Route through mintAndStoreSession for field-parity with other exchange flows.
   // The OIDC "user" is the GitHub Actions actor; the matched "repo" mirrors the
   // shape expected by mintAndStoreSession.
+  const instanceId = await ensureDeploymentInstanceId(c.env.DB);
   const { responseBody } = await mintAndStoreSession({
     projectId: project_id,
     matchedRepo: {
@@ -1260,6 +1284,7 @@ authGithub.post("/exchange-oidc", async (c) => {
     hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
     idempotencyStore,
     idempotencyKey,
+    instanceId,
   });
 
   return c.json(responseBody, 200);
