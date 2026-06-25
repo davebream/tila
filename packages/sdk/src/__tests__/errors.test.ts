@@ -249,6 +249,7 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "github-api-timeout",
     "github-api-error",
     "instance-mismatch",
+    "permission-revoked",
   ]);
 
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {
