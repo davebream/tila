@@ -1,3 +1,7 @@
+export {
+  canonicalizePrincipal,
+  type CanonicalPrincipal,
+} from "./principal";
 export { D1TokenStore, type TokenResult, type TokenRow } from "./token-store";
 export {
   D1IdempotencyStore,
