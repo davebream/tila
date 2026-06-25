@@ -260,6 +260,17 @@ describe("oidcEgressFetch — size cap", () => {
       ),
     ).rejects.toMatchObject({ code: "oidc-fetch-too-large" });
   });
+  it("rejects via text() fallback over maxBytes (no body, no content-length)", async () => {
+    // body == null path: no content-length header to short-circuit, so the
+    // size cap must be re-applied on the decoded text length.
+    await expect(
+      oidcEgressFetch(
+        "https://issuer.example/x",
+        { maxBytes: 4 },
+        { fetchFn: fetchOf(jsonTextOnlyResponse({ a: "bbbbbbbbbbbbbbbb" })) },
+      ),
+    ).rejects.toMatchObject({ code: "oidc-fetch-too-large" });
+  });
 });
 
 describe("oidcEgressFetch — body reconstruction (both paths)", () => {
