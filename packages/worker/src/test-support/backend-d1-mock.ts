@@ -143,6 +143,16 @@ export function backendD1MockFactory(): Record<string, unknown> {
 export function resetBackendD1Mocks(): void {
   mockSessionValidate.mockReset().mockResolvedValue(null);
   mockSessionCreate.mockReset().mockResolvedValue(undefined);
+  // WHY let + delegating closure (not .mockReset()):
+  // `mockRevokedJtiIsRevoked` is a `let` export. The D1RevokedJtiStore mock in
+  // backendD1MockFactory() reads it at call time via a delegating closure
+  //   `isRevoked = (...args) => mockRevokedJtiIsRevoked(...args)`
+  // rather than capturing it once at construction. This means a test can
+  // reassign the module-level binding (e.g. `mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(true)`)
+  // and the already-constructed store instance will call the NEW fn. ESM live-binding
+  // re-export lets consumers' override (imported as a named binding) also propagate
+  // after reset. If this were a `const` with `.mockReset()`, the closure inside the
+  // mock class would stay captured to the original fn and override propagation would break.
   mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(false);
   mockRevokedJtiRevoke.mockReset().mockResolvedValue(undefined);
   mockTokenValidate.mockReset().mockResolvedValue(null);
