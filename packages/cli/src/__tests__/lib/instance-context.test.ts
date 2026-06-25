@@ -190,6 +190,50 @@ describe("legacy-fallback end-to-end via resolveInstanceContext (WI-M Task 6)", 
     rmSync(projectDir, { recursive: true, force: true });
   });
 
+  it("resolves credentialSource:'legacy' via production builtLegacy auto-discovery (no opts.legacy)", async () => {
+    // Write a valid .tila/config.toml so findTilaDir() and findConfig() resolve
+    // the temp project dir. The worker_url is required to give the legacy rung
+    // a repoPointer to bind to.
+    writeFileSync(
+      path.join(projectDir, ".tila", "config.toml"),
+      `${[
+        'project_id = "auto-discovery-project"',
+        "schema_version = 1",
+        'tila_version = "0.2.7"',
+        'created_at = "2026-06-25T00:00:00Z"',
+        'worker_url = "https://auto.acme.dev"',
+      ].join("\n")}\n`,
+    );
+    // Write the legacy token so readLegacyCredential finds it
+    writeFileSync(
+      path.join(projectDir, ".tila", ".env"),
+      "TILA_API_TOKEN=auto-discovery-leg-tok\n",
+    );
+
+    // Drive resolveInstanceContext WITHOUT passing opts.legacy or opts.repoPointer —
+    // this forces the production builtLegacy code path (findTilaDir() from cwd).
+    const savedCwd = process.cwd();
+    try {
+      process.chdir(projectDir);
+      const outcome = await resolveInstanceContext({
+        authStore: store,
+        env: { isCI: false, isTTY: true, tilaHomeOverridden: true },
+        // No legacy: or repoPointer: opts — tests the real builtLegacy walk-up
+      });
+
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.instance.credentialSource).toBe("legacy");
+      expect(outcome.instance.instance_key).toBeNull();
+      expect(outcome.instance.credential).toEqual({
+        source: "legacy",
+        token: "auto-discovery-leg-tok",
+      });
+    } finally {
+      process.chdir(savedCwd);
+    }
+  });
+
   it("resolves credentialSource:'legacy' when only .tila/.env is present and registry is empty", async () => {
     // Write legacy .tila/.env with TILA_API_TOKEN
     writeFileSync(
