@@ -3,6 +3,32 @@ import { GITHUB_API_TIMEOUT_MS } from "../config";
 import { githubFetch } from "./github-fetch";
 
 /**
+ * Discriminated union returned by checkUserMembershipStatus.
+ *   - {kind:"permission", value} — HTTP 200, user is a collaborator at the given level
+ *   - {kind:"absent"}           — HTTP 404, user is definitively not a collaborator
+ *   - {kind:"error"}            — any other non-200 status or network/timeout error
+ */
+export type MembershipStatus =
+  | { kind: "permission"; value: string }
+  | { kind: "absent" }
+  | { kind: "error" };
+
+/**
+ * Error thrown by getInstallationAccessToken (and future App-token helpers) when
+ * the GitHub API returns a non-200 status. Callers can inspect `.status` to
+ * distinguish a 404 (installation not found) from a 5xx transient error.
+ */
+export class GitHubAppTokenError extends Error {
+  constructor(
+    public readonly status: number,
+    message?: string,
+  ) {
+    super(message ?? `GitHub API returned ${status}`);
+    this.name = "GitHubAppTokenError";
+  }
+}
+
+/**
  * Mint a GitHub App JWT for authentication.
  * The JWT is valid for 10 minutes (GitHub maximum).
  *
@@ -56,7 +82,7 @@ export async function getInstallationAccessToken(
     );
 
     if (!res.ok) {
-      throw new Error(`GitHub API returned ${res.status}`);
+      throw new GitHubAppTokenError(res.status);
     }
 
     const data = (await res.json()) as { token: string };
@@ -132,22 +158,23 @@ export async function listInstallationRepositories(
 }
 
 /**
- * Check a user's permission level for a repository via the GitHub App installation token.
+ * Status-aware variant of checkUserMembership that distinguishes a definitive
+ * 404 ("not a collaborator") from a transient error (5xx / network timeout).
  *
  * @param installationToken - Installation access token from getInstallationAccessToken
  * @param owner - Repository owner
  * @param repo - Repository name
  * @param login - GitHub username to check
  * @param apiBase - GitHub API base URL (default: https://api.github.com)
- * @returns Permission level ("admin", "write", "read", "none") or null on error
+ * @returns MembershipStatus discriminated union
  */
-export async function checkUserMembership(
+export async function checkUserMembershipStatus(
   installationToken: string,
   owner: string,
   repo: string,
   login: string,
   apiBase = "https://api.github.com",
-): Promise<string | null> {
+): Promise<MembershipStatus> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GITHUB_API_TIMEOUT_MS);
 
@@ -162,15 +189,50 @@ export async function checkUserMembership(
       },
     );
 
-    if (!res.ok) {
-      return null;
+    if (res.status === 200) {
+      const data = (await res.json()) as { permission: string };
+      return { kind: "permission", value: data.permission };
     }
 
-    const data = (await res.json()) as { permission: string };
-    return data.permission ?? null;
+    if (res.status === 404) {
+      return { kind: "absent" };
+    }
+
+    return { kind: "error" };
   } catch {
-    return null;
+    return { kind: "error" };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Check a user's permission level for a repository via the GitHub App installation token.
+ * Thin wrapper over checkUserMembershipStatus: maps `permission` → value, `absent`/`error` → null.
+ *
+ * @param installationToken - Installation access token from getInstallationAccessToken
+ * @param owner - Repository owner
+ * @param repo - Repository name
+ * @param login - GitHub username to check
+ * @param apiBase - GitHub API base URL (default: https://api.github.com)
+ * @returns Permission level ("admin", "write", "read", "none") or null on error/absence
+ */
+export async function checkUserMembership(
+  installationToken: string,
+  owner: string,
+  repo: string,
+  login: string,
+  apiBase = "https://api.github.com",
+): Promise<string | null> {
+  const status = await checkUserMembershipStatus(
+    installationToken,
+    owner,
+    repo,
+    login,
+    apiBase,
+  );
+  if (status.kind === "permission") {
+    return status.value;
+  }
+  return null;
 }
