@@ -22,6 +22,7 @@ export {
   type GitHubAppConfigRow,
 } from "./github-app-config";
 export { D1RevokedJtiStore } from "./revoked-jti-store";
+export { D1RevokedSubjectsStore } from "./revoked-subjects-store";
 export {
   AdminGrantsStore,
   type AdminGrantRow,
