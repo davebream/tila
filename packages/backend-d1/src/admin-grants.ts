@@ -69,6 +69,7 @@ export class AdminGrantsStore {
   /**
    * Soft-delete revoke. The `revoked_at IS NULL` guard in the WHERE clause
    * makes double-revoke a no-op. Revoked rows persist for the audit trail.
+   * Canonicalizes host/subject internally via canonicalizePrincipal().
    */
   async revoke(
     projectId: string,
@@ -77,6 +78,10 @@ export class AdminGrantsStore {
     revokedByUserId?: number,
   ): Promise<void> {
     const revokedAt = Math.floor(Date.now() / 1000); // seconds (flag-only; never numerically compared)
+    const { identityHost, subjectId } = canonicalizePrincipal(
+      githubHost,
+      githubUserId,
+    );
 
     await this.drizzle
       .update(adminGrants)
@@ -87,8 +92,8 @@ export class AdminGrantsStore {
       .where(
         and(
           eq(adminGrants.project_id, projectId),
-          eq(adminGrants.github_host, githubHost),
-          eq(adminGrants.github_user_id, githubUserId),
+          eq(adminGrants.identity_host, identityHost),
+          eq(adminGrants.subject_id, subjectId),
           isNull(adminGrants.revoked_at),
         ),
       );
@@ -113,20 +118,26 @@ export class AdminGrantsStore {
 
   /**
    * Check if a GitHub user has an active admin grant for a project.
+   * Canonicalizes host/subject internally via canonicalizePrincipal().
    */
   async isActiveAdmin(
     projectId: string,
     githubHost: string,
     githubUserId: number,
   ): Promise<boolean> {
+    const { identityHost, subjectId } = canonicalizePrincipal(
+      githubHost,
+      githubUserId,
+    );
+
     const rows = await this.drizzle
       .select()
       .from(adminGrants)
       .where(
         and(
           eq(adminGrants.project_id, projectId),
-          eq(adminGrants.github_host, githubHost),
-          eq(adminGrants.github_user_id, githubUserId),
+          eq(adminGrants.identity_host, identityHost),
+          eq(adminGrants.subject_id, subjectId),
           isNull(adminGrants.revoked_at),
         ),
       )
