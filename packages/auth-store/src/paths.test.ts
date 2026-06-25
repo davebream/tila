@@ -54,10 +54,9 @@ describe("TilaPaths", () => {
     expect(p.infraFile("my-slug")).toBe("/custom/tila/infra/my-slug.toml");
   });
 
-  it("infraFile accepts a UUID-like slug", () => {
+  it("infraFile accepts a slug with digits and dashes", () => {
     process.env.TILA_HOME = "/custom/tila";
     const p = new TilaPaths();
-    // UUIDs don't match the slug pattern, but a slug-like value does
     expect(() => p.infraFile("my-deploy-01")).not.toThrow();
   });
 

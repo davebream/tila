@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { type InstanceRegistry, InstanceRegistrySchema } from "@tila/schemas";
@@ -99,8 +105,10 @@ export async function writeRegistry(
   const homeDir = paths.home;
   const filePath = paths.registryFile();
 
-  // Ensure the home directory exists with restrictive permissions
+  // Ensure the home directory exists with restrictive permissions.
+  // chmodSync after mkdirSync so pre-existing dirs with looser perms are tightened.
   mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+  chmodSync(homeDir, 0o700);
 
   const serialized = stringify(registry as Record<string, unknown>);
 
@@ -109,8 +117,6 @@ export async function writeRegistry(
   try {
     writeFileSync(tempPath, serialized, { mode: 0o600 });
     renameSync(tempPath, filePath);
-    // Ensure the final file has the correct mode (rename preserves temp mode on most systems)
-    // but we also set it explicitly on the temp file which should survive the rename
   } catch (err) {
     // Clean up temp file if it exists
     try {

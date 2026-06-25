@@ -113,4 +113,59 @@ describe("registry-file", () => {
       RegistryParseError,
     );
   });
+
+  it("round-trips an untrusted instance with trust.trusted_at null", async () => {
+    // Covers normalizeRegistryFromToml: TOML drops null values on stringify,
+    // so trusted_at is absent on disk; normalize restores it to null.
+    const registry: InstanceRegistry = {
+      version: 1,
+      current_context: null,
+      instances: [
+        {
+          instance_key: "untrusted-key" as import("@tila/schemas").InstanceKey,
+          label: "Untrusted Instance",
+          worker_url: "https://example.com",
+          instance_id_source: "client-uuid",
+          trust: { trusted: false, trusted_at: null },
+          created_at: 1700000000000,
+        },
+      ],
+    };
+
+    await writeRegistry(paths, registry);
+    const result = await readRegistry(paths);
+    expect(result).toEqual(registry);
+  });
+
+  it("round-trips an instance where trust object is structurally present but trusted_at is absent on disk", async () => {
+    // This covers the { trusted_at: null, ...trust } branch in normalizeRegistryFromToml
+    // when trust is already present as an object but trusted_at is omitted.
+    // We write a raw TOML file with trust.trusted = false but no trusted_at key.
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(
+      paths.registryFile(),
+      [
+        "version = 1",
+        "",
+        "[[instances]]",
+        'instance_key = "partial-trust-key"',
+        'worker_url = "https://example.com"',
+        'instance_id_source = "client-uuid"',
+        "created_at = 1700000000000",
+        "",
+        "[instances.trust]",
+        "trusted = false",
+        "# trusted_at intentionally omitted — TOML null-drop simulation",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+
+    const result = await readRegistry(paths);
+    expect(result).not.toBeNull();
+    expect(result?.instances[0]?.trust).toEqual({
+      trusted: false,
+      trusted_at: null,
+    });
+  });
 });

@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { type PerSlugInfraMeta, PerSlugInfraMetaSchema } from "@tila/schemas";
 import { parse, stringify } from "smol-toml";
@@ -68,8 +74,10 @@ export async function writeInfraMeta(
   const filePath = paths.infraFile(slug);
   const infraDir = paths.infraDir();
 
-  // Ensure the infra directory exists with restrictive permissions
+  // Ensure the infra directory exists with restrictive permissions.
+  // chmodSync after mkdirSync so pre-existing dirs with looser perms are tightened.
   mkdirSync(infraDir, { recursive: true, mode: 0o700 });
+  chmodSync(infraDir, 0o700);
 
   const serialized = stringify(meta as Record<string, unknown>);
 
