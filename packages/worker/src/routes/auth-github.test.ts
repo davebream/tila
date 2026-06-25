@@ -2091,23 +2091,43 @@ describe("instance_id binding in minted session JWT and login response", () => {
     const app = createApp();
     const envWithOidc = {
       ...testEnv,
-      GITHUB_OIDC_AUDIENCE: "test-audience",
+      GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
     } as unknown as Env;
 
+    // Mirror the full claims setup from the passing OIDC "returns 200" test so
+    // the exchange reaches 200 rather than 403 (repo not in allowlist).
     mockVerifyOidcToken.mockResolvedValue({
+      iss: "https://token.actions.githubusercontent.com",
+      aud: "https://tila.example.com",
+      sub: "repo:test-org/test-repo:ref:refs/heads/main",
+      exp: Math.floor(Date.now() / 1000) + 600,
+      iat: Math.floor(Date.now() / 1000),
+      nbf: Math.floor(Date.now() / 1000),
+      jti: "unique-jwt-id-oidc-instance-test",
+      repository: "test-org/test-repo",
       repository_id: 99999,
+      repository_owner: "test-org",
+      repository_owner_id: 12345,
       actor: "actions-bot",
       actor_id: 7777,
-      repository: "test-org/test-repo",
-      repository_owner: "test-org",
+      ref: "refs/heads/main",
+      sha: "abc123",
+      workflow: "CI",
+      run_id: 222,
+      run_number: 7,
+      run_attempt: 1,
+      environment: "production",
+      event_name: "push",
+      repository_visibility: "private",
+      job_workflow_ref:
+        "test-org/test-repo/.github/workflows/ci.yml@refs/heads/main",
     });
 
-    // Seed an OIDC repo with a project that matches MOCK_REPO
-    const oidcRepo = {
+    // OIDC path uses isRegistered (not listForProject) to look up by repository_id.
+    mockIsRegistered.mockResolvedValue({
       ...MOCK_REPO,
       oidc_permission: "read",
-    };
-    mockListForProject.mockResolvedValue([oidcRepo]);
+    });
 
     const res = await app.request(
       "/api/auth/github/exchange-oidc",
@@ -2116,25 +2136,76 @@ describe("instance_id binding in minted session JWT and login response", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: "test-project",
-          oidc_token: "eyJ0eXAiOiJKV1QifQ.payload.sig",
+          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
         }),
       },
-      { ...envWithOidc, DB: mockDb } as unknown as Env,
+      envWithOidc,
     );
 
-    // OIDC repos need to be listed with oidc_permission
-    if (res.status === 200) {
-      const body = (await res.json()) as {
-        session_token: string;
-        instance_id: string;
-      };
-      expect(body.instance_id).toBe(KNOWN_INSTANCE_ID);
-      const parts = body.session_token.split(".");
-      const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
-      const jwtPayload = JSON.parse(payloadStr) as { instance_id?: string };
-      expect(jwtPayload.instance_id).toBe(KNOWN_INSTANCE_ID);
-    }
-    // If it's not 200, we skip (OIDC may need more setup), but we verify
-    // the instance_id binding is in place for the /exchange path above.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      session_token: string;
+      instance_id: string;
+    };
+    // Assert the response body carries instance_id
+    expect(body.instance_id).toBe(KNOWN_INSTANCE_ID);
+    // Assert the minted JWT payload also carries instance_id
+    const parts = body.session_token.split(".");
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toBe("tila_s");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const jwtPayload = JSON.parse(payloadStr) as { instance_id?: string };
+    expect(jwtPayload.instance_id).toBe(KNOWN_INSTANCE_ID);
+  });
+
+  it("/exchange App path response body and JWT also carry instance_id", async () => {
+    const app = createApp();
+    const envWithApp = {
+      ...testEnv,
+      GITHUB_APP_ID: TEST_APP_ID,
+      GITHUB_APP_PRIVATE_KEY: TEST_APP_PRIVATE_KEY,
+    } as unknown as Env;
+
+    // Mirror the App exchange mock setup from the passing "returns 200 with session
+    // token for valid App exchange" test so the request reaches 200.
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "appuser", id: 54321 });
+    mockGitHubAppConfigGetInstallation.mockResolvedValue({
+      project_id: "test-project",
+      installation_id: 12345,
+      created_at: 1000000,
+      created_by: "admin",
+    });
+    mockMintAppJwt.mockResolvedValue("app-jwt-fake");
+    mockGetInstallationAccessToken.mockResolvedValue("ghs_install_token_fake");
+    mockCheckUserMembership.mockResolvedValue("write");
+
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          user_token: "ghu_user_token_fake",
+          auth_method: "user_token",
+        }),
+      },
+      envWithApp,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      session_token: string;
+      instance_id: string;
+    };
+    // Assert the response body carries instance_id
+    expect(body.instance_id).toBe(KNOWN_INSTANCE_ID);
+    // Assert the minted JWT payload also carries instance_id
+    const parts = body.session_token.split(".");
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toBe("tila_s");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const jwtPayload = JSON.parse(payloadStr) as { instance_id?: string };
+    expect(jwtPayload.instance_id).toBe(KNOWN_INSTANCE_ID);
   });
 });
