@@ -508,6 +508,48 @@ wrangler secret put SWEEP_SECRET   # enter new value at the prompt
 
 The old secret is invalidated immediately; the next scheduled cron invocation will use the new value automatically.
 
+## Auth: Revocation & Pepper Rotation
+
+Operational procedures for the multi-instance auth controls. The timing guarantees and the
+constants behind them are documented once in
+[`docs/13-MULTI-INSTANCE-AUTH.md`](13-MULTI-INSTANCE-AUTH.md) — this runbook covers the *steps*.
+
+### Revoke a principal (bulk kill-switch)
+
+To lock out a user across a project, write a `_revoked_subjects` tombstone for the canonical
+principal `(project_id, identity_host, subject_id)` via the admin revoke entry point. Effect is
+**instant on the revoking isolate** and propagates to other isolates within the cross-isolate cache
+window; an unrevoked session otherwise expires on its own within its tier TTL. For the exact SLA and
+the cache-window value, see [`docs/13`](13-MULTI-INSTANCE-AUTH.md) § Revocation and SLA. To revoke a
+single session instead of a whole principal, use the per-`jti` kill-switch (see
+[`docs/01-DECISIONS.md`](01-DECISIONS.md) § C9). The revocation read fails closed — if D1 is
+unavailable the request is denied, not allowed.
+
+### Revocation garbage collection
+
+Revocation tombstones are bounded, not unbounded: the daily cron sweep
+(`packages/worker/src/lib/sweep.ts`) prunes expired `_revoked_subjects` and `_revoked_jti` rows
+once they are older than the retention window (long enough to outlive any session they suppress —
+value in [`docs/13`](13-MULTI-INSTANCE-AUTH.md)). Sweep failures are logged and non-fatal; no manual
+GC is normally required. If tombstone growth is ever a concern, confirm the cron is firing via
+`wrangler tail` (look for `[sweep] pruned … revoked … rows`).
+
+### Rotate `HASH_PEPPER`
+
+> **`HASH_PEPPER` rotation is a breaking change — not zero-downtime.** Setting or rotating it changes
+> every token digest; a zero-downtime dual-verify path is a tracked follow-up that is not yet
+> implemented. See [`docs/13`](13-MULTI-INSTANCE-AUTH.md) § Migration Guide for the rationale.
+
+Steps:
+
+1. Set the new secret: `wrangler secret put HASH_PEPPER` (enter the new value at the prompt).
+2. **Re-issue every D1 API token** — tokens hashed under the old pepper no longer validate. Notify
+   token holders and issue replacements via the normal token-creation flow.
+3. Cookie/workspace sessions re-authenticate automatically within their TTL; no action needed beyond
+   informing users they may be prompted to log in again.
+
+Do not rotate `HASH_PEPPER` expecting a grace period — plan the re-issue before rotating.
+
 ## Troubleshooting
 
 Common failure modes and remediation steps.

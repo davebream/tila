@@ -465,3 +465,31 @@ This document is the constitution. It changes when reality requires it, not when
 Either way the column is a label on the audit row, not a gate. Cross-project infra revoke is therefore expected and correct: it records the caller-asserted slug and still revokes the jti globally.
 
 **Code references:** `packages/backend-d1/src/revoked-jti-store.ts` (store contract + `isRevoked` DON'T comment), `packages/backend-d1/src/schema.ts` (`_revoked_jti` table), `packages/worker/src/middleware/auth.ts` (fail-closed per-isolate revocation check), `packages/worker/src/routes/admin.ts` and `packages/worker/src/routes/infra.ts` (revoke entry points).
+
+## 23. Multi-instance auth: per-deployment sovereignty (epic #122)
+
+**Decision:** A tila deployment is its own sovereign auth authority. There is **no central control
+plane** — no shared identity provider, no cross-deployment session registry, no federation. Each
+Worker validates only its own sessions/tokens against its own D1, signed with its own HMAC key.
+
+**Why:** It keeps the server model simple and the blast radius of any one deployment contained. The
+full model and the code-anchored detail live in
+[`docs/13-MULTI-INSTANCE-AUTH.md`](13-MULTI-INSTANCE-AUTH.md); the settled positions are:
+
+- **Multi-instance is a client-side registry problem, not server federation.** The CLI/MCP track
+  which deployment a command targets via the `~/.tila` store; servers stay ignorant of each other.
+- **Sessions are instance-bound.** Every session carries the minting deployment's `instance_id`
+  claim; a mismatch is rejected (`instance-mismatch`) — cross-deployment replay is defeated at the
+  server, not by client discipline.
+- **Untrusted inline `worker_url` is a trust boundary.** A presented `worker_url` that does not match
+  the registered instance is rejected (anti-spoof), never silently trusted.
+- **CI fails closed.** Under CI / non-TTY the home credential store is disabled; only inline
+  `--token` / `TILA_TOKEN` is honored, so a CI job cannot silently reuse a developer's cached
+  credentials.
+- **Subject revocation is forward-only.** The `_revoked_subjects` cutoff advances monotonically
+  (`MAX(...)`), bounded by session TTL; re-arming with an earlier cutoff is a no-op (complements the
+  jti kill-switch in §C9).
+
+**Code references:** `packages/auth-store/src/resolver.ts`, `trust.ts`, `ci-policy.ts` (client
+resolution + trust); `packages/worker/src/middleware/auth.ts` (instance-binding + subject-revocation
+checks); `packages/worker/migrations/global/0017_deployment_meta.sql`, `0019_revoked_subjects.sql`.
