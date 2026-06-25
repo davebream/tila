@@ -13,6 +13,8 @@
  * directly. This is enforced by a unit test in instance-context.test.ts.
  */
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   AuthStore,
   KeyringSecretStore,
@@ -21,6 +23,7 @@ import {
   resolveWithTrace,
 } from "@tila/auth-store";
 import type {
+  LegacyLocations,
   RepoPointer,
   ResolveInput,
   ResolveOutcome,
@@ -28,8 +31,9 @@ import type {
   ResolverEnv,
 } from "@tila/auth-store";
 import type { InstanceKey } from "@tila/schemas";
-import { findConfig } from "../config";
+import { findConfig, findTilaDir } from "../config";
 import { getGlobalFlags } from "./global-flags";
+import { tilaHome } from "./provisioning";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -126,6 +130,11 @@ export interface ResolveInstanceContextOpts {
   env?: ResolverEnv;
   /** Override flag-derived ResolveInput.flags (for testing inline token paths). */
   flags?: ResolveInput["flags"];
+  /**
+   * Override the legacy locations (for testing the legacy-fallback rung).
+   * Production auto-builds from findTilaDir() + tilaHome()/infra.toml.
+   */
+  legacy?: LegacyLocations;
 }
 
 /**
@@ -179,12 +188,22 @@ export async function resolveInstanceContext(
     tilaHomeOverridden: Boolean(process.env.TILA_HOME),
   };
 
+  // Build legacy locations for the lowest-priority legacy-fallback rung (WI-M).
+  // opts.legacy overrides for test injection; production auto-discovers from cwd walk-up.
+  const homeInfraPath = join(tilaHome(), "infra.toml");
+  const builtLegacy: LegacyLocations = {
+    projectTilaDir: findTilaDir(),
+    homeInfraToml: existsSync(homeInfraPath) ? homeInfraPath : null,
+  };
+  const legacy = opts.legacy ?? builtLegacy;
+
   const input: ResolveInput = {
     flags: resolveFlags,
     envReader: (name: string) => process.env[name],
     env,
     authStore,
     repoPointer: repoPointer ?? undefined,
+    legacy,
   };
 
   return resolveWithTrace(input);
