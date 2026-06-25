@@ -422,6 +422,38 @@ describe("legacy-fallback rung (WI-M)", () => {
     // After corrupt file, no usable credential
     expect(outcome.ok).toBe(false);
   });
+
+  it("corrupt .session with type violation: trace detail leaks no secret token value", async () => {
+    // Write a .session file whose expires_at is the wrong type (string, not number).
+    // The secret value "super-secret-ghs-value" must NEVER appear in the trace detail.
+    writeFileSync(
+      path.join(tilaDir(), ".session"),
+      JSON.stringify({
+        session_token: "super-secret-ghs-value",
+        expires_at: "not-a-number", // type violation → reader throws
+      }),
+    );
+
+    // resolveWithTrace must not throw
+    const outcome = await resolveWithTrace(
+      baseInput({
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    // The rung must record a matched:false step
+    const legacyStep = outcome.trace.find((s) => s.rung === "legacy-fallback");
+    expect(legacyStep).toBeDefined();
+    expect(legacyStep?.matched).toBe(false);
+
+    // SECURITY: the secret value must not appear anywhere in the trace detail
+    expect(legacyStep?.detail).not.toContain("super-secret-ghs-value");
+    // And not anywhere in the full trace JSON
+    expect(JSON.stringify(outcome.trace)).not.toContain(
+      "super-secret-ghs-value",
+    );
+  });
 });
 
 describe("credential binding + never-throws contract", () => {
