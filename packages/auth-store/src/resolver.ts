@@ -14,6 +14,7 @@
 import type { InstanceKey, InstanceRecord } from "@tila/schemas";
 import { evaluateCiPolicy } from "./ci-policy.js";
 import { InstanceResolutionError } from "./errors.js";
+import { readLegacyCredential } from "./legacy-reader.js";
 import type {
   InstanceCandidate,
   ResolutionSource,
@@ -30,6 +31,7 @@ const RUNG_ORDER: ResolutionSource[] = [
   "env",
   "repo-pointer",
   "current-context",
+  "legacy-fallback",
 ];
 
 /** What a rung produced: nothing, or a candidate (+ optional inline token). */
@@ -192,6 +194,69 @@ async function buildCurrentContextRung(
   };
 }
 
+/**
+ * Lowest-priority fallback rung for legacy .tila/.env / .tila/.session credentials (WI-M).
+ *
+ * Constraints (normative):
+ * - MUST NOT call any input.authStore method — data comes only from legacy-reader + repoPointer.
+ * - TraceStep.detail MUST NOT contain the token value — use source path only.
+ * - Wraps readLegacyCredential in try/catch → matched:false on corruption (preserves never-throws).
+ * - Uses inlineToken:true so trust.ts Rule 1 + ci-policy.ts exemption apply unchanged.
+ */
+async function buildLegacyFallbackRung(
+  input: ResolveInput,
+): Promise<RungResult> {
+  if (!input.legacy) {
+    return { matched: false, detail: "no legacy locations provided" };
+  }
+
+  let cred: ReturnType<typeof readLegacyCredential>;
+  try {
+    cred = readLegacyCredential(input.legacy);
+  } catch (err) {
+    // Corrupt file — record detail with no raw file content, no token
+    const msg = err instanceof Error ? err.message : String(err);
+    // Strip the token from the message (e.g., if somehow included)
+    const safeMsg = msg.replace(/token[^\s]*/gi, "<redacted>");
+    return {
+      matched: false,
+      detail: `legacy credential file corrupt — ${safeMsg}`,
+    };
+  }
+
+  if (!cred) {
+    return {
+      matched: false,
+      detail: "no usable legacy .tila/.env or .tila/.session found",
+    };
+  }
+
+  // Derive worker_url from repoPointer only — never fabricate a URL
+  const workerUrl = input.repoPointer?.worker_url ?? null;
+  if (!workerUrl) {
+    return {
+      matched: false,
+      detail:
+        "legacy credential found but no worker_url derivable (no repo pointer); " +
+        "run inside a tila project directory or set TILA_CONFIG",
+    };
+  }
+
+  // Use source_path for the detail, never the token itself
+  return {
+    matched: true,
+    candidate: {
+      worker_url: workerUrl,
+      instance_key: null,
+      inlineToken: true,
+      legacy: true,
+    },
+    record: null,
+    token: cred.token,
+    detail: `legacy ${cred.source_path} (${cred.kind})`,
+  };
+}
+
 function buildRung(
   rung: ResolutionSource,
   input: ResolveInput,
@@ -205,6 +270,8 @@ function buildRung(
       return buildRepoPointerRung(input);
     case "current-context":
       return buildCurrentContextRung(input);
+    case "legacy-fallback":
+      return buildLegacyFallbackRung(input);
   }
 }
 
@@ -278,6 +345,22 @@ async function assemble(
         ),
       };
     }
+
+    // Legacy-fallback branch: emit credentialSource "legacy" to distinguish from an
+    // explicit --token / TILA_TOKEN inline token.
+    if (candidate.legacy) {
+      return {
+        ok: true,
+        instance: {
+          instance_key: null,
+          worker_url: candidate.worker_url,
+          credentialSource: "legacy",
+          credential: { source: "legacy", token: token as string },
+          trust: { kind: "trusted" },
+        },
+      };
+    }
+
     return {
       ok: true,
       instance: {
