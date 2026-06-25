@@ -9,6 +9,7 @@ export const TILA_ERRORS = {
   UNAUTHORIZED: "unauthorized",
   SESSION_EXPIRED: "session-expired",
   SESSION_REVOKED: "session-revoked",
+  SUBJECT_REVOKED: "subject-revoked",
   RATE_LIMITED: "rate-limited",
   PERMISSION_DENIED: "permission-denied",
   PERMISSION_REVOKED: "permission-revoked",

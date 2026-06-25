@@ -1,9 +1,11 @@
 import {
   D1RateLimitStore,
   D1RevokedJtiStore,
+  D1RevokedSubjectsStore,
   D1SessionStore,
   D1TokenStore,
   type RateLimitStoreInterface,
+  canonicalizePrincipal,
 } from "@tila/backend-d1";
 import { SessionPayloadSchema } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
@@ -17,6 +19,8 @@ import {
   MAX_DEBOUNCE_MAP_SIZE,
   RATE_LIMIT_MAX_FAILURES,
   RATE_LIMIT_WINDOW_MS,
+  SUBJECT_REVCHECK_TTL_MS,
+  SUBJECT_REV_CACHE_MAX_SIZE,
 } from "../config";
 import { emitInstanceMismatchDatapoint } from "../lib/analytics";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
@@ -28,7 +32,14 @@ import {
   invalidateSession,
   setSessionInCache,
 } from "../lib/session-cache";
-import { asEpochSeconds, nowMs, nowSeconds } from "../lib/time";
+import {
+  asEpochMillis,
+  asEpochSeconds,
+  isIssuedBeforeRevocation,
+  nowMs,
+  nowSeconds,
+  secondsToMillis,
+} from "../lib/time";
 import { type TokenClaims, getFromCache, setInCache } from "../lib/token-cache";
 import { D1_TOKEN_PREFIX, verifyD1TokenChecksum } from "../lib/token-format";
 import type {
@@ -191,6 +202,91 @@ function getJtiFromCache(jti: string): boolean | null {
     return null;
   }
   return entry.revoked;
+}
+
+// --- Per-isolate subject-revocation cache (WI-C) ---
+// Mirrors jtiRevCache but for the subject-level bulk kill-switch. Caches the
+// principal's `revoked_before` tombstone value (or null = no tombstone) to avoid
+// a D1 read on every session-bearer request.
+//
+// Security contract (design C7):
+//   - Revocation is effective within at most SUBJECT_REVCHECK_TTL_MS across isolates.
+//   - The KEY is the FULL composite (project_id, identity_host, subject_id) — subject
+//     revocation is per-project, so the project_id MUST be part of the key. A bare
+//     subject key would let a tombstone in project A deny the same principal in
+//     project B within one isolate (cross-project fail-deny).
+//   - If the D1 lookup errors, the request is DENIED (fail-closed) — the cache is
+//     NOT consulted as a fallback in the error path.
+//
+// Map<`${project_id}\0${identity_host}\0${subject_id}`, { revokedBefore: number | null; cachedAt }>
+const subjectRevCache = new Map<
+  string,
+  { revokedBefore: number | null; cachedAt: number }
+>();
+
+/** Build the composite per-project cache key from a canonical principal. */
+function subjectCacheKey(
+  projectId: string,
+  identityHost: string,
+  subjectId: string,
+): string {
+  return `${projectId} ${identityHost} ${subjectId}`;
+}
+
+/**
+ * Insert a subject-revocation entry with oldest-entry eviction on overflow.
+ * Internal helper used by both revokeSubjectInCache and the D1 lookup path.
+ */
+function setSubjectRevInCache(
+  key: string,
+  entry: { revokedBefore: number | null; cachedAt: number },
+): void {
+  if (
+    !subjectRevCache.has(key) &&
+    subjectRevCache.size >= SUBJECT_REV_CACHE_MAX_SIZE
+  ) {
+    const oldest = subjectRevCache.keys().next().value;
+    if (oldest !== undefined) {
+      subjectRevCache.delete(oldest);
+    }
+  }
+  subjectRevCache.set(key, entry);
+}
+
+/**
+ * Immediately set a subject's revocation tombstone in the per-isolate cache.
+ * Called by a revoke route (and tests) so the revoking isolate takes effect
+ * instantly. `host`/`subject` are canonicalized internally to match the verify
+ * path's key. Exported for use by a future admin revoke route handler and tests.
+ */
+export function revokeSubjectInCache(
+  projectId: string,
+  host: string | null | undefined,
+  subject: string | number,
+  revokedBefore: number,
+): void {
+  const { identityHost, subjectId } = canonicalizePrincipal(host, subject);
+  setSubjectRevInCache(subjectCacheKey(projectId, identityHost, subjectId), {
+    revokedBefore,
+    cachedAt: nowMs(),
+  });
+}
+
+/**
+ * Check the per-isolate subject-revocation cache.
+ * Returns the cached `{ revokedBefore }` entry if present and not stale.
+ * Returns `null` (cache miss or stale) if the caller should query D1.
+ */
+function getSubjectRevFromCache(
+  key: string,
+): { revokedBefore: number | null } | null {
+  const entry = subjectRevCache.get(key);
+  if (!entry) return null;
+  if (nowMs() - entry.cachedAt > SUBJECT_REVCHECK_TTL_MS) {
+    subjectRevCache.delete(key);
+    return null;
+  }
+  return { revokedBefore: entry.revokedBefore };
 }
 
 function isExpectedAudience(aud: unknown, expected: string): boolean {
@@ -705,6 +801,89 @@ export function createAuthMiddleware(
         // match (claimedId === deploymentId) → accept silently
       }
 
+      // --- WI-C: subject-level bulk-revocation kill-switch (fail-closed) ---
+      // Reject if this principal (project_id, canonical identity) has a
+      // _revoked_subjects tombstone and the token was issued strictly before it.
+      // Identity is derived from the VERIFIED payload (parsed.data) ONLY, through
+      // the shared canonicalizePrincipal so the (identity_host, subject_id) pair
+      // matches byte-for-byte whatever was written when the tombstone was set.
+      {
+        const { identityHost, subjectId } = canonicalizePrincipal(
+          payload.github_host,
+          payload.github_user_id,
+        );
+        const cacheKey = subjectCacheKey(
+          payload.project_id,
+          identityHost,
+          subjectId,
+        );
+
+        let revokedBefore: number | null;
+        const cachedSubject = getSubjectRevFromCache(cacheKey);
+        if (cachedSubject !== null) {
+          revokedBefore = cachedSubject.revokedBefore;
+        } else {
+          // Cache miss or stale — query D1 (fail-closed on error, like the jti path)
+          try {
+            const revokedSubjectsStore = new D1RevokedSubjectsStore(c.env.DB);
+            revokedBefore = await revokedSubjectsStore.getRevokedBefore(
+              payload.project_id,
+              payload.github_host,
+              payload.github_user_id,
+            );
+            setSubjectRevInCache(cacheKey, {
+              revokedBefore,
+              cachedAt: nowMs(),
+            });
+          } catch {
+            // D1 lookup error — DENY (fail-closed per design C7). The cache is
+            // NOT consulted as a fallback in the error path.
+            return c.json(
+              {
+                ok: false,
+                error: {
+                  code: "unauthorized",
+                  message: "Session token verification failed",
+                  retryable: true,
+                },
+              },
+              401,
+            );
+          }
+        }
+
+        if (
+          revokedBefore !== null &&
+          isIssuedBeforeRevocation(
+            secondsToMillis(asEpochSeconds(payload.issued_at)),
+            asEpochMillis(revokedBefore),
+          )
+        ) {
+          // SECURITY: emit only event-type labels/counters — never subject_id,
+          // github_login, or identity_host (no PII in Analytics Engine).
+          try {
+            c.env.ANALYTICS.writeDataPoint({
+              blobs: ["auth", "subject-revoked"],
+              doubles: [1],
+              indexes: ["subject-revoked"],
+            });
+          } catch {
+            // Analytics emission is never load-bearing
+          }
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "subject-revoked",
+                message: "Session principal has been revoked",
+                retryable: false,
+              },
+            },
+            401,
+          );
+        }
+      }
+
       // Set session token result
       const sessionResult: SessionTokenResult = {
         kind: "session",
@@ -862,11 +1041,12 @@ export function createAuthMiddleware(
   };
 }
 
-/** For testing only -- resets debounce state, isolate rate-limit map, and jti cache. */
+/** For testing only -- resets debounce state, isolate rate-limit map, and revocation caches. */
 export function _resetMiddlewareStateForTest(): void {
   lastWriteMap.clear();
   isolateFailMap.clear();
   jtiRevCache.clear();
+  subjectRevCache.clear();
   cachedHmacKey = null;
   cachedHmacKeyRaw = null;
   hashPepperUnsetWarned = false;
@@ -890,4 +1070,9 @@ export function _jtiRevCacheSizeForTest(): number {
 /** For testing only -- returns whether a jti key exists in the cache (regardless of TTL). */
 export function _jtiRevCacheHasForTest(jti: string): boolean {
   return jtiRevCache.has(jti);
+}
+
+/** For testing only -- returns current subject-revocation cache size. */
+export function _subjectRevCacheSizeForTest(): number {
+  return subjectRevCache.size;
 }

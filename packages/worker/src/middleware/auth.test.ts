@@ -26,7 +26,9 @@ import {
   _jtiRevCacheHasForTest,
   _jtiRevCacheSizeForTest,
   _resetMiddlewareStateForTest,
+  _subjectRevCacheSizeForTest,
   createAuthMiddleware,
+  revokeSubjectInCache,
 } from "./auth";
 
 // Mock deployment-instance module for Task 8 tests (instance_id validation)
@@ -122,6 +124,10 @@ const mockSessionValidate = vi.fn();
 // Mutable mock for D1RevokedJtiStore — tests can reassign mockRevokedJtiIsRevoked
 let mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(false);
 
+// Mutable mock for D1RevokedSubjectsStore.getRevokedBefore (WI-C). Default: no
+// tombstone (null). Tests reassign to return a number or reject (fail-closed).
+let mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
+
 // vitest 4 forbids arrow-function vi.fn() implementations from being used as
 // constructors (the worker source calls `new D1TokenStore(...)`). A `class`
 // expression is constructable; the `as unknown as () => unknown` cast satisfies
@@ -152,6 +158,28 @@ vi.mock("@tila/backend-d1", () => ({
       revoke = vi.fn().mockResolvedValue(undefined);
     } as unknown as () => unknown,
   ),
+  D1RevokedSubjectsStore: vi.fn().mockImplementation(
+    class {
+      getRevokedBefore = (...args: unknown[]) => mockGetRevokedBefore(...args);
+      revokeSubject = vi.fn().mockResolvedValue(undefined);
+    } as unknown as () => unknown,
+  ),
+  // Real (pure) canonicalization — the verify path uses it to build the cache
+  // key; mocking it would defeat parity. Kept byte-identical to
+  // backend-d1/src/principal.ts.
+  canonicalizePrincipal: (
+    host: string | null | undefined,
+    subject: string | number,
+  ) => {
+    const identityHost = (host ?? "github.com").trim().toLowerCase();
+    const subjectId = String(subject).trim();
+    if (subjectId === "") {
+      throw new Error(
+        "canonicalizePrincipal: empty subject after canonicalization",
+      );
+    }
+    return { identityHost, subjectId };
+  },
 }));
 
 // --- Mock session-cache ---
@@ -246,6 +274,8 @@ beforeEach(() => {
   mockInvalidateSession.mockReset();
   mockSessionValidate.mockReset();
   mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(false);
+  // WI-C: default to no subject tombstone (null) between tests
+  mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
   // Task 8: reset instance cache + mocks between tests
   mockEnsureDeploymentInstanceId.mockReset();
   mockEmitInstanceMismatchDatapoint.mockReset();
@@ -1333,6 +1363,151 @@ describe("auth middleware", () => {
       // Generous timeout: this test makes 2000+ full auth requests to fill the
       // cache to its cap, which can exceed the default 5s on loaded CI runners.
     }, 30000);
+  });
+
+  // ---------------------------------------------------------------------------
+  // WI-C — subject-level bulk-revocation kill-switch (fail-closed)
+  // ---------------------------------------------------------------------------
+  describe("subject revocation (WI-C)", () => {
+    it("accepts a session token when the principal has no tombstone", async () => {
+      mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
+      const token = await mintSessionToken({ jti: "subj-no-tombstone" });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockGetRevokedBefore).toHaveBeenCalledWith(
+        "proj-1",
+        "github.com",
+        12345,
+      );
+    });
+
+    it("returns 401 subject-revoked when issued_at is before revoked_before (D1)", async () => {
+      const issuedAtSec = Math.floor(Date.now() / 1000) - 3600; // 1h ago
+      // revoked_before is EpochMillis, set to now → strictly after issued_at
+      mockGetRevokedBefore = vi.fn().mockResolvedValue(Date.now());
+      const token = await mintSessionToken({ issued_at: issuedAtSec });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("subject-revoked");
+    });
+
+    it("allows a token issued at/after the cutoff (strict <)", async () => {
+      const issuedAtSec = Math.floor(Date.now() / 1000);
+      // revoked_before strictly before issued_at (ms) → not revoked
+      mockGetRevokedBefore = vi
+        .fn()
+        .mockResolvedValue(issuedAtSec * 1000 - 1000);
+      const token = await mintSessionToken({ issued_at: issuedAtSec });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it("returns 401 (fail-closed) when D1 getRevokedBefore throws", async () => {
+      mockGetRevokedBefore = vi
+        .fn()
+        .mockRejectedValue(new Error("D1 unavailable"));
+      const token = await mintSessionToken();
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      // Fail-closed deny uses "unauthorized" (retryable), not 500/200
+      expect(body.error.code).toBe("unauthorized");
+    });
+
+    it("cache key is per-project: a tombstone in project A does not deny project B", async () => {
+      // Arm the in-isolate cache for project A only, with a future cutoff.
+      revokeSubjectInCache(
+        "proj-A",
+        "github.com",
+        12345,
+        Date.now() + 3_600_000,
+      );
+
+      // Project A request → cache hit → issued_at(now) < revoked_before(now+1h) → denied
+      const tokenA = await mintSessionToken({ project_id: "proj-A" });
+      const app = createTestApp();
+      const resA = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${tokenA}` }),
+      );
+      expect(resA.status).toBe(401);
+      expect(
+        ((await resA.json()) as { error: { code: string } }).error.code,
+      ).toBe("subject-revoked");
+
+      // Project B, same principal → cache miss (different key) → D1 null → allowed
+      mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
+      const tokenB = await mintSessionToken({ project_id: "proj-B" });
+      const resB = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${tokenB}` }),
+      );
+      expect(resB.status).toBe(200);
+    });
+
+    it("threads the verified jti onto the bearer session result", async () => {
+      const token = await mintSessionToken({ jti: "threaded-jti" });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { claims: SessionTokenResult };
+      expect(body.claims.jti).toBe("threaded-jti");
+    });
+
+    it("_resetMiddlewareStateForTest clears the subject cache", async () => {
+      revokeSubjectInCache("proj-1", "github.com", 12345, Date.now() + 1000);
+      expect(_subjectRevCacheSizeForTest()).toBeGreaterThan(0);
+      _resetMiddlewareStateForTest();
+      expect(_subjectRevCacheSizeForTest()).toBe(0);
+    });
+
+    it("emits a PII-free analytics datapoint on the subject-revoked deny path", async () => {
+      const issuedAtSec = Math.floor(Date.now() / 1000) - 3600;
+      mockGetRevokedBefore = vi.fn().mockResolvedValue(Date.now());
+      const token = await mintSessionToken({ issued_at: issuedAtSec });
+      const app = createTestApp();
+      const writeDataPoint = vi.fn();
+      const res = await app.fetch(
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+        {
+          DB: {} as D1Database,
+          PROJECT: {} as DurableObjectNamespace,
+          ARTIFACTS: {} as R2Bucket,
+          ANALYTICS: { writeDataPoint } as unknown as AnalyticsEngineDataset,
+          GITHUB_SESSION_HMAC_KEY: TEST_HMAC_KEY,
+        } as Env,
+        {
+          waitUntil: mockWaitUntil,
+          passThroughOnException: vi.fn(),
+        } as unknown as ExecutionContext,
+      );
+      expect(res.status).toBe(401);
+      expect(writeDataPoint).toHaveBeenCalledWith({
+        blobs: ["auth", "subject-revoked"],
+        doubles: [1],
+        indexes: ["subject-revoked"],
+      });
+    });
   });
 
   // ---------------------------------------------------------------------------

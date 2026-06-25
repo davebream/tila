@@ -31,6 +31,8 @@ export {
   createAuthMiddleware,
   _resetMiddlewareStateForTest,
   revokeJtiInCache,
+  revokeSubjectInCache,
+  _subjectRevCacheSizeForTest,
 } from "../middleware/auth";
 
 // Mock factory + handles + reset

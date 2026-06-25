@@ -224,6 +224,7 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "github-auth-failed",
     "hmac-not-configured",
     "session-revoked",
+    "subject-revoked",
     "token-name-conflict",
     "token-not-found",
     "stale-fence",
