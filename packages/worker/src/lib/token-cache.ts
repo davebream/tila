@@ -6,6 +6,8 @@ export interface TokenClaims {
   scopes: string;
   tokenId: string;
   kind?: "d1-token"; // Added for backward compat; existing entries lack it
+  /** DPoP JWK thumbprint bound to this token at issue time (WI-G). Absent on unbound tokens. */
+  cnfJkt?: string | null;
 }
 
 const cache = new LruTtlCache<TokenClaims | null>({
