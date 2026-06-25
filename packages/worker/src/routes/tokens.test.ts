@@ -451,6 +451,78 @@ describe("token routes — D1 token gate (real gate, cases 10-12b)", () => {
     expect(body.error.code).toBe("token-authz-denied");
   });
 
+  // POST /api/tokens jkt binding tests
+  it("POST with valid jkt (43 base64url chars) ⇒ 201 and passes cnfJkt to store.issue", async () => {
+    const validJkt = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"; // 43 chars
+    mockIssue.mockResolvedValue({ tokenId: "jkt-bound-tid" });
+    const app = createApp(makeD1Token("full"));
+    const res = await app.request(
+      "/api/tokens",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "bound-tok", jkt: validJkt }),
+      },
+      mockEnv,
+    );
+    expect(res.status).toBe(201);
+    expect(mockIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ cnfJkt: validJkt }),
+    );
+  });
+
+  it("POST without jkt ⇒ 201 and cnfJkt is undefined (unbound token)", async () => {
+    mockIssue.mockResolvedValue({ tokenId: "unbound-tid" });
+    const app = createApp(makeD1Token("full"));
+    const res = await app.request(
+      "/api/tokens",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "unbound-tok" }),
+      },
+      mockEnv,
+    );
+    expect(res.status).toBe(201);
+    expect(mockIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ cnfJkt: undefined }),
+    );
+  });
+
+  it("POST with malformed jkt (wrong length) ⇒ 400 validation-error", async () => {
+    const app = createApp(makeD1Token("full"));
+    const res = await app.request(
+      "/api/tokens",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "bad-tok", jkt: "tooshort" }),
+      },
+      mockEnv,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("validation-error");
+  });
+
+  it("POST with malformed jkt (non-base64url chars) ⇒ 400 validation-error", async () => {
+    const app = createApp(makeD1Token("full"));
+    // 43 chars but contains '+' which is not base64url
+    const badJkt = "+".repeat(43);
+    const res = await app.request(
+      "/api/tokens",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "bad-tok2", jkt: badJkt }),
+      },
+      mockEnv,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("validation-error");
+  });
+
   // workspace-session ⇒ 403 (fail-closed)
   it("case 12b: workspace-session ⇒ 403 (GET)", async () => {
     const app = createApp(makeWorkspaceSessionToken());
