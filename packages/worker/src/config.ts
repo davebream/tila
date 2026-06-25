@@ -4,8 +4,17 @@
  * should be defined here and imported by the relevant modules.
  */
 
-/** HMAC bearer-token TTL in seconds (1 hour). Stateless — not revocable. */
-export const SESSION_TTL_SECONDS = 3600;
+/** Bearer-session TTL by permission tier, in seconds. read keeps the 1h window; write/admin
+ *  are shortened to minutes to bound post-offboarding exposure (WI-H / #131). */
+export const SESSION_TTL_SECONDS_BY_TIER = {
+  read: 3600, // 1 hour (unchanged)
+  write: 900, // 15 minutes
+  admin: 300, // 5 minutes
+} as const satisfies Record<"read" | "write" | "admin", number>;
+
+/** @deprecated Back-compat alias = the read tier. Existing importers keep compiling; new code
+ *  should select from SESSION_TTL_SECONDS_BY_TIER. */
+export const SESSION_TTL_SECONDS = SESSION_TTL_SECONDS_BY_TIER.read;
 
 /**
  * Cookie-session TTL in seconds (8 hours).
