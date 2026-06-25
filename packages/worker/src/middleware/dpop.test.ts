@@ -38,13 +38,14 @@ let jkt: string;
 async function mintProof(overrides?: {
   htm?: string;
   htu?: string;
-  iat?: number;
+  iat?: number | null; // pass null to omit
   jti?: string | null; // pass null to omit
   extraHeaderFields?: Record<string, unknown>;
   privateKeyOverride?: CryptoKey;
 }): Promise<string> {
+  const addIat = overrides?.iat !== undefined ? overrides.iat !== null : true;
   const iat =
-    overrides?.iat !== undefined ? overrides.iat : Math.floor(NOW_MS / 1000);
+    overrides?.iat != null ? overrides.iat : Math.floor(NOW_MS / 1000);
   const htm = overrides?.htm ?? HTM;
   const htu = overrides?.htu ?? HTU;
   const addJti = overrides?.jti !== undefined ? overrides.jti !== null : true;
@@ -60,7 +61,7 @@ async function mintProof(overrides?: {
   const builder = new SignJWT({
     htm,
     htu,
-    iat,
+    ...(addIat ? { iat } : {}),
     ...(addJti ? { jti } : {}),
   }).setProtectedHeader(header);
 
@@ -179,24 +180,56 @@ describe("verifyDpopProof", () => {
     expect(result).toEqual({ ok: false, code: "htu-mismatch" });
   });
 
-  it("query-strip equivalence — proof htu with query strip equals server htu without query", async () => {
-    // The caller (auth.ts) passes canonicalizeHtu(c.req.url) which already strips query;
-    // both sides must produce the same canonical form. This test verifies the verifier
-    // compares already-canonical strings.
+  it("query-strip equivalence — a client that canonicalizes matches; a raw (un-canonicalized) htu is rejected", async () => {
+    // Positive: a client that runs canonicalizeHtu on the URL it dialed (query stripped)
+    // produces the same canonical form the server derives — verifier accepts.
     const canonicalHtu = canonicalizeHtu(
       "https://example.com/api/tasks?foo=bar",
     );
-    const proof = await mintProof({ htu: canonicalHtu });
-    const result = await verifyDpopProof({
-      proofJwt: proof,
+    expect(canonicalHtu).toBe(HTU); // canonicalization actually stripped the query
+    const goodProof = await mintProof({ htu: canonicalHtu });
+    await expect(
+      verifyDpopProof({
+        proofJwt: goodProof,
+        expectedJkt: jkt,
+        htm: HTM,
+        htu: HTU,
+        nowMs: NOW_MS,
+        maxAgeMs: MAX_AGE_MS,
+        clockSkewMs: CLOCK_SKEW_MS,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    // Negative: a client that forgets to canonicalize and sends the RAW htu with the
+    // query string does NOT match the server's canonical htu — load-bearing guard
+    // against a canonicalization regression (mismatch ⇒ 401 on every bound request).
+    const rawProof = await mintProof({
+      htu: "https://example.com/api/tasks?foo=bar",
+    });
+    const rawResult = await verifyDpopProof({
+      proofJwt: rawProof,
       expectedJkt: jkt,
       htm: HTM,
-      htu: HTU, // same as canonicalHtu after stripping
+      htu: HTU,
       nowMs: NOW_MS,
       maxAgeMs: MAX_AGE_MS,
       clockSkewMs: CLOCK_SKEW_MS,
     });
-    expect(result).toEqual({ ok: true });
+    expect(rawResult).toEqual({ ok: false, code: "htu-mismatch" });
+  });
+
+  it("malformed-proof when iat is absent", async () => {
+    const proof = await mintProof({ iat: null });
+    const result = await verifyDpopProof({
+      proofJwt: proof,
+      expectedJkt: jkt,
+      htm: HTM,
+      htu: HTU,
+      nowMs: NOW_MS,
+      maxAgeMs: MAX_AGE_MS,
+      clockSkewMs: CLOCK_SKEW_MS,
+    });
+    expect(result).toEqual({ ok: false, code: "malformed-proof" });
   });
 
   it("stale-proof when iat is older than maxAgeMs", async () => {
