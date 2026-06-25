@@ -92,6 +92,25 @@ describe("buildMcpEntry", () => {
     expect(entry.env.TILA_PROJECT_ID).toBe("myproj-abc123");
     expect(entry.env.TILA_API_TOKEN).toBeUndefined();
   });
+
+  it("sets TILA_INSTANCE and omits TILA_API_TOKEN when instanceKey is provided", () => {
+    const entry = buildMcpEntry({ instanceKey: "inst-abc123" });
+    expect(entry.env.TILA_INSTANCE).toBe("inst-abc123");
+    // Regression guard: no stale token that would shadow the keychain path
+    expect(entry.env.TILA_API_TOKEN).toBeUndefined();
+  });
+
+  it("uses legacy TILA_API_TOKEN placeholder when no instanceKey (empty config)", () => {
+    const entry = buildMcpEntry({});
+    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
+    expect(entry.env.TILA_INSTANCE).toBeUndefined();
+  });
+
+  it("uses legacy TILA_API_TOKEN placeholder when instanceKey is null (treated as absent)", () => {
+    const entry = buildMcpEntry({ instanceKey: null });
+    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
+    expect(entry.env.TILA_INSTANCE).toBeUndefined();
+  });
 });
 
 // ─── stripJsoncComments ──────────────────────────────────────────────────────
