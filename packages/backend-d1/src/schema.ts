@@ -28,10 +28,10 @@ export const tokens = sqliteTable(
     name: text("name").notNull(),
     note: text("note"),
     scopes: text("scopes").notNull().default("full"),
-    created_at: integer("created_at").notNull(),
+    created_at: integer("created_at").notNull(), // Unix seconds
     created_by: text("created_by").notNull(),
-    last_used_at: integer("last_used_at"),
-    revoked_at: integer("revoked_at"),
+    last_used_at: integer("last_used_at"), // Unix seconds
+    revoked_at: integer("revoked_at"), // Unix seconds
     revoked_by: text("revoked_by"),
     token_id: text("token_id").notNull().unique(),
   },
@@ -82,8 +82,8 @@ export const sessions = sqliteTable(
     actor_name: text("actor_name").notNull(),
     scopes: text("scopes").notNull().default("full"),
     permission: text("permission").notNull().default("read"),
-    created_at: integer("created_at").notNull(),
-    expires_at: integer("expires_at").notNull(),
+    created_at: integer("created_at").notNull(), // Unix ms (EpochMillis)
+    expires_at: integer("expires_at").notNull(), // Unix ms (EpochMillis)
   },
   (table) => [index("idx_sessions_expires").on(table.expires_at)],
 );
@@ -119,7 +119,7 @@ export const revokedJti = sqliteTable(
   {
     jti: text("jti").primaryKey(),
     project_id: text("project_id").notNull(),
-    revoked_at: integer("revoked_at").notNull(),
+    revoked_at: integer("revoked_at").notNull(), // Unix ms (EpochMillis); cf. worker/src/lib/time.ts
   },
   (table) => [index("idx_revoked_jti_project").on(table.project_id)],
 );
