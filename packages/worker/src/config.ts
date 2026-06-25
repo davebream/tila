@@ -232,3 +232,19 @@ export const PERMISSION_RECHECK_BACKOFF_MS = 10_000; // 10 seconds
  * Oldest entry is evicted on overflow (same pattern as isolateFailMap / jtiRevCache).
  */
 export const PERMISSION_RECHECK_CACHE_MAX_SIZE = 2000;
+
+/**
+ * Maximum age of a DPoP proof `iat` claim relative to the server clock, in
+ * milliseconds. Proofs older than this window are rejected as stale (WI-G / C3).
+ *
+ * 60 s matches the existing JTI_REVCHECK_TTL_MS precedent and is a reasonable
+ * two-sided window for Smart Placement clock drift. The value is tunable later.
+ */
+export const DPOP_PROOF_MAX_AGE_MS = 60_000; // 60 seconds
+
+/**
+ * Allowed future-dated `iat` skew for DPoP proofs, in milliseconds.
+ * A proof whose `iat` is at most this far in the future is still accepted,
+ * accommodating minor client clock drift without widening the replay window.
+ */
+export const DPOP_CLOCK_SKEW_MS = 5_000; // 5 seconds
