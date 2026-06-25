@@ -37,7 +37,12 @@ export async function mintD1Token(): Promise<string> {
 
   // Checksum: first 4 bytes (8 hex chars) of SHA-256 over the RAW entropy bytes
   // (not the hex string — this is the cross-runtime parity anchor)
-  const hashBuffer = await crypto.subtle.digest("SHA-256", entropy);
+  // Cast to ArrayBuffer: new Uint8Array(n) is Uint8Array<ArrayBufferLike> in TS 5.x,
+  // but crypto.subtle.digest requires BufferSource (ArrayBuffer, not SharedArrayBuffer).
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    entropy.buffer as ArrayBuffer,
+  );
   const checksumHex = toHex(new Uint8Array(hashBuffer)).slice(0, 8);
 
   return D1_TOKEN_PREFIX + entropyHex + checksumHex;
@@ -93,7 +98,10 @@ export async function verifyD1TokenChecksum(
   // Recompute checksum from raw bytes
   let recomputedChecksum: string;
   try {
-    const hashBuffer = await crypto.subtle.digest("SHA-256", entropyBytes);
+    const hashBuffer = await crypto.subtle.digest(
+      "SHA-256",
+      entropyBytes.buffer as ArrayBuffer,
+    );
     recomputedChecksum = toHex(new Uint8Array(hashBuffer)).slice(0, 8);
   } catch {
     return "bad-checksum";

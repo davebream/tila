@@ -64,10 +64,32 @@ describe("token-format", () => {
     });
 
     it("returns bad-checksum for uppercase hex on a tila_d1_ token", async () => {
-      const token = await mintD1Token();
-      // Uppercase the first char of the entropy region
-      const uppercased =
-        token.slice(0, 8) + token[8].toUpperCase() + token.slice(9);
+      // Use a fixed token with known letter chars in the entropy region so
+      // toUpperCase() definitely changes the string.
+      // FIXTURE_ENTROPY_HEX starts with "01020304..." — find the first a-f letter.
+      // We use a token built from the fixture so we control at least one letter char.
+      const entropyBytes = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) {
+        entropyBytes[i] = Number.parseInt(
+          "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20".slice(
+            i * 2,
+            i * 2 + 2,
+          ),
+          16,
+        );
+      }
+      const hashBuffer = await crypto.subtle.digest("SHA-256", entropyBytes);
+      const checksumHex = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .slice(0, 8);
+      const validToken = `${D1_TOKEN_PREFIX}0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20${checksumHex}`;
+      // Verify it's valid first
+      expect(await verifyD1TokenChecksum(validToken)).toBe("ok");
+
+      // Now uppercase the 'a' at position 8+18 (the 'a' in '0a' of the entropy — index 26)
+      // entropy starts at index 8; char at index 8+18=26 is the second char of "0a" = 'a'
+      const uppercased = `${validToken.slice(0, 26)}A${validToken.slice(27)}`;
       const result = await verifyD1TokenChecksum(uppercased);
       expect(result).toBe("bad-checksum");
     });
