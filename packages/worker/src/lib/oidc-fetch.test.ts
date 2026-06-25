@@ -165,12 +165,15 @@ describe("oidcFetch", () => {
         }),
     );
 
+    // Attach the rejection assertion synchronously BEFORE advancing timers so the
+    // abort-driven rejection is never momentarily unhandled (avoids a leaked
+    // PromiseRejectionHandledWarning that would erode this security suite's signal).
     const promise = oidcFetch(JWKS_URL, { timeoutMs: 1000 });
-    await vi.advanceTimersByTimeAsync(1001);
-
-    await expect(promise).rejects.toMatchObject({
+    const assertion = expect(promise).rejects.toMatchObject({
       code: "oidc-fetch-timeout",
     });
+    await vi.advanceTimersByTimeAsync(1001);
+    await assertion;
   });
 
   it("(d) throws oidc-fetch-blocked on opaque-redirect response", async () => {
