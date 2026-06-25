@@ -5,6 +5,26 @@
  * programmatically without instanceof checks.
  */
 
+import type { TrustDecision } from "./resolver-types.js";
+
+// ----------------------------------------------------------------------------
+// InstanceResolutionError
+// Thrown by resolveInstance() when no instance can be safely resolved — either
+// nothing matched ("none") or a candidate failed the trust / CI gate. Carries
+// the failing TrustDecision so callers can branch; the message is actionable.
+// ----------------------------------------------------------------------------
+export class InstanceResolutionError extends Error {
+  readonly code = "INSTANCE_RESOLUTION_ERROR" as const;
+
+  constructor(
+    message: string,
+    public readonly decision: TrustDecision | "none",
+  ) {
+    super(message);
+    this.name = "InstanceResolutionError";
+  }
+}
+
 // ----------------------------------------------------------------------------
 // RegistryParseError
 // Thrown when instances.toml or infra/<slug>.toml cannot be parsed (corrupt
