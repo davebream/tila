@@ -121,7 +121,14 @@ const statusCmd = defineCommand({
           key: `${inst.instance_key}${isCurrent ? " ◀" : ""}`,
           label: inst.label ?? "—",
           worker_url: inst.worker_url,
-          trust: formatTrust(inst.trust),
+          trust: formatTrust(
+            inst.trust.trusted
+              ? { kind: "trusted" as const }
+              : {
+                  kind: "untrusted-needs-login" as const,
+                  reason: "not-trusted" as const,
+                },
+          ),
           expiry: formatExpiry(expiresAt),
           here: formatResolvesHere(isHere),
         };
