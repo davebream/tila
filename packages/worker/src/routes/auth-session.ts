@@ -1,8 +1,4 @@
-import {
-  D1RateLimitStore,
-  D1SessionStore,
-  D1TokenStore,
-} from "@tila/backend-d1";
+import { D1SessionStore, D1TokenStore } from "@tila/backend-d1";
 import { SessionExchangeRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
@@ -12,12 +8,11 @@ import { hashToken } from "../lib/hash-token";
 import { invalidateSession } from "../lib/session-cache";
 import { invalidate } from "../lib/token-cache";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
+import { checkExchangeRateLimit, recordExchangeFailure } from "./auth-github";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
 const COOKIE_SESSION_TTL_MS = COOKIE_SESSION_TTL_SECONDS * 1000;
-const RATE_LIMIT_MAX_FAILURES = 20;
-const RATE_LIMIT_WINDOW_MS = 60_000;
 
 function parseCookieValue(
   header: string | undefined,
@@ -39,34 +34,13 @@ function parseCookieValue(
 export const authSessionExchange = new Hono<AppEnv>();
 
 authSessionExchange.post("/", async (c) => {
-  const ip = c.req.header("CF-Connecting-IP");
+  const ip = c.req.header("CF-Connecting-IP") ?? null;
 
-  // Rate limit check
-  if (ip) {
-    const rateLimitStore = new D1RateLimitStore(c.env.DB);
-    try {
-      const isLimited = await rateLimitStore.check(
-        ip,
-        RATE_LIMIT_MAX_FAILURES,
-        RATE_LIMIT_WINDOW_MS,
-      );
-      if (isLimited) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "rate-limited",
-              message: "Too many requests",
-              retryable: true,
-            },
-          },
-          429,
-        );
-      }
-    } catch {
-      // Fail open on transient D1 error
-    }
-  }
+  // WI-I: route the generic session exchange through the shared `exchange:${ip}`
+  // brute-force counter (previously a separate bare-`ip` counter) so it shares one
+  // budget with the GitHub exchange family. The helper fails open on a D1 error.
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
 
   // Parse and validate body
   let body: unknown;
@@ -109,15 +83,8 @@ authSessionExchange.post("/", async (c) => {
   const tokenResult = await tokenStore.validate(tokenHash);
 
   if (!tokenResult) {
-    // Increment rate limit on failure
-    if (ip) {
-      const rateLimitStore = new D1RateLimitStore(c.env.DB);
-      try {
-        await rateLimitStore.recordFailure(ip, RATE_LIMIT_WINDOW_MS);
-      } catch {
-        // Non-fatal
-      }
-    }
+    // Increment the shared exchange:${ip} failure counter (WI-I).
+    await recordExchangeFailure(c.env, ip);
     return c.json(
       {
         ok: false,
@@ -197,6 +164,12 @@ export const authSessionProtected = new Hono<AppEnv>();
 //   - workspace-session:    no-op
 // Always clears the cookie and returns { ok: true }; idempotent (double-logout safe).
 authSessionProtected.post("/logout", async (c) => {
+  // WI-I: check-only shared rate-limit guard (defense-in-depth). Rejects an IP
+  // already over the exchange:${ip} threshold; never records a failure, so a
+  // legitimate logout is never counted toward the brute-force budget.
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
+
   const tokenResult = c.get("tokenResult");
 
   switch (tokenResult.kind) {

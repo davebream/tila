@@ -230,9 +230,93 @@ describe("POST /auth/session", () => {
 
     expect(res.status).toBe(429);
   });
+
+  it("WI-I: session exchange checks the shared exchange:${ip} counter (not bare ip)", async () => {
+    const app = makeExchangeApp();
+
+    await app.request(
+      "/auth/session",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "1.2.3.4",
+        },
+        body: JSON.stringify({
+          token: "tila_token",
+          project_id: "test-project",
+        }),
+      },
+      testEnv,
+      mockCtx,
+    );
+
+    expect(mockRateLimitCheck).toHaveBeenCalledWith(
+      "exchange:1.2.3.4",
+      expect.any(Number),
+      expect.any(Number),
+    );
+  });
+
+  it("WI-I: failed session exchange records a failure on the shared exchange:${ip} counter", async () => {
+    mockTokenValidate.mockResolvedValue(null); // invalid token → 401 + recordFailure
+    const app = makeExchangeApp();
+
+    const res = await app.request(
+      "/auth/session",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "1.2.3.4",
+        },
+        body: JSON.stringify({
+          token: "tila_bad",
+          project_id: "test-project",
+        }),
+      },
+      testEnv,
+      mockCtx,
+    );
+
+    expect(res.status).toBe(401);
+    expect(mockRateLimitRecordFailure).toHaveBeenCalledWith(
+      "exchange:1.2.3.4",
+      expect.any(Number),
+    );
+  });
 });
 
 describe("POST /auth/logout", () => {
+  it("WI-I: logout returns 429 when the shared exchange:${ip} counter is over the limit", async () => {
+    mockRateLimitCheck.mockResolvedValue(true);
+    mockSessionValidate.mockResolvedValue({
+      projectId: "test-project",
+      tokenHash: "tok-hash",
+      name: "actor",
+      scopes: "full",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const app = makeProtectedApp();
+
+    const res = await app.request(
+      "/auth/logout",
+      {
+        method: "POST",
+        headers: {
+          Cookie: "tila_session=some-session-uuid",
+          "CF-Connecting-IP": "1.2.3.4",
+        },
+      },
+      testEnv,
+      mockCtx,
+    );
+
+    expect(res.status).toBe(429);
+    // Check-only guard: logout never records a failure.
+    expect(mockRateLimitRecordFailure).not.toHaveBeenCalled();
+  });
+
   it("clears session cookie with Max-Age=0", async () => {
     mockSessionValidate.mockResolvedValue({
       projectId: "test-project",

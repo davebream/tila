@@ -16,6 +16,7 @@ import {
   revokeAdminGrantInCache,
 } from "../middleware/require-project-admin";
 import type { Env, HonoVariables } from "../types";
+import { checkExchangeRateLimit } from "./auth-github";
 
 type AdminEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -184,6 +185,13 @@ admin.post(
  * named tokens are revoked (auto-discovery is out of scope).
  */
 admin.post("/principals/:id/revoke", requireProjectAdmin, async (c) => {
+  // WI-I: check-only shared rate-limit guard (defense-in-depth), applied AFTER
+  // requireProjectAdmin so it never weakens the admin-auth gate. Rejects an IP
+  // already over the exchange:${ip} threshold; records no failure, so a
+  // clean-IP admin is never blocked.
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
+
   const projectId = c.get("projectId") ?? "";
   const tokenResult = c.get("tokenResult");
 
