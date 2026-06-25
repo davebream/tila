@@ -305,6 +305,38 @@ export function emitAdminRosterDatapoint(
   }
 }
 
+/**
+ * Instance-mismatch datapoint for cross-deployment session-token replay detection.
+ * Emitted in the Bearer/JWT auth branch for three outcomes:
+ *   - "mismatch"       — token's instance_id is present but does not match this deployment (B2 replay)
+ *   - "legacy"         — token has no instance_id claim (pre-binding, accepted during transition)
+ *   - "resolve-failed" — ensureDeploymentInstanceId threw (D1 outage on a cold isolate)
+ *
+ * Never includes the raw claimed id in indexes — unbounded cardinality. Fire-and-forget.
+ */
+export function emitInstanceMismatchDatapoint(
+  analytics: AnalyticsEngineDataset,
+  ctx: ExecutionContext,
+  fields: {
+    projectId: string;
+    outcome: "mismatch" | "legacy" | "resolve-failed";
+  },
+): void {
+  try {
+    ctx.waitUntil(
+      Promise.resolve(
+        analytics.writeDataPoint({
+          blobs: [fields.projectId, fields.outcome, "instance_mismatch"],
+          doubles: [1],
+          indexes: [fields.projectId || "anonymous"],
+        }),
+      ),
+    );
+  } catch {
+    // Swallow -- emission is never load-bearing
+  }
+}
+
 export function emitDoOperationDatapoint(
   analytics: AnalyticsEngineDataset,
   ctx: ExecutionContext,

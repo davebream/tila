@@ -189,6 +189,21 @@ describe("TilaApiError.code is TilaErrorCode", () => {
   });
 });
 
+describe("instance-mismatch error code", () => {
+  it('TILA_ERRORS.INSTANCE_MISMATCH has wire value "instance-mismatch"', () => {
+    expect(TILA_ERRORS.INSTANCE_MISMATCH).toBe("instance-mismatch");
+  });
+
+  it('"instance-mismatch" is a member of Object.values(TILA_ERRORS)', () => {
+    expect(Object.values(TILA_ERRORS)).toContain("instance-mismatch");
+  });
+
+  it('toTilaErrorCode("instance-mismatch") returns the code unchanged (not "UNKNOWN")', () => {
+    expect(toTilaErrorCode("instance-mismatch")).toBe("instance-mismatch");
+    expect(toTilaErrorCode("instance-mismatch")).not.toBe("UNKNOWN");
+  });
+});
+
 describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   const SDK_ONLY_ERROR_CODES = new Set<string>([
     "artifact-get-failed",
@@ -233,6 +248,7 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "repo-not-found",
     "github-api-timeout",
     "github-api-error",
+    "instance-mismatch",
   ]);
 
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {

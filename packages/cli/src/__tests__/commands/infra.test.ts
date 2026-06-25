@@ -598,6 +598,62 @@ describe("tila infra provision", () => {
 
     expect(allLogged).not.toContain("mock-admin-token");
   });
+
+  it("seeds _deployment_meta with a UUID after applying D1 migrations", async () => {
+    await invokeProvision();
+
+    // queryD1 is called to seed _deployment_meta with ON CONFLICT DO NOTHING
+    const seedCall = mockQueryD1.mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[3] === "string" &&
+        call[3].includes("_deployment_meta") &&
+        call[3].includes("ON CONFLICT"),
+    );
+    expect(seedCall).toBeDefined();
+    // The SQL should insert into _deployment_meta with params [uuid, timestamp]
+    const sql = seedCall?.[3] as string;
+    const params = seedCall?.[4] as string[];
+    expect(sql).toContain("INSERT INTO _deployment_meta");
+    expect(params).toHaveLength(2);
+    // First param should be a UUID (matches RFC 4122 v4 pattern)
+    expect(params[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    // Second param should be a numeric epoch-ms string
+    expect(Number(params[1])).toBeGreaterThan(0);
+  });
+
+  it("seeds _deployment_meta after applyD1Migrations (order check)", async () => {
+    const callOrder: string[] = [];
+    mockApplyD1Migrations.mockImplementation(async () => {
+      callOrder.push("applyD1Migrations");
+    });
+    mockQueryD1.mockImplementation(async () => {
+      callOrder.push("queryD1");
+      return [{ cnt: 0 }];
+    });
+
+    await invokeProvision();
+
+    const migrationsIdx = callOrder.indexOf("applyD1Migrations");
+    const seedIdx = callOrder.indexOf("queryD1");
+    expect(migrationsIdx).toBeGreaterThanOrEqual(0);
+    expect(seedIdx).toBeGreaterThan(migrationsIdx);
+  });
+
+  it("re-provision does not overwrite the existing instance_id (ON CONFLICT DO NOTHING)", async () => {
+    // The seed SQL must use ON CONFLICT DO NOTHING to be idempotent on re-provision.
+    await invokeProvision();
+
+    const seedCall = mockQueryD1.mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[3] === "string" &&
+        call[3].includes("_deployment_meta") &&
+        call[3].toUpperCase().includes("ON CONFLICT") &&
+        call[3].toUpperCase().includes("DO NOTHING"),
+    );
+    expect(seedCall).toBeDefined();
+  });
 });
 
 describe("tila infra teardown", () => {

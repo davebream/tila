@@ -1,16 +1,33 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
+
+// Use vi.hoisted so the mock variable is defined before vi.mock hoisting executes
+const { mockEnsureDeploymentInstanceId } = vi.hoisted(() => ({
+  mockEnsureDeploymentInstanceId: vi
+    .fn()
+    .mockResolvedValue("test-instance-id-abc"),
+}));
+
+vi.mock("../lib/deployment-instance", () => ({
+  ensureDeploymentInstanceId: (...args: unknown[]) =>
+    mockEnsureDeploymentInstanceId(...args),
+  __resetInstanceCache: vi.fn(),
+}));
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
 // Import after mocks are set up
 const { whoami } = await import("./whoami");
 
+// Stub D1Database so c.env.DB is not undefined in the test — the mock for
+// ensureDeploymentInstanceId intercepts all calls so the real DB is never used.
+const stubDb = {} as D1Database;
+
 function createApp(tokenResult: UnifiedTokenResult): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
-  // Inject tokenResult via middleware before routing
+  // Inject tokenResult via middleware
   app.use("*", async (c, next) => {
     c.set("tokenResult", tokenResult);
     await next();
@@ -20,7 +37,44 @@ function createApp(tokenResult: UnifiedTokenResult): Hono<AppEnv> {
   return app;
 }
 
+// Fetch with a stub env so c.env.DB does not throw TypeError.
+// The ensureDeploymentInstanceId mock intercepts the call; the real DB is never used.
+async function fetchWhoami(app: Hono<AppEnv>): Promise<Response> {
+  return app.fetch(
+    new Request("http://localhost/whoami"),
+    { DB: stubDb } as unknown as Env,
+    {
+      waitUntil: () => {},
+      passThroughOnException: () => {},
+    } as unknown as ExecutionContext,
+  );
+}
+
 describe("GET /whoami", () => {
+  beforeEach(() => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("test-instance-id-abc");
+  });
+
+  it("returns instance_id equal to the deployment singleton id", async () => {
+    const tokenResult: UnifiedTokenResult = {
+      kind: "d1-token",
+      projectId: "test-project",
+      name: "test-token",
+      scopes: "all",
+      tokenId: "token-123",
+    };
+
+    const app = createApp(tokenResult);
+    const res = await fetchWhoami(app);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      instance_id?: string;
+    };
+
+    expect(body.instance_id).toBe("test-instance-id-abc");
+  });
+
   it("returns auth_kind only for d1-token", async () => {
     const tokenResult: UnifiedTokenResult = {
       kind: "d1-token",
@@ -31,7 +85,7 @@ describe("GET /whoami", () => {
     };
 
     const app = createApp(tokenResult);
-    const res = await app.request("/whoami");
+    const res = await fetchWhoami(app);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ok: boolean;
@@ -69,7 +123,7 @@ describe("GET /whoami", () => {
     };
 
     const app = createApp(tokenResult);
-    const res = await app.request("/whoami");
+    const res = await fetchWhoami(app);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ok: boolean;
@@ -106,7 +160,7 @@ describe("GET /whoami", () => {
     };
 
     const app = createApp(tokenResult);
-    const res = await app.request("/whoami");
+    const res = await fetchWhoami(app);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ok: boolean;
