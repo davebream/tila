@@ -246,4 +246,67 @@ describe("AuthStore registry tier", () => {
       store.markTrusted(makeKey("ghost-mark")),
     ).rejects.toBeInstanceOf(InstanceNotFoundError);
   });
+
+  // --------------------------------------------------------------------------
+  // deleteInstance (Task 7a)
+  // --------------------------------------------------------------------------
+
+  it("deleteInstance removes the instance from the registry", async () => {
+    const key = makeKey("del-key-001");
+    await store.registerInstance({
+      instance_key: key,
+      instance_id_source: "server",
+      worker_url: "https://worker.example.com",
+    });
+
+    await store.deleteInstance(key);
+
+    expect(await store.getInstance(key)).toBeNull();
+    const list = await store.listInstances();
+    expect(list.every((r) => r.instance_key !== key)).toBe(true);
+  });
+
+  it("deleteInstance clears current_context when it pointed at the deleted key", async () => {
+    const key = makeKey("del-ctx-key-001");
+    await store.registerInstance({
+      instance_key: key,
+      instance_id_source: "server",
+      worker_url: "https://worker.example.com",
+    });
+    await store.setCurrentContext(key);
+    expect(await store.getCurrentContext()).toBe(key);
+
+    await store.deleteInstance(key);
+
+    expect(await store.getCurrentContext()).toBeNull();
+    expect(await store.getInstance(key)).toBeNull();
+  });
+
+  it("deleteInstance does not clear current_context when it points at a different key", async () => {
+    const key1 = makeKey("del-other-001");
+    const key2 = makeKey("del-other-002");
+    await store.registerInstance({
+      instance_key: key1,
+      instance_id_source: "server",
+      worker_url: "https://worker1.example.com",
+    });
+    await store.registerInstance({
+      instance_key: key2,
+      instance_id_source: "server",
+      worker_url: "https://worker2.example.com",
+    });
+    await store.setCurrentContext(key2);
+
+    await store.deleteInstance(key1);
+
+    expect(await store.getCurrentContext()).toBe(key2);
+    expect(await store.getInstance(key1)).toBeNull();
+    expect(await store.getInstance(key2)).not.toBeNull();
+  });
+
+  it("deleteInstance is idempotent on an absent key (does not throw)", async () => {
+    await expect(
+      store.deleteInstance(makeKey("nonexistent-del-key")),
+    ).resolves.toBeUndefined();
+  });
 });
