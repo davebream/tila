@@ -43,6 +43,11 @@ export const TilaProjectConfigSchema = z.object({
       repo_id: z.number().int().optional(),
     })
     .optional(),
+  instance: z
+    .object({
+      instance_key: z.string().optional(),
+    })
+    .optional(),
 });
 
 export type TilaProjectConfig = z.infer<typeof TilaProjectConfigSchema>;

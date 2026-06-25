@@ -79,7 +79,25 @@ export {
   SCHEMA_SECTION_MERGE_POLICY,
   type SchemaSectionMergePolicy,
 } from "./config";
-export { TilaInfraConfigSchema, type TilaInfraConfig } from "./infra-config";
+export {
+  TilaInfraConfigSchema,
+  type TilaInfraConfig,
+  PerSlugInfraMetaSchema,
+  type PerSlugInfraMeta,
+  InfraSecretsSchema,
+  type InfraSecrets,
+} from "./infra-config";
+
+// --- Multi-instance auth registry schemas ---
+export {
+  InstanceKey,
+  InstanceRecordSchema,
+  type InstanceRecord,
+  InstanceRegistrySchema,
+  type InstanceRegistry,
+} from "./instance-registry";
+export { CredentialRecordSchema, type CredentialRecord } from "./credential";
+export { RefreshRecordSchema, type RefreshRecord } from "./refresh";
 
 // --- API request/response contracts ---
 export {
