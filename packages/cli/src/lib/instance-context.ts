@@ -20,9 +20,11 @@ import {
   KeyringSecretStore,
   TilaPaths,
   processEnvProbe,
+  promoteLegacy,
   resolveWithTrace,
 } from "@tila/auth-store";
 import type {
+  EnvProbe,
   LegacyLocations,
   RepoPointer,
   ResolveInput,
@@ -247,4 +249,43 @@ export function toInstanceMetadata(
     credentialSource: resolved.credentialSource,
     trust: resolved.trust,
   };
+}
+
+// ---------------------------------------------------------------------------
+// maybePromoteLegacyAfterWrite — lazy promotion on write paths (WI-M, C3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Best-effort lazy promotion of legacy credentials on user-triggered write paths.
+ *
+ * MUST NOT be called from resolveInstanceContext (read path) — enforced by test.
+ * Call sites: tila link (after putCredential), tila switch (after writeCurrentContext).
+ *
+ * Builds LegacyLocations from the current filesystem state, then calls promoteLegacy.
+ * Swallows all errors — the command's primary action already succeeded.
+ * Skips silently under CI / non-TTY (guard lives inside promoteLegacy).
+ */
+export async function maybePromoteLegacyAfterWrite(
+  authStore: AuthStore,
+  workerUrl: string,
+  env?: EnvProbe,
+): Promise<void> {
+  const homeInfraPath = join(tilaHome(), "infra.toml");
+  const legacy: LegacyLocations = {
+    projectTilaDir: findTilaDir(),
+    homeInfraToml: existsSync(homeInfraPath) ? homeInfraPath : null,
+  };
+  try {
+    await promoteLegacy({
+      authStore,
+      legacy,
+      env: env ?? processEnvProbe,
+      workerUrl,
+    });
+  } catch (err) {
+    // Best-effort: never propagate promotion failure to the calling command.
+    process.stderr.write(
+      `[tila] Warning: lazy legacy promotion failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
 }
