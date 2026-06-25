@@ -95,9 +95,14 @@ async function buildFlagRung(input: ResolveInput): Promise<RungResult> {
 }
 
 async function buildEnvRung(input: ResolveInput): Promise<RungResult> {
-  const token = input.envReader("TILA_TOKEN");
+  // TILA_TOKEN takes precedence; TILA_API_TOKEN is a backward-compat alias (WI-M).
+  const token =
+    input.envReader("TILA_TOKEN") ?? input.envReader("TILA_API_TOKEN");
   if (token) {
     const url = activeWorkerUrl(input);
+    const envVar = input.envReader("TILA_TOKEN")
+      ? "TILA_TOKEN"
+      : "TILA_API_TOKEN";
     return {
       matched: true,
       candidate: {
@@ -107,7 +112,7 @@ async function buildEnvRung(input: ResolveInput): Promise<RungResult> {
       },
       record: null,
       token,
-      detail: "TILA_TOKEN env set",
+      detail: `${envVar} env set`,
     };
   }
   const instance = input.envReader("TILA_INSTANCE");

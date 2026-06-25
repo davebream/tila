@@ -219,6 +219,46 @@ describe("CI fail-closed (mandatory negative tests)", () => {
   });
 });
 
+describe("TILA_API_TOKEN env alias (WI-M)", () => {
+  it("TILA_API_TOKEN with no .tila/.env resolves via env rung as inline token", async () => {
+    const outcome = await resolveWithTrace(
+      baseInput({
+        envReader: (n) => (n === "TILA_API_TOKEN" ? "api-tok-xyz" : undefined),
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.instance.credentialSource).toBe("inline-token");
+    // Trace must show the env rung matched
+    const envStep = outcome.trace.find((s) => s.rung === "env");
+    expect(envStep?.matched).toBe(true);
+    expect(outcome.instance.credential).toEqual({
+      source: "inline-token",
+      token: "api-tok-xyz",
+    });
+  });
+
+  it("TILA_TOKEN takes precedence over TILA_API_TOKEN when both set", async () => {
+    const outcome = await resolveWithTrace(
+      baseInput({
+        envReader: (n) => {
+          if (n === "TILA_TOKEN") return "primary-tok";
+          if (n === "TILA_API_TOKEN") return "alias-tok";
+          return undefined;
+        },
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.instance.credential).toEqual({
+      source: "inline-token",
+      token: "primary-tok",
+    });
+  });
+});
+
 describe("nothing matched", () => {
   it("returns an actionable error when no rung resolves", async () => {
     const outcome = await resolveWithTrace(baseInput());
