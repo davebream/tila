@@ -40,6 +40,7 @@ import {
 import { hashToken } from "../lib/hash-token";
 import { OidcVerificationError, verifyOidcToken } from "../lib/oidc-verify";
 import { parseCookieHeader } from "../lib/parse-cookie";
+import { asEpochMillis, asEpochSeconds, nowMs, nowSeconds } from "../lib/time";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -186,7 +187,10 @@ export async function checkIdempotentExchange(
 
   try {
     const cachedBody = JSON.parse(cached.body) as { expires_at?: number };
-    if (cachedBody.expires_at && cachedBody.expires_at > Date.now() / 1000) {
+    if (
+      cachedBody.expires_at &&
+      asEpochSeconds(cachedBody.expires_at) > nowSeconds()
+    ) {
       return cachedBody;
     }
     // Stale: delete and re-exchange
@@ -220,7 +224,7 @@ async function mintAndStoreSession(opts: {
     idempotencyKey,
   } = opts;
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowSeconds();
   const expiresAt = now + SESSION_TTL_SECONDS;
   const normalizedPerm = normalizeGitHubPermission(userPermission);
   // jti: random nonce for per-token revocation (C9). crypto.randomUUID() is
@@ -693,7 +697,7 @@ authGithub.get("/login", async (c) => {
 
   // Generate HMAC-signed state using jose
   const nonce = crypto.randomUUID();
-  const iat = Math.floor(Date.now() / 1000);
+  const iat = nowSeconds();
 
   const keyBytes = base64UrlDecode(hmacKey);
   const secret = await importJWK(
@@ -857,7 +861,7 @@ authGithub.get("/oauth/callback", async (c) => {
   }
 
   // Check state expiry (iat is seconds)
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowSeconds();
   if (now - statePayload.iat > 300) {
     return oauthErrorRedirect(
       "Expired State",
@@ -906,7 +910,7 @@ authGithub.get("/oauth/callback", async (c) => {
   // Create workspace session in D1 (SEC-1: pepper to match the cookie-session lookup in auth.ts:302)
   const sessionToken = crypto.randomUUID();
   const sessionHash = await hashToken(sessionToken, c.env.HASH_PEPPER);
-  const expiresAt = Date.now() + OAUTH_SESSION_TTL_MS;
+  const expiresAt = asEpochMillis(nowMs() + OAUTH_SESSION_TTL_MS);
 
   const sessionStore = new D1SessionStore(c.env.DB);
   try {

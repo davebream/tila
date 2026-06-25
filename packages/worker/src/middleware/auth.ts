@@ -26,6 +26,7 @@ import {
   invalidateSession,
   setSessionInCache,
 } from "../lib/session-cache";
+import { asEpochSeconds, nowMs, nowSeconds } from "../lib/time";
 import { type TokenClaims, getFromCache, setInCache } from "../lib/token-cache";
 import type {
   CookieSessionTokenResult,
@@ -90,7 +91,7 @@ const isolateFailMap = new Map<string, number[]>();
  * Not exported — internal to the auth middleware region.
  */
 function isolateRecordFailure(ip: string): void {
-  const now = Date.now();
+  const now = nowMs();
   const existing = isolateFailMap.get(ip);
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
 
@@ -116,7 +117,7 @@ function isolateRecordFailure(ip: string): void {
  * Also prunes the window in place. Not exported.
  */
 function isolateIsLimited(ip: string): boolean {
-  const now = Date.now();
+  const now = nowMs();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
   const entries = isolateFailMap.get(ip);
   if (!entries) return false;
@@ -170,7 +171,7 @@ function setJtiInCache(
  * Exported for use by the admin revoke route handler.
  */
 export function revokeJtiInCache(jti: string): void {
-  setJtiInCache(jti, { revoked: true, cachedAt: Date.now() });
+  setJtiInCache(jti, { revoked: true, cachedAt: nowMs() });
 }
 
 /**
@@ -182,7 +183,7 @@ export function revokeJtiInCache(jti: string): void {
 function getJtiFromCache(jti: string): boolean | null {
   const entry = jtiRevCache.get(jti);
   if (!entry) return null;
-  if (Date.now() - entry.cachedAt > JTI_REVCHECK_TTL_MS) {
+  if (nowMs() - entry.cachedAt > JTI_REVCHECK_TTL_MS) {
     jtiRevCache.delete(jti);
     return null;
   }
@@ -274,7 +275,7 @@ export function createAuthMiddleware(
   const getIP = opts.getClientIP ?? defaultGetClientIP;
 
   return async (c, next) => {
-    const now = Date.now();
+    const now = nowMs();
 
     // SEC-1: warn once per isolate if HASH_PEPPER is unset (bare SHA-256 fallback).
     warnHashPepperUnsetOnce(c.env);
@@ -361,7 +362,7 @@ export function createAuthMiddleware(
 
       if (cached !== undefined) {
         // Positive cache hit — check expiresAt
-        if (cached.expiresAt < Date.now()) {
+        if (cached.expiresAt < nowMs()) {
           // Expired in cache — evict and fall through to D1
           invalidateSession(sessionHash);
           sessionResult = null;
@@ -556,7 +557,7 @@ export function createAuthMiddleware(
       }
 
       // Check expiry
-      if (payload.expires_at <= Date.now() / 1000) {
+      if (asEpochSeconds(payload.expires_at) <= nowSeconds()) {
         return c.json(
           {
             ok: false,
@@ -599,7 +600,7 @@ export function createAuthMiddleware(
             const revokedStore = new D1RevokedJtiStore(c.env.DB);
             const isRevoked = await revokedStore.isRevoked(jti);
             // Update cache for future requests (bounded by JTI_REV_CACHE_MAX_SIZE)
-            setJtiInCache(jti, { revoked: isRevoked, cachedAt: Date.now() });
+            setJtiInCache(jti, { revoked: isRevoked, cachedAt: nowMs() });
             if (isRevoked) {
               return c.json(
                 {

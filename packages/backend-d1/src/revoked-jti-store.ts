@@ -63,7 +63,7 @@ export class D1RevokedJtiStore {
       .values({
         jti,
         project_id: projectId,
-        revoked_at: Date.now(),
+        revoked_at: Date.now(), // ms (EpochMillis) — Worker brands at read via asEpochMillis
       })
       .onConflictDoNothing();
   }
