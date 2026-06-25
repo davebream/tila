@@ -2,7 +2,7 @@
  * Tests for the hardened OIDC egress wrapper (oidcEgressFetch).
  *
  * All tests are Bun+Node-agnostic — they do not rely on `response.type === "opaqueredirect"`.
- * The primary redirect guard is the `redirect: "error"` on the request init.
+ * The primary redirect guard is the `redirect: "manual"` on the request init.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -49,16 +49,16 @@ describe("oidcEgressFetch", () => {
   });
 
   describe("redirect rejection via request init", () => {
-    it("sets redirect:'error' on the fetch init (CI-2: prevents outbound SSRF via redirect)", async () => {
+    it("sets redirect:'manual' on the fetch init (CI-2: prevents outbound SSRF via redirect)", async () => {
       ff.pushJson(200, { data: "response" });
       await oidcEgressFetch("https://example.com/api", undefined, ff.fetch);
 
-      // Assert that the fetch was called with redirect: "error" in the request init
+      // Assert that the fetch was called with redirect: "manual" in the request init
       expect(ff.calls).toHaveLength(1);
-      expect(ff.calls[0].init).toMatchObject({ redirect: "error" });
+      expect(ff.calls[0].init).toMatchObject({ redirect: "manual" });
     });
 
-    it("sets redirect:'error' even when caller provides custom init without redirect field", async () => {
+    it("sets redirect:'manual' even when caller provides custom init without redirect field", async () => {
       ff.pushJson(200, { data: "response" });
       await oidcEgressFetch(
         "https://example.com/api",
@@ -67,7 +67,7 @@ describe("oidcEgressFetch", () => {
       );
 
       expect(ff.calls[0].init).toMatchObject({
-        redirect: "error",
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
       });
     });
@@ -81,8 +81,8 @@ describe("oidcEgressFetch", () => {
         ff.fetch,
       );
 
-      // Should have used redirect: "error" not "follow"
-      expect(ff.calls[0].init).toMatchObject({ redirect: "error" });
+      // Should have used redirect: "manual" not "follow"
+      expect(ff.calls[0].init).toMatchObject({ redirect: "manual" });
     });
 
     it("rejects when response.redirected is true (defense-in-depth post-hoc check)", async () => {
