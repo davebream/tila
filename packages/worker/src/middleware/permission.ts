@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from "hono";
+import { reverifySessionPermission } from "../lib/permission-recheck";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -17,9 +18,26 @@ const PERMISSION_LEVELS: Record<string, number> = {
 };
 
 /**
+ * Returns true when the request falls within the re-verify scope for Layer B.
+ * Re-verify fires when the required level is "admin" (highest-privilege mutations)
+ * OR when the HTTP method is "DELETE" (destructive). This covers:
+ *   - requirePermission("admin") routes (doctor, search reindex, admin authz)
+ *   - write-level DELETE routes (artifacts.delete, gates.delete, entities.delete)
+ * Keeping the predicate a single exported function makes future scope widening
+ * (e.g. all write mutations) a one-line change without touching call sites.
+ */
+export function recheckInScope(
+  level: "read" | "write" | "admin",
+  method: string,
+): boolean {
+  return level === "admin" || method === "DELETE";
+}
+
+/**
  * Route-level permission gate.
  * For D1 tokens: scopes === "full" grants all access.
- * For session tokens: checks permission hierarchy.
+ * For session tokens: checks permission hierarchy (snapshot gate) followed by
+ * live GitHub re-verify when recheckInScope is true (Layer B, WI-H).
  */
 export function requirePermission(
   level: "read" | "write" | "admin",
@@ -64,21 +82,40 @@ export function requirePermission(
       const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
       const requiredLevel = PERMISSION_LEVELS[level] ?? 0;
 
-      if (userLevel >= requiredLevel) {
-        return next();
+      if (userLevel < requiredLevel) {
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "permission-denied",
+              message: `Requires ${level} permission`,
+              retryable: false,
+            },
+          },
+          403,
+        );
       }
 
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "permission-denied",
-            message: `Requires ${level} permission`,
-            retryable: false,
-          },
-        },
-        403,
-      );
+      // Snapshot gate passed. For admin-level or destructive (DELETE) routes,
+      // perform a live GitHub permission re-verify (Layer B, WI-H / #131).
+      if (recheckInScope(level, c.req.method)) {
+        const verdict = await reverifySessionPermission(c, tokenResult, level);
+        if (verdict.decision === "deny") {
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "permission-revoked",
+                message: "Repository permission was revoked or downgraded",
+                retryable: false,
+              },
+            },
+            403,
+          );
+        }
+      }
+
+      return next();
     }
 
     if (tokenResult.kind === "cookie-session") {

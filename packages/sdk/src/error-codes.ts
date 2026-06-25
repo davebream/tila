@@ -11,6 +11,7 @@ export const TILA_ERRORS = {
   SESSION_REVOKED: "session-revoked",
   RATE_LIMITED: "rate-limited",
   PERMISSION_DENIED: "permission-denied",
+  PERMISSION_REVOKED: "permission-revoked",
   PROJECT_MISMATCH: "project-mismatch",
   CSRF_MISSING_ORIGIN: "csrf-missing-origin",
   CSRF_ORIGIN_MISMATCH: "csrf-origin-mismatch",
