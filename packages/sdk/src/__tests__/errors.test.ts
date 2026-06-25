@@ -204,6 +204,26 @@ describe("instance-mismatch error code", () => {
   });
 });
 
+describe("DPoP error codes (WI-G)", () => {
+  it('TILA_ERRORS.DPOP_REQUIRED has wire value "dpop-required"', () => {
+    expect(TILA_ERRORS.DPOP_REQUIRED).toBe("dpop-required");
+  });
+
+  it('TILA_ERRORS.DPOP_INVALID has wire value "dpop-invalid"', () => {
+    expect(TILA_ERRORS.DPOP_INVALID).toBe("dpop-invalid");
+  });
+
+  it('toTilaErrorCode("dpop-required") returns the code unchanged (not "UNKNOWN")', () => {
+    expect(toTilaErrorCode("dpop-required")).toBe("dpop-required");
+    expect(toTilaErrorCode("dpop-required")).not.toBe("UNKNOWN");
+  });
+
+  it('toTilaErrorCode("dpop-invalid") returns the code unchanged (not "UNKNOWN")', () => {
+    expect(toTilaErrorCode("dpop-invalid")).toBe("dpop-invalid");
+    expect(toTilaErrorCode("dpop-invalid")).not.toBe("UNKNOWN");
+  });
+});
+
 describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   const SDK_ONLY_ERROR_CODES = new Set<string>([
     "artifact-get-failed",
@@ -251,6 +271,8 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "github-api-error",
     "instance-mismatch",
     "permission-revoked",
+    "dpop-required",
+    "dpop-invalid",
   ]);
 
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {

@@ -45,6 +45,9 @@ export const TILA_ERRORS = {
   INVALID_RELATIONSHIP_TYPE: "invalid-relationship-type",
   // Instance binding (worker auth middleware — kebab-case wire value)
   INSTANCE_MISMATCH: "instance-mismatch",
+  // DPoP sender-constrained tokens (WI-G — auth middleware)
+  DPOP_REQUIRED: "dpop-required",
+  DPOP_INVALID: "dpop-invalid",
   // Repo allowlist route (POST/DELETE /api/repos) — kebab-case wire values.
   // token-authz-denied is emitted by the require-project-admin middleware guarding
   // these management routes (the same value is also emitted on /api/tokens routes, so
