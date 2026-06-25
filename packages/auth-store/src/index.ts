@@ -58,6 +58,9 @@ export {
 export { AuthStore } from "./auth-store.js";
 export type { NewInstanceInput, InfraRecord } from "./auth-store.js";
 
+// WI-M Phase 1 — infra split helper
+export { splitInfraConfig } from "./infra-split.js";
+
 // Re-export TilaPaths for consumers that need to construct instances
 export { TilaPaths } from "./paths.js";
 export type { SegmentKind } from "./paths.js";
