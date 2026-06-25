@@ -10,7 +10,7 @@ export default defineConfig({
   // Bundle the internal @tila/schemas package so the server ships self-contained
   // and @tila/schemas never needs to be published.
   // The shebang comes from src/index.ts (esbuild preserves it) — no banner.
-  noExternal: ["@tila/schemas"],
+  noExternal: ["@tila/schemas", "@tila/auth-store"],
   // `tila-sdk` is kept EXTERNAL (resolved from node_modules at runtime). Its
   // `createTila` local branch does `await import("./local.js")`, a specifier
   // RELATIVE to the SDK's own dist — bundling the SDK into this dist would make
@@ -25,6 +25,7 @@ export default defineConfig({
   // native binary.
   external: [
     "@modelcontextprotocol/sdk",
+    "@napi-rs/keyring",
     "smol-toml",
     "zod",
     "tila-sdk",
