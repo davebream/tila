@@ -212,8 +212,10 @@ describe("checkIdempotentExchange", () => {
     );
 
     expect(result).toBeNull();
+    // Stale-delete is now guarded on status_code != 0 so it can never remove a
+    // concurrently-reserved in-flight placeholder (Task 4 hardening).
     expect(mockPrepare).toHaveBeenCalledWith(
-      "DELETE FROM _idempotency WHERE key = ?",
+      "DELETE FROM _idempotency WHERE key = ? AND status_code != 0",
     );
     expect(mockBind).toHaveBeenCalledWith("exchange:proj1:hash");
     expect(mockRun).toHaveBeenCalled();

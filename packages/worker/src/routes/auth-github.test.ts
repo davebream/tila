@@ -59,6 +59,13 @@ const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 const mockRateLimitRecordFailure = vi.fn().mockResolvedValue(undefined);
 const mockIdempotencyCheck = vi.fn().mockResolvedValue(null);
 const mockIdempotencyStore = vi.fn().mockResolvedValue(undefined);
+// Atomic reservation primitives (Phase 2). Defaults model the happy path:
+// a fresh key is acquired, finalize succeeds, release is a no-op. These
+// defaults survive vi.clearAllMocks() (which clears call history, not
+// implementations), so existing exchange tests keep passing unchanged.
+const mockIdempotencyReserve = vi.fn().mockResolvedValue({ state: "acquired" });
+const mockIdempotencyFinalize = vi.fn().mockResolvedValue(true);
+const mockIdempotencyRelease = vi.fn().mockResolvedValue(undefined);
 const mockListForProject = vi.fn().mockResolvedValue([]);
 const mockIsRegistered = vi.fn().mockResolvedValue(null);
 const mockGitHubAppConfigSetInstallation = vi.fn().mockResolvedValue(undefined);
@@ -85,6 +92,9 @@ vi.mock("@tila/backend-d1", () => ({
     class {
       check = mockIdempotencyCheck;
       store = mockIdempotencyStore;
+      reserve = mockIdempotencyReserve;
+      finalize = mockIdempotencyFinalize;
+      release = mockIdempotencyRelease;
     } as unknown as () => unknown,
   ),
   RepoAllowlistStore: vi.fn().mockImplementation(
@@ -113,7 +123,9 @@ vi.mock("@tila/backend-d1", () => ({
 }));
 
 // Import after mocks are set up
-const { authGithub } = await import("./auth-github");
+const { authGithub, checkIdempotentExchange, mintSession } = await import(
+  "./auth-github"
+);
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -2441,5 +2453,139 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
     const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
     const payload = JSON.parse(payloadStr) as { issued_at: number };
     expect(body.expires_at - payload.issued_at).toBe(300);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 4 (Phase 3): checkIdempotentExchange placeholder hardening + mintSession
+// ---------------------------------------------------------------------------
+
+describe("checkIdempotentExchange placeholder hardening", () => {
+  // Build a db double whose prepare/bind/run records every prepared SQL string,
+  // so we can assert the stale-delete is (or is not) issued.
+  function makeRecordingDb(): {
+    db: D1Database;
+    preparedSql: string[];
+  } {
+    const preparedSql: string[] = [];
+    const db = {
+      prepare: (sql: string) => {
+        preparedSql.push(sql);
+        return {
+          bind: () => ({ run: vi.fn().mockResolvedValue(undefined) }),
+        };
+      },
+    } as unknown as D1Database;
+    return { db, preparedSql };
+  }
+
+  // Minimal store double exposing only the `check` method the function uses.
+  function makeStore(
+    checkResult: {
+      statusCode: number;
+      body: string;
+      requestHash: string | null;
+    } | null,
+  ) {
+    return {
+      check: vi.fn().mockResolvedValue(checkResult),
+    } as unknown as Parameters<typeof checkIdempotentExchange>[0];
+  }
+
+  it("returns null on a status_code=0 placeholder WITHOUT deleting it", async () => {
+    const { db, preparedSql } = makeRecordingDb();
+    // Placeholder rows carry an empty body and status_code 0.
+    const store = makeStore({ statusCode: 0, body: "", requestHash: null });
+
+    const result = await checkIdempotentExchange(
+      store,
+      "exchange:p:hash",
+      "p",
+      db,
+    );
+
+    expect(result).toBeNull();
+    // Critically: no DELETE was issued for the live placeholder.
+    expect(preparedSql.some((sql) => sql.includes("DELETE"))).toBe(false);
+  });
+
+  it("deletes a stale FINALIZED row guarded on status_code != 0", async () => {
+    const { db, preparedSql } = makeRecordingDb();
+    // A finalized row whose cached body has already expired (stale).
+    const staleBody = JSON.stringify({
+      ok: true,
+      expires_at: Math.floor(Date.now() / 1000) - 100,
+    });
+    const store = makeStore({
+      statusCode: 200,
+      body: staleBody,
+      requestHash: null,
+    });
+
+    const result = await checkIdempotentExchange(
+      store,
+      "exchange:p:hash",
+      "p",
+      db,
+    );
+
+    expect(result).toBeNull();
+    const deleteSql = preparedSql.find((sql) => sql.includes("DELETE"));
+    expect(deleteSql).toBeDefined();
+    // The guard prevents deleting a concurrently-reserved placeholder.
+    expect(deleteSql).toContain("status_code != 0");
+  });
+
+  it("returns the cached body for a live FINALIZED row", async () => {
+    const { db } = makeRecordingDb();
+    const liveBody = JSON.stringify({
+      ok: true,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const store = makeStore({
+      statusCode: 200,
+      body: liveBody,
+      requestHash: null,
+    });
+
+    const result = await checkIdempotentExchange(
+      store,
+      "exchange:p:hash",
+      "p",
+      db,
+    );
+
+    expect(result).toMatchObject({ ok: true });
+  });
+});
+
+describe("mintSession (mint only, no idempotency write)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns a responseBody without writing an idempotency row", async () => {
+    const { responseBody } = await mintSession({
+      projectId: "test-project",
+      matchedRepo: { github_host: "github.com", github_repo_id: 99999 },
+      githubUser: { login: "testuser", id: 12345 },
+      userPermission: "write",
+      hmacKey: TEST_HMAC_KEY,
+      instanceId: "test-deployment-instance-id",
+    });
+
+    const body = responseBody as {
+      ok: boolean;
+      session_token: string;
+      project_id: string;
+      permission: string;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.session_token).toMatch(/^tila_s\./);
+    expect(body.project_id).toBe("test-project");
+    expect(body.permission).toBe("write");
+    // mintSession must NOT touch the idempotency store at all.
+    expect(mockIdempotencyStore).not.toHaveBeenCalled();
+    expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
   });
 });

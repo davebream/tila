@@ -186,6 +186,10 @@ export async function checkIdempotentExchange(
   const cached = await store.check(key, projectId);
   // If no cached entry, return null immediately
   if (!cached) return null;
+  // An in-flight reservation placeholder (status_code === 0) is NOT a cache hit.
+  // Treat it as a miss so the caller proceeds to reserve(); do NOT rely on the
+  // JSON.parse('') of an empty placeholder body throwing.
+  if (cached.statusCode === 0) return null;
 
   try {
     const cachedBody = JSON.parse(cached.body) as { expires_at?: number };
@@ -195,8 +199,13 @@ export async function checkIdempotentExchange(
     ) {
       return cachedBody;
     }
-    // Stale: delete and re-exchange
-    await db.prepare("DELETE FROM _idempotency WHERE key = ?").bind(key).run();
+    // Stale FINALIZED row: delete and re-exchange. Guard on status_code != 0 so
+    // a concurrently-reserved placeholder is never deleted out from under its
+    // holder (the CRITICAL placeholder-collision fix).
+    await db
+      .prepare("DELETE FROM _idempotency WHERE key = ? AND status_code != 0")
+      .bind(key)
+      .run();
   } catch {
     // Malformed cache entry -- proceed with fresh exchange
   }
@@ -204,17 +213,17 @@ export async function checkIdempotentExchange(
 }
 
 /**
- * Shared tail for exchange flows: normalize permission, mint session token,
- * store idempotency record, and return the response body.
+ * Mint a session token and build the exchange response body. Mint ONLY — this
+ * function performs NO idempotency write. The atomic exchange orchestration
+ * (reserve → mintSession → finalize/release) at each call site owns the
+ * idempotency-row lifecycle; see component C4 in the design.
  */
-async function mintAndStoreSession(opts: {
+export async function mintSession(opts: {
   projectId: string;
   matchedRepo: { github_host: string; github_repo_id: number };
   githubUser: { login: string; id: number };
   userPermission: string;
   hmacKey: string;
-  idempotencyStore: D1IdempotencyStore;
-  idempotencyKey: string;
   /**
    * Stable deployment instance id — resolved at the call site via
    * `ensureDeploymentInstanceId(env.DB)` before calling this function.
@@ -230,8 +239,6 @@ async function mintAndStoreSession(opts: {
     githubUser,
     userPermission,
     hmacKey,
-    idempotencyStore,
-    idempotencyKey,
     instanceId,
   } = opts;
 
@@ -278,10 +285,31 @@ async function mintAndStoreSession(opts: {
     instance_id: instanceId,
   };
 
+  return { responseBody };
+}
+
+/**
+ * Thin wrapper kept for any non-exchange caller: mint a session then write the
+ * idempotency record via the legacy best-effort `store()` path. The three
+ * minting exchange paths use the atomic reserve/finalize/release flow directly
+ * and do NOT call this wrapper.
+ */
+async function mintAndStoreSession(opts: {
+  projectId: string;
+  matchedRepo: { github_host: string; github_repo_id: number };
+  githubUser: { login: string; id: number };
+  userPermission: string;
+  hmacKey: string;
+  idempotencyStore: D1IdempotencyStore;
+  idempotencyKey: string;
+  instanceId: string;
+}): Promise<{ responseBody: Record<string, unknown> }> {
+  const { responseBody } = await mintSession(opts);
+
   try {
-    await idempotencyStore.store(
-      idempotencyKey,
-      projectId,
+    await opts.idempotencyStore.store(
+      opts.idempotencyKey,
+      opts.projectId,
       200,
       JSON.stringify(responseBody),
     );
