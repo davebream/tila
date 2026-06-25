@@ -1,4 +1,4 @@
--- Migration 0014: _revoked_subjects bulk-revocation tombstones (epic #122 / WI-C).
+-- Migration 0019: _revoked_subjects bulk-revocation tombstones (epic #122 / WI-C).
 --
 -- One row per principal per project. The unique index backs the upsert-MAX in
 -- D1RevokedSubjectsStore.revokeSubject (ON CONFLICT DO UPDATE SET

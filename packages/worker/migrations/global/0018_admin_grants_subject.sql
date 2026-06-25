@@ -1,4 +1,4 @@
--- Migration 0013: _admin_grants subject-level principal identity (epic #122 / WI-C).
+-- Migration 0018: _admin_grants subject-level principal identity (epic #122 / WI-C).
 --
 -- Adds canonical (identity_host, subject_id) TEXT columns alongside the legacy
 -- github_host / github_user_id columns (retained; NOT NULL — backward compatible).
