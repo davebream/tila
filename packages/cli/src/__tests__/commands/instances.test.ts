@@ -158,7 +158,7 @@ describe("instances list", () => {
 
     // Table output should include our fixture keys (via console.log)
     const allOutput = consoleLogSpy.mock.calls
-      .map((c) => c.join(" "))
+      .map((c: unknown[]) => c.join(" "))
       .join("\n");
     expect(allOutput).toContain(FIXTURE_KEY);
     expect(allOutput).toContain(FIXTURE_KEY_2);
@@ -168,7 +168,9 @@ describe("instances list", () => {
     const cmd = await loadInstancesCmd();
     await runSubCmd(cmd, "list", { json: true });
 
-    const logCalls = consoleLogSpy.mock.calls.map((c) => c[0]).join("\n");
+    const logCalls = consoleLogSpy.mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("\n");
     const parsed = JSON.parse(logCalls);
     expect(parsed.ok).toBe(true);
     expect(parsed.result.instances).toBeDefined();
@@ -194,7 +196,9 @@ describe("instances list", () => {
     const cmd = await loadInstancesCmd();
     await runSubCmd(cmd, "list", { json: true });
 
-    const logOutput = consoleLogSpy.mock.calls.map((c) => c[0]).join("\n");
+    const logOutput = consoleLogSpy.mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("\n");
     expect(logOutput).not.toContain(FIXTURE_TOKEN);
   });
 });
@@ -272,7 +276,9 @@ describe("instances remove", () => {
       }),
     ).rejects.toThrow("process.exit");
 
-    const errOutput = consoleErrorSpy.mock.calls.map((c) => c[0]).join("\n");
+    const errOutput = consoleErrorSpy.mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("\n");
     const parsed = JSON.parse(errOutput);
     expect(parsed.ok).toBe(false);
     expect(parsed.code).toBeDefined();
