@@ -65,7 +65,7 @@ function permissionMeetsMinimum(actual: string, minimum: string): boolean {
  * The token starts with "tila_s." prefix for routing in auth middleware.
  * Full token format: tila_s.<jwtHeader>.<jwtPayload>.<jwtSignature>
  */
-async function mintSessionToken(
+export async function mintSessionToken(
   payload: Record<string, unknown>,
   hmacKeyRaw: string,
 ): Promise<string> {
@@ -247,6 +247,10 @@ async function mintAndStoreSession(opts: {
 
   const payload = {
     project_id: projectId,
+    // sub_type discriminator: new mints always stamp "github" explicitly.
+    // The auth middleware default-fills absent sub_type to "github" for
+    // legacy tokens issued before this field existed (critic Finding 2).
+    sub_type: "github",
     github_host: matchedRepo.github_host,
     github_repo_id: matchedRepo.github_repo_id,
     github_login: githubUser.login,

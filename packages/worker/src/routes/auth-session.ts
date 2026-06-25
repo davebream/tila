@@ -277,6 +277,7 @@ function effectivePermission(
   switch (tokenResult.kind) {
     case "session":
     case "cookie-session":
+    case "oidc-session":
       return tokenResult.permission as "read" | "write" | "admin";
     case "d1-token":
       return tokenResult.scopes === "full" ? "admin" : "read";

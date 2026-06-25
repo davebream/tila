@@ -2024,3 +2024,178 @@ describe("auth middleware — instance_id validation (Bearer/JWT branch only)", 
     expect(mockEmitInstanceMismatchDatapoint).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3 (T9): OIDC session (sub_type:"oidc") middleware tests
+// ---------------------------------------------------------------------------
+
+describe("OIDC session tokens (sub_type:oidc)", () => {
+  /**
+   * Mint a tila_s. JWT with sub_type:"oidc" fields.
+   * These are the tokens produced by the /api/auth/oidc/exchange route (Phase 4).
+   */
+  async function mintOidcSessionToken(
+    overrides: Record<string, unknown> = {},
+  ): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      project_id: "proj-oidc",
+      sub_type: "oidc",
+      oidc_issuer: "https://idp.example.com",
+      oidc_subject: "user@example.com",
+      actor_name: "user@example.com",
+      permission: "write",
+      expires_at: now + 3600,
+      issued_at: now,
+      iss: "tila",
+      aud: "tila",
+      jti: "oidc-jti-test-uuid",
+      ...overrides,
+    };
+
+    const keyBytes = base64UrlDecode(TEST_HMAC_KEY);
+    const secret = await importJWK(
+      { kty: "oct", k: base64UrlEncode(keyBytes), alg: "HS256" },
+      "HS256",
+    );
+
+    const jwt = await new SignJWT(payload)
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .sign(secret);
+
+    return `tila_s.${jwt}`;
+  }
+
+  it("resolves to kind:oidc-session with correct fields", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const token = await mintOidcSessionToken();
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      claims: {
+        kind: string;
+        name: string;
+        permission: string;
+        oidcIssuer: string;
+        oidcSubject: string;
+        projectId: string;
+      };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.claims.kind).toBe("oidc-session");
+    expect(body.claims.name).toBe("user@example.com");
+    expect(body.claims.permission).toBe("write");
+    expect(body.claims.oidcIssuer).toBe("https://idp.example.com");
+    expect(body.claims.oidcSubject).toBe("user@example.com");
+    expect(body.claims.projectId).toBe("proj-oidc");
+    // Must NOT carry any GitHub fields
+    expect(
+      (body.claims as Record<string, unknown>).githubRepoId,
+    ).toBeUndefined();
+    expect(
+      (body.claims as Record<string, unknown>).githubLogin,
+    ).toBeUndefined();
+    expect(
+      (body.claims as Record<string, unknown>).githubUserId,
+    ).toBeUndefined();
+    expect((body.claims as Record<string, unknown>).githubHost).toBeUndefined();
+  });
+
+  it("legacy GitHub token with no sub_type still resolves to kind:session", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    // A legacy token: all github fields present, NO sub_type
+    const token = await mintSessionToken({
+      // No sub_type — should default-fill to "github"
+    });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      claims: { kind: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.claims.kind).toBe("session");
+  });
+
+  it("expired oidc session is rejected with 401 session-expired", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const now = Math.floor(Date.now() / 1000);
+    const token = await mintOidcSessionToken({
+      expires_at: now - 60, // expired 60s ago
+    });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("session-expired");
+  });
+
+  it("oidc session with wrong iss is rejected with 401", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const token = await mintOidcSessionToken({ iss: "not-tila" });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+  });
+
+  it("oidc session with wrong aud is rejected with 401", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const token = await mintOidcSessionToken({ aud: "other" });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+  });
+
+  it("WI-C: oidc principal with revocation tombstone is rejected", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const now = Math.floor(Date.now() / 1000);
+    // Token issued at now - 10; tombstone at now - 5 → token issued before revocation
+    const token = await mintOidcSessionToken({
+      issued_at: now - 10,
+      expires_at: now + 3600,
+    });
+    // Tombstone set 5 seconds ago (in ms for the store)
+    const tombstoneMs = (now - 5) * 1000;
+    mockGetRevokedBefore = vi.fn().mockResolvedValue(tombstoneMs);
+
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("subject-revoked");
+    // Lock the OIDC identity axis: the kill-switch MUST query the
+    // (oidc_issuer, oidc_subject) principal, not the (absent) github_* fields.
+    // Without this a regression to the github axes would still pass the deny check.
+    expect(mockGetRevokedBefore).toHaveBeenCalledWith(
+      "proj-oidc",
+      "https://idp.example.com",
+      "user@example.com",
+    );
+  });
+
+  it("WI-C: oidc principal with tombstone AFTER issuance is NOT rejected", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const now = Math.floor(Date.now() / 1000);
+    // Token issued at now - 5; tombstone at now - 10 → token issued AFTER revocation → allowed
+    const token = await mintOidcSessionToken({
+      issued_at: now - 5,
+      expires_at: now + 3600,
+    });
+    const tombstoneMs = (now - 10) * 1000;
+    mockGetRevokedBefore = vi.fn().mockResolvedValue(tombstoneMs);
+
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(200);
+  });
+});
