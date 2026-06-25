@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { revokedJti } from "./schema";
 
@@ -66,5 +66,19 @@ export class D1RevokedJtiStore {
         revoked_at: Date.now(), // ms (EpochMillis) — Worker brands at read via asEpochMillis
       })
       .onConflictDoNothing();
+  }
+
+  /**
+   * Prune revocations whose protected token has certainly expired.
+   * Returns the number of rows deleted. `olderThanMs` is an absolute EpochMillis
+   * cutoff; callers pass `now - RETENTION` so a row survives at least RETENTION
+   * past its `revoked_at`. Deletes only rows strictly older than the cutoff.
+   */
+  async deleteExpired(olderThanMs: number): Promise<number> {
+    const res = await this.db
+      .delete(revokedJti)
+      .where(lt(revokedJti.revoked_at, olderThanMs))
+      .run();
+    return res.meta?.changes ?? 0;
   }
 }
