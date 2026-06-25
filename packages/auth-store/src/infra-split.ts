@@ -54,10 +54,8 @@ export function splitInfraConfig(config: TilaInfraConfig): InfraRecord {
     if (value === undefined) continue; // skip undefined optionals
 
     if (META_KEYS.has(rawKey)) {
-      // biome-ignore lint/suspicious/noExplicitAny: dynamic field assignment from allowlist
       (meta as Record<string, unknown>)[rawKey] = value;
     } else if (SECRET_KEYS.has(rawKey)) {
-      // biome-ignore lint/suspicious/noExplicitAny: dynamic field assignment from allowlist
       (secretParts as Record<string, unknown>)[rawKey] = value;
       hasSecret = true;
     } else {
