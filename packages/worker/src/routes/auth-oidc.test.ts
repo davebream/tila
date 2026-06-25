@@ -109,17 +109,19 @@ const mockCtx = {
 } as unknown as ExecutionContext;
 
 function post(body: unknown, env: Env): Promise<Response> {
-  return authOidc.fetch(
-    new Request("http://localhost/exchange", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "CF-Connecting-IP": "1.2.3.4",
-      },
-      body: JSON.stringify(body),
-    }),
-    env,
-    mockCtx,
+  return Promise.resolve(
+    authOidc.fetch(
+      new Request("http://localhost/exchange", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "CF-Connecting-IP": "1.2.3.4",
+        },
+        body: JSON.stringify(body),
+      }),
+      env,
+      mockCtx,
+    ),
   );
 }
 
