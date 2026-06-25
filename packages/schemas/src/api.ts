@@ -592,6 +592,17 @@ export const TokenIssueRequestSchema = z.object({
     .max(64)
     .regex(/^[a-z0-9-]+$/),
   note: z.string().max(256).optional(),
+  /**
+   * Optional DPoP JWK thumbprint (RFC 7638, SHA-256, unpadded base64url — always
+   * exactly 43 characters for P-256 keys). When present, the issued token will be
+   * sender-constrained: the bearer must present a valid DPoP proof on every request.
+   * A malformed thumbprint permanently locks the token (no recovery except reissue),
+   * so we validate the format strictly at issue time.
+   */
+  jkt: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/)
+    .optional(),
 });
 
 export type TokenIssueRequest = z.infer<typeof TokenIssueRequestSchema>;

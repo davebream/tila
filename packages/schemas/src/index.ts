@@ -373,6 +373,9 @@ export { TagSchema, type Tag, TagsSchema, type Tags } from "./tags";
 // --- GitHub validation constants ---
 export { GITHUB_LOGIN_REGEX } from "./github";
 
+// --- DPoP shared helpers ---
+export { canonicalizeHtu, DPOP_TYP, DPOP_ALG } from "./dpop";
+
 // --- Record schemas ---
 export {
   RecordTypeSchema,

@@ -33,6 +33,13 @@ const SessionBaseSchema = z.object({
    * legacy tokens without the claim are still accepted during the transition.
    */
   instance_id: z.string().optional(),
+  /**
+   * DPoP sender-constraint (WI-G, RFC 9449 §6). When present, the bearer
+   * must attach a valid DPoP proof on every request. Optional for backward
+   * compatibility — sessions minted before this WI omit the claim and follow
+   * the legacy accept path (absent binding ⇒ no DPoP check).
+   */
+  cnf: z.object({ jkt: z.string().min(1) }).optional(),
 });
 
 /**
@@ -79,6 +86,12 @@ export type SessionPayload = z.infer<typeof SessionPayloadSchema>;
 export const GitHubExchangeRequestSchema = z.object({
   project_id: z.string().min(1),
   github_token: z.string().min(1),
+  /**
+   * Optional DPoP JWK thumbprint (WI-G). When present, the minted session
+   * will carry a `cnf: { jkt }` claim. The bearer must then attach a DPoP
+   * proof on every request.
+   */
+  jkt: z.string().min(1).optional(),
 });
 export type GitHubExchangeRequest = z.infer<typeof GitHubExchangeRequestSchema>;
 
@@ -138,6 +151,12 @@ export const GitHubAppExchangeRequestSchema = z.object({
   project_id: z.string().min(1),
   user_token: z.string().min(1),
   auth_method: z.literal("user_token"),
+  /**
+   * Optional DPoP JWK thumbprint (WI-G). When present, the minted session
+   * will carry a `cnf: { jkt }` claim. OIDC exchange (`OidcExchangeRequestSchema`)
+   * does NOT accept `jkt` — CI runners have no persistent key holder.
+   */
+  jkt: z.string().min(1).optional(),
 });
 export type GitHubAppExchangeRequest = z.infer<
   typeof GitHubAppExchangeRequestSchema

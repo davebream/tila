@@ -50,6 +50,7 @@ const main = defineCommand({
     search: () => load(() => import("./commands/search")),
     infra: () => load(() => import("./commands/infra")),
     project: () => load(() => import("./commands/project")),
+    auth: () => load(() => import("./commands/auth")),
   },
 });
 

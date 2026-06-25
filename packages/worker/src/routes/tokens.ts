@@ -24,7 +24,7 @@ tokens.post("/", async (c) => {
   if (!parsed.success)
     return zodValidationError(c, parsed.error, "validation-error");
 
-  const { name, note } = parsed.data;
+  const { name, note, jkt } = parsed.data;
   const plaintext = await generateToken();
   // SEC-1: pepper at mint so it matches every peppered lookup (auth.ts:614,
   // auth-github app-config, auth-session exchange). Bare here would break
@@ -42,6 +42,7 @@ tokens.post("/", async (c) => {
       note,
       createdBy: tokenResult.name,
       createdAt,
+      cnfJkt: jkt,
     });
     tokenId = result.tokenId;
   } catch (err) {
