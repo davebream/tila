@@ -48,10 +48,16 @@ let testPrivateKey: CryptoKey;
 let testPublicKey: CryptoKey;
 let testKid: string;
 
-// A second key pair for multi-issuer / rotation tests.
+// A second key pair for multi-issuer / cache-miss tests.
 let altPrivateKey: CryptoKey;
 let altPublicKey: CryptoKey;
 const ALT_KID = "alt-key-id-1";
+
+// A third key pair for the stable-kid key-rotation scenario: shares testKid
+// but has different key material.  Used to exercise the rotation-retry branch
+// (signature fails with cached key → force re-fetch → retry with new key).
+let rotPrivateKey: CryptoKey;
+let rotPublicKey: CryptoKey;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -156,6 +162,21 @@ beforeAll(async () => {
   );
   altPrivateKey = altPair.privateKey;
   altPublicKey = altPair.publicKey;
+
+  // Third pair: shares testKid but has different key material — for the
+  // stable-kid rotation scenario.
+  const rotPair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+  rotPrivateKey = rotPair.privateKey;
+  rotPublicKey = rotPair.publicKey;
 });
 
 beforeEach(() => {
@@ -430,8 +451,8 @@ describe("verifyOidcToken (GitHub backward-compat)", () => {
     expect(mockOidcFetch).toHaveBeenCalledTimes(1); // still 1, no second fetch
   });
 
-  it("re-fetches JWKS on signature failure — key rotation (oidcFetch called twice)", async () => {
-    // Sign token1 with testPrivateKey → cache the testPublicKey.
+  it("cache-miss fetch: re-fetches JWKS for an uncached kid (oidcFetch called twice)", async () => {
+    // Sign token1 with testPrivateKey → cache testPublicKey under testKid.
     const res1 = await makeJwksResponse([
       { kid: testKid, publicKey: testPublicKey },
     ]);
@@ -441,18 +462,57 @@ describe("verifyOidcToken (GitHub backward-compat)", () => {
     await verifyOidcToken(token1, "https://tila.example.com");
     expect(mockOidcFetch).toHaveBeenCalledTimes(1);
 
-    // Now sign with altPrivateKey (different kid=ALT_KID).
-    const rotatedClaims = { ...VALID_GITHUB_CLAIMS, jti: "rotated-token-id" };
-    const rotatedToken = await signTestJwt(
-      rotatedClaims,
+    // Now sign with altPrivateKey using ALT_KID — a kid not yet in the cache.
+    // This triggers the `if (!key)` cache-miss branch, NOT the rotation-retry branch.
+    const cacheMissClaims = {
+      ...VALID_GITHUB_CLAIMS,
+      jti: "cache-miss-token-id",
+    };
+    const cacheMissToken = await signTestJwt(
+      cacheMissClaims,
       {},
       altPrivateKey,
       ALT_KID,
     );
 
-    // On rotation retry, return JWKS containing altPublicKey.
+    // The re-fetch returns JWKS containing altPublicKey for ALT_KID.
     const res2 = await makeJwksResponse([
       { kid: ALT_KID, publicKey: altPublicKey },
+    ]);
+    mockOidcFetch.mockResolvedValueOnce(res2);
+
+    const claims = await verifyOidcToken(
+      cacheMissToken,
+      "https://tila.example.com",
+    );
+    expect(claims.jti).toBe("cache-miss-token-id");
+    expect(mockOidcFetch).toHaveBeenCalledTimes(2); // original + cache-miss fetch
+  });
+
+  it("rotation retry: re-fetches when cached key for same kid fails signature (stable-kid rotation)", async () => {
+    // Step 1: verify a token with testKid → caches testPublicKey under testKid.
+    const res1 = await makeJwksResponse([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    mockOidcFetch.mockResolvedValueOnce(res1);
+
+    const token1 = await signTestJwt(VALID_GITHUB_CLAIMS);
+    await verifyOidcToken(token1, "https://tila.example.com");
+    expect(mockOidcFetch).toHaveBeenCalledTimes(1);
+
+    // Step 2: present a new token signed with rotPrivateKey but SAME kid=testKid.
+    // The cached testPublicKey cannot verify it → signature fails → rotation retry.
+    const rotatedClaims = { ...VALID_GITHUB_CLAIMS, jti: "stable-kid-rotated" };
+    const rotatedToken = await signTestJwt(
+      rotatedClaims,
+      {},
+      rotPrivateKey,
+      testKid, // same kid as before — stable kid, rotated key material
+    );
+
+    // The re-fetch returns JWKS where testKid now maps to rotPublicKey.
+    const res2 = await makeJwksResponse([
+      { kid: testKid, publicKey: rotPublicKey },
     ]);
     mockOidcFetch.mockResolvedValueOnce(res2);
 
@@ -460,8 +520,8 @@ describe("verifyOidcToken (GitHub backward-compat)", () => {
       rotatedToken,
       "https://tila.example.com",
     );
-    expect(claims.jti).toBe("rotated-token-id");
-    expect(mockOidcFetch).toHaveBeenCalledTimes(2); // original + retry
+    expect(claims.jti).toBe("stable-kid-rotated");
+    expect(mockOidcFetch).toHaveBeenCalledTimes(2); // initial fetch + rotation retry
   });
 });
 
@@ -608,8 +668,8 @@ describe("verifyOidcJwt (generic core)", () => {
     ).rejects.toMatchObject({ code: "oidc-invalid-issuer" });
   });
 
-  it("rotation retry: oidcFetch called twice on signature failure with cached keys", async () => {
-    // First request: cache testPublicKey for CUSTOM_ISSUER.
+  it("cache-miss fetch: oidcFetch called twice for an uncached kid (not a rotation-retry)", async () => {
+    // First request: cache testPublicKey for CUSTOM_ISSUER under testKid.
     const res1 = await makeJwksResponse([
       { kid: testKid, publicKey: testPublicKey },
     ]);
@@ -623,27 +683,28 @@ describe("verifyOidcJwt (generic core)", () => {
     });
     expect(mockOidcFetch).toHaveBeenCalledTimes(1);
 
-    // Sign with altPrivateKey (ALT_KID not yet in cache).
-    const rotatedToken = await signTestJwt(
-      { ...VALID_CUSTOM_CLAIMS, jti: "rotated-2" },
+    // Sign with altPrivateKey using ALT_KID — not yet in the cache.
+    // This exercises the `if (!key)` cache-miss branch, NOT the rotation-retry branch.
+    const cacheMissToken = await signTestJwt(
+      { ...VALID_CUSTOM_CLAIMS, jti: "cache-miss-2" },
       {},
       altPrivateKey,
       ALT_KID,
     );
 
-    // On rotation retry, return JWKS with altPublicKey.
+    // The re-fetch returns JWKS with altPublicKey for ALT_KID.
     const res2 = await makeJwksResponse([
       { kid: ALT_KID, publicKey: altPublicKey },
     ]);
     mockOidcFetch.mockResolvedValueOnce(res2);
 
-    const result = await verifyOidcJwt(rotatedToken, {
+    const result = await verifyOidcJwt(cacheMissToken, {
       issuer: CUSTOM_ISSUER,
       audience: CUSTOM_AUDIENCE,
       jwksUri: CUSTOM_JWKS_URL,
     });
-    expect(result.payload.jti).toBe("rotated-2");
-    expect(mockOidcFetch).toHaveBeenCalledTimes(2);
+    expect(result.payload.jti).toBe("cache-miss-2");
+    expect(mockOidcFetch).toHaveBeenCalledTimes(2); // initial fetch + cache-miss fetch
   });
 
   it("strict aud: array membership accepted", async () => {

@@ -344,13 +344,13 @@ export async function verifyOidcJwt(
   }
 
   // 10. Rotation retry — if signature fails and the cached keys are still
-  //     within the TTL, force an unconditional re-fetch (so key rotation
-  //     within the TTL window is actually picked up), then re-verify.
+  //     within the TTL, force an unconditional re-fetch so that key rotation
+  //     that happened within the TTL window is actually picked up, then
+  //     re-verify once with the freshly imported key for this kid.
   //
-  //     The guard `Date.now() - (lastFetchedAt.get(issuer) ?? 0) < JWKS_TTL_MS`
-  //     means: retry only when the cached keys are still considered fresh.
-  //     `?? 0` prevents NaN arithmetic; it does NOT change the "retry on fresh
-  //     cache" semantics.
+  //     Guard: retry only when the cache is considered fresh (last fetch was
+  //     within JWKS_TTL_MS).  `?? 0` prevents NaN arithmetic without changing
+  //     the "retry on fresh cache" semantics.
   if (!valid && Date.now() - (lastFetchedAt.get(issuer) ?? 0) < JWKS_TTL_MS) {
     // Force unconditional re-fetch (don't short-circuit on current freshness).
     await fetchJwks(issuer, jwksUri);
@@ -366,24 +366,6 @@ export async function verifyOidcJwt(
         );
       } catch {
         valid = false;
-      }
-
-      // If the retry key changed (rotation), re-check with the new kid.
-      if (!valid) {
-        // The kid may have changed after the rotation fetch.
-        const newKey = jwksCache.get(cacheKey(issuer, kid)) ?? null;
-        if (newKey && newKey !== retryKey) {
-          try {
-            valid = await crypto.subtle.verify(
-              "RSASSA-PKCS1-v1_5",
-              newKey,
-              signature.buffer as ArrayBuffer,
-              new TextEncoder().encode(data).buffer as ArrayBuffer,
-            );
-          } catch {
-            valid = false;
-          }
-        }
       }
     }
   }
