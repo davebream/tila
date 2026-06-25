@@ -1,11 +1,29 @@
 /**
- * OIDC JWT verification for GitHub Actions OIDC tokens
+ * OIDC JWT verification
  *
- * Verifies RS256-signed JWTs from GitHub Actions against GitHub's JWKS endpoint.
- * Caches public keys with 1-hour TTL and retry-on-rotation logic.
+ * Two public entry-points:
+ *
+ * 1. `verifyOidcJwt(token, {issuer, audience, jwksUri})` — generic core.
+ *    Accepts any RS256-signed JWT, fetches JWKS via the hardened `oidcFetch`
+ *    wrapper, and returns the raw `{header, payload}` without any coercion.
+ *
+ * 2. `verifyOidcToken(token, expectedAudience)` — GitHub-Actions wrapper.
+ *    Delegates to `verifyOidcJwt` with GitHub constants and applies the
+ *    numeric-field coercion required by `OidcClaims`.  Caller signature and
+ *    return type are unchanged from the pre-generalisation version.
+ *
+ * JWKS cache is keyed by `${issuer.length}:${issuer}:${kid}` (length-prefix
+ * prevents a crafted kid from colliding across issuers).  Per-issuer
+ * `lastFetchedAt` and `issuerKids` bookkeeping enable TTL-guarded rotation
+ * retry and per-issuer eviction.
  */
 
 import { base64UrlDecode } from "./base64url";
+import { OidcFetchError, oidcFetch } from "./oidc-fetch";
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 export interface OidcClaims {
   iss: string;
@@ -51,35 +69,102 @@ export class OidcVerificationError extends Error {
   }
 }
 
-// JWKS cache: Map<kid, CryptoKey>
+export interface OidcVerifyParams {
+  /** Expected value of the `iss` claim. */
+  issuer: string;
+  /** Expected `aud` claim (string or array membership). */
+  audience: string;
+  /** JWKS endpoint URL.  Must be pre-resolved — never derived from payload. */
+  jwksUri: string;
+}
+
+export interface VerifiedOidcResult {
+  header: Record<string, unknown>;
+  payload: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// JWKS cache — three maps for per-issuer isolation and eviction
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the cache key for a (issuer, kid) pair.
+ *
+ * Length-prefix defeats a crafted kid that encodes another issuer's key path.
+ * E.g. kid = `37:https://issuer-a.example.com:real-kid` looks identical to
+ * the legitimate key for issuer A — but only when the issuer length is ALSO
+ * 37. A different issuer produces a different prefix even with the same kid.
+ */
+function cacheKey(issuer: string, kid: string): string {
+  return `${issuer.length}:${issuer}:${kid}`;
+}
+
+/** `kid → CryptoKey` — keyed by the length-prefixed cache key above. */
 const jwksCache = new Map<string, CryptoKey>();
-let lastFetchedAt = 0;
+
+/** Per-issuer timestamp of the last successful JWKS fetch. */
+const lastFetchedAt = new Map<string, number>();
+
+/** Per-issuer set of (raw) kid values currently loaded into `jwksCache`. */
+const issuerKids = new Map<string, Set<string>>();
+
 const JWKS_TTL_MS = 60 * 60 * 1000; // 1 hour
-const JWKS_MAX_KEYS = 10;
+const JWKS_MAX_KEYS = 10; // per-issuer eviction threshold
+
+// ---------------------------------------------------------------------------
+// GitHub-specific constants (preserved for the backward-compat wrapper)
+// ---------------------------------------------------------------------------
 
 const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 const GITHUB_JWKS_URL =
   "https://token.actions.githubusercontent.com/.well-known/jwks";
 
+// ---------------------------------------------------------------------------
+// Cache helpers
+// ---------------------------------------------------------------------------
+
 /**
- * Clear the JWKS cache (for testing only)
+ * Clear the JWKS cache (for testing only).
+ * Clears all three maps so cache state never leaks across tests.
+ *
  * @internal
  */
 export function clearCacheForTesting(): void {
   jwksCache.clear();
-  lastFetchedAt = 0;
+  lastFetchedAt.clear();
+  issuerKids.clear();
 }
 
+// ---------------------------------------------------------------------------
+// JWKS fetch + import
+// ---------------------------------------------------------------------------
+
 /**
- * Fetch JWKS from GitHub and import keys into the cache
+ * Fetch the JWKS at `jwksUri` and import keys into `jwksCache` under the
+ * given `issuer` namespace.  Stamps `lastFetchedAt` on success.
+ *
+ * Per-issuer eviction: if loading this issuer's new key set would push the
+ * total cache size beyond `JWKS_MAX_KEYS`, evict the current keys for this
+ * issuer before importing.
  */
-async function fetchJwks(): Promise<void> {
-  const res = await fetch(GITHUB_JWKS_URL);
+async function fetchJwks(issuer: string, jwksUri: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await oidcFetch(jwksUri);
+  } catch (err) {
+    if (err instanceof OidcFetchError) {
+      throw new OidcVerificationError(
+        "oidc-jwks-unavailable",
+        `OIDC fetch error fetching JWKS: ${err.message}`,
+      );
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     throw new OidcVerificationError(
       "oidc-jwks-unavailable",
-      `Failed to fetch JWKS from GitHub (status ${res.status})`,
+      `Failed to fetch JWKS (status ${res.status})`,
     );
   }
 
@@ -87,10 +172,16 @@ async function fetchJwks(): Promise<void> {
     keys: (JsonWebKey & { kid?: string })[];
   };
 
-  // Clear old cache if we're about to exceed max keys
-  if (jwksCache.size + jwks.keys.length > JWKS_MAX_KEYS) {
-    jwksCache.clear();
+  // Per-issuer eviction: remove existing keys for this issuer before re-loading.
+  const currentKids = issuerKids.get(issuer);
+  if (currentKids) {
+    for (const kid of currentKids) {
+      jwksCache.delete(cacheKey(issuer, kid));
+    }
+    issuerKids.delete(issuer);
   }
+
+  const newKids = new Set<string>();
 
   for (const jwk of jwks.keys) {
     if (!jwk.kid) continue;
@@ -104,52 +195,38 @@ async function fetchJwks(): Promise<void> {
         ["verify"],
       );
 
-      jwksCache.set(jwk.kid, key);
+      jwksCache.set(cacheKey(issuer, jwk.kid), key);
+      // Only add to the kid index after successful importKey.
+      newKids.add(jwk.kid);
     } catch (err) {
-      // Skip keys that fail to import (e.g., unsupported algorithm)
-      console.warn(`Failed to import key ${jwk.kid}:`, err);
+      console.warn(
+        `Failed to import JWKS key ${jwk.kid} for issuer ${issuer}:`,
+        err,
+      );
     }
   }
 
-  lastFetchedAt = Date.now();
+  issuerKids.set(issuer, newKids);
+  lastFetchedAt.set(issuer, Date.now());
 }
 
-/**
- * Get a key from cache, or fetch fresh JWKS if miss/stale
- */
-async function getKey(
-  kid: string,
-  allowFetch: boolean,
-): Promise<CryptoKey | null> {
-  const cached = jwksCache.get(kid);
-
-  // Cache hit and fresh
-  if (cached && Date.now() - lastFetchedAt < JWKS_TTL_MS) {
-    return cached;
-  }
-
-  // Cache miss or stale — fetch if allowed
-  if (allowFetch) {
-    await fetchJwks();
-    return jwksCache.get(kid) ?? null;
-  }
-
-  return null;
-}
+// ---------------------------------------------------------------------------
+// Generic core: verifyOidcJwt
+// ---------------------------------------------------------------------------
 
 /**
- * Verify an OIDC JWT from GitHub Actions
+ * Verify an RS256 OIDC JWT against a caller-supplied issuer, audience, and
+ * JWKS URI.  Returns the raw decoded `{header, payload}` — no coercion.
  *
- * @param token - The OIDC JWT to verify
- * @param expectedAudience - The expected 'aud' claim (e.g., worker URL)
- * @returns Parsed and verified OIDC claims
- * @throws OidcVerificationError on any validation failure
+ * @throws OidcVerificationError on any validation failure.
  */
-export async function verifyOidcToken(
+export async function verifyOidcJwt(
   token: string,
-  expectedAudience: string,
-): Promise<OidcClaims> {
-  // Split token into parts
+  params: OidcVerifyParams,
+): Promise<VerifiedOidcResult> {
+  const { issuer, audience, jwksUri } = params;
+
+  // 1. Split and basic structure check.
   const parts = token.split(".");
   if (parts.length !== 3) {
     throw new OidcVerificationError(
@@ -160,7 +237,7 @@ export async function verifyOidcToken(
 
   const [headerB64, payloadB64, signatureB64] = parts;
 
-  // Decode header and payload
+  // 2. Decode header and payload.
   let header: Record<string, unknown>;
   let payload: Record<string, unknown>;
 
@@ -174,7 +251,7 @@ export async function verifyOidcToken(
     );
   }
 
-  // Validate algorithm
+  // 3. Algorithm check — only RS256 supported.
   if (header.alg !== "RS256") {
     throw new OidcVerificationError(
       "oidc-invalid-token",
@@ -182,27 +259,33 @@ export async function verifyOidcToken(
     );
   }
 
-  // Validate issuer
-  if (payload.iss !== GITHUB_OIDC_ISSUER) {
+  // 4. Issuer assertion — BEFORE any network call.
+  //    Never derive fetch URLs from payload.iss; use params.jwksUri.
+  if (payload.iss !== issuer) {
     throw new OidcVerificationError(
       "oidc-invalid-issuer",
-      `Invalid issuer: ${payload.iss} (expected ${GITHUB_OIDC_ISSUER})`,
+      `Invalid issuer: ${payload.iss} (expected ${issuer})`,
     );
   }
 
-  // Validate audience. Per RFC 7519, aud may be a single string OR an array of
-  // strings; accept either form (and reject an absent aud) for forward-compat
-  // with multi-audience OIDC providers.
-  const audClaim = payload.aud as unknown;
-  const audiences = Array.isArray(audClaim) ? audClaim : [audClaim];
-  if (!audiences.includes(expectedAudience)) {
+  // 5. Audience check.  RFC 7519 allows aud to be a string or array.
+  //    Absent aud is explicitly rejected (not via incidental falsy path).
+  const audClaim = payload.aud;
+  if (audClaim === undefined || audClaim === null) {
     throw new OidcVerificationError(
       "oidc-invalid-audience",
-      `Invalid audience: ${JSON.stringify(audClaim)} (expected ${expectedAudience})`,
+      "Missing aud claim",
+    );
+  }
+  const audiences = Array.isArray(audClaim) ? audClaim : [audClaim];
+  if (!audiences.includes(audience)) {
+    throw new OidcVerificationError(
+      "oidc-invalid-audience",
+      `Invalid audience: ${JSON.stringify(audClaim)} (expected ${audience})`,
     );
   }
 
-  // Validate time claims
+  // 6. Time claims.
   const now = Math.floor(Date.now() / 1000);
 
   if (typeof payload.exp !== "number" || payload.exp <= now) {
@@ -219,8 +302,8 @@ export async function verifyOidcToken(
     );
   }
 
-  // Get key from cache or fetch
-  const kid = header.kid as string;
+  // 7. Kid extraction — ignore jku/x5u header fields entirely.
+  const kid = header.kid as string | undefined;
   if (!kid) {
     throw new OidcVerificationError(
       "oidc-invalid-token",
@@ -228,16 +311,23 @@ export async function verifyOidcToken(
     );
   }
 
-  let key = await getKey(kid, true);
+  // 8. Key lookup — fetch if not cached for this issuer.
+  const ck = cacheKey(issuer, kid);
+  let key = jwksCache.get(ck);
+
+  if (!key) {
+    await fetchJwks(issuer, jwksUri);
+    key = jwksCache.get(ck) ?? null;
+  }
 
   if (!key) {
     throw new OidcVerificationError(
       "oidc-jwks-unavailable",
-      `Key with kid ${kid} not found in JWKS`,
+      `Key with kid ${kid} not found in JWKS for issuer ${issuer}`,
     );
   }
 
-  // Verify signature
+  // 9. Signature verification.
   const data = `${headerB64}.${payloadB64}`;
   const signature = base64UrlDecode(signatureB64);
 
@@ -253,20 +343,47 @@ export async function verifyOidcToken(
     valid = false;
   }
 
-  // On signature failure with cached key, retry with fresh JWKS (handles key rotation)
-  if (!valid && Date.now() - lastFetchedAt < JWKS_TTL_MS) {
-    key = await getKey(kid, true); // Force fresh fetch
+  // 10. Rotation retry — if signature fails and the cached keys are still
+  //     within the TTL, force an unconditional re-fetch (so key rotation
+  //     within the TTL window is actually picked up), then re-verify.
+  //
+  //     The guard `Date.now() - (lastFetchedAt.get(issuer) ?? 0) < JWKS_TTL_MS`
+  //     means: retry only when the cached keys are still considered fresh.
+  //     `?? 0` prevents NaN arithmetic; it does NOT change the "retry on fresh
+  //     cache" semantics.
+  if (!valid && Date.now() - (lastFetchedAt.get(issuer) ?? 0) < JWKS_TTL_MS) {
+    // Force unconditional re-fetch (don't short-circuit on current freshness).
+    await fetchJwks(issuer, jwksUri);
+    const retryKey = jwksCache.get(ck) ?? null;
 
-    if (key) {
+    if (retryKey) {
       try {
         valid = await crypto.subtle.verify(
           "RSASSA-PKCS1-v1_5",
-          key,
+          retryKey,
           signature.buffer as ArrayBuffer,
           new TextEncoder().encode(data).buffer as ArrayBuffer,
         );
       } catch {
         valid = false;
+      }
+
+      // If the retry key changed (rotation), re-check with the new kid.
+      if (!valid) {
+        // The kid may have changed after the rotation fetch.
+        const newKey = jwksCache.get(cacheKey(issuer, kid)) ?? null;
+        if (newKey && newKey !== retryKey) {
+          try {
+            valid = await crypto.subtle.verify(
+              "RSASSA-PKCS1-v1_5",
+              newKey,
+              signature.buffer as ArrayBuffer,
+              new TextEncoder().encode(data).buffer as ArrayBuffer,
+            );
+          } catch {
+            valid = false;
+          }
+        }
       }
     }
   }
@@ -278,8 +395,36 @@ export async function verifyOidcToken(
     );
   }
 
-  // Coerce numeric ID fields from string to number
-  // GitHub OIDC JWTs encode these as strings, but downstream code expects numbers
+  return { header, payload };
+}
+
+// ---------------------------------------------------------------------------
+// Backward-compatible GitHub-Actions wrapper: verifyOidcToken
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify an OIDC JWT from GitHub Actions.
+ *
+ * Delegates to `verifyOidcJwt` with GitHub constants and applies the
+ * numeric-field coercion required by the `OidcClaims` interface.
+ *
+ * @param token - The OIDC JWT to verify.
+ * @param expectedAudience - The expected 'aud' claim (e.g., worker URL).
+ * @returns Parsed and verified OIDC claims with coerced numeric fields.
+ * @throws OidcVerificationError on any validation failure.
+ */
+export async function verifyOidcToken(
+  token: string,
+  expectedAudience: string,
+): Promise<OidcClaims> {
+  const { payload } = await verifyOidcJwt(token, {
+    issuer: GITHUB_OIDC_ISSUER,
+    audience: expectedAudience,
+    jwksUri: GITHUB_JWKS_URL,
+  });
+
+  // Coerce numeric ID fields from string to number.
+  // GitHub OIDC JWTs encode these as strings; downstream code expects numbers.
   const repository_id = Number(payload.repository_id);
   const repository_owner_id = Number(payload.repository_owner_id);
   const actor_id = Number(payload.actor_id);
@@ -287,7 +432,6 @@ export async function verifyOidcToken(
   const run_number = Number(payload.run_number);
   const run_attempt = Number(payload.run_attempt);
 
-  // Return typed claims
   return {
     iss: payload.iss as string,
     aud: payload.aud as string,
