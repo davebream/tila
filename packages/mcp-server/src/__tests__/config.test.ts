@@ -502,6 +502,175 @@ trust = {trusted = true, trusted_at = 1700000000000}`;
 
       await expect(config.getToken()).rejects.toThrow();
     });
+
+    // Fix 3: C3 provenance invariant — refresh uses registry-pinned worker_url, never config
+    it("C3: attemptRefresh ctx.worker_url is sourced from registry-pinned instance, not config worker_url", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      // Registry has a DISTINCT worker_url — deliberately different from the config's
+      // worker_url ("https://tila.example.com" from GITHUB_REPO_CONFIG_TOML).
+      // If a regression reads from config/repoPointer instead of the registry record,
+      // this test will catch it because capturedWorkerUrl will equal the config URL.
+      const REGISTRY_TOML_C3 = `version = 1
+
+[[instances]]
+instance_key = "${TEST_KEY}"
+worker_url = "https://registry-pinned.example.com"
+instance_id_source = "server"
+created_at = 1700000000000
+trust = {trusted = true, trusted_at = 1700000000000}`;
+
+      mockReadFile.mockImplementation(async (path: unknown) => {
+        if (String(path).includes("instances.toml")) return REGISTRY_TOML_C3;
+        return "";
+      });
+
+      const fakeStore = new FakeSecretStore();
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true, token: "old-expired-token" }),
+      );
+      fakeStore._store.set(
+        `tila:refresh\x00${TEST_KEY}`,
+        makeRefreshJSON({ token: "my-refresh-token" }),
+      );
+
+      let capturedWorkerUrl: string | undefined;
+      const fakeMinted: MintedCredential = {
+        token: "refreshed-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMinted,
+        refresh: async (ctx) => {
+          capturedWorkerUrl = ctx.worker_url;
+          return fakeMinted;
+        },
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      await config.getToken();
+
+      // C3 assertion: the refresh provider received the REGISTRY-pinned URL, not the
+      // config's worker_url. A regression that reads repoPointer.worker_url or
+      // config.data.worker_url would set capturedWorkerUrl to "https://tila.example.com".
+      expect(capturedWorkerUrl).toBe("https://registry-pinned.example.com");
+      expect(capturedWorkerUrl).not.toBe("https://tila.example.com"); // config worker_url
+    });
+
+    // Fix 4: R5 rotation — refresh_token from MintedCredential is persisted
+    it("R5: minted.refresh_token is persisted to tila:refresh on rotation", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true }),
+      );
+      fakeStore._store.set(
+        `tila:refresh\x00${TEST_KEY}`,
+        makeRefreshJSON({ token: "old-refresh-token" }),
+      );
+
+      const rotationTime = Date.now() + 7_200_000;
+      const fakeMintedWithRotation: MintedCredential = {
+        token: "new-rotated-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+        refresh_token: "new-refresh-token",
+        refresh_expires_at: rotationTime,
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMintedWithRotation,
+        refresh: async () => fakeMintedWithRotation,
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      const token = await config.getToken();
+      expect(token).toBe("new-rotated-token");
+
+      // R5: the rotated refresh_token must be persisted under tila:refresh
+      const storedRefreshRaw = fakeStore._store.get(
+        `tila:refresh\x00${TEST_KEY}`,
+      );
+      expect(storedRefreshRaw).toBeDefined();
+      const storedRefresh = JSON.parse(storedRefreshRaw as string);
+      expect(storedRefresh.refresh_token).toBe("new-refresh-token");
+      expect(storedRefresh.expires_at).toBe(rotationTime);
+    });
+
+    // Fix 4 (optional): R5 swallow — putRefresh failure does not discard credential token
+    it("R5: putRefresh failure is swallowed and credential token is still returned", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const innerStore = new FakeSecretStore();
+      innerStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true }),
+      );
+      innerStore._store.set(
+        `tila:refresh\x00${TEST_KEY}`,
+        makeRefreshJSON({ token: "old-refresh-token" }),
+      );
+
+      // Proxy store that allows credential writes but throws on refresh writes,
+      // simulating a keychain that becomes partially unavailable mid-operation.
+      const throwOnRefreshWriteStore = {
+        get: (service: string, account: string) =>
+          innerStore.get(service, account),
+        set: async (service: string, account: string, value: string) => {
+          if (service === "tila:refresh")
+            throw new Error("refresh keychain locked");
+          return innerStore.set(service, account, value);
+        },
+        delete: (service: string, account: string) =>
+          innerStore.delete(service, account),
+      };
+
+      const fakeMintedWithRotation: MintedCredential = {
+        token: "rotated-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+        refresh_token: "should-not-reach-store",
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMintedWithRotation,
+        refresh: async () => fakeMintedWithRotation,
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: throwOnRefreshWriteStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      // putRefresh throws → must be swallowed; credential token still returned
+      const token = await config.getToken();
+      expect(token).toBe("rotated-token");
+    });
   });
 
   describe("local backend mode (backend = local)", () => {

@@ -182,6 +182,11 @@ async function attemptRefresh(
   providerFactory: (kind: CredentialKind) => CredentialProvider,
   fetchImpl: typeof fetch,
 ): Promise<string | null> {
+  // Defense-in-depth: skip refresh entirely in CI. resolveWithTrace already fails
+  // closed in CI, but an exec-provider kind would still run its external command
+  // before the write gate fires if we reached this point. Return null immediately.
+  if (envProbe.isCI) return null;
+
   const refreshRecord = await authStore.getRefresh(instanceKey);
   if (!refreshRecord) return null;
 
@@ -224,41 +229,54 @@ async function attemptRefresh(
       ({ kind } as CredentialProviderConfig),
   };
 
+  // Only provider.refresh() failure returns null — storage failures must not
+  // discard a legitimately authenticated token.
+  let minted: MintedCredential;
   try {
-    const minted: MintedCredential = await provider.refresh(ctx, refreshRecord);
-
-    const credRecord: CredentialRecord = {
-      instance_key: instanceKey,
-      obtained_at: Date.now(),
-      token: minted.token,
-      token_type: minted.token_type,
-      expires_at: minted.expires_at,
-      scope: minted.scope,
-    };
-
-    await authStore.putCredential(instanceKey, credRecord);
-
-    // R5: persist rotated refresh token, swallow putRefresh-only failure
-    if (minted.refresh_token) {
-      try {
-        const newRefreshRecord: RefreshRecord = {
-          instance_key: instanceKey,
-          refresh_token: minted.refresh_token,
-          expires_at: minted.refresh_expires_at ?? null,
-          obtained_at: Date.now(),
-        };
-        await authStore.putRefresh(instanceKey, newRefreshRecord);
-      } catch (err) {
-        process.stderr.write(
-          `tila-mcp-server: warning: failed to persist rotated refresh token: ${(err as Error).message}\n`,
-        );
-      }
-    }
-
-    return minted.token;
+    minted = await provider.refresh(ctx, refreshRecord);
   } catch {
-    return null; // refresh failed — caller emits actionable error
+    return null; // refresh() failed — caller emits actionable error
   }
+
+  const credRecord: CredentialRecord = {
+    instance_key: instanceKey,
+    obtained_at: Date.now(),
+    token: minted.token,
+    token_type: minted.token_type,
+    expires_at: minted.expires_at,
+    scope: minted.scope,
+  };
+
+  // Wrap putCredential separately: a transient keychain write failure must not
+  // discard a legitimately refreshed token — only caching is denied. The token
+  // was authenticated against the registry-pinned URL; next startup re-refreshes.
+  // IMPORTANT: never include the token value in the warning message.
+  try {
+    await authStore.putCredential(instanceKey, credRecord);
+  } catch (err) {
+    process.stderr.write(
+      `tila-mcp-server: warning: failed to persist refreshed credential: ${(err as Error).message}\n`,
+    );
+  }
+
+  // R5: persist rotated refresh token, swallow putRefresh-only failure
+  if (minted.refresh_token) {
+    try {
+      const newRefreshRecord: RefreshRecord = {
+        instance_key: instanceKey,
+        refresh_token: minted.refresh_token,
+        expires_at: minted.refresh_expires_at ?? null,
+        obtained_at: Date.now(),
+      };
+      await authStore.putRefresh(instanceKey, newRefreshRecord);
+    } catch (err) {
+      process.stderr.write(
+        `tila-mcp-server: warning: failed to persist rotated refresh token: ${(err as Error).message}\n`,
+      );
+    }
+  }
+
+  return minted.token;
 }
 
 /**
