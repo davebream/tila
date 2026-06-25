@@ -185,7 +185,9 @@ describe("single-writer guard", () => {
     const violations: string[] = [];
     for (const file of commandFiles) {
       const content = readFileSync(file, "utf-8");
-      if (content.includes("setCurrentContext")) {
+      // Match an actual call site (`setCurrentContext(`), not doc-comment mentions
+      // of the invariant — only a real call violates the single-writer rule.
+      if (content.includes("setCurrentContext(")) {
         violations.push(file);
       }
     }
