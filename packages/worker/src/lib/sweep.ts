@@ -158,7 +158,11 @@ export async function runSweep(
   const now = options.now ?? Date.now;
   const timeBudgetMs = options.timeBudgetMs ?? SWEEP_TIME_BUDGET_MS;
   const drainPageSize = options.drainPageSize ?? SWEEP_DRAIN_PAGE_SIZE;
-  const deadline = now() + timeBudgetMs;
+  // Single clock read at sweep start, reused for both the wall-clock deadline and
+  // the revocation-GC cutoff. Avoids an extra now() read that would perturb the
+  // injected-clock budget accounting.
+  const sweepStartMs = now();
+  const deadline = sweepStartMs + timeBudgetMs;
   // Shared across ALL projects and ALL drain rounds — a cron sweep is a single
   // Worker invocation, so the self-imposed subrequest ceiling applies across the
   // whole run (it mirrors the platform's per-invocation accounting).
@@ -207,7 +211,7 @@ export async function runSweep(
   // wrapped SEPARATELY so a jti failure does not skip the subject prune, and
   // both are non-fatal (console.error only — runSweep has no ExecutionContext,
   // so do NOT call emitSweepErrorDatapoint here).
-  const revocationCutoff = now() - REVOCATION_GC_RETENTION_MS;
+  const revocationCutoff = sweepStartMs - REVOCATION_GC_RETENTION_MS;
   try {
     const jtiPruned = await new D1RevokedJtiStore(env.DB).deleteExpired(
       revocationCutoff,
