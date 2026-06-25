@@ -49,6 +49,10 @@ export interface SessionTokenResult {
   // factories stay valid; production always populates both from parsed.data.
   githubUserId?: number;
   githubHost?: string;
+  // JWT ID from the verified payload; used by the permission re-check helper
+  // (Layer B) to key the per-isolate rate-limit cache. Optional so existing
+  // test factories that don't set a jti stay valid.
+  jti?: string;
 }
 
 export interface CookieSessionTokenResult {

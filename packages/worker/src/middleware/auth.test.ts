@@ -623,6 +623,24 @@ describe("auth middleware", () => {
       expect(body.claims.githubHost).toBe("github.com");
     });
 
+    it("surfaces jti from the verified payload on the session tokenResult", async () => {
+      const token = await mintSessionToken({
+        jti: "test-jti-12345",
+      });
+      const app = createTestApp();
+      const res = await fetchWithSessionEnv(
+        app,
+        makeReq("/test", { Authorization: `Bearer ${token}` }),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        claims: SessionTokenResult;
+      };
+      expect(body.claims.kind).toBe("session");
+      expect(body.claims.jti).toBe("test-jti-12345");
+    });
+
     it("returns 401 SESSION_EXPIRED for an expired session token", async () => {
       const token = await mintSessionToken({
         expires_at: Math.floor(Date.now() / 1000) - 10,
