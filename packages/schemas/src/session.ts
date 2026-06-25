@@ -62,17 +62,33 @@ export const OidcSessionPayloadSchema = SessionBaseSchema.extend({
 });
 export type OidcSessionPayload = z.infer<typeof OidcSessionPayloadSchema>;
 
-/**
- * The minted-and-verified session JWT payload. A discriminated union on
- * `sub_type` so a GitHub session and an OIDC session never share a shape and a
- * single safeParse narrows to the correct variant. The auth middleware
- * default-fills an absent `sub_type` to "github" before parsing so that legacy
- * GitHub tokens (minted before the discriminator) keep validating.
- */
-export const SessionPayloadSchema = z.discriminatedUnion("sub_type", [
+const SessionPayloadUnion = z.discriminatedUnion("sub_type", [
   GitHubSessionPayloadSchema,
   OidcSessionPayloadSchema,
 ]);
+
+/**
+ * The minted-and-verified session JWT payload. A discriminated union on
+ * `sub_type` so a GitHub session and an OIDC session never share a shape and a
+ * single safeParse narrows to the correct variant.
+ *
+ * Backward compatibility lives here at the schema layer: legacy GitHub tokens
+ * minted before the `sub_type` discriminator existed carry no `sub_type`, so a
+ * preprocess step default-fills `"github"` when the field is absent. This lets
+ * existing tokens (and any direct schema consumers) keep validating without a
+ * caller-side default-fill.
+ */
+export const SessionPayloadSchema = z.preprocess((val) => {
+  if (
+    typeof val === "object" &&
+    val !== null &&
+    !Array.isArray(val) &&
+    !("sub_type" in val)
+  ) {
+    return { sub_type: "github", ...(val as Record<string, unknown>) };
+  }
+  return val;
+}, SessionPayloadUnion);
 export type SessionPayload = z.infer<typeof SessionPayloadSchema>;
 
 export const GitHubExchangeRequestSchema = z.object({
