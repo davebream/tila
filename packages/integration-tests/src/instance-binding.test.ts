@@ -79,6 +79,25 @@ vi.mock("@tila/backend-d1", () => ({
       revoke = vi.fn().mockResolvedValue(undefined);
     } as unknown as () => unknown,
   ),
+  D1RevokedSubjectsStore: vi.fn().mockImplementation(
+    class {
+      getRevokedBefore = vi.fn().mockResolvedValue(null);
+      revokeSubject = vi.fn().mockResolvedValue(undefined);
+    } as unknown as () => unknown,
+  ),
+  canonicalizePrincipal: (
+    host: string | null | undefined,
+    subject: string | number,
+  ) => {
+    const identityHost = (host ?? "github.com").trim().toLowerCase();
+    const subjectId = String(subject).trim();
+    if (subjectId === "") {
+      throw new Error(
+        "canonicalizePrincipal: empty subject after canonicalization",
+      );
+    }
+    return { identityHost, subjectId };
+  },
 }));
 
 // Stub session-cache
@@ -146,6 +165,22 @@ function createTestApp(): Hono<AppEnv> {
 
 const mockWaitUntil = vi.fn((p: Promise<unknown>) => p);
 
+// Empty-read D1 stub: the WI-C subject-revocation gate constructs the REAL
+// D1RevokedSubjectsStore (the per-package vi.mock above does not reliably
+// intercept the worker's own import) and calls getRevokedBefore for EVERY
+// session token. A bare `{}` throws → fail-closed 401; this returns "no
+// tombstone" so valid tokens proceed.
+const emptyReadDb = {
+  prepare: () => ({
+    bind: () => ({
+      all: async () => ({ results: [], success: true, meta: {} }),
+      first: async () => null,
+      run: async () => ({ success: true, meta: {} }),
+      raw: async () => [],
+    }),
+  }),
+} as unknown as D1Database;
+
 async function fetchWithAuth(token: string): Promise<Response> {
   const app = createTestApp();
   return app.fetch(
@@ -153,7 +188,7 @@ async function fetchWithAuth(token: string): Promise<Response> {
       headers: { Authorization: `Bearer ${token}` },
     }),
     {
-      DB: {} as D1Database,
+      DB: emptyReadDb,
       PROJECT: {} as DurableObjectNamespace,
       ARTIFACTS: {} as R2Bucket,
       ANALYTICS: {} as AnalyticsEngineDataset,
@@ -244,7 +279,7 @@ describe("instance-id binding: cross-deployment replay rejection + legacy accept
 
     const res = await app.fetch(
       new Request("http://localhost/whoami"),
-      { DB: {} as D1Database } as unknown as Env,
+      { DB: emptyReadDb } as unknown as Env,
       {
         waitUntil: () => {},
         passThroughOnException: () => {},

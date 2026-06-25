@@ -44,6 +44,8 @@ export {
   mockSessionCreate,
   mockRevokedJtiIsRevoked,
   mockRevokedJtiRevoke,
+  mockRevokedSubjectsGetRevokedBefore,
+  mockRevokedSubjectsRevokeSubject,
   mockTokenValidate,
   mockTokenUpdateLastUsedAt,
   mockRateLimitCheck,
