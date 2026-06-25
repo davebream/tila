@@ -25,7 +25,6 @@ import {
 import {
   INFRA_CONFIG_FILE,
   getInfraSlug,
-  loadInfraConfig,
   writeInfraConfig,
 } from "../../lib/infra-config";
 import { resolveInfraConfig } from "../../lib/infra-fallback";

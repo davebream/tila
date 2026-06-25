@@ -31,7 +31,10 @@ export async function resolveInfraConfig(
   const slug = getInfraSlug(flatConfig);
   const record = await authStore.getInfra(slug);
 
-  // Step 3: per-slug record wins when present
+  // Step 3: per-slug record wins when present. The per-slug record fully
+  // supersedes the flat file — flat secrets are intentionally NOT field-merged
+  // when a per-slug meta exists. `secrets: null` legitimately means "no secrets"
+  // (putInfra writes meta only after secrets), not "fall back to flat secrets".
   if (record !== null) {
     return {
       ...record.meta,
