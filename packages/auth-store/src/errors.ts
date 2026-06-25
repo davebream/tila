@@ -162,3 +162,29 @@ export class UnknownCredentialProviderError extends Error {
     this.name = "UnknownCredentialProviderError";
   }
 }
+
+// ----------------------------------------------------------------------------
+// DeviceFlowError
+// Thrown by runDeviceFlow() when the RFC 8628 device flow cannot complete.
+// `reason` carries the terminal classification so callers can branch without
+// string matching on the message.
+// ----------------------------------------------------------------------------
+export type DeviceFlowErrorReason =
+  | "authorization_pending" // should not normally surface — internally retried
+  | "slow_down" // should not normally surface — internally retried
+  | "expired_token" // device code has expired; user must restart
+  | "access_denied" // user explicitly denied the request
+  | "timeout" // 120-attempt cap reached with no success
+  | "error"; // unexpected error code from the server
+
+export class DeviceFlowError extends Error {
+  readonly code = "DEVICE_FLOW_ERROR" as const;
+
+  constructor(
+    public readonly reason: DeviceFlowErrorReason,
+    message?: string,
+  ) {
+    super(message ?? `Device flow failed: ${reason}`);
+    this.name = "DeviceFlowError";
+  }
+}

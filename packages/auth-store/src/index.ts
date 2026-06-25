@@ -14,6 +14,22 @@ export type {
   RunCommandResult,
 } from "./providers/types.js";
 
+// WI-K Phase 2 — device-flow helper + ports
+export { runDeviceFlow } from "./providers/device-flow.js";
+export type { DeviceFlowResult } from "./providers/device-flow.js";
+export { DeviceFlowError } from "./errors.js";
+export type { DeviceFlowErrorReason } from "./errors.js";
+export {
+  FakeFetch,
+  FakeClock,
+  FakePrompter,
+  FakeRunCommand,
+} from "./providers/ports.js";
+export type {
+  FakeFetchCall,
+  DisplayDeviceCodeCall,
+} from "./providers/ports.js";
+
 // Phase 2 exports
 export type { SecretStore, EnvProbe } from "./secret-store.js";
 export { probeSecretStore, processEnvProbe } from "./secret-store.js";
