@@ -2172,6 +2172,14 @@ describe("OIDC session tokens (sub_type:oidc)", () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("subject-revoked");
+    // Lock the OIDC identity axis: the kill-switch MUST query the
+    // (oidc_issuer, oidc_subject) principal, not the (absent) github_* fields.
+    // Without this a regression to the github axes would still pass the deny check.
+    expect(mockGetRevokedBefore).toHaveBeenCalledWith(
+      "proj-oidc",
+      "https://idp.example.com",
+      "user@example.com",
+    );
   });
 
   it("WI-C: oidc principal with tombstone AFTER issuance is NOT rejected", async () => {
