@@ -11,10 +11,12 @@ const CREATE_ADMIN_GRANTS = `
     granted_by_user_id    INTEGER,
     granted_at            INTEGER NOT NULL,
     revoked_at            INTEGER,
-    revoked_by_user_id    INTEGER
+    revoked_by_user_id    INTEGER,
+    identity_host         TEXT    NOT NULL DEFAULT 'github.com',
+    subject_id            TEXT    NOT NULL DEFAULT ''
   );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_grants_active
-    ON _admin_grants (project_id, github_host, github_user_id)
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_grants_active_subject
+    ON _admin_grants (project_id, identity_host, subject_id)
     WHERE revoked_at IS NULL;
 `;
 

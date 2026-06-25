@@ -19,6 +19,7 @@ export interface GrantParams {
 
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { canonicalizePrincipal } from "./principal";
 import { adminGrants } from "./schema";
 
 export class AdminGrantsStore {
@@ -35,14 +36,22 @@ export class AdminGrantsStore {
    * IMPORTANT: Do NOT switch to Drizzle's onConflictDoNothing() — in
    * drizzle-orm 0.45.2 it emits the predicate AFTER DO NOTHING, which is a
    * SQLite syntax error and does not bind the partial index.
+   *
+   * Conflict target uses canonical (identity_host, subject_id) columns per
+   * migration 0013 (WI-C). Legacy github_host / github_user_id are still
+   * populated because they remain NOT NULL.
    */
   async grant(params: GrantParams): Promise<void> {
     const host = params.githubHost ?? "github.com";
     const grantedAt = Math.floor(Date.now() / 1000); // seconds (flag-only; never numerically compared)
+    const { identityHost, subjectId } = canonicalizePrincipal(
+      host,
+      params.githubUserId,
+    );
 
     await this.db
       .prepare(
-        "INSERT INTO _admin_grants (project_id, github_host, github_user_id, github_login_snapshot, granted_by_user_id, granted_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (project_id, github_host, github_user_id) WHERE revoked_at IS NULL DO NOTHING",
+        "INSERT INTO _admin_grants (project_id, github_host, github_user_id, github_login_snapshot, granted_by_user_id, granted_at, identity_host, subject_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (project_id, identity_host, subject_id) WHERE revoked_at IS NULL DO NOTHING",
       )
       .bind(
         params.projectId,
@@ -51,6 +60,8 @@ export class AdminGrantsStore {
         params.githubLoginSnapshot ?? null,
         params.grantedByUserId ?? null,
         grantedAt,
+        identityHost,
+        subjectId,
       )
       .run();
   }
