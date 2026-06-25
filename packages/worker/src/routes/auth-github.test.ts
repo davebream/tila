@@ -2443,3 +2443,196 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
     expect(body.expires_at - payload.issued_at).toBe(300);
   });
 });
+
+// ============================================================================
+// Task 4: cnf.jkt DPoP binding — PAT exchange, App exchange, OIDC unaffected
+// ============================================================================
+
+const VALID_JKT_T4 = "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0U";
+
+describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue(false);
+    mockIdempotencyCheck.mockResolvedValue(null);
+    mockListForProject.mockResolvedValue([MOCK_REPO]);
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "alice", id: 42 });
+    mockGetRepoPermission.mockResolvedValue("write");
+    mockEnsureDeploymentInstanceId.mockResolvedValue(
+      "test-deployment-instance-id",
+    );
+  });
+
+  it("SessionPayloadSchema accepts a payload with cnf.jkt", async () => {
+    const { SessionPayloadSchema } = await import("@tila/schemas");
+    const result = SessionPayloadSchema.safeParse({
+      project_id: "proj-1",
+      github_host: "github.com",
+      github_repo_id: 123,
+      github_login: "alice",
+      github_user_id: 42,
+      permission: "write",
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      issued_at: Math.floor(Date.now() / 1000),
+      cnf: { jkt: VALID_JKT_T4 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("SessionPayloadSchema accepts a payload without cnf", async () => {
+    const { SessionPayloadSchema } = await import("@tila/schemas");
+    const result = SessionPayloadSchema.safeParse({
+      project_id: "proj-1",
+      github_host: "github.com",
+      github_repo_id: 123,
+      github_login: "alice",
+      github_user_id: 42,
+      permission: "write",
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      issued_at: Math.floor(Date.now() / 1000),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("PAT /exchange with jkt mints a session JWT whose payload has cnf.jkt", async () => {
+    const app = createApp();
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_test",
+          jkt: VALID_JKT_T4,
+        }),
+      },
+      testEnv,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { session_token: string };
+    const parts = body.session_token.split(".");
+    expect(parts).toHaveLength(4);
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const jwtPayload = JSON.parse(payloadStr) as { cnf?: { jkt?: string } };
+    expect(jwtPayload.cnf?.jkt).toBe(VALID_JKT_T4);
+  });
+
+  it("PAT /exchange without jkt mints a session JWT with no cnf claim", async () => {
+    const app = createApp();
+    const res = await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_test",
+        }),
+      },
+      testEnv,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { session_token: string };
+    const parts = body.session_token.split(".");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const jwtPayload = JSON.parse(payloadStr) as { cnf?: { jkt?: string } };
+    expect(jwtPayload.cnf).toBeUndefined();
+  });
+
+  it("two PAT exchanges with same token but different jkt use distinct idempotency keys", async () => {
+    const app = createApp();
+    const jktA = "A".repeat(43);
+    const jktB = "B".repeat(43);
+
+    await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_same",
+          jkt: jktA,
+        }),
+      },
+      testEnv,
+    );
+    await app.request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_same",
+          jkt: jktB,
+        }),
+      },
+      testEnv,
+    );
+
+    expect(mockIdempotencyStore).toHaveBeenCalledTimes(2);
+    const firstKey = (mockIdempotencyStore.mock.calls[0] as [string])[0];
+    const secondKey = (mockIdempotencyStore.mock.calls[1] as [string])[0];
+    expect(firstKey).not.toBe(secondKey);
+  });
+
+  it("OIDC exchange ignores jkt — session JWT has no cnf claim", async () => {
+    const envWithOidc = {
+      ...testEnv,
+      GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
+    } as unknown as Env;
+
+    mockVerifyOidcToken.mockResolvedValue({
+      iss: "https://token.actions.githubusercontent.com",
+      aud: "https://tila.example.com",
+      sub: "repo:test-org/test-repo:ref:refs/heads/main",
+      exp: Math.floor(Date.now() / 1000) + 600,
+      iat: Math.floor(Date.now() / 1000),
+      nbf: Math.floor(Date.now() / 1000),
+      jti: "unique-jti-cnf-test-t4",
+      repository: "test-org/test-repo",
+      repository_id: 99999,
+      repository_owner: "test-org",
+      repository_owner_id: 12345,
+      actor: "actions-bot",
+      actor_id: 7777,
+      ref: "refs/heads/main",
+      sha: "abc123",
+      workflow: "CI",
+      run_id: 333,
+      run_number: 8,
+      run_attempt: 1,
+      environment: "production",
+      event_name: "push",
+      repository_visibility: "private",
+      job_workflow_ref:
+        "test-org/test-repo/.github/workflows/ci.yml@refs/heads/main",
+    });
+    mockIsRegistered.mockResolvedValue({
+      ...MOCK_REPO,
+      oidc_permission: "read",
+    });
+
+    const app = createApp();
+    const res = await app.request(
+      "/api/auth/github/exchange-oidc",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        }),
+      },
+      envWithOidc,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { session_token: string };
+    const parts = body.session_token.split(".");
+    const payloadStr = atob(parts[2].replace(/-/g, "+").replace(/_/g, "/"));
+    const jwtPayload = JSON.parse(payloadStr) as { cnf?: unknown };
+    expect(jwtPayload.cnf).toBeUndefined();
+  });
+});

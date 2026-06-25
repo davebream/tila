@@ -223,6 +223,12 @@ async function mintAndStoreSession(opts: {
    * propagates as a 5xx (better than minting an unbound token).
    */
   instanceId: string;
+  /**
+   * Optional DPoP JWK thumbprint (WI-G). When supplied, the minted JWT
+   * carries a `cnf: { jkt }` claim, sender-constraining the session.
+   * OIDC-minted sessions must NOT pass this — CI runners have no key holder.
+   */
+  jkt?: string;
 }): Promise<{ responseBody: Record<string, unknown> }> {
   const {
     projectId,
@@ -233,6 +239,7 @@ async function mintAndStoreSession(opts: {
     idempotencyStore,
     idempotencyKey,
     instanceId,
+    jkt,
   } = opts;
 
   const now = nowSeconds();
@@ -245,7 +252,7 @@ async function mintAndStoreSession(opts: {
   // available in the Workers runtime and is cryptographically random.
   const jti = crypto.randomUUID();
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     project_id: projectId,
     github_host: matchedRepo.github_host,
     github_repo_id: matchedRepo.github_repo_id,
@@ -259,6 +266,12 @@ async function mintAndStoreSession(opts: {
     // Phase 3 (middleware/auth.ts) reads this claim to reject cross-deployment tokens.
     instance_id: instanceId,
   };
+
+  // DPoP sender-constraint (WI-G): only set cnf when jkt was supplied by an
+  // in-scope flow (PAT or App). OIDC callers never pass jkt (no key holder).
+  if (jkt) {
+    payload.cnf = { jkt };
+  }
 
   const sessionToken = await mintSessionToken(payload, hmacKey);
 
@@ -301,10 +314,10 @@ async function handleAppExchange(
     req: { raw: { headers: { get: (key: string) => string | null } } };
     json: (data: unknown, status: number) => Response;
   },
-  data: { project_id: string; user_token: string },
+  data: { project_id: string; user_token: string; jkt?: string },
   ip: string | null,
 ): Promise<Response> {
-  const { project_id, user_token } = data;
+  const { project_id, user_token, jkt } = data;
 
   // Check App configuration
   if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
@@ -338,9 +351,11 @@ async function handleAppExchange(
     );
   }
 
-  // Idempotency check (keyed by project_id + sha256 of user token)
+  // Idempotency check (keyed by project_id + sha256 of user token + jkt suffix).
+  // The jkt suffix ensures a re-exchange with a new key after `auth recover` does
+  // NOT hit the stale idempotency entry bound to the old key (WI-G C2).
   const tokenHash = await hashToken(user_token, c.env.HASH_PEPPER);
-  const idempotencyKey = `exchange:${project_id}:${tokenHash}`;
+  const idempotencyKey = `exchange:${project_id}:${tokenHash}:${jkt ?? "nojkt"}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedBody = await checkIdempotentExchange(
@@ -480,6 +495,7 @@ async function handleAppExchange(
     idempotencyStore,
     idempotencyKey,
     instanceId,
+    jkt, // DPoP sender-constraint (WI-G): thread from handleAppExchange caller
   });
 
   return c.json(responseBody, 200);
@@ -548,7 +564,7 @@ authGithub.post("/exchange", async (c) => {
     );
   }
 
-  const { project_id, github_token } = parsed.data;
+  const { project_id, github_token, jkt } = parsed.data;
 
   // Check HMAC key is configured
   if (!c.env.GITHUB_SESSION_HMAC_KEY) {
@@ -566,12 +582,14 @@ authGithub.post("/exchange", async (c) => {
     );
   }
 
-  // Idempotency check (keyed by project_id + sha256 of github token)
+  // Idempotency check (keyed by project_id + sha256 of github token + jkt suffix).
   // The hash ensures the raw token is never stored in D1.
   // SEC-1: pepper for consistency with the App-path idempotency key (:276).
   // This is an idempotency-cache key, not a stored credential — no validate() pairs it.
+  // The jkt suffix ensures re-exchange with a new key after `auth recover` does NOT
+  // hit the stale idempotency entry bound to the old key (WI-G C2).
   const tokenHash = await hashToken(github_token, c.env.HASH_PEPPER);
-  const idempotencyKey = `exchange:${project_id}:${tokenHash}`;
+  const idempotencyKey = `exchange:${project_id}:${tokenHash}:${jkt ?? "nojkt"}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedBody = await checkIdempotentExchange(
@@ -666,6 +684,7 @@ authGithub.post("/exchange", async (c) => {
     idempotencyStore,
     idempotencyKey,
     instanceId,
+    jkt, // DPoP sender-constraint (WI-G): thread the client jkt from the PAT /exchange body
   });
 
   return c.json(responseBody, 200);
