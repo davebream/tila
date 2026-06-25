@@ -26,7 +26,7 @@ import type { InstanceMetadata } from "../../lib/instance-context";
 
 // Mock buildAuthStore and resolveInstanceContext so no real keychain is touched.
 // toInstanceMetadata is re-implemented here to match the real projection (strips credential).
-const mockBuildAuthStore = vi.fn<[], AuthStore>();
+const mockBuildAuthStore = vi.fn<() => AuthStore>();
 const mockResolveInstanceContext = vi.fn();
 
 vi.mock("../../lib/instance-context", () => ({
@@ -188,15 +188,15 @@ const loadAuth = async () => {
 // helpers to collect all stdout / stderr output
 function allStdout(): string {
   return [
-    ...stdoutWriteSpy.mock.calls.map((c) => String(c[0])),
-    ...consoleLogSpy.mock.calls.map((c) => String(c[0])),
+    ...stdoutWriteSpy.mock.calls.map((c: unknown[]) => String(c[0])),
+    ...consoleLogSpy.mock.calls.map((c: unknown[]) => String(c[0])),
   ].join("");
 }
 
 function allStderr(): string {
   return [
-    ...stderrWriteSpy.mock.calls.map((c) => String(c[0])),
-    ...consoleErrorSpy.mock.calls.map((c) => String(c[0])),
+    ...stderrWriteSpy.mock.calls.map((c: unknown[]) => String(c[0])),
+    ...consoleErrorSpy.mock.calls.map((c: unknown[]) => String(c[0])),
   ].join("");
 }
 
