@@ -21,20 +21,40 @@
  *   co-located unit tests (packages/worker/src/middleware/auth.test.ts). The cache
  *   branch tested here is the production hot path.
  *
- * Skip-gated (WI-C, #126):
- *   - Subject-level bulk kill-switch / principal-level revocation.
+ * Subject-level bulk kill-switch (WI-C, #126):
+ *   - Driven through the worker's REAL per-isolate subject cache via the
+ *     re-exported revokeSubjectInCache() — the production hot path (cache hit,
+ *     no D1). The D1-query branch + fail-closed behavior are covered by the
+ *     worker's co-located unit tests (see the cross-package mock limitation above).
  */
 import {
   _resetMiddlewareStateForTest,
   authFixtures,
   createAuthTestApp,
-  featurePending,
   makeAuthEnv,
   revokeJtiInCache,
+  revokeSubjectInCache,
 } from "@tila/worker/test-support";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const env = makeAuthEnv();
+// Minimal empty-read D1 stub. auth-revocation.test.ts uses the REAL backend-d1
+// stores (no @tila/backend-d1 vi.mock — see header). The WI-C subject gate, unlike
+// the jti gate, ALWAYS queries D1 on a subject-cache miss, so the env's DB must be
+// able to serve a read that returns "no tombstone" (empty result → getRevokedBefore
+// returns null → request proceeds). Returns empty for every query; tombstone-present
+// cases in this file are driven through the in-isolate cache via revokeSubjectInCache.
+const emptyD1 = {
+  prepare: () => ({
+    bind: () => ({
+      all: async () => ({ results: [], success: true, meta: {} }),
+      first: async () => null,
+      run: async () => ({ success: true, meta: {} }),
+      raw: async () => [],
+    }),
+  }),
+} as unknown as D1Database;
+
+const env = makeAuthEnv({ DB: emptyD1 });
 
 beforeEach(() => {
   // Clear the per-isolate jti revocation cache between tests so the positive
@@ -107,36 +127,49 @@ describe("token hash equality", () => {
 });
 
 // ---------------------------------------------------------------------------
-// FEATURE-PENDING(WI-C, #126): subject-level bulk kill-switch / principal revocation
+// WI-C (#126): subject-level bulk kill-switch — subject-revoked (auth.ts gate)
+// Driven through the worker's REAL per-isolate subject cache (production hot
+// path). Fixture defaults: project_id "proj-1", github_host "github.com",
+// github_user_id 12345, issued_at ~now.
 // ---------------------------------------------------------------------------
 
-const fp = featurePending(
-  "WI-C",
-  126,
-  "bulk kill-switch / subject-level revocation",
-);
+describe("subject-level bulk revocation — subject-revoked", () => {
+  it("rejects a session token whose principal was revoked with a future cutoff (401 subject-revoked)", async () => {
+    // Arm the in-isolate tombstone for the default principal with a cutoff in the
+    // future, so a token issued now is strictly before it and must be rejected.
+    revokeSubjectInCache("proj-1", "github.com", 12345, Date.now() + 3_600_000);
 
-fp.describe("subject-level bulk revocation", () => {
-  fp.it(
-    "revoking a principal rejects all its in-flight tokens within 60s",
-    async () => {
-      // shape TBD — owned by WI-C. When WI-C lands:
-      //   1. Mint a session token for a principal.
-      //   2. Call the kill-switch endpoint to revoke all tokens for that principal.
-      //   3. Assert the token is rejected 401 (session-revoked or the new code).
-      //   4. Assert a fresh session for a different principal still works.
-      const _token = await authFixtures.mintSessionToken({
-        github_login: "victim-user",
-      });
-      throw new Error("shape TBD — owned by WI-C");
-    },
-  );
+    const app = createAuthTestApp(env);
+    const token = await authFixtures.mintSessionToken();
+    const res = await app.fetch(
+      new Request("http://localhost/auth/session/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+      execCtx,
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.ok).toBe(false);
+    // Exact lowercase-kebab code from source — coordinate with WI-Q.
+    expect(body.error.code).toBe("subject-revoked");
+  });
 
-  fp.it(
-    "subject-level revocation propagates across isolates within TTL",
-    async () => {
-      // shape TBD — owned by WI-C.
-      throw new Error("shape TBD — owned by WI-C");
-    },
-  );
+  it("allows a token issued at/after the cutoff (strict <, positive counterpart)", async () => {
+    // Same principal, but the tombstone cutoff is in the past, so a token issued
+    // now is NOT before it — the kill-switch must not fire (guards against a
+    // blanket-reject bug). Cache hit → no D1 needed.
+    revokeSubjectInCache("proj-1", "github.com", 12345, Date.now() - 3_600_000);
+
+    const app = createAuthTestApp(env);
+    const token = await authFixtures.mintSessionToken();
+    const res = await app.fetch(
+      new Request("http://localhost/auth/session/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+      execCtx,
+    );
+    expect(res.status).toBe(200);
+  });
 });

@@ -138,21 +138,61 @@ export const deploymentMeta = sqliteTable("_deployment_meta", {
 // Soft-delete model: revoke sets revoked_at rather than deleting rows,
 // preserving the audit trail. Partial unique index scopes uniqueness to
 // active (non-revoked) grants only, allowing re-grant after revoke.
+//
+// WI-C (epic #122): canonical principal identity columns added.
+// identity_host / subject_id are the authoritative identity for all reads
+// and writes; legacy github_host / github_user_id are retained (NOT NULL)
+// for backward compatibility and audit. New rows must populate both.
 export const adminGrants = sqliteTable(
   "_admin_grants",
   {
     project_id: text("project_id").notNull(),
-    github_host: text("github_host").notNull().default("github.com"),
-    github_user_id: integer("github_user_id").notNull(),
+    github_host: text("github_host").notNull().default("github.com"), // legacy; retained NOT NULL
+    github_user_id: integer("github_user_id").notNull(), // legacy; retained NOT NULL
     github_login_snapshot: text("github_login_snapshot"), // display/audit only, never identity
     granted_by_user_id: integer("granted_by_user_id"), // NULL only for infra-owner-seeded rows
     granted_at: integer("granted_at").notNull(), // Unix seconds (not ms); cf. _revoked_jti which uses ms
     revoked_at: integer("revoked_at"), // Unix seconds (not ms); cf. _revoked_jti which uses ms
     revoked_by_user_id: integer("revoked_by_user_id"),
+    // Canonical principal identity (WI-C). Populated via canonicalizePrincipal().
+    // subject_id NOT NULL DEFAULT '' mirrors migration 0018 to avoid NULL-distinct
+    // partial-index loophole (every NULL is DISTINCT in a UNIQUE index).
+    identity_host: text("identity_host").notNull().default("github.com"),
+    subject_id: text("subject_id").notNull().default(""),
   },
   (table) => [
-    uniqueIndex("idx_admin_grants_active")
-      .on(table.project_id, table.github_host, table.github_user_id)
+    // idx_admin_grants_active_subject replaced idx_admin_grants_active (migration 0018).
+    // Keyed on canonical columns (not legacy github_*) so canonicalizePrincipal()
+    // parity is enforced at the index level.
+    uniqueIndex("idx_admin_grants_active_subject")
+      .on(table.project_id, table.identity_host, table.subject_id)
       .where(sql`${table.revoked_at} is null`),
+  ],
+);
+
+// --- _revoked_subjects ---
+// Bulk-revocation tombstones for subject-level principal kill-switch (WI-C, epic #122).
+// One row per (project_id, identity_host, subject_id). The unique index backs the
+// upsert-MAX in D1RevokedSubjectsStore.revokeSubject — revoked_before can only
+// move forward, so re-arming never un-revokes already-covered sessions.
+//
+// IMPORTANT: rows must be written via D1RevokedSubjectsStore (which calls
+// canonicalizePrincipal internally). Direct D1 inserts must be pre-canonicalized:
+//   identity_host = lower(trim(host)),  subject_id = trim(cast(subject as text)).
+// A non-canonical row (e.g. 'GitHub.com') will silently never match at verify time.
+export const revokedSubjects = sqliteTable(
+  "_revoked_subjects",
+  {
+    project_id: text("project_id").notNull(),
+    identity_host: text("identity_host").notNull().default("github.com"),
+    subject_id: text("subject_id").notNull(),
+    revoked_before: integer("revoked_before").notNull(), // Unix ms (EpochMillis); never seconds
+  },
+  (table) => [
+    uniqueIndex("idx_revoked_subjects_principal").on(
+      table.project_id,
+      table.identity_host,
+      table.subject_id,
+    ),
   ],
 );

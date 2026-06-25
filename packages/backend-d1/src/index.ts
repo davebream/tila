@@ -1,3 +1,7 @@
+export {
+  canonicalizePrincipal,
+  type CanonicalPrincipal,
+} from "./principal";
 export { D1TokenStore, type TokenResult, type TokenRow } from "./token-store";
 export {
   D1IdempotencyStore,
@@ -18,6 +22,7 @@ export {
   type GitHubAppConfigRow,
 } from "./github-app-config";
 export { D1RevokedJtiStore } from "./revoked-jti-store";
+export { D1RevokedSubjectsStore } from "./revoked-subjects-store";
 export {
   AdminGrantsStore,
   type AdminGrantRow,

@@ -11,10 +11,12 @@ const CREATE_ADMIN_GRANTS = `
     granted_by_user_id    INTEGER,
     granted_at            INTEGER NOT NULL,
     revoked_at            INTEGER,
-    revoked_by_user_id    INTEGER
+    revoked_by_user_id    INTEGER,
+    identity_host         TEXT    NOT NULL DEFAULT 'github.com',
+    subject_id            TEXT    NOT NULL DEFAULT ''
   );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_grants_active
-    ON _admin_grants (project_id, github_host, github_user_id)
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_grants_active_subject
+    ON _admin_grants (project_id, identity_host, subject_id)
     WHERE revoked_at IS NULL;
 `;
 
@@ -213,6 +215,83 @@ describe("AdminGrantsStore", () => {
         .get() as { cnt: number };
 
       expect(after.cnt).toBe(before.cnt);
+    });
+  });
+
+  describe("canonical columns — host case-insensitivity", () => {
+    it("grant with 'github.com', isActiveAdmin with 'GitHub.com' → true (canonicalized internally)", async () => {
+      const { store } = createTestStore();
+      await store.grant({ ...BASE_PARAMS, githubHost: "github.com" });
+
+      // isActiveAdmin must canonicalize the host internally
+      const isAdmin = await store.isActiveAdmin("proj-1", "GitHub.com", 42);
+      expect(isAdmin).toBe(true);
+    });
+
+    it("grant with mixed-case host 'GitHub.Com', isActiveAdmin with 'github.com' → true", async () => {
+      const { store } = createTestStore();
+      await store.grant({ ...BASE_PARAMS, githubHost: "GitHub.Com" });
+
+      const isAdmin = await store.isActiveAdmin("proj-1", "github.com", 42);
+      expect(isAdmin).toBe(true);
+    });
+  });
+
+  describe("canonical columns — both canonical + legacy written", () => {
+    it("grant writes identity_host (lower) + subject_id (string) AND legacy github_host + github_user_id", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.grant({
+        ...BASE_PARAMS,
+        githubHost: "GitHub.Com",
+        githubUserId: 42,
+      });
+
+      const row = sqlite
+        .prepare("SELECT * FROM _admin_grants WHERE project_id = ?")
+        .get("proj-1") as Record<string, unknown>;
+
+      // Canonical columns must be lowercase / stringified
+      expect(row.identity_host).toBe("github.com");
+      expect(row.subject_id).toBe("42");
+
+      // Legacy columns must still be populated
+      expect(row.github_host).toBe("GitHub.Com");
+      expect(row.github_user_id).toBe(42);
+    });
+  });
+
+  describe("re-grant after revoke uses canonical columns", () => {
+    it("revoke with mixed-case host, re-grant works and yields single active row", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.grant(BASE_PARAMS);
+
+      // Revoke with mixed-case host (revoke must canonicalize)
+      await store.revoke("proj-1", "GITHUB.COM", 42);
+
+      // Verify revoked
+      const isAdminAfterRevoke = await store.isActiveAdmin(
+        "proj-1",
+        "github.com",
+        42,
+      );
+      expect(isAdminAfterRevoke).toBe(false);
+
+      // Re-grant
+      await store.grant(BASE_PARAMS);
+
+      const isAdminAfterRegrant = await store.isActiveAdmin(
+        "proj-1",
+        "github.com",
+        42,
+      );
+      expect(isAdminAfterRegrant).toBe(true);
+
+      const activeCount = sqlite
+        .prepare(
+          "SELECT COUNT(*) as cnt FROM _admin_grants WHERE project_id = ? AND revoked_at IS NULL",
+        )
+        .get("proj-1") as { cnt: number };
+      expect(activeCount.cnt).toBe(1);
     });
   });
 });

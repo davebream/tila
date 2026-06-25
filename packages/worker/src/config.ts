@@ -186,6 +186,23 @@ export const JTI_REVCHECK_TTL_MS = 60_000; // 60 seconds
  */
 export const JTI_REV_CACHE_MAX_SIZE = 2000;
 
+/**
+ * TTL for the per-isolate subject revocation status cache (C7/C9).
+ * Revocation is effective within at most this duration across isolates.
+ * The revoking isolate invalidates its own cache entry immediately.
+ *
+ * Security posture: fail-closed (D1 lookup error → deny); bounded ≤TTL
+ * staleness across isolates (not instant cross-isolate propagation).
+ */
+export const SUBJECT_REVCHECK_TTL_MS = 60_000; // 60 seconds
+
+/**
+ * Maximum number of subject revocation entries in the per-isolate cache (C7/C9).
+ * Consistent with JTI_REV_CACHE_MAX_SIZE — all per-isolate maps are capped
+ * to prevent unbounded memory growth. Oldest entry is evicted on overflow.
+ */
+export const SUBJECT_REV_CACHE_MAX_SIZE = 2000;
+
 /** TTL for the per-isolate admin-grants roster cache (≤10s per OR-2; fail-closed). */
 export const ADMIN_GRANTS_CACHE_TTL_MS = 10_000; // 10 seconds
 

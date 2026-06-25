@@ -22,6 +22,32 @@ export const TEST_HMAC_KEY = btoa("test-hmac-key-this-is-32-bytes!!")
   .replace(/=+$/, "");
 
 /**
+ * Minimal empty-read D1 stub. Returns empty results for every query (drizzle
+ * `.all()` → no rows, `.first()` → null). Needed because a per-package
+ * vi.mock("@tila/backend-d1") does NOT reliably intercept the worker's OWN
+ * internal store construction (cross-package module-graph limitation — see
+ * auth-revocation.test.ts header). The WI-C subject-revocation gate constructs
+ * `new D1RevokedSubjectsStore(c.env.DB)` for EVERY session token and calls
+ * getRevokedBefore; against a bare `{}` that throws → fail-closed 401. An
+ * empty-read stub lets the real store return "no tombstone" (null) so valid
+ * tokens proceed. Tombstone-present cases are driven via the in-isolate cache
+ * (revokeSubjectInCache); the fail-closed-on-throw branch is covered by the
+ * worker's co-located unit tests.
+ */
+export function emptyReadD1(): D1Database {
+  return {
+    prepare: () => ({
+      bind: () => ({
+        all: async () => ({ results: [], success: true, meta: {} }),
+        first: async () => null,
+        run: async () => ({ success: true, meta: {} }),
+        raw: async () => [],
+      }),
+    }),
+  } as unknown as D1Database;
+}
+
+/**
  * Build a minimal, structurally valid Env for auth test apps.
  *
  * @param overrides — shallow-merged onto the base Env shape; pass to
@@ -32,7 +58,7 @@ export const TEST_HMAC_KEY = btoa("test-hmac-key-this-is-32-bytes!!")
  */
 export function makeAuthEnv(overrides: Partial<Env> = {}): Env {
   return {
-    DB: {} as D1Database,
+    DB: emptyReadD1(),
     PROJECT: {
       idFromName: vi.fn().mockReturnValue({
         toString: () => "stub-do-id",

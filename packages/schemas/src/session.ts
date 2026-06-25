@@ -11,7 +11,13 @@ export const SessionPayloadSchema = z.object({
   github_user_id: z.number().int(),
   permission: SessionPermissionSchema,
   expires_at: z.number().int(),
-  issued_at: z.number().int(),
+  // Lower bound (~year 2001 in Unix seconds) is defense-in-depth against a
+  // wrong-unit mint bug: a future mint that passed Date.now() (ms) instead of
+  // nowSeconds() would otherwise produce an issued_at ~1000x too large, making
+  // the token look issued far in the future and silently bypassing the
+  // subject-revocation kill-switch comparison (WI-C). Anything below ~1e9 is a
+  // clear seconds-vs-ms mistake; fail the schema parse instead of failing open.
+  issued_at: z.number().int().min(1_000_000_000),
   iss: z.string().optional(),
   aud: z.union([z.string(), z.array(z.string())]).optional(),
   /**

@@ -35,6 +35,17 @@ export const mockRevokedJtiIsRevoked: Mock = vi.fn().mockResolvedValue(false);
 /** D1RevokedJtiStore.revoke */
 export const mockRevokedJtiRevoke: Mock = vi.fn().mockResolvedValue(undefined);
 
+/** D1RevokedSubjectsStore.getRevokedBefore — return a number (ms) to simulate a
+ *  subject tombstone, or null for no tombstone (default). */
+export const mockRevokedSubjectsGetRevokedBefore: Mock = vi
+  .fn()
+  .mockResolvedValue(null);
+
+/** D1RevokedSubjectsStore.revokeSubject */
+export const mockRevokedSubjectsRevokeSubject: Mock = vi
+  .fn()
+  .mockResolvedValue(undefined);
+
 /** D1TokenStore.validate — return a TokenResult or null */
 export const mockTokenValidate: Mock = vi.fn().mockResolvedValue(null);
 
@@ -103,6 +114,28 @@ export function backendD1MockFactory(): Record<string, unknown> {
         revoke = mockRevokedJtiRevoke;
       } as unknown as () => unknown,
     ),
+    D1RevokedSubjectsStore: vi.fn().mockImplementation(
+      class {
+        getRevokedBefore = mockRevokedSubjectsGetRevokedBefore;
+        revokeSubject = mockRevokedSubjectsRevokeSubject;
+      } as unknown as () => unknown,
+    ),
+    // Real (pure) canonicalization — the verify path uses it to build the cache
+    // key; mocking it would defeat parity. Kept byte-identical to
+    // backend-d1/src/principal.ts.
+    canonicalizePrincipal: (
+      host: string | null | undefined,
+      subject: string | number,
+    ) => {
+      const identityHost = (host ?? "github.com").trim().toLowerCase();
+      const subjectId = String(subject).trim();
+      if (subjectId === "") {
+        throw new Error(
+          "canonicalizePrincipal: empty subject after canonicalization",
+        );
+      }
+      return { identityHost, subjectId };
+    },
     D1TokenStore: vi.fn().mockImplementation(
       class {
         validate = mockTokenValidate;
@@ -161,6 +194,8 @@ export function resetBackendD1Mocks(): void {
   // to set return value from outside this module.
   mockRevokedJtiIsRevoked.mockReset().mockResolvedValue(false);
   mockRevokedJtiRevoke.mockReset().mockResolvedValue(undefined);
+  mockRevokedSubjectsGetRevokedBefore.mockReset().mockResolvedValue(null);
+  mockRevokedSubjectsRevokeSubject.mockReset().mockResolvedValue(undefined);
   mockTokenValidate.mockReset().mockResolvedValue(null);
   mockTokenUpdateLastUsedAt.mockReset().mockResolvedValue(undefined);
   mockRateLimitCheck.mockReset().mockResolvedValue(false);
