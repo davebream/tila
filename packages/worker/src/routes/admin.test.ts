@@ -14,6 +14,10 @@ const listAllIncludingArchivedMock = vi.fn();
 const mockRevokedJtiRevoke = vi.fn().mockResolvedValue(undefined);
 const mockRevokePrincipalBatch = vi.fn();
 const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
+// WI-I: the offboard handler routes through the shared exchange:${ip} rate-limit
+// guard (checkExchangeRateLimit constructs D1RateLimitStore), so the mock must
+// provide it. Default check=false → existing tests are unaffected.
+const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 vi.mock("@tila/backend-d1", () => ({
   D1ProjectRegistry: vi.fn().mockImplementation(
     class {
@@ -24,6 +28,12 @@ vi.mock("@tila/backend-d1", () => ({
     class {
       revoke = mockRevokedJtiRevoke;
       isRevoked = vi.fn().mockResolvedValue(false);
+    } as unknown as () => unknown,
+  ),
+  D1RateLimitStore: vi.fn().mockImplementation(
+    class {
+      check = mockRateLimitCheck;
+      recordFailure = vi.fn().mockResolvedValue(undefined);
     } as unknown as () => unknown,
   ),
   D1SessionStore: vi.fn().mockImplementation(
@@ -1303,6 +1313,9 @@ describe("project admin routes", () => {
   describe("POST /admin/principals/:id/revoke (WI-D offboard)", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      // clearAllMocks keeps implementations — reset the shared rate-limit check
+      // so a prior 429 test's `true` cannot leak into the clean offboard tests.
+      mockRateLimitCheck.mockResolvedValue(false);
       mockDeleteByTokenHash.mockResolvedValue({ deleted: 0 });
       mockRevokePrincipalBatch.mockResolvedValue({
         grantsRevoked: true,
@@ -1327,6 +1340,26 @@ describe("project admin routes", () => {
         mockEnv as Env,
       );
     }
+
+    it("WI-I: returns 429 when the shared exchange:${ip} counter is over the limit (no offboard)", async () => {
+      mockRateLimitCheck.mockResolvedValue(true);
+      const app = createApp("full", "d1-token");
+      const res = await app.request(
+        "/admin/principals/12345/revoke",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "CF-Connecting-IP": "1.2.3.4",
+          },
+        },
+        mockEnv as Env,
+      );
+
+      expect(res.status).toBe(429);
+      // Guard runs before the offboard batch; nothing is revoked.
+      expect(mockRevokePrincipalBatch).not.toHaveBeenCalled();
+    });
 
     it("offboards an active-admin principal: arms batch, primes caches, 200", async () => {
       const res = await offboard("12345");

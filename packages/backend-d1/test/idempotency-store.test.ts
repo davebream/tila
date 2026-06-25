@@ -134,4 +134,105 @@ describe("D1IdempotencyStore", () => {
     expect(result).not.toBeNull();
     expect(result?.requestHash).toBeNull();
   });
+
+  describe("reserve/finalize/release", () => {
+    const STALE_MS = 30_000;
+
+    it("reserve returns acquired on a fresh key", async () => {
+      const { store } = createTestStore();
+      const r = await store.reserve("k1", "proj-1", 1000, STALE_MS);
+      expect(r).toEqual({ state: "acquired" });
+      // A placeholder row exists with status_code 0
+      const row = await store.check("k1", "proj-1");
+      expect(row?.statusCode).toBe(0);
+    });
+
+    it("reserve returns in-flight while a fresh placeholder is held", async () => {
+      const { store } = createTestStore();
+      const first = await store.reserve("k1", "proj-1", 1000, STALE_MS);
+      expect(first).toEqual({ state: "acquired" });
+      // Second reserve within the stale window — placeholder is still fresh.
+      const second = await store.reserve("k1", "proj-1", 1500, STALE_MS);
+      expect(second).toEqual({ state: "in-flight" });
+    });
+
+    it("reserve returns finalized with the stored body after finalize", async () => {
+      const { store } = createTestStore();
+      await store.reserve("k1", "proj-1", 1000, STALE_MS);
+      const ok = await store.finalize(
+        "k1",
+        "proj-1",
+        200,
+        JSON.stringify({ ok: true }),
+      );
+      expect(ok).toBe(true);
+      const r = await store.reserve("k1", "proj-1", 2000, STALE_MS);
+      expect(r).toEqual({
+        state: "finalized",
+        statusCode: 200,
+        body: JSON.stringify({ ok: true }),
+      });
+      // check() also reflects the finalized row
+      const row = await store.check("k1", "proj-1");
+      expect(row?.statusCode).toBe(200);
+      expect(JSON.parse(row?.body ?? "{}")).toEqual({ ok: true });
+    });
+
+    it("reserve steals a placeholder older than staleMs (acquired)", async () => {
+      const { store } = createTestStore();
+      await store.reserve("k1", "proj-1", 1000, STALE_MS);
+      // now is well past the stale window relative to the placeholder created_at.
+      const stolen = await store.reserve(
+        "k1",
+        "proj-1",
+        1000 + STALE_MS + 1,
+        STALE_MS,
+      );
+      expect(stolen).toEqual({ state: "acquired" });
+    });
+
+    it("finalize returns false when no status_code=0 row exists", async () => {
+      const { store } = createTestStore();
+      // No reservation at all.
+      const noRow = await store.finalize("missing", "proj-1", 200, "{}");
+      expect(noRow).toBe(false);
+
+      // Already finalized: second finalize must not overwrite and returns false.
+      await store.reserve("k2", "proj-1", 1000, STALE_MS);
+      await store.finalize(
+        "k2",
+        "proj-1",
+        200,
+        JSON.stringify({ first: true }),
+      );
+      const again = await store.finalize(
+        "k2",
+        "proj-1",
+        500,
+        JSON.stringify({ second: true }),
+      );
+      expect(again).toBe(false);
+      const row = await store.check("k2", "proj-1");
+      expect(row?.statusCode).toBe(200);
+      expect(JSON.parse(row?.body ?? "{}")).toEqual({ first: true });
+    });
+
+    it("release removes a placeholder but never a finalized row", async () => {
+      const { store } = createTestStore();
+      // Placeholder is removed.
+      await store.reserve("k1", "proj-1", 1000, STALE_MS);
+      await store.release("k1");
+      expect(await store.check("k1", "proj-1")).toBeNull();
+      // After release a fresh reserve acquires again.
+      const r = await store.reserve("k1", "proj-1", 2000, STALE_MS);
+      expect(r).toEqual({ state: "acquired" });
+
+      // Finalized row is NOT removed by release.
+      await store.reserve("k2", "proj-1", 1000, STALE_MS);
+      await store.finalize("k2", "proj-1", 200, JSON.stringify({ ok: true }));
+      await store.release("k2");
+      const row = await store.check("k2", "proj-1");
+      expect(row?.statusCode).toBe(200);
+    });
+  });
 });

@@ -19,6 +19,7 @@ import { z } from "zod";
 import {
   RATE_LIMIT_MAX_FAILURES,
   RATE_LIMIT_WINDOW_MS,
+  RESERVATION_STALE_MS,
   SESSION_TTL_SECONDS,
   SESSION_TTL_SECONDS_BY_TIER,
 } from "../config";
@@ -186,6 +187,9 @@ export async function checkIdempotentExchange(
   const cached = await store.check(key, projectId);
   // If no cached entry, return null immediately
   if (!cached) return null;
+  // A status_code=0 row is an in-flight reservation placeholder (WI-I), not a
+  // usable cache hit. Skip it explicitly — do NOT rely on JSON.parse('') throwing.
+  if (cached.statusCode === 0) return null;
 
   try {
     const cachedBody = JSON.parse(cached.body) as { expires_at?: number };
@@ -195,8 +199,13 @@ export async function checkIdempotentExchange(
     ) {
       return cachedBody;
     }
-    // Stale: delete and re-exchange
-    await db.prepare("DELETE FROM _idempotency WHERE key = ?").bind(key).run();
+    // Stale FINALIZED row: delete and re-exchange. Guard status_code != 0 so a
+    // concurrently-reserved placeholder is never deleted out from under its
+    // holder (that would reopen the double-mint WI-I closes).
+    await db
+      .prepare("DELETE FROM _idempotency WHERE key = ? AND status_code != 0")
+      .bind(key)
+      .run();
   } catch {
     // Malformed cache entry -- proceed with fresh exchange
   }
@@ -204,17 +213,17 @@ export async function checkIdempotentExchange(
 }
 
 /**
- * Shared tail for exchange flows: normalize permission, mint session token,
- * store idempotency record, and return the response body.
+ * Shared tail for exchange flows: normalize permission, mint the session token,
+ * and return the response body. Mint ONLY — the idempotency record is owned by
+ * the caller's reservation flow (reserve → mintSession → finalize/release, WI-I),
+ * so this function performs no idempotency write.
  */
-async function mintAndStoreSession(opts: {
+async function mintSession(opts: {
   projectId: string;
   matchedRepo: { github_host: string; github_repo_id: number };
   githubUser: { login: string; id: number };
   userPermission: string;
   hmacKey: string;
-  idempotencyStore: D1IdempotencyStore;
-  idempotencyKey: string;
   /**
    * Stable deployment instance id — resolved at the call site via
    * `ensureDeploymentInstanceId(env.DB)` before calling this function.
@@ -236,8 +245,6 @@ async function mintAndStoreSession(opts: {
     githubUser,
     userPermission,
     hmacKey,
-    idempotencyStore,
-    idempotencyKey,
     instanceId,
     jkt,
   } = opts;
@@ -295,18 +302,55 @@ async function mintAndStoreSession(opts: {
     instance_id: instanceId,
   };
 
-  try {
-    await idempotencyStore.store(
-      idempotencyKey,
-      projectId,
-      200,
-      JSON.stringify(responseBody),
-    );
-  } catch {
-    // Non-fatal -- response is still valid
-  }
-
   return { responseBody };
+}
+
+/**
+ * Shared reservation-flow helper (WI-I). Wraps the GitHub/JWKS round-trip + mint
+ * in an atomic claim so concurrent identical exchanges cannot double-mint.
+ *
+ * - Returns a Response to send when the key is already finalized (200 replay) or
+ *   in-flight (409 retryable) — the caller returns it directly.
+ * - Returns `null` when the reservation was acquired; the caller then runs its
+ *   exchange logic inside a try/finally, calling `finalizeExchangeReservation`
+ *   on success and `releaseExchangeReservation` on every other path.
+ */
+async function acquireExchangeReservation(
+  c: { json: (data: unknown, status: number) => Response },
+  store: D1IdempotencyStore,
+  key: string,
+  projectId: string,
+): Promise<Response | null> {
+  const reservation = await store.reserve(
+    key,
+    projectId,
+    nowMs(),
+    RESERVATION_STALE_MS,
+  );
+  if (reservation.state === "finalized") {
+    // The body was written by finalize() via JSON.stringify, so it is always
+    // valid JSON. Guard defensively anyway (consistent with checkIdempotentExchange):
+    // a corrupt row falls through to a fresh exchange rather than throwing a 500.
+    try {
+      return c.json(JSON.parse(reservation.body), 200);
+    } catch {
+      return null; // treat as acquired; the fresh mint's finalize is a no-op on the finalized row
+    }
+  }
+  if (reservation.state === "in-flight") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "exchange-in-progress",
+          message: "An identical exchange is already in progress",
+          retryable: true,
+        },
+      },
+      409,
+    );
+  }
+  return null; // acquired
 }
 
 /**
@@ -372,137 +416,177 @@ async function handleAppExchange(
     return c.json(cachedBody, 200);
   }
 
-  // Authenticate user with GitHub
-  let githubUser: { login: string; id: number };
-  try {
-    githubUser = await getAuthenticatedUser(user_token);
-  } catch {
-    await recordExchangeFailure(c.env, ip);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "github-auth-failed",
-          message: "GitHub authentication failed",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Get installation ID for this project
-  const configStore = new GitHubAppConfigStore(c.env.DB);
-  const installation = await configStore.getInstallation(project_id);
-
-  if (!installation) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "app-not-configured",
-          message: "GitHub App installation not configured for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Mint App JWT and get installation access token
-  let appJwt: string;
-  let installationToken: string;
-  try {
-    appJwt = await mintAppJwt(
-      Number(c.env.GITHUB_APP_ID),
-      c.env.GITHUB_APP_PRIVATE_KEY,
-    );
-    installationToken = await getInstallationAccessToken(
-      appJwt,
-      installation.installation_id,
-    );
-  } catch (err) {
-    console.error("[exchange:app] Failed to get installation token:", err);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "github-api-error",
-          message: "Failed to obtain GitHub App installation token",
-          retryable: true,
-        },
-      },
-      502,
-    );
-  }
-
-  // Load allowed repos and check user permissions
-  const allowlistStore = new RepoAllowlistStore(c.env.DB);
-  const repos = await allowlistStore.listForProject(project_id);
-
-  if (repos.length === 0) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "repo-not-allowed",
-          message: "No repos registered for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Check user's permission on each registered repo via installation token
-  let matchedRepo: (typeof repos)[0] | null = null;
-  let userPermission: string | null = null;
-
-  for (const repo of repos) {
-    const perm = await checkUserMembership(
-      installationToken,
-      repo.github_owner,
-      repo.github_repo,
-      githubUser.login,
-    );
-
-    if (perm && permissionMeetsMinimum(perm, repo.min_read_permission)) {
-      matchedRepo = repo;
-      userPermission = perm;
-      break;
-    }
-  }
-
-  if (!matchedRepo || !userPermission) {
-    await recordExchangeFailure(c.env, ip);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "repo-not-allowed",
-          message: "Insufficient repository permissions",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Mint session token, store idempotency, and build response
-  const instanceId = await ensureDeploymentInstanceId(c.env.DB);
-  const { responseBody } = await mintAndStoreSession({
-    projectId: project_id,
-    matchedRepo,
-    githubUser,
-    userPermission,
-    hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
+  // WI-I: atomically claim the key before the GitHub round-trip so concurrent
+  // identical exchanges cannot double-mint. Loser gets 409; winner finalizes on
+  // success and releases on every other path (try/finally below).
+  const reserved = await acquireExchangeReservation(
+    c,
     idempotencyStore,
     idempotencyKey,
-    instanceId,
-    jkt, // DPoP sender-constraint (WI-G): thread from handleAppExchange caller
-  });
+    project_id,
+  );
+  if (reserved) return reserved;
 
-  return c.json(responseBody, 200);
+  let reservationFinalized = false;
+  try {
+    // Authenticate user with GitHub
+    let githubUser: { login: string; id: number };
+    try {
+      githubUser = await getAuthenticatedUser(user_token);
+    } catch {
+      await recordExchangeFailure(c.env, ip);
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "github-auth-failed",
+            message: "GitHub authentication failed",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Get installation ID for this project
+    const configStore = new GitHubAppConfigStore(c.env.DB);
+    const installation = await configStore.getInstallation(project_id);
+
+    if (!installation) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "app-not-configured",
+            message: "GitHub App installation not configured for this project",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Mint App JWT and get installation access token
+    let appJwt: string;
+    let installationToken: string;
+    try {
+      appJwt = await mintAppJwt(
+        Number(c.env.GITHUB_APP_ID),
+        c.env.GITHUB_APP_PRIVATE_KEY,
+      );
+      installationToken = await getInstallationAccessToken(
+        appJwt,
+        installation.installation_id,
+      );
+    } catch (err) {
+      console.error("[exchange:app] Failed to get installation token:", err);
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "github-api-error",
+            message: "Failed to obtain GitHub App installation token",
+            retryable: true,
+          },
+        },
+        502,
+      );
+    }
+
+    // Load allowed repos and check user permissions
+    const allowlistStore = new RepoAllowlistStore(c.env.DB);
+    const repos = await allowlistStore.listForProject(project_id);
+
+    if (repos.length === 0) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "repo-not-allowed",
+            message: "No repos registered for this project",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Check user's permission on each registered repo via installation token
+    let matchedRepo: (typeof repos)[0] | null = null;
+    let userPermission: string | null = null;
+
+    for (const repo of repos) {
+      const perm = await checkUserMembership(
+        installationToken,
+        repo.github_owner,
+        repo.github_repo,
+        githubUser.login,
+      );
+
+      if (perm && permissionMeetsMinimum(perm, repo.min_read_permission)) {
+        matchedRepo = repo;
+        userPermission = perm;
+        break;
+      }
+    }
+
+    if (!matchedRepo || !userPermission) {
+      await recordExchangeFailure(c.env, ip);
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "repo-not-allowed",
+            message: "Insufficient repository permissions",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Mint the session token and finalize the reservation with the response.
+    const instanceId = await ensureDeploymentInstanceId(c.env.DB);
+    const { responseBody } = await mintSession({
+      projectId: project_id,
+      matchedRepo,
+      githubUser,
+      userPermission,
+      hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
+      instanceId,
+      jkt, // DPoP sender-constraint (WI-G)
+    });
+    // Finalize the reservation with the minted response. Non-fatal, mirroring the
+    // pre-WI-I fail-soft idempotency write: a transient D1 error or a lost/stolen
+    // placeholder (finalize → false, e.g. this exchange exceeded
+    // RESERVATION_STALE_MS) must NOT fail an otherwise-successful mint — the token
+    // is valid and a missed cache-write self-heals via stale-steal. Setting
+    // reservationFinalized stops the finally-block from releasing a row that is no
+    // longer ours to release.
+    try {
+      const finalized = await idempotencyStore.finalize(
+        idempotencyKey,
+        project_id,
+        200,
+        JSON.stringify(responseBody),
+      );
+      if (!finalized) {
+        console.warn(
+          "[exchange] idempotency reservation lost before finalize (stale-steal window); returning valid token",
+        );
+      }
+    } catch (err) {
+      console.warn("[exchange] idempotency finalize failed (non-fatal):", err);
+    }
+    reservationFinalized = true;
+    return c.json(responseBody, 200);
+  } finally {
+    // Any non-success path (auth/permission failure, throw) releases the claim
+    // so a failed exchange never poisons the key beyond this request.
+    if (!reservationFinalized) {
+      await idempotencyStore.release(idempotencyKey);
+    }
+  }
 }
 
 export const authGithub = new Hono<AppEnv>();
@@ -606,92 +690,132 @@ authGithub.post("/exchange", async (c) => {
     return c.json(cachedBody, 200);
   }
 
-  // Authenticate with GitHub
-  let githubUser: { login: string; id: number };
-  try {
-    githubUser = await getAuthenticatedUser(github_token);
-  } catch {
-    await recordExchangeFailure(c.env, ip);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "github-auth-failed",
-          message: "GitHub authentication failed",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Find an allowed repo for this project
-  const allowlistStore = new RepoAllowlistStore(c.env.DB);
-  const repos = await allowlistStore.listForProject(project_id);
-
-  if (repos.length === 0) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "repo-not-allowed",
-          message: "No repos registered for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Check user's permission on each registered repo
-  let matchedRepo: (typeof repos)[0] | null = null;
-  let userPermission: string | null = null;
-
-  for (const repo of repos) {
-    const perm = await getRepoPermission(
-      github_token,
-      repo.github_owner,
-      repo.github_repo,
-      githubUser.login,
-    );
-
-    if (perm && permissionMeetsMinimum(perm, repo.min_read_permission)) {
-      matchedRepo = repo;
-      userPermission = perm;
-      break;
-    }
-  }
-
-  if (!matchedRepo || !userPermission) {
-    await recordExchangeFailure(c.env, ip);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "repo-not-allowed",
-          message: "Insufficient repository permissions",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Mint session token, store idempotency, and build response
-  const instanceId = await ensureDeploymentInstanceId(c.env.DB);
-  const { responseBody } = await mintAndStoreSession({
-    projectId: project_id,
-    matchedRepo,
-    githubUser,
-    userPermission,
-    hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
+  // WI-I: atomically claim the key before the GitHub round-trip so concurrent
+  // identical exchanges cannot double-mint. Loser gets 409; winner finalizes on
+  // success and releases on every other path (try/finally below).
+  const reserved = await acquireExchangeReservation(
+    c,
     idempotencyStore,
     idempotencyKey,
-    instanceId,
-    jkt, // DPoP sender-constraint (WI-G): thread the client jkt from the PAT /exchange body
-  });
+    project_id,
+  );
+  if (reserved) return reserved;
 
-  return c.json(responseBody, 200);
+  let reservationFinalized = false;
+  try {
+    // Authenticate with GitHub
+    let githubUser: { login: string; id: number };
+    try {
+      githubUser = await getAuthenticatedUser(github_token);
+    } catch {
+      await recordExchangeFailure(c.env, ip);
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "github-auth-failed",
+            message: "GitHub authentication failed",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Find an allowed repo for this project
+    const allowlistStore = new RepoAllowlistStore(c.env.DB);
+    const repos = await allowlistStore.listForProject(project_id);
+
+    if (repos.length === 0) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "repo-not-allowed",
+            message: "No repos registered for this project",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Check user's permission on each registered repo
+    let matchedRepo: (typeof repos)[0] | null = null;
+    let userPermission: string | null = null;
+
+    for (const repo of repos) {
+      const perm = await getRepoPermission(
+        github_token,
+        repo.github_owner,
+        repo.github_repo,
+        githubUser.login,
+      );
+
+      if (perm && permissionMeetsMinimum(perm, repo.min_read_permission)) {
+        matchedRepo = repo;
+        userPermission = perm;
+        break;
+      }
+    }
+
+    if (!matchedRepo || !userPermission) {
+      await recordExchangeFailure(c.env, ip);
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "repo-not-allowed",
+            message: "Insufficient repository permissions",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Mint the session token and finalize the reservation with the response.
+    const instanceId = await ensureDeploymentInstanceId(c.env.DB);
+    const { responseBody } = await mintSession({
+      projectId: project_id,
+      matchedRepo,
+      githubUser,
+      userPermission,
+      hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
+      instanceId,
+      jkt, // DPoP sender-constraint (WI-G)
+    });
+    // Finalize the reservation with the minted response. Non-fatal, mirroring the
+    // pre-WI-I fail-soft idempotency write: a transient D1 error or a lost/stolen
+    // placeholder (finalize → false, e.g. this exchange exceeded
+    // RESERVATION_STALE_MS) must NOT fail an otherwise-successful mint — the token
+    // is valid and a missed cache-write self-heals via stale-steal. Setting
+    // reservationFinalized stops the finally-block from releasing a row that is no
+    // longer ours to release.
+    try {
+      const finalized = await idempotencyStore.finalize(
+        idempotencyKey,
+        project_id,
+        200,
+        JSON.stringify(responseBody),
+      );
+      if (!finalized) {
+        console.warn(
+          "[exchange] idempotency reservation lost before finalize (stale-steal window); returning valid token",
+        );
+      }
+    } catch (err) {
+      console.warn("[exchange] idempotency finalize failed (non-fatal):", err);
+    }
+    reservationFinalized = true;
+    return c.json(responseBody, 200);
+  } finally {
+    // Any non-success path (auth/permission failure, throw) releases the claim
+    // so a failed exchange never poisons the key beyond this request.
+    if (!reservationFinalized) {
+      await idempotencyStore.release(idempotencyKey);
+    }
+  }
 });
 
 // GET /app-info -- Return GitHub App ID and client ID if configured
@@ -1257,62 +1381,102 @@ authGithub.post("/exchange-oidc", async (c) => {
     return c.json(cachedOidcBody, 200);
   }
 
-  // Check if repo is registered for this project
-  const allowlistStore = new RepoAllowlistStore(c.env.DB);
-  const repo = await allowlistStore.isRegistered(
-    project_id,
-    "github.com",
-    claims.repository_id,
-  );
-
-  if (!repo) {
-    await recordExchangeFailure(c.env, ip);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "repo-not-allowed",
-          message: "Repository not registered for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Read oidc_permission from allowlist and validate it
-  const oidcPermissionParsed = SessionPermissionSchema.safeParse(
-    repo.oidc_permission,
-  );
-  if (!oidcPermissionParsed.success) {
-    console.warn(
-      `[auth-oidc] repo ${claims.repository_id} has an unrecognized oidc_permission value "${repo.oidc_permission}"; defaulting to "read" (least privilege)`,
-    );
-  }
-  const oidcPermission = oidcPermissionParsed.success
-    ? oidcPermissionParsed.data
-    : "read"; // Default to read (least privilege) if invalid
-
-  // Route through mintAndStoreSession for field-parity with other exchange flows.
-  // The OIDC "user" is the GitHub Actions actor; the matched "repo" mirrors the
-  // shape expected by mintAndStoreSession.
-  const instanceId = await ensureDeploymentInstanceId(c.env.DB);
-  const { responseBody } = await mintAndStoreSession({
-    projectId: project_id,
-    matchedRepo: {
-      github_host: "github.com",
-      github_repo_id: claims.repository_id,
-    },
-    githubUser: {
-      login: claims.actor,
-      id: claims.actor_id,
-    },
-    userPermission: oidcPermission,
-    hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
+  // WI-I: atomically claim the key before the round-trip so concurrent identical
+  // OIDC exchanges cannot double-mint. Loser gets 409; winner finalizes on
+  // success and releases on every other path (try/finally below).
+  const reserved = await acquireExchangeReservation(
+    c,
     idempotencyStore,
     idempotencyKey,
-    instanceId,
-  });
+    project_id,
+  );
+  if (reserved) return reserved;
 
-  return c.json(responseBody, 200);
+  let reservationFinalized = false;
+  try {
+    // Check if repo is registered for this project
+    const allowlistStore = new RepoAllowlistStore(c.env.DB);
+    const repo = await allowlistStore.isRegistered(
+      project_id,
+      "github.com",
+      claims.repository_id,
+    );
+
+    if (!repo) {
+      await recordExchangeFailure(c.env, ip);
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "repo-not-allowed",
+            message: "Repository not registered for this project",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
+    // Read oidc_permission from allowlist and validate it
+    const oidcPermissionParsed = SessionPermissionSchema.safeParse(
+      repo.oidc_permission,
+    );
+    if (!oidcPermissionParsed.success) {
+      console.warn(
+        `[auth-oidc] repo ${claims.repository_id} has an unrecognized oidc_permission value "${repo.oidc_permission}"; defaulting to "read" (least privilege)`,
+      );
+    }
+    const oidcPermission = oidcPermissionParsed.success
+      ? oidcPermissionParsed.data
+      : "read"; // Default to read (least privilege) if invalid
+
+    // Route through mintSession for field-parity with other exchange flows.
+    // The OIDC "user" is the GitHub Actions actor; the matched "repo" mirrors the
+    // shape expected by mintSession.
+    const instanceId = await ensureDeploymentInstanceId(c.env.DB);
+    const { responseBody } = await mintSession({
+      projectId: project_id,
+      matchedRepo: {
+        github_host: "github.com",
+        github_repo_id: claims.repository_id,
+      },
+      githubUser: {
+        login: claims.actor,
+        id: claims.actor_id,
+      },
+      userPermission: oidcPermission,
+      hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
+      instanceId,
+    });
+    // Finalize the reservation with the minted response. Non-fatal, mirroring the
+    // pre-WI-I fail-soft idempotency write: a transient D1 error or a lost/stolen
+    // placeholder (finalize → false, e.g. this exchange exceeded
+    // RESERVATION_STALE_MS) must NOT fail an otherwise-successful mint — the token
+    // is valid and a missed cache-write self-heals via stale-steal. Setting
+    // reservationFinalized stops the finally-block from releasing a row that is no
+    // longer ours to release.
+    try {
+      const finalized = await idempotencyStore.finalize(
+        idempotencyKey,
+        project_id,
+        200,
+        JSON.stringify(responseBody),
+      );
+      if (!finalized) {
+        console.warn(
+          "[exchange] idempotency reservation lost before finalize (stale-steal window); returning valid token",
+        );
+      }
+    } catch (err) {
+      console.warn("[exchange] idempotency finalize failed (non-fatal):", err);
+    }
+    reservationFinalized = true;
+    return c.json(responseBody, 200);
+  } finally {
+    // Any non-success path (repo not registered, throw) releases the claim so a
+    // failed exchange never poisons the key beyond this request.
+    if (!reservationFinalized) {
+      await idempotencyStore.release(idempotencyKey);
+    }
+  }
 });
