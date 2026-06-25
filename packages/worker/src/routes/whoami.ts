@@ -26,8 +26,15 @@ whoami.get("/whoami", async (c) => {
     token_name: string;
     scopes: string;
     token_id: string;
-    auth_kind?: "d1-token" | "session" | "cookie-session" | "workspace-session";
+    auth_kind?:
+      | "d1-token"
+      | "session"
+      | "oidc-session"
+      | "cookie-session"
+      | "workspace-session";
     github_login?: string;
+    oidc_issuer?: string;
+    oidc_subject?: string;
     permission?: string;
     expires_at?: number;
     instance_id?: string;
@@ -47,6 +54,11 @@ whoami.get("/whoami", async (c) => {
   // Add session-specific fields
   if (token.kind === "session") {
     response.github_login = token.githubLogin;
+    response.permission = token.permission;
+    response.expires_at = token.expiresAt;
+  } else if (token.kind === "oidc-session") {
+    response.oidc_issuer = token.oidcIssuer;
+    response.oidc_subject = token.oidcSubject;
     response.permission = token.permission;
     response.expires_at = token.expiresAt;
   } else if (token.kind === "cookie-session") {

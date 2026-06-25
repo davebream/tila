@@ -51,6 +51,23 @@ export interface SessionTokenResult {
   githubHost?: string;
 }
 
+/**
+ * Session minted from a generic (non-GitHub) OIDC exchange (WI-B2). Deliberately
+ * carries NO github_* fields, so it can never reach the GitHub-coupled
+ * admin-grants roster (require-project-admin only matches kind:"session").
+ */
+export interface OidcSessionTokenResult {
+  kind: "oidc-session";
+  projectId: string;
+  name: string; // actor_name — the upstream subject, used as the DO actor label
+  scopes: string; // == permission
+  tokenId: string; // ""
+  permission: string;
+  expiresAt: number;
+  oidcIssuer: string;
+  oidcSubject: string;
+}
+
 export interface CookieSessionTokenResult {
   kind: "cookie-session";
   projectId: string;
@@ -76,6 +93,7 @@ export interface WorkspaceSessionTokenResult {
 export type UnifiedTokenResult =
   | D1TokenResult
   | SessionTokenResult
+  | OidcSessionTokenResult
   | CookieSessionTokenResult
   | WorkspaceSessionTokenResult;
 

@@ -36,6 +36,7 @@ import type {
   D1TokenResult,
   Env,
   HonoVariables,
+  OidcSessionTokenResult,
   SessionTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
@@ -502,8 +503,19 @@ export function createAuthMiddleware(
         );
       }
 
+      // Default-fill the discriminator for legacy GitHub tokens minted before
+      // the sub_type discriminator existed (WI-B2). Build a NEW object rather
+      // than mutating the JOSE payload; the discriminated-union safeParse below
+      // still rejects non-objects.
+      const payloadForParse =
+        typeof payloadObj === "object" &&
+        payloadObj !== null &&
+        !("sub_type" in payloadObj)
+          ? { sub_type: "github", ...(payloadObj as Record<string, unknown>) }
+          : payloadObj;
+
       // Validate payload schema
-      const parsed = SessionPayloadSchema.safeParse(payloadObj);
+      const parsed = SessionPayloadSchema.safeParse(payloadForParse);
       if (!parsed.success) {
         return c.json(
           {
@@ -705,7 +717,26 @@ export function createAuthMiddleware(
         // match (claimedId === deploymentId) → accept silently
       }
 
-      // Set session token result
+      // Set session token result — branch on the discriminator. An OIDC
+      // session (WI-B2) carries no github identity, so it resolves to a
+      // separate kind that is structurally unable to reach the admin roster.
+      if (payload.sub_type === "oidc") {
+        const oidcResult: OidcSessionTokenResult = {
+          kind: "oidc-session",
+          projectId: payload.project_id,
+          name: payload.actor_name,
+          scopes: payload.permission,
+          tokenId: "",
+          permission: payload.permission,
+          expiresAt: payload.expires_at,
+          oidcIssuer: payload.oidc_issuer,
+          oidcSubject: payload.oidc_subject,
+        };
+        c.set("tokenResult", oidcResult);
+        c.set("authKind", "bearer");
+        return next();
+      }
+
       const sessionResult: SessionTokenResult = {
         kind: "session",
         projectId: payload.project_id,

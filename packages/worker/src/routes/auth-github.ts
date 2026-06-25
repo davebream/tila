@@ -242,6 +242,7 @@ async function mintAndStoreSession(opts: {
   const jti = crypto.randomUUID();
 
   const payload = {
+    sub_type: "github" as const,
     project_id: projectId,
     github_host: matchedRepo.github_host,
     github_repo_id: matchedRepo.github_repo_id,

@@ -519,3 +519,67 @@ describe("project middleware — PROJECT_MISMATCH guard", () => {
     expect(body.error.code).toBe("project-mismatch");
   });
 });
+
+describe("requirePermission — oidc-session kind (WI-B2)", () => {
+  type AppEnv = { Bindings: Env; Variables: HonoVariables };
+  const mockEnv = {
+    DB: {} as D1Database,
+    PROJECT: {} as DurableObjectNamespace,
+    ARTIFACTS: {} as R2Bucket,
+    ANALYTICS: {} as AnalyticsEngineDataset,
+  } as unknown as Env;
+  const mockCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+
+  function appWithOidc(permission: string, gate: "read" | "write" | "admin") {
+    const app = new Hono<AppEnv>();
+    app.use("/*", async (c, next) => {
+      c.set("tokenResult", {
+        kind: "oidc-session",
+        projectId: "proj-1",
+        name: "workload-1",
+        scopes: permission,
+        tokenId: "",
+        permission,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        oidcIssuer: "https://idp.example.com",
+        oidcSubject: "workload-1",
+      });
+      return next();
+    });
+    app.use("/*", requirePermission(gate));
+    app.get("/test", (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it("admits a write-permission oidc-session on a write gate", async () => {
+    const res = await appWithOidc("write", "write").fetch(
+      new Request("http://localhost/test"),
+      mockEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("denies a read-permission oidc-session on a write gate", async () => {
+    const res = await appWithOidc("read", "write").fetch(
+      new Request("http://localhost/test"),
+      mockEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("permission-denied");
+  });
+
+  it("admits an admin-permission oidc-session on an admin gate", async () => {
+    const res = await appWithOidc("admin", "admin").fetch(
+      new Request("http://localhost/test"),
+      mockEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+});

@@ -81,6 +81,31 @@ export function requirePermission(
       );
     }
 
+    if (tokenResult.kind === "oidc-session") {
+      // Generic OIDC session (WI-B2): authorize on the granted permission tier,
+      // same hierarchy as the bearer-session branch. Without this arm an OIDC
+      // principal would hit the catch-all deny and a write/admin grant would be
+      // silently ignored (over-denial).
+      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
+      const requiredLevel = PERMISSION_LEVELS[level] ?? 0;
+
+      if (userLevel >= requiredLevel) {
+        return next();
+      }
+
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "permission-denied",
+            message: `Requires ${level} permission`,
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
     if (tokenResult.kind === "cookie-session") {
       // Map cookie-session normalized permission onto the PERMISSION_LEVELS hierarchy.
       // Uses the persisted GitHub-derived permission tier ("read"/"write"/"admin"),
