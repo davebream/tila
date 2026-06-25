@@ -23,6 +23,13 @@ export const SESSION_TTL_SECONDS = SESSION_TTL_SECONDS_BY_TIER.read;
  */
 export const COOKIE_SESSION_TTL_SECONDS = 28800;
 
+/**
+ * Retention for revocation tombstones before cron GC. Must stay >= the longest
+ * session lifetime (COOKIE_SESSION_TTL_SECONDS) so a tombstone is never pruned
+ * while a token it denies is still live. 2x for clock-skew + safety margin.
+ */
+export const REVOCATION_GC_RETENTION_MS = COOKIE_SESSION_TTL_SECONDS * 1000 * 2;
+
 /** Maximum failed auth attempts before rate-limiting an IP. */
 export const RATE_LIMIT_MAX_FAILURES = 20;
 

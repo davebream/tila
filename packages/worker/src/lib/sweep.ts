@@ -1,7 +1,13 @@
-import { D1ProjectRegistry, D1SessionStore } from "@tila/backend-d1";
+import {
+  D1ProjectRegistry,
+  D1RevokedJtiStore,
+  D1RevokedSubjectsStore,
+  D1SessionStore,
+} from "@tila/backend-d1";
 import { R2ArtifactBackend } from "@tila/backend-r2";
 import {
   DRIFT_RECONCILE_THRESHOLD,
+  REVOCATION_GC_RETENTION_MS,
   SWEEP_ANALYTICS_MAX_PROJECT_DATAPOINTS,
   SWEEP_DRAIN_PAGE_SIZE,
   SWEEP_DRIFT_MAX_SUBREQUESTS,
@@ -98,6 +104,10 @@ export interface SweepSummary {
   driftErrors: number;
   expiredSessions: number;
   journalEventsArchived: number;
+  /** Revoked-jti tombstones pruned by GC this run (undefined if the prune threw). */
+  revokedJtiPruned?: number;
+  /** Revoked-subject tombstones pruned by GC this run (undefined if the prune threw). */
+  revokedSubjectsPruned?: number;
   /** Per-project status objects (Task 9 emits these as Analytics). */
   projectStatuses: ProjectSweepStatus[];
   /** Resume frontier when the wall-clock budget truncated the run; else null. */
@@ -190,6 +200,33 @@ export async function runSweep(
     summary.expiredSessions = expiredSessions;
   } catch (err) {
     console.error("[sweep] session cleanup failed:", err);
+  }
+
+  // Revocation-tombstone GC (global, not per-project; two D1 subrequests). The
+  // cutoff uses the injected `now()` (ms) so tests can pin it. Each prune is
+  // wrapped SEPARATELY so a jti failure does not skip the subject prune, and
+  // both are non-fatal (console.error only — runSweep has no ExecutionContext,
+  // so do NOT call emitSweepErrorDatapoint here).
+  const revocationCutoff = now() - REVOCATION_GC_RETENTION_MS;
+  try {
+    const jtiPruned = await new D1RevokedJtiStore(env.DB).deleteExpired(
+      revocationCutoff,
+    );
+    budget.subrequests++;
+    summary.revokedJtiPruned = jtiPruned;
+    console.log(`[sweep] pruned ${jtiPruned} revoked jti rows`);
+  } catch (err) {
+    console.error("[sweep] revoked-jti GC failed:", err); // non-fatal
+  }
+  try {
+    const subjPruned = await new D1RevokedSubjectsStore(env.DB).deleteExpired(
+      revocationCutoff,
+    );
+    budget.subrequests++;
+    summary.revokedSubjectsPruned = subjPruned;
+    console.log(`[sweep] pruned ${subjPruned} revoked subject rows`);
+  } catch (err) {
+    console.error("[sweep] revoked-subjects GC failed:", err); // non-fatal
   }
 
   for (const { projectId } of projects) {

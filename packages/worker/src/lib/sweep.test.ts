@@ -11,8 +11,28 @@
  * separate work (sweep-key.test.ts and later tasks); this only pins the seam.
  */
 import { describe, expect, it, vi } from "vitest";
+import { REVOCATION_GC_RETENTION_MS } from "../config";
 import type { Env } from "../types";
 import { type SweepSummary, runSweep } from "./sweep";
+
+// Spies so the revocation-GC tests can drive deleteExpired behavior and assert
+// the cutoff. The factory references hoisted vi.fn() instances; default impls
+// return 0 so the seam tests (empty registry) still see zeroed counts.
+const jtiDeleteExpired = vi.fn(async (_cutoff: number) => 0);
+const subjectsDeleteExpired = vi.fn(async (_cutoff: number) => 0);
+
+vi.mock("@tila/backend-d1", async (importActual) => {
+  const actual = await importActual<typeof import("@tila/backend-d1")>();
+  return {
+    ...actual,
+    D1RevokedJtiStore: class {
+      deleteExpired = jtiDeleteExpired;
+    },
+    D1RevokedSubjectsStore: class {
+      deleteExpired = subjectsDeleteExpired;
+    },
+  };
+});
 
 /**
  * Minimal D1 stub matching the drizzle-orm/d1 driver contract: prepare(sql)
@@ -92,6 +112,8 @@ describe("runSweep — extraction seam", () => {
       journalEventsArchived: 0,
       projectStatuses: [],
       resumePoint: null,
+      revokedJtiPruned: 0,
+      revokedSubjectsPruned: 0,
     });
   });
 
@@ -101,5 +123,61 @@ describe("runSweep — extraction seam", () => {
     const summary = await runSweep(env);
 
     expect(summary.projectsSwept).toBe(0);
+  });
+});
+
+describe("runSweep — revocation GC", () => {
+  it("prunes both revocation tables at cutoff now() - REVOCATION_GC_RETENTION_MS", async () => {
+    jtiDeleteExpired.mockClear().mockResolvedValue(0);
+    subjectsDeleteExpired.mockClear().mockResolvedValue(0);
+    const env = makeStubEnv();
+    const fixedNow = 2_000_000_000_000;
+
+    await runSweep(env, { now: () => fixedNow });
+
+    const expectedCutoff = fixedNow - REVOCATION_GC_RETENTION_MS;
+    expect(jtiDeleteExpired).toHaveBeenCalledWith(expectedCutoff);
+    expect(subjectsDeleteExpired).toHaveBeenCalledWith(expectedCutoff);
+  });
+
+  it("records the pruned counts in the summary", async () => {
+    jtiDeleteExpired.mockClear().mockResolvedValue(3);
+    subjectsDeleteExpired.mockClear().mockResolvedValue(5);
+    const env = makeStubEnv();
+
+    const summary = await runSweep(env, { now: () => 2_000_000_000_000 });
+
+    expect(summary.revokedJtiPruned).toBe(3);
+    expect(summary.revokedSubjectsPruned).toBe(5);
+  });
+
+  it("swallows a thrown jti prune and still runs the subject prune + rest of sweep", async () => {
+    jtiDeleteExpired.mockClear().mockRejectedValue(new Error("jti prune boom"));
+    subjectsDeleteExpired.mockClear().mockResolvedValue(7);
+    const env = makeStubEnv();
+
+    const summary = await runSweep(env, { now: () => 2_000_000_000_000 });
+
+    // jti prune failed → its summary field stays undefined (non-fatal)
+    expect(summary.revokedJtiPruned).toBeUndefined();
+    // subject prune still ran in its own try/catch
+    expect(subjectsDeleteExpired).toHaveBeenCalledTimes(1);
+    expect(summary.revokedSubjectsPruned).toBe(7);
+    // the rest of the sweep still completed
+    expect(summary.resumePoint).toBeNull();
+    expect(summary.projectsSwept).toBe(0);
+  });
+
+  it("swallows a thrown subject prune independently of the jti prune", async () => {
+    jtiDeleteExpired.mockClear().mockResolvedValue(2);
+    subjectsDeleteExpired
+      .mockClear()
+      .mockRejectedValue(new Error("subject prune boom"));
+    const env = makeStubEnv();
+
+    const summary = await runSweep(env, { now: () => 2_000_000_000_000 });
+
+    expect(summary.revokedJtiPruned).toBe(2);
+    expect(summary.revokedSubjectsPruned).toBeUndefined();
   });
 });
