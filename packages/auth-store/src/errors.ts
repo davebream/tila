@@ -149,3 +149,16 @@ export class InstanceNotFoundError extends Error {
     this.name = "InstanceNotFoundError";
   }
 }
+
+// ----------------------------------------------------------------------------
+// UnknownCredentialProviderError
+// Thrown by createProvider() when an unrecognized credential kind is requested.
+// ----------------------------------------------------------------------------
+export class UnknownCredentialProviderError extends Error {
+  readonly code = "UNKNOWN_CREDENTIAL_PROVIDER" as const;
+
+  constructor(public readonly kind: string) {
+    super(`Unknown credential provider kind: "${kind}"`);
+    this.name = "UnknownCredentialProviderError";
+  }
+}

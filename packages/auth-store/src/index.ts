@@ -1,5 +1,19 @@
 // @tila/auth-store — runtime-agnostic client-side auth persistence
 
+// WI-K credential provider contract (Phase 1)
+export { createProvider } from "./providers/index.js";
+export type {
+  CredentialKind,
+  MintedCredential,
+  CredentialProvider,
+  ProviderContext,
+  ProviderPorts,
+  Clock,
+  Prompter,
+  RunCommand,
+  RunCommandResult,
+} from "./providers/types.js";
+
 // Phase 2 exports
 export type { SecretStore, EnvProbe } from "./secret-store.js";
 export { probeSecretStore, processEnvProbe } from "./secret-store.js";
@@ -11,6 +25,7 @@ export {
   InstanceKeyMismatchError,
   ImmutableInstanceKeyError,
   InstanceNotFoundError,
+  UnknownCredentialProviderError,
 } from "./errors.js";
 export { FakeSecretStore, ThrowingSecretStore } from "./testing.js";
 export type { ThrowMode } from "./testing.js";

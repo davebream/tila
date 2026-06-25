@@ -91,6 +91,8 @@ export {
 // --- Multi-instance auth registry schemas ---
 export {
   InstanceKey,
+  CredentialProviderConfigSchema,
+  type CredentialProviderConfig,
   InstanceRecordSchema,
   type InstanceRecord,
   InstanceRegistrySchema,
