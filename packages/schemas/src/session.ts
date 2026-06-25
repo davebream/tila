@@ -20,6 +20,14 @@ export const SessionPayloadSchema = z.object({
    * was added. Tokens without jti are not revocable via the revocation store.
    */
   jti: z.string().optional(),
+  /**
+   * Stable deployment instance id — a crypto.randomUUID() stored in
+   * `_deployment_meta` D1 singleton. Minted into every bearer session JWT
+   * (kind: "session") to allow cross-deployment replay detection (B2).
+   * Optional for backward compatibility with tokens minted before this WI;
+   * legacy tokens without the claim are still accepted during the transition.
+   */
+  instance_id: z.string().optional(),
 });
 export type SessionPayload = z.infer<typeof SessionPayloadSchema>;
 
@@ -37,6 +45,16 @@ export const GitHubExchangeResponseSchema = z.object({
   github_login: z.string(),
   github_repo_id: z.number().int(),
   permission: SessionPermissionSchema,
+  /**
+   * Stable deployment instance id. Included in the login response so clients
+   * can key stored credentials by deployment id rather than by URL (US-CLIENT).
+   * Optional for backward compatibility: a stale _idempotency cache entry
+   * created before this WI deploys will replay a response WITHOUT instance_id
+   * for up to the JWT TTL window. The JWT claim itself is always present for
+   * freshly minted tokens. (WI-J2/T11 consumers should expect a possible
+   * transient miss on the response-body field.)
+   */
+  instance_id: z.string().optional(),
 });
 export type GitHubExchangeResponse = z.infer<
   typeof GitHubExchangeResponseSchema
