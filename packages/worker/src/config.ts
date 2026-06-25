@@ -30,6 +30,13 @@ export const COOKIE_SESSION_TTL_SECONDS = 28800;
  */
 export const REVOCATION_GC_RETENTION_MS = COOKIE_SESSION_TTL_SECONDS * 1000 * 2;
 
+/**
+ * Stale window for an idempotency-exchange reservation placeholder. Bounds how
+ * long a crashed/abandoned exchange poisons a key before the next request steals
+ * it; set above the GitHub+JWKS round-trip ceiling (GITHUB_API_TIMEOUT_MS + margin).
+ */
+export const RESERVATION_STALE_MS = 30_000;
+
 /** Maximum failed auth attempts before rate-limiting an IP. */
 export const RATE_LIMIT_MAX_FAILURES = 20;
 
