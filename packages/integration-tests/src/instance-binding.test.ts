@@ -137,7 +137,7 @@ async function mintTestToken(instanceId?: string): Promise<string> {
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
-function createTestApp(): ReturnType<typeof Hono<AppEnv>> {
+function createTestApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("/*", createAuthMiddleware({ getClientIP: () => null }));
   app.get("/test", (c) => c.json({ ok: true }));
