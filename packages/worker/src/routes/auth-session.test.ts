@@ -10,6 +10,10 @@ const mockTokenValidate = vi.fn();
 const mockSessionCreate = vi.fn().mockResolvedValue(undefined);
 const mockSessionValidate = vi.fn();
 const mockSessionRevoke = vi.fn().mockResolvedValue(undefined);
+const mockTokenRevoke = vi
+  .fn()
+  .mockResolvedValue({ revoked: true, tokenHash: "tok-hash" });
+const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
 
 vi.mock("@tila/backend-d1", () => ({
   D1RateLimitStore: vi.fn().mockImplementation(
@@ -22,6 +26,7 @@ vi.mock("@tila/backend-d1", () => ({
     class {
       validate = mockTokenValidate;
       updateLastUsedAt = vi.fn().mockResolvedValue(undefined);
+      revoke = mockTokenRevoke;
     } as unknown as () => unknown,
   ),
   D1SessionStore: vi.fn().mockImplementation(
@@ -29,9 +34,32 @@ vi.mock("@tila/backend-d1", () => ({
       validate = mockSessionValidate;
       create = mockSessionCreate;
       revoke = mockSessionRevoke;
+      deleteByTokenHash = mockDeleteByTokenHash;
     } as unknown as () => unknown,
   ),
 }));
+
+// Self-logout dependencies (WI-D): revokeSession (jti revoke) + token-cache invalidate.
+const mockRevokeSession = vi.fn().mockResolvedValue({
+  ok: true,
+  jti: "j",
+  revoked_at: 0,
+});
+vi.mock("../lib/admin-ops", async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    revokeSession: (...args: unknown[]) => mockRevokeSession(...args),
+  };
+});
+const mockInvalidate = vi.fn();
+vi.mock("../lib/token-cache", async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    invalidate: (...args: unknown[]) => mockInvalidate(...args),
+  };
+});
 
 // Import after mocks are set up
 const { authSessionExchange, authSessionProtected } = await import(
@@ -259,6 +287,113 @@ describe("POST /auth/logout", () => {
     expect(setCookie).toContain("Secure");
     expect(setCookie).toContain("SameSite=Lax");
     expect(setCookie).not.toContain("SameSite=None");
+  });
+});
+
+describe("POST /auth/logout — credential-kind branches (WI-D)", () => {
+  // Inject tokenResult directly to isolate the logout branch logic from the
+  // real auth middleware (which would require minting JWTs / D1 tokens).
+  function makeLogoutApp(tokenResult: unknown) {
+    const app = new Hono<AppEnv>();
+    app.use("/*", async (c, next) => {
+      // biome-ignore lint/suspicious/noExplicitAny: test injection
+      c.set("tokenResult", tokenResult as any);
+      await next();
+    });
+    app.route("/auth", authSessionProtected);
+    return app;
+  }
+
+  function post(app: Hono<AppEnv>) {
+    return app.request("/auth/logout", { method: "POST" }, testEnv, mockCtx);
+  }
+
+  it("bearer session revokes its own jti and returns 200", async () => {
+    const app = makeLogoutApp({
+      kind: "session",
+      projectId: "p1",
+      name: "u",
+      scopes: "admin",
+      tokenId: "",
+      githubRepoId: 1,
+      githubLogin: "u",
+      permission: "admin",
+      expiresAt: Date.now() + 3_600_000,
+      jti: "11111111-1111-1111-1111-111111111111",
+    });
+    const res = await post(app);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(mockRevokeSession).toHaveBeenCalledWith(
+      expect.anything(),
+      "11111111-1111-1111-1111-111111111111",
+      "p1",
+    );
+  });
+
+  it("bearer session without jti is a no-op (legacy token)", async () => {
+    const app = makeLogoutApp({
+      kind: "session",
+      projectId: "p1",
+      name: "u",
+      scopes: "admin",
+      tokenId: "",
+      githubRepoId: 1,
+      githubLogin: "u",
+      permission: "admin",
+      expiresAt: Date.now() + 3_600_000,
+      // no jti
+    });
+    const res = await post(app);
+    expect(res.status).toBe(200);
+    expect(mockRevokeSession).not.toHaveBeenCalled();
+  });
+
+  it("d1-token revokes its own token + invalidates cache + cascades sessions", async () => {
+    mockTokenRevoke.mockResolvedValue({ revoked: true, tokenHash: "th-1" });
+    const app = makeLogoutApp({
+      kind: "d1-token",
+      projectId: "p1",
+      name: "ci-bot",
+      scopes: "full",
+      tokenId: "tid",
+    });
+    const res = await post(app);
+    expect(res.status).toBe(200);
+    expect(mockTokenRevoke).toHaveBeenCalledWith("p1", "ci-bot", "self-logout");
+    expect(mockInvalidate).toHaveBeenCalledWith("th-1");
+    expect(mockDeleteByTokenHash).toHaveBeenCalledWith("th-1");
+  });
+
+  it("workspace-session is a no-op and still returns 200", async () => {
+    const app = makeLogoutApp({
+      kind: "workspace-session",
+      projectId: "p1",
+      name: "ws",
+      scopes: "read",
+      tokenId: "",
+    });
+    const res = await post(app);
+    expect(res.status).toBe(200);
+    expect(mockRevokeSession).not.toHaveBeenCalled();
+    expect(mockTokenRevoke).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent: a second bearer logout still returns 200", async () => {
+    const tr = {
+      kind: "session",
+      projectId: "p1",
+      name: "u",
+      scopes: "admin",
+      tokenId: "",
+      githubRepoId: 1,
+      githubLogin: "u",
+      permission: "admin",
+      expiresAt: Date.now() + 3_600_000,
+      jti: "22222222-2222-2222-2222-222222222222",
+    };
+    expect((await post(makeLogoutApp(tr))).status).toBe(200);
+    expect((await post(makeLogoutApp(tr))).status).toBe(200);
   });
 });
 

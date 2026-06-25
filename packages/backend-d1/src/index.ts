@@ -24,6 +24,11 @@ export {
 export { D1RevokedJtiStore } from "./revoked-jti-store";
 export { D1RevokedSubjectsStore } from "./revoked-subjects-store";
 export {
+  revokePrincipalBatch,
+  type RevokePrincipalParams,
+  type RevokePrincipalResult,
+} from "./offboard";
+export {
   AdminGrantsStore,
   type AdminGrantRow,
   type GrantParams,
