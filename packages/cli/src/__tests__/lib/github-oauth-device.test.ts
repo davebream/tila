@@ -383,6 +383,7 @@ describe("pollForToken", () => {
 
 describe("resolveAppUserToken", () => {
   const originalIsTTY = process.stdin.isTTY;
+  const originalCI = process.env.CI;
 
   beforeEach(() => {
     mockFetch.mockReset();
@@ -391,6 +392,9 @@ describe("resolveAppUserToken", () => {
     vi.mocked(writeFileSync).mockReset();
     vi.mocked(p.log.warn).mockReset();
     Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+    // Clear CI so the ambient-token tests assert the non-CI behavior. The WI-J2
+    // CI gate is exercised explicitly by the "under CI" tests below.
+    Reflect.deleteProperty(process.env, "CI");
     // Reset isTTY to original
     Object.defineProperty(process.stdin, "isTTY", {
       value: originalIsTTY,
@@ -402,11 +406,49 @@ describe("resolveAppUserToken", () => {
   afterEach(() => {
     vi.useRealTimers();
     Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+    if (originalCI === undefined) {
+      Reflect.deleteProperty(process.env, "CI");
+    } else {
+      process.env.CI = originalCI;
+    }
     Object.defineProperty(process.stdin, "isTTY", {
       value: originalIsTTY,
       writable: true,
       configurable: true,
     });
+  });
+
+  it("refuses ambient GITHUB_TOKEN under CI (credential-bleed defense)", async () => {
+    vi.mocked(existsSync).mockReturnValue(false); // no cache
+    process.env.CI = "true";
+    process.env.GITHUB_TOKEN = "ghu_ambient_ci_token";
+
+    await expect(
+      resolveAppUserToken(
+        { project_id: "test-proj", worker_url: "https://test.workers.dev" },
+        "/tmp/tila",
+      ),
+    ).rejects.toThrow(/disabled under CI/i);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("honors a valid per-project cache even under CI", async () => {
+    const futureExpiry = Date.now() / 1000 + 7200;
+    process.env.CI = "true";
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({
+        user_token: "ghu_cached_token",
+        expires_at: futureExpiry,
+        project_id: "test-proj",
+      }),
+    );
+
+    const token = await resolveAppUserToken(
+      { project_id: "test-proj", worker_url: "https://test.workers.dev" },
+      "/tmp/tila",
+    );
+    expect(token).toBe("ghu_cached_token");
   });
 
   it("returns cached token when cache is valid", async () => {

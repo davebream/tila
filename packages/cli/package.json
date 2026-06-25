@@ -60,6 +60,7 @@
   },
   "devDependencies": {
     "@clack/prompts": "^1.5.1",
+    "@tila/auth-store": "workspace:*",
     "@tila/backend-embedded": "workspace:*",
     "@tila/backend-local": "workspace:*",
     "@tila/core": "workspace:*",

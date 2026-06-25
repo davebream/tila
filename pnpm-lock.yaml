@@ -224,6 +224,9 @@ importers:
       '@clack/prompts':
         specifier: ^1.5.1
         version: 1.5.1
+      '@tila/auth-store':
+        specifier: workspace:*
+        version: link:../auth-store
       '@tila/backend-embedded':
         specifier: workspace:*
         version: link:../backend-embedded

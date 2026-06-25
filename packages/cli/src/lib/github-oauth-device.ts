@@ -276,6 +276,21 @@ export async function resolveAppUserToken(
     }
   }
 
+  // WI-J2 CI fail-closed: ambient GitHub token consumption — the GITHUB_TOKEN
+  // env var and the `gh auth token` CLI session — is a CI credential-bleed
+  // vector. Under CI, refuse to consume either. CI auth must come from the
+  // sanctioned GitHub Actions OIDC flow (resolved by the caller BEFORE this
+  // function is reached) or an explicit project token (TILA_TOKEN / --token).
+  // The per-project cache above is still honored; it is only ever written by a
+  // prior interactive login.
+  const isCI = Boolean(process.env.CI);
+  if (isCI) {
+    throw new Error(
+      "Ambient GitHub token consumption (GITHUB_TOKEN / gh CLI) is disabled under CI to prevent credential bleed.\n" +
+        "Use the GitHub Actions OIDC flow (set ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN), or provide an explicit project token (TILA_TOKEN).",
+    );
+  }
+
   // Check GITHUB_TOKEN env var
   const envToken = process.env.GITHUB_TOKEN;
   if (envToken && envToken.trim() !== "") {
