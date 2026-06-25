@@ -6,9 +6,11 @@ import {
 import { SessionExchangeRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
+import { revokeSession } from "../lib/admin-ops";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import { hashToken } from "../lib/hash-token";
 import { invalidateSession } from "../lib/session-cache";
+import { invalidate } from "../lib/token-cache";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -187,24 +189,76 @@ authSessionExchange.post("/", async (c) => {
 // Auth-protected session routes (require auth middleware upstream)
 export const authSessionProtected = new Hono<AppEnv>();
 
-// POST /auth/logout — clear cookie and revoke session
+// POST /auth/logout — self-service: revoke the caller's OWN credential (WI-D).
+// Branches on the authenticated token kind:
+//   - session (bearer JWT): revoke own jti (+ jti cache) — legacy no-jti → no-op
+//   - d1-token:             revoke own API token (+ token cache + session cascade)
+//   - cookie-session:       revoke session hash (+ session cache) — unchanged path
+//   - workspace-session:    no-op
+// Always clears the cookie and returns { ok: true }; idempotent (double-logout safe).
 authSessionProtected.post("/logout", async (c) => {
-  const sessionCookie = parseCookieValue(
-    c.req.header("Cookie"),
-    "tila_session",
-  );
-  if (sessionCookie) {
-    // SEC-1: pepper to match the session mint above and the cookie lookup in auth.ts:302
-    const sessionHash = await hashToken(sessionCookie, c.env.HASH_PEPPER);
-    const sessionStore = new D1SessionStore(c.env.DB);
-    try {
-      await sessionStore.revoke(sessionHash);
-    } catch (err) {
-      console.error("[auth-session] session revoke failed:", err);
-      // Log error but still clear cookie (idempotent logout)
+  const tokenResult = c.get("tokenResult");
+
+  switch (tokenResult.kind) {
+    case "session": {
+      // Bearer session JWT — revoke its jti so the verifier denies it (C9).
+      if (tokenResult.jti) {
+        try {
+          await revokeSession(c.env, tokenResult.jti, tokenResult.projectId);
+        } catch (err) {
+          console.error("[auth-session] jti revoke failed:", err);
+        }
+      }
+      break;
     }
-    // Always invalidate session cache regardless of D1 result
-    invalidateSession(sessionHash);
+    case "d1-token": {
+      // Self-service revoke of the caller's own durable D1 API token.
+      try {
+        const tokenStore = new D1TokenStore(c.env.DB);
+        const { tokenHash } = await tokenStore.revoke(
+          tokenResult.projectId,
+          tokenResult.name,
+          "self-logout",
+        );
+        if (tokenHash) {
+          invalidate(tokenHash);
+          try {
+            await new D1SessionStore(c.env.DB).deleteByTokenHash(tokenHash);
+          } catch (err) {
+            console.error(
+              "[auth-session] d1-token session cascade failed:",
+              err,
+            );
+          }
+        }
+      } catch (err) {
+        console.error("[auth-session] d1-token revoke failed:", err);
+      }
+      break;
+    }
+    case "cookie-session": {
+      // Existing cookie path — derive the peppered hash from the raw cookie
+      // (SEC-1; must match the mint pepper and auth.ts cookie lookup). Do NOT
+      // substitute tokenResult.sessionHash.
+      const sessionCookie = parseCookieValue(
+        c.req.header("Cookie"),
+        "tila_session",
+      );
+      if (sessionCookie) {
+        const sessionHash = await hashToken(sessionCookie, c.env.HASH_PEPPER);
+        const sessionStore = new D1SessionStore(c.env.DB);
+        try {
+          await sessionStore.revoke(sessionHash);
+        } catch (err) {
+          console.error("[auth-session] session revoke failed:", err);
+          // Log error but still clear cookie (idempotent logout)
+        }
+        // Always invalidate session cache regardless of D1 result
+        invalidateSession(sessionHash);
+      }
+      break;
+    }
+    // workspace-session (and any future kind): no revocation primitive — no-op.
   }
 
   // Clear cookie regardless of session state — must match buildSessionCookie SameSite logic.
