@@ -223,6 +223,74 @@ export class ExecCredentialError extends Error {
 }
 
 // ----------------------------------------------------------------------------
+// OidcEgressError
+// Thrown by oidcEgressFetch() when a request to an OIDC issuer endpoint is
+// rejected by the hardened egress wrapper. Carries a discriminable `code` so
+// callers can branch without string-matching the message.
+//
+// Shared location: defined here (NOT in the worker package) so both the
+// auth-store egress wrapper and any future shared tooling can import it without
+// creating a worker-runtime dependency.
+// ----------------------------------------------------------------------------
+export type OidcEgressErrorCode =
+  | "oidc-fetch-blocked" // non-https, redirect, non-2xx upstream, SSRF
+  | "oidc-fetch-timeout" // AbortController deadline exceeded
+  | "oidc-fetch-too-large"; // Content-Length or streaming size cap exceeded
+
+export class OidcEgressError extends Error {
+  readonly code: OidcEgressErrorCode;
+
+  constructor(code: OidcEgressErrorCode, message: string) {
+    super(`[${code}] ${message}`);
+    this.name = "OidcEgressError";
+    this.code = code;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// OidcDiscoveryError
+// Thrown by resolveOidcEndpoints() (oidc-discovery.ts) when RFC 8414 discovery
+// fails: unreachable issuer, issuer-confusion (mismatch), or missing/non-https
+// device_authorization_endpoint or token_endpoint.
+// ----------------------------------------------------------------------------
+export class OidcDiscoveryError extends Error {
+  readonly code = "OIDC_DISCOVERY_ERROR" as const;
+
+  constructor(
+    message: string,
+    public readonly reason:
+      | "unreachable"
+      | "issuer-mismatch"
+      | "missing-endpoint"
+      | "invalid-endpoint",
+  ) {
+    super(message);
+    this.name = "OidcDiscoveryError";
+  }
+}
+
+// ----------------------------------------------------------------------------
+// RefreshExpiredError
+// Thrown by oidc-generic refresh() when the stored refresh token is absent
+// (empty string) OR its expires_at is in the past (or exactly now).
+// This is a terminal error — the caller must re-authenticate interactively.
+//
+// Design rationale (from Task 6): do NOT silently fall through to an
+// interactive device-flow mint when a refresh token is expired. Force the
+// caller to handle the expiry explicitly (display a message, restart flow).
+// ----------------------------------------------------------------------------
+export class RefreshExpiredError extends Error {
+  readonly code = "REFRESH_EXPIRED" as const;
+
+  constructor(
+    message = "Refresh token is absent or expired — re-authentication required",
+  ) {
+    super(message);
+    this.name = "RefreshExpiredError";
+  }
+}
+
+// ----------------------------------------------------------------------------
 // DeviceFlowError
 // Thrown by runDeviceFlow() when the RFC 8628 device flow cannot complete.
 // `reason` carries the terminal classification so callers can branch without

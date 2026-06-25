@@ -1,21 +1,24 @@
 /**
  * Credential provider factory — createProvider(kind) registry.
  *
- * Phase-4 update: tila-token and exec providers are now wired with real implementations.
- * oidc-generic remains an inline-throwing placeholder until Phase 5 (Task 6 / C5).
+ * Phase-5 update: all four providers are now wired with real implementations.
+ *   - github: RFC 8628 device flow over fixed GitHub endpoints
+ *   - tila-token: static bearer token from caller context
+ *   - exec: subprocess vending machine (shell:false)
+ *   - oidc-generic: RFC 8628 device flow over RFC 8414 discovered endpoints
  */
 
 import { UnknownCredentialProviderError } from "../errors.js";
 import { createExecProvider } from "./exec.js";
 import { createGithubProvider } from "./github.js";
+import { createOidcGenericProvider } from "./oidc-generic.js";
 import { createTilaTokenProvider } from "./tila-token.js";
 import type { CredentialKind, CredentialProvider } from "./types.js";
 
 /**
  * Return a CredentialProvider for the given kind.
  *
- * Phase 4: github, tila-token, and exec are wired with real implementations.
- * oidc-generic remains an inline-throwing placeholder.
+ * Phase 5: all four providers are wired with real implementations.
  */
 export function createProvider(kind: CredentialKind): CredentialProvider {
   switch (kind) {
@@ -26,9 +29,7 @@ export function createProvider(kind: CredentialKind): CredentialProvider {
     case "exec":
       return createExecProvider();
     case "oidc-generic":
-      throw new Error(
-        "oidc-generic provider not implemented until Phase 5 (Task 6 / C5)",
-      );
+      return createOidcGenericProvider();
     default: {
       // Exhaustiveness check: TypeScript will error here if a CredentialKind is unhandled.
       const _exhaustive: never = kind;
