@@ -37,6 +37,9 @@ importers:
       '@napi-rs/keyring':
         specifier: ^1.3.0
         version: 1.3.0
+      '@tila/core':
+        specifier: workspace:*
+        version: link:../core
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas

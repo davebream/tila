@@ -228,24 +228,15 @@ export class ExecCredentialError extends Error {
 // rejected by the hardened egress wrapper. Carries a discriminable `code` so
 // callers can branch without string-matching the message.
 //
-// Shared location: defined here (NOT in the worker package) so both the
-// auth-store egress wrapper and any future shared tooling can import it without
-// creating a worker-runtime dependency.
+// Canonical home: re-exported from `@tila/core` (the shared egress module) so
+// the worker and auth-store wrappers share one error class — preserving this
+// taxonomy's surface (same name, codes, and `instanceof`). It is no longer
+// defined locally.
 // ----------------------------------------------------------------------------
-export type OidcEgressErrorCode =
-  | "oidc-fetch-blocked" // non-https, redirect, non-2xx upstream, SSRF
-  | "oidc-fetch-timeout" // AbortController deadline exceeded
-  | "oidc-fetch-too-large"; // Content-Length or streaming size cap exceeded
-
-export class OidcEgressError extends Error {
-  readonly code: OidcEgressErrorCode;
-
-  constructor(code: OidcEgressErrorCode, message: string) {
-    super(`[${code}] ${message}`);
-    this.name = "OidcEgressError";
-    this.code = code;
-  }
-}
+export {
+  OidcEgressError,
+  type OidcEgressErrorCode,
+} from "@tila/core";
 
 // ----------------------------------------------------------------------------
 // OidcDiscoveryError
