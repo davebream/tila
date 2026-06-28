@@ -1,3 +1,9 @@
+import {
+  AuthStore,
+  KeyringSecretStore,
+  TilaPaths,
+  processEnvProbe,
+} from "@tila/auth-store";
 import { defineCommand } from "citty";
 import { TARGET_DEFS, runMcpInit } from "../lib/mcp-targets";
 
@@ -33,10 +39,24 @@ export default defineCommand({
                 .filter((a) => !a.startsWith("-"))
                 .filter((a) => VALID_SLUGS.has(a));
 
+        // Resolve the current instance key from the keychain-backed auth store.
+        // R3: processEnvProbe is a const object with getters — no parentheses.
+        // Graceful degradation: any failure (not logged in, keychain unavailable)
+        // yields null → undefined → legacy TILA_API_TOKEN placeholder mode.
+        const authStore = new AuthStore({
+          paths: new TilaPaths(),
+          secrets: new KeyringSecretStore(),
+          env: processEnvProbe,
+        });
+        const instanceKey = await authStore
+          .getCurrentContext()
+          .catch(() => null);
+
         await runMcpInit({
           targets,
           dryRun: (args as unknown as { "dry-run": boolean })["dry-run"],
           cwd: process.cwd(),
+          instanceKey: instanceKey ?? undefined,
         });
       },
     }),

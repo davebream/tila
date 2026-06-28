@@ -9,9 +9,15 @@ vi.mock("../lib/do-forward", () => ({
   forwardToDO: (...args: unknown[]) => forwardToDOMock(...args),
 }));
 
-// Mock D1ProjectRegistry + D1RevokedJtiStore
+// Mock D1ProjectRegistry + D1RevokedJtiStore + WI-D offboard primitives
 const listAllIncludingArchivedMock = vi.fn();
 const mockRevokedJtiRevoke = vi.fn().mockResolvedValue(undefined);
+const mockRevokePrincipalBatch = vi.fn();
+const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
+// WI-I: the offboard handler routes through the shared exchange:${ip} rate-limit
+// guard (checkExchangeRateLimit constructs D1RateLimitStore), so the mock must
+// provide it. Default check=false → existing tests are unaffected.
+const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 vi.mock("@tila/backend-d1", () => ({
   D1ProjectRegistry: vi.fn().mockImplementation(
     class {
@@ -24,15 +30,37 @@ vi.mock("@tila/backend-d1", () => ({
       isRevoked = vi.fn().mockResolvedValue(false);
     } as unknown as () => unknown,
   ),
+  D1RateLimitStore: vi.fn().mockImplementation(
+    class {
+      check = mockRateLimitCheck;
+      recordFailure = vi.fn().mockResolvedValue(undefined);
+    } as unknown as () => unknown,
+  ),
+  D1SessionStore: vi.fn().mockImplementation(
+    class {
+      deleteByTokenHash = mockDeleteByTokenHash;
+    } as unknown as () => unknown,
+  ),
+  revokePrincipalBatch: (...args: unknown[]) =>
+    mockRevokePrincipalBatch(...args),
 }));
 
-// Mock revokeJtiInCache from auth middleware (side-effect call in admin route)
+// Mock auth-middleware cache side-effects (revokeJtiInCache, revokeSubjectInCache)
 const mockRevokeJtiInCache = vi.fn();
+const mockRevokeSubjectInCache = vi.fn();
 vi.mock("../middleware/auth", () => ({
   revokeJtiInCache: (...args: unknown[]) => mockRevokeJtiInCache(...args),
+  revokeSubjectInCache: (...args: unknown[]) =>
+    mockRevokeSubjectInCache(...args),
   requireD1Token: vi
     .fn()
     .mockImplementation((_c: unknown, next: () => Promise<void>) => next()),
+}));
+
+// Mock token-cache invalidate (WI-D offboard token-cache purge)
+const mockInvalidate = vi.fn();
+vi.mock("../lib/token-cache", () => ({
+  invalidate: (...args: unknown[]) => mockInvalidate(...args),
 }));
 
 // Mock R2ArtifactBackend
@@ -52,10 +80,13 @@ vi.mock("@tila/backend-r2", () => ({
 // /admin/restart is gated by requireProjectAdmin; mock it pass-through here so
 // admin.test.ts stays focused on routing. Real denial coverage lives in
 // admin-authz.test.ts (uses the genuine middleware).
+const mockRevokeAdminGrantInCache = vi.fn();
 vi.mock("../middleware/require-project-admin", () => ({
   requireProjectAdmin: vi
     .fn()
     .mockImplementation((_c: unknown, next: () => Promise<void>) => next()),
+  revokeAdminGrantInCache: (...args: unknown[]) =>
+    mockRevokeAdminGrantInCache(...args),
 }));
 
 const { admin } = await import("./admin");
@@ -1276,6 +1307,188 @@ describe("project admin routes", () => {
         mockEnv as Env,
       );
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("POST /admin/principals/:id/revoke (WI-D offboard)", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      // clearAllMocks keeps implementations — reset the shared rate-limit check
+      // so a prior 429 test's `true` cannot leak into the clean offboard tests.
+      mockRateLimitCheck.mockResolvedValue(false);
+      mockDeleteByTokenHash.mockResolvedValue({ deleted: 0 });
+      mockRevokePrincipalBatch.mockResolvedValue({
+        grantsRevoked: true,
+        revokedBefore: 1_782_000_000_000,
+        tokenHashes: [],
+      });
+    });
+
+    function offboard(
+      id: string,
+      body?: unknown,
+      kind: UnifiedTokenResult["kind"] = "d1-token",
+    ) {
+      const app = createApp("full", kind);
+      return app.request(
+        `/admin/principals/${id}/revoke`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        },
+        mockEnv as Env,
+      );
+    }
+
+    it("WI-I: returns 429 when the shared exchange:${ip} counter is over the limit (no offboard)", async () => {
+      mockRateLimitCheck.mockResolvedValue(true);
+      const app = createApp("full", "d1-token");
+      const res = await app.request(
+        "/admin/principals/12345/revoke",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "CF-Connecting-IP": "1.2.3.4",
+          },
+        },
+        mockEnv as Env,
+      );
+
+      expect(res.status).toBe(429);
+      // Guard runs before the offboard batch; nothing is revoked.
+      expect(mockRevokePrincipalBatch).not.toHaveBeenCalled();
+    });
+
+    it("offboards an active-admin principal: arms batch, primes caches, 200", async () => {
+      const res = await offboard("12345");
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json.ok).toBe(true);
+      expect(json.grants_revoked).toBe(true);
+      expect(json.subject_revoked_before).toBe(1_782_000_000_000);
+      expect(json.principal).toEqual({
+        host: "github.com",
+        subject_id: "12345",
+      });
+
+      // batch called with canonicalizable args + ms/sec injected as numbers
+      expect(mockRevokePrincipalBatch).toHaveBeenCalledTimes(1);
+      const arg = mockRevokePrincipalBatch.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(arg.projectId).toBe("proj-target");
+      expect(arg.host).toBe("github.com");
+      expect(arg.subject).toBe(12345);
+      expect(typeof arg.nowMsValue).toBe("number");
+      expect(typeof arg.nowSecValue).toBe("number");
+
+      // cache priming
+      expect(mockRevokeSubjectInCache).toHaveBeenCalledWith(
+        "proj-target",
+        "github.com",
+        12345,
+        1_782_000_000_000,
+      );
+      expect(mockRevokeAdminGrantInCache).toHaveBeenCalledWith(
+        "proj-target:github.com:12345",
+      );
+    });
+
+    it("non-admin principal still arms the tombstone (grants_revoked=false)", async () => {
+      mockRevokePrincipalBatch.mockResolvedValue({
+        grantsRevoked: false,
+        revokedBefore: 1_782_000_000_000,
+        tokenHashes: [],
+      });
+      const res = await offboard("777");
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json.grants_revoked).toBe(false);
+      expect(mockRevokeSubjectInCache).toHaveBeenCalled();
+    });
+
+    it("revoke_tokens → token-cache invalidate + session cascade", async () => {
+      mockRevokePrincipalBatch.mockResolvedValue({
+        grantsRevoked: true,
+        revokedBefore: 1_782_000_000_000,
+        tokenHashes: ["h1", "h2"],
+      });
+      const res = await offboard("12345", { revoke_tokens: ["ci-bot"] });
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json.tokens_revoked).toEqual(["ci-bot"]);
+      expect(mockInvalidate).toHaveBeenCalledWith("h1");
+      expect(mockInvalidate).toHaveBeenCalledWith("h2");
+      expect(mockDeleteByTokenHash).toHaveBeenCalledTimes(2);
+    });
+
+    it("forwards a custom host from the body to the batch", async () => {
+      const res = await offboard("12345", { host: "github.example.com" });
+      expect(res.status).toBe(200);
+      const arg = mockRevokePrincipalBatch.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(arg.host).toBe("github.example.com");
+      // cache purge still uses literal github.com (verifier-parity caveat)
+      expect(mockRevokeAdminGrantInCache).toHaveBeenCalledWith(
+        "proj-target:github.com:12345",
+      );
+    });
+
+    it("resolves session caller identity into revokedByUserId", async () => {
+      const app = createApp("admin", "session");
+      // session tokenResult has githubUserId? makeTokenResult omits it → null actor
+      const res = await app.request(
+        "/admin/principals/12345/revoke",
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+        mockEnv as Env,
+      );
+      expect(res.status).toBe(200);
+      const arg = mockRevokePrincipalBatch.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      // d1-token actor when no githubUserId present
+      expect(arg.revokedBySnapshot).toBe("d1-token");
+    });
+
+    it("400 on non-integer id (no batch issued)", async () => {
+      const res = await offboard("abc");
+      expect(res.status).toBe(400);
+      expect(mockRevokePrincipalBatch).not.toHaveBeenCalled();
+    });
+
+    it("400 on malformed JSON body", async () => {
+      const app = createApp("full");
+      const res = await app.request(
+        "/admin/principals/12345/revoke",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{not json",
+        },
+        mockEnv as Env,
+      );
+      expect(res.status).toBe(400);
+      expect(mockRevokePrincipalBatch).not.toHaveBeenCalled();
+    });
+
+    it("400 on schema-invalid body (host wrong type)", async () => {
+      const res = await offboard("12345", { host: 123 });
+      expect(res.status).toBe(400);
+      expect(mockRevokePrincipalBatch).not.toHaveBeenCalled();
+    });
+
+    it("502 and NO cache prime when the batch fails", async () => {
+      mockRevokePrincipalBatch.mockRejectedValue(new Error("D1 unavailable"));
+      const res = await offboard("12345");
+      expect(res.status).toBe(502);
+      expect(mockRevokeSubjectInCache).not.toHaveBeenCalled();
+      expect(mockRevokeAdminGrantInCache).not.toHaveBeenCalled();
     });
   });
 });

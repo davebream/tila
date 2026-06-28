@@ -212,11 +212,31 @@ describe("checkIdempotentExchange", () => {
     );
 
     expect(result).toBeNull();
+    // WI-I: stale-delete is guarded `AND status_code != 0` so it never removes a
+    // concurrently-reserved in-flight placeholder.
     expect(mockPrepare).toHaveBeenCalledWith(
-      "DELETE FROM _idempotency WHERE key = ?",
+      "DELETE FROM _idempotency WHERE key = ? AND status_code != 0",
     );
     expect(mockBind).toHaveBeenCalledWith("exchange:proj1:hash");
     expect(mockRun).toHaveBeenCalled();
+  });
+
+  it("returns null for an in-flight placeholder (status_code 0) WITHOUT deleting it", async () => {
+    // WI-I: a status_code=0 row is a live reservation placeholder, not a usable
+    // cache hit. checkIdempotentExchange must skip it and must NOT delete it.
+    const mockStore = {
+      check: vi.fn().mockResolvedValue({ body: "", statusCode: 0 }),
+    } as unknown as D1IdempotencyStore;
+
+    const result = await checkIdempotentExchange(
+      mockStore,
+      "exchange:proj1:hash",
+      "proj1",
+      mockDb,
+    );
+
+    expect(result).toBeNull();
+    expect(mockPrepare).not.toHaveBeenCalled();
   });
 
   it("returns null and does not throw when cached body is malformed JSON", async () => {
@@ -305,7 +325,7 @@ describe("call-site count assertions (C3 regression guard)", () => {
     expect(callSites).toBe(3);
   });
 
-  it("OIDC tail uses mintAndStoreSession (not inline mint)", async () => {
+  it("OIDC tail uses mintSession + reservation flow (not inline mint, not legacy store)", async () => {
     const { readFileSync } = await import("node:fs");
     const { join, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
@@ -314,11 +334,16 @@ describe("call-site count assertions (C3 regression guard)", () => {
     const __dirname = dirname(__filename);
     const src = readFileSync(join(__dirname, "auth-github.ts"), "utf-8");
 
-    // Check that the OIDC handler calls mintAndStoreSession
+    // WI-I: the OIDC handler claims the key (reservation), mints via the shared
+    // mintSession tail, and finalizes — it no longer routes through the legacy
+    // mintAndStoreSession (which performed an unconditional idempotency write).
     const oidcHandlerIdx = src.indexOf("/exchange-oidc");
     expect(oidcHandlerIdx).toBeGreaterThan(-1);
     const oidcSection = src.slice(oidcHandlerIdx);
-    expect(oidcSection).toContain("await mintAndStoreSession(");
+    expect(oidcSection).toContain("await mintSession(");
+    expect(oidcSection).toContain("acquireExchangeReservation(");
+    expect(oidcSection).toContain("idempotencyStore.finalize(");
+    expect(oidcSection).not.toContain("await mintAndStoreSession(");
 
     // Confirm no inline payload construction in the OIDC handler body
     const oidcHandlerBody = src.slice(oidcHandlerIdx, oidcHandlerIdx + 2000);

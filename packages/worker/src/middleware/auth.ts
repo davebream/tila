@@ -7,11 +7,13 @@ import {
   type RateLimitStoreInterface,
   canonicalizePrincipal,
 } from "@tila/backend-d1";
-import { SessionPayloadSchema } from "@tila/schemas";
-import type { MiddlewareHandler } from "hono";
+import { SessionPayloadSchema, canonicalizeHtu } from "@tila/schemas";
+import type { Context, MiddlewareHandler } from "hono";
 import { importJWK, jwtVerify } from "jose";
 import {
   DEBOUNCE_MS,
+  DPOP_CLOCK_SKEW_MS,
+  DPOP_PROOF_MAX_AGE_MS,
   ISOLATE_RL_MAX_FAILURES,
   ISOLATE_RL_MAX_MAP_SIZE,
   JTI_REVCHECK_TTL_MS,
@@ -47,9 +49,11 @@ import type {
   D1TokenResult,
   Env,
   HonoVariables,
+  OidcSessionTokenResult,
   SessionTokenResult,
   WorkspaceSessionTokenResult,
 } from "../types";
+import { SAFE_TO_EXPOSE_CODES, verifyDpopProof } from "./dpop";
 
 // --- Re-export invalidate for T3 revoke handler convenience ---
 export { invalidate } from "../lib/token-cache";
@@ -360,6 +364,95 @@ export type GetClientIP = (req: Request) => string | null;
 export const defaultGetClientIP: GetClientIP = (req) =>
   req.headers.get("CF-Connecting-IP");
 
+// ---------------------------------------------------------------------------
+// DPoP enforcement helper (shared by session and D1-token branches)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generic message used externally for key-material rejection codes.
+ * These codes (`bad-signature`, `thumbprint-mismatch`, `malformed-proof`,
+ * `bad-header`) must never reveal which specific check failed — an attacker
+ * could use the distinction to probe key material.
+ */
+const DPOP_GENERIC_INVALID_MESSAGE =
+  "DPoP proof is invalid or does not match the bound key";
+
+/**
+ * Enforce a DPoP proof for a bearer credential that carries a JWK thumbprint
+ * binding (`expectedJkt`).
+ *
+ * Returns a Hono response (401) on failure so the caller can `return` it.
+ * Returns `null` on success — the caller continues the middleware chain.
+ *
+ * Security:
+ *   - Exactly two top-level error codes: `dpop-required` and `dpop-invalid`.
+ *   - Key-material sub-reasons are collapsed to `DPOP_GENERIC_INVALID_MESSAGE`.
+ *   - Clock/URL sub-reasons (`stale-proof`, `future-proof`, `htm-mismatch`,
+ *     `htu-mismatch`) may appear verbatim in the message.
+ *   - Full sub-reason is always logged via `console.warn` for operator visibility.
+ */
+async function enforceDpop(
+  c: Context,
+  expectedJkt: string,
+): Promise<Response | null> {
+  const proofJwt = c.req.header("DPoP");
+
+  if (!proofJwt) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "dpop-required",
+          message:
+            "This credential requires a DPoP proof — attach a DPoP header",
+          retryable: false,
+        },
+      },
+      401,
+    );
+  }
+
+  const htm = c.req.method;
+  const htu = canonicalizeHtu(c.req.url);
+
+  const result = await verifyDpopProof({
+    proofJwt,
+    expectedJkt,
+    htm,
+    htu,
+    nowMs: nowMs(),
+    maxAgeMs: DPOP_PROOF_MAX_AGE_MS,
+    clockSkewMs: DPOP_CLOCK_SKEW_MS,
+  });
+
+  if (!result.ok) {
+    // Log the full sub-reason internally for operator visibility.
+    console.warn(
+      `[auth] DPoP proof rejected: code=${result.code} htm=${htm} htu=${htu}`,
+    );
+
+    // Message hardening: collapse key-material codes; expose clock/URL codes.
+    const isSafe = (SAFE_TO_EXPOSE_CODES as readonly string[]).includes(
+      result.code,
+    );
+    const message = isSafe ? result.code : DPOP_GENERIC_INVALID_MESSAGE;
+
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "dpop-invalid",
+          message,
+          retryable: false,
+        },
+      },
+      401,
+    );
+  }
+
+  return null; // proof valid — continue
+}
+
 /**
  * Create the auth middleware factory.
  * @param opts.getClientIP - Override IP extraction for tests (default: CF-Connecting-IP)
@@ -598,8 +691,17 @@ export function createAuthMiddleware(
         );
       }
 
-      // Validate payload schema
-      const parsed = SessionPayloadSchema.safeParse(payloadObj);
+      // Validate payload schema.
+      // Default-fill sub_type:"github" for legacy tokens that predate the
+      // discriminated union (security A-2: do NOT mutate the JOSE-verified
+      // payloadObj — build a new parse input instead).
+      const payloadForParse =
+        typeof payloadObj === "object" &&
+        payloadObj !== null &&
+        !("sub_type" in payloadObj)
+          ? { sub_type: "github", ...(payloadObj as Record<string, unknown>) }
+          : payloadObj;
+      const parsed = SessionPayloadSchema.safeParse(payloadForParse);
       if (!parsed.success) {
         return c.json(
           {
@@ -807,11 +909,18 @@ export function createAuthMiddleware(
       // Identity is derived from the VERIFIED payload (parsed.data) ONLY, through
       // the shared canonicalizePrincipal so the (identity_host, subject_id) pair
       // matches byte-for-byte whatever was written when the tombstone was set.
+      // OIDC sessions: use (oidc_issuer, oidc_subject) as the canonical identity
+      // so the same kill-switch covers all session kinds. The issuer becomes the
+      // identity_host column; it cannot collide with github.com principals because
+      // OIDC issuers are https:// URIs.
       {
-        const { identityHost, subjectId } = canonicalizePrincipal(
-          payload.github_host,
-          payload.github_user_id,
-        );
+        const { identityHost, subjectId } =
+          payload.sub_type === "oidc"
+            ? canonicalizePrincipal(payload.oidc_issuer, payload.oidc_subject)
+            : canonicalizePrincipal(
+                payload.github_host,
+                payload.github_user_id,
+              );
         const cacheKey = subjectCacheKey(
           payload.project_id,
           identityHost,
@@ -826,10 +935,16 @@ export function createAuthMiddleware(
           // Cache miss or stale — query D1 (fail-closed on error, like the jti path)
           try {
             const revokedSubjectsStore = new D1RevokedSubjectsStore(c.env.DB);
+            // Use the same identity axes that canonicalizePrincipal consumed
+            // above so the cache-key and the D1 lookup stay consistent.
+            const [hostArg, subjectArg] =
+              payload.sub_type === "oidc"
+                ? ([payload.oidc_issuer, payload.oidc_subject] as const)
+                : ([payload.github_host, payload.github_user_id] as const);
             revokedBefore = await revokedSubjectsStore.getRevokedBefore(
               payload.project_id,
-              payload.github_host,
-              payload.github_user_id,
+              hostArg,
+              subjectArg,
             );
             setSubjectRevInCache(cacheKey, {
               revokedBefore,
@@ -884,22 +999,55 @@ export function createAuthMiddleware(
         }
       }
 
-      // Set session token result
-      const sessionResult: SessionTokenResult = {
-        kind: "session",
-        projectId: payload.project_id,
-        name: payload.github_login,
-        scopes: payload.permission,
-        tokenId: "",
-        githubRepoId: payload.github_repo_id,
-        githubLogin: payload.github_login,
-        permission: payload.permission,
-        expiresAt: payload.expires_at,
-        // SECURITY: source ONLY from the verified payload (parsed.data), never the pre-validation object.
-        githubUserId: payload.github_user_id,
-        githubHost: payload.github_host,
-        jti: payload.jti,
-      };
+      // --- WI-G: DPoP enforcement for bound session tokens ---
+      // If the session payload carries a `cnf.jkt` thumbprint binding, enforce
+      // a DPoP proof for this request. Absent binding ⇒ skip (legacy accept).
+      // OIDC sessions never carry `cnf` (binding is out of scope for the CI
+      // runner profile), so this is structurally a no-op on the OIDC branch.
+      if (payload.cnf?.jkt) {
+        const dpopResult = await enforceDpop(c, payload.cnf.jkt);
+        if (dpopResult !== null) return dpopResult;
+      }
+
+      // Set token result — branch on sub_type.
+      // SECURITY: source ONLY from the verified payload (parsed.data), never the
+      // pre-validation payloadObj. The OIDC branch produces no GitHub fields by
+      // construction, making the admin-roster structurally unreachable.
+      let tokenKindResult: SessionTokenResult | OidcSessionTokenResult;
+      if (payload.sub_type === "oidc") {
+        const oidcResult: OidcSessionTokenResult = {
+          kind: "oidc-session",
+          projectId: payload.project_id,
+          name: payload.actor_name,
+          scopes: payload.permission,
+          tokenId: "",
+          permission: payload.permission,
+          expiresAt: payload.expires_at,
+          oidcIssuer: payload.oidc_issuer,
+          oidcSubject: payload.oidc_subject,
+        };
+        tokenKindResult = oidcResult;
+      } else {
+        const sessionResult: SessionTokenResult = {
+          kind: "session",
+          projectId: payload.project_id,
+          name: payload.github_login,
+          scopes: payload.permission,
+          tokenId: "",
+          githubRepoId: payload.github_repo_id,
+          githubLogin: payload.github_login,
+          permission: payload.permission,
+          expiresAt: payload.expires_at,
+          githubUserId: payload.github_user_id,
+          githubHost: payload.github_host,
+          jti: payload.jti,
+        };
+        tokenKindResult = sessionResult;
+      }
+      // Keep local reference for back-compat: downstream code in this file still
+      // refers to sessionResult for cookie/workspace paths above; the naming below
+      // shadows by reassignment. Use the alias for clarity.
+      const sessionResult = tokenKindResult;
 
       c.set("tokenResult", sessionResult);
       c.set("authKind", "bearer");
@@ -1000,6 +1148,21 @@ export function createAuthMiddleware(
       }
       claims = result;
       setInCache(tokenHash, claims); // positive cache
+    }
+
+    // 5.5. DPoP enforcement for bound D1 tokens (WI-G)
+    // If the token carries a JWK thumbprint binding (cnfJkt), enforce a DPoP
+    // proof for this request. Absent binding ⇒ skip (legacy/unbound accept).
+    //
+    // Cache-warmup pinning: the positive cache entry DOES carry cnfJkt (set in
+    // step 5 below). A pre-deploy warm entry populated WITHOUT cnfJkt (e.g. from
+    // a running pre-WI-G worker) would be served here as cnfJkt=undefined, meaning
+    // DPoP is NOT enforced during the warm window. This is the documented bounded
+    // fail-open window — after eviction/expiry (60s), the entry is re-read from
+    // D1 and enforcement resumes. See Task 7 tests for the pinned regression guard.
+    if (claims?.cnfJkt) {
+      const dpopResult = await enforceDpop(c, claims.cnfJkt);
+      if (dpopResult !== null) return dpopResult;
     }
 
     // 6. Debounced last_used_at write (fire-and-forget)

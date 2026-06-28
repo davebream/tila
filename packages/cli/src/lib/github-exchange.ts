@@ -177,6 +177,10 @@ async function resolveOidcToken(
  * 4. Cache and return
  *
  * The raw GitHub token is NEVER written to disk or logged.
+ *
+ * @param jkt Optional DPoP public key thumbprint. When provided, the minted session
+ *            carries `cnf.jkt` so the Worker can enforce DPoP sender-constraint on
+ *            all subsequent requests using that session.
  */
 export async function resolveGithubRepoToken(
   config: {
@@ -185,6 +189,7 @@ export async function resolveGithubRepoToken(
     github?: { host?: string; owner?: string; repo?: string; repo_id?: number };
   },
   tilaDir: string,
+  jkt?: string,
 ): Promise<string> {
   // 1. Check cache
   const cached = readSessionCache(tilaDir);
@@ -208,14 +213,18 @@ export async function resolveGithubRepoToken(
 
   // 3. Exchange using App OAuth format
   const exchangeUrl = `${config.worker_url}/api/auth/github/exchange`;
+  const exchangeBody: Record<string, unknown> = {
+    auth_method: "user_token",
+    project_id: config.project_id,
+    user_token: userToken,
+  };
+  if (jkt !== undefined) {
+    exchangeBody.jkt = jkt;
+  }
   const res = await fetch(exchangeUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      auth_method: "user_token",
-      project_id: config.project_id,
-      user_token: userToken,
-    }),
+    body: JSON.stringify(exchangeBody),
   });
 
   if (!res.ok) {

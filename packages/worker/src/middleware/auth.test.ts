@@ -1,9 +1,17 @@
 import type { RateLimitStoreInterface, SessionResult } from "@tila/backend-d1";
 import { Hono } from "hono";
-import { SignJWT, importJWK } from "jose";
+import {
+  type JWK,
+  SignJWT,
+  calculateJwkThumbprint,
+  exportJWK,
+  generateKeyPair,
+  importJWK,
+} from "jose";
 import {
   type Mock,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -2022,5 +2030,475 @@ describe("auth middleware — instance_id validation (Bearer/JWT branch only)", 
     // ensureDeploymentInstanceId must NOT be called for cookie sessions
     expect(mockEnsureDeploymentInstanceId).not.toHaveBeenCalled();
     expect(mockEmitInstanceMismatchDatapoint).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DPoP enforcement tests (WI-G / Task 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * DPoP test helpers: generate a P-256 keypair + helpers to mint proofs.
+ * Runs once per describe block to avoid per-test key generation overhead.
+ */
+async function makeDpopKeyPair(): Promise<{
+  publicJwk: JWK;
+  privateKey: CryptoKey;
+  jkt: string;
+}> {
+  const kp = await generateKeyPair("ES256", { extractable: true });
+  const publicJwk = await exportJWK(kp.publicKey);
+  const jkt = await calculateJwkThumbprint(publicJwk, "sha256");
+  return { publicJwk, privateKey: kp.privateKey, jkt };
+}
+
+async function mintDpopProof(
+  privateKey: CryptoKey,
+  publicJwk: JWK,
+  overrides?: { htm?: string; htu?: string; iat?: number; jti?: string },
+): Promise<string> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return new SignJWT({
+    htm: overrides?.htm ?? "GET",
+    htu: overrides?.htu ?? "http://localhost/test",
+    iat: overrides?.iat ?? nowSec,
+    jti: overrides?.jti ?? crypto.randomUUID(),
+  })
+    .setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: publicJwk })
+    .sign(privateKey);
+}
+
+describe("DPoP enforcement — session token branch (WI-G)", () => {
+  let dpopPublicJwk: JWK;
+  let dpopPrivateKey: CryptoKey;
+  let dpopJkt: string;
+
+  beforeAll(async () => {
+    const kp = await makeDpopKeyPair();
+    dpopPublicJwk = kp.publicJwk;
+    dpopPrivateKey = kp.privateKey;
+    dpopJkt = kp.jkt;
+  });
+
+  it("bound session + valid proof ⇒ 200 (pass)", async () => {
+    const token = await mintSessionToken({ cnf: { jkt: dpopJkt } });
+    const proof = await mintDpopProof(dpopPrivateKey, dpopPublicJwk, {
+      htm: "GET",
+      htu: "http://localhost/test",
+    });
+    const app = createTestApp();
+    const res = await fetchWithSessionEnv(
+      app,
+      makeReq("/test", {
+        Authorization: `Bearer ${token}`,
+        DPoP: proof,
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("bound session + missing DPoP header ⇒ 401 dpop-required", async () => {
+    const token = await mintSessionToken({ cnf: { jkt: dpopJkt } });
+    const app = createTestApp();
+    const res = await fetchWithSessionEnv(
+      app,
+      makeReq("/test", { Authorization: `Bearer ${token}` }),
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("dpop-required");
+  });
+
+  it("bound session + wrong-key proof ⇒ 401 dpop-invalid", async () => {
+    const wrongKp = await makeDpopKeyPair();
+    const token = await mintSessionToken({ cnf: { jkt: dpopJkt } });
+    const proof = await mintDpopProof(
+      wrongKp.privateKey,
+      wrongKp.publicJwk, // mismatched key
+      { htm: "GET", htu: "http://localhost/test" },
+    );
+    const app = createTestApp();
+    const res = await fetchWithSessionEnv(
+      app,
+      makeReq("/test", {
+        Authorization: `Bearer ${token}`,
+        DPoP: proof,
+      }),
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("dpop-invalid");
+  });
+
+  it("UNBOUND session (no cnf.jkt) ⇒ behaviour identical to today (no DPoP required)", async () => {
+    // A session WITHOUT cnf.jkt must pass without any DPoP header — the opt-in regression guard.
+    const token = await mintSessionToken(); // no cnf override
+    const app = createTestApp();
+    const res = await fetchWithSessionEnv(
+      app,
+      makeReq("/test", { Authorization: `Bearer ${token}` }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { error?: { code: string } };
+    expect(body.error).toBeUndefined();
+  });
+
+  it("oracle test: bound session + stale proof ⇒ dpop-invalid (clock sub-reason in message)", async () => {
+    vi.setSystemTime(new Date("2030-01-01T00:00:00Z")); // real clock far in the future
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Mint proof with iat 2 minutes in the past (beyond 60s max age)
+    const proof = await mintDpopProof(dpopPrivateKey, dpopPublicJwk, {
+      htm: "GET",
+      htu: "http://localhost/test",
+      iat: nowSec - 120, // stale
+    });
+    const token = await mintSessionToken({
+      cnf: { jkt: dpopJkt },
+      expires_at: nowSec + 3600, // valid expiry
+      issued_at: nowSec - 120,
+    });
+    const app = createTestApp();
+    const res = await fetchWithSessionEnv(
+      app,
+      makeReq("/test", {
+        Authorization: `Bearer ${token}`,
+        DPoP: proof,
+      }),
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(body.error.code).toBe("dpop-invalid");
+    // stale-proof is a clock/URL code — message should be the verbatim sub-reason
+    expect(body.error.message).toBe("stale-proof");
+    vi.useRealTimers();
+  });
+});
+
+describe("DPoP enforcement — D1 token branch (WI-G)", () => {
+  let dpopPublicJwk: JWK;
+  let dpopPrivateKey: CryptoKey;
+  let dpopJkt: string;
+
+  beforeAll(async () => {
+    const kp = await makeDpopKeyPair();
+    dpopPublicJwk = kp.publicJwk;
+    dpopPrivateKey = kp.privateKey;
+    dpopJkt = kp.jkt;
+  });
+
+  it("bound D1 token + valid proof ⇒ 200 (pass)", async () => {
+    mockValidate.mockResolvedValueOnce({
+      ...CLAIMS,
+      cnfJkt: dpopJkt,
+    });
+    const proof = await mintDpopProof(dpopPrivateKey, dpopPublicJwk, {
+      htm: "GET",
+      htu: "http://localhost/test",
+    });
+    const app = createTestApp();
+    const res = await fetchWithCtx(
+      app,
+      makeReq("/test", {
+        Authorization: `Bearer ${VALID_TOKEN}`,
+        DPoP: proof,
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("bound D1 token + missing DPoP header ⇒ 401 dpop-required", async () => {
+    mockValidate.mockResolvedValueOnce({
+      ...CLAIMS,
+      cnfJkt: dpopJkt,
+    });
+    const app = createTestApp();
+    const res = await fetchWithCtx(
+      app,
+      makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }),
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("dpop-required");
+  });
+
+  it("bound D1 token + wrong-key proof ⇒ 401 dpop-invalid", async () => {
+    const wrongKp = await makeDpopKeyPair();
+    mockValidate.mockResolvedValueOnce({
+      ...CLAIMS,
+      cnfJkt: dpopJkt,
+    });
+    const proof = await mintDpopProof(
+      wrongKp.privateKey,
+      wrongKp.publicJwk, // mismatched key (thumbprint won't match dpopJkt)
+      { htm: "GET", htu: "http://localhost/test" },
+    );
+    const app = createTestApp();
+    const res = await fetchWithCtx(
+      app,
+      makeReq("/test", {
+        Authorization: `Bearer ${VALID_TOKEN}`,
+        DPoP: proof,
+      }),
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("dpop-invalid");
+  });
+
+  it("UNBOUND D1 token (no cnfJkt) ⇒ behaviour identical to today (no DPoP required)", async () => {
+    mockValidate.mockResolvedValueOnce({
+      ...CLAIMS,
+      cnfJkt: null, // unbound
+    });
+    const app = createTestApp();
+    const res = await fetchWithCtx(
+      app,
+      makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { error?: { code: string } };
+    expect(body.error).toBeUndefined();
+  });
+
+  it("cache-warmup pinning: D1 token bound in D1 but cache entry lacks cnfJkt ⇒ no DPoP during warm window", async () => {
+    // Simulate a pre-deploy positive-cache entry that was populated before WI-G
+    // (i.e., cnfJkt is absent/undefined in the cached entry).
+    // First request: populate cache WITH cnfJkt (simulating current deploy)
+    mockValidate.mockResolvedValueOnce({
+      ...CLAIMS,
+      cnfJkt: dpopJkt,
+    });
+    const proof = await mintDpopProof(dpopPrivateKey, dpopPublicJwk, {
+      htm: "GET",
+      htu: "http://localhost/test",
+    });
+    const app = createTestApp();
+    await fetchWithCtx(
+      app,
+      makeReq("/test", {
+        Authorization: `Bearer ${VALID_TOKEN}`,
+        DPoP: proof,
+      }),
+    );
+    // Now manually seed the cache with a stale entry that lacks cnfJkt —
+    // simulating a pre-WI-G warm entry.
+    const { setInCache: setCacheEntry } = await import("../lib/token-cache");
+    const { hashToken: hash } = await import("../lib/hash-token");
+    const tokenHash = await hash(VALID_TOKEN, undefined);
+    setCacheEntry(tokenHash, { ...CLAIMS, cnfJkt: undefined });
+
+    // Second request: cache hit with cnfJkt=undefined → DPoP NOT enforced
+    mockValidate.mockReset(); // should not be called (cache hit)
+    const res = await fetchWithCtx(
+      app,
+      makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }), // no DPoP header
+    );
+    expect(res.status).toBe(200); // passes because cache entry lacks cnfJkt
+    expect(mockValidate).not.toHaveBeenCalled(); // confirmed: cache hit path
+  });
+
+  it("oracle test: bound D1 token + thumbprint-mismatch proof ⇒ dpop-invalid, generic message (key-material collapse)", async () => {
+    const wrongKp = await makeDpopKeyPair();
+    mockValidate.mockResolvedValueOnce({
+      ...CLAIMS,
+      cnfJkt: dpopJkt,
+    });
+    const proof = await mintDpopProof(wrongKp.privateKey, wrongKp.publicJwk, {
+      htm: "GET",
+      htu: "http://localhost/test",
+    });
+    const app = createTestApp();
+    const res = await fetchWithCtx(
+      app,
+      makeReq("/test", {
+        Authorization: `Bearer ${VALID_TOKEN}`,
+        DPoP: proof,
+      }),
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(body.error.code).toBe("dpop-invalid");
+    // thumbprint-mismatch is a key-material code → must use generic message
+    expect(body.error.message).toBe(
+      "DPoP proof is invalid or does not match the bound key",
+    );
+  });
+});
+
+// Phase 3 (T9): OIDC session (sub_type:"oidc") middleware tests
+// ---------------------------------------------------------------------------
+
+describe("OIDC session tokens (sub_type:oidc)", () => {
+  /**
+   * Mint a tila_s. JWT with sub_type:"oidc" fields.
+   * These are the tokens produced by the /api/auth/oidc/exchange route (Phase 4).
+   */
+  async function mintOidcSessionToken(
+    overrides: Record<string, unknown> = {},
+  ): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      project_id: "proj-oidc",
+      sub_type: "oidc",
+      oidc_issuer: "https://idp.example.com",
+      oidc_subject: "user@example.com",
+      actor_name: "user@example.com",
+      permission: "write",
+      expires_at: now + 3600,
+      issued_at: now,
+      iss: "tila",
+      aud: "tila",
+      jti: "oidc-jti-test-uuid",
+      ...overrides,
+    };
+
+    const keyBytes = base64UrlDecode(TEST_HMAC_KEY);
+    const secret = await importJWK(
+      { kty: "oct", k: base64UrlEncode(keyBytes), alg: "HS256" },
+      "HS256",
+    );
+
+    const jwt = await new SignJWT(payload)
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .sign(secret);
+
+    return `tila_s.${jwt}`;
+  }
+
+  it("resolves to kind:oidc-session with correct fields", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const token = await mintOidcSessionToken();
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      claims: {
+        kind: string;
+        name: string;
+        permission: string;
+        oidcIssuer: string;
+        oidcSubject: string;
+        projectId: string;
+      };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.claims.kind).toBe("oidc-session");
+    expect(body.claims.name).toBe("user@example.com");
+    expect(body.claims.permission).toBe("write");
+    expect(body.claims.oidcIssuer).toBe("https://idp.example.com");
+    expect(body.claims.oidcSubject).toBe("user@example.com");
+    expect(body.claims.projectId).toBe("proj-oidc");
+    // Must NOT carry any GitHub fields
+    expect(
+      (body.claims as Record<string, unknown>).githubRepoId,
+    ).toBeUndefined();
+    expect(
+      (body.claims as Record<string, unknown>).githubLogin,
+    ).toBeUndefined();
+    expect(
+      (body.claims as Record<string, unknown>).githubUserId,
+    ).toBeUndefined();
+    expect((body.claims as Record<string, unknown>).githubHost).toBeUndefined();
+  });
+
+  it("legacy GitHub token with no sub_type still resolves to kind:session", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    // A legacy token: all github fields present, NO sub_type
+    const token = await mintSessionToken({
+      // No sub_type — should default-fill to "github"
+    });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      claims: { kind: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.claims.kind).toBe("session");
+  });
+
+  it("expired oidc session is rejected with 401 session-expired", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const now = Math.floor(Date.now() / 1000);
+    const token = await mintOidcSessionToken({
+      expires_at: now - 60, // expired 60s ago
+    });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("session-expired");
+  });
+
+  it("oidc session with wrong iss is rejected with 401", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const token = await mintOidcSessionToken({ iss: "not-tila" });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+  });
+
+  it("oidc session with wrong aud is rejected with 401", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const token = await mintOidcSessionToken({ aud: "other" });
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+  });
+
+  it("WI-C: oidc principal with revocation tombstone is rejected", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const now = Math.floor(Date.now() / 1000);
+    // Token issued at now - 10; tombstone at now - 5 → token issued before revocation
+    const token = await mintOidcSessionToken({
+      issued_at: now - 10,
+      expires_at: now + 3600,
+    });
+    // Tombstone set 5 seconds ago (in ms for the store)
+    const tombstoneMs = (now - 5) * 1000;
+    mockGetRevokedBefore = vi.fn().mockResolvedValue(tombstoneMs);
+
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("subject-revoked");
+    // Lock the OIDC identity axis: the kill-switch MUST query the
+    // (oidc_issuer, oidc_subject) principal, not the (absent) github_* fields.
+    // Without this a regression to the github axes would still pass the deny check.
+    expect(mockGetRevokedBefore).toHaveBeenCalledWith(
+      "proj-oidc",
+      "https://idp.example.com",
+      "user@example.com",
+    );
+  });
+
+  it("WI-C: oidc principal with tombstone AFTER issuance is NOT rejected", async () => {
+    mockEnsureDeploymentInstanceId.mockResolvedValue("deployment-A");
+    const now = Math.floor(Date.now() / 1000);
+    // Token issued at now - 5; tombstone at now - 10 → token issued AFTER revocation → allowed
+    const token = await mintOidcSessionToken({
+      issued_at: now - 5,
+      expires_at: now + 3600,
+    });
+    const tombstoneMs = (now - 10) * 1000;
+    mockGetRevokedBefore = vi.fn().mockResolvedValue(tombstoneMs);
+
+    const app = createTestApp();
+    const req = makeReq("/test", { Authorization: `Bearer ${token}` });
+    const res = await fetchWithSessionEnv(app, req);
+    expect(res.status).toBe(200);
   });
 });

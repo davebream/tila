@@ -118,6 +118,28 @@ export function requirePermission(
       return next();
     }
 
+    if (tokenResult.kind === "oidc-session") {
+      // OIDC sessions use a static permission granted at allowlist registration.
+      // Do NOT call reverifySessionPermission — that helper is GitHub-specific
+      // (reads githubHost/githubRepoId/githubLogin) and OidcSessionTokenResult
+      // carries none of those fields. The permission is locked at exchange time.
+      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
+      if (userLevel >= (PERMISSION_LEVELS[level] ?? 0)) {
+        return next();
+      }
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "permission-denied",
+            message: `Requires ${level} permission`,
+            retryable: false,
+          },
+        },
+        403,
+      );
+    }
+
     if (tokenResult.kind === "cookie-session") {
       // Map cookie-session normalized permission onto the PERMISSION_LEVELS hierarchy.
       // Uses the persisted GitHub-derived permission tier ("read"/"write"/"admin"),

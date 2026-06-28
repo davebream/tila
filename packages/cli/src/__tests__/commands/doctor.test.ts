@@ -53,6 +53,30 @@ vi.mock("node:os", async (importOriginal) => {
   };
 });
 
+// Mock lib/instance-context so doctor.ts's auth-store block doesn't call
+// resolveInstanceContext with a real (TOML-parsing) implementation when
+// the node:fs mock returns unexpected values.
+const mockDocBuildAuthStore = vi.fn();
+const mockDocResolveInstanceContext = vi.fn();
+vi.mock("../../lib/instance-context", () => ({
+  buildAuthStore: () => mockDocBuildAuthStore(),
+  resolveInstanceContext: (opts?: unknown) =>
+    mockDocResolveInstanceContext(opts),
+  toInstanceMetadata: vi.fn(
+    (r: {
+      instance_key: unknown;
+      worker_url: unknown;
+      credentialSource: unknown;
+      trust: unknown;
+    }) => ({
+      instance_key: r.instance_key,
+      worker_url: r.worker_url,
+      credentialSource: r.credentialSource,
+      trust: r.trust,
+    }),
+  ),
+}));
+
 import { existsSync, readFileSync } from "node:fs";
 import { runStartupChecks } from "../../context";
 
@@ -157,6 +181,25 @@ describe("doctor GitHub App checks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+
+    // Default auth-store mocks: buildAuthStore returns a stub store whose probe passes,
+    // resolveInstanceContext returns a failed outcome (no instance), and listInstances
+    // returns []. This prevents the new auth-store block from crashing existing tests.
+    const stubStore = {
+      probe: vi.fn(() => Promise.resolve()),
+      listInstances: vi.fn(() => Promise.resolve([])),
+      getCurrentContext: vi.fn(() => Promise.resolve(null)),
+      getCredential: vi.fn(() => Promise.resolve(null)),
+    };
+    mockDocBuildAuthStore.mockReturnValue(stubStore);
+    mockDocResolveInstanceContext.mockResolvedValue({
+      ok: false,
+      error: Object.assign(new Error("no instance"), {
+        code: "INSTANCE_RESOLUTION_ERROR",
+        decision: "none",
+      }),
+      trace: [],
+    });
   });
 
   afterEach(() => {

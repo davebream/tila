@@ -133,6 +133,88 @@ describe("D1RevokedSubjectsStore", () => {
     });
   });
 
+  describe("deleteExpired", () => {
+    function seedRow(
+      sqlite: Database.Database,
+      subjectId: string,
+      revokedBefore: number,
+    ) {
+      sqlite
+        .prepare(
+          "INSERT INTO _revoked_subjects (project_id, identity_host, subject_id, revoked_before) VALUES (?, ?, ?, ?)",
+        )
+        .run("proj-1", "github.com", subjectId, revokedBefore);
+    }
+
+    it("deletes a row strictly older than the cutoff", async () => {
+      const { store, sqlite } = createTestStore();
+      const cutoff = 1_700_000_000_000;
+      seedRow(sqlite, "old", cutoff - 1);
+
+      const deleted = await store.deleteExpired(cutoff);
+
+      expect(deleted).toBe(1);
+      expect(
+        await store.getRevokedBefore("proj-1", "github.com", "old"),
+      ).toBeNull();
+    });
+
+    it("keeps a row exactly at the cutoff (strict <)", async () => {
+      const { store, sqlite } = createTestStore();
+      const cutoff = 1_700_000_000_000;
+      seedRow(sqlite, "boundary", cutoff);
+
+      const deleted = await store.deleteExpired(cutoff);
+
+      expect(deleted).toBe(0);
+      expect(
+        await store.getRevokedBefore("proj-1", "github.com", "boundary"),
+      ).toBe(cutoff);
+    });
+
+    it("keeps a row newer than the cutoff", async () => {
+      const { store, sqlite } = createTestStore();
+      const cutoff = 1_700_000_000_000;
+      seedRow(sqlite, "fresh", cutoff + 1);
+
+      const deleted = await store.deleteExpired(cutoff);
+
+      expect(deleted).toBe(0);
+      expect(
+        await store.getRevokedBefore("proj-1", "github.com", "fresh"),
+      ).toBe(cutoff + 1);
+    });
+
+    it("returns the count of deleted rows", async () => {
+      const { store, sqlite } = createTestStore();
+      const cutoff = 1_700_000_000_000;
+      seedRow(sqlite, "old-1", cutoff - 100);
+      seedRow(sqlite, "old-2", cutoff - 50);
+      seedRow(sqlite, "boundary", cutoff);
+      seedRow(sqlite, "fresh", cutoff + 100);
+
+      const deleted = await store.deleteExpired(cutoff);
+
+      expect(deleted).toBe(2);
+      expect(
+        await store.getRevokedBefore("proj-1", "github.com", "boundary"),
+      ).toBe(cutoff);
+      expect(
+        await store.getRevokedBefore("proj-1", "github.com", "fresh"),
+      ).toBe(cutoff + 100);
+    });
+
+    it("returns 0 when no rows match", async () => {
+      const { store, sqlite } = createTestStore();
+      const cutoff = 1_700_000_000_000;
+      seedRow(sqlite, "fresh", cutoff + 1);
+
+      const deleted = await store.deleteExpired(cutoff);
+
+      expect(deleted).toBe(0);
+    });
+  });
+
   describe("project scoping", () => {
     it("revoke in project A returns null for project B (same principal)", async () => {
       const { store } = createTestStore();

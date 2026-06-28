@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Must mock fs and smol-toml before importing config
 vi.mock("node:fs", async () => {
@@ -11,11 +11,30 @@ vi.mock("node:fs", async () => {
   };
 });
 
+vi.mock("node:fs/promises", async () => {
+  const actual =
+    await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
+  return {
+    ...actual,
+    readFile: vi.fn(async () => ""),
+  };
+});
+
 import { existsSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import {
+  type CredentialProvider,
+  FakeSecretStore,
+  type MintedCredential,
+} from "@tila/auth-store";
+import type { InstanceKey } from "@tila/schemas";
 import { resolveServerConfig } from "../config";
 
 const mockExistsSync = vi.mocked(existsSync);
 const mockReadFileSync = vi.mocked(readFileSync);
+const mockReadFile = vi.mocked(readFile);
 
 // Minimal valid config.toml content for tila-token mode
 const TILA_TOKEN_CONFIG_TOML = `
@@ -77,6 +96,7 @@ describe("resolveServerConfig", () => {
     vi.unstubAllEnvs();
     mockExistsSync.mockReturnValue(false);
     mockReadFileSync.mockReturnValue("");
+    mockReadFile.mockImplementation(async () => "");
   });
 
   describe("tila-token mode (backward compat)", () => {
@@ -179,24 +199,6 @@ describe("resolveServerConfig", () => {
       expect(typeof config.getToken).toBe("function");
     });
 
-    it("throws actionable error when github-repo mode but [github] section is missing", async () => {
-      vi.stubEnv("TILA_API_URL", "");
-      vi.stubEnv("TILA_API_TOKEN", "");
-      vi.stubEnv("TILA_PROJECT_ID", "");
-
-      mockExistsSync.mockImplementation((path: unknown) => {
-        return String(path).endsWith("config.toml");
-      });
-      mockReadFileSync.mockImplementation((path: unknown) => {
-        if (String(path).endsWith("config.toml")) {
-          return GITHUB_REPO_NO_GITHUB_SECTION_TOML;
-        }
-        return "";
-      });
-
-      await expect(resolveServerConfig()).rejects.toThrow("[github]");
-    });
-
     it("throws actionable error when github-repo mode but worker_url is missing", async () => {
       vi.stubEnv("TILA_API_URL", "");
       vi.stubEnv("TILA_API_TOKEN", "");
@@ -235,6 +237,439 @@ describe("resolveServerConfig", () => {
       expect(config.mode).toBe("remote");
       if (config.mode !== "remote") throw new Error("expected remote mode");
       expect(config.authMode).toBe("github-repo");
+    });
+  });
+
+  describe("resolver path (TILA_INSTANCE / keychain credentials)", () => {
+    const TEST_KEY = "test-inst-key";
+    const TEST_WORKER_URL = "https://tila.example.com";
+
+    // Registry TOML with a single trusted instance
+    const REGISTRY_TOML = `version = 1
+
+[[instances]]
+instance_key = "${TEST_KEY}"
+worker_url = "${TEST_WORKER_URL}"
+instance_id_source = "server"
+created_at = 1700000000000
+trust = {trusted = true, trusted_at = 1700000000000}`;
+
+    function makeCredentialJSON(
+      opts: {
+        expired?: boolean;
+        token?: string;
+      } = {},
+    ): string {
+      const now = Date.now();
+      return JSON.stringify({
+        instance_key: TEST_KEY,
+        token: opts.token ?? "keychain-token",
+        token_type: "bearer",
+        expires_at: opts.expired ? now - 60_000 : now + 3_600_000,
+        scope: "read",
+        obtained_at: now - 60_000,
+      });
+    }
+
+    function makeRefreshJSON(opts: { token?: string } = {}): string {
+      return JSON.stringify({
+        instance_key: TEST_KEY,
+        refresh_token: opts.token ?? "my-refresh-token",
+        expires_at: null,
+        obtained_at: Date.now(),
+      });
+    }
+
+    /** Daemon-mode env probes: isTTY overridden to true for the MCP server subprocess */
+    const daemonEnvProbe = { isCI: false, isTTY: true };
+    const daemonResolverEnv = {
+      isCI: false,
+      isTTY: true,
+      tilaHomeOverridden: true,
+    };
+
+    beforeEach(() => {
+      vi.stubEnv("TILA_HOME", "/test-tila-home");
+      vi.stubEnv("TILA_API_TOKEN", "");
+      vi.stubEnv("TILA_PROJECT_ID", "");
+      vi.stubEnv("TILA_API_URL", "");
+      vi.stubEnv("CI", "");
+
+      // Default: config.toml exists with github-repo mode, registry exists
+      mockExistsSync.mockImplementation((path: unknown) => {
+        const p = String(path);
+        if (p.includes("instances.toml")) return true;
+        if (p.endsWith("config.toml")) return true;
+        return false;
+      });
+      mockReadFileSync.mockImplementation((path: unknown) => {
+        if (String(path).endsWith("config.toml"))
+          return GITHUB_REPO_CONFIG_TOML;
+        return "";
+      });
+      mockReadFile.mockImplementation(async (path: unknown) => {
+        if (String(path).includes("instances.toml")) return REGISTRY_TOML;
+        return "";
+      });
+    });
+
+    it("TILA_API_TOKEN set → tila-token mode, resolver not consulted", async () => {
+      vi.stubEnv("TILA_API_TOKEN", "static-token");
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+      });
+
+      expect(config.mode).toBe("remote");
+      if (config.mode !== "remote") throw new Error("expected remote");
+      expect(config.authMode).toBe("tila-token");
+      const token = await config.getToken();
+      expect(token).toBe("static-token");
+    });
+
+    it("TILA_INSTANCE + valid credential → authMode github-repo, returns keychain token", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ token: "my-keychain-token" }),
+      );
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+      });
+
+      expect(config.mode).toBe("remote");
+      if (config.mode !== "remote") throw new Error("expected remote");
+      expect(config.authMode).toBe("github-repo");
+
+      const token = await config.getToken();
+      expect(token).toBe("my-keychain-token");
+    });
+
+    it("TILA_INSTANCE + expired credential + valid refresh token → returns refreshed token", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      // Expired credential
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true, token: "old-expired-token" }),
+      );
+      // Valid refresh record
+      fakeStore._store.set(
+        `tila:refresh\x00${TEST_KEY}`,
+        makeRefreshJSON({ token: "my-refresh-token" }),
+      );
+
+      const fakeMinted: MintedCredential = {
+        token: "new-refreshed-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMinted,
+        refresh: async () => fakeMinted,
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+
+      expect(config.mode).toBe("remote");
+      if (config.mode !== "remote") throw new Error("expected remote");
+      const token = await config.getToken();
+      expect(token).toBe("new-refreshed-token");
+    });
+
+    it("refresh persists via daemon env (isTTY: true) → second getToken() returns cached token without re-refreshing", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      // Expired credential + valid refresh
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true }),
+      );
+      fakeStore._store.set(`tila:refresh\x00${TEST_KEY}`, makeRefreshJSON());
+
+      let refreshCallCount = 0;
+      const fakeMinted: MintedCredential = {
+        token: "refreshed-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMinted,
+        refresh: async () => {
+          refreshCallCount++;
+          return fakeMinted;
+        },
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      // First call: expired credential → refresh
+      const token1 = await config.getToken();
+      expect(token1).toBe("refreshed-token");
+      expect(refreshCallCount).toBe(1);
+
+      // Second call: freshly-stored credential should be found → no re-refresh
+      const token2 = await config.getToken();
+      expect(token2).toBe("refreshed-token");
+      expect(refreshCallCount).toBe(1); // still 1 — not called again
+    });
+
+    it("TILA_INSTANCE + expired credential + no refresh token → rejects with tila auth login", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      // Expired credential, no refresh record
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true }),
+      );
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      await expect(config.getToken()).rejects.toThrow("tila auth login");
+    });
+
+    it("stderr surfacing: writes tila auth login to process.stderr on unresolvable failure", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      // Expired credential, no refresh record
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true }),
+      );
+
+      const stderrSpy = vi.spyOn(process.stderr, "write");
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      await expect(config.getToken()).rejects.toThrow();
+      expect(stderrSpy).toHaveBeenCalledWith(
+        expect.stringContaining("tila auth login"),
+      );
+
+      stderrSpy.mockRestore();
+    });
+
+    it("no TILA_INSTANCE and no resolvable instance → getToken() rejects with actionable error", async () => {
+      vi.stubEnv("TILA_INSTANCE", ""); // not set
+
+      const fakeStore = new FakeSecretStore();
+      // No credential in store
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      await expect(config.getToken()).rejects.toThrow();
+    });
+
+    // Fix 3: C3 provenance invariant — refresh uses registry-pinned worker_url, never config
+    it("C3: attemptRefresh ctx.worker_url is sourced from registry-pinned instance, not config worker_url", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      // Registry has a DISTINCT worker_url — deliberately different from the config's
+      // worker_url ("https://tila.example.com" from GITHUB_REPO_CONFIG_TOML).
+      // If a regression reads from config/repoPointer instead of the registry record,
+      // this test will catch it because capturedWorkerUrl will equal the config URL.
+      const REGISTRY_TOML_C3 = `version = 1
+
+[[instances]]
+instance_key = "${TEST_KEY}"
+worker_url = "https://registry-pinned.example.com"
+instance_id_source = "server"
+created_at = 1700000000000
+trust = {trusted = true, trusted_at = 1700000000000}`;
+
+      mockReadFile.mockImplementation(async (path: unknown) => {
+        if (String(path).includes("instances.toml")) return REGISTRY_TOML_C3;
+        return "";
+      });
+
+      const fakeStore = new FakeSecretStore();
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true, token: "old-expired-token" }),
+      );
+      fakeStore._store.set(
+        `tila:refresh\x00${TEST_KEY}`,
+        makeRefreshJSON({ token: "my-refresh-token" }),
+      );
+
+      let capturedWorkerUrl: string | undefined;
+      const fakeMinted: MintedCredential = {
+        token: "refreshed-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMinted,
+        refresh: async (ctx) => {
+          capturedWorkerUrl = ctx.worker_url;
+          return fakeMinted;
+        },
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      await config.getToken();
+
+      // C3 assertion: the refresh provider received the REGISTRY-pinned URL, not the
+      // config's worker_url. A regression that reads repoPointer.worker_url or
+      // config.data.worker_url would set capturedWorkerUrl to "https://tila.example.com".
+      expect(capturedWorkerUrl).toBe("https://registry-pinned.example.com");
+      expect(capturedWorkerUrl).not.toBe("https://tila.example.com"); // config worker_url
+    });
+
+    // Fix 4: R5 rotation — refresh_token from MintedCredential is persisted
+    it("R5: minted.refresh_token is persisted to tila:refresh on rotation", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const fakeStore = new FakeSecretStore();
+      fakeStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true }),
+      );
+      fakeStore._store.set(
+        `tila:refresh\x00${TEST_KEY}`,
+        makeRefreshJSON({ token: "old-refresh-token" }),
+      );
+
+      const rotationTime = Date.now() + 7_200_000;
+      const fakeMintedWithRotation: MintedCredential = {
+        token: "new-rotated-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+        refresh_token: "new-refresh-token",
+        refresh_expires_at: rotationTime,
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMintedWithRotation,
+        refresh: async () => fakeMintedWithRotation,
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: fakeStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      const token = await config.getToken();
+      expect(token).toBe("new-rotated-token");
+
+      // R5: the rotated refresh_token must be persisted under tila:refresh
+      const storedRefreshRaw = fakeStore._store.get(
+        `tila:refresh\x00${TEST_KEY}`,
+      );
+      expect(storedRefreshRaw).toBeDefined();
+      const storedRefresh = JSON.parse(storedRefreshRaw as string);
+      expect(storedRefresh.refresh_token).toBe("new-refresh-token");
+      expect(storedRefresh.expires_at).toBe(rotationTime);
+    });
+
+    // Fix 4 (optional): R5 swallow — putRefresh failure does not discard credential token
+    it("R5: putRefresh failure is swallowed and credential token is still returned", async () => {
+      vi.stubEnv("TILA_INSTANCE", TEST_KEY);
+
+      const innerStore = new FakeSecretStore();
+      innerStore._store.set(
+        `tila:credential\x00${TEST_KEY}`,
+        makeCredentialJSON({ expired: true }),
+      );
+      innerStore._store.set(
+        `tila:refresh\x00${TEST_KEY}`,
+        makeRefreshJSON({ token: "old-refresh-token" }),
+      );
+
+      // Proxy store that allows credential writes but throws on refresh writes,
+      // simulating a keychain that becomes partially unavailable mid-operation.
+      const throwOnRefreshWriteStore = {
+        get: (service: string, account: string) =>
+          innerStore.get(service, account),
+        set: async (service: string, account: string, value: string) => {
+          if (service === "tila:refresh")
+            throw new Error("refresh keychain locked");
+          return innerStore.set(service, account, value);
+        },
+        delete: (service: string, account: string) =>
+          innerStore.delete(service, account),
+      };
+
+      const fakeMintedWithRotation: MintedCredential = {
+        token: "rotated-token",
+        token_type: "bearer",
+        expires_at: Date.now() + 3_600_000,
+        refresh_token: "should-not-reach-store",
+      };
+      const fakeProvider: CredentialProvider = {
+        kind: "oidc-generic",
+        mint: async () => fakeMintedWithRotation,
+        refresh: async () => fakeMintedWithRotation,
+        revoke: async () => {},
+      };
+
+      const config = await resolveServerConfig({
+        secretStore: throwOnRefreshWriteStore,
+        envProbe: daemonEnvProbe,
+        resolverEnv: daemonResolverEnv,
+        providerFactory: () => fakeProvider,
+      });
+      if (config.mode !== "remote") throw new Error("expected remote");
+
+      // putRefresh throws → must be swallowed; credential token still returned
+      const token = await config.getToken();
+      expect(token).toBe("rotated-token");
     });
   });
 

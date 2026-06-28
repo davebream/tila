@@ -50,3 +50,6 @@ packages/cli-*/bin/tila.exe
 /2026-*-caveat*.txt
 # Local AI tooling (not published)
 .claude/
+
+# kombajn build-loop checkpoint (orchestration artifact, never committed)
+.build-checkpoint.json

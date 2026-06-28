@@ -19,6 +19,7 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import {
+  type CredentialProviderConfig,
   type CredentialRecord,
   CredentialRecordSchema,
   type InfraSecrets,
@@ -215,6 +216,30 @@ export class AuthStore {
   }
 
   /**
+   * Remove an instance from the registry.
+   *
+   * - If the key does not exist: no-op (idempotent).
+   * - If current_context points at the deleted key: clear it to null.
+   * - No keychain interaction — keychain cleanup is the caller's responsibility.
+   */
+  async deleteInstance(key: InstanceKey): Promise<void> {
+    const registry = await readRegistry(this.paths);
+    if (!registry) return; // no registry → nothing to delete
+
+    const filtered = registry.instances.filter((r) => r.instance_key !== key);
+    if (filtered.length === registry.instances.length) return; // key not found → idempotent
+
+    const newCurrentContext =
+      registry.current_context === key ? null : registry.current_context;
+
+    await writeRegistry(this.paths, {
+      ...registry,
+      instances: filtered,
+      current_context: newCurrentContext,
+    });
+  }
+
+  /**
    * Flip trust.trusted = true for the given instance and record trusted_at.
    * Throws InstanceNotFoundError if the key does not exist.
    */
@@ -235,6 +260,38 @@ export class AuthStore {
         trusted: true,
         trusted_at: Date.now(),
       },
+    };
+
+    await writeRegistry(this.paths, registry);
+  }
+
+  /**
+   * Set or update the credential_provider configuration for an instance.
+   *
+   * Uses the same full-record splice pattern as markTrusted so all other fields
+   * (worker_url, instance_id_source, instance_key, trust, created_at, label) are
+   * preserved verbatim. This field is mutable policy — NOT identity — so it does
+   * not trigger ImmutableInstanceKeyError.
+   *
+   * Throws InstanceNotFoundError if the key does not exist.
+   */
+  async setCredentialProvider(
+    key: InstanceKey,
+    config: CredentialProviderConfig,
+  ): Promise<void> {
+    const registry = await readRegistry(this.paths);
+    if (!registry) {
+      throw new InstanceNotFoundError(key);
+    }
+
+    const idx = registry.instances.findIndex((r) => r.instance_key === key);
+    if (idx === -1) {
+      throw new InstanceNotFoundError(key);
+    }
+
+    registry.instances[idx] = {
+      ...registry.instances[idx],
+      credential_provider: config,
     };
 
     await writeRegistry(this.paths, registry);
@@ -269,8 +326,13 @@ export class AuthStore {
       throw new InstanceKeyMismatchError(key, parsed.instance_key);
     }
 
-    // Expiry check (default: filter expired unless allowExpired is set)
-    if (!opts?.allowExpired && parsed.expires_at < Date.now()) {
+    // Expiry check (default: filter expired unless allowExpired is set).
+    // null expires_at = non-expiring (mirror getRefresh behavior at auth-store.ts:330).
+    if (
+      !opts?.allowExpired &&
+      parsed.expires_at !== null &&
+      parsed.expires_at < Date.now()
+    ) {
       return null;
     }
 

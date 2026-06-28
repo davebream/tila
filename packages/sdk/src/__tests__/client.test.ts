@@ -260,6 +260,111 @@ describe("TilaClient", () => {
   });
 });
 
+describe("TilaClient dpopSigner hook", () => {
+  const mockFetch = vi.fn();
+
+  const fakeSigner = vi.fn(
+    async (_htm: string, _htu: string) => "test-dpop-proof",
+  );
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    fakeSigner.mockClear();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("request(): attaches DPoP header when dpopSigner is set", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = new TilaClient({
+      baseUrl: "https://api.test",
+      token: "t",
+      dpopSigner: fakeSigner,
+    });
+    await client.get("/api/tasks");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers.DPoP).toBe("test-dpop-proof");
+    expect(fakeSigner).toHaveBeenCalledOnce();
+    const [htm, htu] = fakeSigner.mock.calls[0];
+    expect(htm).toBe("GET");
+    // htu must be canonicalized (no query/fragment)
+    expect(htu).toBe("https://api.test/api/tasks");
+  });
+
+  it("request(): does NOT attach DPoP header when dpopSigner is absent", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    await client.get("/api/tasks");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers.DPoP).toBeUndefined();
+  });
+
+  it("requestRaw(): attaches DPoP header when dpopSigner is set", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+    const client = new TilaClient({
+      baseUrl: "https://api.test",
+      token: "t",
+      dpopSigner: fakeSigner,
+    });
+    await client.requestRaw("DELETE", "/api/tasks/123");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers.DPoP).toBe("test-dpop-proof");
+    expect(fakeSigner).toHaveBeenCalledOnce();
+    const [htm, htu] = fakeSigner.mock.calls[0];
+    expect(htm).toBe("DELETE");
+    expect(htu).toBe("https://api.test/api/tasks/123");
+  });
+
+  it("requestRaw(): does NOT attach DPoP header when dpopSigner is absent", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    await client.requestRaw("DELETE", "/api/tasks/123");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers.DPoP).toBeUndefined();
+  });
+
+  it("postFormData(): attaches DPoP header when dpopSigner is set", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = new TilaClient({
+      baseUrl: "https://api.test",
+      token: "t",
+      dpopSigner: fakeSigner,
+    });
+    await client.postFormData("/api/artifacts", new FormData());
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers.DPoP).toBe("test-dpop-proof");
+    expect(fakeSigner).toHaveBeenCalledOnce();
+    const [htm, htu] = fakeSigner.mock.calls[0];
+    expect(htm).toBe("POST");
+    expect(htu).toBe("https://api.test/api/artifacts");
+  });
+
+  it("postFormData(): does NOT attach DPoP header when dpopSigner is absent", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    await client.postFormData("/api/artifacts", new FormData());
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers.DPoP).toBeUndefined();
+  });
+});
+
 describe("isTilaApiError", () => {
   it("returns true for TilaApiError instances", () => {
     const err = new TilaApiError(409, "stale-fence", "stale fence", false);

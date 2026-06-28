@@ -76,4 +76,19 @@ export class D1RevokedSubjectsStore {
       .bind(projectId, identityHost, subjectId, revokedBefore)
       .run();
   }
+
+  /**
+   * Prune subject-revocation tombstones whose protected tokens have certainly
+   * expired. Returns the number of rows deleted. `olderThanMs` is an absolute
+   * EpochMillis cutoff; callers pass `now - RETENTION` so a tombstone survives at
+   * least RETENTION past its `revoked_before`. Deletes only rows strictly older
+   * than the cutoff (global, not project-scoped — the cutoff is purely time-based).
+   */
+  async deleteExpired(olderThanMs: number): Promise<number> {
+    const res = await this.db
+      .prepare("DELETE FROM _revoked_subjects WHERE revoked_before < ?")
+      .bind(olderThanMs)
+      .run();
+    return res.meta?.changes ?? 0;
+  }
 }

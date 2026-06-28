@@ -23,6 +23,20 @@ export const SESSION_TTL_SECONDS = SESSION_TTL_SECONDS_BY_TIER.read;
  */
 export const COOKIE_SESSION_TTL_SECONDS = 28800;
 
+/**
+ * Retention for revocation tombstones before cron GC. Must stay >= the longest
+ * session lifetime (COOKIE_SESSION_TTL_SECONDS) so a tombstone is never pruned
+ * while a token it denies is still live. 2x for clock-skew + safety margin.
+ */
+export const REVOCATION_GC_RETENTION_MS = COOKIE_SESSION_TTL_SECONDS * 1000 * 2;
+
+/**
+ * Stale window for an idempotency-exchange reservation placeholder. Bounds how
+ * long a crashed/abandoned exchange poisons a key before the next request steals
+ * it; set above the GitHub+JWKS round-trip ceiling (GITHUB_API_TIMEOUT_MS + margin).
+ */
+export const RESERVATION_STALE_MS = 30_000;
+
 /** Maximum failed auth attempts before rate-limiting an IP. */
 export const RATE_LIMIT_MAX_FAILURES = 20;
 
@@ -232,3 +246,19 @@ export const PERMISSION_RECHECK_BACKOFF_MS = 10_000; // 10 seconds
  * Oldest entry is evicted on overflow (same pattern as isolateFailMap / jtiRevCache).
  */
 export const PERMISSION_RECHECK_CACHE_MAX_SIZE = 2000;
+
+/**
+ * Maximum age of a DPoP proof `iat` claim relative to the server clock, in
+ * milliseconds. Proofs older than this window are rejected as stale (WI-G / C3).
+ *
+ * 60 s matches the existing JTI_REVCHECK_TTL_MS precedent and is a reasonable
+ * two-sided window for Smart Placement clock drift. The value is tunable later.
+ */
+export const DPOP_PROOF_MAX_AGE_MS = 60_000; // 60 seconds
+
+/**
+ * Allowed future-dated `iat` skew for DPoP proofs, in milliseconds.
+ * A proof whose `iat` is at most this far in the future is still accepted,
+ * accommodating minor client clock drift without widening the replay window.
+ */
+export const DPOP_CLOCK_SKEW_MS = 5_000; // 5 seconds

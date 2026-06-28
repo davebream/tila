@@ -1,4 +1,8 @@
-import { ErrorEnvelopeSchema, type TilaProjectConfig } from "@tila/schemas";
+import {
+  ErrorEnvelopeSchema,
+  type TilaProjectConfig,
+  canonicalizeHtu,
+} from "@tila/schemas";
 import type { z } from "zod";
 import { createArtifactMethods } from "./artifacts";
 import { createClaimMethods } from "./claims";
@@ -25,6 +29,16 @@ export interface ClientOptions {
   timeoutMs?: number;
   /** Extra headers to include on every request. Overrides the default X-Tila-Source header if provided. */
   extraHeaders?: Record<string, string>;
+  /**
+   * Optional DPoP proof signer. When set, a `DPoP` header is attached to every
+   * request carrying a freshly-minted proof JWT. The function receives the HTTP
+   * method (`htm`) and the canonicalized target URL (`htu`) and must return the
+   * signed compact-serialized DPoP proof JWT.
+   *
+   * When absent (default), no `DPoP` header is sent — existing unbound tokens
+   * are unaffected (backward-compatible).
+   */
+  dpopSigner?: (htm: string, htu: string) => Promise<string>;
 }
 
 export class TilaClient {
@@ -33,6 +47,7 @@ export class TilaClient {
   private validate: boolean;
   private timeoutMs: number;
   private extraHeaders: Record<string, string>;
+  private dpopSigner?: (htm: string, htu: string) => Promise<string>;
 
   constructor(opts: ClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
@@ -43,6 +58,7 @@ export class TilaClient {
       "X-Tila-Source": `sdk/${SDK_VERSION}`,
       ...opts.extraHeaders,
     };
+    this.dpopSigner = opts.dpopSigner;
   }
 
   /**
@@ -123,6 +139,11 @@ export class TilaClient {
       Accept: "application/json",
       ...this.extraHeaders,
     };
+
+    if (this.dpopSigner) {
+      const htu = canonicalizeHtu(url.toString());
+      headers.DPoP = await this.dpopSigner(method, htu);
+    }
 
     const init: RequestInit = {
       method,
@@ -252,6 +273,11 @@ export class TilaClient {
       ...this.extraHeaders,
     };
 
+    if (this.dpopSigner) {
+      const htu = canonicalizeHtu(url.toString());
+      headers.DPoP = await this.dpopSigner(method, htu);
+    }
+
     let res: Response;
     try {
       res = await fetch(url.toString(), {
@@ -292,6 +318,11 @@ export class TilaClient {
       ...this.extraHeaders,
     };
     // Do NOT set Content-Type — fetch sets it with the boundary automatically for FormData
+
+    if (this.dpopSigner) {
+      const htu = canonicalizeHtu(url.toString());
+      headers.DPoP = await this.dpopSigner("POST", htu);
+    }
 
     let res: Response;
     try {

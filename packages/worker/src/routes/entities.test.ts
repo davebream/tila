@@ -229,6 +229,46 @@ class FakeIdempotencyStore implements IdempotencyStoreLike {
       });
     }
   }
+
+  async reserve(
+    key: string,
+    _projectId: string,
+    _nowMs: number,
+    _staleMs: number,
+  ): Promise<
+    | { state: "acquired" }
+    | { state: "in-flight" }
+    | { state: "finalized"; statusCode: number; body: string }
+  > {
+    const existing = this.map.get(key);
+    if (!existing) {
+      this.map.set(key, { statusCode: 0, body: "", requestHash: null });
+      return { state: "acquired" };
+    }
+    if (existing.statusCode === 0) return { state: "in-flight" };
+    return {
+      state: "finalized",
+      statusCode: existing.statusCode,
+      body: existing.body,
+    };
+  }
+
+  async finalize(
+    key: string,
+    _projectId: string,
+    statusCode: number,
+    responseJson: string,
+  ): Promise<boolean> {
+    const existing = this.map.get(key);
+    if (!existing || existing.statusCode !== 0) return false;
+    this.map.set(key, { statusCode, body: responseJson, requestHash: null });
+    return true;
+  }
+
+  async release(key: string): Promise<void> {
+    const existing = this.map.get(key);
+    if (existing && existing.statusCode === 0) this.map.delete(key);
+  }
 }
 
 /** Canned create response the DO stub returns */

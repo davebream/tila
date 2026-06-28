@@ -8,7 +8,7 @@ export const CredentialRecordSchema = z.object({
   instance_key: InstanceKey,
   token: z.string(),
   token_type: z.string(),
-  expires_at: z.number().int(), // epoch ms
+  expires_at: z.number().int().nullable(), // epoch ms; null = unknown/non-expiring
   scope: z.string().optional(),
   obtained_at: z.number().int(), // epoch ms
 });

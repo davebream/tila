@@ -4,7 +4,7 @@
  * a temp TILA_HOME with the in-memory FakeSecretStore (J1 testing seam).
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { CredentialRecord, InstanceKey } from "@tila/schemas";
@@ -219,6 +219,46 @@ describe("CI fail-closed (mandatory negative tests)", () => {
   });
 });
 
+describe("TILA_API_TOKEN env alias (WI-M)", () => {
+  it("TILA_API_TOKEN with no .tila/.env resolves via env rung as inline token", async () => {
+    const outcome = await resolveWithTrace(
+      baseInput({
+        envReader: (n) => (n === "TILA_API_TOKEN" ? "api-tok-xyz" : undefined),
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.instance.credentialSource).toBe("inline-token");
+    // Trace must show the env rung matched
+    const envStep = outcome.trace.find((s) => s.rung === "env");
+    expect(envStep?.matched).toBe(true);
+    expect(outcome.instance.credential).toEqual({
+      source: "inline-token",
+      token: "api-tok-xyz",
+    });
+  });
+
+  it("TILA_TOKEN takes precedence over TILA_API_TOKEN when both set", async () => {
+    const outcome = await resolveWithTrace(
+      baseInput({
+        envReader: (n) => {
+          if (n === "TILA_TOKEN") return "primary-tok";
+          if (n === "TILA_API_TOKEN") return "alias-tok";
+          return undefined;
+        },
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.instance.credential).toEqual({
+      source: "inline-token",
+      token: "primary-tok",
+    });
+  });
+});
+
 describe("nothing matched", () => {
   it("returns an actionable error when no rung resolves", async () => {
     const outcome = await resolveWithTrace(baseInput());
@@ -227,6 +267,192 @@ describe("nothing matched", () => {
       expect(outcome.error.decision).toBe("none");
       expect(outcome.error.message).toContain("tila auth login");
     }
+  });
+});
+
+describe("legacy-fallback rung (WI-M)", () => {
+  let legacyDir: string;
+
+  beforeEach(() => {
+    legacyDir = mkdtempSync(path.join(os.tmpdir(), "tila-legacy-rung-"));
+    mkdirSync(path.join(legacyDir, ".tila"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(legacyDir, { recursive: true, force: true });
+  });
+
+  const tilaDir = () => path.join(legacyDir, ".tila");
+
+  it("legacy-only .env → credentialSource 'legacy', trust trusted, instance_key null", async () => {
+    writeFileSync(path.join(tilaDir(), ".env"), "TILA_API_TOKEN=leg-tok-abc\n");
+
+    const outcome = await resolveWithTrace(
+      baseInput({
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.instance.credentialSource).toBe("legacy");
+    expect(outcome.instance.instance_key).toBeNull();
+    expect(outcome.instance.trust).toEqual({ kind: "trusted" });
+    expect(outcome.instance.credential).toEqual({
+      source: "legacy",
+      token: "leg-tok-abc",
+    });
+  });
+
+  it("trusted registry instance wins over legacy (US-5)", async () => {
+    writeFileSync(path.join(tilaDir(), ".env"), "TILA_API_TOKEN=leg-tok-abc\n");
+    await seedTrusted(key("acme-prod"), "https://acme.dev");
+    await store.setCurrentContext(key("acme-prod"));
+
+    const outcome = await resolveWithTrace(
+      baseInput({
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    // Registry instance wins — legacy is only lowest-priority rung
+    expect(outcome.instance.credentialSource).toBe("keychain");
+    expect(outcome.instance.instance_key).toBe("acme-prod");
+  });
+
+  it("legacy rung makes zero authStore calls beyond getCurrentContext", async () => {
+    writeFileSync(path.join(tilaDir(), ".env"), "TILA_API_TOKEN=leg-tok-abc\n");
+
+    const calls: string[] = [];
+    const spyStore = new Proxy(store, {
+      get(target, prop, receiver) {
+        const val = Reflect.get(target, prop, receiver);
+        if (typeof val === "function" && typeof prop === "string") {
+          return (...args: unknown[]) => {
+            calls.push(prop);
+            return (val as (...a: unknown[]) => unknown).apply(target, args);
+          };
+        }
+        return val;
+      },
+    });
+
+    await resolveWithTrace({
+      envReader: () => undefined,
+      env: interactiveEnv,
+      authStore: spyStore,
+      // no instance_key → repo-pointer rung skips without authStore call
+      repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+      legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+    });
+
+    // getCurrentContext (from current-context rung) is allowed — it is not the legacy rung.
+    // The legacy rung itself must make no authStore calls (no getInstance, getCredential, etc.).
+    const nonContextCalls = calls.filter((c) => c !== "getCurrentContext");
+    expect(nonContextCalls).toEqual([]);
+  });
+
+  it("under CI, legacy candidate resolves (inlineToken CI exemption)", async () => {
+    writeFileSync(path.join(tilaDir(), ".env"), "TILA_API_TOKEN=leg-tok-abc\n");
+
+    const outcome = await resolveWithTrace(
+      baseInput({
+        env: { isCI: true, isTTY: false, tilaHomeOverridden: false },
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.instance.credentialSource).toBe("legacy");
+  });
+
+  it("no-worker_url legacy → falls through to none error", async () => {
+    writeFileSync(path.join(tilaDir(), ".env"), "TILA_API_TOKEN=leg-tok-abc\n");
+
+    const outcome = await resolveWithTrace(
+      baseInput({
+        // no repoPointer → no worker_url derivable
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error.decision).toBe("none");
+    }
+  });
+
+  it("trace detail contains no token value", async () => {
+    writeFileSync(
+      path.join(tilaDir(), ".env"),
+      "TILA_API_TOKEN=super-secret-xyz\n",
+    );
+
+    const outcome = await resolveWithTrace(
+      baseInput({
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    const traceStr = JSON.stringify(outcome.trace);
+    expect(traceStr).not.toContain("super-secret-xyz");
+  });
+
+  it("corrupt .tila/.session → matched:false step, resolveWithTrace does not throw", async () => {
+    writeFileSync(path.join(tilaDir(), ".session"), "{ not valid json !!!");
+
+    const outcome = await resolveWithTrace(
+      baseInput({
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    // resolveWithTrace must not throw — check outcome exists
+    const legacyStep = outcome.trace.find((s) => s.rung === "legacy-fallback");
+    expect(legacyStep).toBeDefined();
+    expect(legacyStep?.matched).toBe(false);
+    expect(legacyStep?.detail.toLowerCase()).toContain("corrupt");
+    // After corrupt file, no usable credential
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("corrupt .session with type violation: trace detail leaks no secret token value", async () => {
+    // Write a .session file whose expires_at is the wrong type (string, not number).
+    // The secret value "super-secret-ghs-value" must NEVER appear in the trace detail.
+    writeFileSync(
+      path.join(tilaDir(), ".session"),
+      JSON.stringify({
+        session_token: "super-secret-ghs-value",
+        expires_at: "not-a-number", // type violation → reader throws
+      }),
+    );
+
+    // resolveWithTrace must not throw
+    const outcome = await resolveWithTrace(
+      baseInput({
+        repoPointer: { instance_key: null, worker_url: "https://acme.dev" },
+        legacy: { projectTilaDir: tilaDir(), homeInfraToml: null },
+      }),
+    );
+
+    // The rung must record a matched:false step
+    const legacyStep = outcome.trace.find((s) => s.rung === "legacy-fallback");
+    expect(legacyStep).toBeDefined();
+    expect(legacyStep?.matched).toBe(false);
+
+    // SECURITY: the secret value must not appear anywhere in the trace detail
+    expect(legacyStep?.detail).not.toContain("super-secret-ghs-value");
+    // And not anywhere in the full trace JSON
+    expect(JSON.stringify(outcome.trace)).not.toContain(
+      "super-secret-ghs-value",
+    );
   });
 });
 

@@ -9,16 +9,18 @@
 import type { CredentialRecord, InstanceKey } from "@tila/schemas";
 import type { AuthStore } from "./auth-store.js";
 import type { InstanceResolutionError } from "./errors.js";
+import type { LegacyLocations } from "./legacy-reader.js";
 
 /** Which precedence rung produced the winning candidate. */
 export type ResolutionSource =
   | "flag" // --instance / --token
-  | "env" // TILA_INSTANCE / TILA_TOKEN / TILA_CONFIG
+  | "env" // TILA_INSTANCE / TILA_TOKEN / TILA_CONFIG / TILA_API_TOKEN
   | "repo-pointer" // .tila/config.toml (cwd walk-up): instance_key + worker_url
-  | "current-context"; // registry current_context
+  | "current-context" // registry current_context
+  | "legacy-fallback"; // legacy .tila/.env / .tila/.session (lowest priority)
 
 /** Where the resolved credential came from. */
-export type CredentialSource = "inline-token" | "keychain";
+export type CredentialSource = "inline-token" | "keychain" | "legacy";
 
 /**
  * The trust decision for a candidate instance. `trusted` is the ONLY kind that
@@ -34,14 +36,20 @@ export type TrustDecision =
 /** The actual credential the caller will send. */
 export type ResolvedCredential =
   | { source: "inline-token"; token: string }
-  | { source: "keychain"; record: CredentialRecord };
+  | { source: "keychain"; record: CredentialRecord }
+  | { source: "legacy"; token: string };
 
 /** A candidate instance under evaluation by the trust / CI gates. */
 export interface InstanceCandidate {
   worker_url: string;
   instance_key: InstanceKey | null;
-  /** True for an explicit raw token (--token / TILA_TOKEN). */
+  /** True for an explicit raw token (--token / TILA_TOKEN / TILA_API_TOKEN / legacy file). */
   inlineToken: boolean;
+  /**
+   * True when this candidate came from a legacy .tila/.env or .tila/.session file.
+   * Used by assemble() to emit credentialSource: "legacy" instead of "inline-token".
+   */
+  legacy?: true;
 }
 
 /** The successful resolution result. */
@@ -106,4 +114,11 @@ export interface ResolveInput {
   repoPointer?: RepoPointer | null;
   /** Pointer from a TILA_CONFIG-referenced config (pre-parsed by the caller). */
   envConfigPointer?: RepoPointer | null;
+  /**
+   * Legacy filesystem paths for the lowest-priority legacy-fallback rung (WI-M).
+   * When absent the legacy rung is skipped (matched: false immediately).
+   * The caller (resolveInstanceContext) populates this from findTilaDir() and
+   * tilaHome()/infra.toml so that the rung is active in production.
+   */
+  legacy?: LegacyLocations;
 }

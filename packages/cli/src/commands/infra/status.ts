@@ -4,7 +4,8 @@ import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
 import { queryD1 } from "../../lib/cloudflare-resources";
-import { loadInfraConfig } from "../../lib/infra-config";
+import { resolveInfraConfig } from "../../lib/infra-fallback";
+import { buildAuthStore } from "../../lib/instance-context";
 import { printJson, printJsonError } from "../../lib/output";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import { R2_BUCKET_NAME } from "../../lib/resource-names";
@@ -24,10 +25,10 @@ export default defineCommand({
   async run({ args }) {
     const tilaDir = tilaHome();
 
-    // Step 1: Load infra config
-    let config: ReturnType<typeof loadInfraConfig>;
+    // Step 1: Load infra config — prefer per-slug store, fall back to flat file
+    let config: Awaited<ReturnType<typeof resolveInfraConfig>>;
     try {
-      config = loadInfraConfig(tilaDir);
+      config = await resolveInfraConfig(tilaDir, buildAuthStore());
     } catch (err) {
       if (args.json) {
         printJsonError("No infrastructure found", "NOT_CONFIGURED");

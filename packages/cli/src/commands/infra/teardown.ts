@@ -5,7 +5,9 @@ import { defineCommand } from "citty";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
 import { deletePagesProject, queryD1 } from "../../lib/cloudflare-resources";
 import type { AppCredentials } from "../../lib/github-app-setup";
-import { getInfraSlug, loadInfraConfig } from "../../lib/infra-config";
+import { getInfraSlug } from "../../lib/infra-config";
+import { resolveInfraConfig } from "../../lib/infra-fallback";
+import { buildAuthStore } from "../../lib/instance-context";
 import { printJsonError } from "../../lib/output";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import { R2_BUCKET_NAME } from "../../lib/resource-names";
@@ -40,10 +42,10 @@ export default defineCommand({
       );
     }
 
-    // Step 1: Load infra config
-    let config: ReturnType<typeof loadInfraConfig>;
+    // Step 1: Load infra config — prefer per-slug store, fall back to flat file
+    let config: Awaited<ReturnType<typeof resolveInfraConfig>>;
     try {
-      config = loadInfraConfig(tilaDir);
+      config = await resolveInfraConfig(tilaDir, buildAuthStore());
     } catch (err) {
       p.cancel("No infrastructure found. Run `tila infra provision` first.");
       process.exit(1);

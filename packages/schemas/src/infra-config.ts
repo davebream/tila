@@ -8,6 +8,7 @@ export const PerSlugInfraMetaSchema = z.object({
   account_name: z.string(),
   d1_database_id: z.string(),
   worker_url: z.string().url().optional(),
+  r2_bucket_name: z.string().optional(),
   pages_project_name: z.string().optional(),
   github_app: z
     .object({
