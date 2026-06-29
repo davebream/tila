@@ -59,7 +59,7 @@ post /tasks '{"id":"task.error-handling","type":"task","data":{"title":"Standard
 post /tasks '{"id":"task.ci-pipeline","type":"task","data":{"title":"Set up CI/CD pipeline","priority":"medium","status":"done","assigned_to":"human-dawid"}}'
 post /tasks '{"id":"task.docs-api","type":"task","data":{"title":"Document API endpoints","priority":"low","status":"queued","assigned_to":null}}'
 
-echo "  10 tasks created (1 epic, 2 milestones, 7 tasks)"
+echo "  11 tasks created (1 epic, 2 milestones, 8 tasks)"
 
 # --- Relationships ---
 echo "→ Creating relationships"
