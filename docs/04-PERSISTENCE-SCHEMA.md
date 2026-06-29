@@ -151,9 +151,9 @@ erDiagram
 
 ## How to read it
 
-**One DO per project.** Every table outside `_projects`, `_tokens`, `_idempotency` lives inside the project's Durable Object's SQLite storage. There is one DO instance per tila project. All per-project state — entities, relationships, artifacts metadata, claims, journal, schema history — is in this DO. The DO is reachable only through the Worker; access goes through Cloudflare's serialization, which is what makes single-transaction claim+entity+journal writes safe.
+**One DO per project.** Every table outside the global D1 set (see below) lives inside the project's Durable Object's SQLite storage. There is one DO instance per tila project. All per-project state — entities, relationships, artifacts metadata, claims, journal, schema history — is in this DO. The DO is reachable only through the Worker; access goes through Cloudflare's serialization, which is what makes single-transaction claim+entity+journal writes safe.
 
-**Global D1 is small and narrow.** `_projects`, `_tokens`, `_idempotency` live in a single global D1 instance shared across all tila projects in a Cloudflare account. The Worker reads these to authenticate requests and route to the right DO. They're separate because they have cross-project scope (an account-wide token registry; idempotency keys that may span requests across DOs).
+**Global D1 is narrow.** The global D1 instance holds 12 account-wide tables shared across all tila projects in a Cloudflare account: `_projects`, `_tokens`, `_idempotency`, plus the auth/session tables added for multi-instance auth (`_sessions`, `_project_repos`, `_rate_limits`, `_github_app_config`, `_revoked_jti`, `_revoked_subjects`, `_oidc_principals`, `_admin_grants`, `_deployment_meta`). The Worker reads these to authenticate requests and route to the right DO. They're separate because they have cross-project scope (an account-wide token registry; idempotency keys that may span requests across DOs; session and revocation state).
 
 **Solid lines are foreign-key relationships inside one storage layer.** Within DO SQLite, `entities.id` is referenced by `entity_relationships.from_id`/`to_id`, `entity_artifact_references.entity_id`, and `artifact_pointers.resource`. Within global D1, `_projects.project_id` is referenced by `_tokens.project_id`.
 
@@ -249,7 +249,7 @@ These are worth confirming or deferring; the diagram makes them visible:
 
 Looking at the structure end-to-end, three things stand out:
 
-**The DO is the heart.** Almost every table is in DO SQLite. The D1 piece is small (3 tables) and narrowly scoped. R2 holds blobs and nothing else. This is the cleanest expression of "one project = one DO" — every write that needs project-level consistency goes through the same single-threaded SQLite database.
+**The DO is the heart.** Almost every per-project table is in DO SQLite. The D1 piece is narrowly scoped (12 tables: account-wide auth, routing, idempotency, and session/revocation state). R2 holds blobs and nothing else. This is the cleanest expression of "one project = one DO" — every write that needs project-level consistency goes through the same single-threaded SQLite database.
 
 **The cross-store edge is narrow.** R2 connects to DO through exactly one column: `artifact_pointers.r2_key`. Every R2 object should have exactly one pointer row, and every non-tombstoned pointer row should reference exactly one R2 object. If this invariant breaks, `tila doctor` detects it and reports orphans on either side.
 

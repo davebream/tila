@@ -100,7 +100,7 @@ Implement typed records from `docs/08-RECORDS.md`
 ### Body
 
 Implement `record`, tila's typed mutable JSON state primitive, as specified in
-[`docs/08-RECORDS.md`](./docs/08-RECORDS.md).
+[`docs/08-RECORDS.md`](./08-RECORDS.md).
 
 Records are shared project state addressed by `(type, key)` and exposed as
 resource names of the form `record:<type>/<key>`. They are not work units, do
@@ -121,10 +121,10 @@ objects with optional R2 snapshot artifacts.
 
 #### Source Of Truth
 
-- Normative spec: [`docs/08-RECORDS.md`](./docs/08-RECORDS.md)
+- Normative spec: [`docs/08-RECORDS.md`](./08-RECORDS.md)
 - Architecture references:
-  - [`docs/02-ARCHITECTURE.md`](./docs/02-ARCHITECTURE.md)
-  - [`docs/04-PERSISTENCE-SCHEMA.md`](./docs/04-PERSISTENCE-SCHEMA.md)
+  - [`docs/02-ARCHITECTURE.md`](./02-ARCHITECTURE.md)
+  - [`docs/04-PERSISTENCE-SCHEMA.md`](./04-PERSISTENCE-SCHEMA.md)
 
 #### Non-Goals For This Epic
 

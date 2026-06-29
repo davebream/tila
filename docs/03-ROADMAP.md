@@ -26,6 +26,7 @@ tila/                              # github.com/davebream/tila
     ├── ops-sqlite/                # @tila/ops-sqlite — shared SQLite ops (entity, coord, artifact, journal, gate, signal, sweep)
     ├── backend-d1/                # @tila/backend-d1
     ├── backend-do/                # @tila/backend-do (Cloudflare path)
+    ├── backend-embedded/          # @tila/backend-embedded — runtime-agnostic embedded SQLite core (Bun + Node)
     ├── backend-local/             # @tila/backend-local (local path: bun:sqlite + filesystem)
     ├── backend-r2/                # @tila/backend-r2
     ├── worker/                    # @tila/worker — the Cloudflare Worker
@@ -33,6 +34,7 @@ tila/                              # github.com/davebream/tila
     ├── cli/                       # tila-cli — `tila` binary (Bun-compiled)
     ├── sdk/                       # tila-sdk — typed TypeScript client for framework consumers
     ├── mcp-server/                # tila-mcp-server — MCP tools and opt-in resources
+    ├── auth-store/                # @tila/auth-store — client-side auth persistence (instance registry, credential store, keychain)
     └── integration-tests/
 ```
 

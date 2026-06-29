@@ -18,19 +18,21 @@ tila implements a unified authentication system with three distinct auth paths, 
 | Auth Path | Client | Use Case | Lifetime | Revocation |
 |-----------|--------|----------|----------|------------|
 | D1 API Token | CLI, SDK, MCP | Long-lived machine access | Indefinite (until revoked) | Explicit (via `/api/tokens/:tokenId` DELETE) |
-| GitHub Session Token | CLI (github-repo mode) | Repo-scoped collaboration | 1 hour | Automatic (expiry only, no explicit revoke) |
+| GitHub Session Token | CLI (github-repo mode) | Repo-scoped collaboration | Tiered by permission: read 1 h / write 15 min / admin 5 min (see §12) | Automatic (expiry only, no explicit revoke) |
 | Cookie Session | Browser UI | Interactive web access | 8 hours | Explicit (via `/auth/session/logout` POST) |
 
 ### UnifiedTokenResult Discriminated Union
 
-All three paths resolve to a `UnifiedTokenResult` with `kind` discriminant:
+All auth paths resolve to a `UnifiedTokenResult` with a `kind` discriminant:
 
 ```typescript
-// packages/worker/src/types.ts lines 16-49
+// packages/worker/src/types.ts
 export type UnifiedTokenResult =
-  | D1TokenResult       // kind: "d1-token"
-  | SessionTokenResult  // kind: "session"
-  | CookieSessionTokenResult // kind: "cookie-session"
+  | D1TokenResult              // kind: "d1-token"
+  | SessionTokenResult         // kind: "session"
+  | CookieSessionTokenResult   // kind: "cookie-session"
+  | WorkspaceSessionTokenResult // kind: "workspace-session"
+  | OidcSessionTokenResult     // kind: "oidc-session"
 ```
 
 Each variant includes:
@@ -259,10 +261,10 @@ export const projectRepos = sqliteTable("_project_repos", {
 
 GitHub returns permission levels: `none`, `read`, `triage`, `write`, `maintain`, `admin`.
 
-tila normalizes these to three levels (lines 39-46 in `auth-github.ts`):
+tila normalizes these to three levels (`normalizeGitHubPermission` in `packages/worker/src/lib/github-permission.ts`):
 
 ```typescript
-function normalizePermission(githubPermission: string): "read" | "write" | "admin" {
+export function normalizeGitHubPermission(githubPermission: string): "read" | "write" | "admin" {
   const level = PERMISSION_HIERARCHY[githubPermission] ?? 0;
   if (level >= PERMISSION_HIERARCHY.admin) return "admin";
   if (level >= PERMISSION_HIERARCHY.write) return "write";
@@ -407,7 +409,7 @@ Cookie sessions enable browser UI login without exposing long-lived tokens to Ja
 **Response:**
 ```
 HTTP/1.1 200 OK
-Set-Cookie: tila_session=<UUID>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800
+Set-Cookie: tila_session=<UUID>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=28800
 {"ok": true}
 ```
 
@@ -481,16 +483,16 @@ When a request arrives with a `Cookie: tila_session=<UUID>` header, the auth mid
 Session cookies are set with strict security attributes:
 
 ```typescript
-// packages/worker/src/routes/auth-session.ts lines 34-37
-function buildSessionCookie(value: string, isLocalDev: boolean): string {
+// packages/worker/src/lib/cookie-helpers.ts (Max-Age = COOKIE_SESSION_TTL_SECONDS, config.ts)
+export function buildSessionCookie(value: string, isLocalDev: boolean): string {
   const secureFlag = isLocalDev ? "" : " Secure;";
-  return `tila_session=${value}; HttpOnly;${secureFlag} SameSite=Strict; Path=/; Max-Age=28800`;
+  return `tila_session=${value}; HttpOnly;${secureFlag} SameSite=Lax; Path=/; Max-Age=28800`;
 }
 ```
 
 - `HttpOnly` — JavaScript cannot read the cookie (XSS protection)
 - `Secure` — HTTPS-only (omitted on localhost for local dev)
-- `SameSite=Strict` — Prevents CSRF via cross-site requests
+- `SameSite=Lax` — CSRF protection under same-origin deployment (UI and API share an origin)
 - `Max-Age=28800` — 8 hours (28,800 seconds)
 
 ### Logout
@@ -659,7 +661,8 @@ const projectRoutes = new Hono<AppEnv>();
 projectRoutes.use("/*", createAuthMiddleware());
 projectRoutes.use("/*", csrfGuard);
 projectRoutes.use("/*", projectMiddleware);  // Resolves DO stub from projectId
-projectRoutes.route("/work-units", entities);
+projectRoutes.route("/tasks", entities); // canonical
+projectRoutes.route("/work-units", entities); // @deprecated alias
 projectRoutes.route("/claims", claims);
 // ... (additional project-scoped resources)
 ```

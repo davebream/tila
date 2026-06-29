@@ -29,12 +29,12 @@ Use `blob4` (type discriminator) to filter by event type.
 | Project ID | `blob3` | `proj-abc` |
 | Type | `blob4` | `do_operation` |
 | Latency (ms) | `double1` | `15` |
-| Rows affected | `double2` | `0` (v0.1) |
+| Rows affected | `double2` | `1` |
 | Index (partition) | `index1` | Project ID |
 
-> **Note:** `double2` (rows affected) is always `0` in v0.1 because the DO response envelope does
-> not yet carry structured row counts. This will be populated in v0.2 when the DO response schema
-> is standardized.
+> **Note:** `double2` carries the rows affected by the operation. The DO response envelope exposes
+> an `X-Rows-Affected` header for entity and record write operations, which the Worker forwards into
+> `double2` (`packages/worker/src/lib/analytics.ts`). Operations that do not report a row count emit `0`.
 
 ## Sample Queries
 

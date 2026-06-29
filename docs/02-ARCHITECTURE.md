@@ -2248,7 +2248,7 @@ tila/                                  # github.com/davebream/tila
 │   │   │   ├── config.ts              # .tila/config.toml read/write
 │   │   │   ├── client.ts              # HTTP client to the Worker
 │   │   │   └── provision.ts           # wrangler shell-out logic
-│   │   ├── templates/                 # bundled: wrangler.toml.tmpl, tila.schema.toml.tmpl, etc.
+│   │   ├── lib/wrangler-config.ts     # generates wrangler.<slug>.toml at deploy time (no bundled templates)
 │   │   ├── test/
 │   │   ├── package.json
 │   │   └── tsconfig.json
@@ -2308,7 +2308,7 @@ tila/                                  # github.com/davebream/tila
 
 **Backends as separate packages** is not required for v0.1 functionally — they could be inlined in `core` — but separating them upfront makes the adapter pattern *real* rather than aspirational. Adding `backend-github-issues` or `backend-linear` in v0.2 is "create a new package," not "refactor existing code." `@tila/ops-sqlite` sits between `core` and `backend-{do,local}` in the dependency graph -- it extracts the shared business logic so both backends share identical entity, coordination, artifact, journal, and sweep operations without duplication.
 
-**`packages/worker/wrangler.toml`** is the Worker's own wrangler.toml — used for `wrangler dev` during local development of the Worker package itself. This is different from the *templates* in `packages/cli/templates/wrangler.toml.tmpl`, which are what tila generates when a user runs `tila project create` for their own project. Don't conflate them.
+**`packages/worker/wrangler.toml`** is the Worker's own wrangler.toml — used for `wrangler dev` during local development of the Worker package itself. This is different from the per-deploy config the CLI generates programmatically via `generateWranglerConfig()` in `packages/cli/src/lib/wrangler-config.ts` (written as `wrangler.<slug>.toml`) when a user runs `tila project create` for their own project. Don't conflate them.
 
 **`packages/integration-tests`** is its own workspace, not inside any other package. It depends on all the others. This keeps the integration test machinery out of the application packages and makes it easy to skip with `bun test --filter='!integration'` during inner-loop development.
 

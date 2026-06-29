@@ -472,7 +472,7 @@ Do this as a pre-deploy step for each affected environment. It is a cleanup acti
 
 `SWEEP_SECRET` authenticates the `/_internal/sweep` endpoint. The Worker compares the `X-Sweep-Secret` request header against this secret using a constant-time comparison (HMAC key `tila-sweep-compare`, distinct from the infra admin key). When `SWEEP_SECRET` is unset or the header value does not match, the endpoint returns **403 Forbidden** — the sweep will not run.
 
-The cron trigger defined in `wrangler.toml` passes this secret automatically on each scheduled invocation. It is **not** the same key as `INFRA_ADMIN_TOKEN` and must be stored as a separate Worker secret.
+The scheduled cron handler calls `runSweep(env)` directly (`scheduled()` in `packages/worker/src/index.ts`) — it does **not** go through the HTTP endpoint, so `SWEEP_SECRET` is not required for the cron to run. `SWEEP_SECRET` only authenticates the manual `/_internal/sweep` HTTP trigger. It is **not** the same key as `INFRA_ADMIN_TOKEN` and must be stored as a separate Worker secret.
 
 #### Setup
 
@@ -483,7 +483,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 wrangler secret put SWEEP_SECRET
 ```
 
-If `SWEEP_SECRET` is missing, every scheduled sweep invocation returns 403 and logs a `sweep_error` Analytics datapoint. You can verify the secret is set by running:
+If `SWEEP_SECRET` is missing, the scheduled cron sweep still runs (it calls `runSweep` directly and does not use the secret); only the manual `/_internal/sweep` HTTP trigger returns 403. You can verify the secret is set by running:
 
 ```bash
 wrangler secret list | grep SWEEP_SECRET
@@ -938,7 +938,7 @@ Verifies that Durable Object SQLite state survives an eviction+restart cycle. Ca
 
 **Requirements:**
 - `TILA_BASE_URL` — live worker URL (e.g. `https://your-worker.workers.dev`)
-- `TILA_TOKEN` — an **admin-scoped** token. `POST /projects/:id/admin/restart` is protected by `requirePermission("admin")`. A 403 response means the token is not admin-scoped. Create one with: `tila token create --scope admin`
+- `TILA_TOKEN` — an **admin-scoped** token. `POST /projects/:id/admin/restart` is protected by `requirePermission("admin")`. A 403 response means the token lacks admin permission. Issue one with: `tila token issue --name <name>` from an admin credential.
 
 ```bash
 TILA_BASE_URL=https://your-worker.workers.dev \
@@ -948,7 +948,7 @@ pnpm --filter @tila/integration-tests exec vitest run src/do-eviction.test.ts
 
 The test:
 1. Writes a uniquely-stamped task to the live project.
-2. POSTs `/_internal/projects/:id/admin/restart` — evicts the DO from memory.
+2. POSTs `/projects/:id/admin/restart` — evicts the DO from memory.
 3. Reads the task back — **hard assertion:** if the data is absent, SQLite persistence is broken.
 4. Runs a best-of-3 read latency check — **advisory only:** fails are logged as warnings, never blocking. A latency above 5 000 ms is noted but does not fail the release.
 

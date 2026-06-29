@@ -303,8 +303,7 @@ To prevent feature creep on the wrong axis, here is what growth looks like over 
 | Package | File | API used |
 |---------|------|----------|
 | `@tila/core` | `src/schema-parser.ts` | `parse` (TOML syntax parsing for `tila.schema.toml`) |
-| `@tila/worker` | `src/routes/artifacts.ts` | `parse` (in-request schema validation) |
-| `@tila/worker` | `src/routes/entities.ts` | `parse` (in-request slot validation) |
+| `@tila/worker` | `src/lib/schema-validation.ts` | `parse` (in-request schema validation) |
 | `tila-cli` | `src/config.ts` | `parse`, `stringify` (read/write `.tila/config.toml`) |
 
 The CLI's use of `stringify` constrains alternative choices — not all TOML parsers support serialization.

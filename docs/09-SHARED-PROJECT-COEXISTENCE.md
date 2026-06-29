@@ -108,10 +108,10 @@ filter by prefix:
 
 ```bash
 # Framework sends a signal targeting the control-plane scheduler
-tila signal send --target "cp:scheduler" --type "work-ready" --body '{"taskId":"cp_task/T-42"}'
+tila signal send --to "cp:scheduler" --kind ready --payload '{"taskId":"cp_task/T-42"}'
 
 # Direct-use tooling signals the infra pipeline
-tila signal send --target "infra:deploy-gate" --type "approval-granted" --body '{}'
+tila signal send --to "infra:deploy-gate" --kind info --payload '{}'
 ```
 
 Consumers subscribe to the project-level signal stream and filter by the `target` prefix
