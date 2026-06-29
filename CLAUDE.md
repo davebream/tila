@@ -54,7 +54,7 @@ To populate the dashboard with realistic sample data (tasks, records, relationsh
 bash scripts/dev-seed.sh
 ```
 
-Requires the Worker to be running on `:8787`. Creates 10 tasks (1 epic, 2 milestones, 7 tasks) in a 3-level hierarchy, 3 records (deploy config + db schemas), 16 relationships (10 parent-child, 6 blocking), 2 active claims, 3 machine heartbeats, and 5 artifacts.
+Requires the Worker to be running on `:8787`. Creates 11 tasks (1 epic, 2 milestones, 8 tasks) in a 3-level hierarchy, 3 records (deploy config + db schemas), 16 relationships (10 parent-child, 6 blocking), 2 active claims, 3 machine heartbeats, and 5 artifacts.
 
 ### Remote development (production data)
 
@@ -111,6 +111,7 @@ Turborepo monorepo under `packages/`:
 | `tila-sdk` | TypeScript SDK for tila consumers (client, resource methods, retry, error codes) |
 | `tila-mcp-server` | MCP server exposing tila API as tools/resources/prompts for AI agents |
 | `@tila/ui` | Read-only SPA served by Worker |
+| `@tila/auth-store` | Client-side auth persistence — instance registry, credential store, keychain seam. Consumed by `tila-cli` |
 | `tila-cli` | `tila` CLI binary (Citty framework, Bun-compiled for multi-platform distribution) |
 | `tila-cli-{platform}` | Platform-specific binary packages for npm distribution |
 | `@tila/integration-tests` | E2E tests via `@cloudflare/vitest-pool-workers` |

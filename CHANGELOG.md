@@ -120,7 +120,7 @@ First public release.
 - Typed, schema-validated records with revision history and fencing tokens
 - Coordination primitives: claims, gates, signals, presence, and an append-only journal
 - First-writer-wins concurrency with monotonic fencing tokens (stale writes rejected)
-- Cloudflare deployment path (Worker + Durable Object SQLite + D1 + R2) and local mode (`tila init --local`, bun:sqlite)
+- Cloudflare deployment path (Worker + Durable Object SQLite + D1 + R2) and local mode (`tila project create --local`, bun:sqlite)
 - `tila` CLI distributed as self-contained native binaries for macOS, Linux (glibc + musl), and Windows
 - TypeScript SDK (`tila-sdk`) and MCP server (`tila-mcp-server`) for Claude Code, Cursor, and VS Code
 - Read-only dashboard SPA served by the Worker

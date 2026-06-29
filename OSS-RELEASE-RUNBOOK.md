@@ -29,7 +29,7 @@ Safe from a credential standpoint today. **Not safe to flip public as-is** becau
 | # | Blocker | Exact fix |
 |---|---------|-----------|
 | **B1** | `.kombajn/` (66 files) committed despite `.gitignore:16`. Leaks internal AI-workflow artifacts + private "kombajn" tool internals. | `git rm -r --cached .kombajn/` then commit. **If squashing (recommended), this is removed from history automatically** since the squash rebuilds the tree from current state — but verify post-squash with `git log --all --full-history -- .kombajn/` returns empty. |
-| **B2** | Personal absolute machine paths in tracked scripts/docs: `scripts/migrate-kombajn-runbook.sh` (`/home/dawid/code/kombajn`), `scripts/dogfooding-observe.sh:15`, `docs/dogfooding-report.md:17`. These are one-off personal artifacts with no public value. | Delete the kombajn-migration script and dogfooding script/report: `git rm scripts/migrate-kombajn-runbook.sh scripts/dogfooding-observe.sh docs/dogfooding-report.md`. (Alternative: genericize paths, but deletion is cleaner — they have no public utility.) |
+| **B2** | ✅ RESOLVED. Personal absolute machine paths in tracked scripts/docs: `scripts/migrate-kombajn-runbook.sh` (`/home/dawid/code/kombajn`), `scripts/dogfooding-observe.sh:15`, `docs/dogfooding-report.md:17`. | Already done — all three files have been deleted from the repo (`find` confirms none exist). No action needed. |
 | **B3** | README contradiction: "For AI coding agents" section instructs `npx -y @tila/mcp-server` / `npm install @tila/sdk` and claims MCP Registry listing exists, but Installation section says "not published yet." First adopters hit 404. | Either (a) gate the MCP/SDK snippets behind a pre-release caveat (draft in §5), **or** (b) actually publish the packages first (Stage 4) and then the README becomes true. **Recommended: publish first (B3 resolves itself), keep a pre-release note only if you defer SDK/MCP publish.** Also change "is listed on the MCP Registry" → "will be listed on" unless the listing exists today. |
 | **B4** | npm scope ownership unverified. `@tila/cli`/`@tila/sdk` return 404, but a 404 does NOT prove the `tila` npm **org** is claimable (orgs are a separate namespace). All automation (`release.yml`, bin shim `packages/cli/bin/tila.cjs`, homebrew formula) hardcodes `@tila/*`. | **Before any publish automation**, attempt to create the org: `npm org create tila` (or npmjs.com/org/create). If taken → fall back to `@davebream/*` (§3b). This is a hard gate on Stage 4. |
 | **B5** | Publish dependency closure: `@tila/sdk` and `@tila/mcp-server` are built with plain `tsc` (no bundler) and emit real runtime `import ... from "@tila/schemas"` / `"@tila/sdk"`. **`@tila/schemas` MUST be published** (reclassified from internal) or both consumer packages are broken on install. | Publish in topological order `schemas → sdk → mcp-server` (each `--access public`). `release.yml` today publishes **neither** sdk, mcp-server, nor schemas — only CLI + 8 platform packages. Add a publish step (§3c / Stage 4). |
@@ -98,10 +98,7 @@ git status --porcelain && git branch --show-current
 git rm -r --cached .kombajn/
 ```
 
-**0.3** Delete personal one-off scripts/docs (B2):
-```bash
-git rm scripts/migrate-kombajn-runbook.sh scripts/dogfooding-observe.sh docs/dogfooding-report.md
-```
+**0.3** Delete personal one-off scripts/docs (B2): ✅ already done — `scripts/migrate-kombajn-runbook.sh`, `scripts/dogfooding-observe.sh`, and `docs/dogfooding-report.md` have already been removed from the repo. No action needed.
 
 **0.4** Apply `.claude/` decision (§3d). If keeping: no action. If removing:
 ```bash
@@ -322,7 +319,7 @@ git tag -d backup/pre-squash-<ts>
 | File | Change |
 |---|---|
 | `.kombajn/` (66 files) | **Remove from tree** (`git rm -r --cached`). B1. |
-| `scripts/migrate-kombajn-runbook.sh`, `scripts/dogfooding-observe.sh`, `docs/dogfooding-report.md` | **Delete.** B2. |
+| `scripts/migrate-kombajn-runbook.sh`, `scripts/dogfooding-observe.sh`, `docs/dogfooding-report.md` | ✅ Already deleted from the repo. B2 resolved. |
 | `packages/cli/package.json` | Add `description`, `homepage`, `bugs`, `keywords`, `author`, `repository.directory: "packages/cli"`, `publishConfig: { "access": "public" }`. Bump version to lockstep target (e.g. `0.3.0`) and update all 8 `optionalDependencies` pins to the same version. B6/B7. |
 | `packages/cli-*/package.json` (×8) | Add `homepage`, `bugs`, `publishConfig.access:public`; bump `version` to lockstep target. B6/B7. |
 | `packages/schemas/package.json` | Add `description`, `homepage`, `bugs`, `keywords`, `author`, `repository.directory`, `publishConfig.access:public`, and a `files` allowlist (`["dist"]`). **Remove any `private` flag** — it must publish. B5/B7. |
@@ -349,7 +346,7 @@ Also fix README TOC (add missing **Installation**, **Documentation**, **Developm
 - Typed, schema-validated records with revision history and fencing tokens
 - Coordination primitives: claims, gates, signals, presence, append-only journal
 - First-writer-wins concurrency with monotonic fences (stale writes rejected with 409)
-- Cloudflare deployment (Worker + Durable Object SQLite + D1 + R2) and local mode (`tila init --local`)
+- Cloudflare deployment (Worker + Durable Object SQLite + D1 + R2) and local mode (`tila project create --local`)
 - `tila` CLI, TypeScript SDK (`@tila/sdk`), MCP server (`@tila/mcp-server`)
 - Read-only dashboard SPA; GitHub-scoped auth (default) + D1 API tokens (admin)
 

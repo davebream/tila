@@ -13,12 +13,12 @@ This tutorial walks you through the full tila lifecycle: initializing a project,
 
 ## Section 1 — Initialize a tila project
 
-### New project owner: `tila init --cloudflare`
+### New project owner: `tila project create`
 
 Run this once to provision your project on Cloudflare. It requires `wrangler` to be installed and logged in.
 
 ```
-$ tila init --cloudflare
+$ tila project create
 Checking prerequisites...
   Cloudflare account: My Account (abc123def456)
   Project slug: my-project-a1b2
@@ -46,7 +46,7 @@ tila project provisioned.
   Token:    written to .tila/.env
 
 Next steps:
-  1. Teammates join with: tila init --inherit (uses GitHub auth — no token sharing needed)
+  1. Teammates join with: tila init (uses GitHub auth — no token sharing needed)
   2. Open the dashboard in your browser
   3. Start working: tila task new --title "First task"
 ```
@@ -73,12 +73,12 @@ Checking prerequisites...
 Error: CLOUDFLARE_API_TOKEN is required for Cloudflare provisioning.
 ```
 
-### Teammate joining an existing project: `tila init --inherit`
+### Teammate joining an existing project: `tila init`
 
 Once the project owner has committed `.tila/config.toml`, teammates authenticate via GitHub — no shared API token needed. The CLI reads the GitHub token from the environment (e.g., `gh auth token`) and exchanges it for a tila session.
 
 ```
-$ tila init --inherit
+$ tila init
 Looking for .tila/config.toml...
   Project: my-project-a1b2
   Worker:  https://tila-my-project-a1b2.myaccount.workers.dev
@@ -254,7 +254,7 @@ The journal is append-only and immutable. Use it to audit who did what and when,
 
 ## Section 5 — View the UI dashboard
 
-Navigate to `<worker_url>/index.html` in your browser. The `worker_url` is shown at the end of `tila init --cloudflare` and is also stored in `.tila/config.toml` under the `worker_url` key.
+Navigate to `<worker_url>/index.html` in your browser. The `worker_url` is shown at the end of `tila project create` and is also stored in `.tila/config.toml` under the `worker_url` key.
 
 Example: `https://tila-my-project-a1b2.myaccount.workers.dev/index.html`
 

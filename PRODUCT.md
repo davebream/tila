@@ -14,7 +14,7 @@ Context of use: engineers glancing at the read-only dashboard between coding ses
 
 **tila** (Finnish: state, space, condition, mode) is a state-and-coordination engine for multi-machine agentic work. Cloudflare-native (Worker + DO SQLite + D1 + R2).
 
-Core flow: provision with `tila init --cloudflare`, coordinate with `tila task claim` (first-writer-wins via fencing tokens), store content-addressed artifacts in R2, review state through a read-only dashboard showing presence, claims, and journal.
+Core flow: provision with `tila project create`, coordinate with `tila task claim` (first-writer-wins via fencing tokens), store content-addressed artifacts in R2, review state through a read-only dashboard showing presence, claims, and journal.
 
 Success: engineers and their agents never silently conflict, never lose in-flight context when switching machines, and never pollute the repo with coordination artifacts.
 

@@ -237,7 +237,7 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 ## 📄 Documentation
 
 - [CLI Reference](packages/cli/README.md): all commands and workflows
-- [MCP Server](packages/mcp-server/README.md): 41 tools, auth modes, resources
+- [MCP Server](packages/mcp-server/README.md): 42 tools, auth modes, resources
 - [TypeScript SDK](packages/sdk/README.md): client API, claims, artifacts, error handling
 - [Getting Started Tutorial](docs/tutorial-getting-started.md): from `tila init` to the UI dashboard
 - [Architecture](docs/02-ARCHITECTURE.md): full technical spec

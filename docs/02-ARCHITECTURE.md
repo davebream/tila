@@ -13,7 +13,7 @@ The languages, frameworks, and libraries this is built with. Decisions are made;
 - **Language:** TypeScript throughout. CLI, Worker, shared schemas, UI bundle. One language eliminates client-server type drift and maximizes Claude Code's effectiveness during AI-assisted implementation.
 - **CLI runtime:** Bun (>=1.2). Source is TypeScript; distribution is a static binary per platform via `bun build --compile`. Cold start ~20-30ms vs Node's 200-500ms. Bun's test runner is acceptable for v0.1; Vitest is the fallback for tests that need `@cloudflare/vitest-pool-workers` (the Worker tests specifically).
 - **Worker runtime:** Cloudflare Workers (workerd). Same TypeScript source as the CLI; bundled via Wrangler.
-- **Package manager:** Bun for the monorepo (`bun install`, workspaces). pnpm is the fallback if Bun's workspace handling surfaces gaps.
+- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun is used only to compile the CLI binary (`bun build --compile`), not for workspace management.
 - **Monorepo tooling:** Turborepo for task orchestration across packages (matching the maintainer's existing setup).
 - **ORM / DB access:** Drizzle for SQL access. In the Worker, `drizzle-orm/durable-sqlite` for the per-project DO (the primary persistence layer) and `drizzle-orm/d1` for the global D1 instance (auth tokens, idempotency). The EntityBackend interface preserves the option for v0.2+ alternatives (GitHub Issues, Linear, Upstash, self-hosted Postgres).
 - **HTTP framework in the Worker:** Hono. Route handlers, middleware, error handling.
@@ -22,7 +22,7 @@ The languages, frameworks, and libraries this is built with. Decisions are made;
 - **R2 / S3 client:** `aws4fetch` in the Worker for minimal bundle size. The CLI does not talk to R2 directly; all artifact ops go through the Worker.
 - **Validation:** Zod schemas for every API boundary (Worker endpoints, CLI inputs, schema.toml parsing). Zod is the source of truth; types are derived via `z.infer`. Shared schemas live in a dedicated `packages/schemas` workspace consumed by both the Worker and the CLI.
 - **Build:** `bun build --compile` for CLI binaries; Wrangler for the Worker. tsdown is the fallback if Bun's compile gains friction for any specific output target.
-- **Local development:** `bun run dev` runs the CLI against a local `wrangler dev` instance of the Worker. Iteration loop under 1 second.
+- **Local development:** `pnpm dev` runs the Worker via a local `wrangler dev` instance. Iteration loop under 1 second.
 - **2026 Cloudflare platform features used by tila:**
   - **Smart Placement** — enabled by default in `wrangler.toml` (`placement = { mode = "smart" }`). Auto-places the Worker close to the DO. Single biggest free latency win.
   - **DO SQLite storage** — GA, 10GB per DO, point-in-time recovery. The primary persistence layer for per-project state (entities, journal, claims, schema history). Replaces the 2024 D1-heavy design.
@@ -139,7 +139,7 @@ This stack uses a Turborepo monorepo, Drizzle ORM, a Hono backend, and Promptfoo
 
 **Why the layering looks like this:** the Worker is a thin facade that routes to the right backend. Per-project state (entities, journal, claims) lives in one DO per project; this is the 2026-native consolidation that replaces the 2024 D1+DO split. Auth tokens and idempotency keys live in global D1 because they need cross-project scope and lightweight access patterns. Artifacts live in R2 because they're large blobs that benefit from content-addressing and per-prefix lifecycle. The DO can only be reached through a Worker; the Worker is the only writer to R2 (no signed-URL writes in v0.1).
 
-**Local path (single machine -- `tila init --local`):**
+**Local path (single machine -- `tila project create --local`):**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -246,7 +246,7 @@ Three concepts, three relationship tables:
 | Per-project config (worker URL, account id, etc.) | `.tila/config.toml` in project repo | Committed |
 | API token | `.tila/.env` in project repo | Gitignored |
 
-On the local path (`tila init --local`), all per-project DO SQLite state and the global D1 idempotency table collapse into a single local bun:sqlite database at `~/.tila/<org>/<project>.db`; artifact blobs live on the local filesystem at `~/.tila/artifacts/<org>/<project>/<sha256>.<ext>`. Schema and operations are identical to the Cloudflare path; only the connection and transaction layer differs.
+On the local path (`tila project create --local`), all per-project DO SQLite state and the global D1 idempotency table collapse into a single local bun:sqlite database at `~/.tila/<org>/<project>.db`; artifact blobs live on the local filesystem at `~/.tila/artifacts/<org>/<project>/<sha256>.<ext>`. Schema and operations are identical to the Cloudflare path; only the connection and transaction layer differs.
 
 ### 1.4 What flows where
 
@@ -335,7 +335,7 @@ Local mode therefore now runs under **plain Node**, not just Bun. There is no AD
 
 **Idempotency is accepted but not honored locally — a known divergence.** The embedded `_idempotency` table (v`1000`) and `EmbeddedProject.checkIdempotency` / `storeIdempotency` exist, but no local resource adapter currently calls them: in local mode an `idempotency_key` (e.g. on `claims.acquire`) is **accepted but not honored**. Remote dedups retries via D1; local relies on **primary-key-level dedup** instead — a retried create of an existing id fails rather than duplicating. Full idempotency wiring is single-machine-low-risk and remains **remote-only**; the table + methods are kept available-but-unwired so a future wiring has the storage already in place. (Mirrored in the SDK README local-divergence list.)
 
-**Pre-feature local DB upgrade — a known limitation.** Local DBs created by the **old / pre-feature** CLI (which used the legacy `ALL_LOCAL_MIGRATIONS` with a *divergent* v1 and v5) do **not** fully upgrade to the canonical embedded schema. Because v1 and v5 are already recorded in that file's `_migrations`, the runner treats them as applied and skips them — so the `artifact_relationships.target` column and the canonical v5 `idx_er_to_id_type` index stay absent. (v14 *does* apply retroactively, since it was never recorded.) A partial in-place heal is intentionally **not** attempted: it cannot reproduce the canonical NOT-NULL primary-key `target` column, so it would yield a subtly non-identical schema — worse than a clean recreate. **Remedy:** recreate the local DB via `tila init --local`. Local mode is single-machine, disposable dev/edge state, so recreating is cheap and safe.
+**Pre-feature local DB upgrade — a known limitation.** Local DBs created by the **old / pre-feature** CLI (which used the legacy `ALL_LOCAL_MIGRATIONS` with a *divergent* v1 and v5) do **not** fully upgrade to the canonical embedded schema. Because v1 and v5 are already recorded in that file's `_migrations`, the runner treats them as applied and skips them — so the `artifact_relationships.target` column and the canonical v5 `idx_er_to_id_type` index stay absent. (v14 *does* apply retroactively, since it was never recorded.) A partial in-place heal is intentionally **not** attempted: it cannot reproduce the canonical NOT-NULL primary-key `target` column, so it would yield a subtly non-identical schema — worse than a clean recreate. **Remedy:** recreate the local DB via `tila project create --local`. Local mode is single-machine, disposable dev/edge state, so recreating is cheap and safe.
 
 **Concurrency limits.** Local mode is **single-machine** only. Concurrent writers (e.g. two CLI processes, or a CLI plus a Node MCP server on the same file) serialize via WAL + a 5 s `busy_timeout` + the `withBusyRetry` application-layer retry loop (proven by a cross-runtime concurrency test where a Bun and a Node writer contend on one file). A **network filesystem is rejected at connect** by `assertLocalFilesystem`, because SQLite's POSIX advisory locking is unreliable there: on Linux it parses `/proc/self/mounts` (longest-enclosing-mount match against `nfs`/`nfs4`/`cifs`/`smb`/`smbfs`); on macOS it shells out to `stat -f %T` (matching `smbfs`/`nfs`/`afpfs`/`webdavfs` substrings). On **Windows the guard is a no-op** (no `/proc`, no `stat -f`). Detection *failures* (unreadable mount table, missing `stat`, sandboxes) are treated as "can't tell" and skip the check rather than hard-failing.
 
@@ -771,7 +771,7 @@ Two distinct credentials, each with a different role. Distinguishing them is fou
 
 **Credential 1 — Cloudflare account credentials (via wrangler).** The user's identity to Cloudflare. Stored at `~/.wrangler/config/default.toml` after `wrangler login`. Used only for:
 
-- Provisioning operations (`tila init --cloudflare`)
+- Provisioning operations (`tila project create`)
 - Worker code updates (`tila worker upgrade`)
 - R2 lifecycle rule changes (`tila lifecycle apply`)
 - D1 schema migrations (`tila schema apply` when it triggers a D1 DDL migration; entity-config-level schema changes do not need this)
@@ -838,7 +838,7 @@ Step 3 (if Cloudflare credentials needed):
 
 Step 4 (if project API token needed):
   - Read .tila/.env for TILA_API_TOKEN.
-    - If missing: error "no API token found; run `tila init --inherit` to join this project, or set TILA_API_TOKEN in your environment"
+    - If missing: error "no API token found; run `tila init` to join this project, or set TILA_API_TOKEN in your environment"
   - Continue. Token is sent as Bearer header to the Worker. 401 from Worker is handled at the request site.
 
 Step 5: Execute the command.
@@ -861,8 +861,8 @@ Three patterns supported, in order of preference:
 | `tila --version` | no | no |
 | `tila --help` | no | no |
 | `tila login` | yes (initiates) | no |
-| `tila init --cloudflare` | yes | no (generates one) |
-| `tila init --inherit` | no | yes (prompts for it) |
+| `tila project create` | yes | no (generates one) |
+| `tila init` | no | yes (prompts for it) |
 | `tila task *`, `tila issue *`, `tila epic *` | no | yes |
 | `tila claim/renew/release` | no | yes |
 | `tila artifact *` | no | yes |
@@ -1769,8 +1769,8 @@ is: trust DO SQLite durability (PIT recovery is built in) and have R2 as the lon
 
 ```
 # Setup
-tila init --cloudflare           # provision a new tila project on Cloudflare
-tila init --inherit              # join existing cloud project (team member onboarding)
+tila project create           # provision a new tila project on Cloudflare
+tila init              # join existing cloud project (team member onboarding)
 tila login                       # Cloudflare OAuth (delegates to wrangler)
 
 # Work-unit CRUD (same shape for any declared work-unit type)
@@ -1960,13 +1960,13 @@ The Worker is on Cloudflare's anycast network; partitions are rare. If a write t
 All timestamps are recorded by the Worker (single clock). Client-supplied timestamps are advisory only. TTLs are computed at the DO using the DO's clock.
 
 ### 10.15 Project deleted from Cloudflare dashboard
-CLI calls return 404 / DNS failure. `tila doctor` reports "Worker not reachable." User must `tila init --cloudflare` again to create a new project; old data is unrecoverable unless they had exports.
+CLI calls return 404 / DNS failure. `tila doctor` reports "Worker not reachable." User must `tila project create` again to create a new project; old data is unrecoverable unless they had exports.
 
 ### 10.16 `wrangler deploy` collides with an existing Worker of the same name
 Init prompts: "A Worker named `tila-<slug>` already exists in your Cloudflare account. Reuse it? [y/N]" — if yes, attempts to bind to existing resources; if no, suggests a new project slug.
 
 ### 10.17 No project context (`.tila/config.toml` missing)
-CLI commands that need project context (everything except `--version`, `--help`, `tila account list`) print: "no tila project found in current directory or any parent. Run `tila init --cloudflare` to create one, or `tila init --inherit` to join an existing project." Exit code 1.
+CLI commands that need project context (everything except `--version`, `--help`, `tila account list`) print: "no tila project found in current directory or any parent. Run `tila project create` to create one, or `tila init` to join an existing project." Exit code 1.
 
 ### 10.18 Multiple tila projects on one Cloudflare account
 Fully supported. Each project has its own Worker, D1, R2 bucket, and DO namespace. Naming convention: `tila-<slug>` for everything. No cross-project isolation issues at the Cloudflare level.
@@ -2005,7 +2005,7 @@ For provisioning-class commands, tila runs `wrangler whoami` and checks for vali
 Supported via per-shell `CLOUDFLARE_ACCOUNT_ID` env var that tila sets implicitly based on the project's config before shelling out to wrangler. User does not manually switch accounts; being in a project's directory is what makes that project's account active. `tila account list` enumerates accounts the local wrangler has credentials for; `tila account use <name>` outputs an `export CLOUDFLARE_ACCOUNT_ID=...` line suitable for `eval`.
 
 ### 10.31 Organization Cloudflare account policies override tila defaults
-Acme Corp may enforce: R2 jurisdiction (EU only), custom Worker subdomain (`tila.acme.com`), retention policy overrides, restricted Worker permissions. These are configured at the Cloudflare account level and at `wrangler.toml`. tila's `.tila/config.toml` supports `[cloudflare] worker_subdomain`, `jurisdiction`, and `custom_domain` flags; init reads these from the org's tila template if one is provided via `--template=<url>`. Org admins publish a tila template in their org's onboarding docs; engineers run `tila init --cloudflare --template=https://acme.internal/tila-template.toml` to inherit org defaults.
+Acme Corp may enforce: R2 jurisdiction (EU only), custom Worker subdomain (`tila.acme.com`), retention policy overrides, restricted Worker permissions. These are configured at the Cloudflare account level and at `wrangler.toml`. tila's `.tila/config.toml` supports `[cloudflare] worker_subdomain`, `jurisdiction`, and `custom_domain` flags. Org admins publish these defaults in their org's onboarding docs; engineers run `tila project create` and apply the org's configuration overrides.
 
 ### 10.32 Service account / CI token usage
 For automation (CI, scheduled jobs, server-side autopilots): runtime operations use a dedicated project API token issued via `tila token issue --name=ci-prod`. The token is stored in CI secrets as `TILA_API_TOKEN`. Provisioning from CI (rare) uses a Cloudflare API token (not OAuth) scoped to the specific account, stored as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. tila and wrangler both honor these env vars; no interactive login is required.
@@ -2082,7 +2082,7 @@ Returns exit code 0 (healthy), 1 (warnings), 2 (errors). Useful in CI.
 
 ## Section 11: Provisioning sequence in detail
 
-`tila init --cloudflare` does these things, in order:
+`tila project create` does these things, in order:
 
 ```
 1. Check wrangler is installed (npm install if needed, version >= 3.73)
@@ -2122,7 +2122,7 @@ Returns exit code 0 (healthy), 1 (warnings), 2 (errors). Useful in CI.
 
 Note: D1 is shared across all tila projects in a Cloudflare account (one `tila-global` instance per account). The DO and R2 bucket are per-project. This is intentional — the global D1 is small (auth tokens, idempotency, project registry) and benefits from being one place. Per-project D1 would create unnecessary fragmentation.
 
-`tila init --inherit` for joining teammates:
+`tila init` for joining teammates:
 
 ```
 1. Read .tila/config.toml (committed by the original setup)
@@ -2308,7 +2308,7 @@ tila/                                  # github.com/davebream/tila
 
 **Backends as separate packages** is not required for v0.1 functionally — they could be inlined in `core` — but separating them upfront makes the adapter pattern *real* rather than aspirational. Adding `backend-github-issues` or `backend-linear` in v0.2 is "create a new package," not "refactor existing code." `@tila/ops-sqlite` sits between `core` and `backend-{do,local}` in the dependency graph -- it extracts the shared business logic so both backends share identical entity, coordination, artifact, journal, and sweep operations without duplication.
 
-**`packages/worker/wrangler.toml`** is the Worker's own wrangler.toml — used for `wrangler dev` during local development of the Worker package itself. This is different from the *templates* in `packages/cli/templates/wrangler.toml.tmpl`, which are what tila generates when a user runs `tila init --cloudflare` for their own project. Don't conflate them.
+**`packages/worker/wrangler.toml`** is the Worker's own wrangler.toml — used for `wrangler dev` during local development of the Worker package itself. This is different from the *templates* in `packages/cli/templates/wrangler.toml.tmpl`, which are what tila generates when a user runs `tila project create` for their own project. Don't conflate them.
 
 **`packages/integration-tests`** is its own workspace, not inside any other package. It depends on all the others. This keeps the integration test machinery out of the application packages and makes it easy to skip with `bun test --filter='!integration'` during inner-loop development.
 
