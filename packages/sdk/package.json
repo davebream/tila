@@ -75,7 +75,7 @@
   "devDependencies": {
     "@tila/schemas": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^22.20.0",
+    "@types/node": "^22.20.1",
     "better-sqlite3": "^12.10.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",

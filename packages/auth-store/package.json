@@ -20,7 +20,7 @@
     "smol-toml": "^1.6.1"
   },
   "devDependencies": {
-    "@types/node": "^22.20.0",
+    "@types/node": "^22.20.1",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9"
   }
