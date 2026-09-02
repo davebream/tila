@@ -24,6 +24,9 @@ describe("ProjectDO.alarm", () => {
     reindexBatchMock.mockReturnValue({ processed: 50, done: false });
 
     const storage = {
+      sql: {
+        exec: vi.fn().mockReturnValue({ toArray: () => [] }),
+      },
       get: vi.fn().mockResolvedValue({
         kind: "artifact",
         batchSize: 50,
