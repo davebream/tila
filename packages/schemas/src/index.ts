@@ -35,6 +35,22 @@ export {
   type EntitySearchResult,
 } from "./artifact";
 export { FenceSchema, type Fence } from "./fence";
+export {
+  PROJECT_BACKUP_FORMAT,
+  PROJECT_BACKUP_FORMAT_VERSION,
+  ProjectBackupHeaderSchema,
+  type ProjectBackupHeader,
+  ProjectBackupEntrySchema,
+  type ProjectBackupEntry,
+  ProjectBackupObjectSchema,
+  type ProjectBackupObject,
+  ProjectBackupManifestSchema,
+  type ProjectBackupManifest,
+  ProjectTransferModeSchema,
+  type ProjectTransferMode,
+  ProjectTransferStateSchema,
+  type ProjectTransferState,
+} from "./backup";
 export { PresenceSchema, type Presence } from "./presence";
 export {
   EntityRelationshipTypeSchema,

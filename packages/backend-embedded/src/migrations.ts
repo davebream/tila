@@ -16,11 +16,7 @@
  *
  * Three deliberate, narrowly-scoped deltas vs the DO set:
  *
- *  1. Version 15 (`_journal_archive_watermark`) is SKIPPED: journal archival to
- *     R2 is a DO-only feature with no embedded equivalent. Skipping it does not
- *     affect any shared table.
- *
- *  1b. Version 21 (`_do_idempotency`) is SKIPPED for the same reason: the DO-side
+ *  1. Version 21 (`_do_idempotency`) is SKIPPED: the DO-side
  *      in-transaction idempotency dedup table (audit B1) is a Cloudflare-only
  *      guard. Embedded mode has its own `_idempotency` overlay (delta 2 below),
  *      so creating `_do_idempotency` here would be redundant and off-schema.
@@ -54,11 +50,10 @@ export type { Migration, MigrationStorage } from "@tila/ops-sqlite";
 
 /**
  * Canonical version slots skipped in embedded mode (DO-only features):
- *  - 15: `_journal_archive_watermark` (DO-only journal archival to R2)
  *  - 21: `_do_idempotency` (DO-only in-transaction idempotency dedup, audit B1;
  *        embedded mode uses its own `_idempotency` overlay instead)
  */
-const SKIPPED_VERSIONS = new Set<number>([15, 21]);
+const SKIPPED_VERSIONS = new Set<number>([21]);
 
 /** Version assigned to the embedded-only idempotency overlay (outside the
  *  canonical 1–19 range so it is purely additive). */

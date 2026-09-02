@@ -754,6 +754,88 @@ export function runMigration0023(storage: MigrationStorage): void {
 }
 
 /**
+ * Singleton project transfer lock plus idempotent accepted-chunk ledger.
+ * Export sessions carry a renewable expiry. Import and rollback sessions store
+ * NULL in expires_at and therefore fail closed until explicitly completed.
+ */
+export const MIGRATION_0024 = `
+CREATE TABLE IF NOT EXISTS _project_transfer_state (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  session_id TEXT NOT NULL UNIQUE,
+  mode TEXT NOT NULL CHECK(mode IN ('export', 'import', 'rollback')),
+  owner TEXT NOT NULL,
+  archive_digest TEXT,
+  safety_archive TEXT,
+  started_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  applying INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS _project_transfer_chunks (
+  session_id TEXT NOT NULL,
+  section TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  accepted_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, section, chunk_index)
+);
+`;
+
+const TRANSFER_GUARDED_TABLES = [
+  "entities",
+  "entity_relationships",
+  "artifact_pointers",
+  "entity_artifact_references",
+  "artifact_relationships",
+  "journal",
+  "_journal_archive_watermark",
+  "claims",
+  "fences",
+  "presence",
+  "_schema_history",
+  "artifact_search_docs",
+  "entity_search_docs",
+  "gates",
+  "signals",
+  "records",
+  "entity_tags",
+  "artifact_tags",
+  "record_tags",
+  "record_revisions",
+  "record_search_docs",
+] as const;
+
+export function runMigration0024(storage: MigrationStorage): void {
+  storage.sql.exec(MIGRATION_0024);
+  for (const table of TRANSFER_GUARDED_TABLES) {
+    const exists =
+      storage.sql
+        .exec(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+          table,
+        )
+        .toArray().length > 0;
+    if (!exists) continue;
+    for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
+      storage.sql.exec(`
+        CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
+        BEFORE ${operation} ON ${table}
+        WHEN EXISTS (
+          SELECT 1 FROM _project_transfer_state
+          WHERE singleton = 1 AND applying = 0
+            AND (expires_at IS NULL OR expires_at > (unixepoch('subsec') * 1000))
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'project-maintenance');
+        END;
+      `);
+    }
+  }
+}
+
+/**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
  * The runner executes only versions not yet recorded in _migrations.
@@ -782,4 +864,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 21, sql: MIGRATION_0021 },
   { version: 22, sql: MIGRATION_0022 },
   { version: 23, run: runMigration0023 },
+  { version: 24, run: runMigration0024 },
 ];

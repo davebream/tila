@@ -451,3 +451,33 @@ export const doIdempotency = sqliteTable(
   },
   (table) => [index("idx_do_idempotency_created").on(table.created_at)],
 );
+
+export const projectTransferState = sqliteTable("_project_transfer_state", {
+  singleton: integer("singleton").primaryKey(),
+  session_id: text("session_id").notNull().unique(),
+  mode: text("mode").notNull(),
+  owner: text("owner").notNull(),
+  archive_digest: text("archive_digest"),
+  safety_archive: text("safety_archive"),
+  started_at: integer("started_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+  expires_at: integer("expires_at"),
+  applying: integer("applying").notNull().default(0),
+});
+
+export const projectTransferChunks = sqliteTable(
+  "_project_transfer_chunks",
+  {
+    session_id: text("session_id").notNull(),
+    section: text("section").notNull(),
+    chunk_index: integer("chunk_index").notNull(),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    accepted_at: integer("accepted_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.session_id, table.section, table.chunk_index],
+    }),
+  ],
+);

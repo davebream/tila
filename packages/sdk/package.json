@@ -47,6 +47,16 @@
         "types": "./dist/local.d.cts",
         "default": "./dist/local.cjs"
       }
+    },
+    "./backup": {
+      "import": {
+        "types": "./dist/backup.d.ts",
+        "default": "./dist/backup.js"
+      },
+      "require": {
+        "types": "./dist/backup.d.cts",
+        "default": "./dist/backup.cjs"
+      }
     }
   },
   "files": ["dist"],

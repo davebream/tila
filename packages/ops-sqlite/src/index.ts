@@ -27,6 +27,9 @@ export {
   MIGRATION_0018,
   MIGRATION_0019,
   MIGRATION_0021,
+  MIGRATION_0024,
+  runMigration0023,
+  runMigration0024,
   runMigration0002,
   runMigration0004,
   runMigration0010,
@@ -66,6 +69,11 @@ export * as searchReindexOps from "./search-reindex-ops";
 export * as storeCountsOps from "./store-counts-ops";
 export * as destroyOps from "./destroy-ops";
 export * as templateOps from "./template-ops";
+export * as projectTransferOps from "./project-transfer-ops";
+export type {
+  ProjectBackupTable,
+  ProjectSqlStorage,
+} from "./project-transfer-ops";
 
 // Named type exports for downstream consumers
 export type { EnrichOpts } from "./entity-ops";

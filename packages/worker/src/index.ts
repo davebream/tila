@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { emitRequestDatapoint, emitSweepErrorDatapoint } from "./lib/analytics";
 import { constantTimeSecretMatch } from "./lib/constant-time-compare";
+import { forwardToDO } from "./lib/do-forward";
 import { runSweep } from "./lib/sweep";
 import { createAuthMiddleware } from "./middleware/auth";
 import { createCacheMiddleware } from "./middleware/cache";
@@ -23,6 +24,7 @@ import {
   authSessionExchange,
   authSessionProtected,
 } from "./routes/auth-session";
+import { backup } from "./routes/backup";
 import { claims } from "./routes/claims";
 import { doctor } from "./routes/doctor";
 import { entities } from "./routes/entities";
@@ -180,6 +182,38 @@ projectRoutes.use("/*", csrfGuard);
 projectRoutes.use("/*", sourceResolution());
 projectRoutes.use("/*", requestIdentityMiddleware());
 projectRoutes.use("/*", projectMiddleware);
+projectRoutes.use("/*", async (c, next) => {
+  if (
+    c.req.method === "GET" ||
+    c.req.method === "HEAD" ||
+    c.req.method === "OPTIONS" ||
+    c.req.path.includes("/admin/backup")
+  ) {
+    return next();
+  }
+  const status = await forwardToDO(
+    c.get("doStub"),
+    "/admin/transfer/status",
+    "GET",
+  );
+  if (!status.ok) return status;
+  const body = (await status.json()) as {
+    state?: { mode: string; session_id: string } | null;
+  };
+  if (body.state) {
+    return c.json(
+      {
+        error: {
+          code: "project-maintenance",
+          message: `Project is locked for ${body.state.mode}`,
+          session_id: body.state.session_id,
+        },
+      },
+      423,
+    );
+  }
+  return next();
+});
 projectRoutes.use("/*", createIdempotencyMiddleware());
 projectRoutes.use("/*", createCacheMiddleware());
 projectRoutes.route("/tasks", entities); // canonical
@@ -197,6 +231,7 @@ projectRoutes.route("/gates", gates);
 projectRoutes.route("/templates", templates);
 projectRoutes.route("/records", records);
 projectRoutes.route("/search", search);
+projectRoutes.route("/admin/backup", backup);
 projectRoutes.route("/admin", admin);
 projectRoutes.route("/admins", adminRoster);
 projectRoutes.route("/", doctor);
