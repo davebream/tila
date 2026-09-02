@@ -21,9 +21,16 @@
   "pnpm": {
     "overrides": {
       "esbuild": ">=0.28.1",
+      "fast-uri": ">=3.1.6",
       "form-data": ">=4.0.6",
       "hono": ">=4.12.26",
-      "miniflare>undici": ">=7.28.0 <8.0.0",
+      "ip-address": ">=10.3.1",
+      "miniflare>undici": ">=7.29.0 <8.0.0",
+      "nanoid": ">=3.3.18",
+      "postcss": ">=8.5.23",
+      "react-router": ">=7.18.2 <8.0.0",
+      "sharp": ">=0.35.0",
+      "undici": ">=7.29.0 <8.0.0",
       "wrangler": ">=4.59.1",
       "ws": ">=8.20.1"
     }
