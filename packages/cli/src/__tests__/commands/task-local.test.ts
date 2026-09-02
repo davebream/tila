@@ -146,6 +146,11 @@ function makeLocalProject(): {
     db,
     org: "testorg",
     project: "test-proj",
+    identity: {
+      principal_id: "local:testorg",
+      participant_id: "participant-task-test",
+      environment: { machine: "test-machine", client_name: "tila-cli" },
+    },
     sleepSync: () => {},
     close: () => sqlite.close(),
   });
@@ -154,6 +159,11 @@ function makeLocalProject(): {
     blobs: new MemoryBlobStore(),
     org: "testorg",
     project: "test-proj",
+    identity: {
+      principal_id: "local:testorg",
+      participant_id: "participant-task-test",
+      environment: { machine: "test-machine", client_name: "tila-cli" },
+    },
     sleepSync: () => {},
   });
   return { project, artifacts, close: () => sqlite.close() };
@@ -239,7 +249,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
   it("list --compact projects id/status/title/claimed_by from the local backend", async () => {
     await seedTask("T-1", { status: "open", title: "First" });
     // Claim T-1 so claimed_by is populated.
-    await project.acquire("task:T-1", "m1", "u1", "exclusive", 60000);
+    await project.acquire("task:T-1", "exclusive", 60000);
 
     const cmd = await loadCommand();
     await runCmd(getSubCommand(cmd, "list"), { compact: true, json: true });
@@ -253,7 +263,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
       type: "task",
       title: "First",
       status: "open",
-      claimed_by: "m1/u1",
+      claimed_by: "participant-task-test",
     });
     expect(errorSpy).not.toHaveBeenCalled();
   });
@@ -406,13 +416,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
 
   it("update --fence rejects a stale fence with a clean one-line error (no stack trace)", async () => {
     await seedTask("T-fence", { status: "open", title: "Fenced" });
-    const acq = await project.acquire(
-      "task:T-fence",
-      "local",
-      "local",
-      "exclusive",
-      60000,
-    );
+    const acq = await project.acquire("task:T-fence", "exclusive", 60000);
 
     const cmd = await loadCommand();
 
@@ -454,13 +458,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
 
   it("update --fence (JSON mode) emits a structured stale-fence error, not a stack trace", async () => {
     await seedTask("T-fence-json", { status: "open", title: "Fenced" });
-    const acq = await project.acquire(
-      "task:T-fence-json",
-      "local",
-      "local",
-      "exclusive",
-      60000,
-    );
+    const acq = await project.acquire("task:T-fence-json", "exclusive", 60000);
 
     const cmd = await loadCommand();
     await expect(

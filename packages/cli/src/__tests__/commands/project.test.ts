@@ -879,6 +879,8 @@ describe("tila project destroy", () => {
 
   // (a) Happy path: worker→D1 5 tables→verify→_tokens→local
   it("happy path: calls wipeProjectViaWorker then D1 cleanup then verify then local cleanup", async () => {
+    vi.stubEnv("TILA_PARTICIPANT_ID", "destroy-test-participant");
+
     await invokeProjectDestroy();
 
     // Worker wipe called with correct args
@@ -886,6 +888,7 @@ describe("tila project destroy", () => {
       "https://tila-test-proj.workers.dev",
       "tila_test-api-token",
       "test-proj",
+      "destroy-test-participant",
     );
 
     // D1 non-token cleanup called

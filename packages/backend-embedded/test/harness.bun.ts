@@ -84,11 +84,17 @@ export function makeHarness(
 
   const close = () => rawDb.close();
   const blobs = new MemoryBlobStore();
+  const identity = {
+    principal_id: `local:${org}`,
+    participant_id: "test-participant",
+    environment: { machine: "test-machine", client_name: "embedded-test" },
+  };
 
   const embeddedProject = new EmbeddedProject({
     db,
     org,
     project,
+    identity,
     sleepSync: noopSleep,
     close,
   });
@@ -98,6 +104,7 @@ export function makeHarness(
     blobs,
     org,
     project,
+    identity,
     sleepSync: noopSleep,
   });
 

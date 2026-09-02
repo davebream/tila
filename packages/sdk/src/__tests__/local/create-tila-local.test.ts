@@ -50,8 +50,6 @@ describe("createTilaLocal — full local round-trip", () => {
     // 2. Claim it — a monotonic fence is returned.
     const acquired = await local.project.acquire(
       "task:task-1",
-      "machine-a",
-      "user-a",
       "exclusive",
       30_000,
     );
@@ -120,8 +118,6 @@ describe("createTilaLocal — full local round-trip", () => {
     });
     const acquired = await local.project.acquire(
       "task:arch-1",
-      "machine-a",
-      "user-a",
       "exclusive",
       30_000,
     );

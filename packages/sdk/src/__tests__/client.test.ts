@@ -32,14 +32,48 @@ describe("TilaClient", () => {
     expect(init.headers["X-Tila-Source"]).toMatch(/^sdk\/\d+\.\d+\.\d+$/);
   });
 
-  it("allows extraHeaders to override default X-Tila-Source", async () => {
+  it("keeps one generated participant ID stable per client instance", async () => {
+    mockFetch.mockImplementation(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const first = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const second = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+
+    await first.get("/one");
+    await first.get("/two");
+    await second.get("/three");
+
+    const ids = mockFetch.mock.calls.map(
+      ([, init]) => init.headers["X-Tila-Participant-Id"],
+    );
+    expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  it("uses an explicit participant ID", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
     const client = new TilaClient({
       baseUrl: "https://api.test",
       token: "t",
-      extraHeaders: { "X-Tila-Source": "cli/1.0.0" },
+      participantId: "participant-fixed",
+    });
+    await client.get("/test");
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers["X-Tila-Participant-Id"]).toBe("participant-fixed");
+  });
+
+  it("derives X-Tila-Source from canonical environment metadata", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = new TilaClient({
+      baseUrl: "https://api.test",
+      token: "t",
+      environment: { client_name: "cli", client_version: "1.0.0" },
     });
     await client.get("/test");
 
@@ -47,7 +81,7 @@ describe("TilaClient", () => {
     expect(init.headers["X-Tila-Source"]).toBe("cli/1.0.0");
   });
 
-  it("fromConfig forwards opts.extraHeaders (X-Tila-Source) to the client", async () => {
+  it("fromConfig forwards environment client identity to X-Tila-Source", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
@@ -61,7 +95,12 @@ describe("TilaClient", () => {
         created_at: "1970-01-01T00:00:00Z",
       },
       "t",
-      { extraHeaders: { "X-Tila-Source": "mcp-server/2.3.4" } },
+      {
+        environment: {
+          client_name: "mcp-server",
+          client_version: "2.3.4",
+        },
+      },
     );
     await client.get("/test");
 

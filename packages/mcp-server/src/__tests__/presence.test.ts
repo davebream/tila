@@ -51,7 +51,7 @@ describe("registerPresenceTools", () => {
       const handler = findHandler("tila_presence_heartbeat");
       const result = await handler({ info: { task: "coding" } });
 
-      expect(facade.presence.heartbeat).toHaveBeenCalledWith("mcp-agent", {
+      expect(facade.presence.heartbeat).toHaveBeenCalledWith({
         task: "coding",
       });
       expect(result.content[0].text).toContain('"ok":true');
@@ -63,7 +63,7 @@ describe("registerPresenceTools", () => {
       const handler = findHandler("tila_presence_heartbeat");
       await handler({ info: {} });
 
-      expect(facade.presence.heartbeat).toHaveBeenCalledWith("mcp-agent", {});
+      expect(facade.presence.heartbeat).toHaveBeenCalledWith({});
     });
   });
 

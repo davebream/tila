@@ -6,7 +6,7 @@ import {
   upsertPointer,
 } from "../src/artifact-ops";
 import { acquire } from "../src/coordination-ops";
-import { createEntity, createTestDb } from "./helpers";
+import { createEntity, createTestDb, testOrigin } from "./helpers";
 
 // confirmBlobDeleted is the signal the sweep records after a SUCCESSFUL R2 blob
 // delete. It stamps blob_deleted_at, which is what gates the tombstoned-pointer
@@ -19,7 +19,13 @@ describe("confirmBlobDeleted", () => {
   } {
     const { db, rawDb } = createTestDb();
     createEntity(db, { id: "task-cb" });
-    const claim = acquire(db, "task:task-cb", "m1", "u1", "exclusive", 60_000);
+    const claim = acquire(
+      db,
+      "task:task-cb",
+      testOrigin("m1", "u1"),
+      "exclusive",
+      60_000,
+    );
     const r2Key = "produced/task-cb/x.txt";
     upsertPointer(
       db,
@@ -35,9 +41,9 @@ describe("confirmBlobDeleted", () => {
         produced_by: "m1/u1",
         expires_at: null,
       },
-      { actor: "m1/u1" },
+      testOrigin("m1/u1"),
     );
-    tombstonePointer(db, r2Key, { actor: "sweep-cron" });
+    tombstonePointer(db, r2Key, testOrigin("sweep-cron"));
     return { db, rawDb, r2Key };
   }
 

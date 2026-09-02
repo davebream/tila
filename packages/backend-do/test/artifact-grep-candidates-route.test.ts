@@ -73,7 +73,12 @@ describe("GET /artifact/grep-candidates route", () => {
     artifactOps.upsertPointer(
       db,
       makePointer({ content_inline: "hello world" }),
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
     );
 
     const app = createArtifactRoutes(makeDeps(db));
@@ -141,7 +146,18 @@ describe("GET /artifact/grep-candidates route", () => {
       .run("task-1", "task", Date.now(), Date.now());
     // Establish a live claim (creates the fence row at current_fence=1 and a
     // live lease) so the artifact write satisfies the requireLiveClaim contract.
-    coordinationOps.acquire(db, "task:task-1", "m1", "u1", "exclusive", 60_000);
+    coordinationOps.acquire(
+      db,
+      "task:task-1",
+      {
+        principalId: "test:u1",
+        participantId: "m1",
+        environment: { machine: "m1" },
+        actor: "m1/u1",
+      },
+      "exclusive",
+      60_000,
+    );
 
     artifactOps.upsertPointer(
       db,
@@ -150,12 +166,22 @@ describe("GET /artifact/grep-candidates route", () => {
         resource: "task-1",
         fence: 1,
       }),
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
     );
     artifactOps.upsertPointer(
       db,
       makePointer({ r2_key: "sources/b.md", resource: null }),
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
     );
 
     const app = createArtifactRoutes(makeDeps(db));
@@ -171,7 +197,12 @@ describe("GET /artifact/grep-candidates route", () => {
 
   it("respects limit param (default 50)", async () => {
     for (let i = 0; i < 5; i++) {
-      artifactOps.upsertPointer(db, makePointer(), { actor: "test-actor" });
+      artifactOps.upsertPointer(db, makePointer(), {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      });
     }
 
     const app = createArtifactRoutes(makeDeps(db));
@@ -187,7 +218,12 @@ describe("GET /artifact/grep-candidates route", () => {
 
   it("clamps limit to 100 (Math.min)", async () => {
     for (let i = 0; i < 5; i++) {
-      artifactOps.upsertPointer(db, makePointer(), { actor: "test-actor" });
+      artifactOps.upsertPointer(db, makePointer(), {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      });
     }
 
     const app = createArtifactRoutes(makeDeps(db));
@@ -202,7 +238,12 @@ describe("GET /artifact/grep-candidates route", () => {
   });
 
   it("returns { ok: true, candidates: [...] } envelope", async () => {
-    artifactOps.upsertPointer(db, makePointer(), { actor: "test-actor" });
+    artifactOps.upsertPointer(db, makePointer(), {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
 
     const app = createArtifactRoutes(makeDeps(db));
     const res = await app.request("/artifact/grep-candidates");

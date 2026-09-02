@@ -4,7 +4,7 @@ import {
   tombstonePointer,
   upsertPointer,
 } from "../src/artifact-ops";
-import { type TestDb, createTestDb } from "./helpers";
+import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
 
@@ -115,7 +115,7 @@ describe("tombstonePointer stamps tombstoned_at", () => {
         produced_by: "test",
         expires_at: null,
       },
-      { actor: "test" },
+      testOrigin("test"),
     );
 
     const tsBefore = testDb.rawDb
@@ -125,7 +125,11 @@ describe("tombstonePointer stamps tombstoned_at", () => {
       .get() as { tombstoned_at: number | null };
     expect(tsBefore.tombstoned_at).toBeNull();
 
-    tombstonePointer(testDb.db, "produced/f/test.bin", { actor: "sweep-cron" });
+    tombstonePointer(
+      testDb.db,
+      "produced/f/test.bin",
+      testOrigin("sweep-cron"),
+    );
     const after = Date.now();
 
     const row = testDb.rawDb

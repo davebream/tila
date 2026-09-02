@@ -14,6 +14,7 @@ const makeSessionResult = (
   projectId: "proj-1",
   tokenHash: "tok-hash-abc",
   name: "testuser",
+  principalId: "github:github.com:1",
   scopes: "full",
   permission: "read",
   expiresAt: Date.now() + 3_600_000, // 1 hour

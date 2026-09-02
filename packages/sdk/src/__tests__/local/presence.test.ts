@@ -2,14 +2,14 @@ import type { PresenceWithStatus } from "@tila/core";
 import { describe, expect, it } from "vitest";
 
 /**
- * C5 — local presence.listAll stale-machine parity.
+ * C5 — local presence.listAll stale-participant parity.
  *
- * The remote `presence/all` endpoint returns ALL machines with a computed
+ * The remote `presence/all` endpoint returns ALL participants with a computed
  * `active` flag (last_seen vs TTL cutoff), including stale ones.
  * The local adapter must match this semantic via `EmbeddedProject.listAllPresence`.
  */
 describe("local presence.listAll stale-machine parity", () => {
-  it("returns stale machines with active:false", () => {
+  it("returns stale participants with active:false", () => {
     const now = Date.now();
     const ttlMs = 60_000;
 
@@ -17,13 +17,17 @@ describe("local presence.listAll stale-machine parity", () => {
     // one active machine, one stale machine (last_seen older than ttlMs).
     const mockRows: PresenceWithStatus[] = [
       {
-        machine: "active-machine",
+        principal_id: "local:test",
+        participant_id: "active-participant",
+        environment: { machine: "shared-machine" },
         last_seen: now - 10_000, // 10s ago → within 60s TTL → active
         info: {},
         active: true,
       },
       {
-        machine: "stale-machine",
+        principal_id: "local:test",
+        participant_id: "stale-participant",
+        environment: { machine: "shared-machine" },
         last_seen: now - 120_000, // 120s ago → beyond 60s TTL → stale
         info: {},
         active: false,
@@ -31,20 +35,26 @@ describe("local presence.listAll stale-machine parity", () => {
     ];
 
     // Map the rows as the adapter does: { ...p, active: p.active }
-    const machines = mockRows.map((p) => ({
-      machine: p.machine,
+    const participants = mockRows.map((p) => ({
+      principal_id: p.principal_id,
+      participant_id: p.participant_id,
+      environment: p.environment,
       last_seen: p.last_seen,
       info: p.info,
       active: p.active,
     }));
 
-    expect(machines).toHaveLength(2);
+    expect(participants).toHaveLength(2);
 
-    const stale = machines.find((m) => m.machine === "stale-machine");
+    const stale = participants.find(
+      (p) => p.participant_id === "stale-participant",
+    );
     expect(stale).toBeDefined();
     expect(stale?.active).toBe(false);
 
-    const active = machines.find((m) => m.machine === "active-machine");
+    const active = participants.find(
+      (p) => p.participant_id === "active-participant",
+    );
     expect(active).toBeDefined();
     expect(active?.active).toBe(true);
   });
@@ -61,9 +71,18 @@ describe("local presence.listAll stale-machine parity", () => {
     // Build a minimal mock of EmbeddedProject
     const mockProject = {
       listAllPresence: async () => [
-        { machine: "fresh", last_seen: now - 5000, info: {}, active: true },
         {
-          machine: "expired",
+          principal_id: "local:test",
+          participant_id: "fresh",
+          environment: { machine: "shared-machine" },
+          last_seen: now - 5000,
+          info: {},
+          active: true,
+        },
+        {
+          principal_id: "local:test",
+          participant_id: "expired",
+          environment: { machine: "shared-machine" },
           last_seen: now - 200000,
           info: {},
           active: false,
@@ -81,15 +100,17 @@ describe("local presence.listAll stale-machine parity", () => {
     const result = await presence.listAll();
 
     expect(result.ok).toBe(true);
-    expect(result.machines).toHaveLength(2);
+    expect(result.participants).toHaveLength(2);
 
-    const expired = result.machines.find(
-      (m: { machine: string; active: boolean }) => m.machine === "expired",
+    const expired = result.participants.find(
+      (p: { participant_id: string; active: boolean }) =>
+        p.participant_id === "expired",
     );
     expect(expired?.active).toBe(false);
 
-    const fresh = result.machines.find(
-      (m: { machine: string; active: boolean }) => m.machine === "fresh",
+    const fresh = result.participants.find(
+      (p: { participant_id: string; active: boolean }) =>
+        p.participant_id === "fresh",
     );
     expect(fresh?.active).toBe(true);
   });

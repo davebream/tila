@@ -13,10 +13,13 @@ vi.mock("yocto-spinner", () => ({
 const mockList = vi.fn();
 const mockGet = vi.fn();
 const mockAcquire = vi.fn();
+const mockRenew = vi.fn();
+const mockRelease = vi.fn();
+let participantIdExplicit = false;
 
 vi.mock("../../context", () => ({
   requireClient: (ctx: { client: unknown }) => ctx.client,
-  resolveContext: vi.fn().mockReturnValue({
+  resolveContext: vi.fn(() => ({
     client: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
     config: { project_id: "proj-test" },
     entity: {
@@ -28,14 +31,15 @@ vi.mock("../../context", () => ({
     },
     coordination: {
       acquire: mockAcquire,
-      renew: vi.fn(),
-      release: vi.fn(),
+      renew: mockRenew,
+      release: mockRelease,
       state: vi.fn(),
       heartbeat: vi.fn(),
       listPresence: vi.fn(),
     },
     artifact: { put: vi.fn(), get: vi.fn(), list: vi.fn(), delete: vi.fn() },
-  }),
+    participantIdExplicit,
+  })),
 }));
 
 const loadCommand = async () => {
@@ -86,6 +90,9 @@ describe("tila task --json", () => {
     mockList.mockReset();
     mockGet.mockReset();
     mockAcquire.mockReset();
+    mockRenew.mockReset();
+    mockRelease.mockReset();
+    participantIdExplicit = false;
   });
 
   afterEach(() => {
@@ -184,7 +191,11 @@ describe("tila task --json", () => {
 
   describe("task claim", () => {
     it("outputs JSON with fence as number and expires_at as ISO 8601 when --json", async () => {
-      mockAcquire.mockResolvedValue({ fence: 42, expires_at: 1700000300000 });
+      mockAcquire.mockResolvedValue({
+        fence: 42,
+        expires_at: 1700000300000,
+        participant_id: "participant-1",
+      });
       const cmd = await loadCommand();
       const claimCmd = getSubCommand(cmd, "claim");
       await runCmd(claimCmd, { id: "T-1", ttl: "300", json: true });
@@ -195,6 +206,40 @@ describe("tila task --json", () => {
       expect(output.fence).toBe(42);
       expect(typeof output.fence).toBe("number");
       expect(output.expires_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(output.participant_id).toBe("participant-1");
+    });
+  });
+
+  describe("task claim continuation", () => {
+    it.each(["renew", "release"])(
+      "%s rejects a generated participant ID",
+      async (commandName) => {
+        const cmd = await loadCommand();
+        const command = getSubCommand(cmd, commandName);
+
+        await expect(
+          runCmd(command, { id: "T-1", fence: "42", ttl: "300" }),
+        ).rejects.toThrow(/TILA_PARTICIPANT_ID/);
+      },
+    );
+
+    it("renews and releases when the participant ID is explicit", async () => {
+      participantIdExplicit = true;
+      mockRenew.mockResolvedValue({ renewed: true, expires_at: 1700000300000 });
+      const cmd = await loadCommand();
+
+      await runCmd(getSubCommand(cmd, "renew"), {
+        id: "T-1",
+        fence: "42",
+        ttl: "300",
+      });
+      await runCmd(getSubCommand(cmd, "release"), {
+        id: "T-1",
+        fence: "42",
+      });
+
+      expect(mockRenew).toHaveBeenCalledWith("task:T-1", 42, 300_000);
+      expect(mockRelease).toHaveBeenCalledWith("task:T-1", 42);
     });
   });
 });

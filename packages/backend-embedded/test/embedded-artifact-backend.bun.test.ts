@@ -200,13 +200,7 @@ mime_types = ["text/markdown"]
     it("persists fence + expiresAt + resource routing fields on the pointer", async () => {
       // A fence-carrying put validates the fence against the resource's claim,
       // so acquire a real claim first and use its fence.
-      const claim = await h.project.acquire(
-        "task-1",
-        "agent",
-        "agent",
-        "exclusive",
-        60_000,
-      );
+      const claim = await h.project.acquire("task-1", "exclusive", 60_000);
 
       const content = "routed";
       const hash = await sha256Hex(content);

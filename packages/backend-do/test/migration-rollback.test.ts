@@ -3,7 +3,7 @@ import { runMigrationsWithPitrRollback } from "../src/migration-runner";
 
 type SqlExecResult = { toArray: () => unknown[] };
 
-const ALL_MIGRATION_VERSIONS = Array.from({ length: 22 }, (_, i) => i + 1);
+const ALL_MIGRATION_VERSIONS = Array.from({ length: 23 }, (_, i) => i + 1);
 
 function makeMockStorage(opts: {
   failOnSql?: string;
@@ -200,9 +200,9 @@ describe("runMigrationsWithPitrRollback", () => {
                 ],
                 claims: [
                   "resource",
-                  "holder",
-                  "machine",
-                  "user",
+                  "principal_id",
+                  "participant_id",
+                  "environment",
                   "mode",
                   "fence",
                   "acquired_at",
@@ -265,8 +265,17 @@ describe("runMigrationsWithPitrRollback", () => {
                   "token_id",
                   "source",
                   "source_version",
+                  "principal_id",
+                  "participant_id",
+                  "environment",
                 ],
-                presence: ["machine", "last_seen", "info"],
+                presence: [
+                  "principal_id",
+                  "participant_id",
+                  "environment",
+                  "last_seen",
+                  "info",
+                ],
                 record_revisions: [
                   "type",
                   "key",
