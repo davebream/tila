@@ -3,7 +3,7 @@
  * runtime-agnostic embedded backend (and, once Task 4 re-points it, by
  * `@tila/backend-local`).
  *
- * SCHEMA IDENTITY IS THE #1 INVARIANT. Versions 1–19 reuse the canonical DO
+ * SCHEMA IDENTITY IS THE #1 INVARIANT. Shared versions through v24 reuse the canonical DO
  * `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` VERBATIM, so an
  * embedded SQLite file is byte-for-byte schema-identical to a DO project for
  * every shared version. There is NO embedded-specific variant of `MIGRATION_0001`:
@@ -16,11 +16,7 @@
  *
  * Three deliberate, narrowly-scoped deltas vs the DO set:
  *
- *  1. Version 15 (`_journal_archive_watermark`) is SKIPPED: journal archival to
- *     R2 is a DO-only feature with no embedded equivalent. Skipping it does not
- *     affect any shared table.
- *
- *  1b. Version 21 (`_do_idempotency`) is SKIPPED for the same reason: the DO-side
+ *  1. Version 21 (`_do_idempotency`) is SKIPPED: the DO-side
  *      in-transaction idempotency dedup table (audit B1) is a Cloudflare-only
  *      guard. Embedded mode has its own `_idempotency` overlay (delta 2 below),
  *      so creating `_do_idempotency` here would be redundant and off-schema.
@@ -34,7 +30,7 @@
  *     operation's own transaction.
  *     The `project_id` column is omitted because each embedded DB file is
  *     scoped to exactly one project. It is given a version OUTSIDE the canonical
- *     1–19 range (rather than hijacking canonical slot 5, which the DO uses for
+ *     shared range (rather than hijacking canonical slot 5, which the DO uses for
  *     the `idx_er_to_id_type` index) so it is purely additive and never shadows
  *     or collides with a canonical migration. Every canonical version, including
  *     v5, applies exactly as upstream.
@@ -54,14 +50,13 @@ export type { Migration, MigrationStorage } from "@tila/ops-sqlite";
 
 /**
  * Canonical version slots skipped in embedded mode (DO-only features):
- *  - 15: `_journal_archive_watermark` (DO-only journal archival to R2)
  *  - 21: `_do_idempotency` (DO-only in-transaction idempotency dedup, audit B1;
  *        embedded mode uses its own `_idempotency` overlay instead)
  */
-const SKIPPED_VERSIONS = new Set<number>([15, 21]);
+const SKIPPED_VERSIONS = new Set<number>([21]);
 
 /** Version assigned to the embedded-only idempotency overlay (outside the
- *  canonical 1–19 range so it is purely additive). */
+ *  canonical shared range so it is purely additive). */
 export const IDEMPOTENCY_MIGRATION_VERSION = 1000;
 
 /**

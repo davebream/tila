@@ -561,7 +561,7 @@ Common failure modes and remediation steps.
 | `do-reachable` FAIL + 502 | DO cold start race or DO eviction in progress | Retry once; if persistent, run `tila doctor --json` for structured output |
 | `doRttMs` > 200ms | Smart Placement not yet converged or disabled | Check `wrangler.toml` `[placement] mode = "smart"`; wait 24h for convergence |
 | `expired-claims` WARN | Sweep cron did not run | Check `wrangler tail` for sweep errors; trigger manually via `/_internal/sweep` if needed |
-| `journal-size` WARN (>= 10,000 rows) | High write volume without archival | Monitor growth rate; journal archival is v0.2; no action required unless near 10GB DO SQLite limit |
+| `journal-size` WARN (>= 10,000 rows) | High write volume without recent archival | Run the journal archive operation, then create and verify a project backup |
 | `search-missing-doc` FAIL | Index drift from interrupted sweep | Run `tila doctor --search-drift --search-rebuild --apply` |
 | R2 objects absent, no `artifact.expired` journal events | R2 lifecycle backstop fired | Run `tila doctor --reconcile --apply` to sync DO state with R2 |
 | Schema version mismatch in Worker logs | Worker and DO on different schema versions | Redeploy Worker: `wrangler deploy`; DO migrates on next request |
@@ -573,13 +573,37 @@ Common failure modes and remediation steps.
 
 ## Backup and Recovery
 
-### v0.1 backup story
+### Create and verify a backup
 
-Cloudflare manages DO SQLite point-in-time recovery automatically. There is no user-controllable backup export in v0.1. The recovery story relies on:
+```bash
+tila project export --output /absolute/path/project.tila-backup
+```
 
-1. **DO SQLite durability** -- Cloudflare's built-in PIT recovery restores DO state to a recent snapshot. Users do not trigger this manually; it is infrastructure-level protection.
-2. **R2 as long-tail backstop** -- Artifact blobs in R2 survive DO state loss. `tila doctor --reconcile` can reconstruct `artifact_pointers` from R2 object metadata.
-3. **`tila reset --force`** -- Last resort: wipes the project and starts fresh.
+Export refuses to overwrite its destination. It freezes writes, leaves reads available, streams a consistent snapshot, verifies the final manifest and checksums, rechecks the D1 ACL digest, then unlocks. A failed client eventually releases an export lock through its renewable TTL; missing blobs, archive gaps, contradictory journal ranges, corruption, duplicate paths, and unsafe paths fail visibly and do not produce a completed archive.
+
+The archive deliberately excludes bearer credentials and hashes, sessions, rate limits, idempotency caches, revoked JTIs/subjects, and deployment-global metadata. Store the archive outside the source Cloudflare account. Archives are not encrypted; protect them with the storage system's encryption and access controls.
+
+### Restore, resume, and roll back
+
+```bash
+# New local destination
+tila project import /absolute/path/project.tila-backup --local
+
+# Replace the configured project (prompts for its exact slug)
+tila project import /absolute/path/project.tila-backup --replace
+
+# Continue a matching fail-closed session
+tila project import /absolute/path/project.tila-backup --resume
+
+# Restore the adjacent timestamped pre-restore safety archive
+tila project import /absolute/path/project.tila-backup --rollback
+```
+
+Use `--force` only to skip typed confirmation in automation. Existing restore automatically creates `<timestamp>-<project>-pre-restore.tila-backup` beside the input archive. After that verified export, the same cloud lock is promoted to a non-expiring import lock: the project stays hidden and all normal access returns `423 project-maintenance` until finalize, resume, or rollback verifies the semantic digest. Existing destination tokens and revocation tables remain untouched. A new cloud destination receives one fresh bootstrap token after successful ACL restore; source credentials never cross the archive boundary.
+
+Local replace builds and verifies sibling temporary database/artifact paths before swapping them. A pre-swap failure leaves the original untouched. Cloud restore uploads checksum-addressed R2 bytes before DO pointers, restores DO rows in dependency order and the exact journal sequence, replaces approved D1 ACL metadata in a batch, rebuilds FTS, then unlocks.
+
+Cross-backend restore supports local→local, cloud→cloud, local→cloud, and cloud→local without changing the project ID. Source account and GitHub installation identifiers remain in the manifest for audit. `cloudflare_account_id` stays the destination value. GitHub installation metadata is retained only when already usable at the destination; otherwise restore warns and requires reconnection.
 
 ### Recovery scenarios
 
@@ -588,14 +612,16 @@ Cloudflare manages DO SQLite point-in-time recovery automatically. There is no u
 | DO eviction (idle, normal) | Automatic -- state survives in DO SQLite, cold start adds ~50-100ms |
 | DO evicted, state intact | `tila doctor` to verify; `tila doctor --reconcile` if R2 drift suspected |
 | Partial R2 loss | `tila doctor --reconcile --apply` to sync DO pointers with remaining R2 objects |
-| Full DO loss (Cloudflare incident) | Contact Cloudflare support for PIT recovery; then `tila doctor --reconcile --apply` |
+| Full project-store loss | Import the latest verified `.tila-backup`, then run `tila doctor` |
 | Intentional reset | `tila reset --force` |
 
-### What is NOT available in v0.1
+### Recovery objectives and unsupported cases
 
-- `tila restore --from-r2-and-backup` -- external backup export/import is a v0.2 feature
-- Manual DO SQLite snapshots -- not exposed by the Cloudflare API
-- Journal archival or export -- v0.2 scope
+- **RPO (data-loss window):** time since the latest verified export. A completed archive is consistent at its maintenance-freeze boundary.
+- **RTO (recovery duration):** depends on row count, blob bytes, and network throughput. Export/import report measured rows, bytes, and elapsed time; format v1 has no fixed recovery-time SLA.
+- Unsupported: project renaming, online/no-downtime restore, encrypted archives, secret-bearing annexes, and importing a newer unsupported DO migration.
+
+Run a recovery drill periodically: seed representative entities, relationships, claims/fences, schemas, records/revisions, live and archived journal events, tombstones, ACL rows, and blobs; export; isolate or destroy the source; import into a clean destination; compare the reported semantic/blob digests; then perform one fenced write. Record archive bytes plus export/restore elapsed time.
 
 ### Artifact recovery detail
 

@@ -287,6 +287,27 @@ pnpm build                      # Production build
 
 `dev:setup` is idempotent: re-running clears local state and reapplies from scratch. `dev-seed.sh` requires the Worker to be running.
 
+## Project backups
+
+Create a complete, portable backup with an absolute output path:
+
+```bash
+tila project export --output /backups/my-project.tila-backup
+```
+
+The uncompressed `.tila-backup` tar stream includes canonical DO/local SQLite rows, approved D1 project and ACL metadata, artifact pointers, confirmed journal archives, and deduplicated blobs. Every entry and the overall content root are SHA-256 checked. Tokens, token hashes, sessions, rate-limit/idempotency state, revocation material, and deployment-global metadata are never exported.
+
+Restore into a new local project or replace the current project:
+
+```bash
+tila project import /backups/my-project.tila-backup --local
+tila project import /backups/my-project.tila-backup --replace
+tila project import /backups/my-project.tila-backup --resume
+tila project import /backups/my-project.tila-backup --rollback
+```
+
+Project IDs cannot be renamed during restore. Existing-project restore creates an adjacent timestamped safety archive first. Cloud export freezes writes while reads remain available; restore keeps the destination hidden and write-locked until verification, resume, or rollback completes. See [Operations](docs/05-OPERATIONS.md#backup-and-recovery) for the recovery drill and compatibility rules.
+
 ---
 
 ## Contributing
@@ -336,7 +357,7 @@ tila's search is keyword retrieval: "find the auth migration plan," not "find do
 <details>
 <summary><b>What happens if I lose my Cloudflare account?</b></summary>
 
-Your Cloudflare account holds the durable state. Backups are your responsibility. Durable Object SQLite supports point-in-time recovery; R2 supports lifecycle rules. The v0.2 roadmap adds explicit export and backup commands.
+Your Cloudflare account holds the durable state. Backups are your responsibility: run `tila project export --output <absolute-path>` and retain the verified `.tila-backup` outside the account. Durable Object SQLite point-in-time recovery remains an additional infrastructure safeguard.
 </details>
 
 <details>

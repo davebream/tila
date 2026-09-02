@@ -80,7 +80,7 @@ describe("embedded migration set on a fresh local DB (Step 4)", () => {
     expect(cols).toContain("source_version");
   });
 
-  it("(b) _migrations contains every embedded version incl. 14 and excl. 15", () => {
+  it("(b) _migrations contains every embedded version including backup state", () => {
     const tracked = appliedVersions(db.$client);
     const expected = EMBEDDED_MIGRATIONS.map((m) => m.version).sort(
       (a, b) => a - b,
@@ -88,7 +88,8 @@ describe("embedded migration set on a fresh local DB (Step 4)", () => {
     // Versions tracked in _migrations, NOT PRAGMA user_version.
     expect(tracked).toEqual(expected);
     expect(tracked).toContain(14);
-    expect(tracked).not.toContain(15);
+    expect(tracked).toContain(15);
+    expect(tracked).toContain(23);
     expect(tracked).toContain(1000); // idempotency overlay
   });
 

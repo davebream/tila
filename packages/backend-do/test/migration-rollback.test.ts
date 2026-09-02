@@ -1,9 +1,10 @@
+import { MIGRATIONS } from "@tila/ops-sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { runMigrationsWithPitrRollback } from "../src/migration-runner";
 
 type SqlExecResult = { toArray: () => unknown[] };
 
-const ALL_MIGRATION_VERSIONS = Array.from({ length: 23 }, (_, i) => i + 1);
+const ALL_MIGRATION_VERSIONS = MIGRATIONS.map((migration) => migration.version);
 
 function makeMockStorage(opts: {
   failOnSql?: string;

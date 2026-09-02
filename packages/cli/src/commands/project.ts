@@ -9,6 +9,8 @@ export default defineCommand({
     create: () => import("./project/create").then((m) => m.default),
     configure: () => import("./project/configure").then((m) => m.default),
     destroy: () => import("./project/destroy").then((m) => m.default),
+    export: () => import("./project/export").then((m) => m.default),
+    import: () => import("./project/import").then((m) => m.default),
     list: () => import("./project/list").then((m) => m.default),
   },
 });

@@ -30,7 +30,9 @@ interface ConfirmResponse {
 
 /**
  * Write journal events to R2 as JSONL files grouped by year/month.
- * Key format: journal-archive/<projectId>/<year>/<month>.jsonl
+ * Key format: journal-archive/<projectId>/<year>/<month>.part-<throughSeq>.jsonl
+ * The sequence suffix makes every confirmed range immutable and prevents a
+ * later manual archive from overwriting earlier events in the same month.
  */
 async function writeJournalArchiveToR2(
   r2: R2Bucket,
@@ -53,7 +55,8 @@ async function writeJournalArchiveToR2(
   }
 
   for (const [yearMonth, groupEvents] of groups) {
-    const r2Key = `journal-archive/${projectId}/${yearMonth}.jsonl`;
+    const throughSeq = Math.max(...groupEvents.map((event) => event.seq));
+    const r2Key = `journal-archive/${projectId}/${yearMonth}.part-${throughSeq}.jsonl`;
     const jsonl = groupEvents.map((e) => JSON.stringify(e)).join("\n");
     await r2.put(r2Key, jsonl);
   }

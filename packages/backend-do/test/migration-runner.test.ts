@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { journalOps, schema } from "../../ops-sqlite/src";
 
 const { appendJournal, listJournal } = journalOps;
+const ALL_MIGRATION_VERSIONS = MIGRATIONS.map(({ version }) => version);
 import {
   runProjectMigrations,
   validateProjectSchema,
@@ -77,10 +78,7 @@ describe("migration runner", () => {
     const sqlite = new Database(":memory:");
     runProjectMigrations(createStorage(sqlite));
 
-    expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-      22, 23,
-    ]);
+    expect(versions(sqlite)).toEqual(ALL_MIGRATION_VERSIONS);
 
     const tableNames = (
       sqlite
@@ -104,6 +102,8 @@ describe("migration runner", () => {
     expect(tableNames).toContain("_journal_archive_watermark");
     // v21 (audit B1): DO-side idempotency dedup table + its index.
     expect(tableNames).toContain("_do_idempotency");
+    expect(tableNames).toContain("_project_transfer_state");
+    expect(tableNames).toContain("_project_transfer_chunks");
     expect(indexes(sqlite)).toEqual(
       expect.arrayContaining([
         "idx_entity_relationships_to_id_type",
@@ -137,10 +137,7 @@ describe("migration runner", () => {
     runProjectMigrations(storage);
     runProjectMigrations(storage);
 
-    expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-      22, 23,
-    ]);
+    expect(versions(sqlite)).toEqual(ALL_MIGRATION_VERSIONS);
   });
 
   it("backfills versions for pre-existing DOs", () => {
@@ -150,10 +147,7 @@ describe("migration runner", () => {
 
     runProjectMigrations(createStorage(sqlite));
 
-    expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-      22, 23,
-    ]);
+    expect(versions(sqlite)).toEqual(ALL_MIGRATION_VERSIONS);
   });
 
   it("applies only pending migrations when partially applied", () => {
@@ -170,10 +164,7 @@ describe("migration runner", () => {
 
     runProjectMigrations(createStorage(sqlite));
 
-    expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-      22, 23,
-    ]);
+    expect(versions(sqlite)).toEqual(ALL_MIGRATION_VERSIONS);
   });
 
   it("recovers when column-add migrations applied but were not recorded", () => {
@@ -184,10 +175,7 @@ describe("migration runner", () => {
       .run();
 
     expect(() => runProjectMigrations(createStorage(sqlite))).not.toThrow();
-    expect(versions(sqlite)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-      22, 23,
-    ]);
+    expect(versions(sqlite)).toEqual(ALL_MIGRATION_VERSIONS);
     expect(columns(sqlite, "claims")).toEqual(
       expect.arrayContaining(["principal_id", "participant_id", "environment"]),
     );

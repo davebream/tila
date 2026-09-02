@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseSchemaToml } from "@tila/core";
 import type { EnrichOpts } from "@tila/ops-sqlite";
-import { schema, searchReindexOps } from "@tila/ops-sqlite";
+import { projectTransferOps, schema, searchReindexOps } from "@tila/ops-sqlite";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { runMigrationsWithPitrRollback } from "./migration-runner";
@@ -66,6 +66,7 @@ export class ProjectDO extends DurableObject {
    * (if more work remains) or clears the state (if done).
    */
   async alarm(): Promise<void> {
+    if (projectTransferOps.getTransferState(this.ctx.storage.sql)) return;
     const state = await this.ctx.storage.get<ReindexState>(REINDEX_KV_KEY);
     if (!state) {
       // No pending reindex -- no-op

@@ -1,3 +1,4 @@
+import { projectTransferOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
 import { createAdminRoutes } from "./routes/admin-routes";
 import { createArtifactRoutes } from "./routes/artifact-routes";
@@ -11,6 +12,7 @@ import { createRecordRoutes } from "./routes/record-routes";
 import { createSchemaRoutes } from "./routes/schema-routes";
 import { createSignalRoutes } from "./routes/signal-routes";
 import { createSweepRoutes } from "./routes/sweep-routes";
+import { createTransferRoutes } from "./routes/transfer-routes";
 import { CORRELATION_ID_KEY } from "./routes/types";
 import type { RouterDeps } from "./routes/types";
 
@@ -34,6 +36,28 @@ export function createProjectRouter(deps: RouterDeps) {
     }
   });
 
+  app.use("*", async (c, next) => {
+    const state = projectTransferOps.getTransferState(deps.ctx.storage.sql);
+    if (!state) return next();
+    const transferRoute = c.req.path.startsWith("/admin/transfer/");
+    const readOnly =
+      c.req.method === "GET" ||
+      c.req.method === "HEAD" ||
+      c.req.method === "OPTIONS";
+    if (transferRoute || (state.mode === "export" && readOnly)) return next();
+    return c.json(
+      {
+        error: {
+          code: "project-maintenance",
+          message: `Project is locked for ${state.mode}`,
+          session_id: state.session_id,
+        },
+      },
+      423,
+    );
+  });
+
+  app.route("/", createTransferRoutes(deps));
   app.route("/", createAdminRoutes(deps));
   app.route("/", createEntityRoutes(deps));
   app.route("/", createArtifactRoutes(deps));

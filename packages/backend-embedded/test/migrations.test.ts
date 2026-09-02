@@ -10,14 +10,15 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–22 minus 15 and 21
- * (v15 = DO-only journal-archive watermark, v21 = DO-only idempotency table).
- * v22 (idx_entities_archived) is shared — the partial index applies to the
- * embedded entities table too. The embedded-only idempotency overlay is appended
+ * Canonical shared versions present in the embedded set: 1–24 minus 21
+ * (v21 = DO-only idempotency table). The archive watermark and transfer lock
+ * are shared so cloud/local backups have identical recovery semantics.
+ * The embedded-only idempotency overlay is appended
  * at IDEMPOTENCY_MIGRATION_VERSION, above the shared range.
  */
 const CANONICAL_VERSIONS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 22, 23,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23,
+  24,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,
@@ -76,10 +77,12 @@ function createFakeStorage(): {
 describe("EMBEDDED_MIGRATIONS", () => {
   const versions = EMBEDDED_MIGRATIONS.map((m) => m.version);
 
-  it("includes canonical versions through v23 plus the idempotency overlay", () => {
+  it("includes shared backup migrations plus the idempotency overlay", () => {
     expect(versions).toEqual(EXPECTED_VERSIONS);
     expect(versions).toContain(14);
-    expect(versions).not.toContain(15);
+    expect(versions).toContain(15);
+    expect(versions).toContain(23);
+    expect(versions).toContain(24);
     expect(versions).toContain(IDEMPOTENCY_MIGRATION_VERSION);
   });
 
