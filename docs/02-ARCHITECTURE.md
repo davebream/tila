@@ -333,7 +333,7 @@ Local mode therefore now runs under **plain Node**, not just Bun. There is no AD
 
 **Cross-runtime schema identity.** Both hosts run the *same* `EMBEDDED_MIGRATIONS` from `@tila/backend-embedded`, which reuse the canonical `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` *verbatim* (not a copy that can drift). Both apply the same ordered `EMBEDDED_PRAGMAS` (`busy_timeout=5000`, then `journal_mode=WAL`, then `foreign_keys=ON`) and the same network-filesystem matcher. The result: a Bun (CLI)-created DB file and a Node (SDK/MCP)-created DB file are byte-for-byte schema-identical, so **a DB file is portable between the CLI and a Node SDK/MCP consumer** (proven by a cross-runtime interop test: bun writes, node reads). Applied versions are tracked in the **`_migrations` table**, not `PRAGMA user_version`.
 
-**Schema versioning & cross-version compatibility.** The embedded migration set is the canonical versions **1–18 minus v15** (`_journal_archive_watermark`; journal archival to R2 is a DO-only feature with no embedded equivalent — skipping it touches no shared table), **plus an embedded-only idempotency table at version `1000`**. In Cloudflare mode idempotency lives in D1; in embedded mode it lives in the same project SQLite file (one fewer store to coordinate), as a standalone `INSERT OR IGNORE`. Version `1000` is deliberately *outside* the canonical 1–18 range so it is purely additive and never hijacks canonical **v5** (the `idx_er_to_id_type` index) — every canonical version, including v5, applies exactly as upstream. Because both hosts share one migration set keyed by version in `_migrations`, a CLI and an SDK/MCP of *different* releases interoperate on one file as long as they share that set: each applies only the versions it doesn't yet have, in ascending order.
+**Schema versioning & cross-version compatibility.** The embedded migration set reuses every canonical migration except v21 (`_do_idempotency`, which is DO-only), including v15 (journal archive watermark), v23 (canonical identity), and v24 (project transfer lock). It adds the embedded-only idempotency table at version `1000`. Sharing the watermark and transfer state is required for cloud/local backup compatibility and for maintenance triggers to block every SQLite mutation during a snapshot. Because both hosts share one migration set keyed by version in `_migrations`, a CLI and an SDK/MCP of different releases apply only missing versions in ascending order.
 
 **Idempotency is accepted but not honored locally — a known divergence.** The embedded `_idempotency` table (v`1000`) and `EmbeddedProject.checkIdempotency` / `storeIdempotency` exist, but no local resource adapter currently calls them: in local mode an `idempotency_key` (e.g. on `claims.acquire`) is **accepted but not honored**. Remote dedups retries via D1; local relies on **primary-key-level dedup** instead — a retried create of an existing id fails rather than duplicating. Full idempotency wiring is single-machine-low-risk and remains **remote-only**; the table + methods are kept available-but-unwired so a future wiring has the storage already in place. (Mirrored in the SDK README local-divergence list.)
 
@@ -1763,20 +1763,28 @@ If a DO is wiped (Cloudflare incident, manual reset via `tila reset`, accidental
 1. CLI calls /health, gets a 5xx or empty state.
 2. CLI calls `tila doctor` which reports the DO is uninitialized/inaccessible.
 3. Recovery options:
-   a. If R2 still has artifacts and the user has external journal backups (v0.2 feature):
-      `tila restore --from-r2-and-backup` rebuilds entities and journal from the backup,
-      and reconciles artifact_pointers from R2 object metadata.
+   a. Restore the latest verified archive with
+      `tila project import /absolute/path/project.tila-backup`. This restores the
+      same project ID, exact journal sequence, fences, revisions, ACL metadata,
+      artifact metadata, and blobs, then verifies a canonical semantic digest.
    b. If only R2 survives: `tila doctor --reconcile` walks R2, synthesizes artifact_pointers
       from R2 object metadata, and emits `artifact.reconciled` journal events. Entities and
       claims are lost; the user must recreate them.
    c. Otherwise: `tila reset --force` and start fresh.
 
 In practice (a) and (c) are the expected outcomes; (b) is partial recovery for catastrophic
-loss with no backup. v0.1 does not implement (a) — backups are v0.2. v0.1's recovery story
-is: trust DO SQLite durability (PIT recovery is built in) and have R2 as the long-tail backstop.
+loss with no backup.
 ```
 
-**The journal is the source of truth for "what happened."** Any reconstruction starts from the journal. If a DO is restored from a SQLite snapshot taken at time T, replaying journal events after T (if available externally) brings state forward. v0.1 relies on Cloudflare's built-in DO SQLite PIT recovery; explicit external backups are v0.2.
+**The journal is the source of truth for "what happened."** A complete backup carries both confirmed archived ranges and the live tail, validates unique contiguous coverage through the archive watermark, and restores `sqlite_sequence` exactly.
+
+### 8.5 Complete project backup format
+
+Format v1 is an uncompressed tar stream. `header.json` is first and `manifest.json` is last; absence of the final complete manifest makes the archive unusable. Canonical JSONL sections live below `do/` and `d1/`, object metadata is in `objects.jsonl`, and deduplicated bytes are stored as `blobs/<sha256>`. Paths must be relative and traversal-free. Every entry declares bytes, rows where applicable, and SHA-256; the manifest binds them with a sorted content-root digest and a semantic digest of authoritative SQLite state.
+
+V1 readers accept older v1 producers by applying schema defaults, ignore only explicitly declared optional sections, reject unknown required features, and reject DO migration versions newer than they support. Project renaming is unsupported because project IDs participate in Durable Object identity and artifact keys. The separate `tila-sdk/backup` entry exposes `inspectProjectBackup`, `exportProjectBackup`, `importProjectBackup`, and the infra-authenticated operator client; the main SDK and MCP surface remain unchanged.
+
+Cloud export uses a renewable transfer lock: reads continue and all mutations, including sweep work and D1 ACL writes, return `423 project-maintenance`. Existing restore keeps one continuous lock across its verified safety export and promotion to a non-expiring import lock. Blobs are restored idempotently by checksum before pointers; rows follow dependency order; FTS virtual tables are rebuilt; D1 ACL replacement is batched; only then can the semantic digest unlock the project. Local replace stages a migrated database and artifact tree in sibling paths, verifies both, and swaps them into place with rollback on a failed swap.
 
 ---
 
