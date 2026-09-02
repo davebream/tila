@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const presence = new Hono<{
@@ -42,13 +43,12 @@ presence.post("/heartbeat", async (c) => {
   const parsed = PresenceHeartbeatRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const stub = c.get("doStub");
-  const tokenResult = c.get("tokenResult");
   return forwardToDO(
     stub,
     "/coord/heartbeat",
     "POST",
     {
-      machine: tokenResult.name,
+      ...identityPayload(c),
       info: parsed.data.info,
     },
     undefined,

@@ -4,6 +4,7 @@ import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { bustSchemaCache } from "../lib/schema-cache";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const schemaRoutes = new Hono<{
@@ -97,9 +98,7 @@ schemaRoutes.post("/", requirePermission("write"), async (c) => {
       definition: raw.definition,
       applied_by: tokenResult.name,
       strategy: raw.strategy,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),

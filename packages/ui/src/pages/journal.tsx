@@ -81,11 +81,16 @@ type JournalEvent = {
   t: number;
   kind: string;
   resource: string;
-  actor: string;
+  principal_id: string;
+  participant_id: string;
+  environment: {
+    machine?: string;
+    client_name?: string;
+    client_version?: string;
+  };
+  token_id: string | null;
   fence: number | null;
   data: Record<string, unknown>;
-  source: string | null;
-  source_version: string | null;
 };
 
 function kindBadgeVariant(kind: string): "default" | "green" | "amber" | "red" {
@@ -236,8 +241,10 @@ function EventRow({ event }: { event: JournalEvent }) {
         </TableCell>
         <TableCell className="text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
-            {event.actor}
-            <AuthorAffix source={mapSourceToAffix(event.source)} />
+            {event.principal_id}/{event.participant_id}
+            <AuthorAffix
+              source={mapSourceToAffix(event.environment.client_name ?? null)}
+            />
           </span>
         </TableCell>
         <TableCell>
@@ -296,12 +303,12 @@ export function JournalPage() {
   const [kindFilter, setKindFilter] = useState<string[]>(
     () => searchParams.get("kind")?.split(",").filter(Boolean) ?? [],
   );
-  const [sourceFilter, setSourceFilter] = useState<string[]>(
-    () => searchParams.get("source")?.split(",").filter(Boolean) ?? [],
+  const [clientNameFilter, setClientNameFilter] = useState<string[]>(
+    () => searchParams.get("client_name")?.split(",").filter(Boolean) ?? [],
   );
   const filterResource = useDebouncedValue(resourceInput, 300);
   const filterKind = kindFilter;
-  const filterSource = sourceFilter;
+  const filterClientName = clientNameFilter;
 
   // Events accumulator in React state (state-driven rendering, no manual tick)
   const [events, setEvents] = useState<JournalEvent[]>([]);
@@ -314,9 +321,10 @@ export function JournalPage() {
     const params = new URLSearchParams();
     if (filterResource) params.set("resource", filterResource);
     if (filterKind.length > 0) params.set("kind", filterKind.join(","));
-    if (filterSource.length > 0) params.set("source", filterSource.join(","));
+    if (filterClientName.length > 0)
+      params.set("client_name", filterClientName.join(","));
     setSearchParams(params, { replace: true });
-  }, [filterResource, filterKind, filterSource, setSearchParams]);
+  }, [filterResource, filterKind, filterClientName, setSearchParams]);
 
   // Scroll tracking
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -340,19 +348,19 @@ export function JournalPage() {
       projectId,
       filterResource,
       filterKind,
-      filterSource,
+      filterClientName,
       retryKey,
     ],
     queryFn: async () => {
       const params: {
         resource?: string;
         kind?: string[];
-        source?: string[];
+        client_name?: string[];
         limit: number;
       } = { limit: 100 };
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
-      if (filterSource.length > 0) params.source = filterSource;
+      if (filterClientName.length > 0) params.client_name = filterClientName;
       if (!projectId) return { events: [] as JournalEvent[] };
       return listJournal(projectId, params) as Promise<{
         events: JournalEvent[];
@@ -380,19 +388,19 @@ export function JournalPage() {
       projectId,
       filterResource,
       filterKind,
-      filterSource,
+      filterClientName,
     ],
     queryFn: async () => {
       const params: {
         resource?: string;
         kind?: string[];
-        source?: string[];
+        client_name?: string[];
         after_seq: number;
         limit: number;
       } = { after_seq: lastSeqRef.current, limit: 100 };
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
-      if (filterSource.length > 0) params.source = filterSource;
+      if (filterClientName.length > 0) params.client_name = filterClientName;
       if (!projectId) return { events: [] as JournalEvent[] };
       return listJournal(projectId, params) as Promise<{
         events: JournalEvent[];
@@ -431,7 +439,7 @@ export function JournalPage() {
   const clearFilters = useCallback(() => {
     setResourceInput("");
     setKindFilter([]);
-    setSourceFilter([]);
+    setClientNameFilter([]);
   }, []);
 
   const [showJumpBtn, setShowJumpBtn] = useState(false);
@@ -471,21 +479,23 @@ export function JournalPage() {
           groups={KIND_GROUPS}
         />
         <MultiSelectFilter
-          label="Source"
+          label="Client"
           options={SOURCE_OPTIONS}
-          selected={sourceFilter}
-          onChange={setSourceFilter}
+          selected={clientNameFilter}
+          onChange={setClientNameFilter}
         />
         {(resourceInput ||
           kindFilter.length > 0 ||
-          sourceFilter.length > 0) && (
+          clientNameFilter.length > 0) && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>
             Reset
           </Button>
         )}
       </div>
 
-      {(filterResource || kindFilter.length > 0 || sourceFilter.length > 0) && (
+      {(filterResource ||
+        kindFilter.length > 0 ||
+        clientNameFilter.length > 0) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {filterResource && (
             <span className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue">
@@ -540,19 +550,19 @@ export function JournalPage() {
               </button>
             </span>
           ))}
-          {sourceFilter.map((s) => (
+          {clientNameFilter.map((s) => (
             <span
               key={s}
               className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue"
             >
-              source: {s}
+              client: {s}
               <button
                 type="button"
                 onClick={() =>
-                  setSourceFilter((prev) => prev.filter((x) => x !== s))
+                  setClientNameFilter((prev) => prev.filter((x) => x !== s))
                 }
                 className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-                aria-label={`Remove source filter: ${s}`}
+                aria-label={`Remove client filter: ${s}`}
               >
                 <svg
                   width="10"

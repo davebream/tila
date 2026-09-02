@@ -7,37 +7,34 @@ import {
 } from "@tila/ops-sqlite";
 import {
   AcquireRequestSchema,
+  EnvironmentMetadataSchema,
+  ParticipantIdSchema,
   PresenceHeartbeatRequestSchema,
   ReleaseRequestSchema,
   RenewRequestSchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { z } from "zod";
+import { originFromBody } from "./origin";
 import { formatZodIssues, idempotencyFrom, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
-const DoAcquireRequestSchema = AcquireRequestSchema.extend({
-  machine: z.string().min(1),
-  user: z.string().min(1),
+const identityFields = {
+  principal_id: z.string().min(1),
+  participant_id: ParticipantIdSchema,
+  environment: EnvironmentMetadataSchema,
   actor_token_id: z.string().nullable().optional(),
   source: z.string().nullable().optional(),
   source_version: z.string().nullable().optional(),
-});
+};
 
-const DoRenewRequestSchema = RenewRequestSchema.extend({
-  machine: z.string().min(1),
-  user: z.string().min(1),
-  actor_token_id: z.string().nullable().optional(),
-  source: z.string().nullable().optional(),
-  source_version: z.string().nullable().optional(),
-});
+const DoAcquireRequestSchema = AcquireRequestSchema.extend(identityFields);
 
-const DoReleaseRequestSchema = ReleaseRequestSchema.extend({
-  actor: z.string().min(1),
-  actor_token_id: z.string().nullable().optional(),
-  source: z.string().nullable().optional(),
-  source_version: z.string().nullable().optional(),
-});
+const DoRenewRequestSchema = RenewRequestSchema.extend(identityFields);
+
+const DoReleaseRequestSchema = ReleaseRequestSchema.extend(identityFields);
+const DoHeartbeatRequestSchema =
+  PresenceHeartbeatRequestSchema.extend(identityFields);
 
 export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
@@ -55,22 +52,15 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     }
     const body = parsed.data;
     const resource = resolveEntityResource(db, body.resource) ?? body.resource;
-    const origin: RequestOrigin = {
-      actor: body.user,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const origin = originFromBody(body);
     const result = coordinationOps.acquire(
       db,
       resource,
-      body.machine,
-      body.user,
+      origin,
       body.mode,
       body.ttl_ms,
       body.metadata,
       Date.now(),
-      origin,
       idempotencyFrom(c),
     );
     if (!result.acquired) {
@@ -85,6 +75,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
       ok: true,
       fence: result.fence,
       expires_at: result.expires_at,
+      participant_id: result.participant_id,
     });
   });
 
@@ -101,21 +92,14 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     }
     const body = parsed.data;
     const resource = resolveEntityResource(db, body.resource) ?? body.resource;
-    const renewOrigin: RequestOrigin = {
-      actor: body.user,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const renewOrigin = originFromBody(body);
     const result = coordinationOps.renew(
       db,
       resource,
-      body.machine,
-      body.user,
+      renewOrigin,
       body.fence,
       body.ttl_ms,
       Date.now(),
-      renewOrigin,
       idempotencyFrom(c),
     );
     if (!result.renewed) {
@@ -123,7 +107,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
         c,
         409,
         "renew-failed",
-        "Claim not found, expired, or holder mismatch",
+        "Claim not found, expired, or participant mismatch",
       );
     }
     return c.json({ ok: true, expires_at: result.expires_at });
@@ -142,12 +126,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     }
     const body = parsed.data;
     const resource = resolveEntityResource(db, body.resource) ?? body.resource;
-    const releaseOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const releaseOrigin = originFromBody(body);
     coordinationOps.release(
       db,
       resource,
@@ -177,7 +156,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.post("/coord/heartbeat", async (c) => {
     const { db } = deps;
-    const parsed = PresenceHeartbeatRequestSchema.safeParse(await c.req.json());
+    const parsed = DoHeartbeatRequestSchema.safeParse(await c.req.json());
     if (!parsed.success) {
       return jsonError(
         c,
@@ -187,20 +166,20 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
       );
     }
     const body = parsed.data;
-    coordinationOps.heartbeat(db, body.machine, body.info);
+    coordinationOps.heartbeat(db, originFromBody(body), body.info);
     return c.json({ ok: true });
   });
 
   app.get("/coord/presence/all", (c) => {
     const { db } = deps;
-    const machines = coordinationOps.listAllPresence(db);
-    return c.json({ ok: true, machines });
+    const participants = coordinationOps.listAllPresence(db);
+    return c.json({ ok: true, participants });
   });
 
   app.get("/coord/presence", (c) => {
     const { db } = deps;
-    const machines = coordinationOps.listPresence(db);
-    return c.json({ ok: true, machines });
+    const participants = coordinationOps.listPresence(db);
+    return c.json({ ok: true, participants });
   });
 
   app.get("/coord/health", (c) => {
@@ -222,10 +201,10 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     const kind = kindRaw?.includes(",")
       ? kindRaw.split(",").filter(Boolean)
       : (kindRaw ?? undefined);
-    const sourceRaw = c.req.query("source");
-    const source = sourceRaw?.includes(",")
-      ? sourceRaw.split(",").filter(Boolean)
-      : (sourceRaw ?? undefined);
+    const clientNameRaw = c.req.query("client_name");
+    const client_name = clientNameRaw?.includes(",")
+      ? clientNameRaw.split(",").filter(Boolean)
+      : (clientNameRaw ?? undefined);
     const afterSeqParam = c.req.query("after_seq");
     const after_seq = afterSeqParam ? Number(afterSeqParam) : undefined;
     const limitParam = c.req.query("limit");
@@ -239,7 +218,7 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
       {
         resource,
         kind,
-        source,
+        client_name,
         after_seq,
         limit,
       },

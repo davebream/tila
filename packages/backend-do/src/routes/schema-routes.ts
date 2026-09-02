@@ -8,6 +8,7 @@ import {
 import { InstantiateTemplateRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { originFromBody } from "./origin";
 import { formatZodIssues, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
@@ -49,12 +50,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
       source?: string | null;
       source_version?: string | null;
     };
-    const schemaOrigin: RequestOrigin = {
-      actor: body.applied_by,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const schemaOrigin = originFromBody(body as Record<string, unknown>);
     try {
       const result = schemaOps.applySchema(
         db,
@@ -140,13 +136,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
     // Request origin (defaults actor to "system" — unchanged behavior). Passed
     // explicitly to the shared op so the per-caller actor/origin is deliberate.
     const rawRecord = raw as Record<string, unknown>;
-    const origin: RequestOrigin = {
-      actor: (rawRecord.actor as string | undefined) ?? "system",
-      tokenId: (rawRecord.actor_token_id as string | null | undefined) ?? null,
-      source: (rawRecord.source as string | null | undefined) ?? null,
-      sourceVersion:
-        (rawRecord.source_version as string | null | undefined) ?? null,
-    };
+    const origin = originFromBody(rawRecord);
 
     try {
       const result = templateOps.instantiateTemplate(db, {

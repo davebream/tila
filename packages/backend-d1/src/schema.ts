@@ -87,6 +87,7 @@ export const sessions = sqliteTable(
     project_id: text("project_id").notNull(),
     token_hash: text("token_hash").notNull(),
     actor_name: text("actor_name").notNull(),
+    principal_id: text("principal_id").notNull(),
     scopes: text("scopes").notNull().default("full"),
     permission: text("permission").notNull().default("read"),
     created_at: integer("created_at").notNull(), // Unix ms (EpochMillis)

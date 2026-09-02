@@ -31,12 +31,14 @@ export default defineCommand({
           .join(", ") || "none"
       }`,
     );
-    console.log(`Online: ${p.online_machines.join(", ") || "none"}`);
+    console.log(`Online: ${p.online_participants.join(", ") || "none"}`);
     console.log(`Token estimate: ${p.token_estimate}`);
     if (p.recent_events.length > 0) {
       console.log("Recent events:");
       for (const e of p.recent_events.slice(0, 5)) {
-        console.log(`  ${e.kind}  ${e.resource}  by ${e.actor}`);
+        console.log(
+          `  ${e.kind}  ${e.resource}  by ${e.principal_id}/${e.participant_id}`,
+        );
       }
     }
   },

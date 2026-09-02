@@ -184,6 +184,20 @@ workspace.post("/select", async (c) => {
   }
 
   const wsSession = tokenResult as WorkspaceSessionTokenResult;
+  if (!wsSession.principalId) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "session-expired",
+          message:
+            "Session predates canonical identity support; sign in again.",
+          retryable: false,
+        },
+      },
+      401,
+    );
+  }
 
   // Parse body
   let body: unknown;
@@ -336,6 +350,7 @@ workspace.post("/select", async (c) => {
     projectId,
     tokenHash: "",
     actorName: login,
+    principalId: wsSession.principalId,
     scopes,
     permission,
     expiresAt,
@@ -373,6 +388,20 @@ workspace.post("/deselect", async (c) => {
   }
 
   const session = tokenResult as CookieSessionTokenResult;
+  if (!session.principalId) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "session-expired",
+          message:
+            "Session predates canonical identity support; sign in again.",
+          retryable: false,
+        },
+      },
+      401,
+    );
+  }
   const sessionStore = new D1SessionStore(c.env.DB);
 
   try {
@@ -391,6 +420,7 @@ workspace.post("/deselect", async (c) => {
     projectId: "",
     tokenHash: "",
     actorName: session.name,
+    principalId: session.principalId,
     scopes: "",
     permission: "read",
     expiresAt,

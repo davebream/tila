@@ -15,7 +15,7 @@ const load = (loader: () => Promise<CommandModule>): Promise<CommandDef> =>
   loader().then((m) => withErrorBoundary(m.default));
 
 // Pre-dispatch: parse global flags before citty processes argv.
-// Citty 0.2.2 has NO arg inheritance, so --instance/--token/--project must be
+// Citty 0.2.2 has NO arg inheritance, so global context flags must be
 // extracted here and stored in the singleton for commands to read via getGlobalFlags().
 setGlobalFlags(parseGlobalFlags(process.argv.slice(2)));
 
@@ -37,6 +37,10 @@ const main = defineCommand({
     project: {
       type: "string" as const,
       description: "Assert or select a project (maps to worker_url)",
+    },
+    "participant-id": {
+      type: "string" as const,
+      description: "Use a stable participant ID for this client session",
     },
   },
   subCommands: {

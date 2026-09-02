@@ -336,10 +336,12 @@ export async function wipeProjectViaWorker(
   workerUrl: string,
   token: string,
   slug: string,
+  participantId: string,
 ): Promise<WipeProjectResult> {
   return wipeViaEndpoint(`${workerUrl}/projects/${slug}/admin/destroy`, {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
+    "X-Tila-Participant-Id": participantId,
   });
 }
 

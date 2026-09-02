@@ -8,6 +8,7 @@ import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const claims = new Hono<{
@@ -34,7 +35,6 @@ claims.post("/acquire", requirePermission("write"), async (c) => {
   const parsed = AcquireRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const stub = c.get("doStub");
-  const tokenResult = c.get("tokenResult");
 
   // Presence mode: route to heartbeat instead of claims table
   if (parsed.data.mode === "presence") {
@@ -43,7 +43,7 @@ claims.post("/acquire", requirePermission("write"), async (c) => {
       "/coord/heartbeat",
       "POST",
       {
-        machine: tokenResult.name,
+        ...identityPayload(c),
         info: parsed.data.metadata ?? {},
       },
       undefined,
@@ -57,6 +57,7 @@ claims.post("/acquire", requirePermission("write"), async (c) => {
       ok: true,
       fence: 0,
       expires_at: Date.now() + parsed.data.ttl_ms,
+      participant_id: identityPayload(c).participant_id,
     });
   }
 
@@ -66,11 +67,7 @@ claims.post("/acquire", requirePermission("write"), async (c) => {
     "POST",
     {
       ...parsed.data,
-      machine: tokenResult.name,
-      user: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -84,18 +81,13 @@ claims.post("/renew", requirePermission("write"), async (c) => {
   const parsed = RenewRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const stub = c.get("doStub");
-  const tokenResult = c.get("tokenResult");
   return forwardToDO(
     stub,
     "/coord/renew",
     "POST",
     {
       ...parsed.data,
-      machine: tokenResult.name,
-      user: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -109,17 +101,13 @@ claims.post("/release", requirePermission("write"), async (c) => {
   const parsed = ReleaseRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const stub = c.get("doStub");
-  const tokenResult = c.get("tokenResult");
   return forwardToDO(
     stub,
     "/coord/release",
     "POST",
     {
       ...parsed.data,
-      actor: `${tokenResult.name}/${tokenResult.name}`,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),

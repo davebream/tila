@@ -468,7 +468,7 @@ export default defineCommand({
               ]),
           );
           const claimByResource = new Map(
-            claims.map((c) => [c.resource, `${c.machine}/${c.user}`]),
+            claims.map((c) => [c.resource, c.participant_id]),
           );
           const entities = tasks.map((e) => {
             const data = e.data as Record<string, unknown>;
@@ -746,12 +746,10 @@ export default defineCommand({
         ...jsonArg,
       },
       async run({ args }) {
-        const { coordination, machine } = await resolveContext();
+        const { coordination } = await resolveContext();
         const ttlMs = Number(args.ttl) * 1000;
         const result = await coordination.acquire(
           `task:${args.id}`,
-          machine,
-          machine,
           "exclusive",
           ttlMs,
         );
@@ -761,11 +759,12 @@ export default defineCommand({
             acquired: true,
             fence: result.fence,
             expires_at: tsToIso(result.expires_at),
+            participant_id: result.participant_id,
           });
           return;
         }
         console.log(
-          `Claimed task ${args.id}  fence=${result.fence}  expires=${new Date(result.expires_at).toISOString()}`,
+          `Claimed task ${args.id}  fence=${result.fence}  participant=${result.participant_id}  expires=${new Date(result.expires_at).toISOString()}`,
         );
       },
     }),
@@ -782,11 +781,14 @@ export default defineCommand({
         ...jsonArg,
       },
       async run({ args }) {
-        const { coordination, machine } = await resolveContext();
+        const { coordination, participantIdExplicit } = await resolveContext();
+        if (!participantIdExplicit) {
+          throw new Error(
+            "Renew requires --participant-id or TILA_PARTICIPANT_ID from the acquiring session.",
+          );
+        }
         await coordination.renew(
           `task:${args.id}`,
-          machine,
-          machine,
           Number(args.fence),
           Number(args.ttl) * 1000,
         );
@@ -809,7 +811,12 @@ export default defineCommand({
         ...jsonArg,
       },
       async run({ args }) {
-        const { coordination } = await resolveContext();
+        const { coordination, participantIdExplicit } = await resolveContext();
+        if (!participantIdExplicit) {
+          throw new Error(
+            "Release requires --participant-id or TILA_PARTICIPANT_ID from the acquiring session.",
+          );
+        }
         await coordination.release(`task:${args.id}`, Number(args.fence));
         if (args.json) {
           printJson({ ok: true });

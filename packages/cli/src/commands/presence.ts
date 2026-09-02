@@ -7,28 +7,28 @@ import {
   renderTable,
 } from "../lib/output";
 
-// Note: The `active` field is stripped by RemoteBackend.listPresence() because
-// the Presence type (from @tila/schemas) lacks the `active` field. The
-// [active]/[inactive] prefix is no longer shown (known breaking change RC-3).
 async function showPresenceList(json: boolean): Promise<void> {
   const { coordination } = await resolveContext();
-  const machines = await coordination.listPresence();
+  const participants = await coordination.listPresence();
   if (json) {
-    // Re-wrap in { ok, machines } envelope for JSON output parity
-    printJson({ ok: true, machines });
+    printJson({ ok: true, participants });
     return;
   }
-  if (machines.length === 0) {
-    console.log("No machines.");
+  if (participants.length === 0) {
+    console.log("No participants.");
     return;
   }
   renderTable(
-    machines.map((m) => ({
-      machine: m.machine,
-      last_seen: formatTimestamp(m.last_seen),
-      info: JSON.stringify(m.info),
+    participants.map((participant) => ({
+      principal_id: participant.principal_id,
+      participant_id: participant.participant_id,
+      machine: participant.environment.machine ?? "",
+      last_seen: formatTimestamp(participant.last_seen),
+      info: JSON.stringify(participant.info),
     })),
     [
+      { key: "principal_id", label: "Principal" },
+      { key: "participant_id", label: "Participant" },
       { key: "machine", label: "Machine" },
       { key: "last_seen", label: "Last Seen" },
       { key: "info", label: "Info" },
@@ -39,7 +39,7 @@ async function showPresenceList(json: boolean): Promise<void> {
 const listCommand = defineCommand({
   meta: {
     name: "list",
-    description: "Show all machines (active and inactive)",
+    description: "Show all participants",
   },
   args: {
     ...jsonArg,
@@ -50,24 +50,18 @@ const listCommand = defineCommand({
 });
 
 const heartbeatCommand = defineCommand({
-  meta: { name: "heartbeat", description: "Send a heartbeat for this machine" },
+  meta: { name: "heartbeat", description: "Send a participant heartbeat" },
   args: {
-    machine: {
-      type: "string",
-      description:
-        "Machine identity for local mode (server stamps identity in remote mode, default: TILA_MACHINE or os.hostname())",
-    },
     ...jsonArg,
   },
   async run({ args }) {
-    const { coordination, machine: defaultMachine } = await resolveContext();
-    const machine = (args.machine as string | undefined) ?? defaultMachine;
-    await coordination.heartbeat(machine, {});
+    const { coordination, participantId } = await resolveContext();
+    await coordination.heartbeat({});
     if (args.json) {
       printJson({ ok: true });
       return;
     }
-    console.log(`Heartbeat sent for ${machine}`);
+    console.log(`Heartbeat sent for participant ${participantId}`);
   },
 });
 

@@ -124,6 +124,11 @@ export const journal = sqliteTable(
     t: integer("t").notNull(),
     kind: text("kind").notNull(),
     resource: text("resource").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    environment: text("environment").notNull().default("{}"),
+    // Retained physically for archived-row compatibility; public reads use the
+    // canonical identity columns above.
     actor: text("actor").notNull(),
     token_id: text("token_id"),
     fence: integer("fence"),
@@ -135,6 +140,7 @@ export const journal = sqliteTable(
     index("idx_journal_resource").on(table.resource),
     index("idx_journal_kind").on(table.kind),
     index("idx_journal_source").on(table.source),
+    index("idx_journal_participant").on(table.participant_id),
   ],
 );
 
@@ -156,9 +162,9 @@ export const claims = sqliteTable(
   "claims",
   {
     resource: text("resource").primaryKey(),
-    holder: text("holder").notNull(),
-    machine: text("machine").notNull(),
-    user: text("user").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    environment: text("environment").notNull().default("{}"),
     mode: text("mode").notNull(),
     fence: integer("fence").notNull(),
     acquired_at: integer("acquired_at").notNull(),
@@ -178,11 +184,16 @@ export const fences = sqliteTable("fences", {
 export const presence = sqliteTable(
   "presence",
   {
-    machine: text("machine").primaryKey(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    environment: text("environment").notNull().default("{}"),
     last_seen: integer("last_seen").notNull(),
     info: text("info").notNull().default("{}"),
   },
-  (table) => [index("idx_presence_last_seen").on(table.last_seen)],
+  (table) => [
+    primaryKey({ columns: [table.principal_id, table.participant_id] }),
+    index("idx_presence_last_seen").on(table.last_seen),
+  ],
 );
 
 // --- _schema_history ---

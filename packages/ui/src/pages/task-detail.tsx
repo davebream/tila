@@ -231,18 +231,18 @@ export function TaskDetailPage() {
                 <TableBody>
                   <TableRow>
                     <FieldLabel>
-                      <InfoTip content="Unique identifier of the machine holding this claim">
-                        Machine
+                      <InfoTip content="Authenticated subject that owns this claim">
+                        Principal
                       </InfoTip>
                     </FieldLabel>
                     <TableCell className="text-foreground">
-                      {entityClaim.machine}
+                      {entityClaim.principal_id}
                     </TableCell>
                   </TableRow>
                   <TableRow>
-                    <FieldLabel>User</FieldLabel>
+                    <FieldLabel>Participant</FieldLabel>
                     <TableCell className="text-foreground">
-                      {entityClaim.user}
+                      {entityClaim.participant_id}
                     </TableCell>
                   </TableRow>
                   <TableRow>

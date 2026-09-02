@@ -26,6 +26,8 @@ export const TILA_ERRORS = {
   TOKEN_NOT_FOUND: "token-not-found",
   // Validation (worker + DO layers)
   VALIDATION_ERROR: "validation-error",
+  PARTICIPANT_REQUIRED: "participant-required",
+  INVALID_ENVIRONMENT: "invalid-environment",
   // DO errors (project-do-router — kebab-case wire values)
   STALE_FENCE: "stale-fence",
   NOT_FOUND: "not-found",

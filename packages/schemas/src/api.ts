@@ -4,6 +4,7 @@ import {
   EntitySearchResultSchema,
 } from "./artifact";
 import { ClaimModeSchema } from "./claim";
+import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
 import { RecordKeySchema, RecordTagSchema, RecordTypeSchema } from "./record";
 import {
@@ -42,6 +43,7 @@ export const AcquireSuccessResponseSchema = z.object({
   ok: z.literal(true),
   fence: z.number().int(),
   expires_at: z.number().int(),
+  participant_id: ParticipantIdSchema,
 });
 
 export type AcquireSuccessResponse = z.infer<
@@ -85,8 +87,9 @@ export const StateResponseSchema = z.object({
   claim: z
     .object({
       resource: z.string(),
-      machine: z.string(),
-      user: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       mode: ClaimModeSchema,
       fence: z.number().int(),
       acquired_at: z.number().int(),
@@ -103,8 +106,9 @@ export const StateListResponseSchema = z.object({
   claims: z.array(
     z.object({
       resource: z.string(),
-      machine: z.string(),
-      user: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       mode: ClaimModeSchema,
       fence: z.number().int(),
       acquired_at: z.number().int(),
@@ -272,7 +276,7 @@ export const SummaryResponseSchema = z.object({
     status_counts: z.record(z.number().int()),
     active_claims: z.number().int(),
     ready_count: z.number().int(),
-    online_machines: z.array(z.string()),
+    online_participants: z.array(ParticipantIdSchema),
     token_estimate: z.number().int(),
     recent_events: z.array(
       z.object({
@@ -280,7 +284,9 @@ export const SummaryResponseSchema = z.object({
         t: z.number().int(),
         kind: z.string(),
         resource: z.string(),
-        actor: z.string(),
+        principal_id: z.string(),
+        participant_id: ParticipantIdSchema,
+        environment: EnvironmentMetadataSchema,
       }),
     ),
   }),
@@ -379,7 +385,7 @@ export type DeleteEntityRelationshipResponse = z.infer<
 export const JournalQuerySchema = z.object({
   resource: z.string().optional(),
   kind: JournalEventKindSchema.optional(),
-  source: z.string().optional(),
+  client_name: z.string().optional(),
   after_seq: z.number().int().optional(),
   limit: z.number().int().positive().default(100),
 });
@@ -394,12 +400,12 @@ export const JournalResponseSchema = z.object({
       t: z.number().int(),
       kind: z.string(),
       resource: z.string(),
-      actor: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       token_id: z.string().nullable(),
       fence: z.number().int().nullable(),
       data: z.record(z.unknown()),
-      source: z.string().nullable(),
-      source_version: z.string().nullable(),
     }),
   ),
 });
@@ -409,7 +415,6 @@ export type JournalResponse = z.infer<typeof JournalResponseSchema>;
 // --- Presence API ---
 
 export const PresenceHeartbeatRequestSchema = z.object({
-  machine: z.string(),
   info: z.record(z.unknown()).default({}),
 });
 
@@ -419,9 +424,11 @@ export type PresenceHeartbeatRequest = z.infer<
 
 export const PresenceListResponseSchema = z.object({
   ok: z.literal(true),
-  machines: z.array(
+  participants: z.array(
     z.object({
-      machine: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       last_seen: z.number().int(),
       info: z.record(z.unknown()),
     }),
@@ -432,9 +439,11 @@ export type PresenceListResponse = z.infer<typeof PresenceListResponseSchema>;
 
 export const PresenceAllListResponseSchema = z.object({
   ok: z.literal(true),
-  machines: z.array(
+  participants: z.array(
     z.object({
-      machine: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       last_seen: z.number().int(),
       info: z.record(z.unknown()),
       active: z.boolean(),

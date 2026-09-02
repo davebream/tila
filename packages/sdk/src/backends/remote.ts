@@ -59,6 +59,7 @@ import {
   ArchiveSuccessResponseSchema,
   ArtifactGrepResponseSchema,
   ArtifactPutResponseSchema,
+  ClaimSchema,
   CreateEntityRelationshipResponseSchema,
   DeleteEntityRelationshipResponseSchema,
   EntityArtifactReferenceListResponseSchema,
@@ -143,18 +144,7 @@ const SchemaApplyLenientSchema = z.object({
 
 const StateListInternalSchema = z.object({
   ok: z.literal(true),
-  claims: z.array(
-    z.object({
-      resource: z.string(),
-      machine: z.string(),
-      user: z.string(),
-      mode: z.enum(["exclusive", "owner", "presence"]),
-      fence: z.number(),
-      acquired_at: z.number(),
-      expires_at: z.number(),
-      metadata: z.record(z.unknown()).optional(),
-    }),
-  ),
+  claims: z.array(ClaimSchema),
 });
 
 const ArtifactSearchResponseSchema = z.object({
@@ -316,7 +306,7 @@ export class RemoteBackend
     // Auto-acquire a fence using bare entity ID as the claim resource.
     // assertResourceFence in fence-ops.ts supports both bare-id and typed-resource
     // lookup, so the bare id is sufficient without an extra get() call to resolve type.
-    const acquired = await this.acquire(id, "cli", "cli", "exclusive", 30_000);
+    const acquired = await this.acquire(id, "exclusive", 30_000);
     try {
       const result = await this.client.patch(
         `/projects/${this.projectId}/tasks/${encodeURIComponent(id)}`,
@@ -337,7 +327,7 @@ export class RemoteBackend
   async archive(id: string): Promise<void> {
     // Auto-acquire a fence; archive() deletes the claim inside its transaction,
     // so no explicit release is needed after a successful archive.
-    const acquired = await this.acquire(id, "cli", "cli", "exclusive", 30_000);
+    const acquired = await this.acquire(id, "exclusive", 30_000);
     await this.client.post(
       `/projects/${this.projectId}/tasks/${encodeURIComponent(id)}/archive`,
       { fence: acquired.fence },
@@ -471,8 +461,6 @@ export class RemoteBackend
 
   async acquire(
     resource: string,
-    machine: string,
-    user: string,
     mode: "exclusive" | "owner" | "presence",
     ttlMs: number,
   ): Promise<AcquireResult> {
@@ -485,13 +473,12 @@ export class RemoteBackend
       acquired: true,
       fence: result.fence,
       expires_at: result.expires_at,
+      participant_id: result.participant_id,
     };
   }
 
   async renew(
     resource: string,
-    _machine: string,
-    _user: string,
     fence: number,
     ttlMs: number,
   ): Promise<RenewResult> {
@@ -523,13 +510,10 @@ export class RemoteBackend
     return result.claim ?? null;
   }
 
-  async heartbeat(
-    machine: string,
-    info?: Record<string, unknown>,
-  ): Promise<void> {
+  async heartbeat(info?: Record<string, unknown>): Promise<void> {
     await this.client.post(
       `/projects/${this.projectId}/presence/heartbeat`,
-      { machine, info: info ?? {} },
+      { info: info ?? {} },
       { schema: PresenceHeartbeatSuccessResponseSchema, validate: true },
     );
   }
@@ -539,12 +523,16 @@ export class RemoteBackend
       `/projects/${this.projectId}/presence/all`,
       { schema: PresenceAllListResponseSchema, validate: true },
     );
-    // Strip the `active` field — Presence type has only machine, last_seen, info.
-    return result.machines.map(({ machine, last_seen, info }) => ({
-      machine,
-      last_seen,
-      info,
-    }));
+    // Strip the server-computed `active` field from the base Presence shape.
+    return result.participants.map(
+      ({ principal_id, participant_id, environment, last_seen, info }) => ({
+        principal_id,
+        participant_id,
+        environment,
+        last_seen,
+        info,
+      }),
+    );
   }
 
   async listAllPresence(
@@ -557,12 +545,23 @@ export class RemoteBackend
       `/projects/${this.projectId}/presence/all`,
       { schema: PresenceAllListResponseSchema, validate: true },
     );
-    return result.machines.map(({ machine, last_seen, info, active }) => ({
-      machine,
-      last_seen,
-      info,
-      active,
-    }));
+    return result.participants.map(
+      ({
+        principal_id,
+        participant_id,
+        environment,
+        last_seen,
+        info,
+        active,
+      }) => ({
+        principal_id,
+        participant_id,
+        environment,
+        last_seen,
+        info,
+        active,
+      }),
+    );
   }
 
   async listClaims(): Promise<Claim[]> {
@@ -570,16 +569,7 @@ export class RemoteBackend
       schema: StateListInternalSchema,
       validate: true,
     });
-    return result.claims.map((c) => ({
-      resource: c.resource,
-      machine: c.machine,
-      user: c.user,
-      mode: c.mode,
-      fence: c.fence,
-      acquired_at: c.acquired_at,
-      expires_at: c.expires_at,
-      metadata: (c.metadata ?? {}) as Record<string, unknown>,
-    }));
+    return result.claims;
   }
 
   // --- JournalBackend ---
@@ -593,18 +583,12 @@ export class RemoteBackend
         query: {
           resource: query.resource,
           kind: query.kind,
+          client_name: query.client_name,
           limit: query.limit !== undefined ? String(query.limit) : undefined,
         },
       },
     );
-    return result.events.map((ev) => ({
-      seq: ev.seq,
-      t: ev.t,
-      kind: ev.kind,
-      resource: ev.resource,
-      actor: ev.actor,
-      fence: ev.fence,
-    }));
+    return result.events;
   }
 
   // --- GateBackend ---

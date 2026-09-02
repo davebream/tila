@@ -12,7 +12,8 @@
  */
 
 import { spawn } from "node:child_process";
-import type { InstanceKey } from "@tila/schemas";
+import { randomUUID } from "node:crypto";
+import { type InstanceKey, ParticipantIdSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { globalFlagArgs } from "../lib/global-flags";
 import { buildAuthStore } from "../lib/instance-context";
@@ -46,6 +47,11 @@ export default defineCommand({
 
     // Resolve the shell to spawn
     const shell = process.env.SHELL ?? "/bin/sh";
+    const participantId = ParticipantIdSchema.parse(
+      ((args["participant-id"] as string | undefined) ??
+        process.env.TILA_PARTICIPANT_ID?.trim()) ||
+        randomUUID(),
+    );
 
     // Spawn the child shell with TILA_INSTANCE + TILA_SHELL_PINNED injected.
     // stdio: "inherit" — the child is interactive (stdin/stdout/stderr pass through).
@@ -57,6 +63,7 @@ export default defineCommand({
           ...process.env,
           TILA_INSTANCE: key,
           TILA_SHELL_PINNED: "1",
+          TILA_PARTICIPANT_ID: participantId,
         },
       });
 

@@ -442,6 +442,7 @@ export async function createRecord(
     appendJournal(tx, {
       kind: "record.created",
       resource,
+      ...origin,
       actor: input.actor,
       fence,
       tokenId: origin.tokenId,
@@ -583,6 +584,7 @@ export async function setRecord(
       appendJournal(tx, {
         kind: "record.updated",
         resource,
+        ...origin,
         actor: input.actor,
         fence: newFence,
         tokenId: origin.tokenId,
@@ -709,6 +711,7 @@ export async function putRecord(
       appendJournal(tx, {
         kind: "record.created",
         resource,
+        ...origin,
         actor: input.actor,
         fence,
         tokenId: origin.tokenId,
@@ -789,6 +792,7 @@ export async function putRecord(
     appendJournal(tx, {
       kind: "record.updated",
       resource,
+      ...origin,
       actor: input.actor,
       fence: newFence,
       tokenId: origin.tokenId,
@@ -1023,6 +1027,7 @@ export async function patchRecord(
       appendJournal(tx, {
         kind: "record.updated",
         resource,
+        ...origin,
         actor: input.actor,
         fence: newFence,
         tokenId: origin.tokenId,
@@ -1170,6 +1175,7 @@ export function archiveRecord(
       appendJournal(tx, {
         kind: "record.archived",
         resource,
+        ...origin,
         actor: input.actor,
         fence: newFence,
         tokenId: origin.tokenId,
@@ -1311,6 +1317,7 @@ export function unarchiveRecord(
       appendJournal(tx, {
         kind: "record.unarchived",
         resource,
+        ...origin,
         actor: input.actor,
         fence: newFence,
         tokenId: origin.tokenId,

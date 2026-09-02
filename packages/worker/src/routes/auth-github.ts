@@ -1093,6 +1093,7 @@ authGithub.get("/oauth/callback", async (c) => {
       projectId: "",
       tokenHash: "",
       actorName: user.login,
+      principalId: `github:github.com:${user.id}`,
       scopes: "",
       permission: "read",
       expiresAt,

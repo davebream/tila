@@ -1,4 +1,4 @@
-import type { TilaProjectConfig } from "@tila/schemas";
+import type { EnvironmentMetadata, TilaProjectConfig } from "@tila/schemas";
 import { TilaClient } from "tila-sdk";
 import { VERSION as CLI_VERSION } from "../version";
 
@@ -19,11 +19,18 @@ export function createCliClient(
   baseUrl: string,
   token: string,
   dpopSigner?: (htm: string, htu: string) => Promise<string>,
+  identity?: { participantId: string; environment: EnvironmentMetadata },
 ): TilaClient {
   return new TilaClient({
     baseUrl,
     token,
     extraHeaders: CLI_SOURCE_HEADERS,
+    participantId: identity?.participantId,
+    environment: {
+      ...identity?.environment,
+      client_name: "cli",
+      client_version: CLI_VERSION,
+    },
     ...(dpopSigner ? { dpopSigner } : {}),
   });
 }
@@ -38,6 +45,7 @@ export function createCliClientFromConfig(
   config: TilaProjectConfig,
   token: string,
   dpopSigner?: (htm: string, htu: string) => Promise<string>,
+  identity?: { participantId: string; environment: EnvironmentMetadata },
 ): TilaClient {
   if (!config.worker_url) {
     throw new Error(
@@ -45,5 +53,5 @@ export function createCliClientFromConfig(
         "Use 'tila project create' or set backend = \"cloudflare\" in .tila/config.toml.",
     );
   }
-  return createCliClient(config.worker_url, token, dpopSigner);
+  return createCliClient(config.worker_url, token, dpopSigner, identity);
 }

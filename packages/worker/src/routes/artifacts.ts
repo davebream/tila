@@ -39,6 +39,7 @@ import { getValidatedSchema } from "../lib/schema-validation";
 import { type ScanRow, buildRebuildCandidates } from "../lib/search-rebuild";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 const INLINE_THRESHOLD = 64 * 1024;
@@ -180,7 +181,8 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     metadata: {
       "tila-task": resource ?? "",
       "tila-fence": fence !== undefined ? String(fence) : "",
-      "tila-machine": tokenResult.name,
+      "tila-principal": identityPayload(c).principal_id,
+      "tila-participant": identityPayload(c).participant_id,
       "tila-kind": kind,
       "tila-sha256": sha256,
       "tila-mime": mimeType,
@@ -207,10 +209,8 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     actor: tokenResult.name,
     search_title: normalizedText?.title ?? null,
     search_body_text: normalizedText?.body_text ?? null,
-    actor_token_id: tokenResult.tokenId,
     content_inline: contentInline,
-    source: c.get("source"),
-    source_version: c.get("sourceVersion"),
+    ...identityPayload(c),
     tags: tags ?? undefined,
   };
 
@@ -365,7 +365,8 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     metadata: {
       "tila-task": resource ?? "",
       "tila-fence": fence !== null ? String(fence) : "",
-      "tila-machine": tokenResult.name,
+      "tila-principal": identityPayload(c).principal_id,
+      "tila-participant": identityPayload(c).participant_id,
       "tila-kind": kind,
       "tila-sha256": sha256,
       "tila-mime": mimeType,
@@ -395,10 +396,8 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     actor: tokenResult.name,
     search_title: normalizedText?.title ?? null,
     search_body_text: normalizedText?.body_text ?? null,
-    actor_token_id: tokenResult.tokenId,
     content_inline: contentInline,
-    source: c.get("source"),
-    source_version: c.get("sourceVersion"),
+    ...identityPayload(c),
     tags,
   };
 
@@ -760,9 +759,7 @@ artifacts.post("/relationship", requirePermission("write"), async (c) => {
       type: body.type,
       metadata: body.metadata ?? {},
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -980,9 +977,7 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
       r2_blobs: enrichedBlobs,
       apply,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -1037,9 +1032,7 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
           {
             r2_key: pointer.r2_key,
             actor: tokenResult.name,
-            actor_token_id: tokenResult.tokenId,
-            source: c.get("source"),
-            source_version: c.get("sourceVersion"),
+            ...identityPayload(c),
           },
           undefined,
           analyticsCtxFrom(c),
@@ -1109,9 +1102,7 @@ artifacts.post("/search-rebuild", requirePermission("write"), async (c) => {
       candidates,
       apply,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -1136,9 +1127,7 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
     {
       r2_key: key,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),

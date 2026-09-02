@@ -58,16 +58,18 @@ import {
 } from "@tila/ops-sqlite";
 import type { TilaSchemaToml } from "@tila/schemas";
 
-import type {
-  Claim,
-  CompactEntity,
-  Entity,
-  EntityArtifactReference,
-  EntityRelationship,
-  Presence,
-  RecordHistoryItem,
-  RecordListItem,
-  RecordRow,
+import {
+  type Claim,
+  type CompactEntity,
+  type Entity,
+  type EntityArtifactReference,
+  type EntityRelationship,
+  type IdentityContext,
+  IdentityContextSchema,
+  type Presence,
+  type RecordHistoryItem,
+  type RecordListItem,
+  type RecordRow,
 } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -129,6 +131,7 @@ export class EmbeddedProject
   private readonly db: EmbeddedDb;
   private readonly sleepSync: SleepSync;
   private readonly _close: () => void;
+  private readonly identity: IdentityContext;
 
   // `org`/`project` are accepted in the constructor opts for symmetry with the
   // wrapper API (and with EmbeddedArtifactBackend, which DOES use them for key
@@ -138,12 +141,20 @@ export class EmbeddedProject
     db: EmbeddedDb;
     org: string;
     project: string;
+    identity?: IdentityContext;
     sleepSync: SleepSync;
     close: () => void;
   }) {
     this.db = opts.db;
     this.sleepSync = opts.sleepSync;
     this._close = opts.close;
+    this.identity = IdentityContextSchema.parse(
+      opts.identity ?? {
+        principal_id: `local:${opts.org}`,
+        participant_id: crypto.randomUUID(),
+        environment: { client_name: "embedded" },
+      },
+    );
   }
 
   /** Run `fn` with SQLITE_BUSY retry, using the injected blocking sleep. */
@@ -178,7 +189,7 @@ export class EmbeddedProject
           tags: input.tags,
         },
         schemaVersion,
-        { actor: input.created_by },
+        { ...this.localOrigin(), actor: input.created_by },
       );
     });
   }
@@ -199,8 +210,7 @@ export class EmbeddedProject
       coordinationOps.acquire(
         this.db,
         resource,
-        "local",
-        "local",
+        this.localOrigin(),
         "exclusive",
         30_000,
       ),
@@ -211,15 +221,18 @@ export class EmbeddedProject
         id,
         data as Record<string, unknown>,
         acquired.fence,
-        { actor: "local" },
+        this.localOrigin(),
       ),
     );
     // Best-effort release -- archive() deletes claim inside its transaction, so this may be a no-op
     try {
       this.retry(() =>
-        coordinationOps.release(this.db, resource, acquired.fence, {
-          actor: "local/local",
-        }),
+        coordinationOps.release(
+          this.db,
+          resource,
+          acquired.fence,
+          this.localOrigin(),
+        ),
       );
     } catch {
       // Idempotent -- claim may have been deleted inside archive transaction
@@ -235,14 +248,13 @@ export class EmbeddedProject
       coordinationOps.acquire(
         this.db,
         resource,
-        "local",
-        "local",
+        this.localOrigin(),
         "exclusive",
         30_000,
       ),
     );
     this.retry(() =>
-      entityOps.archive(this.db, id, acquired.fence, { actor: "local" }),
+      entityOps.archive(this.db, id, acquired.fence, this.localOrigin()),
     );
     // No explicit release needed -- archive() deletes the claim row inside its transaction
   }
@@ -337,12 +349,13 @@ export class EmbeddedProject
     fence: number,
   ): Promise<Entity> {
     return this.retry(() =>
-      entityOps.update(this.db, id, data as Record<string, unknown>, fence, {
-        actor: "local",
-        tokenId: null,
-        source: null,
-        sourceVersion: null,
-      }),
+      entityOps.update(
+        this.db,
+        id,
+        data as Record<string, unknown>,
+        fence,
+        this.localOrigin(),
+      ),
     );
   }
 
@@ -357,12 +370,7 @@ export class EmbeddedProject
    */
   async archiveWithFence(id: string, fence: number): Promise<void> {
     return this.retry(() =>
-      entityOps.archive(this.db, id, fence, {
-        actor: "local",
-        tokenId: null,
-        source: null,
-        sourceVersion: null,
-      }),
+      entityOps.archive(this.db, id, fence, this.localOrigin()),
     );
   }
 
@@ -444,19 +452,26 @@ export class EmbeddedProject
 
   async acquire(
     resource: string,
-    machine: string,
-    user: string,
     mode: "exclusive" | "owner" | "presence",
     ttlMs: number,
   ): Promise<AcquireResult> {
+    if (mode === "presence") {
+      const now = Date.now();
+      await this.heartbeat();
+      return {
+        acquired: true,
+        fence: 0,
+        expires_at: now + ttlMs,
+        participant_id: this.identity.participant_id,
+      };
+    }
     const canonicalResource =
       resolveEntityResource(this.db, resource) ?? resource;
     return this.retry(() =>
       coordinationOps.acquire(
         this.db,
         canonicalResource,
-        machine,
-        user,
+        this.localOrigin(),
         mode,
         ttlMs,
       ),
@@ -465,13 +480,11 @@ export class EmbeddedProject
 
   async renew(
     resource: string,
-    machine: string,
-    user: string,
     fence: number,
     ttlMs: number,
   ): Promise<RenewResult> {
     // Return the FULL result (not a bare boolean): `renewed` distinguishes
-    // loss-of-claim (missing / expired / holder mismatch) from success, and
+    // loss-of-claim (missing / expired / participant mismatch) from success, and
     // `expires_at` is the REAL stored expiry — callers must not recompute it.
     // Mirrors the DO `/coord/renew` contract (409 `renew-failed` on !renewed).
     const canonicalResource =
@@ -480,8 +493,7 @@ export class EmbeddedProject
       coordinationOps.renew(
         this.db,
         canonicalResource,
-        machine,
-        user,
+        this.localOrigin(),
         fence,
         ttlMs,
       ),
@@ -491,13 +503,13 @@ export class EmbeddedProject
   async release(resource: string, fence: number): Promise<void> {
     const canonicalResource =
       resolveEntityResource(this.db, resource) ?? resource;
-    const claim = coordinationOps.state(this.db, canonicalResource);
-    const actor = claim ? `${claim.machine}/${claim.user}` : "local/local";
-
     this.retry(() =>
-      coordinationOps.release(this.db, canonicalResource, fence, {
-        actor,
-      }),
+      coordinationOps.release(
+        this.db,
+        canonicalResource,
+        fence,
+        this.localOrigin(),
+      ),
     );
   }
 
@@ -507,11 +519,10 @@ export class EmbeddedProject
     return coordinationOps.state(this.db, canonicalResource);
   }
 
-  async heartbeat(
-    machine: string,
-    info?: Record<string, unknown>,
-  ): Promise<void> {
-    this.retry(() => coordinationOps.heartbeat(this.db, machine, info));
+  async heartbeat(info?: Record<string, unknown>): Promise<void> {
+    this.retry(() =>
+      coordinationOps.heartbeat(this.db, this.localOrigin(), info),
+    );
   }
 
   async listPresence(): Promise<Presence[]> {
@@ -538,8 +549,12 @@ export class EmbeddedProject
       t: row.t,
       kind: row.kind,
       resource: row.resource,
-      actor: row.actor,
+      principal_id: row.principal_id,
+      participant_id: row.participant_id,
+      environment: row.environment,
+      token_id: row.token_id,
       fence: row.fence,
+      data: row.data,
     }));
   }
 
@@ -562,7 +577,7 @@ export class EmbeddedProject
           fence,
           timeout_at: timeoutAt,
         },
-        { actor: "local" },
+        this.localOrigin(),
       );
       return {
         id: row.id,
@@ -599,12 +614,12 @@ export class EmbeddedProject
 
   async resolveGate(gateId: string, resolution?: string): Promise<void> {
     this.retry(() =>
-      gateOps.resolveGate(this.db, gateId, resolution, { actor: "local" }),
+      gateOps.resolveGate(this.db, gateId, resolution, this.localOrigin()),
     );
   }
 
   async cancelGate(gateId: string): Promise<void> {
-    this.retry(() => gateOps.cancelGate(this.db, gateId, { actor: "local" }));
+    this.retry(() => gateOps.cancelGate(this.db, gateId, this.localOrigin()));
   }
 
   // ---------- SignalBackend ----------
@@ -717,14 +732,16 @@ export class EmbeddedProject
       status_counts: statusCounts,
       active_claims: claims.length,
       ready_count: readyEntities.length,
-      online_machines: presenceList.map((p) => p.machine),
+      online_participants: presenceList.map((p) => p.participant_id),
       token_estimate: 0,
       recent_events: recentEvents.map((ev) => ({
         seq: ev.seq,
         t: ev.t,
         kind: ev.kind,
         resource: ev.resource,
-        actor: ev.actor,
+        principal_id: ev.principal_id,
+        participant_id: ev.participant_id,
+        environment: ev.environment,
       })),
     };
     payload.token_estimate = Math.ceil(JSON.stringify(payload).length / 4);
@@ -798,10 +815,13 @@ export class EmbeddedProject
 
   private localOrigin(): RequestOrigin {
     return {
-      actor: "local",
+      principalId: this.identity.principal_id,
+      participantId: this.identity.participant_id,
+      environment: this.identity.environment,
+      actor: this.identity.principal_id,
       tokenId: null,
-      source: null,
-      sourceVersion: null,
+      source: this.identity.environment.client_name ?? null,
+      sourceVersion: this.identity.environment.client_version ?? null,
     };
   }
 
@@ -1153,10 +1173,8 @@ export class EmbeddedProject
           rootId: input.root_id,
           vars: input.vars ?? {},
           origin: {
-            actor: input.actor ?? "local",
-            tokenId: null,
-            source: null,
-            sourceVersion: null,
+            ...this.localOrigin(),
+            actor: input.actor ?? this.identity.principal_id,
           },
         }),
       );

@@ -1,5 +1,8 @@
 import {
+  type EnvironmentMetadata,
+  EnvironmentMetadataSchema,
   ErrorEnvelopeSchema,
+  ParticipantIdSchema,
   type TilaProjectConfig,
   canonicalizeHtu,
 } from "@tila/schemas";
@@ -27,7 +30,11 @@ export interface ClientOptions {
   validate?: boolean;
   /** Request timeout in milliseconds. Default: 30000 (30s). */
   timeoutMs?: number;
-  /** Extra headers to include on every request. Overrides the default X-Tila-Source header if provided. */
+  /** Stable identity for this independent client session. Defaults to a UUID. */
+  participantId?: string;
+  /** Untrusted environment metadata reported with each request. */
+  environment?: EnvironmentMetadata;
+  /** Extra non-identity headers to include on every request. */
   extraHeaders?: Record<string, string>;
   /**
    * Optional DPoP proof signer. When set, a `DPoP` header is attached to every
@@ -48,15 +55,41 @@ export class TilaClient {
   private timeoutMs: number;
   private extraHeaders: Record<string, string>;
   private dpopSigner?: (htm: string, htu: string) => Promise<string>;
+  readonly participantId: string;
+  readonly environment: EnvironmentMetadata;
 
   constructor(opts: ClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.token = opts.token;
     this.validate = opts.validate ?? false;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.participantId = ParticipantIdSchema.parse(
+      opts.participantId ?? crypto.randomUUID(),
+    );
+    this.environment = EnvironmentMetadataSchema.parse({
+      ...opts.environment,
+      client_name: opts.environment?.client_name ?? "sdk",
+      client_version: opts.environment?.client_version ?? SDK_VERSION,
+    });
     this.extraHeaders = {
-      "X-Tila-Source": `sdk/${SDK_VERSION}`,
       ...opts.extraHeaders,
+      "X-Tila-Source": `${this.environment.client_name}/${this.environment.client_version}`,
+      "X-Tila-Participant-Id": this.participantId,
+      ...(this.environment.machine
+        ? { "X-Tila-Machine": this.environment.machine }
+        : {}),
+      ...(this.environment.repository
+        ? { "X-Tila-Repository": this.environment.repository }
+        : {}),
+      ...(this.environment.worktree
+        ? { "X-Tila-Worktree": this.environment.worktree }
+        : {}),
+      ...(this.environment.branch
+        ? { "X-Tila-Branch": this.environment.branch }
+        : {}),
+      ...(this.environment.commit
+        ? { "X-Tila-Commit": this.environment.commit }
+        : {}),
     };
     this.dpopSigner = opts.dpopSigner;
   }
@@ -90,7 +123,10 @@ export class TilaClient {
   static fromConfig(
     config: TilaProjectConfig,
     token: string,
-    opts?: { extraHeaders?: Record<string, string> },
+    opts?: Pick<
+      ClientOptions,
+      "extraHeaders" | "participantId" | "environment"
+    >,
   ): TilaClient {
     if (config.backend === "local") {
       throw new Error(
@@ -112,6 +148,8 @@ export class TilaClient {
       // Optional caller attribution (e.g. mcp-server/<version>). When omitted,
       // the constructor's default X-Tila-Source (sdk/<version>) applies.
       ...(opts?.extraHeaders ? { extraHeaders: opts.extraHeaders } : {}),
+      ...(opts?.participantId ? { participantId: opts.participantId } : {}),
+      ...(opts?.environment ? { environment: opts.environment } : {}),
     });
   }
 
@@ -575,7 +613,7 @@ export function buildHttpFacadeForTest(
 export async function createTila(
   config: TilaProjectConfig,
   token?: string,
-  opts?: { extraHeaders?: Record<string, string> },
+  opts?: Pick<ClientOptions, "extraHeaders" | "participantId" | "environment">,
 ): Promise<TilaFacade> {
   if (config.backend === "local") {
     if (!config.local) {
@@ -600,6 +638,17 @@ export async function createTila(
       artifactsPath: config.local.artifacts_path,
       org: config.local.org,
       project: config.project_id,
+      identity: {
+        principal_id: `local:${config.local.org ?? "local"}`,
+        participant_id: ParticipantIdSchema.parse(
+          opts?.participantId ?? crypto.randomUUID(),
+        ),
+        environment: EnvironmentMetadataSchema.parse({
+          client_name: "sdk",
+          client_version: SDK_VERSION,
+          ...opts?.environment,
+        }),
+      },
     });
 
     const resources = buildLocalResources(project, artifacts);
@@ -619,6 +668,8 @@ export async function createTila(
   }
   const client = TilaClient.fromConfig(config, token, {
     extraHeaders: opts?.extraHeaders,
+    participantId: opts?.participantId,
+    environment: opts?.environment,
   });
   return buildHttpFacade(client, config.project_id);
 }
