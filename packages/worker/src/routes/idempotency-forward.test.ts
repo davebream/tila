@@ -50,6 +50,9 @@ function createApp(
       tokenId: "tok-1",
     });
     c.set("doStub", {} as DurableObjectStub);
+    c.set("principalId", "token:tok-1");
+    c.set("participantId", "test-participant");
+    c.set("environment", { client_name: "test" });
     // Simulate the idempotency middleware having stashed the scoped key + hash.
     if (opts.withIdempotency) {
       c.set("idempotencyKey", "dp:proj-1:agent:POST:/x:client-key");

@@ -10,6 +10,10 @@ export default defineCommand({
       args: {
         resource: { type: "string", description: "Filter by resource" },
         kind: { type: "string", description: "Filter by event kind" },
+        "client-name": {
+          type: "string",
+          description: "Filter by environment client name",
+        },
         limit: {
           type: "string",
           description: "Number of events",
@@ -22,6 +26,7 @@ export default defineCommand({
         const events = await journal.listJournal({
           resource: args.resource as string | undefined,
           kind: args.kind as string | undefined,
+          client_name: args["client-name"] as string | undefined,
           limit: args.limit ? Number(args.limit) : 20,
         });
         if (args.json) {
@@ -43,7 +48,8 @@ export default defineCommand({
             time: new Date(ev.t).toISOString(),
             kind: ev.kind,
             resource: ev.resource,
-            actor: ev.actor,
+            principal: ev.principal_id,
+            participant: ev.participant_id,
             fence: ev.fence !== null ? ev.fence : "-",
           })),
           [
@@ -51,7 +57,8 @@ export default defineCommand({
             { key: "time", label: "Time" },
             { key: "kind", label: "Kind" },
             { key: "resource", label: "Resource" },
-            { key: "actor", label: "Actor" },
+            { key: "principal", label: "Principal" },
+            { key: "participant", label: "Participant" },
             { key: "fence", label: "Fence" },
           ],
         );

@@ -112,6 +112,9 @@ function fenceOf(
 }
 
 const ORIGIN = {
+  principalId: "test:u",
+  participantId: "m",
+  environment: {},
   actor: "m/u",
   tokenId: null,
   source: null,
@@ -125,13 +128,22 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
       db,
       { id: "e1", type: "task", data: { n: 0 }, created_by: "test" },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const claim = coordinationOps.acquire(
       db,
       "e1",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
     );
@@ -229,7 +241,12 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
       db,
       { id: "e2", type: "task", data: {}, created_by: "test" },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const idem = { key: "dp:p:c:POST:/acquire", requestHash: "h-acq" };
 
@@ -237,13 +254,16 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
     const first = coordinationOps.acquire(
       db,
       "e2",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
       undefined,
       Date.now(),
-      undefined,
       idem,
     );
     expect(first.acquired).toBe(true);
@@ -254,13 +274,16 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
     const replay = coordinationOps.acquire(
       db,
       "e2",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
       undefined,
       Date.now(),
-      undefined,
       idem,
     );
     expect(replay.fence).toBe(first.fence);
@@ -274,13 +297,22 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
       db,
       { id: "e3", type: "task", data: {}, created_by: "test" },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const claim = coordinationOps.acquire(
       db,
       "e3",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
     );
@@ -303,13 +335,22 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
       db,
       { id: "e4", type: "task", data: { n: 0 }, created_by: "test" },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const claim = coordinationOps.acquire(
       db,
       "e4",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
     );
@@ -331,15 +372,24 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
       db,
       { id: "e5", type: "task", data: {}, created_by: "test" },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // 2. Holder A (mA/uA) acquires exclusive — this is the fence-mutating success path.
     const a = coordinationOps.acquire(
       db,
       "e5",
-      "mA",
-      "uA",
+      {
+        principalId: "test:uA",
+        participantId: "mA",
+        environment: { machine: "mA" },
+        actor: "mA/uA",
+      },
       "exclusive",
       60_000,
     );
@@ -352,18 +402,21 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
     //    returning acquired:true, which would NOT exercise the shouldStore=false branch)
     //    attempts exclusive acquire while A holds the lease. B carries an idempotency key.
     //    All positionals are spelled out to reach the trailing `idempotency` arg:
-    //    acquire(db, resource, machine, user, mode, ttlMs, metadata?, now?, origin?, idempotency?)
+    //    acquire(db, resource, origin, mode, ttlMs, metadata?, now?, idempotency?)
     const idemB = { key: "dp:p:c:POST:/acquire:B", requestHash: "h-B" };
     const failed = coordinationOps.acquire(
       db,
       "e5",
-      "mB",
-      "uB",
+      {
+        principalId: "test:uB",
+        participantId: "mB",
+        environment: { machine: "mB" },
+        actor: "mB/uB",
+      },
       "exclusive",
       60_000,
       undefined,
       Date.now(),
-      undefined,
       idemB,
     );
 
@@ -385,6 +438,9 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
     //    the stored holder string "mA/uA" (= `${machine}/${user}`) and fence must
     //    equal fenceAfterA, otherwise release throws ClaimOwnershipError/assertFence.
     coordinationOps.release(db, "e5", fenceAfterA, {
+      principalId: "test:uA",
+      participantId: "mA",
+      environment: { machine: "mA" },
       actor: "mA/uA",
       tokenId: null,
       source: null,
@@ -399,13 +455,16 @@ describe("audit B1 — DO idempotency dedup (crash-replay)", () => {
     const replay = coordinationOps.acquire(
       db,
       "e5",
-      "mB",
-      "uB",
+      {
+        principalId: "test:uB",
+        participantId: "mB",
+        environment: { machine: "mB" },
+        actor: "mB/uB",
+      },
       "exclusive",
       60_000,
       undefined,
       Date.now(),
-      undefined,
       idemB,
     );
 

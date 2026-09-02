@@ -26,7 +26,12 @@ function insertPointer(
       produced_by: "test",
       expires_at: expiresAt,
     },
-    { actor: "test" },
+    {
+      principalId: "test:test",
+      participantId: "test",
+      environment: {},
+      actor: "test",
+    },
   );
 }
 
@@ -90,7 +95,12 @@ describe("listExpiredPointers", () => {
     const { db } = createTestDb();
     const now = Date.now();
     insertPointer(db, "expired/1/a.bin", now - 1000);
-    tombstonePointer(db, "expired/1/a.bin", { actor: "test" });
+    tombstonePointer(db, "expired/1/a.bin", {
+      principalId: "test:test",
+      participantId: "test",
+      environment: {},
+      actor: "test",
+    });
 
     const result = listExpiredPointers(db, now, 100);
     expect(result).toHaveLength(0);
@@ -109,7 +119,12 @@ describe("tombstonePointer with journalKind", () => {
     tombstonePointer(
       db,
       "expired/1/a.bin",
-      { actor: "sweep-cron" },
+      {
+        principalId: "test:sweep-cron",
+        participantId: "sweep-cron",
+        environment: {},
+        actor: "sweep-cron",
+      },
       "artifact.expired",
     );
 
@@ -124,7 +139,12 @@ describe("tombstonePointer with journalKind", () => {
 
     // Should not throw when called without journalKind
     expect(() =>
-      tombstonePointer(db, "test/1/b.bin", { actor: "manual-user" }),
+      tombstonePointer(db, "test/1/b.bin", {
+        principalId: "test:manual-user",
+        participantId: "manual-user",
+        environment: {},
+        actor: "manual-user",
+      }),
     ).not.toThrow();
 
     const after = listPointers(db, {});
@@ -139,7 +159,12 @@ describe("tombstonePointer with journalKind", () => {
       tombstonePointer(
         db,
         "expired/2/c.bin",
-        { actor: "sweep-cron" },
+        {
+          principalId: "test:sweep-cron",
+          participantId: "sweep-cron",
+          environment: {},
+          actor: "sweep-cron",
+        },
         "artifact.expired",
       ),
     ).not.toThrow();
@@ -160,7 +185,12 @@ describe("tombstonePointer search doc cleanup", () => {
     expect(countSearchDocs(db, key)).toBe(1);
     expect(countFtsResults(db, "hello")).toBe(1);
 
-    tombstonePointer(db, key, { actor: "test-actor" });
+    tombstonePointer(db, key, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
 
     // Search doc should be deleted
     expect(countSearchDocs(db, key)).toBe(0);
@@ -175,7 +205,12 @@ describe("tombstonePointer search doc cleanup", () => {
 
     // No search doc inserted -- this simulates a non-searchable artifact
     expect(() =>
-      tombstonePointer(db, key, { actor: "test-actor" }),
+      tombstonePointer(db, key, {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      }),
     ).not.toThrow();
 
     // Pointer should still be tombstoned
@@ -189,11 +224,21 @@ describe("tombstonePointer search doc cleanup", () => {
     insertPointer(db, key, null);
     insertSearchDoc(db, key);
 
-    tombstonePointer(db, key, { actor: "test-actor" });
+    tombstonePointer(db, key, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
     // Second tombstone: pointer UPDATE is no-op (already tombstoned=1),
     // DELETE on absent search doc is no-op
     expect(() =>
-      tombstonePointer(db, key, { actor: "test-actor" }),
+      tombstonePointer(db, key, {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      }),
     ).not.toThrow();
 
     expect(countSearchDocs(db, key)).toBe(0);
@@ -206,7 +251,17 @@ describe("tombstonePointer search doc cleanup", () => {
     insertPointer(db, key, now - 1000);
     insertSearchDoc(db, key);
 
-    tombstonePointer(db, key, { actor: "sweep-cron" }, "artifact.expired");
+    tombstonePointer(
+      db,
+      key,
+      {
+        principalId: "test:sweep-cron",
+        participantId: "sweep-cron",
+        environment: {},
+        actor: "sweep-cron",
+      },
+      "artifact.expired",
+    );
 
     // listExpiredPointers should return 0 rows (tombstoned=1)
     const expired = listExpiredPointers(db, now, 100);
@@ -238,7 +293,12 @@ describe("retention enforcement via schema", () => {
         produced_by: "test",
         expires_at: computedExpiresAt,
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const pointers = listPointers(db, { kind: "logs" });
@@ -325,7 +385,12 @@ describe("retention enforcement via schema", () => {
         produced_by: "test",
         expires_at: now - 1 * 86_400_000, // expired 1 day ago
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // Pointer B: retention_days: 30, not expired
@@ -343,7 +408,12 @@ describe("retention enforcement via schema", () => {
         produced_by: "test",
         expires_at: now + 22 * 86_400_000, // still 22 days left
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // Only pointer A should be returned by listExpiredPointers
@@ -355,7 +425,12 @@ describe("retention enforcement via schema", () => {
     tombstonePointer(
       db,
       "produced/res-A/shared.md",
-      { actor: "sweep-cron" },
+      {
+        principalId: "test:sweep-cron",
+        participantId: "sweep-cron",
+        environment: {},
+        actor: "sweep-cron",
+      },
       "artifact.expired",
     );
 

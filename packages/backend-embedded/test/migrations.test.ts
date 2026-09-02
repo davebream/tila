@@ -17,7 +17,7 @@ import {
  * at IDEMPOTENCY_MIGRATION_VERSION, above the shared range.
  */
 const CANONICAL_VERSIONS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 22,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 22, 23,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,
@@ -76,7 +76,7 @@ function createFakeStorage(): {
 describe("EMBEDDED_MIGRATIONS", () => {
   const versions = EMBEDDED_MIGRATIONS.map((m) => m.version);
 
-  it("includes every canonical version 1–19 except 15 (v14 present, v15 absent), plus the idempotency overlay", () => {
+  it("includes canonical versions through v23 plus the idempotency overlay", () => {
     expect(versions).toEqual(EXPECTED_VERSIONS);
     expect(versions).toContain(14);
     expect(versions).not.toContain(15);

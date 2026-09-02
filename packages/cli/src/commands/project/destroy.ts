@@ -6,6 +6,7 @@ import { defineCommand } from "citty";
 import { parse } from "smol-toml";
 import { findConfig } from "../../config";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
+import { resolveParticipantId } from "../../lib/global-flags";
 import { loadInfraConfig } from "../../lib/infra-config";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import {
@@ -374,6 +375,7 @@ export default defineCommand({
         workerUrl,
         tilaApiToken,
         slug,
+        resolveParticipantId().id,
       );
       s.stop(
         workerWipeResult.ok

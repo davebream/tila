@@ -423,7 +423,7 @@ function createLocalRecordMethods(project: EmbeddedProject) {
 /**
  * Claim methods (mirrors `createClaimMethods` in `claims.ts`).
  * HTTP-shaped `acquire(resource, mode, ttlMs, opts?)` -> CoordinationBackend
- * `acquire(resource, machine, user, mode, ttlMs)`.
+ * `acquire(resource, mode, ttlMs)`.
  */
 function createLocalClaimMethods(project: EmbeddedProject) {
   return {
@@ -439,13 +439,7 @@ function createLocalClaimMethods(project: EmbeddedProject) {
       // embedded `_idempotency` table + EmbeddedProject.check/storeIdempotency
       // exist but are intentionally unwired here (single-machine-low-risk).
       // See docs/02-ARCHITECTURE.md §1.6a and the SDK README divergence list.
-      const result = await project.acquire(
-        resource,
-        "local",
-        "local",
-        mode,
-        ttlMs,
-      );
+      const result = await project.acquire(resource, mode, ttlMs);
       // coordinationOps returns {acquired:false} (no throw) on conflict; the DO
       // maps that to 409 `already-held` (coordination-routes.ts ~43-50). Match
       // it so isTilaApiError(err) branches identically across backends.
@@ -457,7 +451,11 @@ function createLocalClaimMethods(project: EmbeddedProject) {
           false,
         );
       }
-      return okEnvelope({ fence: result.fence, expires_at: result.expires_at });
+      return okEnvelope({
+        fence: result.fence,
+        expires_at: result.expires_at,
+        participant_id: result.participant_id,
+      });
     },
 
     async renew(
@@ -465,15 +463,9 @@ function createLocalClaimMethods(project: EmbeddedProject) {
       fence: number,
       ttlMs: number,
     ): Promise<RenewSuccessResponse> {
-      const result = await project.renew(
-        resource,
-        "local",
-        "local",
-        fence,
-        ttlMs,
-      );
+      const result = await project.renew(resource, fence, ttlMs);
       // coordinationOps returns {renewed:false} (no throw) when the claim is
-      // missing / expired / held by a different holder; the DO maps that to 409
+      // missing / expired / held by a different participant; the DO maps that to 409
       // `renew-failed` (coordination-routes.ts ~86-94). Without this guard, local
       // renew would silently report success after the caller LOST the claim —
       // breaking the fencing contract. Throw the SAME TilaApiError so
@@ -482,7 +474,7 @@ function createLocalClaimMethods(project: EmbeddedProject) {
         throw new TilaApiError(
           409,
           "renew-failed",
-          "Claim not found, expired, or holder mismatch",
+          "Claim not found, expired, or participant mismatch",
           false,
         );
       }
@@ -571,6 +563,7 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
     async list(query?: {
       resource?: string;
       kind?: string;
+      client_name?: string;
       limit?: string;
       tagFilter?: string[];
     }): Promise<ArtifactListResponse> {
@@ -794,20 +787,7 @@ function createLocalJournalMethods(project: EmbeddedProject) {
         after_seq: opts?.after_seq ? Number(opts.after_seq) : undefined,
         limit: opts?.limit ? Number(opts.limit) : undefined,
       });
-      // The embedded `JournalEvent` is the minimal projection (no token_id /
-      // data / source / source_version, which the DO journal route returns).
-      // Local DIVERGENCE (Task 14): those are defaulted (null/{}) so the wire
-      // shape matches exactly.
-      return {
-        ok: true,
-        events: events.map((e) => ({
-          ...e,
-          token_id: null,
-          data: {},
-          source: null,
-          source_version: null,
-        })),
-      };
+      return { ok: true, events };
     },
   };
 }
@@ -816,34 +796,23 @@ function createLocalJournalMethods(project: EmbeddedProject) {
 function createLocalPresenceMethods(project: EmbeddedProject) {
   return {
     async heartbeat(
-      machine: string,
       info?: Record<string, unknown>,
     ): Promise<PresenceHeartbeatSuccessResponse> {
-      await project.heartbeat(machine, info);
+      await project.heartbeat(info);
       return { ok: true };
     },
 
     async list(): Promise<PresenceListResponse> {
-      // Wire shape: `{ ok, machines: [{ machine, last_seen, info }] }` — the key
-      // is `machines`, not `presence`. (The prior `as unknown as` cast hid this
-      // mislabel.) `Presence` matches the item shape exactly.
-      const machines = await project.listPresence();
-      return { ok: true, machines };
+      const participants = await project.listPresence();
+      return { ok: true, participants };
     },
 
     async listAll(): Promise<PresenceAllListResponse> {
       // C5 fix: call the stale-inclusive backend read and map `active` per row
       // rather than hardcoding `active: true`. `listAllPresence` returns ALL
-      // presence rows with `active = last_seen > cutoff` computed per row, so
-      // stale machines appear with `active: false` — matching remote semantics.
-      const presence: PresenceWithStatus[] = await project.listAllPresence();
-      const machines = presence.map((p) => ({
-        machine: p.machine,
-        last_seen: p.last_seen,
-        info: p.info,
-        active: p.active,
-      }));
-      return { ok: true, machines };
+      const participants: PresenceWithStatus[] =
+        await project.listAllPresence();
+      return { ok: true, participants };
     },
   };
 }

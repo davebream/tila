@@ -12,7 +12,7 @@ export function registerPresenceTools(
 
   server.tool(
     "tila_presence_heartbeat",
-    "Record a heartbeat to mark this agent as online. Machine identity is derived from the API token server-side. Call periodically (e.g. every 60s) to maintain presence visibility.",
+    "Record a heartbeat for this MCP server participant. Call periodically (e.g. every 60s) to maintain presence visibility.",
     {
       info: z
         .record(z.unknown())
@@ -21,7 +21,7 @@ export function registerPresenceTools(
     },
     async ({ info }) => {
       try {
-        const result = await presence.heartbeat("mcp-agent", info);
+        const result = await presence.heartbeat(info);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };

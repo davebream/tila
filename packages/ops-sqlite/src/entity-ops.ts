@@ -164,7 +164,7 @@ export function create(
     appendJournal(tx, {
       kind: "entity.created",
       resource: input.id,
-      actor: origin.actor,
+      ...origin,
       fence: null,
       tokenId: origin.tokenId,
       source: origin.source,
@@ -370,7 +370,11 @@ export function list(
 export function compactEntity(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   entity: Entity,
-  activeClaims: Array<{ resource: string; machine: string; user: string }>,
+  activeClaims: Array<{
+    resource: string;
+    principal_id: string;
+    participant_id: string;
+  }>,
   stats: CompactEntityStats,
 ): CompactEntity {
   const data = entity.data as Record<string, unknown>;
@@ -384,7 +388,7 @@ export function compactEntity(
     type: entity.type,
     title: (data.title as string | undefined) ?? null,
     status: (data.status as string | undefined) ?? null,
-    claimed_by: claim ? `${claim.machine}/${claim.user}` : null,
+    claimed_by: claim?.participant_id ?? null,
     blockers,
     artifacts,
   };
@@ -518,7 +522,7 @@ export function update(
       appendJournal(tx, {
         kind: "entity.updated",
         resource: id,
-        actor: origin.actor,
+        ...origin,
         fence: fence,
         tokenId: origin.tokenId,
         source: origin.source,
@@ -631,7 +635,7 @@ export function archive(
       appendJournal(tx, {
         kind: "entity.archived",
         resource: id,
-        actor: origin.actor,
+        ...origin,
         fence: fence,
         tokenId: origin.tokenId,
         source: origin.source,

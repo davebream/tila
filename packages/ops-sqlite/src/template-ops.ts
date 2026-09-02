@@ -230,7 +230,7 @@ export function instantiateTemplate(
     appendJournal(tx, {
       kind: "template.instantiated",
       resource: rootId,
-      actor: origin.actor,
+      ...origin,
       tokenId: origin.tokenId,
       source: origin.source,
       sourceVersion: origin.sourceVersion,

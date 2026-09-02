@@ -59,6 +59,9 @@ function createApp(routeModule: Hono<AppEnv>, prefix = ""): Hono<AppEnv> {
       tokenId: "test-token-id-uuid",
     });
     c.set("doStub", {} as DurableObjectStub);
+    c.set("principalId", "token:test-token-id-uuid");
+    c.set("participantId", "participant-1");
+    c.set("environment", { machine: "test-host" });
     await next();
   });
   if (prefix) {
@@ -132,7 +135,7 @@ describe("Identity stamp — spoof prevention", () => {
   describe("POST /acquire (claim acquire — exclusive mode)", () => {
     const app = createApp(claims);
 
-    it("stamps machine+user from token, ignoring client-supplied values", async () => {
+    it("stamps canonical auth and participant identity", async () => {
       const res = await app.request("/acquire", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -144,15 +147,18 @@ describe("Identity stamp — spoof prevention", () => {
       });
       expect(res.status).toBe(200);
       const payload = forwardToDOMock.mock.calls[0][3];
-      expect(payload.machine).toBe(TOKEN_NAME);
-      expect(payload.user).toBe(TOKEN_NAME);
+      expect(payload.principal_id).toBe("token:test-token-id-uuid");
+      expect(payload.participant_id).toBe("participant-1");
+      expect(payload.environment).toEqual({ machine: "test-host" });
+      expect(payload.machine).toBeUndefined();
+      expect(payload.user).toBeUndefined();
     });
   });
 
   describe("POST /acquire (claim acquire — presence mode)", () => {
     const app = createApp(claims);
 
-    it("stamps machine from token in presence mode", async () => {
+    it("stamps participant identity in presence mode", async () => {
       // heartbeat returns ok:true
       forwardToDOMock.mockResolvedValueOnce(makeJsonResponse({ ok: true }));
 
@@ -167,9 +173,9 @@ describe("Identity stamp — spoof prevention", () => {
       });
       expect(res.status).toBe(200);
       const payload = forwardToDOMock.mock.calls[0][3];
-      // In presence mode, forwardToDO is called with /coord/heartbeat and machine=tokenResult.name
-      expect(payload.machine).toBe(TOKEN_NAME);
-      expect(payload.machine).not.toBe("spoofed");
+      expect(payload.principal_id).toBe("token:test-token-id-uuid");
+      expect(payload.participant_id).toBe("participant-1");
+      expect(payload.machine).toBeUndefined();
     });
   });
 
@@ -178,7 +184,7 @@ describe("Identity stamp — spoof prevention", () => {
   describe("POST /renew (claim renew)", () => {
     const app = createApp(claims);
 
-    it("stamps machine+user from token, ignoring client-supplied values", async () => {
+    it("stamps canonical identity", async () => {
       const res = await app.request("/renew", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -190,8 +196,10 @@ describe("Identity stamp — spoof prevention", () => {
       });
       expect(res.status).toBe(200);
       const payload = forwardToDOMock.mock.calls[0][3];
-      expect(payload.machine).toBe(TOKEN_NAME);
-      expect(payload.user).toBe(TOKEN_NAME);
+      expect(payload.principal_id).toBe("token:test-token-id-uuid");
+      expect(payload.participant_id).toBe("participant-1");
+      expect(payload.machine).toBeUndefined();
+      expect(payload.user).toBeUndefined();
     });
   });
 
@@ -258,7 +266,7 @@ describe("Identity stamp — spoof prevention", () => {
   describe("POST /heartbeat (presence heartbeat)", () => {
     const app = createApp(presence, "");
 
-    it("stamps machine from token, ignoring client-supplied value", async () => {
+    it("keeps client machine data as environment metadata", async () => {
       forwardToDOMock.mockResolvedValueOnce(makeJsonResponse({ ok: true }));
 
       const res = await app.request("/heartbeat", {
@@ -271,8 +279,10 @@ describe("Identity stamp — spoof prevention", () => {
       });
       expect(res.status).toBe(200);
       const payload = forwardToDOMock.mock.calls[0][3];
-      expect(payload.machine).toBe(TOKEN_NAME);
-      expect(payload.machine).not.toBe("spoofed-machine");
+      expect(payload.principal_id).toBe("token:test-token-id-uuid");
+      expect(payload.participant_id).toBe("participant-1");
+      expect(payload.environment).toEqual({ machine: "test-host" });
+      expect(payload.machine).toBeUndefined();
       expect(payload.info).toEqual({ task: "current" });
     });
   });

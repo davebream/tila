@@ -7,6 +7,14 @@ export {
   type Claim,
 } from "./claim";
 export {
+  ParticipantIdSchema,
+  type ParticipantId,
+  EnvironmentMetadataSchema,
+  type EnvironmentMetadata,
+  IdentityContextSchema,
+  type IdentityContext,
+} from "./identity";
+export {
   JournalEventKindSchema,
   type JournalEventKind,
   JournalEventSchema,

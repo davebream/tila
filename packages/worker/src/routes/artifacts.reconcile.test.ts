@@ -165,6 +165,9 @@ async function makeReconcileApp(opts: {
     c.set("tokenResult", opts.tokenResult);
     c.set("doStub", opts.doStub);
     c.set("projectId", "proj-1");
+    c.set("principalId", "token:test-token");
+    c.set("participantId", "test-participant");
+    c.set("environment", { client_name: "test" });
     return next();
   });
   app.route("/artifacts", artifacts);

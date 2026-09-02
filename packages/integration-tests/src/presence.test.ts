@@ -11,31 +11,32 @@ const TOKEN = process.env.TILA_TOKEN;
 const PROJECT_ID = process.env.TILA_PROJECT_ID ?? "default";
 
 describe.skipIf(!BASE_URL || !TOKEN)("tila presence", () => {
+  const machine = `test-presence-${Date.now()}`;
   const client = new TilaClient({
     baseUrl: BASE_URL ?? "http://localhost:8787",
     token: TOKEN ?? "",
+    environment: { machine },
   });
 
   const projectPath = `/projects/${PROJECT_ID}`;
-  const machine = `test-presence-${Date.now()}`;
 
   // AC-4: tila presence heartbeat writes a heartbeat
   it("should accept heartbeat and return ok:true", async () => {
     const res = await client.post(
       `${projectPath}/presence/heartbeat`,
-      { machine, info: { role: "test" } },
+      { info: { role: "test" } },
       { schema: PresenceHeartbeatSuccessResponseSchema, validate: true },
     );
 
     expect(res.ok).toBe(true);
   });
 
-  // AC-5: tila presence list shows active machines
-  it("should list active machines after heartbeat", async () => {
-    // Send heartbeat first to ensure the machine exists
+  // AC-5: tila presence list shows active participants
+  it("should list active participants after heartbeat", async () => {
+    // Send heartbeat first to ensure the participant exists
     await client.post(
       `${projectPath}/presence/heartbeat`,
-      { machine, info: { role: "test" } },
+      { info: { role: "test" } },
       { schema: PresenceHeartbeatSuccessResponseSchema, validate: true },
     );
 
@@ -45,8 +46,9 @@ describe.skipIf(!BASE_URL || !TOKEN)("tila presence", () => {
     });
 
     expect(res.ok).toBe(true);
-    const entry = res.machines.find(
-      (m: PresenceAllListResponse["machines"][number]) => m.machine === machine,
+    const entry = res.participants.find(
+      (participant: PresenceAllListResponse["participants"][number]) =>
+        participant.environment.machine === machine,
     );
     expect(entry).toBeDefined();
     expect(entry?.active).toBe(true);
@@ -66,20 +68,21 @@ describe.skipIf(!BASE_URL || !TOKEN)("tila presence", () => {
     });
 
     expect(res.ok).toBe(true);
-    // Validate schema shape: every machine entry has the active boolean field
-    for (const entry of res.machines) {
+    // Validate schema shape: every participant entry has canonical identity.
+    for (const entry of res.participants) {
       expect(typeof entry.active).toBe("boolean");
-      expect(typeof entry.machine).toBe("string");
+      expect(typeof entry.principal_id).toBe("string");
+      expect(typeof entry.participant_id).toBe("string");
       expect(typeof entry.last_seen).toBe("number");
     }
   });
 
   // AC-7: tila presence list --json outputs valid JSON
   it("should return valid JSON matching PresenceAllListResponseSchema", async () => {
-    // Send heartbeat to ensure at least one machine in the list
+    // Send heartbeat to ensure at least one participant in the list
     await client.post(
       `${projectPath}/presence/heartbeat`,
-      { machine, info: { version: "1.0" } },
+      { info: { version: "1.0" } },
       { schema: PresenceHeartbeatSuccessResponseSchema, validate: true },
     );
 
@@ -90,11 +93,12 @@ describe.skipIf(!BASE_URL || !TOKEN)("tila presence", () => {
 
     // If we reach here without throwing, the Zod schema parse succeeded
     expect(res.ok).toBe(true);
-    expect(Array.isArray(res.machines)).toBe(true);
-    expect(res.machines.length).toBeGreaterThan(0);
+    expect(Array.isArray(res.participants)).toBe(true);
+    expect(res.participants.length).toBeGreaterThan(0);
 
-    const entry = res.machines.find(
-      (m: PresenceAllListResponse["machines"][number]) => m.machine === machine,
+    const entry = res.participants.find(
+      (participant: PresenceAllListResponse["participants"][number]) =>
+        participant.environment.machine === machine,
     );
     expect(entry).toBeDefined();
     expect(entry?.info).toBeDefined();

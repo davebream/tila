@@ -258,6 +258,11 @@ describe("SDK-local round-trip (tila-sdk/local under node)", () => {
       org: ORG,
       project: PROJECT,
       skipFilesystemCheck: true,
+      identity: {
+        principal_id: `local:${ORG}`,
+        participant_id: "node-sdk-participant",
+        environment: { machine: "machine-1", client_name: "sdk-test" },
+      },
     });
 
     try {
@@ -271,13 +276,7 @@ describe("SDK-local round-trip (tila-sdk/local under node)", () => {
       expect(task.id).toBe("T-sdk");
 
       // claim returns a monotonic fence
-      const acquired = await project.acquire(
-        "task:T-sdk",
-        "machine-1",
-        "user-1",
-        "exclusive",
-        60_000,
-      );
+      const acquired = await project.acquire("task:T-sdk", "exclusive", 60_000);
       expect(acquired.fence).toBeGreaterThan(0);
 
       // fenced update with the acquired fence succeeds

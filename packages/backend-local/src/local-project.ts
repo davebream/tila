@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { EmbeddedProject } from "@tila/backend-embedded";
 import type { schema } from "@tila/ops-sqlite";
+import type { IdentityContext } from "@tila/schemas";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 
 import { createLocalConnection } from "./connection";
@@ -34,11 +35,13 @@ export class LocalProject extends EmbeddedProject {
     private readonly bunDb: BunDb,
     org: string,
     project: string,
+    identity?: IdentityContext,
   ) {
     super({
       db: bunDb,
       org,
       project,
+      identity,
       sleepSync: Bun.sleepSync,
       close: () => bunDb.$client.close(),
     });
@@ -53,9 +56,10 @@ export class LocalProject extends EmbeddedProject {
     org: string,
     project: string,
     options?: LocalConnectionOptions,
+    identity?: IdentityContext,
   ): LocalProject {
     const db = createLocalConnection(dbPath, org, project, options);
-    return new LocalProject(db, org, project);
+    return new LocalProject(db, org, project, identity);
   }
 
   /**

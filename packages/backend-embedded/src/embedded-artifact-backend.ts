@@ -18,12 +18,17 @@ import {
   validateGrepPattern,
 } from "@tila/core";
 import {
+  type RequestOrigin,
   artifactOps,
   constraintOps,
   relationshipOps,
   schema,
 } from "@tila/ops-sqlite";
-import type { ArtifactGrepResponse } from "@tila/schemas";
+import {
+  type ArtifactGrepResponse,
+  type IdentityContext,
+  IdentityContextSchema,
+} from "@tila/schemas";
 import { and, eq, like } from "drizzle-orm";
 
 import type { BlobStore } from "./blob-store";
@@ -53,12 +58,14 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
   private readonly _org: string;
   private readonly _project: string;
   private readonly sleepSync: SleepSync;
+  private readonly identity: IdentityContext;
 
   constructor(opts: {
     db: EmbeddedDb;
     blobs: BlobStore;
     org: string;
     project: string;
+    identity?: IdentityContext;
     sleepSync: SleepSync;
   }) {
     this.db = opts.db;
@@ -66,6 +73,25 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     this._org = opts.org;
     this._project = opts.project;
     this.sleepSync = opts.sleepSync;
+    this.identity = IdentityContextSchema.parse(
+      opts.identity ?? {
+        principal_id: `local:${opts.org}`,
+        participant_id: crypto.randomUUID(),
+        environment: { client_name: "embedded" },
+      },
+    );
+  }
+
+  private origin(): RequestOrigin {
+    return {
+      principalId: this.identity.principal_id,
+      participantId: this.identity.participant_id,
+      environment: this.identity.environment,
+      actor: this.identity.principal_id,
+      tokenId: null,
+      source: this.identity.environment.client_name ?? null,
+      sourceVersion: this.identity.environment.client_version ?? null,
+    };
   }
 
   private retry<T>(fn: () => T): T {
@@ -129,7 +155,7 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
           produced_by: "local",
           expires_at: options.expiresAt ?? null,
         },
-        { actor: "local" },
+        this.origin(),
         undefined, // journalKind -- default artifact.produced
         searchText,
       ),
@@ -186,9 +212,7 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
 
   async delete(key: string): Promise<void> {
     // Soft tombstone, matching DO behavior. Physical blob cleanup via sweepOps.
-    this.retry(() =>
-      artifactOps.tombstonePointer(this.db, key, { actor: "local" }),
-    );
+    this.retry(() => artifactOps.tombstonePointer(this.db, key, this.origin()));
   }
 
   async listWithMetadata(
@@ -232,7 +256,7 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
           toKeyOrUri.to_key,
           type,
           {},
-          { actor: "local" },
+          this.origin(),
         );
       } else if (toKeyOrUri.to_uri) {
         relationshipOps.insertArtifactRelationship(

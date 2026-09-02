@@ -65,7 +65,7 @@ describe("local adapter envelopes use the shared okEnvelope factory (C7)", () =>
       "../../local/resource-adapters.js"
     );
     const presence = buildLocalPresenceMethodsForTest(mockProject);
-    const result = await presence.heartbeat("machine-1");
+    const result = await presence.heartbeat({});
 
     // heartbeat returns okEnvelope({}) = { ok: true }
     expect(result).toEqual(okEnvelope({}));

@@ -149,7 +149,7 @@ export function upsertPointer(
       appendJournal(tx, {
         kind: journalKind ?? "artifact.produced",
         resource: pointer.resource ?? "source",
-        actor: origin.actor,
+        ...origin,
         fence: pointer.fence,
         tokenId: origin.tokenId,
         source: origin.source,
@@ -476,7 +476,7 @@ export function tombstonePointer(
     appendJournal(tx, {
       kind: journalKind ?? "artifact.tombstoned",
       resource: r2Key,
-      actor: origin.actor,
+      ...origin,
       fence: null,
       tokenId: origin.tokenId,
       source: origin.source,
@@ -576,7 +576,7 @@ export function addArtifactRelationship(
     appendJournal(tx, {
       kind: "artifact.relationship.added",
       resource: fromKey,
-      actor: origin.actor,
+      ...origin,
       fence: null,
       data: { type, to_key: toKey },
       tokenId: origin.tokenId,
@@ -1070,7 +1070,7 @@ export function rebuildSearchDocs(
           appendJournal(tx, {
             kind: "artifact.search.rebuilt",
             resource: candidate.resource ?? candidate.artifact_key,
-            actor: origin.actor,
+            ...origin,
             fence: null,
             tokenId: origin.tokenId,
             source: origin.source,
@@ -1137,7 +1137,7 @@ export function rebuildSearchDocs(
       appendJournal(tx, {
         kind: "artifact.search.rebuilt",
         resource: candidate.resource ?? candidate.artifact_key,
-        actor: origin.actor,
+        ...origin,
         fence: null,
         tokenId: origin.tokenId,
         source: origin.source,

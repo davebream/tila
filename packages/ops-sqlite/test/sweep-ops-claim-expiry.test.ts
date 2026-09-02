@@ -27,7 +27,7 @@ afterEach(() => {
   testDb.rawDb.close();
 });
 
-/** Insert a claim row directly so we control expires_at / holder / fence. */
+/** Insert a claim row directly so we control expires_at / identity / fence. */
 function insertClaim(
   db: TestDb,
   args: {
@@ -41,14 +41,13 @@ function insertClaim(
 ): void {
   db.rawDb
     .prepare(
-      `INSERT INTO claims(resource, holder, machine, user, mode, fence, acquired_at, expires_at, metadata)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, '{}')`,
+      `INSERT INTO claims(resource, principal_id, participant_id, environment, mode, fence, acquired_at, expires_at, metadata)
+       VALUES(?, ?, ?, '{}', ?, ?, ?, ?, '{}')`,
     )
     .run(
       args.resource,
-      `${args.machine}/${args.user}`,
-      args.machine,
       args.user,
+      args.machine,
       args.mode ?? "exclusive",
       args.fence ?? 1,
       args.expiresAt - 1000,
@@ -59,14 +58,14 @@ function insertClaim(
 function journalRows(db: TestDb): Array<{
   kind: string;
   resource: string;
-  actor: string;
+  principal_id: string;
   fence: number | null;
   data: Record<string, unknown>;
 }> {
   return journalOps.listJournal(db.db, { limit: 1000 }).map((r) => ({
     kind: r.kind,
     resource: r.resource,
-    actor: r.actor,
+    principal_id: r.principal_id,
     fence: r.fence,
     data: r.data,
   }));
@@ -91,8 +90,11 @@ describe("sweep — claim.expired journaling", () => {
     );
     expect(expiredRows).toHaveLength(1);
     expect(expiredRows[0].resource).toBe("task:abc");
-    // Holder identity is preserved so the audit trail names whose lease lapsed.
-    expect(expiredRows[0].actor).toBe("m1/u1");
+    expect(expiredRows[0].principal_id).toBe("system:sweep");
+    expect(expiredRows[0].data).toMatchObject({
+      principal_id: "u1",
+      participant_id: "m1",
+    });
     // The claim's fence is recorded.
     expect(expiredRows[0].fence).toBe(7);
   });
@@ -149,9 +151,15 @@ describe("sweep — claim.expired journaling", () => {
     );
     expect(expiredRows).toHaveLength(2);
     const byResource = new Map(expiredRows.map((r) => [r.resource, r]));
-    expect(byResource.get("task:owned-1")?.actor).toBe("m1/owner");
+    expect(byResource.get("task:owned-1")?.data).toMatchObject({
+      principal_id: "owner",
+      participant_id: "m1",
+    });
     expect(byResource.get("task:owned-1")?.fence).toBe(3);
-    expect(byResource.get("task:owned-2")?.actor).toBe("m2/owner");
+    expect(byResource.get("task:owned-2")?.data).toMatchObject({
+      principal_id: "owner",
+      participant_id: "m2",
+    });
     expect(byResource.get("task:owned-2")?.fence).toBe(9);
   });
 

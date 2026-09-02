@@ -81,14 +81,19 @@ erDiagram
         int t "unix ms"
         text kind "event type"
         text resource "soft link"
-        text actor
+        text principal_id
+        text participant_id
+        json environment
+        text token_id "credential audit"
         int fence
         json data "event payload"
     }
 
     claims {
         text resource PK
-        text holder
+        text principal_id
+        text participant_id
+        json environment
         text mode "exclusive or owner or presence"
         int fence "value at acquire time"
         int acquired_at
@@ -102,7 +107,9 @@ erDiagram
     }
 
     presence {
-        text machine PK
+        text principal_id PK
+        text participant_id PK
+        json environment
         int last_seen "60s TTL by default"
         json info "current resource and status"
     }
@@ -205,7 +212,7 @@ DO SQLite is the source of truth for everything per-project. It is *not* a cache
 - **Claims:** persisted, not transient. The single-DO transaction model means claim acquisition is the same kind of write as entity creation.
 - **Fences:** persisted indefinitely. Even after a resource is deleted, its fence counter survives (so future re-creates don't reuse fence numbers).
 - **Journal:** the audit log. Append-only, durable, recoverable via Cloudflare's DO SQLite point-in-time recovery.
-- **Presence:** the one mostly-ephemeral table. Refreshed on heartbeat, reaped by the sweeper. Crashes are recoverable (machines re-register).
+- **Presence:** the one mostly-ephemeral table. It is keyed by `(principal_id, participant_id)`, refreshed on heartbeat, and reaped by the sweeper. Crashes are recoverable (participants re-register).
 
 If a DO is wiped (catastrophic incident with no PIT recovery), the recovery story is:
 - **Artifacts are recoverable from R2 + object metadata.** `tila doctor --reconcile` walks R2 and synthesizes `artifact_pointers` rows from `x-amz-meta-tila-*` metadata.

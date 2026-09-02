@@ -34,14 +34,22 @@ const busyTimeout = Number.parseInt(
 
 try {
   if (op === "acquire") {
-    const lp = LocalProject.open(dbPath, org, project, {
-      skipFilesystemCheck: true,
-    });
+    const lp = LocalProject.open(
+      dbPath,
+      org,
+      project,
+      { skipFilesystemCheck: true },
+      {
+        principal_id: `local:${org}`,
+        participant_id: holder,
+        environment: { machine: "shared-test-machine", client_name: "test" },
+      },
+    );
     // Apply test-specific busy_timeout override (shorter timeout allows faster retries in CI)
     lp.getDb().$client.exec(`PRAGMA busy_timeout=${busyTimeout};`);
     let result: { acquired: boolean; fence: number; expires_at: number };
     try {
-      result = await lp.acquire(resource, holder, holder, "exclusive", 30000);
+      result = await lp.acquire(resource, "exclusive", 30000);
     } catch (acquireErr) {
       // If we exhausted retries on SQLITE_BUSY, the resource is contended.
       // Treat as a non-winner: return acquired:false.
@@ -96,8 +104,8 @@ try {
 
     // Insert a partial claim row (will be rolled back on SIGKILL)
     db.exec(`
-      INSERT OR REPLACE INTO claims (resource, holder, machine, user, mode, fence, acquired_at, expires_at)
-      VALUES ('${resource}', '${holder}', '${holder}', '${holder}', 'exclusive', 999999, ${Date.now()}, ${Date.now() + 60000})
+      INSERT OR REPLACE INTO claims (resource, principal_id, participant_id, environment, mode, fence, acquired_at, expires_at)
+      VALUES ('${resource}', 'local:${org}', '${holder}', '{"machine":"shared-test-machine"}', 'exclusive', 999999, ${Date.now()}, ${Date.now() + 60000})
     `);
     db.exec(`
       INSERT OR REPLACE INTO fences (resource, current_fence)

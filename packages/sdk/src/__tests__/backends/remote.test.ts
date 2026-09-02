@@ -290,21 +290,17 @@ describe("RemoteBackend", () => {
         ok: true,
         fence: 42,
         expires_at: 9999,
+        participant_id: "participant-1",
       });
 
       const backend = await createBackend(client);
-      const result = await backend.acquire(
-        "task:T-1",
-        "agent-1",
-        "agent-1",
-        "exclusive",
-        300_000,
-      );
+      const result = await backend.acquire("task:T-1", "exclusive", 300_000);
 
       expect(result).toEqual({
         acquired: true,
         fence: 42,
         expires_at: 9999,
+        participant_id: "participant-1",
       });
     });
 
@@ -312,13 +308,7 @@ describe("RemoteBackend", () => {
       client.post.mockResolvedValue({ ok: true, expires_at: 9999 });
 
       const backend = await createBackend(client);
-      const result = await backend.renew(
-        "task:T-1",
-        "agent-1",
-        "agent-1",
-        42,
-        300_000,
-      );
+      const result = await backend.renew("task:T-1", 42, 300_000);
 
       // Returns the REAL stored expires_at from the response, not a recompute.
       expect(result).toEqual({ renewed: true, expires_at: 9999 });
@@ -342,9 +332,11 @@ describe("RemoteBackend", () => {
     it("listPresence() strips active field", async () => {
       client.get.mockResolvedValue({
         ok: true,
-        machines: [
+        participants: [
           {
-            machine: "host-1",
+            principal_id: "token:1",
+            participant_id: "participant-1",
+            environment: { machine: "host-1" },
             last_seen: 1000,
             info: {},
             active: true,
@@ -356,7 +348,13 @@ describe("RemoteBackend", () => {
       const result = await backend.listPresence();
 
       expect(result).toEqual([
-        { machine: "host-1", last_seen: 1000, info: {} },
+        {
+          principal_id: "token:1",
+          participant_id: "participant-1",
+          environment: { machine: "host-1" },
+          last_seen: 1000,
+          info: {},
+        },
       ]);
       // active field should NOT be in the result
       expect(result[0]).not.toHaveProperty("active");

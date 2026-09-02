@@ -181,7 +181,7 @@ export async function listJournal(
   params?: {
     resource?: string;
     kind?: string | string[];
-    source?: string[];
+    client_name?: string[];
     after_seq?: number;
     limit?: number;
   },
@@ -193,10 +193,10 @@ export async function listJournal(
       ? params.kind.join(",")
       : params.kind;
   }
-  if (params?.source) {
-    stringParams.source = Array.isArray(params.source)
-      ? params.source.join(",")
-      : params.source;
+  if (params?.client_name) {
+    stringParams.client_name = Array.isArray(params.client_name)
+      ? params.client_name.join(",")
+      : params.client_name;
   }
   if (params?.after_seq !== undefined)
     stringParams.after_seq = String(params.after_seq);

@@ -94,7 +94,10 @@ export function checkPendingGates(
     appendJournal(tx, {
       kind: "gate.timed_out" as JournalEventKind,
       resource,
-      actor: "system",
+      actor: "system:gate-timeout",
+      principalId: "system:gate-timeout",
+      participantId: "system:gate-timeout",
+      environment: {},
       fence: gate.fence,
       data: { gate_id: gate.id },
     });
@@ -205,7 +208,7 @@ export function createGate(
     appendJournal(tx, {
       kind: "gate.created" as JournalEventKind,
       resource: params.resource,
-      actor: origin.actor,
+      ...origin,
       fence: params.fence,
       data: {
         gate_id: params.id,
@@ -265,10 +268,16 @@ export function resolveGate(
       .where(eq(schema.gates.id, gateId))
       .run();
 
+    const journalOrigin = origin ?? {
+      principalId: "system:gate-resolution",
+      participantId: "system:gate-resolution",
+      environment: {},
+      actor: "system:gate-resolution",
+    };
     appendJournal(tx, {
       kind: "gate.resolved" as JournalEventKind,
       resource: gate.resource,
-      actor: origin?.actor ?? "system",
+      ...journalOrigin,
       fence: gate.fence,
       data: {
         gate_id: gateId,
@@ -314,7 +323,7 @@ export function cancelGate(
     appendJournal(tx, {
       kind: "gate.cancelled" as JournalEventKind,
       resource: gate.resource,
-      actor: origin.actor,
+      ...origin,
       fence: gate.fence,
       data: { gate_id: gateId },
       tokenId: origin.tokenId,
@@ -355,7 +364,10 @@ export function listGates(
       appendJournal(tx, {
         kind: "gate.timed_out" as JournalEventKind,
         resource: gate.resource,
-        actor: "system",
+        actor: "system:gate-timeout",
+        principalId: "system:gate-timeout",
+        participantId: "system:gate-timeout",
+        environment: {},
         fence: gate.fence,
         data: { gate_id: gate.id },
       });

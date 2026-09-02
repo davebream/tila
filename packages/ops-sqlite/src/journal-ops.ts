@@ -1,6 +1,16 @@
-import type { JournalEventKind } from "@tila/schemas";
+import type { EnvironmentMetadata, JournalEventKind } from "@tila/schemas";
 import type { TablesRelationalConfig } from "drizzle-orm";
-import { type SQL, and, count, desc, eq, gt, inArray, max } from "drizzle-orm";
+import {
+  type SQL,
+  and,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  max,
+  sql,
+} from "drizzle-orm";
 import type {
   BaseSQLiteDatabase,
   SQLiteTransaction,
@@ -12,6 +22,10 @@ import * as schema from "./schema";
  * Replaces the separate actor + ProvenanceCtx parameter pair.
  */
 export interface RequestOrigin {
+  principalId: string;
+  participantId: string;
+  environment: EnvironmentMetadata;
+  /** Domain display attribution retained outside the public journal identity. */
   actor: string;
   tokenId?: string | null;
   source?: string | null;
@@ -29,6 +43,9 @@ export function appendJournal(
     kind: JournalEventKind;
     resource: string;
     actor: string;
+    principalId: string;
+    participantId: string;
+    environment: EnvironmentMetadata;
     tokenId?: string | null;
     fence?: number | null;
     data?: Record<string, unknown>;
@@ -41,12 +58,17 @@ export function appendJournal(
       t: Date.now(),
       kind: entry.kind,
       resource: entry.resource,
-      actor: entry.actor,
+      principal_id: entry.principalId,
+      participant_id: entry.participantId,
+      environment: JSON.stringify(entry.environment),
+      // v23 retains these columns only so pre-v23 archive tooling can still
+      // read the physical table. Canonical writes never put identity into them.
+      actor: "",
       token_id: entry.tokenId ?? null,
       fence: entry.fence ?? null,
       data: JSON.stringify(entry.data ?? {}),
-      source: entry.source ?? null,
-      source_version: entry.sourceVersion ?? null,
+      source: null,
+      source_version: null,
     })
     .run();
 }
@@ -64,7 +86,7 @@ export function listJournal(
   query: {
     resource?: string;
     kind?: string | string[];
-    source?: string | string[];
+    client_name?: string | string[];
     after_seq?: number;
     limit?: number;
   },
@@ -74,12 +96,12 @@ export function listJournal(
   t: number;
   kind: string;
   resource: string;
-  actor: string;
+  principal_id: string;
+  participant_id: string;
+  environment: EnvironmentMetadata;
   token_id: string | null;
   fence: number | null;
   data: Record<string, unknown>;
-  source: string | null;
-  source_version: string | null;
 }[] {
   // When the requested range falls entirely within the archived region,
   // return an empty array — the caller surfaces an "archived" indicator.
@@ -103,11 +125,12 @@ export function listJournal(
       conditions.push(eq(schema.journal.kind, query.kind));
     }
   }
-  if (query.source) {
-    if (Array.isArray(query.source)) {
-      conditions.push(inArray(schema.journal.source, query.source));
+  const clientName = sql<string>`json_extract(${schema.journal.environment}, '$.client_name')`;
+  if (query.client_name) {
+    if (Array.isArray(query.client_name)) {
+      conditions.push(inArray(clientName, query.client_name));
     } else {
-      conditions.push(eq(schema.journal.source, query.source));
+      conditions.push(eq(clientName, query.client_name));
     }
   }
   if (query.after_seq !== undefined) {
@@ -129,12 +152,12 @@ export function listJournal(
     t: row.t,
     kind: row.kind,
     resource: row.resource,
-    actor: row.actor,
+    principal_id: row.principal_id,
+    participant_id: row.participant_id,
+    environment: JSON.parse(row.environment) as EnvironmentMetadata,
     token_id: row.token_id ?? null,
     fence: row.fence,
     data: JSON.parse(row.data) as Record<string, unknown>,
-    source: row.source ?? null,
-    source_version: row.source_version ?? null,
   }));
 }
 

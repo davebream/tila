@@ -321,6 +321,7 @@ function buildSessionTokenResult(
   cached: {
     projectId: string;
     name: string;
+    principalId?: string;
     scopes: string;
     expiresAt: number;
     permission?: string;
@@ -339,6 +340,7 @@ function buildSessionTokenResult(
         tokenId: "",
         sessionHash,
         githubLogin: cached.name,
+        principalId: cached.principalId,
         expiresAt: cached.expiresAt,
       } satisfies WorkspaceSessionTokenResult,
       authKind: "workspace",
@@ -354,6 +356,7 @@ function buildSessionTokenResult(
       sessionHash,
       expiresAt: cached.expiresAt,
       permission: cached.permission ?? "read",
+      principalId: cached.principalId,
     } satisfies CookieSessionTokenResult,
     authKind: "cookie",
   };

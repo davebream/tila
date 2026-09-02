@@ -56,7 +56,7 @@ export function registerClaimTools(
   const acquireSchema = {
     resource: z.string().describe("Task ID to claim"),
     mode: ClaimModeSchema.default("exclusive").describe(
-      "Claim mode: exclusive (single holder), owner (one user across machines), or presence (advisory, non-exclusive)",
+      "Claim mode: exclusive (one participant), owner (one principal, transferable between its participants), or presence (advisory, non-exclusive)",
     ),
     ttl_ms: z
       .number()

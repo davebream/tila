@@ -4,6 +4,7 @@ import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const signals = new Hono<{
@@ -39,8 +40,7 @@ signals.post("/send", requirePermission("write"), async (c) => {
     {
       ...parsed.data,
       created_by: tokenResult.name,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),

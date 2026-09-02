@@ -95,6 +95,7 @@ const workspaceSession: WorkspaceSessionTokenResult = {
   tokenId: "",
   sessionHash: "abc123",
   githubLogin: "octocat",
+  principalId: "github:github.com:583231",
   expiresAt: Date.now() + 3600_000,
 };
 
@@ -525,6 +526,7 @@ describe("POST /api/workspace/select", () => {
       sessionHash: "abc123",
       expiresAt: Date.now() + 3600_000,
       permission: "admin",
+      principalId: "github:github.com:583231",
     };
 
     const app = createApp(nonWorkspaceToken);

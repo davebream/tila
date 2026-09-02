@@ -44,8 +44,25 @@ describe("upsertPointer with autoSupersedes=true", () => {
     const old = makePointer({ r2_key: "keys/old.md", sha256: "sha_old" });
     const newPtr = makePointer({ r2_key: "keys/new.md", sha256: "sha_new" });
 
-    upsertPointer(db, old, { actor: "agent" });
-    upsertPointer(db, newPtr, { actor: "agent" }, undefined, null, true);
+    upsertPointer(db, old, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      newPtr,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
 
     const rows = rawDb
       .prepare(
@@ -69,8 +86,18 @@ describe("upsertPointer with autoSupersedes=true", () => {
     const old = makePointer({ r2_key: "keys/old2.md", sha256: "sha_old2" });
     const newPtr = makePointer({ r2_key: "keys/new2.md", sha256: "sha_new2" });
 
-    upsertPointer(db, old, { actor: "agent" });
-    upsertPointer(db, newPtr, { actor: "agent" }); // no autoSupersedes param
+    upsertPointer(db, old, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(db, newPtr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    }); // no autoSupersedes param
 
     const rows = rawDb
       .prepare(
@@ -92,8 +119,25 @@ describe("upsertPointer with autoSupersedes=true", () => {
       resource: null,
     });
 
-    upsertPointer(db, source, { actor: "agent" });
-    upsertPointer(db, newSource, { actor: "agent" }, undefined, null, true);
+    upsertPointer(db, source, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      newSource,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
 
     const rows = rawDb
       .prepare(
@@ -106,10 +150,27 @@ describe("upsertPointer with autoSupersedes=true", () => {
   it("handles re-upload of same content (no duplicate relationships)", () => {
     const pointer = makePointer({ r2_key: "keys/same.md", sha256: "sha_same" });
 
-    upsertPointer(db, pointer, { actor: "agent" });
+    upsertPointer(db, pointer, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
     // Re-upload same r2_key — INSERT OR IGNORE on pointer is a no-op,
     // auto-supersedes query finds 0 other pointers with different r2_key
-    upsertPointer(db, pointer, { actor: "agent" }, undefined, null, true);
+    upsertPointer(
+      db,
+      pointer,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
 
     const rows = rawDb
       .prepare(
@@ -124,9 +185,31 @@ describe("upsertPointer with autoSupersedes=true", () => {
     const ptr2 = makePointer({ r2_key: "keys/v2.md", sha256: "sha_v2" });
     const ptr3 = makePointer({ r2_key: "keys/v3.md", sha256: "sha_v3" });
 
-    upsertPointer(db, ptr1, { actor: "agent" });
-    upsertPointer(db, ptr2, { actor: "agent" });
-    upsertPointer(db, ptr3, { actor: "agent" }, undefined, null, true);
+    upsertPointer(db, ptr1, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(db, ptr2, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      ptr3,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
 
     const rows = rawDb
       .prepare(
@@ -149,10 +232,39 @@ describe("upsertPointer with autoSupersedes=true", () => {
       sha256: "sha_dup_new",
     });
 
-    upsertPointer(db, old, { actor: "agent" });
-    upsertPointer(db, newPtr, { actor: "agent" }, undefined, null, true);
+    upsertPointer(db, old, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      newPtr,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
     // Second upsert of same newPtr with autoSupersedes: same INSERT OR IGNORE → no duplicate
-    upsertPointer(db, newPtr, { actor: "agent" }, undefined, null, true);
+    upsertPointer(
+      db,
+      newPtr,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
 
     const rows = rawDb
       .prepare(
@@ -182,9 +294,31 @@ describe("upsertPointer with autoSupersedes=true", () => {
       resource: "task-1",
     });
 
-    upsertPointer(db, planPtr, { actor: "agent" });
-    upsertPointer(db, designPtr, { actor: "agent" });
-    upsertPointer(db, planNew, { actor: "agent" }, undefined, null, true);
+    upsertPointer(db, planPtr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(db, designPtr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      planNew,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
 
     const rows = rawDb
       .prepare(

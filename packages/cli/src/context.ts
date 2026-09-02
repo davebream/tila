@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { hostname } from "node:os";
 import { LocalArtifactBackend, LocalProject } from "@tila/backend-local";
 import type {
@@ -11,7 +12,11 @@ import type {
   SignalBackend,
   SummaryBackend,
 } from "@tila/core";
-import type { TilaProjectConfig } from "@tila/schemas";
+import type {
+  EnvironmentMetadata,
+  IdentityContext,
+  TilaProjectConfig,
+} from "@tila/schemas";
 import {
   RemoteArtifactBackend,
   RemoteBackend,
@@ -22,15 +27,21 @@ import { requireTokenAsync } from "./auth";
 import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";
+import { getGlobalFlags, resolveParticipantId } from "./lib/global-flags";
 import { deriveOrg, resolveCfApiToken } from "./lib/provisioning";
 import { checkAccountMatch, verifyCloudflareAuth } from "./lib/wrangler";
+import { VERSION as CLI_VERSION } from "./version";
 
 export interface CommandContext {
   config: TilaProjectConfig;
   /** Retained for carved-out commands with no backend interface equivalent. Null in local mode. */
   client: TilaClient | null;
-  /** Machine identity resolved from TILA_MACHINE env var or os.hostname(). */
+  /** Best-effort machine metadata; never used for authorization. */
   machine: string;
+  /** Stable identity for this CLI process. */
+  participantId: string;
+  /** Whether renew/release may safely reuse the participant across processes. */
+  participantIdExplicit: boolean;
   entity: EntityBackend;
   coordination: CoordinationBackend;
   artifact: ArtifactBackend;
@@ -54,6 +65,38 @@ export interface StartupCheckOptions {
   skipAuth?: boolean;
 }
 
+function gitMetadata(...args: string[]): string | undefined {
+  try {
+    const value = execFileSync("git", args, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveCliIdentity(): {
+  participantId: string;
+  explicit: boolean;
+  environment: EnvironmentMetadata;
+} {
+  const participant = resolveParticipantId();
+  return {
+    participantId: participant.id,
+    explicit: participant.explicit,
+    environment: {
+      machine: process.env.TILA_MACHINE?.trim() || hostname(),
+      repository: gitMetadata("config", "--get", "remote.origin.url"),
+      worktree: gitMetadata("rev-parse", "--show-toplevel"),
+      branch: gitMetadata("branch", "--show-current"),
+      commit: gitMetadata("rev-parse", "HEAD"),
+    },
+  };
+}
+
 /**
  * Run the 5-step startup auth check sequence:
  *   1. Find .tila/config.toml (project context)
@@ -73,8 +116,9 @@ export async function runStartupChecks(
 ): Promise<CommandContext> {
   const skipAuth = opts?.skipAuth ?? false;
 
-  // Step 0: Machine identity
-  const machine = process.env.TILA_MACHINE || hostname();
+  // Step 0: Participant identity and untrusted environment metadata.
+  const resolvedIdentity = resolveCliIdentity();
+  const machine = resolvedIdentity.environment.machine ?? hostname();
 
   // Step 1: Project context
   const config = findConfig();
@@ -98,21 +142,35 @@ export async function runStartupChecks(
       );
     }
     const org = config.local.org ?? deriveOrg(process.cwd());
+    const identity: IdentityContext = {
+      principal_id: `local:${org}`,
+      participant_id: resolvedIdentity.participantId,
+      environment: {
+        ...resolvedIdentity.environment,
+        client_name: "cli",
+        client_version: CLI_VERSION,
+      },
+    };
     const localProject = LocalProject.open(
       config.local.db_path,
       org,
       config.project_id,
+      undefined,
+      identity,
     );
     const localArtifact = new LocalArtifactBackend(
       localProject.getDb(),
       config.local.artifacts_path,
       org,
       config.project_id,
+      identity,
     );
     return {
       config,
       client: null,
       machine,
+      participantId: resolvedIdentity.participantId,
+      participantIdExplicit: resolvedIdentity.explicit,
       entity: localProject,
       coordination: localProject,
       artifact: localArtifact,
@@ -149,7 +207,10 @@ export async function runStartupChecks(
     }
   }
 
-  const client = createCliClientFromConfig(config, token);
+  const client = createCliClientFromConfig(config, token, undefined, {
+    participantId: resolvedIdentity.participantId,
+    environment: resolvedIdentity.environment,
+  });
   // RemoteBackend implements EntityBackend + CoordinationBackend.
   // RemoteArtifactBackend implements ArtifactBackend separately — required
   // because EntityBackend and ArtifactBackend share get/list method names
@@ -161,6 +222,8 @@ export async function runStartupChecks(
     config,
     client,
     machine,
+    participantId: resolvedIdentity.participantId,
+    participantIdExplicit: resolvedIdentity.explicit,
     entity: remote,
     coordination: remote,
     artifact: remoteArtifact,

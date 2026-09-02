@@ -19,6 +19,7 @@ import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { getValidatedSchema } from "../lib/schema-validation";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const records = new Hono<{
@@ -104,7 +105,8 @@ async function writeCanonicalSnapshot(
   key: string,
   canonicalJsonStr: string,
   sha256: string,
-  actor: string,
+  principalId: string,
+  participantId: string,
 ): Promise<{ r2Key: string; bytes: number }> {
   const resource = `record:${type}/${key}`;
   const r2Key = `produced/${resource}/${sha256}.json`;
@@ -118,7 +120,8 @@ async function writeCanonicalSnapshot(
     metadata: {
       "tila-task": resource,
       "tila-fence": "",
-      "tila-machine": actor,
+      "tila-principal": principalId,
+      "tila-participant": participantId,
       "tila-kind": "record-snapshot-canonical",
       "tila-sha256": sha256,
       "tila-mime": "application/json",
@@ -211,9 +214,7 @@ records.post(
       {
         ...parsed.data,
         actor: tokenResult.name,
-        actor_token_id: tokenResult.tokenId,
-        source: c.get("source"),
-        source_version: c.get("sourceVersion"),
+        ...identityPayload(c),
       },
       undefined,
       analyticsCtxFrom(c),
@@ -241,9 +242,7 @@ records.post(
       {
         ...parsed.data,
         actor: tokenResult.name,
-        actor_token_id: tokenResult.tokenId,
-        source: c.get("source"),
-        source_version: c.get("sourceVersion"),
+        ...identityPayload(c),
       },
       undefined,
       analyticsCtxFrom(c),
@@ -339,7 +338,8 @@ records.post("/:type/~/put/:key{.+}", requirePermission("write"), async (c) => {
       key,
       canonical,
       sha256,
-      actor,
+      identityPayload(c).principal_id,
+      identityPayload(c).participant_id,
     );
     canonicalArtifactKey = snapshot.r2Key;
   }
@@ -352,9 +352,7 @@ records.post("/:type/~/put/:key{.+}", requirePermission("write"), async (c) => {
       ...parsed.data,
       canonical_artifact_key: canonicalArtifactKey,
       actor,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtx,
@@ -459,7 +457,8 @@ records.put("/:type/:key{.+}", requirePermission("write"), async (c) => {
       key,
       canonical,
       sha256,
-      actor,
+      identityPayload(c).principal_id,
+      identityPayload(c).participant_id,
     );
     canonicalArtifactKey = snapshot.r2Key;
   }
@@ -472,9 +471,7 @@ records.put("/:type/:key{.+}", requirePermission("write"), async (c) => {
       ...parsed.data,
       canonical_artifact_key: canonicalArtifactKey,
       actor,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtx,
@@ -509,9 +506,7 @@ records.patch("/:type/:key{.+}", requirePermission("write"), async (c) => {
     {
       ...parsed.data,
       actor,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtx,
@@ -558,7 +553,8 @@ records.patch("/:type/:key{.+}", requirePermission("write"), async (c) => {
         key,
         canonical,
         sha256,
-        actor,
+        identityPayload(c).principal_id,
+        identityPayload(c).participant_id,
       );
     } catch (snapshotErr) {
       console.warn(
@@ -751,7 +747,8 @@ records.post("/:type", requirePermission("write"), async (c) => {
       recordKey,
       canonical,
       sha256,
-      actor,
+      identityPayload(c).principal_id,
+      identityPayload(c).participant_id,
     );
     canonicalArtifactKey = snapshot.r2Key;
   }
@@ -764,9 +761,7 @@ records.post("/:type", requirePermission("write"), async (c) => {
       ...parsed.data,
       canonical_artifact_key: canonicalArtifactKey,
       actor,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtx,

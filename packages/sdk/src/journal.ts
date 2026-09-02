@@ -11,6 +11,7 @@ export function createJournalMethods(client: TilaClient, projectId: string) {
       // actually reads — `entity_id`/`event_kind` were silently ignored.
       resource?: string;
       kind?: string;
+      client_name?: string;
       after_seq?: string;
       limit?: string;
     }): Promise<JournalResponse> {
@@ -18,6 +19,7 @@ export function createJournalMethods(client: TilaClient, projectId: string) {
         query: {
           resource: opts?.resource,
           kind: opts?.kind,
+          client_name: opts?.client_name,
           after_seq: opts?.after_seq,
           limit: opts?.limit,
         },

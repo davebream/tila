@@ -842,6 +842,12 @@ Per-project DO SQLite migrations run automatically inside `blockConcurrencyWhile
 
 Migration 17 (C7) backfills canonical `<type>:<id>` fence rows from any pre-existing bare-id fence rows. **Deploy during low activity**: any agent that held a bare-id entity claim before deploy will have its fence superseded by the MAX-backfilled typed row on the first post-deploy request; a stale bare fence will be rejected and the agent must re-acquire. This is a one-time effect — after migration 17 runs, all new acquires use the canonical typed form and no re-acquire is needed.
 
+### V23 canonical identity migration (deploy guidance)
+
+Migration 23 intentionally clears active claims and presence rows because legacy rows do not contain a recoverable participant identity. Fence counters are preserved unchanged, so reacquiring never reuses a stale fence. Historical journal rows are retained and marked with explicit `legacy-principal:<actor>` and `legacy-event:<seq>` identities. The corresponding D1 migration clears browser sessions that lack a stored immutable principal, requiring affected users to authenticate again.
+
+Deploy upgraded clients with the Worker. Older clients may continue reading the clean claim, presence, and journal response shapes, but mutations without `X-Tila-Participant-Id` fail with `400 participant-required` and an upgrade message.
+
 ## Local Development with Production Data
 
 Use `wrangler dev --remote` to run a local Worker process that connects to your live

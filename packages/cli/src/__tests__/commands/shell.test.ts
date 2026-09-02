@@ -114,6 +114,7 @@ const FIXTURE_URL = "https://my.tila.example.com";
 let tmpDir: string;
 let savedTilaHome: string | undefined;
 let savedShell: string | undefined;
+let savedParticipantId: string | undefined;
 let authStore: AuthStore;
 let stderrWriteSpy: ReturnType<typeof vi.spyOn>;
 let processExitSpy: ReturnType<typeof vi.spyOn>;
@@ -133,6 +134,8 @@ beforeEach(async () => {
   // Set a known SHELL for predictable testing
   savedShell = process.env.SHELL;
   process.env.SHELL = "/bin/zsh";
+  savedParticipantId = process.env.TILA_PARTICIPANT_ID;
+  Reflect.deleteProperty(process.env, "TILA_PARTICIPANT_ID");
 
   // Build real AuthStore backed by FakeSecretStore
   const fakeSecrets = new FakeSecretStore();
@@ -171,6 +174,11 @@ beforeEach(async () => {
 afterEach(() => {
   process.env.TILA_HOME = savedTilaHome;
   process.env.SHELL = savedShell;
+  if (savedParticipantId === undefined) {
+    Reflect.deleteProperty(process.env, "TILA_PARTICIPANT_ID");
+  } else {
+    process.env.TILA_PARTICIPANT_ID = savedParticipantId;
+  }
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -193,6 +201,27 @@ describe("tila shell --instance", () => {
     expect(capturedShell).toBe("/bin/zsh");
     expect(capturedEnv?.TILA_INSTANCE).toBe(FIXTURE_KEY);
     expect(capturedEnv?.TILA_SHELL_PINNED).toBe("1");
+    expect(capturedEnv?.TILA_PARTICIPANT_ID).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("uses flag before environment participant ID", async () => {
+    process.env.TILA_PARTICIPANT_ID = "from-environment";
+    const cmd = await loadShellCmd();
+    await runCmd(cmd, {
+      instance: FIXTURE_KEY,
+      "participant-id": "from-flag",
+      json: false,
+    });
+
+    expect(capturedEnv?.TILA_PARTICIPANT_ID).toBe("from-flag");
+  });
+
+  it("reuses TILA_PARTICIPANT_ID when no flag is provided", async () => {
+    process.env.TILA_PARTICIPANT_ID = "from-environment";
+    const cmd = await loadShellCmd();
+    await runCmd(cmd, { instance: FIXTURE_KEY, json: false });
+
+    expect(capturedEnv?.TILA_PARTICIPANT_ID).toBe("from-environment");
   });
 
   it("falls back to /bin/sh when SHELL is not set", async () => {

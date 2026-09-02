@@ -20,6 +20,7 @@ import { eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import { filterFields } from "./entity-response";
+import { originFromBody } from "./origin";
 import {
   formatZodIssues,
   idempotencyFrom,
@@ -71,12 +72,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       }
     }
 
-    const origin: RequestOrigin = {
-      actor: body.created_by,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const origin = originFromBody(body as Record<string, unknown>);
     entityOps.create(
       db,
       {
@@ -275,14 +271,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         formatZodIssues(parsed.error.issues),
       );
     }
-    const origin: RequestOrigin = {
-      actor: (body as { actor?: string }).actor ?? "unknown",
-      tokenId:
-        (body as { actor_token_id?: string | null }).actor_token_id ?? null,
-      source: (body as { source?: string | null }).source ?? null,
-      sourceVersion:
-        (body as { source_version?: string | null }).source_version ?? null,
-    };
+    const origin = originFromBody(body as Record<string, unknown>);
     const entity = entityOps.update(
       db,
       id,
@@ -308,14 +297,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         formatZodIssues(parsed.error.issues),
       );
     }
-    const origin: RequestOrigin = {
-      actor: (body as { actor?: string }).actor ?? "unknown",
-      tokenId:
-        (body as { actor_token_id?: string | null }).actor_token_id ?? null,
-      source: (body as { source?: string | null }).source ?? null,
-      sourceVersion:
-        (body as { source_version?: string | null }).source_version ?? null,
-    };
+    const origin = originFromBody(body as Record<string, unknown>);
     entityOps.archive(db, id, parsed.data.fence, origin, idempotencyFrom(c));
     return jsonOkRows(c, {}, 1);
   });
@@ -443,10 +425,12 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       t: e.t,
       kind: e.kind,
       resource: e.resource,
-      actor: e.actor,
+      principal_id: e.principal_id,
+      participant_id: e.participant_id,
+      environment: e.environment,
     }));
     const presenceRows = coordinationOps.listPresence(db);
-    const online_machines = presenceRows.map((p) => p.machine);
+    const online_participants = presenceRows.map((p) => p.participant_id);
 
     const payload = {
       entity_count,
@@ -454,7 +438,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       status_counts,
       active_claims,
       ready_count,
-      online_machines,
+      online_participants,
       token_estimate: 0,
       recent_events,
     };

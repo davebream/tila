@@ -48,6 +48,15 @@ describe("parseGlobalFlags", () => {
     expect(result).toEqual({ token: "secret123" });
   });
 
+  it("resolves --participant-id in space-separated and equals forms", () => {
+    expect(parseGlobalFlags(["--participant-id", "session-a"])).toEqual({
+      participantId: "session-a",
+    });
+    expect(parseGlobalFlags(["task", "--participant-id=session-b"])).toEqual({
+      participantId: "session-b",
+    });
+  });
+
   it("ignores unknown flags without crashing", () => {
     const result = parseGlobalFlags(["--unknown", "val", "--instance", "x"]);
     expect(result).toEqual({ instance: "x" });

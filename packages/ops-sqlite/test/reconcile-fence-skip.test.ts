@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { listPointers, upsertPointer } from "../src/artifact-ops";
 import { acquire, release } from "../src/coordination-ops";
-import { createEntity, createTestDb } from "./helpers";
+import { createEntity, createTestDb, testOrigin } from "./helpers";
 
 // Reconcile recovers an already-committed historical blob whose resource fence
 // may have advanced since the blob was produced. It must record the historical
@@ -12,9 +12,21 @@ describe("upsertPointer reconcile (skipFenceValidation)", () => {
     const { db } = createTestDb();
     createEntity(db, { id: "task-r" });
 
-    const c1 = acquire(db, "task:task-r", "m1", "u1", "exclusive", 60_000);
-    release(db, "task:task-r", c1.fence, { actor: "m1/u1" });
-    const c2 = acquire(db, "task:task-r", "m2", "u2", "exclusive", 60_000);
+    const c1 = acquire(
+      db,
+      "task:task-r",
+      testOrigin("m1", "u1"),
+      "exclusive",
+      60_000,
+    );
+    release(db, "task:task-r", c1.fence, testOrigin("m1", "u1"));
+    const c2 = acquire(
+      db,
+      "task:task-r",
+      testOrigin("m2", "u2"),
+      "exclusive",
+      60_000,
+    );
     expect(c2.fence).toBeGreaterThan(c1.fence); // current_fence has advanced
 
     const pointer = {
@@ -31,7 +43,7 @@ describe("upsertPointer reconcile (skipFenceValidation)", () => {
       produced_by: "reconciler",
       expires_at: null,
     };
-    const origin = { actor: "reconciler" };
+    const origin = testOrigin("reconciler");
 
     // A normal (validated) write with the stale fence is rejected...
     expect(() => upsertPointer(db, pointer, origin)).toThrow();

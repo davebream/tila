@@ -57,7 +57,17 @@ function getSearchDoc(
 describe("rebuildSearchDocs", () => {
   it("returns all zeros for empty candidates list", () => {
     const { db } = createTestDb();
-    const result = rebuildSearchDocs(db, [], { actor: "test-actor" }, false);
+    const result = rebuildSearchDocs(
+      db,
+      [],
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      false,
+    );
     expect(result.candidates_found).toBe(0);
     expect(result.written).toBe(0);
     expect(result.tombstoned).toBe(0);
@@ -86,7 +96,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       false,
     );
     expect(result.candidates_found).toBe(1);
@@ -116,7 +131,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.written).toBe(1);
@@ -148,7 +168,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.skipped).toBe(1);
@@ -177,7 +202,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.tombstoned).toBe(1);
@@ -210,7 +240,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.skipped).toBe(1);
@@ -240,7 +275,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.written).toBe(1);
@@ -270,7 +310,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.unrecoverable).toBe(1);
@@ -299,7 +344,12 @@ describe("rebuildSearchDocs", () => {
     const result = rebuildSearchDocs(
       db,
       candidates,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.skipped).toBe(1);

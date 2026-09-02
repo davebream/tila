@@ -11,7 +11,7 @@ export function registerSummaryTool(
 
   server.tool(
     "tila_summary",
-    "Get a compact project summary: entity counts by type and status, active claims, ready count, online machines, recent journal events, and estimated token count.",
+    "Get a compact project summary: entity counts by type and status, active claims, ready count, online participants, recent journal events, and estimated token count.",
     {},
     async () => {
       try {

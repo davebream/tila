@@ -10,23 +10,38 @@
  * as flags (not positionals) and --help documents them correctly.
  */
 
-/** The three pre-dispatch global flags. */
+import { randomUUID } from "node:crypto";
+import { ParticipantIdSchema } from "@tila/schemas";
+
+/** The pre-dispatch global flags. */
 export interface GlobalFlags {
   instance?: string;
   token?: string;
   project?: string;
+  participantId?: string;
 }
 
 /** Module-level singleton. Populated once at startup by index.ts. */
 let _flags: GlobalFlags = {};
+const generatedParticipantId = randomUUID();
+
+/** Resolve CLI participant precedence: flag, environment, then process UUID. */
+export function resolveParticipantId(): { id: string; explicit: boolean } {
+  const configured =
+    _flags.participantId ?? process.env.TILA_PARTICIPANT_ID?.trim();
+  return {
+    id: ParticipantIdSchema.parse(configured || generatedParticipantId),
+    explicit: Boolean(configured),
+  };
+}
 
 /**
- * Parse --instance/--token/--project from an argv array (space or = forms,
+ * Parse global identity/context flags from an argv array (space or = forms,
  * any position). Does NOT strip them from the array — citty also sees them.
  */
 export function parseGlobalFlags(argv: string[]): GlobalFlags {
   const flags: GlobalFlags = {};
-  const keys = ["instance", "token", "project"] as const;
+  const keys = ["instance", "token", "project", "participant-id"] as const;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -34,14 +49,17 @@ export function parseGlobalFlags(argv: string[]): GlobalFlags {
     for (const key of keys) {
       const prefix = `--${key}=`;
       if (arg.startsWith(prefix)) {
-        flags[key] = arg.slice(prefix.length);
+        const value = arg.slice(prefix.length);
+        if (key === "participant-id") flags.participantId = value;
+        else flags[key] = value;
         break;
       }
       if (arg === `--${key}` && i + 1 < argv.length) {
         // Only consume as flag value if next arg doesn't look like a flag
         const next = argv[i + 1];
         if (!next.startsWith("-")) {
-          flags[key] = next;
+          if (key === "participant-id") flags.participantId = next;
+          else flags[key] = next;
           i++; // skip the value
         }
         break;
@@ -70,7 +88,7 @@ export function resetGlobalFlags(): void {
 /**
  * Shared global-flag args declaration for leaf commands.
  *
- * Spread into each command's `args` so citty parses --instance/--token/--project
+ * Spread into each command's `args` so citty parses the global flags
  * as named flags (not positionals) and --help documents them.
  *
  * The actual values are consumed via getGlobalFlags() from the pre-dispatch
@@ -88,5 +106,9 @@ export const globalFlagArgs = {
   project: {
     type: "string" as const,
     description: "Assert or select a project (maps to worker_url)",
+  },
+  "participant-id": {
+    type: "string" as const,
+    description: "Use a stable participant ID for this client session",
   },
 } as const;

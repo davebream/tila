@@ -6,14 +6,23 @@ import { LocalProject } from "../src/local-project";
 
 describe("LocalProject", () => {
   let tempDir: string;
+  let dbPath: string;
   let project: LocalProject;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "tila-lp-test-"));
-    const dbPath = join(tempDir, "test.db");
-    project = LocalProject.open(dbPath, "test-org", "test-project", {
-      skipFilesystemCheck: true,
-    });
+    dbPath = join(tempDir, "test.db");
+    project = LocalProject.open(
+      dbPath,
+      "test-org",
+      "test-project",
+      { skipFilesystemCheck: true },
+      {
+        principal_id: "local:test-org",
+        participant_id: "participant-1",
+        environment: { machine: "shared-machine", client_name: "test" },
+      },
+    );
   });
 
   afterEach(() => {
@@ -193,56 +202,64 @@ describe("LocalProject", () => {
 
   describe("CoordinationBackend", () => {
     it("acquire returns acquired=true with a fence", async () => {
-      const result = await project.acquire(
-        "task-1",
-        "agent-a",
-        "agent-a",
-        "exclusive",
-        60000,
-      );
+      const result = await project.acquire("task-1", "exclusive", 60000);
       expect(result.acquired).toBe(true);
       expect(result.fence).toBeGreaterThan(0);
       expect(result.expires_at).toBeGreaterThan(Date.now() - 1000);
     });
 
-    it("acquire blocks different holder in exclusive mode", async () => {
-      await project.acquire("task-1", "agent-a", "agent-a", "exclusive", 60000);
-      const result = await project.acquire(
-        "task-1",
-        "agent-b",
-        "agent-b",
-        "exclusive",
-        60000,
+    it("acquire blocks another participant on the same machine in exclusive mode", async () => {
+      await project.acquire("task-1", "exclusive", 60000);
+      const secondClient = LocalProject.open(
+        dbPath,
+        "test-org",
+        "test-project",
+        { skipFilesystemCheck: true },
+        {
+          principal_id: "local:test-org",
+          participant_id: "participant-2",
+          environment: { machine: "shared-machine", client_name: "test" },
+        },
       );
-      expect(result.acquired).toBe(false);
+      try {
+        const result = await secondClient.acquire("task-1", "exclusive", 60000);
+        expect(result.acquired).toBe(false);
+      } finally {
+        secondClient.close();
+      }
+    });
+
+    it("reuses an explicit participant across client instances", async () => {
+      const acquired = await project.acquire("task-1", "exclusive", 60000);
+      const reopened = LocalProject.open(
+        dbPath,
+        "test-org",
+        "test-project",
+        { skipFilesystemCheck: true },
+        {
+          principal_id: "local:test-org",
+          participant_id: "participant-1",
+          environment: { machine: "shared-machine", client_name: "test" },
+        },
+      );
+      try {
+        const renewed = await reopened.renew("task-1", acquired.fence, 60000);
+        expect(renewed.renewed).toBe(true);
+        await reopened.release("task-1", acquired.fence);
+        expect(await project.state("task-1")).toBeNull();
+      } finally {
+        reopened.close();
+      }
     });
 
     it("renew extends expiration with valid fence", async () => {
-      const acq = await project.acquire(
-        "task-1",
-        "agent-a",
-        "agent-a",
-        "exclusive",
-        60000,
-      );
-      const renewed = await project.renew(
-        "task-1",
-        "agent-a",
-        "agent-a",
-        acq.fence,
-        120000,
-      );
+      const acq = await project.acquire("task-1", "exclusive", 60000);
+      const renewed = await project.renew("task-1", acq.fence, 120000);
       expect(renewed.renewed).toBe(true);
     });
 
     it("release frees the claim", async () => {
-      const acq = await project.acquire(
-        "task-1",
-        "agent-a",
-        "agent-a",
-        "exclusive",
-        60000,
-      );
+      const acq = await project.acquire("task-1", "exclusive", 60000);
       await project.release("task-1", acq.fence);
       const state = await project.state("task-1");
       expect(state).toBeNull();
@@ -254,10 +271,14 @@ describe("LocalProject", () => {
     });
 
     it("heartbeat and listPresence round-trip", async () => {
-      await project.heartbeat("machine-1", { role: "builder" });
-      const machines = await project.listPresence();
-      expect(machines).toHaveLength(1);
-      expect(machines[0].machine).toBe("machine-1");
+      await project.heartbeat({ role: "builder" });
+      const participants = await project.listPresence();
+      expect(participants).toHaveLength(1);
+      expect(participants[0]).toMatchObject({
+        principal_id: "local:test-org",
+        participant_id: "participant-1",
+        environment: { machine: "shared-machine" },
+      });
     });
   });
 
@@ -312,8 +333,6 @@ describe("LocalProject", () => {
     it("createGate returns a pending gate", async () => {
       const claim = await project.acquire(
         "task:gate-test",
-        "test",
-        "test",
         "exclusive",
         30_000,
       );
@@ -331,8 +350,6 @@ describe("LocalProject", () => {
     it("listGates returns created gates", async () => {
       const claim = await project.acquire(
         "task:gate-list",
-        "test",
-        "test",
         "exclusive",
         30_000,
       );
@@ -344,8 +361,6 @@ describe("LocalProject", () => {
     it("resolveGate changes status to resolved", async () => {
       const claim = await project.acquire(
         "task:gate-resolve",
-        "test",
-        "test",
         "exclusive",
         30_000,
       );
@@ -364,8 +379,6 @@ describe("LocalProject", () => {
     it("cancelGate changes status to cancelled", async () => {
       const claim = await project.acquire(
         "task:gate-cancel",
-        "test",
-        "test",
         "exclusive",
         30_000,
       );
@@ -483,13 +496,7 @@ type = "string"
 
   describe("CoordinationBackend.listClaims", () => {
     it("listClaims returns active claims", async () => {
-      await project.acquire(
-        "task:claim-test",
-        "test",
-        "test",
-        "exclusive",
-        30_000,
-      );
+      await project.acquire("task:claim-test", "exclusive", 30_000);
       const claims = await project.listClaims();
       expect(claims.length).toBeGreaterThanOrEqual(1);
       const found = claims.find((c) => c.resource === "task:claim-test");
@@ -499,8 +506,6 @@ type = "string"
     it("listClaims returns empty after release", async () => {
       const result = await project.acquire(
         "task:release-test",
-        "test",
-        "test",
         "exclusive",
         30_000,
       );

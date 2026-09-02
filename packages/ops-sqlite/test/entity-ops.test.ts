@@ -16,7 +16,7 @@ import {
 } from "../src/entity-ops";
 import { resolveEntityResourceDirect } from "../src/fence-ops";
 import { listJournal } from "../src/journal-ops";
-import { type TestDb, createTestDb } from "./helpers";
+import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
 
@@ -32,8 +32,7 @@ function acquireFence(id: string): number {
   const result = acquire(
     testDb.db,
     id,
-    "test-actor",
-    "test-actor",
+    testOrigin("test-actor", "test-actor"),
     "exclusive",
     60_000,
   );
@@ -51,7 +50,7 @@ describe("create", () => {
         created_by: "agent-1",
       },
       1,
-      { actor: "agent-1" },
+      testOrigin("agent-1"),
     );
 
     expect(entity.id).toBe("e-create-1");
@@ -74,7 +73,7 @@ describe("create", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     const found = get(testDb.db, "e-get-1");
@@ -99,7 +98,7 @@ describe("create", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     expect(() =>
@@ -112,7 +111,7 @@ describe("create", () => {
           created_by: "actor-2",
         },
         1,
-        { actor: "actor-2" },
+        testOrigin("actor-2"),
       ),
     ).toThrow(EntityAlreadyExistsError);
   });
@@ -130,10 +129,9 @@ describe("provenance threading", () => {
       },
       1,
       {
-        actor: "alice",
+        ...testOrigin("client-a", "principal-alice"),
         tokenId: "tok_123",
-        source: "sdk",
-        sourceVersion: "1.2.3",
+        environment: { client_name: "sdk", client_version: "1.2.3" },
       },
     );
 
@@ -142,8 +140,12 @@ describe("provenance threading", () => {
       kind: "entity.created",
     });
     expect(entries[0].token_id).toBe("tok_123");
-    expect(entries[0].source).toBe("sdk");
-    expect(entries[0].source_version).toBe("1.2.3");
+    expect(entries[0].principal_id).toBe("principal-alice");
+    expect(entries[0].participant_id).toBe("client-a");
+    expect(entries[0].environment).toEqual({
+      client_name: "sdk",
+      client_version: "1.2.3",
+    });
   });
 
   it("create() writes null provenance fields when origin has no optional fields", () => {
@@ -156,7 +158,12 @@ describe("provenance threading", () => {
         created_by: "alice",
       },
       1,
-      { actor: "alice" },
+      {
+        principalId: "principal-alice",
+        participantId: "client-a",
+        environment: {},
+        actor: "alice",
+      },
     );
 
     const entries = listJournal(testDb.db, {
@@ -164,8 +171,7 @@ describe("provenance threading", () => {
       kind: "entity.created",
     });
     expect(entries[0].token_id).toBeNull();
-    expect(entries[0].source).toBeNull();
-    expect(entries[0].source_version).toBeNull();
+    expect(entries[0].environment).toEqual({});
   });
 
   it("update() threads provenance to journal", () => {
@@ -178,14 +184,13 @@ describe("provenance threading", () => {
         created_by: "alice",
       },
       1,
-      { actor: "alice" },
+      testOrigin("alice"),
     );
     const fence = acquireFence("e-prov-upd");
     update(testDb.db, "e-prov-upd", { name: "updated" }, fence, {
-      actor: "alice",
+      ...testOrigin("client-a", "principal-alice"),
       tokenId: "tok_upd",
-      source: "cli",
-      sourceVersion: "2.0.0",
+      environment: { client_name: "cli", client_version: "2.0.0" },
     });
 
     const entries = listJournal(testDb.db, {
@@ -193,8 +198,10 @@ describe("provenance threading", () => {
       kind: "entity.updated",
     });
     expect(entries[0].token_id).toBe("tok_upd");
-    expect(entries[0].source).toBe("cli");
-    expect(entries[0].source_version).toBe("2.0.0");
+    expect(entries[0].environment).toEqual({
+      client_name: "cli",
+      client_version: "2.0.0",
+    });
   });
 
   it("archive() threads provenance to journal", () => {
@@ -207,14 +214,13 @@ describe("provenance threading", () => {
         created_by: "alice",
       },
       1,
-      { actor: "alice" },
+      testOrigin("alice"),
     );
     const fence = acquireFence("e-prov-arch");
     archive(testDb.db, "e-prov-arch", fence, {
-      actor: "alice",
+      ...testOrigin("client-a", "principal-alice"),
       tokenId: "tok_arch",
-      source: "mcp-server",
-      sourceVersion: "3.0.0",
+      environment: { client_name: "mcp-server", client_version: "3.0.0" },
     });
 
     const entries = listJournal(testDb.db, {
@@ -222,8 +228,10 @@ describe("provenance threading", () => {
       kind: "entity.archived",
     });
     expect(entries[0].token_id).toBe("tok_arch");
-    expect(entries[0].source).toBe("mcp-server");
-    expect(entries[0].source_version).toBe("3.0.0");
+    expect(entries[0].environment).toEqual({
+      client_name: "mcp-server",
+      client_version: "3.0.0",
+    });
   });
 });
 
@@ -238,7 +246,7 @@ describe("update", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const fence = acquireFence("e-upd-1");
 
@@ -272,11 +280,11 @@ describe("archive", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const fence = acquireFence("e-arch-1");
 
-    archive(testDb.db, "e-arch-1", fence, { actor: "actor-1" });
+    archive(testDb.db, "e-arch-1", fence, testOrigin("actor-1"));
 
     const found = get(testDb.db, "e-arch-1");
     expect(found?.archived).toBe(1);
@@ -292,7 +300,7 @@ describe("archive", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     // Entity should be findable before archive
@@ -302,7 +310,7 @@ describe("archive", () => {
     expect(beforeArchive).toHaveLength(1);
 
     const fence = acquireFence("e-arch-fts");
-    archive(testDb.db, "e-arch-fts", fence, { actor: "actor-1" });
+    archive(testDb.db, "e-arch-fts", fence, testOrigin("actor-1"));
 
     // Entity should NOT be findable after archive
     const afterArchive = searchEntities(testDb.db, {
@@ -321,7 +329,7 @@ describe("archive", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const fence = acquireFence("e-arch-ts");
 
@@ -340,7 +348,7 @@ describe("archive", () => {
     let tick = 5_000_000;
     const spy = vi.spyOn(Date, "now").mockImplementation(() => ++tick);
     try {
-      archive(testDb.db, "e-arch-ts", fence, { actor: "actor-1" });
+      archive(testDb.db, "e-arch-ts", fence, testOrigin("actor-1"));
     } finally {
       spy.mockRestore();
     }
@@ -366,7 +374,7 @@ describe("archive", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const fence = acquireFence("e-upd-ts");
 
@@ -416,7 +424,7 @@ describe("list", () => {
         created_by: "a",
       },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
     create(
       testDb.db,
@@ -427,7 +435,7 @@ describe("list", () => {
         created_by: "a",
       },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
 
     const result = list(testDb.db);
@@ -440,13 +448,13 @@ describe("list", () => {
       testDb.db,
       { id: "e-task-1", type: "task", data: { name: "Task" }, created_by: "a" },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
     create(
       testDb.db,
       { id: "e-epic-1", type: "epic", data: { name: "Epic" }, created_by: "a" },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
 
     const tasks = list(testDb.db, { type: "task" });
@@ -464,7 +472,7 @@ describe("list", () => {
         created_by: "a",
       },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
     create(
       testDb.db,
@@ -475,10 +483,10 @@ describe("list", () => {
         created_by: "a",
       },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
     const fence = acquireFence("e-archived");
-    archive(testDb.db, "e-archived", fence, { actor: "a" });
+    archive(testDb.db, "e-archived", fence, testOrigin("a"));
 
     const active = list(testDb.db, { archived: 0 });
     expect(active.entities).toHaveLength(1);
@@ -567,7 +575,7 @@ describe("entity tags", () => {
         tags: ["Env:Prod", "team:platform"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     // tags are lowercased
@@ -584,7 +592,7 @@ describe("entity tags", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     expect(entity.tags).toEqual([]);
@@ -601,7 +609,7 @@ describe("entity tags", () => {
         tags: ["env:prod"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     const found = get(testDb.db, "e-get-tags");
@@ -619,7 +627,7 @@ describe("entity tags", () => {
         tags: ["team:alpha"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     create(
       testDb.db,
@@ -631,7 +639,7 @@ describe("entity tags", () => {
         tags: ["team:beta", "env:staging"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     const result = list(testDb.db);
@@ -655,7 +663,7 @@ describe("entity tags", () => {
         tags: ["env:prod"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     create(
       testDb.db,
@@ -667,7 +675,7 @@ describe("entity tags", () => {
         tags: ["env:staging"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     const result = list(testDb.db, { tag: "env:prod" });
@@ -686,13 +694,12 @@ describe("entity tags", () => {
         tags: ["env:prod"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const fence = acquire(
       testDb.db,
       "e-upd-tag-1",
-      "actor-1",
-      "actor-1",
+      testOrigin("actor-1", "actor-1"),
       "exclusive",
       60_000,
     ).fence;
@@ -702,7 +709,7 @@ describe("entity tags", () => {
       "e-upd-tag-1",
       { name: "Updated" },
       fence,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
       // no tags arg → undefined → preserve
     );
 
@@ -720,13 +727,12 @@ describe("entity tags", () => {
         tags: ["env:prod"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const fence = acquire(
       testDb.db,
       "e-upd-tag-2",
-      "actor-1",
-      "actor-1",
+      testOrigin("actor-1", "actor-1"),
       "exclusive",
       60_000,
     ).fence;
@@ -736,7 +742,7 @@ describe("entity tags", () => {
       "e-upd-tag-2",
       { name: "Updated" },
       fence,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
       [],
     );
 
@@ -754,13 +760,12 @@ describe("entity tags", () => {
         tags: ["env:prod", "team:alpha"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const fence = acquire(
       testDb.db,
       "e-upd-tag-3",
-      "actor-1",
-      "actor-1",
+      testOrigin("actor-1", "actor-1"),
       "exclusive",
       60_000,
     ).fence;
@@ -770,7 +775,7 @@ describe("entity tags", () => {
       "e-upd-tag-3",
       { name: "Updated" },
       fence,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
       ["env:staging"],
     );
 
@@ -789,7 +794,7 @@ describe("entity tags", () => {
           tags: ["bad tag!"],
         },
         1,
-        { actor: "actor-1" },
+        testOrigin("actor-1"),
       ),
     ).toThrow();
   });
@@ -806,7 +811,7 @@ describe("entity tags", () => {
           tags: ["-leading-hyphen"],
         },
         1,
-        { actor: "actor-1" },
+        testOrigin("actor-1"),
       ),
     ).toThrow();
   });
@@ -824,7 +829,7 @@ describe("entity tags", () => {
           tags: tooManyTags,
         },
         1,
-        { actor: "actor-1" },
+        testOrigin("actor-1"),
       ),
     ).toThrow();
   });
@@ -840,7 +845,7 @@ describe("entity tags", () => {
         tags: ["env:prod", "ENV:PROD"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     expect(entity.tags).toEqual(["env:prod"]);
@@ -862,7 +867,7 @@ describe("entity tags", () => {
         tags: ["env:prod"],
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     expect(() =>
@@ -876,7 +881,7 @@ describe("entity tags", () => {
           tags: ["env:prod"],
         },
         1,
-        { actor: "actor-2" },
+        testOrigin("actor-2"),
       ),
     ).toThrow(EntityAlreadyExistsError);
   });
@@ -893,7 +898,7 @@ describe("searchEntities", () => {
         created_by: "a",
       },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
 
     const results = searchEntities(testDb.db, { q: "pipeline" });
@@ -912,7 +917,7 @@ describe("searchEntities", () => {
         created_by: "a",
       },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
 
     const results = searchEntities(testDb.db, { q: "nonexistentterm" });
@@ -939,7 +944,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["repo:a", "team:x"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
     create(
       testDb.db,
@@ -951,7 +956,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["repo:a"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
     create(
       testDb.db,
@@ -963,7 +968,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["team:x"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
 
     const result = list(testDb.db, { tagFilter: ["repo:a", "team:x"] });
@@ -982,7 +987,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["repo:a", "team:x"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
     create(
       testDb.db,
@@ -994,7 +999,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["repo:a"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
 
     const result = list(testDb.db, { tagFilter: ["repo:a"] });
@@ -1012,7 +1017,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["repo:a"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
 
     // tags stored as lowercase; filter uppercased should still match
@@ -1033,7 +1038,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["repo:a", "team:x"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
     create(
       testDb.db,
@@ -1045,7 +1050,7 @@ describe("list tagFilter (multi-tag AND)", () => {
         tags: ["repo:a"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
 
     const result = list(testDb.db, {
@@ -1068,7 +1073,7 @@ describe("compactEntity stats batching", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     create(
       testDb.db,
@@ -1079,7 +1084,7 @@ describe("compactEntity stats batching", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     create(
       testDb.db,
@@ -1090,7 +1095,7 @@ describe("compactEntity stats batching", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     const first = create(
@@ -1102,7 +1107,7 @@ describe("compactEntity stats batching", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
     const second = create(
       testDb.db,
@@ -1113,7 +1118,7 @@ describe("compactEntity stats batching", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     testDb.rawDb
@@ -1164,7 +1169,7 @@ describe("compactEntity stats required -- no N+1 fallback", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     const stats = getCompactEntityStats(testDb.db, [entity.id]);
@@ -1235,14 +1240,13 @@ describe("resolveEntityResourceDirect", () => {
         created_by: "actor-1",
       },
       1,
-      { actor: "actor-1" },
+      testOrigin("actor-1"),
     );
 
     const fence = acquire(
       freshDb.db,
       "e-dedup-resolve",
-      "test-actor",
-      "test-actor",
+      testOrigin("test-actor", "test-actor"),
       "exclusive",
       60_000,
     ).fence;
@@ -1277,7 +1281,7 @@ describe("post-write SELECT elimination", () => {
         tags: ["env:test"],
       },
       3,
-      { actor: "agent-create" },
+      testOrigin("agent-create"),
     );
 
     // All fields should be correctly set from inputs
@@ -1304,7 +1308,7 @@ describe("post-write SELECT elimination", () => {
         tags: ["env:prod"],
       },
       2,
-      { actor: "original-creator" },
+      testOrigin("original-creator"),
     );
 
     const fence = acquireFence("e-passthrough");
@@ -1315,7 +1319,7 @@ describe("post-write SELECT elimination", () => {
       "e-passthrough",
       { name: "Updated name" },
       fence,
-      { actor: "updater" },
+      testOrigin("updater"),
       // undefined tags → preserve
     );
 
@@ -1350,7 +1354,7 @@ describe("post-write SELECT elimination", () => {
         tags: ["alpha", "beta"],
       },
       1,
-      { actor: "actor" },
+      testOrigin("actor"),
     );
     const fence = acquireFence("e-tags-fallback");
 
@@ -1359,7 +1363,7 @@ describe("post-write SELECT elimination", () => {
       "e-tags-fallback",
       { name: "Updated" },
       fence,
-      { actor: "actor" },
+      testOrigin("actor"),
       // undefined tags
     );
 
@@ -1383,7 +1387,7 @@ describe("FTS lean result (no data blob)", () => {
         created_by: "a",
       },
       1,
-      { actor: "a" },
+      testOrigin("a"),
     );
 
     const results = searchEntities(testDb.db, { q: "lean" });

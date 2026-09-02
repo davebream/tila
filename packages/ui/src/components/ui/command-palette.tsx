@@ -154,7 +154,7 @@ export function CommandPalette({
       {
         id: "glossary:presence",
         label: "Presence",
-        meta: "Which machines are online right now",
+        meta: "Which participants are online right now",
         group: "glossary",
         href: "",
       },

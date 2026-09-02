@@ -6,6 +6,7 @@ export interface SessionResult {
   projectId: string;
   tokenHash: string;
   name: string;
+  principalId: string;
   scopes: string;
   permission: string;
   expiresAt: number;
@@ -23,6 +24,7 @@ export class D1SessionStore {
     projectId: string;
     tokenHash: string;
     actorName: string;
+    principalId: string;
     scopes: string;
     permission: string;
     expiresAt: number;
@@ -32,6 +34,7 @@ export class D1SessionStore {
       project_id: params.projectId,
       token_hash: params.tokenHash,
       actor_name: params.actorName,
+      principal_id: params.principalId,
       scopes: params.scopes,
       permission: params.permission,
       created_at: Date.now(),
@@ -55,6 +58,7 @@ export class D1SessionStore {
       projectId: row.project_id,
       tokenHash: row.token_hash,
       name: row.actor_name,
+      principalId: row.principal_id,
       scopes: row.scopes,
       permission: row.permission,
       expiresAt: row.expires_at,

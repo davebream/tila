@@ -16,7 +16,7 @@ import {
   listPointers,
   upsertPointer,
 } from "../src/artifact-ops";
-import { type TestDb, createTestDb } from "./helpers";
+import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
 
@@ -28,7 +28,7 @@ afterEach(() => {
   testDb.rawDb.close();
 });
 
-const origin = { actor: "test-actor" };
+const origin = testOrigin("test-actor");
 
 function makePointer(r2Key: string, opts?: { resource?: string | null }) {
   return {

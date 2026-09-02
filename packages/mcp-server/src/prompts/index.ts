@@ -30,9 +30,9 @@ export function registerAllPrompts(
                 )
                 .join("\n")
             : "  - (none)";
-        const machines =
-          p.online_machines.length > 0
-            ? p.online_machines.join(", ")
+        const participants =
+          p.online_participants.length > 0
+            ? p.online_participants.join(", ")
             : "(none)";
 
         const text = `# tila Project Status
@@ -41,7 +41,7 @@ export function registerAllPrompts(
 - Total entities: ${p.entity_count}
 - Active claims: ${p.active_claims}
 - Ready for work: ${p.ready_count}
-- Online machines: ${machines}
+- Online participants: ${participants}
 
 ## Status Breakdown
 ${statusLines}

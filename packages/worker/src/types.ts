@@ -1,4 +1,5 @@
 import type { TokenResult } from "@tila/backend-d1";
+import type { EnvironmentMetadata } from "@tila/schemas";
 
 export interface Env {
   DB: D1Database;
@@ -65,6 +66,7 @@ export interface CookieSessionTokenResult {
   sessionHash: string;
   expiresAt: number;
   permission: string;
+  principalId?: string;
 }
 
 export interface WorkspaceSessionTokenResult {
@@ -76,6 +78,7 @@ export interface WorkspaceSessionTokenResult {
   sessionHash: string;
   githubLogin: string; // derived from name/actorName
   expiresAt: number; // milliseconds
+  principalId?: string;
 }
 
 /**
@@ -111,6 +114,9 @@ export interface HonoVariables {
   requestId?: string;
   source?: string;
   sourceVersion?: string | null;
+  principalId?: string;
+  participantId?: string;
+  environment?: EnvironmentMetadata;
   // Caller-scoped idempotency key + request-body hash, computed by the
   // idempotency middleware and forwarded to the DO so it can dedup the
   // fence-mutating write inside its own transaction (audit B1). Present only

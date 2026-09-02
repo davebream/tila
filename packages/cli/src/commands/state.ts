@@ -21,16 +21,18 @@ const listCommand = defineCommand({
     renderTable(
       claims.map((c) => ({
         resource: c.resource,
-        machine: c.machine,
-        user: c.user,
+        principal: c.principal_id,
+        participant: c.participant_id,
+        machine: c.environment.machine ?? "",
         mode: c.mode,
         fence: c.fence,
         ttl: `${Math.max(0, Math.round((c.expires_at - Date.now()) / 1000))}s`,
       })),
       [
         { key: "resource", label: "Resource" },
-        { key: "machine", label: "Machine" },
-        { key: "user", label: "User" },
+        { key: "principal", label: "Principal" },
+        { key: "participant", label: "Participant" },
+        { key: "machine", label: "Environment" },
         { key: "mode", label: "Mode" },
         { key: "fence", label: "Fence" },
         { key: "ttl", label: "TTL" },
@@ -73,8 +75,11 @@ export default defineCommand({
       Math.round((claim.expires_at - Date.now()) / 1000),
     );
     console.log(`${args.resource}:`);
-    console.log(`  machine: ${claim.machine}`);
-    console.log(`  user:    ${claim.user}`);
+    console.log(`  principal:   ${claim.principal_id}`);
+    console.log(`  participant: ${claim.participant_id}`);
+    if (claim.environment.machine) {
+      console.log(`  machine:     ${claim.environment.machine}`);
+    }
     console.log(`  mode:    ${claim.mode}`);
     console.log(`  fence:   ${claim.fence}`);
     console.log(`  ttl:     ${ttlSec}s`);

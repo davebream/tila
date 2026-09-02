@@ -33,6 +33,11 @@ import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
 let testDb: TestDb;
 let db: TestDb["db"];
+const IDENTITY_BODY = {
+  principal_id: "test:agent",
+  participant_id: "participant-1",
+  environment: {},
+};
 
 beforeEach(() => {
   testDb = createTestDb();
@@ -70,6 +75,7 @@ describe("entity create + get/list tags via DO route", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         id: "T-tag1",
         type: "task",
         data: { title: "Tag Test" },
@@ -118,6 +124,7 @@ describe("entity create + get/list tags via DO route", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         id: "T-notag",
         type: "task",
         data: { title: "No Tags" },
@@ -145,13 +152,23 @@ describe("entity create + get/list tags via DO route", () => {
         tags: ["env:prod"],
       },
       1,
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
     entityOps.create(
       db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
       { id: "T-list2", type: "task", data: {}, created_by: "agent" },
       1,
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const app = createEntityRoutes(
@@ -191,6 +208,7 @@ describe("artifact pointer upsert + get/list tags via DO route", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         r2_key: "sources/abc123.md",
         resource: null,
         kind: "plan",
@@ -241,6 +259,7 @@ describe("artifact pointer upsert + get/list tags via DO route", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         r2_key: "sources/notag.md",
         resource: null,
         kind: "doc",
@@ -277,6 +296,7 @@ describe("artifact pointer upsert + get/list tags via DO route", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         r2_key: "sources/replace.md",
         resource: null,
         kind: "plan",
@@ -297,6 +317,7 @@ describe("artifact pointer upsert + get/list tags via DO route", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         r2_key: "sources/replace.md",
         resource: null,
         kind: "plan",
@@ -339,7 +360,12 @@ function seedEntity(
     d as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
     { id, type: "task", data: { title: id }, created_by: "agent", tags },
     1,
-    { actor: "agent" },
+    {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    },
   );
 }
 
@@ -364,7 +390,12 @@ function seedArtifact(
       produced_by: "agent",
       expires_at: null,
     },
-    { actor: "agent" },
+    {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    },
     undefined,
     { title, body_text: title },
     false,
@@ -494,7 +525,12 @@ describe("tag_filter AND filtering on /record/:type/list", () => {
         actor: "agent",
         tags: ["repo:a", "team:x"],
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
     await recordOps.createRecord(
       db as unknown as BaseSQLiteDatabase<"sync", unknown, typeof schema>,
@@ -506,7 +542,12 @@ describe("tag_filter AND filtering on /record/:type/list", () => {
         actor: "agent",
         tags: ["repo:a"],
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const app = createRecordRoutes(

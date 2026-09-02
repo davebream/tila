@@ -1,5 +1,6 @@
 import { type RequestOrigin, gateOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
+import { originFromBody } from "./origin";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 export function createGateRoutes(deps: RouterDeps): ProjectSubRouter {
@@ -19,12 +20,7 @@ export function createGateRoutes(deps: RouterDeps): ProjectSubRouter {
       source?: string | null;
       source_version?: string | null;
     };
-    const createOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const createOrigin = originFromBody(body as Record<string, unknown>);
     const gate = gateOps.createGate(
       db,
       {
@@ -50,12 +46,7 @@ export function createGateRoutes(deps: RouterDeps): ProjectSubRouter {
       source?: string | null;
       source_version?: string | null;
     };
-    const resolveOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const resolveOrigin = originFromBody(body as Record<string, unknown>);
     gateOps.resolveGate(db, gateId, body.resolution, resolveOrigin);
     return c.json({ ok: true });
   });
@@ -69,12 +60,7 @@ export function createGateRoutes(deps: RouterDeps): ProjectSubRouter {
       source?: string | null;
       source_version?: string | null;
     };
-    const cancelOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const cancelOrigin = originFromBody(body as Record<string, unknown>);
     gateOps.cancelGate(db, gateId, cancelOrigin);
     return c.json({ ok: true });
   });

@@ -165,13 +165,7 @@ describe("EmbeddedProject", () => {
       expect(ids).toEqual(["blocker", "free"]);
 
       // Closing the blocker unblocks "blocked".
-      const acq = await project.acquire(
-        "task:blocker",
-        "local",
-        "local",
-        "exclusive",
-        60000,
-      );
+      const acq = await project.acquire("task:blocker", "exclusive", 60000);
       await project.updateWithFence("blocker", { status: "closed" }, acq.fence);
       const readyAfter = (await project.listReady({ type: "task" }))
         .map((e) => e.id)
@@ -219,13 +213,7 @@ describe("EmbeddedProject", () => {
         data: { status: "open" },
         created_by: "cli",
       });
-      const acq = await project.acquire(
-        "task:fenced",
-        "local",
-        "local",
-        "exclusive",
-        60000,
-      );
+      const acq = await project.acquire("task:fenced", "exclusive", 60000);
 
       // Valid fence updates.
       const updated = await project.updateWithFence(
@@ -250,8 +238,6 @@ describe("EmbeddedProject", () => {
       });
       const acq = await project.acquire(
         "task:fenced-archive",
-        "local",
-        "local",
         "exclusive",
         60000,
       );
@@ -394,60 +380,46 @@ kinds = ["document"]
 
   describe("CoordinationBackend", () => {
     it("acquire returns acquired=true with a fence", async () => {
-      const result = await project.acquire(
-        "task-1",
-        "agent-a",
-        "agent-a",
-        "exclusive",
-        60000,
-      );
+      const result = await project.acquire("task-1", "exclusive", 60000);
       expect(result.acquired).toBe(true);
       expect(result.fence).toBeGreaterThan(0);
     });
 
-    it("acquire blocks different holder in exclusive mode", async () => {
-      await project.acquire("task-1", "agent-a", "agent-a", "exclusive", 60000);
-      const result = await project.acquire(
-        "task-1",
-        "agent-b",
-        "agent-b",
-        "exclusive",
-        60000,
-      );
-      expect(result.acquired).toBe(false);
+    it("reacquire by the same bound participant renews", async () => {
+      const first = await project.acquire("task-1", "exclusive", 60000);
+      const result = await project.acquire("task-1", "exclusive", 60000);
+      expect(result.acquired).toBe(true);
+      expect(result.fence).toBe(first.fence);
     });
 
     it("renew + release round-trip", async () => {
-      const acq = await project.acquire(
-        "task-1",
-        "agent-a",
-        "agent-a",
-        "exclusive",
-        60000,
+      const acq = await project.acquire("task-1", "exclusive", 60000);
+      expect((await project.renew("task-1", acq.fence, 120000)).renewed).toBe(
+        true,
       );
-      expect(
-        (await project.renew("task-1", "agent-a", "agent-a", acq.fence, 120000))
-          .renewed,
-      ).toBe(true);
       await project.release("task-1", acq.fence);
       expect(await project.state("task-1")).toBeNull();
     });
 
     it("heartbeat and listPresence round-trip", async () => {
-      await project.heartbeat("machine-1", { role: "builder" });
-      const machines = await project.listPresence();
-      expect(machines).toHaveLength(1);
-      expect(machines[0].machine).toBe("machine-1");
+      await project.heartbeat({ role: "builder" });
+      const participants = await project.listPresence();
+      expect(participants).toHaveLength(1);
+      expect(participants[0].participant_id).toBe("test-participant");
+      expect(participants[0].environment.machine).toBe("test-machine");
+    });
+
+    it("presence-mode acquire records presence without creating a claim", async () => {
+      const result = await project.acquire("participant", "presence", 60_000);
+
+      expect(result.fence).toBe(0);
+      expect(result.participant_id).toBe("test-participant");
+      expect(await project.listClaims()).toEqual([]);
+      expect(await project.listPresence()).toHaveLength(1);
     });
 
     it("listClaims reflects acquire/release", async () => {
-      const r = await project.acquire(
-        "task:claim",
-        "t",
-        "t",
-        "exclusive",
-        30_000,
-      );
+      const r = await project.acquire("task:claim", "exclusive", 30_000);
       expect(
         (await project.listClaims()).some((c) => c.resource === "task:claim"),
       ).toBe(true);
@@ -479,13 +451,7 @@ kinds = ["document"]
 
   describe("GateBackend", () => {
     it("createGate -> resolveGate -> cancelGate transitions", async () => {
-      const claim = await project.acquire(
-        "task:gate",
-        "test",
-        "test",
-        "exclusive",
-        30_000,
-      );
+      const claim = await project.acquire("task:gate", "exclusive", 30_000);
       const gate = await project.createGate("task:gate", "ci", claim.fence);
       expect(gate.id).toMatch(/^gate_/);
       expect(gate.status).toBe("pending");

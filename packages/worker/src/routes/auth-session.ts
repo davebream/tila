@@ -125,6 +125,7 @@ authSessionExchange.post("/", async (c) => {
       projectId: project_id,
       tokenHash,
       actorName: tokenResult.name,
+      principalId: `token:${tokenResult.tokenId}`,
       scopes: tokenResult.scopes,
       permission: tokenResult.scopes === "full" ? "admin" : "read",
       expiresAt,

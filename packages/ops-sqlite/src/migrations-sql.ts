@@ -46,6 +46,17 @@ export function columnExists(
   return cols.some((c) => c.name === column);
 }
 
+function tableExists(storage: MigrationStorage, table: string): boolean {
+  assertIdentifier(table);
+  const rows = storage.sql
+    .exec(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+      table,
+    )
+    .toArray();
+  return rows.length > 0;
+}
+
 /**
  * Embedded DDL from migrations/do/0001_initial.sql.
  * All statements use CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS
@@ -373,6 +384,10 @@ UPDATE claims SET machine = holder, user = holder WHERE machine = '';
 `;
 
 export function runMigration0010(storage: MigrationStorage): void {
+  // A v23 database may replay this migration if the bookkeeping table was
+  // lost. Its canonical claim table intentionally has no legacy holder column.
+  if (columnExists(storage, "claims", "principal_id")) return;
+
   storage.sql.exec(`
 CREATE TABLE IF NOT EXISTS claims (
   resource TEXT PRIMARY KEY,
@@ -667,6 +682,78 @@ CREATE INDEX IF NOT EXISTS idx_entities_archived ON entities(id) WHERE archived 
 `;
 
 /**
+ * Split authenticated principal, independent participant, and untrusted
+ * environment identity. Active legacy claims and presence cannot be assigned a
+ * truthful participant, so they are intentionally discarded. Fence rows are
+ * untouched and therefore remain monotonic.
+ */
+export function runMigration0023(storage: MigrationStorage): void {
+  storage.sql.exec("DROP TABLE IF EXISTS claims");
+  storage.sql.exec(`
+    CREATE TABLE claims (
+      resource TEXT PRIMARY KEY,
+      principal_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT '{}',
+      mode TEXT NOT NULL CHECK(mode IN ('exclusive', 'owner', 'presence')),
+      fence INTEGER NOT NULL,
+      acquired_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      metadata TEXT DEFAULT '{}'
+    )
+  `);
+  storage.sql.exec(
+    "CREATE INDEX IF NOT EXISTS idx_claims_expires ON claims(expires_at)",
+  );
+
+  storage.sql.exec("DROP TABLE IF EXISTS presence");
+  storage.sql.exec(`
+    CREATE TABLE presence (
+      principal_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT '{}',
+      last_seen INTEGER NOT NULL,
+      info TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY (principal_id, participant_id)
+    )
+  `);
+  storage.sql.exec(
+    "CREATE INDEX IF NOT EXISTS idx_presence_last_seen ON presence(last_seen)",
+  );
+
+  if (tableExists(storage, "journal")) {
+    if (!columnExists(storage, "journal", "principal_id")) {
+      storage.sql.exec("ALTER TABLE journal ADD COLUMN principal_id TEXT");
+    }
+    if (!columnExists(storage, "journal", "participant_id")) {
+      storage.sql.exec("ALTER TABLE journal ADD COLUMN participant_id TEXT");
+    }
+    if (!columnExists(storage, "journal", "environment")) {
+      storage.sql.exec("ALTER TABLE journal ADD COLUMN environment TEXT");
+    }
+    storage.sql.exec(`
+      UPDATE journal
+         SET principal_id = COALESCE(principal_id, 'legacy-principal:' || actor),
+             participant_id = COALESCE(participant_id, 'legacy-event:' || seq),
+             environment = COALESCE(
+               environment,
+               CASE
+                 WHEN source IS NULL THEN '{}'
+                 WHEN source_version IS NULL THEN json_object('client_name', source)
+                 ELSE json_object('client_name', source, 'client_version', source_version)
+               END
+             )
+    `);
+    storage.sql.exec(
+      "CREATE INDEX IF NOT EXISTS idx_journal_participant ON journal(participant_id)",
+    );
+    storage.sql.exec(
+      "CREATE INDEX IF NOT EXISTS idx_journal_client_name ON journal(json_extract(environment, '$.client_name'))",
+    );
+  }
+}
+
+/**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
  * The runner executes only versions not yet recorded in _migrations.
@@ -694,4 +781,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 20, run: runMigration0020 },
   { version: 21, sql: MIGRATION_0021 },
   { version: 22, sql: MIGRATION_0022 },
+  { version: 23, run: runMigration0023 },
 ];

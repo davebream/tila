@@ -200,6 +200,8 @@ Artifacts of either flavor can reference other artifacts via typed edges (a revi
 
 **4. Journal events.** Append-only audit log of meaningful state transitions. Every claim, release, artifact write, record mutation, schema apply, gate transition, signal emission, archive — anything that changes durable state — produces a journal event. Persisted in the per-project DO SQLite `journal` table; immutable after write.
 
+**Client identity.** Every client instance binds `{ principal_id, participant_id, environment }`. The Worker derives the principal from authentication (`token:<uuid>`, `github:<host>:<numeric-user-id>`, or `oidc:<issuer>:<subject>`) and ignores client-supplied principal values. `X-Tila-Participant-Id` is required on authenticated state-changing project requests. Optional `X-Tila-Machine`, repository/worktree/branch/commit, and client headers populate untrusted environment metadata; they never authorize a write or own a claim.
+
 ### 1.2a Coordination primitives
 
 Beyond the four data shapes, tila ships five coordination primitives that operate across them:
@@ -452,7 +454,9 @@ CREATE INDEX artifact_rel_type ON artifact_relationships(type);
 -- Lazy expiry: a claim past expires_at is considered released on next read; sweeper deletes it.
 CREATE TABLE claims (
   resource        TEXT PRIMARY KEY,             -- 'task:T-142', 'file:src/auth.rb', 'epic:E-5'
-  holder          TEXT NOT NULL,                -- 'alice@machine-A:pid-9821'
+  principal_id    TEXT NOT NULL,                -- immutable authenticated subject
+  participant_id  TEXT NOT NULL,                -- independent client process/session
+  environment     JSON NOT NULL DEFAULT '{}',   -- untrusted machine/repository/Git/client metadata
   mode            TEXT NOT NULL,                -- 'exclusive' | 'owner' | 'presence'
   fence           INTEGER NOT NULL,             -- value of fences.current_fence at time of acquire
   acquired_at     INTEGER NOT NULL,
@@ -461,7 +465,6 @@ CREATE TABLE claims (
 );
 
 CREATE INDEX claims_expires_at ON claims(expires_at);
-CREATE INDEX claims_holder ON claims(holder);
 
 -- Monotonic fence counter per resource. Incremented on every acquire (even after release).
 -- Never decrements. Persists across DO evictions.
@@ -470,11 +473,14 @@ CREATE TABLE fences (
   current_fence   INTEGER NOT NULL DEFAULT 0
 );
 
--- Presence: TTL'd machine activity. Refreshed by heartbeat; reaped by the sweeper.
+-- Presence: TTL'd participant activity. Refreshed by heartbeat; reaped by the sweeper.
 CREATE TABLE presence (
-  machine         TEXT PRIMARY KEY,             -- 'alice@machine-A'
+  principal_id    TEXT NOT NULL,
+  participant_id  TEXT NOT NULL,
+  environment     JSON NOT NULL DEFAULT '{}',
   last_seen       INTEGER NOT NULL,
-  info            JSON                           -- current resource, status, etc.
+  info            JSON NOT NULL DEFAULT '{}',   -- current resource, status, etc.
+  PRIMARY KEY (principal_id, participant_id)
 );
 
 CREATE INDEX presence_last_seen ON presence(last_seen);
@@ -488,7 +494,10 @@ CREATE TABLE journal (
   t               INTEGER NOT NULL,             -- unix ms
   kind            TEXT NOT NULL,                -- 'task.claimed', 'artifact.produced', 'artifact.referenced', 'task.completed', 'schema.applied', etc.
   resource        TEXT,                         -- 'task:T-142', null for global events
-  actor           TEXT NOT NULL,                -- 'alice@machine-A' or any actor string
+  principal_id    TEXT NOT NULL,
+  participant_id  TEXT NOT NULL,
+  environment     JSON NOT NULL DEFAULT '{}',
+  token_id        TEXT,                         -- credential audit data
   fence           INTEGER,                      -- if applicable
   data            JSON NOT NULL                 -- full event payload
 );
@@ -647,17 +656,17 @@ The external API surface that the CLI calls. All requests are JSON over HTTPS. A
 | POST | `/entities/:id/archive` | `{ idempotency_key }` | `{ ok }` |
 | POST | `/entities/:id/relationships` | `{ to, type, idempotency_key }` | `{ ok }` |
 | DELETE | `/entities/:id/relationships/:to/:type` | — | `{ ok }` |
-| POST | `/acquire` | `{ resource, holder, mode, ttl_ms, metadata?, idempotency_key }` | `{ ok: true, fence, expires_at }` or `{ ok: false, reason, holder, expires_in_ms }` (409) |
-| POST | `/renew` | `{ resource, holder, fence }` | `{ ok: true, expires_at }` or 409 |
-| POST | `/release` | `{ resource, holder, fence }` | `{ ok: true }` |
+| POST | `/acquire` | `{ resource, mode, ttl_ms, metadata? }` + participant/environment headers | `{ ok: true, fence, expires_at, participant_id }` or 409 |
+| POST | `/renew` | `{ resource, fence, ttl_ms }` + participant/environment headers | `{ ok: true, expires_at }` or 409 |
+| POST | `/release` | `{ resource, fence }` + participant/environment headers | `{ ok: true }` |
 | GET | `/state` | query: `resource` | `{ claim?, owners: [], presence: [] }` |
-| GET | `/presence` | — | `{ machines: [] }` |
-| POST | `/presence` | `{ machine, current_resource?, metadata? }` | `{ ok }` |
+| GET | `/presence` | — | `{ participants: [] }` |
+| POST | `/presence` | `{ info? }` + participant/environment headers | `{ ok }` |
 | PUT | `/artifacts/:key` | binary body, metadata in headers | `{ ok, key, deduplicated? }` |
 | GET | `/artifacts/:key` | — | binary body with metadata headers |
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
-| GET | `/journal` | query: `since_seq`, `resource`, `kind`, `limit` | `{ ok, events: [], archived, lastArchivedSeq }` — `archived: true` (with `lastArchivedSeq`) signals the requested cursor falls below the archival watermark, so the range was cold-stored to R2 and pruned from DO SQLite rather than being genuinely empty; resume reads from `lastArchivedSeq` |
+| GET | `/journal` | query: `since_seq`, `resource`, `kind`, `client_name`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — `archived: true` signals a cold-stored range |
 | GET | `/journal/stream` | query: `since_seq` | SSE event stream (v0.2; v0.1 uses polling) |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
@@ -692,7 +701,7 @@ All error responses use the shape:
     "code": "stale-fence",          // machine-readable
     "message": "Fence 42 is stale; current is 43",  // human-readable
     "retryable": false,
-    "details": { "current_fence": 43, "holder": "bob@..." }
+    "details": { "current_fence": 43, "participant_id": "550e8400-e29b-41d4-a716-446655440000" }
   }
 }
 ```
@@ -988,25 +997,24 @@ Stubs for v0.2+:
 interface CoordinationBackend {
   acquire(
     resource: string,
-    holder: string,
     mode: 'exclusive' | 'owner',
     ttlMs: number,
     metadata?: object
   ): Promise<AcquireResult>;
 
-  renew(resource: string, holder: string, fence: number): Promise<RenewResult>;
-  release(resource: string, holder: string, fence: number): Promise<void>;
+  renew(resource: string, fence: number, ttlMs: number): Promise<RenewResult>;
+  release(resource: string, fence: number): Promise<void>;
 
   getState(resource: string): Promise<ResourceState>;
-  presence(): Promise<MachineActivity[]>;
-  updatePresence(machine: string, info: PresenceInfo): Promise<void>;
+  listPresence(): Promise<ParticipantActivity[]>;
+  heartbeat(info: PresenceInfo): Promise<void>;
 
   capabilities: CoordinationBackendCapabilities;
 }
 
 type AcquireResult =
-  | { ok: true; fence: number; expiresAt: number }
-  | { ok: false; reason: 'already-held'; holder: string; expiresInMs: number };
+  | { acquired: true; fence: number; expires_at: number; participant_id: string }
+  | { acquired: false; fence: number; expires_at: number; participant_id: string };
 ```
 
 v0.1 implementations:
@@ -1325,7 +1333,8 @@ Every artifact carries:
 ```
 x-amz-meta-tila-resource:    task:task-a1b2c3 | (empty for sources)
 x-amz-meta-tila-fence:       42 | (empty for sources)
-x-amz-meta-tila-machine:     alice@machine-A
+x-amz-meta-tila-principal:   github:github.com:123456
+x-amz-meta-tila-participant: 550e8400-e29b-41d4-a716-446655440000
 x-amz-meta-tila-kind:        plan | design | review | patch | transcript | research | lesson | index | ...
 x-amz-meta-tila-mime:        text/markdown
 x-amz-meta-tila-produced-at: 2026-05-15T10:28:11Z
@@ -1417,7 +1426,8 @@ Search documents in `artifact_search_docs` are a recoverable projection of artif
 // only cross-backend step. See §3a.6 for the full cross-backend ordering rules.
 async function putArtifact(req: Request, env: Env): Promise<Response> {
   const input = await req.json();
-  const { resource, fence, holder, body, kind, mime, idempotencyKey } = input;
+  const { resource, fence, body, kind, mime, idempotencyKey } = input;
+  const identity = resolveAuthenticatedIdentity(req); // principal is never read from input
 
   // 1. Idempotency check (global D1 lookup, cached for 60s in Worker memory)
   const cached = await checkIdempotency(env.GLOBAL, idempotencyKey);
@@ -1427,7 +1437,12 @@ async function putArtifact(req: Request, env: Env): Promise<Response> {
   const projectDO = env.PROJECT.get(env.PROJECT.idFromName(env.PROJECT_ID));
   const state = await projectDO.fetch('https://do/coord/state?resource=' + encodeURIComponent(resource));
   const { claim } = await state.json();
-  if (!claim || claim.holder !== holder || claim.fence < fence) {
+  if (
+    !claim ||
+    claim.principal_id !== identity.principal_id ||
+    claim.participant_id !== identity.participant_id ||
+    claim.fence < fence
+  ) {
     return Response.json({ ok: false, reason: 'stale-fence' }, { status: 409 });
   }
 
@@ -1446,7 +1461,8 @@ async function putArtifact(req: Request, env: Env): Promise<Response> {
       customMetadata: {
         'tila-resource': resource ?? '',
         'tila-fence': String(fence),
-        'tila-machine': holder,
+        'tila-principal': identity.principal_id,
+        'tila-participant': identity.participant_id,
         'tila-kind': kind,
         'tila-produced-at': new Date().toISOString(),
       },
@@ -1472,7 +1488,7 @@ async function putArtifact(req: Request, env: Env): Promise<Response> {
       sha256,
       bytes: body.byteLength,
       fence,
-      produced_by: holder,
+      identity,
       mime_type: mime,
       // Includes any required-reference inserts for [artifacts.<kind>].requires_reference_to
       references: input.references ?? [],
@@ -1655,8 +1671,8 @@ T+0:01  CLI: GET <worker>/tasks/T-142
         → Returns: { entity: {...}, claim: null }
 
 T+0:02  CLI: POST <worker>/acquire
-        Body: { resource: "task:T-142", holder: "alice@machine-A:pid-9821",
-                mode: "exclusive", ttl_ms: 600000 }
+        Header: X-Tila-Participant-Id: 550e8400-e29b-41d4-a716-446655440000
+        Body: { resource: "task:T-142", mode: "exclusive", ttl_ms: 600000 }
         → Worker routes to DO
         → DO single SQLite transaction:
             SELECT * FROM claims WHERE resource = 'task:T-142'
@@ -1664,14 +1680,14 @@ T+0:02  CLI: POST <worker>/acquire
             SELECT current_fence FROM fences WHERE resource = 'task:T-142'
             → 41 (or NULL if first time, defaults to 0)
             UPDATE fences SET current_fence = 42 WHERE resource = 'task:T-142'
-            INSERT INTO claims (resource, holder, mode, fence, ...) VALUES (..., 42, ...)
-            INSERT INTO journal (kind, resource, actor, fence, data, ...) VALUES ('task.claimed', 'task:T-142', 'alice@machine-A:pid-9821', 42, ...)
+            INSERT INTO claims (resource, principal_id, participant_id, mode, fence, ...) VALUES (..., 42, ...)
+            INSERT INTO journal (kind, resource, principal_id, participant_id, fence, data, ...) VALUES ('task.claimed', 'task:T-142', ..., 42, ...)
             COMMIT
-        → DO returns { ok: true, fence: 42, expiresAt: ... }
+        → DO returns { ok: true, fence: 42, expires_at: ..., participant_id: "550e..." }
         → Worker returns to CLI
 
 T+0:03  CLI begins agent work.
-        → Background renew loop: POST /renew every 60s with { resource, holder, fence: 42 }
+        → Background renew loop: POST /renew every 60s with { resource, fence: 42 }
 
 T+0:14  Agent produces 3 artifacts.
         → CLI uploads each via PUT /artifacts/<key>
@@ -1680,7 +1696,7 @@ T+0:14  Agent produces 3 artifacts.
         → Worker calls DO /artifact/record; DO transaction inserts pointer row, required-reference edges, and 'artifact.produced' journal event
 
 T+0:15  Work complete. CLI: POST /release
-        Body: { resource: "task:T-142", holder: "alice@machine-A:pid-9821", fence: 42 }
+        Body: { resource: "task:T-142", fence: 42 }
         → DO single transaction: DELETE FROM claims; INSERT journal('task.released'); INSERT journal('task.completed')
 
 T+0:16  Meanwhile, Bob's machine had stale local state and was about to pick T-142.
@@ -1707,24 +1723,25 @@ T+15:00 Alice's laptop wakes up. Agent tries to commit artifact with fence=42.
         → No clobber of Bob's work.
 ```
 
-### 8.3 Issue ownership (soft, non-exclusive)
+### 8.3 Issue ownership (principal-scoped)
 
 Alice takes ownership of issue I-23:
 
 ```
 CLI: POST /acquire
-Body: { resource: "issue:I-23", holder: "alice", mode: "owner", ttl_ms: 86400000 }
+Header: X-Tila-Participant-Id: 550e8400-e29b-41d4-a716-446655440000
+Body: { resource: "issue:I-23", mode: "owner", ttl_ms: 86400000 }
 
 DO transaction:
-  INSERT INTO owner_claims (resource, holder, is_primary, fence, ...) VALUES (...)
-  → If no other owner: is_primary = 1.
-  → If other owners exist: is_primary = 0 (Alice is non-primary owner).
-  → Fence increments regardless.
+  INSERT INTO claims (resource, principal_id, participant_id, mode, fence, ...) VALUES (...)
+  → A different principal conflicts.
+  → The same principal from a different participant transfers ownership and increments the fence.
+  → The previous participant can no longer renew or release.
 
-Returns { ok: true, fence: 7, is_primary: true }.
+Returns { ok: true, fence: 7, participant_id: "550e..." }.
 ```
 
-Bob can still claim individual tasks within I-23 via exclusive mode. Owner claims and exclusive claims are independent.
+Bob can still claim individual task resources within I-23 via exclusive mode. The issue owner claim and task claims are on different resources.
 
 ### 8.4 DO eviction and recovery
 
@@ -1881,14 +1898,16 @@ The point: every framework operation reduces to tila primitives plus framework-l
 import { TilaClient } from "tila-sdk";
 
 const client = new TilaClient({
-  workerUrl: "https://tila-myproj.example.workers.dev",
-  apiToken: process.env.TILA_API_TOKEN!,
+  baseUrl: "https://tila-myproj.example.workers.dev",
+  token: process.env.TILA_API_TOKEN!,
+  participantId: "550e8400-e29b-41d4-a716-446655440000",
+  environment: { machine: "build-host", client_name: "my-framework" },
 });
 
 const task = await client.entities.create({ type: "task", data: { title: "Refactor auth" } });
-const claim = await client.claims.acquire({ resource: `task:${task.id}`, holder: "agent-a", mode: "exclusive", ttlMs: 600_000 });
+const claim = await client.claims.acquire({ resource: `task:${task.id}`, mode: "exclusive", ttlMs: 600_000 });
 await client.artifacts.put({ resource: `task:${task.id}`, fence: claim.fence, kind: "plan", body: planMarkdown });
-await client.claims.release({ resource: `task:${task.id}`, holder: "agent-a", fence: claim.fence });
+await client.claims.release({ resource: `task:${task.id}`, fence: claim.fence });
 
 const service = await client.records.get({ type: "service", key: "api" });
 ```

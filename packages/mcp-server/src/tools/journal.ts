@@ -21,6 +21,10 @@ export function registerJournalTools(
         .describe(
           "Filter by event kind (e.g. 'entity.update', 'gate.resolve')",
         ),
+      client_name: z
+        .string()
+        .optional()
+        .describe("Filter by environment client name"),
       after_seq: z
         .number()
         .int()
@@ -34,11 +38,12 @@ export function registerJournalTools(
         .default(20)
         .describe("Maximum events to return"),
     },
-    async ({ resource, kind, after_seq, limit }) => {
+    async ({ resource, kind, client_name, after_seq, limit }) => {
       try {
         const result = await journal.query({
           resource,
           kind,
+          client_name,
           after_seq: after_seq !== undefined ? String(after_seq) : undefined,
           limit: String(limit),
         });

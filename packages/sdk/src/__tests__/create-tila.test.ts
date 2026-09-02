@@ -179,13 +179,15 @@ describe("createTila — local backend", () => {
     const ev = journal.events[0];
     expect(ev).toHaveProperty("token_id");
     expect(ev).toHaveProperty("data");
-    expect(ev).toHaveProperty("source");
+    expect(ev).toHaveProperty("principal_id");
+    expect(ev).toHaveProperty("participant_id");
+    expect(ev).toHaveProperty("environment");
 
-    // presence.list returns { ok, machines } (NOT { presence })
-    await tila.presence.heartbeat("m-1");
+    // presence.list returns canonical participant identities.
+    await tila.presence.heartbeat();
     const presence = await tila.presence.list();
-    expect(Array.isArray(presence.machines)).toBe(true);
-    expect(presence.machines.some((m) => m.machine === "m-1")).toBe(true);
+    expect(Array.isArray(presence.participants)).toBe(true);
+    expect(presence.participants).toHaveLength(1);
 
     // schema.get / apply
     const sg = await tila.schema.get();
@@ -268,14 +270,19 @@ describe("createTila — cloudflare backend", () => {
     expect(typeof tila.artifacts.writeText).toBe("function");
   });
 
-  it("forwards opts.extraHeaders (X-Tila-Source attribution) to the HTTP client", async () => {
+  it("forwards environment client attribution to the HTTP client", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({ ok: true, entity: { id: "task-1", type: "task" } }),
     );
     const tila = await createTila(
       baseConfig({ backend: "cloudflare", worker_url: "https://api.test" }),
       "tok",
-      { extraHeaders: { "X-Tila-Source": "mcp-server/9.9.9" } },
+      {
+        environment: {
+          client_name: "mcp-server",
+          client_version: "9.9.9",
+        },
+      },
     );
     await tila.tasks.create("task-1", "task", {});
     const [, init] = mockFetch.mock.calls[0];
@@ -333,7 +340,7 @@ describe("createTila — cloudflare backend", () => {
           ok: false,
           error: {
             code: "renew-failed",
-            message: "Claim not found, expired, or holder mismatch",
+            message: "Claim not found, expired, or participant mismatch",
             retryable: false,
           },
         },

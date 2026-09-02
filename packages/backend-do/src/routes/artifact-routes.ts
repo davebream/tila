@@ -11,6 +11,7 @@ import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import type { ReindexState } from "../project-do";
+import { originFromBody } from "./origin";
 import { jsonError, jsonOkRows } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
@@ -92,12 +93,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       ? getAutoSupersedes(parsedSchema, body.kind)
       : false;
 
-    const pointerOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const pointerOrigin = originFromBody(body as Record<string, unknown>);
     artifactOps.upsertPointer(
       db,
       { ...body, expires_at: computedExpiresAt },
@@ -278,12 +274,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       body.journal_kind === "artifact.expired"
         ? ("artifact.expired" as const)
         : undefined;
-    const tombstoneOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const tombstoneOrigin = originFromBody(body as Record<string, unknown>);
     artifactOps.tombstonePointer(db, body.r2_key, tombstoneOrigin, journalKind);
     return jsonOkRows(c, {}, 1);
   });
@@ -311,12 +302,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       source?: string | null;
       source_version?: string | null;
     };
-    const reconcileOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const reconcileOrigin = originFromBody(body as Record<string, unknown>);
     const existing = artifactOps.listPointers(db, { limit: 10000 });
     const existingKeys = new Set(
       existing.map((p: { r2_key: string }) => p.r2_key),
@@ -396,12 +382,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       source?: string | null;
       source_version?: string | null;
     };
-    const rebuildOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const rebuildOrigin = originFromBody(body as Record<string, unknown>);
     const result = artifactOps.rebuildSearchDocs(
       db,
       body.candidates,
@@ -443,12 +424,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       }
     }
 
-    const relationshipOrigin: RequestOrigin = {
-      actor: body.actor,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const relationshipOrigin = originFromBody(body as Record<string, unknown>);
     artifactOps.addArtifactRelationship(
       db,
       body.from_key,

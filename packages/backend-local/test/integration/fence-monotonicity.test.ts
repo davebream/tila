@@ -30,13 +30,7 @@ describe("fence-monotonicity", () => {
       const fences: number[] = [];
 
       for (let i = 0; i < 10; i++) {
-        const result = await lp.acquire(
-          resource,
-          `holder-${i}`,
-          `holder-${i}`,
-          "exclusive",
-          60000,
-        );
+        const result = await lp.acquire(resource, "exclusive", 60000);
         expect(result.acquired).toBe(true);
         fences.push(result.fence);
 
@@ -71,13 +65,7 @@ describe("fence-monotonicity", () => {
       for (const resource of resources) {
         fencesByResource[resource] = [];
         for (let i = 0; i < 3; i++) {
-          const result = await lp.acquire(
-            resource,
-            `holder-${i}`,
-            `holder-${i}`,
-            "exclusive",
-            60000,
-          );
+          const result = await lp.acquire(resource, "exclusive", 60000);
           expect(result.acquired).toBe(true);
           fencesByResource[resource].push(result.fence);
           await lp.release(resource, result.fence);

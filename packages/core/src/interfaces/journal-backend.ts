@@ -1,8 +1,9 @@
-// packages/core/src/interfaces/journal-backend.ts
+import type { EnvironmentMetadata } from "@tila/schemas";
 
 export interface JournalQuery {
   resource?: string;
   kind?: string;
+  client_name?: string;
   after_seq?: number;
   limit?: number;
 }
@@ -12,8 +13,12 @@ export interface JournalEvent {
   t: number;
   kind: string;
   resource: string;
-  actor: string;
+  principal_id: string;
+  participant_id: string;
+  environment: EnvironmentMetadata;
+  token_id: string | null;
   fence: number | null;
+  data: Record<string, unknown>;
 }
 
 export interface JournalBackend {

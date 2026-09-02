@@ -64,9 +64,17 @@ export function sweep(
       appendJournal(tx, {
         kind: "claim.expired",
         resource: claim.resource,
-        actor: claim.holder,
+        actor: "system:sweep",
+        principalId: "system:sweep",
+        participantId: "system:sweep",
+        environment: {},
         fence: claim.fence,
-        data: { mode: claim.mode, expired_at: claim.expires_at },
+        data: {
+          mode: claim.mode,
+          expired_at: claim.expires_at,
+          principal_id: claim.principal_id,
+          participant_id: claim.participant_id,
+        },
       });
     }
 

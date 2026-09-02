@@ -63,10 +63,12 @@ export function createIdempotencyMiddleware(deps?: {
     }
 
     const projectId = c.get("projectId");
-    // Caller-scoped: two actors with write access to the same project must not
-    // collide on the same client-supplied Idempotency-Key.
-    const tokenResult = c.get("tokenResult");
-    const caller = tokenResult?.tokenId || tokenResult?.name || "anon";
+    // Identity-scoped: participants sharing one credential cannot replay one
+    // another's mutation result.
+    const caller = JSON.stringify([
+      c.get("principalId"),
+      c.get("participantId"),
+    ]);
     const key = `dp:${projectId}:${caller}:${c.req.method}:${c.req.path}:${clientKey}`;
     const store = (deps?.makeStore ?? defaultMakeStore)(c.env);
 
