@@ -60,6 +60,15 @@ methods (`tasks`, `records`, `claims`, `artifacts`, `gates`, `signals`,
 `journal`, `presence`, `schema`, `summary`, `search`, `templates`, `tokens`)
 regardless of backend. Swap `config.backend` without changing any call site.
 
+Each facade/client generates one UUID `participant_id` and reuses it for its lifetime. Pass an explicit participant ID when separate instances must continue the same lease; environment fields are optional metadata and never affect authorization:
+
+```typescript
+const tila = await createTila(config, token, {
+  participantId: process.env.TILA_PARTICIPANT_ID,
+  environment: { machine: "runner-7", repository: "org/repo" },
+});
+```
+
 ```typescript
 import { createTila } from "tila-sdk";
 
@@ -174,7 +183,7 @@ HTTP backend. These are intentional and called out so consumers are not surprise
 | Method | Local behavior | Why |
 |--------|----------------|-----|
 | `schema.history` | Returns `[]` | Dead on **both** sides — the Worker exposes no schema-history route either, so the cloudflare branch would 404. (The data exists in `_schema_history`; it is simply not surfaced.) |
-| `presence.listAll` | Returns only **active** machines (every row `active: true`) | The embedded backend's `listPresence()` already filters to active machines by TTL; remote additionally includes stale machines as `active: false`. |
+| `presence.listAll` | Returns only **active** participants (every row `active: true`) | The embedded backend's `listPresence()` already filters to active participants by TTL; remote additionally includes stale participants as `active: false`. |
 | `artifacts.writeText` | Returns `deduplicated: false` and drops `tags` | The embedded artifacts table has no `tags` column, and the local write path does not report dedup. |
 | `tasks.list` | Ignores `compact`, emits no pagination cursor | `compact` is an HTTP-only projection; the local list is non-paginated (no `next_cursor`/`total`). |
 | `templates.list` | `variables` derived from `{{placeholders}}` | Local derives variables by scanning each template's entity data for `{{name}}` placeholders (`/\{\{(\w+)\}\}/`). |
@@ -251,8 +260,8 @@ await withClaim(client, projectId, "dataset/batch-42", "exclusive", 60_000, asyn
 
 | Mode | Behavior |
 |------|----------|
-| `"exclusive"` | Only one holder at a time. Acquire fails if already held. |
-| `"shared"` | Multiple holders allowed. Each gets a unique fence. |
+| `"exclusive"` | Only one participant at a time. A different participant conflicts, even under the same principal. |
+| `"owner"` | One principal at a time. A new participant under that principal transfers ownership and bumps the fence. |
 
 ## Artifacts
 

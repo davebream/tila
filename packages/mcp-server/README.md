@@ -56,6 +56,8 @@ Auto-detects your editor (Claude Code, Cursor, VS Code) and writes the config fi
 
 If your project has a `.tila/config.toml`, the server reads `worker_url` and `project_id` from it automatically. Otherwise, set them via environment variables (`TILA_API_URL`, `TILA_PROJECT_ID`).
 
+One participant UUID is generated per MCP server process and reused by every tool call. Set `TILA_PARTICIPANT_ID` to preserve that identity across server restarts. Hostname and Git context are sent only as untrusted environment metadata.
+
 ## Local mode (embedded SQLite, no network)
 
 The server runs against an embedded SQLite database + on-disk artifacts instead of a
@@ -144,7 +146,7 @@ invocation time with a clear error:
 
 | Tool | Description |
 |------|-------------|
-| `tila_claim_acquire` | Acquire exclusive or shared claim, returns fencing token |
+| `tila_claim_acquire` | Acquire an exclusive or owner claim, returns fencing token and participant ID |
 | `tila_claim_release` | Release a claim (requires fence) |
 | `tila_claim_list` | List all active claims |
 
@@ -213,9 +215,9 @@ invocation time with a clear error:
 
 | URI | Description |
 |-----|-------------|
-| `tila://project/summary` | Entity counts, status breakdown, active claims, ready count, online machines |
+| `tila://project/summary` | Entity counts, status breakdown, active claims, ready count, online participants |
 | `tila://project/ready` | Entities ready for work (no blockers, no pending gates) |
-| `tila://project/presence` | Machines with recorded heartbeats |
+| `tila://project/presence` | Participants with recorded heartbeats |
 | `tila://project/schema` | Current schema version and definition |
 
 ### Dynamic record resources
@@ -244,3 +246,4 @@ For `github-repo` mode, the `[github]` section (owner, repo) and `worker_url` mu
 | `TILA_DB_PATH` | Local mode only | SQLite DB path (config `local.db_path` wins) |
 | `TILA_ARTIFACTS_PATH` | Local mode only | Artifacts dir (config `local.artifacts_path` wins) |
 | `TILA_ORG` | No | Org slug for local mode (config `local.org` wins; defaults to OS username) |
+| `TILA_PARTICIPANT_ID` | No | Stable participant identity for this MCP server process; defaults to a generated UUID |

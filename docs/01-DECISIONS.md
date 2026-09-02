@@ -46,7 +46,9 @@ The backend interfaces (EntityBackend, CoordinationBackend, ArtifactBackend) all
 
 ## 2. Correctness model: first-writer-wins with fencing tokens
 
-The non-negotiable correctness property. Two machines must not silently both believe they hold the same claim.
+The non-negotiable correctness property. Two independent participants must not silently both believe they hold the same claim.
+
+Every authenticated client session has a canonical identity context: `principal_id` is derived only from the authenticated subject, `participant_id` identifies one independent process/session, and `environment` is untrusted descriptive metadata (`machine`, repository/worktree/Git fields, and client name/version). Client-supplied principal fields are ignored.
 
 - **Every claim returns a monotonic `fence` token.** Per-resource counter, incremented on each acquire.
 - **Entity coordination keys canonicalize at the boundary.** Entity claims, renewals, releases, and state reads normalize to the canonical `<type>:<id>` resource before touching claim or fence rows. Bare ids are a caller convenience, not a second storage form.
@@ -60,6 +62,8 @@ The non-negotiable correctness property. Two machines must not silently both bel
   3. Defense-in-depth for code paths added later that might forget to go through the DO. The fencing-token discipline turns a class of latent bugs into hard errors.
 - **Why not optimistic concurrency control (OCC).** OCC (version counters / ETags) was evaluated and rejected. A fencing token validates that the writer *holds the resource*, not merely that the entity hasn't changed — this prevents zombie writes where an expired claimant's late-arriving write succeeds because the entity version hasn't advanced. OCC also cannot extend to out-of-band R2 writes, where fencing tokens can be embedded in signed URLs.
 - **TTL leases, not perpetual locks.** Every claim has an expiration. Renewals extend; failures release. Crashed clients self-recover within the TTL window.
+- **Exclusive claims are participant-scoped.** Reacquiring from the same principal and participant renews without bumping the fence; any different participant conflicts.
+- **Owner claims are principal-scoped and participant-bound.** Another principal conflicts. A different participant under the same principal transfers the owner claim and bumps the fence, invalidating the prior participant. Renew and release always require the matching principal, participant, and current fence.
 
 This applies uniformly: tasks, issues, epics, artifacts, file reservations. The semantics differ (exclusive vs. owner mode, short vs. long TTL), but the fencing-token discipline is the same everywhere.
 
@@ -73,9 +77,9 @@ This applies uniformly: tasks, issues, epics, artifacts, file reservations. The 
 
 A resource can be claimed in one of two ways, plus an implicit third:
 
-- **`exclusive` mode** — one holder at a time, short TTL (minutes), fence-validated. Used for tasks. Two agents cannot both claim the same task.
-- **`owner` mode** — multiple holders allowed; one designated primary. Long TTL (hours to days). Used for issues and epics. Alice owning issue I-23 doesn't prevent Bob from claiming individual tasks within it; it just signals "Alice is driving this."
-- **`presence`** — implicit, ephemeral, no claim semantics. TTL'd machine activity. Used for the "who's online and on what" view.
+- **`exclusive` mode** — one participant at a time, short TTL (minutes), fence-validated. Used for tasks.
+- **`owner` mode** — one principal at a time, with the latest acquiring participant bound to renew/release. Long TTL (hours to days).
+- **`presence`** — implicit, ephemeral, no claim semantics. TTL'd participant activity. Used for the "who's online and on what" view.
 
 ---
 
@@ -95,7 +99,7 @@ Entity types (`task`, `issue`, `epic`, or any custom hierarchy users define) liv
 
 - **Content-addressed by sha256.** Key format: `<prefix>/<task-id>/<sha256>.<ext>`. The same content produces the same key — deduplication falls out for free.
 - **Write-once, never edited.** "Updating" means writing a new artifact with a new hash; pointer files (if any) reference the current one via conditional PUT.
-- **Self-describing via metadata.** Every artifact carries `x-amz-meta-tila-task`, `x-amz-meta-tila-fence`, `x-amz-meta-tila-machine`, `x-amz-meta-tila-kind`. Markdown artifacts additionally have YAML frontmatter with the same fields. Redundancy is deliberate: if one record is lost, the other can rebuild it.
+- **Self-describing via metadata.** Every artifact carries its resource/kind/fence plus canonical principal and participant metadata. Environment metadata is descriptive only. Reconciliation continues to accept legacy `tila-machine` metadata while rebuilding older objects.
 - **R2 lifecycle rules encode retention by prefix.** Tasks 30 days, designs 90 days, transcripts 14 days, completed-state markers retained longer. Configurable per project in `tila.config.toml`.
 - **Pointer files for "current best."** When mutable pointers are needed (e.g., `pointers/T-142/latest.json`), use full PUT with `If-Match: <etag>` for CAS. Fencing-token check at the application layer.
 

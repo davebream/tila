@@ -202,7 +202,7 @@ Uploaded artifact: produced/T-abc123/a7f3b2c1d4e5.md (238 bytes) (deduplicated)
 
 ```
 $ tila state list
-task:T-abc123  holder=cli  mode=exclusive  fence=1  ttl=294s
+task:T-abc123  participant=550e8400-e29b-41d4-a716-446655440000  mode=exclusive  fence=1  ttl=294s
 ```
 
 ### Per-resource claim detail
@@ -210,18 +210,20 @@ task:T-abc123  holder=cli  mode=exclusive  fence=1  ttl=294s
 ```
 $ tila state task:T-abc123
 task:T-abc123:
-  holder:  cli
+  principal:   token:0194e5e7-...
+  participant: 550e8400-e29b-41d4-a716-446655440000
+  machine:     my-laptop
   mode:    exclusive
   fence:   1
   ttl:     294s
   expires: 2026-05-16T10:35:00.000Z
 ```
 
-### Machine presence
+### Participant presence
 
 ```
 $ tila presence
-[active] my-laptop  last_seen=2026-05-16T10:34:12.000Z  info={}
+[active] 550e8400-e29b-41d4-a716-446655440000  machine=my-laptop  last_seen=2026-05-16T10:34:12.000Z  info={}
 ```
 
 **Fields:**
@@ -265,7 +267,7 @@ The dashboard is read-only and shows four panels:
 | **Entities** | Task list with status |
 | **Claims** | Active claims with fence and TTL |
 | **Journal** | Recent events (latest 20 by default) |
-| **Presence** | Active machines and their last-seen timestamps |
+| **Presence** | Active participants, their environment metadata, and last-seen timestamps |
 
 > All mutations go through the CLI — the dashboard is an observer, not a controller.
 
