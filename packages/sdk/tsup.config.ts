@@ -105,4 +105,27 @@ const localConfig = {
   external: ["zod", "better-sqlite3", "drizzle-orm/better-sqlite3"],
 };
 
-export default defineConfig([mainConfig, localConfig]);
+const backupConfig = {
+  entry: { backup: "src/backup/index.ts" },
+  format: ["esm", "cjs"] as const,
+  dts: {
+    compilerOptions: { composite: false, incremental: false },
+    resolve: true,
+  },
+  treeshake: true,
+  sourcemap: false,
+  noExternal: [
+    "@tila/schemas",
+    "@tila/core",
+    "@tila/backend-embedded",
+    "@tila/ops-sqlite",
+  ],
+  external: [
+    "zod",
+    "tar-stream",
+    "better-sqlite3",
+    "drizzle-orm/better-sqlite3",
+  ],
+};
+
+export default defineConfig([mainConfig, localConfig, backupConfig]);

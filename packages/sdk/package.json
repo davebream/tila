@@ -72,6 +72,7 @@
     "@tila/core": "workspace:*",
     "@tila/ops-sqlite": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "tar-stream": "^3.2.1",
     "zod": "^3.24.0"
   },
   "peerDependencies": {
@@ -86,6 +87,7 @@
     "@tila/schemas": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.20.0",
+    "@types/tar-stream": "^3.1.4",
     "better-sqlite3": "^12.10.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
