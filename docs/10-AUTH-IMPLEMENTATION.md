@@ -1089,6 +1089,83 @@ Generic (non-GitHub) OIDC exchange authorizes a `(project_id, issuer, subject)` 
 columns (`migrations/global/0020_projects_oidc.sql`) configure the exchange; `POST /exchange-oidc`
 returns `oidc-not-configured` when they are absent.
 
+### GitHub Actions OIDC repository policies
+
+GitHub Actions OIDC exchange is authorized by a complete policy stored on each repository link.
+Repository registration and migration both create a disabled, read-only policy. The legacy
+`oidc_permission` column remains in backups for compatibility but never participates in
+authorization or session minting.
+
+Admins read or replace the policy through:
+
+| Method | Endpoint | Behavior |
+|---|---|---|
+| `GET` | `/api/repos/:repoId/oidc-policy` | Returns the complete policy |
+| `PUT` | `/api/repos/:repoId/oidc-policy` | Atomically replaces every policy field |
+
+The PUT body requires every field:
+
+```json
+{
+  "enabled": true,
+  "max_permission": "write",
+  "subject_pattern": "repo:acme/api:*",
+  "allowed_events": ["push"],
+  "allowed_refs": ["refs/heads/main", "refs/tags/v1.2.3"],
+  "allowed_environments": ["production"],
+  "allowed_workflows": [
+    "acme/platform/.github/workflows/deploy.yml@refs/tags/v1"
+  ]
+}
+```
+
+Arrays contain at most 50 unique strings. Every string and the optional subject pattern is at most
+512 characters. An enabled policy must allow at least one event. `max_permission` is the exact
+minted role: `read`, `write`, or `admin`.
+
+Policy evaluation happens after token signature and required-claim validation, but before
+idempotency replay or reservation:
+
+```text
+repository id + enabled
+  -> exact event
+  -> full-string subject wildcard
+  -> exact ref OR exact environment
+  -> exact reusable-workflow identity
+  -> mint exactly max_permission
+```
+
+- Event entries are exact. `pull_request` and `pull_request_target` are separate values and must be
+  allowed independently.
+- `subject_pattern` is case-sensitive and anchored to the full subject. Only `*` is special; it
+  matches zero or more characters.
+- Refs, environments, and workflow refs are exact strings. A value such as `refs/tags/v*` is
+  literal and does **not** wildcard-match tags; list each permitted tag explicitly.
+- Refs and environments form one context condition. If either list is non-empty, the verified token
+  must match an allowed ref or an allowed environment.
+- `allowed_workflows` matches the complete `job_workflow_ref`, independently of the caller's ref.
+
+Common exact-match entries:
+
+| Intent | Policy entry |
+|---|---|
+| Main branch | `allowed_refs: ["refs/heads/main"]` |
+| Release tag | `allowed_refs: ["refs/tags/v1.2.3"]` |
+| Protected deployment environment | `allowed_environments: ["production"]` |
+| Pull-request workflow | `allowed_events: ["pull_request"]` |
+| Pinned reusable workflow | `allowed_workflows: ["acme/platform/.github/workflows/deploy.yml@refs/tags/v1"]` |
+
+GitHub emits `environment` only for jobs that reference an environment, and
+`job_workflow_ref` only in applicable reusable-workflow contexts. They are valid optional claims,
+but a policy that constrains the corresponding category denies a token where the claim is absent.
+See GitHub's [OIDC claim reference](https://docs.github.com/en/actions/reference/security/oidc) and
+[reusable workflow guidance](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows).
+
+All authorization denials—including a missing repository link, disabled or malformed policy,
+missing constrained optional claim, and condition mismatch—return HTTP 403 with
+`oidc-policy-denied`. Internal audit telemetry records only the denial reason and verified
+project/repository/actor identifiers; it never records raw tokens or condition values.
+
 ### DPoP sender-constraining (WI-G)
 
 A session token may be sender-constrained to a JWK thumbprint stored as the `cnf.jkt` claim, with the
