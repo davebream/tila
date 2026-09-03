@@ -8,6 +8,7 @@ export type QueryFn = (
 export interface MigrationResult {
   applied: number;
   skipped: number;
+  appliedNames: string[];
 }
 
 export async function applyD1Migrations(opts: {
@@ -37,6 +38,7 @@ export async function applyD1Migrations(opts: {
 
   let appliedCount = 0;
   let skipped = 0;
+  const appliedNames: string[] = [];
   for (const file of files) {
     if (applied.has(file)) {
       skipped++;
@@ -65,9 +67,10 @@ export async function applyD1Migrations(opts: {
       file,
     ]);
     appliedCount++;
+    appliedNames.push(file);
   }
 
-  return { applied: appliedCount, skipped };
+  return { applied: appliedCount, skipped, appliedNames };
 }
 
 async function seedFromWrangler(queryFn: QueryFn): Promise<void> {

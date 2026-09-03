@@ -123,6 +123,13 @@ export function createBackupRoutes(options: {
       "created_at",
       "created_by",
       "oidc_permission",
+      "oidc_enabled",
+      "oidc_max_permission",
+      "oidc_subject_pattern",
+      "oidc_allowed_events",
+      "oidc_allowed_refs",
+      "oidc_allowed_environments",
+      "oidc_allowed_workflows",
     ]),
     _github_app_config: new Set([
       "project_id",

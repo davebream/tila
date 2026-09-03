@@ -99,6 +99,18 @@ export async function applyD1Migrations(
   if (result.applied > 0) {
     p.log.info(`  Applied ${result.applied} migration(s).`);
   }
+
+  if (result.appliedNames.includes("0024_repo_oidc_policy.sql")) {
+    const rows = (await queryFn(
+      "SELECT COUNT(*) AS count FROM _project_repos",
+    )) as Array<{ count?: number | string }>;
+    const affected = Number(rows[0]?.count ?? 0);
+    if (Number.isSafeInteger(affected) && affected > 0) {
+      p.log.warn(
+        `${affected} existing repository link(s) had GitHub Actions OIDC exchange disabled by the security migration. Configure each link with PUT /api/repos/:repoId/oidc-policy before re-enabling Actions access.`,
+      );
+    }
+  }
 }
 
 /**

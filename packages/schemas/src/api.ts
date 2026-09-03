@@ -11,6 +11,7 @@ import {
   EntityRelationshipSchema,
   EntityRelationshipTypeSchema,
 } from "./relationship";
+import { SessionPermissionSchema } from "./session";
 import { TagSchema, TagsSchema } from "./tags";
 
 // --- Error envelope ---
@@ -1007,6 +1008,45 @@ export type InstantiateTemplateResponse = z.infer<
 >;
 
 // --- Repo Allowlist API ---
+
+const RepoOidcPolicyConditionSchema = z
+  .array(z.string().min(1).max(512))
+  .max(50)
+  .refine((values) => new Set(values).size === values.length, {
+    message: "Policy condition values must be unique",
+  });
+
+export const RepoOidcPolicySchema = z
+  .object({
+    enabled: z.boolean(),
+    max_permission: SessionPermissionSchema,
+    subject_pattern: z.string().min(1).max(512).nullable(),
+    allowed_events: RepoOidcPolicyConditionSchema,
+    allowed_refs: RepoOidcPolicyConditionSchema,
+    allowed_environments: RepoOidcPolicyConditionSchema,
+    allowed_workflows: RepoOidcPolicyConditionSchema,
+  })
+  .superRefine((policy, ctx) => {
+    if (policy.enabled && policy.allowed_events.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "An enabled OIDC policy must allow at least one event",
+        path: ["allowed_events"],
+      });
+    }
+  });
+export type RepoOidcPolicy = z.infer<typeof RepoOidcPolicySchema>;
+export const RepoOidcPolicyRequestSchema = RepoOidcPolicySchema;
+export type RepoOidcPolicyRequest = z.infer<typeof RepoOidcPolicyRequestSchema>;
+
+export const RepoOidcPolicyResponseSchema = z.object({
+  ok: z.literal(true),
+  github_repo_id: z.number().int().positive(),
+  policy: RepoOidcPolicySchema,
+});
+export type RepoOidcPolicyResponse = z.infer<
+  typeof RepoOidcPolicyResponseSchema
+>;
 
 export const RepoRegisterRequestSchema = z.object({
   owner: z.string().min(1).max(100),
