@@ -19,12 +19,16 @@ vi.mock("../lib/github-client", () => ({
 // Mock RepoAllowlistStore
 const mockRegister = vi.fn().mockResolvedValue(undefined);
 const mockRemove = vi.fn().mockResolvedValue(undefined);
+const mockGetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
+const mockSetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 
 vi.mock("@tila/backend-d1", () => ({
   RepoAllowlistStore: vi.fn().mockImplementation(
     class {
       register = mockRegister;
       remove = mockRemove;
+      getOidcPolicy = mockGetOidcPolicy;
+      setOidcPolicy = mockSetOidcPolicy;
     } as unknown as () => unknown,
   ),
 }));
@@ -139,6 +143,18 @@ const successMetadata = {
   status: 200,
   id: 12345,
   full_name: "test-org/test-repo",
+};
+
+const oidcPolicy = {
+  enabled: true,
+  max_permission: "write" as const,
+  subject_pattern: "repo:test-org/test-repo:*",
+  allowed_events: ["push"],
+  allowed_refs: ["refs/heads/main"],
+  allowed_environments: ["production"],
+  allowed_workflows: [
+    "test-org/test-repo/.github/workflows/deploy.yml@refs/tags/v1",
+  ],
 };
 
 describe("POST /api/repos", () => {
@@ -320,6 +336,130 @@ describe("POST /api/repos", () => {
       "private-repo",
       "https://api.github.com",
     );
+  });
+});
+
+describe("GET and PUT /api/repos/:repoId/oidc-policy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireProjectAdminHttp.mockResolvedValue(null);
+  });
+
+  it("returns the complete stored policy", async () => {
+    mockGetOidcPolicy.mockResolvedValue({ status: "ok", policy: oidcPolicy });
+    const res = await createApp().request(
+      "/api/repos/12345/oidc-policy",
+      { method: "GET" },
+      mockEnv,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      github_repo_id: 12345,
+      policy: oidcPolicy,
+    });
+    expect(mockGetOidcPolicy).toHaveBeenCalledWith(
+      "proj-1",
+      "github.com",
+      12345,
+    );
+  });
+
+  it("atomically replaces the complete policy", async () => {
+    mockSetOidcPolicy.mockResolvedValue({ status: "ok", policy: oidcPolicy });
+    const res = await createApp().request(
+      "/api/repos/12345/oidc-policy",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(oidcPolicy),
+      },
+      mockEnv,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockSetOidcPolicy).toHaveBeenCalledWith(
+      "proj-1",
+      "github.com",
+      12345,
+      oidcPolicy,
+    );
+  });
+
+  it("requires every PUT field and at least one event when enabled", async () => {
+    const app = createApp();
+    const missingField = await app.request(
+      "/api/repos/12345/oidc-policy",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...oidcPolicy, allowed_workflows: undefined }),
+      },
+      mockEnv,
+    );
+    const missingEvent = await app.request(
+      "/api/repos/12345/oidc-policy",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...oidcPolicy, allowed_events: [] }),
+      },
+      mockEnv,
+    );
+
+    expect(missingField.status).toBe(400);
+    expect(missingEvent.status).toBe(400);
+    expect(mockSetOidcPolicy).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a missing repository link", async () => {
+    mockGetOidcPolicy.mockResolvedValue({ status: "not-found" });
+    mockSetOidcPolicy.mockResolvedValue({ status: "not-found" });
+    const app = createApp();
+
+    const get = await app.request(
+      "/api/repos/12345/oidc-policy",
+      { method: "GET" },
+      mockEnv,
+    );
+    const put = await app.request(
+      "/api/repos/12345/oidc-policy",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(oidcPolicy),
+      },
+      mockEnv,
+    );
+
+    expect(get.status).toBe(404);
+    expect(put.status).toBe(404);
+  });
+
+  it("applies the admin gate to reads and writes", async () => {
+    mockRequireProjectAdminHttp.mockResolvedValue(deny403());
+    const app = createApp(makeSessionToken("write"));
+
+    const get = await app.request(
+      "/api/repos/12345/oidc-policy",
+      { method: "GET" },
+      mockEnv,
+    );
+    const put = await app.request(
+      "/api/repos/12345/oidc-policy",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(oidcPolicy),
+      },
+      mockEnv,
+    );
+
+    expect(get.status).toBe(403);
+    expect(put.status).toBe(403);
+    expect(mockGetOidcPolicy).not.toHaveBeenCalled();
+    expect(mockSetOidcPolicy).not.toHaveBeenCalled();
   });
 });
 
