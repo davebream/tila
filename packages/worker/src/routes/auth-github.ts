@@ -11,7 +11,6 @@ import {
   GitHubAppInstallationConfigSchema,
   GitHubExchangeRequestSchema,
   OidcExchangeRequestSchema,
-  SessionPermissionSchema,
 } from "@tila/schemas";
 import { type Context, Hono } from "hono";
 import { SignJWT, importJWK, jwtVerify } from "jose";
@@ -36,6 +35,10 @@ import {
   getAuthenticatedUser,
   getRepoPermission,
 } from "../lib/github-client";
+import {
+  type GitHubOidcPolicyDenialReason,
+  evaluateGitHubOidcPolicy,
+} from "../lib/github-oidc-policy";
 import {
   PERMISSION_HIERARCHY,
   normalizeGitHubPermission,
@@ -111,6 +114,39 @@ export async function recordExchangeFailure(
     } catch {
       // Analytics emission is never load-bearing
     }
+  }
+}
+
+type GitHubOidcAuditDenialReason =
+  | GitHubOidcPolicyDenialReason
+  | "repository-not-allowed"
+  | "invalid-policy";
+
+function emitGitHubOidcPolicyDenied(
+  env: { ANALYTICS: AnalyticsEngineDataset },
+  details: {
+    projectId: string;
+    repositoryId: number;
+    actorId: number;
+    reason: GitHubOidcAuditDenialReason;
+  },
+): void {
+  try {
+    env.ANALYTICS.writeDataPoint({
+      blobs: [
+        "auth",
+        "github_oidc_exchange",
+        "policy_denied",
+        details.reason,
+        details.projectId,
+        String(details.repositoryId),
+        String(details.actorId),
+      ],
+      doubles: [1],
+      indexes: ["github-oidc"],
+    });
+  } catch {
+    // Analytics is never load-bearing.
   }
 }
 
@@ -1368,6 +1404,55 @@ authGithub.post("/exchange-oidc", async (c) => {
     );
   }
 
+  // Authorization precedes idempotency replay so a cached exchange can never
+  // bypass a policy that was disabled or tightened after the original mint.
+  const policyResult = await new RepoAllowlistStore(c.env.DB).getOidcPolicy(
+    project_id,
+    "github.com",
+    claims.repository_id,
+  );
+  const policyDecision =
+    policyResult.status === "ok"
+      ? evaluateGitHubOidcPolicy(
+          policyResult.repo.github_repo_id,
+          policyResult.policy,
+          claims,
+        )
+      : null;
+  const denialReason: GitHubOidcAuditDenialReason | null =
+    policyResult.status === "not-found"
+      ? "repository-not-allowed"
+      : policyResult.status === "invalid-policy"
+        ? "invalid-policy"
+        : policyDecision && !policyDecision.allowed
+          ? policyDecision.reason
+          : null;
+
+  if (denialReason !== null) {
+    await recordExchangeFailure(c.env, ip);
+    emitGitHubOidcPolicyDenied(c.env, {
+      projectId: project_id,
+      repositoryId: claims.repository_id,
+      actorId: claims.actor_id,
+      reason: denialReason,
+    });
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "oidc-policy-denied",
+          message: "GitHub Actions OIDC policy denied this exchange",
+          retryable: false,
+        },
+      },
+      403,
+    );
+  }
+
+  if (policyResult.status !== "ok") {
+    throw new Error("OIDC policy decision invariant violated");
+  }
+
   // Idempotency check (keyed by project_id + jti from verified claims)
   const idempotencyKey = `oidc:${project_id}:${claims.jti}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
@@ -1395,42 +1480,6 @@ authGithub.post("/exchange-oidc", async (c) => {
 
   let reservationFinalized = false;
   try {
-    // Check if repo is registered for this project
-    const allowlistStore = new RepoAllowlistStore(c.env.DB);
-    const repo = await allowlistStore.isRegistered(
-      project_id,
-      "github.com",
-      claims.repository_id,
-    );
-
-    if (!repo) {
-      await recordExchangeFailure(c.env, ip);
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "repo-not-allowed",
-            message: "Repository not registered for this project",
-            retryable: false,
-          },
-        },
-        403,
-      );
-    }
-
-    // Read oidc_permission from allowlist and validate it
-    const oidcPermissionParsed = SessionPermissionSchema.safeParse(
-      repo.oidc_permission,
-    );
-    if (!oidcPermissionParsed.success) {
-      console.warn(
-        `[auth-oidc] repo ${claims.repository_id} has an unrecognized oidc_permission value "${repo.oidc_permission}"; defaulting to "read" (least privilege)`,
-      );
-    }
-    const oidcPermission = oidcPermissionParsed.success
-      ? oidcPermissionParsed.data
-      : "read"; // Default to read (least privilege) if invalid
-
     // Route through mintSession for field-parity with other exchange flows.
     // The OIDC "user" is the GitHub Actions actor; the matched "repo" mirrors the
     // shape expected by mintSession.
@@ -1445,7 +1494,7 @@ authGithub.post("/exchange-oidc", async (c) => {
         login: claims.actor,
         id: claims.actor_id,
       },
-      userPermission: oidcPermission,
+      userPermission: policyResult.policy.max_permission,
       hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
       instanceId,
     });

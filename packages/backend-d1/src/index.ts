@@ -15,6 +15,7 @@ export {
 export {
   RepoAllowlistStore,
   type RepoAllowlistRow,
+  type RepoOidcPolicyResult,
 } from "./repo-allowlist";
 export {
   OidcPrincipalsStore,

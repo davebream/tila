@@ -106,6 +106,10 @@ describe("applyD1Migrations", () => {
 
     expect(result.applied).toBe(2);
     expect(result.skipped).toBe(0);
+    expect(result.appliedNames).toEqual([
+      "0001_initial.sql",
+      "0002_extras.sql",
+    ]);
 
     const createTracker = queries.find((q) => q.sql.includes("_d1_migrations"));
     expect(createTracker).toBeDefined();
@@ -141,6 +145,7 @@ describe("applyD1Migrations", () => {
 
     expect(result.applied).toBe(1);
     expect(result.skipped).toBe(1);
+    expect(result.appliedNames).toEqual(["0002_extras.sql"]);
   });
 
   it("seeds from wrangler d1_migrations table", async () => {
@@ -176,6 +181,7 @@ describe("applyD1Migrations", () => {
     expect(seeded).toContain("0001_initial.sql");
     expect(seeded).toContain("0002_extras.sql");
     expect(result.applied).toBe(0);
+    expect(result.appliedNames).toEqual([]);
   });
 
   it("catches 'already exists' errors on individual statements", async () => {

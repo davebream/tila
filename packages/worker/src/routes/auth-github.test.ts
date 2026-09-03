@@ -1,3 +1,4 @@
+import type { RepoOidcPolicy } from "@tila/schemas";
 import { Hono } from "hono";
 import { SignJWT, importJWK } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -68,6 +69,7 @@ const mockIdempotencyFinalize = vi.fn().mockResolvedValue(true);
 const mockIdempotencyRelease = vi.fn().mockResolvedValue(undefined);
 const mockListForProject = vi.fn().mockResolvedValue([]);
 const mockIsRegistered = vi.fn().mockResolvedValue(null);
+const mockGetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 const mockGitHubAppConfigSetInstallation = vi.fn().mockResolvedValue(undefined);
 const mockGitHubAppConfigGetInstallation = vi.fn().mockResolvedValue(null);
 const mockD1TokenValidate = vi.fn().mockResolvedValue(null);
@@ -101,6 +103,7 @@ vi.mock("@tila/backend-d1", () => ({
     class {
       listForProject = mockListForProject;
       isRegistered = mockIsRegistered;
+      getOidcPolicy = mockGetOidcPolicy;
     } as unknown as () => unknown,
   ),
   GitHubAppConfigStore: vi.fn().mockImplementation(
@@ -149,13 +152,15 @@ MzEfYyjiWA4R4/M2bS1+fWIcPm15j9mJzKQ7j0fJ9lW6m3VnYWTz6vADC0Rv
 -----END PRIVATE KEY-----`;
 
 // Env is passed as third arg to app.request
+const mockAnalyticsWriteDataPoint = vi.fn();
+
 const testEnv = {
   GITHUB_SESSION_HMAC_KEY: TEST_HMAC_KEY,
   DB: mockDb,
   PROJECT: {} as DurableObjectNamespace,
   ARTIFACTS: {} as R2Bucket,
   ANALYTICS: {
-    writeDataPoint: vi.fn(),
+    writeDataPoint: mockAnalyticsWriteDataPoint,
   } as unknown as AnalyticsEngineDataset,
   ASSETS: {} as Fetcher,
 } as unknown as Env;
@@ -178,6 +183,44 @@ const MOCK_REPO = {
   created_at: 1000000,
   created_by: "admin",
 };
+
+const ENABLED_OIDC_POLICY = {
+  enabled: true,
+  max_permission: "write" as const,
+  subject_pattern: "repo:test-org/test-repo:*",
+  allowed_events: ["push"],
+  allowed_refs: ["refs/heads/main"],
+  allowed_environments: ["production"],
+  allowed_workflows: [
+    "test-org/test-repo/.github/workflows/ci.yml@refs/heads/main",
+  ],
+} satisfies RepoOidcPolicy;
+
+function mockOidcPolicy(
+  policyOverrides: Partial<RepoOidcPolicy> = {},
+  repoOverrides: Record<string, unknown> = {},
+) {
+  mockGetOidcPolicy.mockResolvedValue({
+    status: "ok",
+    policy: { ...ENABLED_OIDC_POLICY, ...policyOverrides },
+    repo: {
+      ...MOCK_REPO,
+      oidc_permission: "admin",
+      oidc_enabled: 1,
+      oidc_max_permission: "write",
+      oidc_subject_pattern: ENABLED_OIDC_POLICY.subject_pattern,
+      oidc_allowed_events: JSON.stringify(ENABLED_OIDC_POLICY.allowed_events),
+      oidc_allowed_refs: JSON.stringify(ENABLED_OIDC_POLICY.allowed_refs),
+      oidc_allowed_environments: JSON.stringify(
+        ENABLED_OIDC_POLICY.allowed_environments,
+      ),
+      oidc_allowed_workflows: JSON.stringify(
+        ENABLED_OIDC_POLICY.allowed_workflows,
+      ),
+      ...repoOverrides,
+    },
+  });
+}
 
 describe("POST /api/auth/github/exchange", () => {
   beforeEach(() => {
@@ -1726,7 +1769,10 @@ describe("POST /api/auth/github/exchange-oidc", () => {
     vi.clearAllMocks();
     mockRateLimitCheck.mockResolvedValue(false);
     mockIdempotencyCheck.mockResolvedValue(null);
-    mockIsRegistered.mockResolvedValue(null);
+    mockIdempotencyReserve.mockResolvedValue({ state: "acquired" });
+    mockIdempotencyFinalize.mockResolvedValue(true);
+    mockIdempotencyRelease.mockResolvedValue(undefined);
+    mockOidcPolicy();
     mockVerifyOidcToken.mockResolvedValue({
       iss: "https://token.actions.githubusercontent.com",
       aud: "https://tila.example.com",
@@ -1761,11 +1807,6 @@ describe("POST /api/auth/github/exchange-oidc", () => {
       ...testEnv,
       GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
     } as unknown as Env;
-
-    mockIsRegistered.mockResolvedValue({
-      ...MOCK_REPO,
-      oidc_permission: "write",
-    });
 
     const res = await app.request(
       "/api/auth/github/exchange-oidc",
@@ -1987,14 +2028,14 @@ describe("POST /api/auth/github/exchange-oidc", () => {
     expect(body.error.code).toBe("oidc-jwks-unavailable");
   });
 
-  it("returns 403 when repo is not in allowlist", async () => {
+  it("returns the generic 403 when the repository link is missing", async () => {
     const app = createApp();
     const envWithOidc = {
       ...testEnv,
       GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
     } as unknown as Env;
 
-    mockIsRegistered.mockResolvedValue(null);
+    mockGetOidcPolicy.mockResolvedValue({ status: "not-found" });
 
     const res = await app.request(
       "/api/auth/github/exchange-oidc",
@@ -2011,7 +2052,109 @@ describe("POST /api/auth/github/exchange-oidc", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("repo-not-allowed");
+    expect(body.error.code).toBe("oidc-policy-denied");
+    expect(mockIdempotencyCheck).not.toHaveBeenCalled();
+  });
+
+  it("emits a non-leaking internal denial reason", async () => {
+    const app = createApp();
+    const envWithOidc = {
+      ...testEnv,
+      GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
+    } as unknown as Env;
+    mockOidcPolicy({ allowed_events: ["workflow_dispatch"] });
+
+    const res = await app.request(
+      "/api/auth/github/exchange-oidc",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          oidc_token: "secret-raw-token",
+        }),
+      },
+      envWithOidc,
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockAnalyticsWriteDataPoint).toHaveBeenCalledWith({
+      blobs: [
+        "auth",
+        "github_oidc_exchange",
+        "policy_denied",
+        "event-mismatch",
+        "test-project",
+        "99999",
+        "54321",
+      ],
+      doubles: [1],
+      indexes: ["github-oidc"],
+    });
+    const telemetry = JSON.stringify(mockAnalyticsWriteDataPoint.mock.calls);
+    expect(telemetry).not.toContain("secret-raw-token");
+    expect(telemetry).not.toContain("refs/heads/main");
+    expect(telemetry).not.toContain("production");
+    expect(telemetry).not.toContain("job_workflow_ref");
+  });
+
+  it("keeps policy denial fail-closed when audit telemetry fails", async () => {
+    const app = createApp();
+    const envWithOidc = {
+      ...testEnv,
+      GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
+    } as unknown as Env;
+    mockOidcPolicy({ enabled: false });
+    mockAnalyticsWriteDataPoint.mockImplementationOnce(() => {
+      throw new Error("analytics unavailable");
+    });
+
+    const res = await app.request(
+      "/api/auth/github/exchange-oidc",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        }),
+      },
+      envWithOidc,
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: { code: "oidc-policy-denied" },
+    });
+  });
+
+  it("does not replay a cached exchange after policy is disabled", async () => {
+    const app = createApp();
+    const envWithOidc = {
+      ...testEnv,
+      GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
+    } as unknown as Env;
+    mockOidcPolicy({ enabled: false });
+    mockIdempotencyCheck.mockResolvedValue({
+      body: JSON.stringify({ ok: true, session_token: "tila_s.cached.token" }),
+      statusCode: 200,
+    });
+
+    const res = await app.request(
+      "/api/auth/github/exchange-oidc",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+        }),
+      },
+      envWithOidc,
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockIdempotencyCheck).not.toHaveBeenCalled();
   });
 
   it("returns cached response on replay (same jti)", async () => {
@@ -2080,8 +2223,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as typeof cachedResponse;
     expect(body.session_token).toBe("tila_s.cached.token");
-    // Verify no new session was minted (no call to isRegistered)
-    expect(mockIsRegistered).not.toHaveBeenCalled();
+    expect(mockGetOidcPolicy).toHaveBeenCalledBefore(mockIdempotencyCheck);
   });
 
   it("returns 429 when rate limited", async () => {
@@ -2114,17 +2256,17 @@ describe("POST /api/auth/github/exchange-oidc", () => {
     expect(body.error.code).toBe("rate-limited");
   });
 
-  it("maps invalid oidc_permission to session permission 'read' (least privilege)", async () => {
+  it("ignores legacy oidc_permission when minting at max_permission", async () => {
     const app = createApp();
     const envWithOidc = {
       ...testEnv,
       GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
     } as unknown as Env;
 
-    mockIsRegistered.mockResolvedValue({
-      ...MOCK_REPO,
-      oidc_permission: "invalid-value-not-a-valid-permission",
-    });
+    mockOidcPolicy(
+      { max_permission: "read" },
+      { oidc_permission: "write", oidc_max_permission: "read" },
+    );
 
     const res = await app.request(
       "/api/auth/github/exchange-oidc",
@@ -2144,34 +2286,40 @@ describe("POST /api/auth/github/exchange-oidc", () => {
     expect(body.permission).toBe("read");
   });
 
-  it("maps oidc_permission 'read' to session permission 'read'", async () => {
+  it("returns the same generic denial for disabled and malformed policies", async () => {
     const app = createApp();
     const envWithOidc = {
       ...testEnv,
       GITHUB_OIDC_AUDIENCE: "https://tila.example.com",
     } as unknown as Env;
 
-    mockIsRegistered.mockResolvedValue({
-      ...MOCK_REPO,
-      oidc_permission: "read",
+    const request = () =>
+      app.request(
+        "/api/auth/github/exchange-oidc",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: "test-project",
+            oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+          }),
+        },
+        envWithOidc,
+      );
+
+    mockOidcPolicy({ enabled: false });
+    const disabled = await request();
+    mockGetOidcPolicy.mockResolvedValue({ status: "invalid-policy" });
+    const malformed = await request();
+
+    expect(disabled.status).toBe(403);
+    expect(malformed.status).toBe(403);
+    expect(await disabled.json()).toMatchObject({
+      error: { code: "oidc-policy-denied" },
     });
-
-    const res = await app.request(
-      "/api/auth/github/exchange-oidc",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: "test-project",
-          oidc_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-        }),
-      },
-      envWithOidc,
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { permission: string };
-    expect(body.permission).toBe("read");
+    expect(await malformed.json()).toMatchObject({
+      error: { code: "oidc-policy-denied" },
+    });
   });
 });
 
@@ -2186,6 +2334,7 @@ describe("instance_id binding in minted session JWT and login response", () => {
     mockGetAuthenticatedUser.mockResolvedValue({ login: "alice", id: 42 });
     mockGetRepoPermission.mockResolvedValue("write");
     mockEnsureDeploymentInstanceId.mockResolvedValue(KNOWN_INSTANCE_ID);
+    mockOidcPolicy({ max_permission: "read" });
   });
 
   it("/exchange response body includes instance_id matching the deployment singleton", async () => {
@@ -2255,12 +2404,6 @@ describe("instance_id binding in minted session JWT and login response", () => {
       repository_visibility: "private",
       job_workflow_ref:
         "test-org/test-repo/.github/workflows/ci.yml@refs/heads/main",
-    });
-
-    // OIDC path uses isRegistered (not listForProject) to look up by repository_id.
-    mockIsRegistered.mockResolvedValue({
-      ...MOCK_REPO,
-      oidc_permission: "read",
     });
 
     const res = await app.request(
@@ -2359,6 +2502,9 @@ describe("WI-H tiered TTL: PAT /exchange path (all three tiers)", () => {
     vi.clearAllMocks();
     mockRateLimitCheck.mockResolvedValue(false);
     mockIdempotencyCheck.mockResolvedValue(null);
+    mockIdempotencyReserve.mockResolvedValue({ state: "acquired" });
+    mockIdempotencyFinalize.mockResolvedValue(true);
+    mockIdempotencyRelease.mockResolvedValue(undefined);
     mockListForProject.mockResolvedValue([MOCK_REPO]);
     mockGitHubAppConfigGetInstallation.mockResolvedValue(null);
     mockGetAuthenticatedUser.mockResolvedValue({ login: "testuser", id: 1 });
@@ -2517,6 +2663,10 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
     vi.clearAllMocks();
     mockRateLimitCheck.mockResolvedValue(false);
     mockIdempotencyCheck.mockResolvedValue(null);
+    mockIdempotencyReserve.mockResolvedValue({ state: "acquired" });
+    mockIdempotencyFinalize.mockResolvedValue(true);
+    mockIdempotencyRelease.mockResolvedValue(undefined);
+    mockOidcPolicy({ max_permission: "read" });
     mockVerifyOidcToken.mockResolvedValue({
       iss: "https://token.actions.githubusercontent.com",
       aud: "https://tila.example.com",
@@ -2547,10 +2697,6 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
 
   it("WI-I: OIDC path returns 409 (no mint) when the reservation is in-flight", async () => {
     const app = createApp();
-    mockIsRegistered.mockResolvedValue({
-      ...MOCK_REPO,
-      oidc_permission: "read",
-    });
     mockIdempotencyReserve.mockResolvedValueOnce({ state: "in-flight" });
 
     const res = await app.request(
@@ -2572,10 +2718,9 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
     expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
   });
 
-  it("WI-I: OIDC path releases the reservation when the repo is not registered (no finalize)", async () => {
+  it("OIDC policy denial happens before reservation", async () => {
     const app = createApp();
-    // reserve defaults to "acquired"; isRegistered → null drives the in-try 403.
-    mockIsRegistered.mockResolvedValue(null);
+    mockGetOidcPolicy.mockResolvedValue({ status: "not-found" });
 
     const res = await app.request(
       "/api/auth/github/exchange-oidc",
@@ -2591,19 +2736,15 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
     );
 
     expect(res.status).toBe(403);
-    // The OIDC finally-block (an independent copy of the release pattern) must
-    // release the claim on this failure path so a retry is never blocked.
-    expect(mockIdempotencyRelease).toHaveBeenCalledTimes(1);
+    expect(mockIdempotencyReserve).not.toHaveBeenCalled();
+    expect(mockIdempotencyRelease).not.toHaveBeenCalled();
     expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
   });
 
   it("OIDC path: admin permission → expires_at - issued_at == 300", async () => {
     const app = createApp();
 
-    mockIsRegistered.mockResolvedValue({
-      ...MOCK_REPO,
-      oidc_permission: "admin",
-    });
+    mockOidcPolicy({ max_permission: "admin" });
 
     const res = await app.request(
       "/api/auth/github/exchange-oidc",
@@ -2647,6 +2788,7 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
     mockEnsureDeploymentInstanceId.mockResolvedValue(
       "test-deployment-instance-id",
     );
+    mockOidcPolicy({ max_permission: "read" });
   });
 
   it("SessionPayloadSchema accepts a payload with cnf.jkt", async () => {
@@ -2801,11 +2943,6 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
       job_workflow_ref:
         "test-org/test-repo/.github/workflows/ci.yml@refs/heads/main",
     });
-    mockIsRegistered.mockResolvedValue({
-      ...MOCK_REPO,
-      oidc_permission: "read",
-    });
-
     const app = createApp();
     const res = await app.request(
       "/api/auth/github/exchange-oidc",

@@ -1,5 +1,8 @@
 import { GitHubAppConfigStore, RepoAllowlistStore } from "@tila/backend-d1";
-import { RepoRegisterRequestSchema } from "@tila/schemas";
+import {
+  RepoOidcPolicyRequestSchema,
+  RepoRegisterRequestSchema,
+} from "@tila/schemas";
 import { Hono } from "hono";
 import { getInstallationAccessToken, mintAppJwt } from "../lib/github-app";
 import { getRepoMetadata } from "../lib/github-client";
@@ -10,6 +13,12 @@ import type { Env, HonoVariables } from "../types";
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
 export const repos = new Hono<AppEnv>();
+
+function parseRepoId(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const repoId = Number(value);
+  return Number.isSafeInteger(repoId) && repoId > 0 ? repoId : null;
+}
 
 // POST /api/repos -- Register a GitHub repo in the allowlist
 repos.post("/", async (c) => {
@@ -158,6 +167,135 @@ repos.post("/", async (c) => {
     },
     201,
   );
+});
+
+// GET /api/repos/:repoId/oidc-policy -- Read the complete Actions OIDC policy
+repos.get("/:repoId/oidc-policy", async (c) => {
+  const authz = await requireProjectAdminHttp(c);
+  if (authz) return authz;
+  const repoId = parseRepoId(c.req.param("repoId"));
+  if (repoId === null) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "repoId must be a positive integer",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
+  const projectId = c.get("tokenResult").projectId;
+  const result = await new RepoAllowlistStore(c.env.DB).getOidcPolicy(
+    projectId,
+    "github.com",
+    repoId,
+  );
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "repo-not-found",
+          message: "Repository link not found",
+          retryable: false,
+        },
+      },
+      404,
+    );
+  }
+  if (result.status === "invalid-policy") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "oidc-policy-invalid",
+          message: "Stored repository OIDC policy is invalid",
+          retryable: false,
+        },
+      },
+      500,
+    );
+  }
+  return c.json({ ok: true, github_repo_id: repoId, policy: result.policy });
+});
+
+// PUT /api/repos/:repoId/oidc-policy -- Replace the complete Actions OIDC policy
+repos.put("/:repoId/oidc-policy", async (c) => {
+  const authz = await requireProjectAdminHttp(c);
+  if (authz) return authz;
+  const repoId = parseRepoId(c.req.param("repoId"));
+  if (repoId === null) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "repoId must be a positive integer",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "Invalid JSON body",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+  const parsed = RepoOidcPolicyRequestSchema.safeParse(body);
+  if (!parsed.success)
+    return zodValidationError(c, parsed.error, "validation-error");
+
+  const projectId = c.get("tokenResult").projectId;
+  const result = await new RepoAllowlistStore(c.env.DB).setOidcPolicy(
+    projectId,
+    "github.com",
+    repoId,
+    parsed.data,
+  );
+  if (result.status === "not-found") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "repo-not-found",
+          message: "Repository link not found",
+          retryable: false,
+        },
+      },
+      404,
+    );
+  }
+  if (result.status === "invalid-policy") {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "oidc-policy-invalid",
+          message: "Stored repository OIDC policy is invalid",
+          retryable: false,
+        },
+      },
+      500,
+    );
+  }
+  return c.json({ ok: true, github_repo_id: repoId, policy: result.policy });
 });
 
 // DELETE /api/repos/:repoId -- Remove a repo from the allowlist (idempotent)

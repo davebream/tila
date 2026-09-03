@@ -369,6 +369,47 @@ Run any `tila` command (e.g., `tila doctor`). The CLI will exchange the GitHub t
 - The CLI auto-refreshes 10 minutes before expiry
 - Cached sessions are stored in `.tila/.session` (mode 0o600, gitignored)
 
+### Enabling GitHub Actions OIDC exchange
+
+Repository links do not authorize Actions OIDC exchange by default. After registering the
+repository, use an admin credential to replace its complete policy:
+
+```bash
+curl --fail-with-body --request PUT \
+  --header "Authorization: Bearer <admin-token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "enabled": true,
+    "max_permission": "write",
+    "subject_pattern": "repo:acme/api:*",
+    "allowed_events": ["push", "workflow_dispatch"],
+    "allowed_refs": ["refs/heads/main", "refs/tags/v1.2.3"],
+    "allowed_environments": ["production"],
+    "allowed_workflows": [
+      "acme/platform/.github/workflows/deploy.yml@refs/tags/v1"
+    ]
+  }' \
+  "https://<tila-host>/api/repos/<numeric-repo-id>/oidc-policy"
+```
+
+Read the current policy with `GET /api/repos/<numeric-repo-id>/oidc-policy`. PUT is full
+replacement: omitted fields fail validation. Events, refs, environments, and complete workflow
+refs use exact matching. Only `subject_pattern` supports a wildcard, where case-sensitive `*`
+matches zero or more characters across the full subject.
+
+When either refs or environments are configured, one of those two context values must match. All
+other configured categories must also match. A constrained environment or reusable workflow claim
+that GitHub omitted is denied. See
+[`docs/10-AUTH-IMPLEMENTATION.md`](10-AUTH-IMPLEMENTATION.md) for the full evaluation model and
+branch, tag, environment, and reusable-workflow examples.
+
+Migration `0024_repo_oidc_policy.sql` explicitly disables OIDC exchange and resets the maximum
+permission to `read` for every existing repository link. The provisioning command prints one
+warning with the affected link count only when that migration is first applied. It does not warn
+for a fresh database with no links or on subsequent provisioning runs. Existing minted sessions
+remain valid until their normal expiry; the new policy is checked before every later exchange or
+cached replay.
+
 ### D1 API Tokens (Admin/Bootstrap)
 
 Administrative credential for initial provisioning and machine-to-machine access. A shared API token is hashed and stored in D1. Use this path for CI pipelines or service accounts that do not have a GitHub identity.

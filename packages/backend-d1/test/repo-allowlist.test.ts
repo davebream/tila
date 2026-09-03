@@ -14,7 +14,14 @@ const CREATE_PROJECT_REPOS = `
     enabled               INTEGER NOT NULL DEFAULT 1,
     created_at            INTEGER NOT NULL,
     created_by            TEXT    NOT NULL,
-    oidc_permission       TEXT    NOT NULL DEFAULT 'write'
+    oidc_permission       TEXT    NOT NULL DEFAULT 'write',
+    oidc_enabled          INTEGER NOT NULL DEFAULT 0,
+    oidc_max_permission   TEXT    NOT NULL DEFAULT 'read',
+    oidc_subject_pattern  TEXT,
+    oidc_allowed_events   TEXT    NOT NULL DEFAULT '[]',
+    oidc_allowed_refs     TEXT    NOT NULL DEFAULT '[]',
+    oidc_allowed_environments TEXT NOT NULL DEFAULT '[]',
+    oidc_allowed_workflows TEXT NOT NULL DEFAULT '[]'
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_project_repos_lookup
     ON _project_repos (project_id, github_host, github_repo_id);
@@ -96,6 +103,8 @@ describe("RepoAllowlistStore", () => {
       expect(r.min_write_permission).toBe("write");
       expect(r.enabled).toBe(1);
       expect(r.created_by).toBe("admin-user");
+      expect(r.oidc_enabled).toBe(0);
+      expect(r.oidc_max_permission).toBe("read");
     });
 
     it("isRegistered() returns null for unknown repo", async () => {
@@ -181,6 +190,89 @@ describe("RepoAllowlistStore", () => {
       const rows = await store.listForProject("proj-1");
       expect(rows).toHaveLength(1);
       expect(rows[0].project_id).toBe("proj-1");
+    });
+  });
+
+  describe("GitHub Actions OIDC policy", () => {
+    it("returns the disabled, read-only policy for a new repository link", async () => {
+      const { store } = createTestStore();
+      await store.register(BASE_PARAMS);
+
+      const result = await store.getOidcPolicy("proj-1", "github.com", 12345);
+      expect(result).toMatchObject({
+        status: "ok",
+        policy: {
+          enabled: false,
+          max_permission: "read",
+          subject_pattern: null,
+          allowed_events: [],
+          allowed_refs: [],
+          allowed_environments: [],
+          allowed_workflows: [],
+        },
+      });
+    });
+
+    it("atomically replaces and round-trips the complete policy", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      const policy = {
+        enabled: true,
+        max_permission: "write" as const,
+        subject_pattern: "repo:acme/widgets:*",
+        allowed_events: ["push"],
+        allowed_refs: ["refs/heads/main"],
+        allowed_environments: ["production"],
+        allowed_workflows: [
+          "acme/workflows/.github/workflows/deploy.yml@refs/heads/main",
+        ],
+      };
+
+      const written = await store.setOidcPolicy(
+        "proj-1",
+        "github.com",
+        12345,
+        policy,
+      );
+      expect(written).toMatchObject({ status: "ok", policy });
+      expect(
+        sqlite
+          .prepare(
+            "SELECT oidc_permission FROM _project_repos WHERE github_repo_id = 12345",
+          )
+          .get(),
+      ).toEqual({ oidc_permission: "write" });
+      expect(
+        await store.getOidcPolicy("proj-1", "github.com", 12345),
+      ).toMatchObject({ status: "ok", policy });
+    });
+
+    it("returns not-found when replacing a missing repository policy", async () => {
+      const { store } = createTestStore();
+      const result = await store.setOidcPolicy("proj-1", "github.com", 99999, {
+        enabled: false,
+        max_permission: "read",
+        subject_pattern: null,
+        allowed_events: [],
+        allowed_refs: [],
+        allowed_environments: [],
+        allowed_workflows: [],
+      });
+      expect(result).toEqual({ status: "not-found" });
+    });
+
+    it("fails closed when stored policy JSON is malformed", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET oidc_enabled = 1, oidc_allowed_events = 'not-json' WHERE github_repo_id = 12345",
+        )
+        .run();
+
+      expect(await store.getOidcPolicy("proj-1", "github.com", 12345)).toEqual({
+        status: "invalid-policy",
+      });
     });
   });
 

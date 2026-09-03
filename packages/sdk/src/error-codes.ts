@@ -19,6 +19,7 @@ export const TILA_ERRORS = {
   DO_UNREACHABLE: "do-unreachable",
   // Auth endpoint specific
   REPO_NOT_ALLOWED: "repo-not-allowed",
+  OIDC_POLICY_DENIED: "oidc-policy-denied",
   GITHUB_AUTH_FAILED: "github-auth-failed",
   HMAC_NOT_CONFIGURED: "hmac-not-configured",
   // Token endpoint specific

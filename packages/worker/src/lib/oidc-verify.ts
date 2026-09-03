@@ -27,7 +27,7 @@ import { OidcFetchError, oidcFetch } from "./oidc-fetch";
 
 export interface OidcClaims {
   iss: string;
-  aud: string;
+  aud: string | string[];
   sub: string;
   exp: number;
   iat: number;
@@ -39,16 +39,16 @@ export interface OidcClaims {
   repository_owner_id: number; // Coerced from string in JWT
   actor: string;
   actor_id: number; // Coerced from string in JWT
-  ref: string;
+  ref?: string;
   sha: string;
   workflow: string;
   run_id: number; // Coerced from string in JWT
   run_number: number; // Coerced from string in JWT
   run_attempt: number; // Coerced from string in JWT
-  environment: string;
+  environment?: string;
   event_name: string;
   repository_visibility: string;
-  job_workflow_ref: string;
+  job_workflow_ref?: string;
 }
 
 export type OidcVerificationErrorCode =
@@ -405,38 +405,83 @@ export async function verifyOidcToken(
     jwksUri: GITHUB_JWKS_URL,
   });
 
-  // Coerce numeric ID fields from string to number.
-  // GitHub OIDC JWTs encode these as strings; downstream code expects numbers.
-  const repository_id = Number(payload.repository_id);
-  const repository_owner_id = Number(payload.repository_owner_id);
-  const actor_id = Number(payload.actor_id);
-  const run_id = Number(payload.run_id);
-  const run_number = Number(payload.run_number);
-  const run_attempt = Number(payload.run_attempt);
+  const requiredString = (name: string): string => {
+    const value = payload[name];
+    if (typeof value !== "string" || value.length === 0) {
+      throw new OidcVerificationError(
+        "oidc-invalid-token",
+        `Missing or invalid ${name} claim`,
+      );
+    }
+    return value;
+  };
+  const optionalString = (name: string): string | undefined => {
+    const value = payload[name];
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string" || value.length === 0) {
+      throw new OidcVerificationError(
+        "oidc-invalid-token",
+        `Invalid ${name} claim`,
+      );
+    }
+    return value;
+  };
+  const requiredNumber = (name: string): number => {
+    const value = payload[name];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new OidcVerificationError(
+        "oidc-invalid-token",
+        `Missing or invalid ${name} claim`,
+      );
+    }
+    return value;
+  };
+  const requiredPositiveInteger = (name: string): number => {
+    const value = Number(payload[name]);
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new OidcVerificationError(
+        "oidc-invalid-token",
+        `Missing or invalid ${name} claim`,
+      );
+    }
+    return value;
+  };
+  const aud = payload.aud;
+  if (
+    !(
+      typeof aud === "string" ||
+      (Array.isArray(aud) && aud.every((value) => typeof value === "string"))
+    )
+  ) {
+    throw new OidcVerificationError(
+      "oidc-invalid-token",
+      "Missing or invalid aud claim",
+    );
+  }
 
   return {
-    iss: payload.iss as string,
-    aud: payload.aud as string,
-    sub: payload.sub as string,
-    exp: payload.exp as number,
-    iat: payload.iat as number,
-    nbf: payload.nbf as number,
-    jti: payload.jti as string,
-    repository: payload.repository as string,
-    repository_id,
-    repository_owner: payload.repository_owner as string,
-    repository_owner_id,
-    actor: payload.actor as string,
-    actor_id,
-    ref: payload.ref as string,
-    sha: payload.sha as string,
-    workflow: payload.workflow as string,
-    run_id,
-    run_number,
-    run_attempt,
-    environment: payload.environment as string,
-    event_name: payload.event_name as string,
-    repository_visibility: payload.repository_visibility as string,
-    job_workflow_ref: payload.job_workflow_ref as string,
+    iss: requiredString("iss"),
+    aud,
+    sub: requiredString("sub"),
+    exp: requiredNumber("exp"),
+    iat: requiredNumber("iat"),
+    nbf: requiredNumber("nbf"),
+    jti: requiredString("jti"),
+    repository: requiredString("repository"),
+    repository_id: requiredPositiveInteger("repository_id"),
+    repository_owner: requiredString("repository_owner"),
+    repository_owner_id: requiredPositiveInteger("repository_owner_id"),
+    actor: requiredString("actor"),
+    actor_id: requiredPositiveInteger("actor_id"),
+    ref: optionalString("ref"),
+    sha: requiredString("sha"),
+    workflow: requiredString("workflow"),
+    run_id: requiredPositiveInteger("run_id"),
+    run_number: requiredPositiveInteger("run_number"),
+    run_attempt: requiredPositiveInteger("run_attempt"),
+    environment: optionalString("environment"),
+    event_name: requiredString("event_name"),
+    repository_visibility: requiredString("repository_visibility"),
+    job_workflow_ref: optionalString("job_workflow_ref"),
   };
 }

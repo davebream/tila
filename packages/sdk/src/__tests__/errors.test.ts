@@ -241,6 +241,7 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "csrf-origin-mismatch",
     "do-unreachable",
     "repo-not-allowed",
+    "oidc-policy-denied",
     "github-auth-failed",
     "hmac-not-configured",
     "session-revoked",
