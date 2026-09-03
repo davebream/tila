@@ -55,11 +55,12 @@ describe("project transfer operations", () => {
       },
     };
     const now = Date.now();
+    const exportTtlMs = 60_000;
     transfer.beginTransfer(sql, {
       sessionId: "export-1",
       mode: "export",
       owner: "test",
-      ttlMs: 10,
+      ttlMs: exportTtlMs,
       now,
     });
     expect(() =>
@@ -69,8 +70,10 @@ describe("project transfer operations", () => {
         )
         .run(),
     ).toThrow("project-maintenance");
-    expect(transfer.getTransferState(sql, now + 9)?.mode).toBe("export");
-    expect(transfer.getTransferState(sql, now + 10)).toBeNull();
+    expect(transfer.getTransferState(sql, now + exportTtlMs - 1)?.mode).toBe(
+      "export",
+    );
+    expect(transfer.getTransferState(sql, now + exportTtlMs)).toBeNull();
     transfer.beginTransfer(sql, {
       sessionId: "import-1",
       mode: "import",
