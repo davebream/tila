@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@tila/schemas": "workspace:*",
-    "smol-toml": "^1.6.1"
+    "smol-toml": "^1.7.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
