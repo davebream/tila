@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectMembershipStore } from "../src/project-memberships";
 
 const DDL = `
@@ -174,34 +174,39 @@ describe("ProjectMembershipStore", () => {
   });
 
   it("revokes the grant, tombstones the subject, deletes cookies, and audits atomically", async () => {
-    const granted = await store.grant({
-      projectId: "p1",
-      principal: { provider: "github", host: "github.com", user_id: 42 },
-      subjectKind: "human",
-      role: "viewer",
-      actorPrincipalId: "bootstrap:test",
-    });
-    sqlite
-      .prepare(
-        "INSERT INTO _sessions(session_hash, project_id, principal_id) VALUES ('s', 'p1', ?)",
-      )
-      .run(granted.membership.principal_id);
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const granted = await store.grant({
+        projectId: "p1",
+        principal: { provider: "github", host: "github.com", user_id: 42 },
+        subjectKind: "human",
+        role: "viewer",
+        actorPrincipalId: "bootstrap:test",
+      });
+      sqlite
+        .prepare(
+          "INSERT INTO _sessions(session_hash, project_id, principal_id) VALUES ('s', 'p1', ?)",
+        )
+        .run(granted.membership.principal_id);
 
-    const result = await store.revoke({
-      projectId: "p1",
-      membershipId: granted.membership.membership_id,
-      actorPrincipalId: "bootstrap:test",
-    });
+      const result = await store.revoke({
+        projectId: "p1",
+        membershipId: granted.membership.membership_id,
+        actorPrincipalId: "bootstrap:test",
+      });
 
-    expect(result?.revokedSessions).toBe(1);
-    expect(
-      await store.resolve("p1", granted.membership.principal_id),
-    ).toBeNull();
-    expect(
-      sqlite.prepare("SELECT COUNT(*) AS n FROM _revoked_subjects").get(),
-    ).toEqual({ n: 1 });
-    expect(
-      (await store.listEvents("p1", null, 10)).map((event) => event.action),
-    ).toEqual(["revoke", "grant"]);
+      expect(result?.revokedSessions).toBe(1);
+      expect(
+        await store.resolve("p1", granted.membership.principal_id),
+      ).toBeNull();
+      expect(
+        sqlite.prepare("SELECT COUNT(*) AS n FROM _revoked_subjects").get(),
+      ).toEqual({ n: 1 });
+      expect(
+        (await store.listEvents("p1", null, 10)).map((event) => event.action),
+      ).toEqual(["revoke", "grant"]);
+    } finally {
+      now.mockRestore();
+    }
   });
 });
