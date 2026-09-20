@@ -230,7 +230,7 @@ Beyond the four data shapes, tila ships five coordination primitives that operat
 
 - **Claims.** First-writer-wins coordination with fencing tokens against any resource name. Used for work-unit claims (`task:T-142`), file-edit locks (`file:src/auth.rb`), record mutations (`record:service/api`), and any other resource the consumer wants to serialize.
 - **Gates.** Approval and quality gates that govern work-unit transitions. A work unit cannot leave a state without all required gates being satisfied. Gates emit journal events on satisfaction.
-- **Signals.** Lightweight notifications distinct from journal events. Used for cross-machine coordination of non-state-changing events ("agent A finished its review, agent B may proceed"). Signals do not modify durable state beyond their own emission record.
+- **Signals.** Lightweight notifications distinct from journal events. Targets are canonical participants, principals, principal-based groups, or the active broadcast audience. Each send snapshots immutable participant deliveries; inboxes and acknowledgements are authorized by the caller's exact principal/participant pair. Display names and environment fields are retained only as audit metadata. Acknowledged deliveries remain through expiry, when the signal and all deliveries are swept together.
 - **Presence.** TTL'd machine activity for "who's online and on what."
 - **Search.** Lexical full-text search (FTS5) across indexed artifact content. Searchable kinds are declared in `tila.schema.toml`.
 
@@ -253,7 +253,7 @@ Three concepts, three relationship tables:
 | Artifact-to-artifact relationships | DO SQLite | `artifact_relationships` table |
 | Records (typed mutable JSON state) | DO SQLite | `records` table keyed by `(type, key)`, plus `record_tags` and `record_revisions`. See [`docs/08-RECORDS.md`](08-RECORDS.md) for full schema. |
 | Gates (approval and quality gates on work-unit transitions) | DO SQLite | Gate definitions and satisfaction state per work unit |
-| Signals (lightweight notifications) | DO SQLite | Append-only signal emission record |
+| Signals (lightweight notifications) | DO SQLite | Signal emissions, immutable participant deliveries, and principal-based groups |
 | Journal events | DO SQLite | Append-only `journal` table |
 | Schema history (every schema definition ever applied) | DO SQLite | `_schema_history` table |
 | Live claims and leases | DO SQLite | `claims` table — same transaction scope as entities |
@@ -684,6 +684,11 @@ The external API surface that the CLI calls. All requests are JSON over HTTPS. A
 | GET | `/state` | query: `resource` | `{ claim?, owners: [], presence: [] }` |
 | GET | `/presence` | — | `{ participants: [] }` |
 | POST | `/presence` | `{ info? }` + participant/environment headers | `{ ok }` |
+| POST | `/signals/send` | `{ target: participant \| principal \| group \| broadcast, kind, resource?, payload?, ttl_ms? }` + participant/environment headers | `{ ok, id, recipient_count }` |
+| GET | `/signals` | participant/environment headers | Current participant's unacknowledged inbox |
+| POST | `/signals/:id/ack` | participant/environment headers | `{ ok }` or 403 for an unrelated participant |
+| GET | `/signals/history` | query: `limit`, `cursor`; admin only | Paginated signal and delivery audit history |
+| GET/PUT/DELETE | `/signals/groups[/:id]` | group reads require project read; mutations require admin | Principal-based signal groups |
 | PUT | `/artifacts/:key` | binary body, metadata in headers | `{ ok, key, deduplicated? }` |
 | GET | `/artifacts/:key` | — | binary body with metadata headers |
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |

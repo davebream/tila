@@ -101,21 +101,23 @@ sufficient for single-type queries.
 
 ### Signal target routing
 
-Route coordination signals to a namespace by convention in the signal `target` string.
-The `target` field is a plain string (`z.string().min(1)`); tila does not parse or
-validate it beyond non-empty. Use a consistent naming convention so consumers can
-filter by prefix:
+Route coordination signals to a namespace with a principal-based signal group. Group
+membership is expanded to active participants when the signal is sent, so later group
+edits do not change existing deliveries:
 
 ```bash
-# Framework sends a signal targeting the control-plane scheduler
-tila signal send --to "cp:scheduler" --kind ready --payload '{"taskId":"cp_task/T-42"}'
+# Define the namespace audience (admin only)
+tila signal group set cp-scheduler --name "Control-plane scheduler" \
+  --principals "token:scheduler,github:github.com:1234"
 
-# Direct-use tooling signals the infra pipeline
-tila signal send --to "infra:deploy-gate" --kind info --payload '{}'
+# Framework sends to the snapshotted active audience
+tila signal send --to group --group-id cp-scheduler --kind ready \
+  --payload '{"taskId":"cp_task/T-42"}'
 ```
 
-Consumers subscribe to the project-level signal stream and filter by the `target` prefix
-on the read side.
+Use direct participant targets when the exact principal/participant pair is known and
+delivery must not depend on presence. Principal, group, and broadcast targets use the
+60-second active-presence window.
 
 ## Why the namespace lives in the type
 

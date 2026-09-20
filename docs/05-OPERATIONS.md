@@ -913,6 +913,8 @@ Migration 17 (C7) backfills canonical `<type>:<id>` fence rows from any pre-exis
 
 Migration 23 intentionally clears active claims and presence rows because legacy rows do not contain a recoverable participant identity. Fence counters are preserved unchanged, so reacquiring never reuses a stale fence. Historical journal rows are retained and marked with explicit `legacy-principal:<actor>` and `legacy-event:<seq>` identities. The corresponding D1 migration clears browser sessions that lack a stored immutable principal, requiring affected users to authenticate again.
 
+Migration 25 intentionally discards pending legacy signals while rebuilding signal storage around canonical principal/participant identities. Legacy signal targets and acknowledgers were display-name strings and cannot be authorized safely. Their TTL was capped at 24 hours, so the migration does not preserve or translate them. New signals use immutable per-participant deliveries and principal-based group membership.
+
 Deploy upgraded clients with the Worker. Older clients may continue reading the clean claim, presence, and journal response shapes, but mutations without `X-Tila-Participant-Id` fail with `400 participant-required` and an upgrade message.
 
 ## Local Development with Production Data
