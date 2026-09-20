@@ -59,6 +59,7 @@ export const TILA_ERRORS = {
   REPO_TOKEN_AUTHZ_DENIED: "token-authz-denied",
   REPO_ACCESS_DENIED: "repo-access-denied",
   REPO_NOT_FOUND: "repo-not-found",
+  REPO_ACCESS_POLICY_INVALID: "access-policy-invalid",
   GITHUB_API_TIMEOUT: "github-api-timeout",
   GITHUB_API_ERROR: "github-api-error",
   // SDK-generated for non-HTTP artifact failures (no wire code from server)

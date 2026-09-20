@@ -19,6 +19,8 @@ vi.mock("../lib/github-client", () => ({
 // Mock RepoAllowlistStore
 const mockRegister = vi.fn().mockResolvedValue(undefined);
 const mockRemove = vi.fn().mockResolvedValue(undefined);
+const mockGetAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
+const mockSetAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 const mockGetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 const mockSetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 
@@ -27,6 +29,8 @@ vi.mock("@tila/backend-d1", () => ({
     class {
       register = mockRegister;
       remove = mockRemove;
+      getAccessPolicy = mockGetAccessPolicy;
+      setAccessPolicy = mockSetAccessPolicy;
       getOidcPolicy = mockGetOidcPolicy;
       setOidcPolicy = mockSetOidcPolicy;
     } as unknown as () => unknown,
@@ -217,6 +221,26 @@ describe("POST /api/repos", () => {
     expect(body.error.code).toBe("validation-error");
   });
 
+  it("rejects inverted access thresholds", async () => {
+    const res = await createApp().request(
+      "/api/repos",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          owner: "test-org",
+          repo: "test-repo",
+          min_read_permission: "admin",
+          min_write_permission: "write",
+        }),
+      },
+      mockEnv,
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockRegister).not.toHaveBeenCalled();
+  });
+
   it("returns 403 for non-full scope d1-token (gate denies)", async () => {
     mockRequireProjectAdminHttp.mockResolvedValue(deny403());
     const app = createApp(makeD1Token("read"));
@@ -336,6 +360,87 @@ describe("POST /api/repos", () => {
       "private-repo",
       "https://api.github.com",
     );
+  });
+});
+
+describe("GET and PUT /api/repos/:repoId/access-policy", () => {
+  const policy = {
+    min_read_permission: "read" as const,
+    min_write_permission: "maintain" as const,
+    max_permission: "write" as const,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireProjectAdminHttp.mockResolvedValue(null);
+  });
+
+  it("returns the complete stored access policy", async () => {
+    mockGetAccessPolicy.mockResolvedValue({ status: "ok", policy });
+
+    const res = await createApp().request(
+      "/api/repos/12345/access-policy",
+      undefined,
+      mockEnv,
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      ok: true,
+      github_repo_id: 12345,
+      policy,
+    });
+  });
+
+  it("atomically replaces the complete access policy", async () => {
+    mockSetAccessPolicy.mockResolvedValue({ status: "ok", policy });
+
+    const res = await createApp().request(
+      "/api/repos/12345/access-policy",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(policy),
+      },
+      mockEnv,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockSetAccessPolicy).toHaveBeenCalledWith(
+      "proj-1",
+      "github.com",
+      12345,
+      policy,
+    );
+  });
+
+  it("requires every access-policy field", async () => {
+    const res = await createApp().request(
+      "/api/repos/12345/access-policy",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_permission: "write" }),
+      },
+      mockEnv,
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockSetAccessPolicy).not.toHaveBeenCalled();
+  });
+
+  it("reports malformed stored policy without exposing it", async () => {
+    mockGetAccessPolicy.mockResolvedValue({ status: "invalid-policy" });
+
+    const res = await createApp().request(
+      "/api/repos/12345/access-policy",
+      undefined,
+      mockEnv,
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("access-policy-invalid");
   });
 });
 

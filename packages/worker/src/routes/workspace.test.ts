@@ -144,6 +144,7 @@ describe("GET /api/workspace/projects", () => {
         github_repo_id: 1,
         min_read_permission: "read",
         min_write_permission: "write",
+        max_permission: "write",
         oidc_permission: "write",
         enabled: 1,
         created_at: 0,
@@ -184,6 +185,52 @@ describe("GET /api/workspace/projects", () => {
       12345,
       testEnv.GITHUB_APP_PRIVATE_KEY,
     );
+  });
+
+  it("filters repositories below read admission and reports effective roles", async () => {
+    mockRegistryListAll.mockResolvedValue([{ projectId: "proj-1" }]);
+    mockConfigGetInstallation.mockResolvedValue({ installation_id: 99 });
+    mockAllowlistListForProject.mockResolvedValue([
+      {
+        project_id: "proj-1",
+        github_host: "github.com",
+        github_owner: "org",
+        github_repo: "denied",
+        github_repo_id: 1,
+        min_read_permission: "write",
+        min_write_permission: "write",
+        max_permission: "write",
+      },
+      {
+        project_id: "proj-1",
+        github_host: "github.com",
+        github_owner: "org",
+        github_repo: "capped",
+        github_repo_id: 2,
+        min_read_permission: "read",
+        min_write_permission: "write",
+        max_permission: "read",
+      },
+    ]);
+    mockCheckUserMembership
+      .mockResolvedValueOnce("read")
+      .mockResolvedValueOnce("admin");
+    mockRegistryGet.mockResolvedValue({ displayName: "Project One" });
+
+    const res = await createApp().request(
+      "/api/workspace/projects",
+      undefined,
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      projects: [
+        {
+          repos: [{ owner: "org", repo: "capped", permission: "read" }],
+        },
+      ],
+    });
   });
 
   it("returns empty list when registry has no projects", async () => {
@@ -315,6 +362,7 @@ describe("GET /api/workspace/projects", () => {
               github_repo_id: 1,
               min_read_permission: "read",
               min_write_permission: "write",
+              max_permission: "write",
               oidc_permission: "write",
               enabled: 1,
               created_at: 0,
@@ -331,6 +379,7 @@ describe("GET /api/workspace/projects", () => {
             github_repo_id: 2,
             min_read_permission: "read",
             min_write_permission: "write",
+            max_permission: "write",
             oidc_permission: "write",
             enabled: 1,
             created_at: 0,
@@ -407,6 +456,7 @@ describe("GET /api/workspace/projects", () => {
         github_repo_id: 1,
         min_read_permission: "read",
         min_write_permission: "write",
+        max_permission: "write",
         oidc_permission: "write",
         enabled: 1,
         created_at: 0,
@@ -450,6 +500,7 @@ describe("POST /api/workspace/select", () => {
       github_repo_id: 42,
       min_read_permission: "read",
       min_write_permission: "write",
+      max_permission: "write",
       oidc_permission: "write",
       enabled: 1,
       created_at: 0,
@@ -513,6 +564,38 @@ describe("POST /api/workspace/select", () => {
         scopes: "full",
         actorName: "octocat",
       }),
+    );
+  });
+
+  it("stores the strongest bounded role independent of repository order", async () => {
+    const readRepo = {
+      ...allowedRepos[0],
+      github_repo: "read-source",
+      github_repo_id: 30,
+      max_permission: "read",
+    };
+    const writeRepo = {
+      ...allowedRepos[0],
+      github_repo: "write-source",
+      github_repo_id: 40,
+      max_permission: "write",
+    };
+    mockAllowlistListForProject.mockResolvedValue([readRepo, writeRepo]);
+    mockCheckUserMembership.mockResolvedValue("admin");
+
+    const res = await createApp().request(
+      "/api/workspace/select",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: "proj-1" }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockSessionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ permission: "write", scopes: "full" }),
     );
   });
 

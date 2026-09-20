@@ -5,6 +5,7 @@ import {
   GitHubAppConfigStore,
   RepoAllowlistStore,
 } from "@tila/backend-d1";
+import type { SessionPermission } from "@tila/schemas";
 import { Hono } from "hono";
 import { z } from "zod";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
@@ -14,11 +15,11 @@ import {
   getInstallationAccessToken,
   mintAppJwt,
 } from "../lib/github-app";
-import {
-  PERMISSION_HIERARCHY,
-  normalizeGitHubPermission,
-} from "../lib/github-permission";
 import { hashToken } from "../lib/hash-token";
+import {
+  evaluateRepositoryAccess,
+  resolveRepositoryAccess,
+} from "../lib/repo-access-policy";
 import { invalidateSession } from "../lib/session-cache";
 import type {
   CookieSessionTokenResult,
@@ -38,10 +39,8 @@ const WorkspaceSelectRequestSchema = z.object({
   project_id: z.string().min(1).max(128),
 });
 
-function permissionToScope(perm: string): string {
-  return (PERMISSION_HIERARCHY[perm] ?? 0) >= PERMISSION_HIERARCHY.write
-    ? "full"
-    : "read";
+function permissionToScope(permission: SessionPermission): string {
+  return permission === "read" ? "read" : "full";
 }
 
 workspace.get("/projects", async (c) => {
@@ -113,11 +112,12 @@ workspace.get("/projects", async (c) => {
           repo.github_repo,
           githubLogin,
         );
-        if (perm && perm !== "none") {
+        const access = evaluateRepositoryAccess(repo, perm);
+        if (access) {
           userRepos.push({
             owner: repo.github_owner,
             repo: repo.github_repo,
-            permission: perm,
+            permission: access.permission,
           });
         }
       }
@@ -297,25 +297,16 @@ workspace.post("/select", async (c) => {
   const allowedRepos = await allowlistStore.listForProject(projectId);
 
   const login = wsSession.githubLogin;
-  let bestPermission = "none";
-
-  for (const repo of allowedRepos) {
-    const perm = await checkUserMembership(
+  const access = await resolveRepositoryAccess(allowedRepos, (repo) =>
+    checkUserMembership(
       installationToken,
       repo.github_owner,
       repo.github_repo,
       login,
-    );
-    if (
-      perm &&
-      (PERMISSION_HIERARCHY[perm] ?? 0) >
-        (PERMISSION_HIERARCHY[bestPermission] ?? 0)
-    ) {
-      bestPermission = perm;
-    }
-  }
+    ),
+  );
 
-  if (bestPermission === "none" || allowedRepos.length === 0) {
+  if (!access) {
     return c.json(
       {
         ok: false,
@@ -342,9 +333,8 @@ workspace.post("/select", async (c) => {
   const newSessionToken = crypto.randomUUID();
   const newSessionHash = await hashToken(newSessionToken, c.env.HASH_PEPPER);
   const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
-  const scopes = permissionToScope(bestPermission);
-
-  const permission = normalizeGitHubPermission(bestPermission);
+  const permission = access.permission;
+  const scopes = permissionToScope(permission);
   await sessionStore.create({
     sessionHash: newSessionHash,
     projectId,

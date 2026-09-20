@@ -609,7 +609,7 @@ Common failure modes and remediation steps.
 | `HMAC_NOT_CONFIGURED` on GitHub exchange | HMAC signing key not set | Generate key and run `wrangler secret put GITHUB_SESSION_HMAC_KEY`; see [Authentication Setup](#authentication-setup) |
 | `REPO_NOT_REGISTERED` on GitHub exchange | Repo not in project allowlist | Run `tila infra provision` from the repo root |
 | `SESSION_EXPIRED` during CLI operation | Session older than 1 hour or revoked | Re-run the CLI command (auto-refreshes); check server/client clock sync |
-| `PERMISSION_INSUFFICIENT` on GitHub exchange | GitHub permission below minimum | Check repo collaborator settings; verify allowlist `min_read_permission` |
+| `PERMISSION_INSUFFICIENT` on GitHub exchange | No enabled repository link admits the user under its current thresholds and cap | Check collaborator access and the link's complete access policy with `GET /api/repos/:repoId/access-policy` |
 | GitHub exchange succeeds, CLI errors on API call | Git remote doesn't match `[github]` config | Check CLI warning about remote mismatch; update `.tila/config.toml` `[github]` section |
 
 ## Backup and Recovery

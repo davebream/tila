@@ -794,10 +794,16 @@ GitHub session tokens are only issued if the user has sufficient permission on a
   "repo": "backend",
   "github_host": "github.com",
   "github_token": "ghp_abc123...",  // Used for repo metadata lookup only
-  "min_read_permission": "read",
-  "min_write_permission": "write"
+  "min_read_permission": "triage",
+  "min_write_permission": "maintain",
+  "max_permission": "write"
 }
 ```
+
+All three policy fields are optional during registration and default to `write`. The two
+thresholds accept `read`, `triage`, `write`, `maintain`, and `admin`; the maximum tila role
+accepts `read`, `write`, or `admin`. Validation requires the read threshold to be no higher
+than the write threshold.
 
 **Flow:**
 
@@ -807,27 +813,35 @@ GitHub session tokens are only issued if the user has sufficient permission on a
 3. Store in D1 via `RepoAllowlistStore.register()` (lines 154-164)
 4. Return `{ok: true, github_repo_id, full_name, registered_at}`
 
-### Permission Hierarchy
+### Permission Evaluation
 
-Allowlist entries include `min_read_permission` and `min_write_permission` (though `min_write_permission` is not currently enforced during exchange).
+Every PAT exchange, GitHub App exchange, browser project lookup/selection, and live
+revalidation uses the same repository evaluator:
 
-During exchange (lines 238-249 in `auth-github.ts`):
+```text
+actual < min_read       → no admission
+actual < min_write      → read
+otherwise               → min(mapped GitHub role, max_permission)
+```
 
-1. Fetch user's actual permission from GitHub API
-2. Compare to `min_read_permission` using `permissionMeetsMinimum()` (lines 28-32)
-3. If user's permission >= minimum, grant access
+Unknown permissions and malformed stored policies fail closed for the affected link. The
+evaluator checks every enabled project link, selects the highest effective tila role, and
+uses the lowest repository ID as the deterministic tie-breaker. Minted JWTs and cookie
+sessions carry that effective role and the selected repository scope.
 
-**Example:** If `min_read_permission` is "write", user must have `write`, `maintain`, or `admin` on the repo.
+### Access-policy management
 
-### Per-Request Re-Verification (NOT Implemented)
+`GET /api/repos/:repoId/access-policy` returns the complete three-field policy.
+`PUT /api/repos/:repoId/access-policy` validates and atomically replaces it; partial updates
+are rejected. Both routes use the same project-admin authorization as repository
+registration and removal.
 
-The current implementation performs repo permission checks **only at exchange time**. Once a session token is minted, it remains valid until expiry (1 hour) even if:
-
-- The user loses repo access mid-session
-- The repo is removed from the allowlist
-- The repo is disabled (`enabled = 0`)
-
-**Future work:** T5/T6 could add per-request repo permission re-checks (hit GitHub API on every request). This was deferred from v0.1 due to latency and rate-limit concerns.
+Live bearer revalidation reevaluates the session's selected repository against its current
+thresholds and cap. Its cache stores the effective permission, not a route-specific allow
+boolean, so one cached result can safely answer different read/write/admin requirements.
+Removing or disabling the selected link, dropping below its read threshold, or tightening
+its cap below the requested operation denies the request until the client re-exchanges.
+Transient GitHub failure behavior remains unchanged.
 
 ### Removal
 
@@ -842,7 +856,8 @@ The current implementation performs repo permission checks **only at exchange ti
 2. Hard-delete from D1 via `RepoAllowlistStore.remove()` (line 201)
 3. Return `{ok: true, github_repo_id, removed_at}`
 
-**Note:** Removal does not revoke existing session tokens. They remain valid until expiry.
+**Note:** Removal immediately blocks live-revalidated repository sessions bound to that
+link. Clients must re-exchange to select another qualifying link.
 
 ## 9. CLI Auth
 

@@ -119,6 +119,7 @@ export function createBackupRoutes(options: {
       "github_repo_id",
       "min_read_permission",
       "min_write_permission",
+      "max_permission",
       "enabled",
       "created_at",
       "created_by",

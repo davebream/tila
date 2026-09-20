@@ -137,6 +137,9 @@ const DEFAULT_REPO_ROW = {
   github_repo_id: 42,
   github_owner: "acme",
   github_repo: "myrepo",
+  min_read_permission: "read",
+  min_write_permission: "write",
+  max_permission: "admin",
 };
 const INSTALL_TOKEN = "ghs_install_token";
 
@@ -207,6 +210,44 @@ describe("reverifySessionPermission", () => {
     if (result.decision === "allow") {
       expect(result.cacheable).toBe(true);
     }
+  });
+
+  it("denies when the repository policy caps a live admin at write", async () => {
+    mockIsRegistered.mockResolvedValue({
+      ...DEFAULT_REPO_ROW,
+      max_permission: "write",
+    });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(makeResponse(200, { permission: "admin" }));
+
+    const result = await reverifySessionPermission(
+      makeContext(),
+      makeSession({ jti: "jti-cap" }),
+      "admin",
+    );
+
+    expect(result.decision).toBe("deny");
+  });
+
+  it("caches the effective role instead of a requirement-independent grant", async () => {
+    mockIsRegistered.mockResolvedValue({
+      ...DEFAULT_REPO_ROW,
+      max_permission: "write",
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(makeResponse(200, { permission: "admin" }));
+    global.fetch = fetchSpy;
+    const session = makeSession({ jti: "jti-role-cache" });
+
+    await expect(
+      reverifySessionPermission(makeContext(), session, "write"),
+    ).resolves.toMatchObject({ decision: "allow" });
+    await expect(
+      reverifySessionPermission(makeContext(), session, "admin"),
+    ).resolves.toMatchObject({ decision: "deny" });
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   // -------------------------------------------------------------------------

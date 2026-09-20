@@ -933,6 +933,9 @@ describe("requireProjectAdminHttp + requireProjectAdmin — Layer B re-verify on
     mockIsRegistered.mockResolvedValue({
       github_owner: "myorg",
       github_repo: "myrepo",
+      min_read_permission: "read",
+      min_write_permission: "write",
+      max_permission: "admin",
     });
     mockMintAppJwt.mockResolvedValue("app-jwt");
     mockGetInstallationAccessToken.mockResolvedValue("install-token");
@@ -946,6 +949,9 @@ describe("requireProjectAdminHttp + requireProjectAdmin — Layer B re-verify on
     mockIsRegistered.mockResolvedValue({
       github_owner: "myorg",
       github_repo: "myrepo",
+      min_read_permission: "read",
+      min_write_permission: "write",
+      max_permission: "admin",
     });
     mockMintAppJwt.mockResolvedValue("app-jwt");
     mockGetInstallationAccessToken.mockResolvedValue("install-token");

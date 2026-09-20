@@ -1009,6 +1009,70 @@ export type InstantiateTemplateResponse = z.infer<
 
 // --- Repo Allowlist API ---
 
+export const GitHubRepositoryPermissionSchema = z.enum([
+  "read",
+  "triage",
+  "write",
+  "maintain",
+  "admin",
+]);
+export type GitHubRepositoryPermission = z.infer<
+  typeof GitHubRepositoryPermissionSchema
+>;
+
+const GITHUB_REPOSITORY_PERMISSION_RANK: Record<
+  GitHubRepositoryPermission,
+  number
+> = {
+  read: 1,
+  triage: 2,
+  write: 3,
+  maintain: 4,
+  admin: 5,
+};
+
+function validateRepoAccessThresholds(
+  policy: {
+    min_read_permission: GitHubRepositoryPermission;
+    min_write_permission: GitHubRepositoryPermission;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (
+    GITHUB_REPOSITORY_PERMISSION_RANK[policy.min_read_permission] >
+    GITHUB_REPOSITORY_PERMISSION_RANK[policy.min_write_permission]
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "min_read_permission must not exceed min_write_permission",
+      path: ["min_write_permission"],
+    });
+  }
+}
+
+export const RepoAccessPolicySchema = z
+  .object({
+    min_read_permission: GitHubRepositoryPermissionSchema,
+    min_write_permission: GitHubRepositoryPermissionSchema,
+    max_permission: SessionPermissionSchema,
+  })
+  .superRefine(validateRepoAccessThresholds);
+export type RepoAccessPolicy = z.infer<typeof RepoAccessPolicySchema>;
+
+export const RepoAccessPolicyRequestSchema = RepoAccessPolicySchema;
+export type RepoAccessPolicyRequest = z.infer<
+  typeof RepoAccessPolicyRequestSchema
+>;
+
+export const RepoAccessPolicyResponseSchema = z.object({
+  ok: z.literal(true),
+  github_repo_id: z.number().int().positive(),
+  policy: RepoAccessPolicySchema,
+});
+export type RepoAccessPolicyResponse = z.infer<
+  typeof RepoAccessPolicyResponseSchema
+>;
+
 const RepoOidcPolicyConditionSchema = z
   .array(z.string().min(1).max(512))
   .max(50)
@@ -1048,14 +1112,19 @@ export type RepoOidcPolicyResponse = z.infer<
   typeof RepoOidcPolicyResponseSchema
 >;
 
-export const RepoRegisterRequestSchema = z.object({
-  owner: z.string().min(1).max(100),
-  repo: z.string().min(1).max(100),
-  github_host: z.string().optional().default("github.com"),
-  github_token: z.string().optional(),
-  min_read_permission: z.string().optional(),
-  min_write_permission: z.string().optional(),
-});
+export const RepoRegisterRequestSchema = z
+  .object({
+    owner: z.string().min(1).max(100),
+    repo: z.string().min(1).max(100),
+    github_host: z.string().optional().default("github.com"),
+    github_token: z.string().optional(),
+    min_read_permission:
+      GitHubRepositoryPermissionSchema.optional().default("write"),
+    min_write_permission:
+      GitHubRepositoryPermissionSchema.optional().default("write"),
+    max_permission: SessionPermissionSchema.optional().default("write"),
+  })
+  .superRefine(validateRepoAccessThresholds);
 export type RepoRegisterRequest = z.infer<typeof RepoRegisterRequestSchema>;
 
 export const RepoRegisterResponseSchema = z.object({
