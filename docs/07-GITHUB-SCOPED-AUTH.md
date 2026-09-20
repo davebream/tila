@@ -61,6 +61,8 @@ CREATE TABLE _project_repos (
   github_repo_id INTEGER NOT NULL,
   min_read_permission TEXT NOT NULL DEFAULT 'read',
   min_write_permission TEXT NOT NULL DEFAULT 'write',
+  max_permission TEXT NOT NULL DEFAULT 'write'
+    CHECK (max_permission IN ('read', 'write', 'admin')),
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   created_by TEXT NOT NULL,
@@ -123,10 +125,84 @@ Response:
 The Worker should call GitHub to:
 
 - identify the token holder
-- resolve the registered repository by stable id
-- verify the holder has the required permission
+- evaluate the holder's current permission on every registered repository
+- select the highest effective tila role, using the lowest repository ID to break ties
 
 If the GitHub token is valid but the repo is not in `_project_repos`, return `403`.
+
+## Repository Access Policy
+
+Each enabled repository link separates admission from authority with one complete policy:
+
+| Field | Meaning | Registration default |
+|---|---|---|
+| `min_read_permission` | Lowest GitHub permission admitted to the project | `write` |
+| `min_write_permission` | Lowest GitHub permission that may receive write authority | `write` |
+| `max_permission` | Maximum tila role this link may grant | `write` |
+
+The threshold fields accept GitHub's `read`, `triage`, `write`, `maintain`, and `admin`
+levels. `max_permission` accepts tila's `read`, `write`, and `admin` roles.
+`min_read_permission` must not be higher than `min_write_permission`.
+
+For each repository link, tila derives the effective permission as follows:
+
+```text
+actual < min_read       → no admission
+actual < min_write      → read
+otherwise               → min(mapped GitHub role, max_permission)
+```
+
+The GitHub mapping is `read`/`triage` → `read`, `write`/`maintain` → `write`, and
+`admin` → `admin`. Unknown GitHub permissions and malformed stored policies fail closed
+for that link. For projects with multiple links, tila evaluates all qualifying links,
+selects the highest effective role, and breaks equal-role ties with the lowest numeric
+GitHub repository ID. Session JWTs, browser cookies, workspace discovery, project
+selection, and live permission rechecks all use this same result.
+
+Examples:
+
+| GitHub permission | Policy (`min_read` / `min_write` / cap) | Result |
+|---|---|---|
+| `triage` | `read` / `write` / `admin` | `read` |
+| `maintain` | `triage` / `maintain` / `admin` | `write` |
+| `admin` | `read` / `write` / `write` | `write` |
+| `read` | `triage` / `write` / `admin` | denied |
+
+### Access-policy API
+
+Both endpoints require project-admin authorization and address a link by its numeric
+GitHub repository ID:
+
+```http
+GET /api/repos/:repoId/access-policy
+PUT /api/repos/:repoId/access-policy
+```
+
+`GET` returns the complete policy. `PUT` atomically replaces all three fields and does
+not accept partial updates:
+
+```json
+{
+  "min_read_permission": "triage",
+  "min_write_permission": "maintain",
+  "max_permission": "write"
+}
+```
+
+PAT and GitHub App exchanges authorize against the current policy before consulting the
+idempotency cache. Reservation keys include the selected repository ID and effective role,
+so tightening a policy cannot replay a broader cached session.
+
+### Migration 0025
+
+Migration `0025_repo_access_policy.sql` adds `max_permission` and backfills existing
+repository links to `write`. It also deletes existing project-scoped GitHub cookie sessions,
+forcing browser users to select a project again under the bounded policy. Signed bearer
+sessions are not bulk-revoked; live revalidation evaluates the selected link's current
+thresholds and cap, and requires re-exchange when that link no longer qualifies.
+
+Project backup/export includes all three policy fields. A legacy backup without
+`max_permission` restores with the database default of `write`.
 
 ## CLI Behavior
 
@@ -429,4 +505,3 @@ plane — addressing many deployments from one machine is a client-side concern,
 
 For the full multi-instance model — the four-tier credential store, the revocation SLA, the threat
 model, and the migration guide — see [`docs/13-MULTI-INSTANCE-AUTH.md`](13-MULTI-INSTANCE-AUTH.md).
-
