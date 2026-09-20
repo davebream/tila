@@ -10,5 +10,21 @@
     { "path": "packages/ui" },
     { "path": "packages/cli" },
     { "path": "packages/integration-tests" }
-  ]
+  ],
+  "compilerOptions": {
+    "paths": {
+      "@tila/schemas": ["./packages/schemas/src/index.ts"],
+      "@tila/core": ["./packages/core/src/index.ts"],
+      "@tila/ops-sqlite": ["./packages/ops-sqlite/src/index.ts"],
+      "@tila/backend-d1": ["./packages/backend-d1/src/index.ts"],
+      "@tila/backend-do": ["./packages/backend-do/src/index.ts"],
+      "@tila/backend-r2": ["./packages/backend-r2/src/index.ts"],
+      "@tila/backend-embedded": ["./packages/backend-embedded/src/index.ts"],
+      "@tila/backend-local": ["./packages/backend-local/src/index.ts"],
+      "@tila/auth-store": ["./packages/auth-store/src/index.ts"],
+      "tila-sdk": ["./packages/sdk/src/index.ts"],
+      "tila-sdk/local": ["./packages/sdk/src/local/index.ts"],
+      "tila-sdk/backup": ["./packages/sdk/src/backup/index.ts"]
+    }
+  }
 }

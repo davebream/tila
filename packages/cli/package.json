@@ -31,7 +31,7 @@
   "files": ["bin"],
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/index.ts",
+    "dev": "node scripts/gen-version.mjs && bun --tsconfig-override ../../tsconfig.json src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
