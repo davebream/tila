@@ -76,6 +76,30 @@ vi.mock("@tila/backend-d1", () => ({
       isAllowed = mockIsAllowed;
     } as unknown as () => unknown,
   ),
+  ProjectMembershipStore: vi.fn().mockImplementation(
+    class {
+      resolve = vi.fn(async () => {
+        const row = await mockIsAllowed();
+        if (!row) return null;
+        const role =
+          row.permission === "admin"
+            ? "maintainer"
+            : row.permission === "write"
+              ? "participant"
+              : "viewer";
+        return { role, sources: ["explicit"] };
+      });
+    } as unknown as () => unknown,
+  ),
+  canonicalMembershipPrincipal: vi.fn(
+    (principal: { issuer: string; subject: string }) => ({
+      principalId: `oidc:${principal.issuer}:${principal.subject}`,
+      provider: "oidc",
+      identityHost: principal.issuer,
+      subjectId: principal.subject,
+      displayName: principal.subject,
+    }),
+  ),
   // Provide stubs for anything else imported by auth-github (it's shared)
   D1TokenStore: vi
     .fn()

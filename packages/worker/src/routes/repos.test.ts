@@ -37,17 +37,17 @@ vi.mock("@tila/backend-d1", () => ({
   ),
 }));
 
-// Mock require-project-admin so we can control requireProjectAdminHttp.
+// Mock the owner gate so route tests can focus on repository behavior.
 const mockRequireProjectAdminHttp = vi.fn<() => Promise<Response | null>>();
 
-vi.mock("../middleware/require-project-admin", async (importOriginal) => {
+vi.mock("../middleware/require-project-owner", async (importOriginal) => {
   const actual =
     await importOriginal<
-      typeof import("../middleware/require-project-admin")
+      typeof import("../middleware/require-project-owner")
     >();
   return {
     ...actual,
-    requireProjectAdminHttp: mockRequireProjectAdminHttp,
+    requireProjectOwnerHttp: mockRequireProjectAdminHttp,
   };
 });
 

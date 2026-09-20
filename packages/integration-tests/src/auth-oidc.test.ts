@@ -205,12 +205,40 @@ function makeSmartD1(opts: SmartD1Options = {}): D1Database {
       const s = sql.trim();
       const isProject = s.includes("_projects");
       const isOidcPrincipal = s.includes("_oidc_principals");
+      const isMembership = s.includes("_project_memberships");
       const isAdminGrant = s.includes("_admin_grants");
       const isIdempotency = s.includes("_idempotency");
 
       const boundStmt = {
         /** Used by raw SQL paths (e.g. project config, revoked-subjects lookups) */
         first<T = unknown>(): Promise<T | null> {
+          if (isProject && s.includes("membership_mode"))
+            return Promise.resolve({
+              membership_mode: "explicit",
+            }) as Promise<T | null>;
+          if (isMembership && opts.oidcPrincipalRow) {
+            const row = opts.oidcPrincipalRow;
+            return Promise.resolve({
+              membership_id: "00000000-0000-4000-a000-000000000001",
+              project_id: row.project_id,
+              principal_id: `oidc:${row.issuer}:${row.subject}`,
+              provider: "oidc",
+              identity_host: row.issuer,
+              subject_id: row.subject,
+              subject_kind: "service",
+              role:
+                row.permission === "admin"
+                  ? "maintainer"
+                  : row.permission === "write"
+                    ? "participant"
+                    : "viewer",
+              display_name: row.subject,
+              granted_by: row.created_by,
+              granted_at: row.created_at,
+              revoked_by: null,
+              revoked_at: null,
+            }) as Promise<T | null>;
+          }
           if (isProject)
             return Promise.resolve(
               opts.projectRow ?? null,

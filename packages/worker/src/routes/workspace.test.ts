@@ -53,6 +53,12 @@ vi.mock("@tila/backend-d1", () => ({
       listForProject = mockAllowlistListForProject;
     } as unknown as () => unknown,
   ),
+  ProjectMembershipStore: vi.fn().mockImplementation(
+    class {
+      listProjectsForPrincipal = vi.fn().mockResolvedValue([]);
+      resolve = vi.fn().mockResolvedValue(null);
+    } as unknown as () => unknown,
+  ),
 }));
 
 // Mock session-cache

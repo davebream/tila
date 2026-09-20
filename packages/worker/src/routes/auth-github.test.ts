@@ -123,6 +123,25 @@ vi.mock("@tila/backend-d1", () => ({
       create = mockD1SessionCreate;
     } as unknown as () => unknown,
   ),
+  ProjectMembershipStore: vi.fn().mockImplementation(
+    class {
+      resolve = vi.fn(
+        async (
+          _projectId: string,
+          _principalId: string,
+          mirrored: { role: string; githubRepoId: number } | null,
+        ) => (mirrored ? { ...mirrored, sources: ["github-mirrored"] } : null),
+      );
+      recordMirroredAdmission = vi.fn().mockResolvedValue(undefined);
+    } as unknown as () => unknown,
+  ),
+  canonicalMembershipPrincipal: vi.fn((principal: { user_id: number }) => ({
+    principalId: `github:github.com:${principal.user_id}`,
+    provider: "github",
+    identityHost: "github.com",
+    subjectId: String(principal.user_id),
+    displayName: null,
+  })),
 }));
 
 // Import after mocks are set up
@@ -180,6 +199,8 @@ const MOCK_REPO = {
   min_read_permission: "read",
   min_write_permission: "write",
   max_permission: "admin",
+  membership_enabled: 1,
+  membership_role_cap: "maintainer",
   enabled: 1,
   created_at: 1000000,
   created_by: "admin",
@@ -489,8 +510,8 @@ describe("POST /api/auth/github/exchange", () => {
     expect((await request()).status).toBe(200);
     const firstKey = (mockIdempotencyReserve.mock.calls[0] as [string])[0];
     const secondKey = (mockIdempotencyReserve.mock.calls[1] as [string])[0];
-    expect(firstKey).toContain(":20:write");
-    expect(secondKey).toContain(":10:read");
+    expect(firstKey).toContain(":20:participant");
+    expect(secondKey).toContain(":10:viewer");
     expect(firstKey).not.toBe(secondKey);
   });
 

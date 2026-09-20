@@ -75,11 +75,40 @@ vi.mock("@tila/backend-d1", () => {
     }
   }
 
+  class ProjectMembershipStore {
+    async grant(params: {
+      projectId: string;
+      principal: { user_id: number; login?: string };
+      actorPrincipalId: string;
+    }) {
+      const existing = storeState.grants.find(
+        (row) =>
+          row.project_id === params.projectId &&
+          row.github_user_id === params.principal.user_id &&
+          row.revoked_at === null,
+      );
+      if (existing) return { membership: {}, created: false };
+      const actorMatch = params.actorPrincipalId.match(/:(\d+)$/);
+      storeState.grants.push({
+        project_id: params.projectId,
+        github_host: "github.com",
+        github_user_id: params.principal.user_id,
+        github_login_snapshot: params.principal.login ?? null,
+        granted_by_user_id: actorMatch ? Number(actorMatch[1]) : null,
+        granted_at: Math.floor(Date.now() / 1000),
+        revoked_at: null,
+        revoked_by_user_id: null,
+      });
+      return { membership: {}, created: true };
+    }
+  }
+
   return {
     AdminGrantsStore: AdminGrantsStore as unknown as () => unknown,
     GitHubAppConfigStore: class {
       getInstallation = async () => storeState.installation;
     } as unknown as () => unknown,
+    ProjectMembershipStore: ProjectMembershipStore as unknown as () => unknown,
   };
 });
 

@@ -12,6 +12,9 @@ const CREATE_SESSIONS = `
     principal_id TEXT NOT NULL,
     scopes       TEXT NOT NULL DEFAULT 'full',
     permission   TEXT NOT NULL DEFAULT 'read',
+    role         TEXT,
+    membership_source TEXT,
+    source_repo_id INTEGER,
     created_at   INTEGER NOT NULL,
     expires_at   INTEGER NOT NULL
   );

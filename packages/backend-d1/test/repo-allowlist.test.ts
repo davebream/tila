@@ -12,6 +12,8 @@ const CREATE_PROJECT_REPOS = `
     min_read_permission   TEXT    NOT NULL DEFAULT 'read',
     min_write_permission  TEXT    NOT NULL DEFAULT 'write',
     max_permission        TEXT    NOT NULL DEFAULT 'write',
+    membership_enabled   INTEGER NOT NULL DEFAULT 0,
+    membership_role_cap  TEXT    NOT NULL DEFAULT 'participant',
     enabled               INTEGER NOT NULL DEFAULT 1,
     created_at            INTEGER NOT NULL,
     created_by            TEXT    NOT NULL,

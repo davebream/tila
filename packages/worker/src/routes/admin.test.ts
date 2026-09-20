@@ -41,6 +41,32 @@ vi.mock("@tila/backend-d1", () => ({
       deleteByTokenHash = mockDeleteByTokenHash;
     } as unknown as () => unknown,
   ),
+  ProjectMembershipStore: vi.fn().mockImplementation(
+    class {
+      getActive = vi.fn().mockResolvedValue(null);
+      countActiveOwners = vi.fn().mockResolvedValue(0);
+    } as unknown as () => unknown,
+  ),
+  canonicalMembershipPrincipal: (principal: {
+    provider: "github" | "oidc";
+    host?: string;
+    user_id?: number;
+    issuer?: string;
+    subject?: string;
+  }) => {
+    const identityHost =
+      principal.provider === "github"
+        ? (principal.host ?? "github.com").toLowerCase()
+        : (principal.issuer ?? "").replace(/\/$/, "").toLowerCase();
+    const subjectId = String(
+      principal.provider === "github" ? principal.user_id : principal.subject,
+    );
+    return {
+      identityHost,
+      subjectId,
+      principalId: `${principal.provider}:${identityHost}:${subjectId}`,
+    };
+  },
   revokePrincipalBatch: (...args: unknown[]) =>
     mockRevokePrincipalBatch(...args),
 }));
