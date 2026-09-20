@@ -14,6 +14,7 @@ export {
 } from "./rate-limit-store";
 export {
   RepoAllowlistStore,
+  type RepoAccessPolicyResult,
   type RepoAllowlistRow,
   type RepoOidcPolicyResult,
 } from "./repo-allowlist";

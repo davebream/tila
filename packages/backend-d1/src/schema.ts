@@ -65,6 +65,7 @@ export const projectRepos = sqliteTable(
     min_write_permission: text("min_write_permission")
       .notNull()
       .default("write"),
+    max_permission: text("max_permission").notNull().default("write"),
     // Legacy field retained for backup compatibility. GitHub Actions exchange
     // authorization uses the explicit fail-closed policy fields below.
     oidc_permission: text("oidc_permission").notNull().default("write"),

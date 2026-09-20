@@ -1,4 +1,9 @@
-import { GitHubAppConfigStore, RepoAllowlistStore } from "@tila/backend-d1";
+import {
+  GitHubAppConfigStore,
+  type RepoAllowlistRow,
+  RepoAllowlistStore,
+} from "@tila/backend-d1";
+import type { SessionPermission } from "@tila/schemas";
 import type { Context } from "hono";
 import {
   PERMISSION_RECHECK_BACKOFF_MS,
@@ -13,26 +18,28 @@ import {
   mintAppJwt,
 } from "./github-app";
 import {
-  PERMISSION_HIERARCHY,
-  normalizeGitHubPermission,
-} from "./github-permission";
+  evaluateRepositoryAccess,
+  permissionMeetsRequirement,
+} from "./repo-access-policy";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
 /**
- * The three settled verdict shapes stored in the per-isolate recheck cache.
- *   - grant:        live GitHub check confirmed sufficient permission
- *   - deny:         live GitHub check confirmed insufficient permission (downgrade/absent)
+ * Settled values stored in the per-isolate recheck cache.
+ *   - permission:   live GitHub check produced a policy-bounded effective role
+ *   - deny:         live GitHub check confirmed no qualifying access
  *   - not-possible: re-verify is impossible for this project (no App install, secrets absent,
  *                   or App was uninstalled) — Layer A is the backstop
  * A separate "backoff" shape records that a transient error occurred so we don't
  * hammer GitHub on every request during an outage.
  */
-type CacheVerdict = "grant" | "deny" | "not-possible";
+type CacheVerdict = "deny" | "not-possible";
 
 interface CacheEntry {
   /** The settled verdict (used when backoff is false). */
   verdict?: CacheVerdict;
+  /** Effective policy-bounded role from the last successful live check. */
+  permission?: SessionPermission;
   /** When true this is a transient-backoff entry (no settled verdict). */
   backoff: boolean;
   /** Millisecond timestamp when the entry was created. */
@@ -94,15 +101,16 @@ function getRecheckFromCache(jti: string): CacheEntry | null {
  *
  * Algorithm (Layer B, WI-H / #131):
  *   1. No jti → skip (pre-C9 token; Layer A backstops) — allow{cacheable:false}.
- *   2. Cache hit → reuse verdict without a GitHub call.
+ *   2. Cache hit → compare the cached effective permission to this route's requirement.
  *   3. App-secrets guard: absent GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY → allow not-possible (cached).
  *   4. getInstallation: null → allow not-possible (cached); throw → deny (fail-closed).
  *   5. isRegistered: null → deny; throw → deny (fail-closed).
  *   6. mintAppJwt + getInstallationAccessToken: 404 throw → allow not-possible (cached);
  *      other throw → allow{cacheable:false} + transient-backoff entry.
  *   7. checkUserMembershipStatus:
- *        permission ≥ required → allow grant (cached)
- *        permission < required → deny (cached)
+ *        qualifying permission → cache its policy-bounded effective role
+ *        effective role ≥ required → allow
+ *        effective role < required → deny
  *        absent               → deny (cached)
  *        error                → allow{cacheable:false} + transient-backoff entry
  *
@@ -141,8 +149,21 @@ export async function reverifySessionPermission(
       return { decision: "allow", cacheable: false };
     }
     // Settled entry
-    if (cached.verdict === "grant" || cached.verdict === "not-possible") {
+    if (cached.verdict === "not-possible") {
       return { decision: "allow", cacheable: true };
+    }
+    if (
+      cached.permission &&
+      permissionMeetsRequirement(cached.permission, required)
+    ) {
+      return { decision: "allow", cacheable: true };
+    }
+    if (cached.permission) {
+      return {
+        decision: "deny",
+        reason:
+          "Permission re-check: permission downgraded or policy cap is insufficient",
+      };
     }
     if (cached.verdict === "deny") {
       return {
@@ -186,7 +207,7 @@ export async function reverifySessionPermission(
 
   // Step 5: Resolve owner/repo from allowlist — fail CLOSED on D1 error or missing row.
   const host = session.githubHost ?? "github.com";
-  let repoRow: { github_owner: string; github_repo: string } | null;
+  let repoRow: RepoAllowlistRow | null;
   try {
     repoRow = await new RepoAllowlistStore(c.env.DB).isRegistered(
       session.projectId,
@@ -256,27 +277,30 @@ export async function reverifySessionPermission(
   );
 
   if (status.kind === "permission") {
-    const currentNorm = normalizeGitHubPermission(status.value);
-    const currentLevel = PERMISSION_HIERARCHY[currentNorm] ?? 0;
-    const requiredLevel = PERMISSION_HIERARCHY[required] ?? 0;
+    const access = evaluateRepositoryAccess(repoRow, status.value);
 
-    if (currentLevel >= requiredLevel) {
+    if (access) {
       setRecheckInCache(jti, {
-        verdict: "grant",
+        permission: access.permission,
         backoff: false,
         cachedAt: Date.now(),
       });
-      return { decision: "allow", cacheable: true };
+      if (permissionMeetsRequirement(access.permission, required)) {
+        return { decision: "allow", cacheable: true };
+      }
     }
 
-    setRecheckInCache(jti, {
-      verdict: "deny",
-      backoff: false,
-      cachedAt: Date.now(),
-    });
+    if (!access) {
+      setRecheckInCache(jti, {
+        verdict: "deny",
+        backoff: false,
+        cachedAt: Date.now(),
+      });
+    }
     return {
       decision: "deny",
-      reason: "Permission re-check: permission downgraded since session issued",
+      reason:
+        "Permission re-check: permission downgraded or policy cap is insufficient",
     };
   }
 
