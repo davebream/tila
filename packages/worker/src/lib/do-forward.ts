@@ -32,6 +32,7 @@ const TABLE_MAP: Record<string, string> = {
   sweep: "_sweep",
   gate: "gates",
   record: "records",
+  signal: "signals",
 };
 
 function deriveTable(path: string): string {

@@ -36,6 +36,7 @@ import {
   type PresenceWithStatus,
   parseTilaSchemaToml,
 } from "@tila/core";
+import { signalOps } from "@tila/ops-sqlite";
 import type {
   AckSignalResponse,
   AcquireSuccessResponse,
@@ -82,12 +83,20 @@ import type {
   SendSignalRequest,
   SendSignalResponse,
   Signal,
+  SignalGroupResponse,
+  SignalGroupsResponse,
+  SignalHistoryResponse,
   StateListResponse,
   StateResponse,
   SummaryResponse,
   UnifiedSearchResponse,
 } from "@tila/schemas";
-import { okEnvelope } from "@tila/schemas";
+import {
+  SendSignalRequestSchema,
+  SetSignalGroupRequestSchema,
+  SignalGroupIdSchema,
+  okEnvelope,
+} from "@tila/schemas";
 import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
 
@@ -733,41 +742,105 @@ function createLocalGateMethods(project: EmbeddedProject) {
 function createLocalSignalMethods(project: EmbeddedProject) {
   return {
     async inbox(): Promise<InboxResponse> {
-      const signals = await project.listSignals("local");
-      // SignalRecord.kind is widened to `string`; the wire Signal.kind is the
-      // SignalKind enum. The stored kinds ARE valid members (written via the
-      // same enum on send), so narrow with a typed assertion per row.
-      return {
-        ok: true,
-        signals: signals.map((s) => ({
-          ...s,
-          kind: s.kind as Signal["kind"],
-        })),
-      };
+      return { ok: true, signals: await project.listSignals() };
     },
 
     async send(req: SendSignalRequest): Promise<SendSignalResponse> {
-      const { id } = await project.sendSignal(
-        {
-          target: req.target,
-          kind: req.kind,
-          resource: req.resource,
-          payload: req.payload,
-          ttl_ms: req.ttl_ms,
-        },
-        "local",
-      );
-      return { ok: true, id };
+      const input = SendSignalRequestSchema.parse(req);
+      try {
+        const result = await project.sendSignal(input);
+        return { ok: true, ...result };
+      } catch (error) {
+        if (error instanceof signalOps.SignalGroupNotFoundError) {
+          throw new TilaApiError(
+            404,
+            "signal-group-not-found",
+            "Signal group not found",
+            false,
+          );
+        }
+        if (error instanceof signalOps.NoActiveRecipientsError) {
+          throw new TilaApiError(
+            409,
+            "no-active-recipients",
+            "Signal target has no active recipients",
+            false,
+          );
+        }
+        throw error;
+      }
     },
 
-    async ack(_signalId: string): Promise<AckSignalResponse> {
-      // The wire AckSignalResponse is just `{ ok: true }`; the embedded ack's
-      // `found`/`authorized` flags are not part of the wire shape, so they are
-      // intentionally dropped (the HTTP factory's `ack` also returns only
-      // `{ ok: true }`). Local mode is single-machine: the acker is "local",
-      // matching the inbox identity used in `listSignals("local")`.
-      await project.ackSignal(_signalId, "local");
+    async ack(signalId: string): Promise<AckSignalResponse> {
+      const result = await project.ackSignal(signalId);
+      if (!result.found) {
+        throw new TilaApiError(404, "not-found", "Signal not found", false);
+      }
+      if (result.expired) {
+        throw new TilaApiError(
+          410,
+          "signal-expired",
+          "Signal has expired",
+          false,
+        );
+      }
+      if (!result.authorized) {
+        throw new TilaApiError(
+          403,
+          "forbidden",
+          "Only this signal delivery's participant may acknowledge it",
+          false,
+        );
+      }
       return { ok: true };
+    },
+
+    async history(
+      options: { limit?: number; cursor?: string } = {},
+    ): Promise<SignalHistoryResponse> {
+      return { ok: true, ...(await project.historySignals(options)) };
+    },
+
+    groups: {
+      async list(): Promise<SignalGroupsResponse> {
+        return { ok: true, groups: await project.listSignalGroups() };
+      },
+      async get(groupId: string): Promise<SignalGroupResponse> {
+        const id = SignalGroupIdSchema.parse(groupId);
+        const group = await project.getSignalGroup(id);
+        if (!group) {
+          throw new TilaApiError(
+            404,
+            "signal-group-not-found",
+            "Signal group not found",
+            false,
+          );
+        }
+        return { ok: true, group };
+      },
+      async set(
+        groupId: string,
+        input: { name: string; principal_ids: string[] },
+      ): Promise<SignalGroupResponse> {
+        const id = SignalGroupIdSchema.parse(groupId);
+        const body = SetSignalGroupRequestSchema.parse(input);
+        return {
+          ok: true,
+          group: await project.setSignalGroup(id, body),
+        };
+      },
+      async delete(groupId: string) {
+        const id = SignalGroupIdSchema.parse(groupId);
+        if (!(await project.deleteSignalGroup(id))) {
+          throw new TilaApiError(
+            404,
+            "signal-group-not-found",
+            "Signal group not found",
+            false,
+          );
+        }
+        return { ok: true } as const;
+      },
     },
   };
 }

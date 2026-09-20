@@ -9,6 +9,8 @@ import type {
   RecordGetResponse,
   RecordHistoryResponse,
   RecordListResponse,
+  SignalGroupsResponse,
+  SignalHistoryResponse,
   StateListResponse,
 } from "@tila/schemas";
 import { API_BASE_URL } from "./config";
@@ -208,6 +210,22 @@ export async function listPresenceAll(
   projectId: string,
 ): Promise<PresenceAllListResponse> {
   return request<PresenceAllListResponse>(projectId, "/presence/all");
+}
+
+export async function listSignalHistory(
+  projectId: string,
+  params?: { cursor?: string; limit?: number },
+): Promise<SignalHistoryResponse> {
+  return request<SignalHistoryResponse>(projectId, "/signals/history", {
+    cursor: params?.cursor,
+    limit: params?.limit === undefined ? undefined : String(params.limit),
+  });
+}
+
+export async function listSignalGroups(
+  projectId: string,
+): Promise<SignalGroupsResponse> {
+  return request<SignalGroupsResponse>(projectId, "/signals/groups");
 }
 
 export async function listTaskArtifactRefs(

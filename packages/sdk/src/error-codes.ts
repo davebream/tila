@@ -46,6 +46,10 @@ export const TILA_ERRORS = {
   INVALID_QUERY: "invalid-query",
   INVALID_SLOT: "invalid-slot",
   INVALID_RELATIONSHIP_TYPE: "invalid-relationship-type",
+  FORBIDDEN: "forbidden",
+  SIGNAL_GROUP_NOT_FOUND: "signal-group-not-found",
+  NO_ACTIVE_RECIPIENTS: "no-active-recipients",
+  SIGNAL_EXPIRED: "signal-expired",
   // Instance binding (worker auth middleware — kebab-case wire value)
   INSTANCE_MISMATCH: "instance-mismatch",
   // DPoP sender-constrained tokens (WI-G — auth middleware)

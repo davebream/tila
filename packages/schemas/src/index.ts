@@ -63,8 +63,17 @@ export {
 export {
   SignalKindSchema,
   type SignalKind,
+  SignalTargetSchema,
+  type SignalTarget,
+  SignalIdentitySchema,
+  type SignalIdentity,
+  SignalDeliverySchema,
+  type SignalDelivery,
   SignalSchema,
   type Signal,
+  SignalGroupIdSchema,
+  SignalGroupSchema,
+  type SignalGroup,
 } from "./signal";
 
 // --- DO SQLite: schema history ---
@@ -343,8 +352,16 @@ export {
   type SendSignalResponse,
   InboxResponseSchema,
   type InboxResponse,
+  SignalHistoryResponseSchema,
+  type SignalHistoryResponse,
   AckSignalResponseSchema,
   type AckSignalResponse,
+  SetSignalGroupRequestSchema,
+  type SetSignalGroupRequest,
+  SignalGroupResponseSchema,
+  type SignalGroupResponse,
+  SignalGroupsResponseSchema,
+  type SignalGroupsResponse,
 } from "./signal";
 
 // --- Search schemas ---

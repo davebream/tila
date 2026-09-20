@@ -12,6 +12,8 @@ import {
   listPresenceAll,
   listRecordTypes,
   listRecords,
+  listSignalGroups,
+  listSignalHistory,
   listTaskArtifactRefs,
   listTasks,
   searchArtifacts,
@@ -116,6 +118,27 @@ export function usePresence() {
   return useQuery({
     queryKey: ["presence", projectId],
     queryFn: () => listPresenceAll(requireProjectId(projectId)),
+    enabled: Boolean(projectId),
+    refetchInterval: 10000,
+  });
+}
+
+export function useSignalHistory() {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["signal-history", projectId],
+    queryFn: () =>
+      listSignalHistory(requireProjectId(projectId), { limit: 100 }),
+    enabled: Boolean(projectId),
+    refetchInterval: 5000,
+  });
+}
+
+export function useSignalGroups() {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["signal-groups", projectId],
+    queryFn: () => listSignalGroups(requireProjectId(projectId)),
     enabled: Boolean(projectId),
     refetchInterval: 10000,
   });

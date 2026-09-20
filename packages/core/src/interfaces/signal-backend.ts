@@ -1,38 +1,30 @@
-// packages/core/src/interfaces/signal-backend.ts
+import type {
+  SendSignalRequest,
+  Signal,
+  SignalGroup,
+  SignalHistoryResponse,
+} from "@tila/schemas";
 
-export interface SendSignalInput {
-  target: string;
-  kind: string;
-  resource?: string;
-  payload?: unknown;
-  ttl_ms?: number;
-}
-
-export interface SignalRecord {
-  id: string;
-  target: string;
-  kind: string;
-  resource: string | null;
-  payload: unknown;
-  created_by: string;
-  created_at: number;
-  expires_at: number;
-  acked_at: number | null;
-}
+export type SendSignalInput = SendSignalRequest;
+export type SignalRecord = Signal;
 
 export interface SignalBackend {
   sendSignal(
     input: SendSignalInput,
-    createdBy: string,
-  ): Promise<{ id: string }>;
-  listSignals(tokenName: string): Promise<SignalRecord[]>;
-  /**
-   * Acknowledge (consume) a signal on behalf of `acker`. Only the signal's
-   * addressee, its original sender, or any caller for a broadcast may ack it;
-   * an unauthorized ack is a no-op and returns `authorized: false`.
-   */
+  ): Promise<{ id: string; recipient_count: number }>;
+  listSignals(): Promise<SignalRecord[]>;
+  historySignals(options?: {
+    limit?: number;
+    cursor?: string;
+  }): Promise<Omit<SignalHistoryResponse, "ok">>;
   ackSignal(
     signalId: string,
-    acker: string,
-  ): Promise<{ found: boolean; authorized: boolean }>;
+  ): Promise<{ found: boolean; authorized: boolean; expired: boolean }>;
+  listSignalGroups(): Promise<SignalGroup[]>;
+  getSignalGroup(groupId: string): Promise<SignalGroup | null>;
+  setSignalGroup(
+    groupId: string,
+    input: { name: string; principal_ids: string[] },
+  ): Promise<SignalGroup>;
+  deleteSignalGroup(groupId: string): Promise<boolean>;
 }

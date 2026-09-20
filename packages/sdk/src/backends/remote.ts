@@ -82,6 +82,9 @@ import {
   ReleaseSuccessResponseSchema,
   RenewSuccessResponseSchema,
   SendSignalResponseSchema,
+  SignalGroupResponseSchema,
+  SignalGroupsResponseSchema,
+  SignalHistoryResponseSchema,
   StateResponseSchema,
   SummaryResponseSchema,
 } from "@tila/schemas";
@@ -669,8 +672,7 @@ export class RemoteBackend
 
   async sendSignal(
     input: SendSignalInput,
-    _createdBy: string,
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string; recipient_count: number }> {
     const body: Record<string, unknown> = {
       target: input.target,
       kind: input.kind,
@@ -683,40 +685,81 @@ export class RemoteBackend
       body,
       { schema: SendSignalResponseSchema, validate: true },
     );
-    return { id: result.id };
+    return { id: result.id, recipient_count: result.recipient_count };
   }
 
-  async listSignals(_tokenName: string): Promise<SignalRecord[]> {
-    const result = await this.client.get(
-      `/projects/${this.projectId}/signals`,
-      { schema: InboxResponseSchema, validate: true },
+  async listSignals(): Promise<SignalRecord[]> {
+    const raw = await this.client.get(`/projects/${this.projectId}/signals`, {
+      schema: InboxResponseSchema,
+      validate: true,
+    });
+    const result = InboxResponseSchema.parse(raw);
+    return result.signals;
+  }
+
+  async historySignals(
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<{ signals: SignalRecord[]; next_cursor: string | null }> {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.cursor) query.set("cursor", options.cursor);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    const raw = await this.client.get(
+      `/projects/${this.projectId}/signals/history${suffix}`,
+      { schema: SignalHistoryResponseSchema, validate: true },
     );
-    return result.signals.map((s) => ({
-      id: s.id,
-      target: s.target,
-      kind: s.kind,
-      resource: s.resource ?? null,
-      payload: s.payload,
-      created_by: s.created_by,
-      created_at: s.created_at,
-      expires_at: s.expires_at,
-      acked_at: s.acked_at,
-    }));
+    const result = SignalHistoryResponseSchema.parse(raw);
+    return { signals: result.signals, next_cursor: result.next_cursor };
   }
 
-  async ackSignal(
-    signalId: string,
-    _acker: string,
-  ): Promise<{ found: boolean; authorized: boolean }> {
-    // The Worker derives the acker from the bearer token identity (the `_acker`
-    // arg is ignored here so a client cannot spoof it); an unauthorized ack
-    // returns 403 and surfaces as a thrown error from `post`.
+  async ackSignal(signalId: string) {
     await this.client.post(
       `/projects/${this.projectId}/signals/${signalId}/ack`,
       {},
       { schema: AckSignalResponseSchema, validate: true },
     );
-    return { found: true, authorized: true };
+    return { found: true, authorized: true, expired: false };
+  }
+
+  async listSignalGroups() {
+    const result = await this.client.get(
+      `/projects/${this.projectId}/signals/groups`,
+      { schema: SignalGroupsResponseSchema, validate: true },
+    );
+    return result.groups;
+  }
+
+  async getSignalGroup(groupId: string) {
+    try {
+      const result = await this.client.get(
+        `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
+        { schema: SignalGroupResponseSchema, validate: true },
+      );
+      return result.group;
+    } catch (err) {
+      if (err instanceof TilaApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async setSignalGroup(
+    groupId: string,
+    input: { name: string; principal_ids: string[] },
+  ) {
+    const result = await this.client.put(
+      `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
+      input,
+      { schema: SignalGroupResponseSchema, validate: true },
+    );
+    return result.group;
+  }
+
+  async deleteSignalGroup(groupId: string) {
+    await this.client.delete(
+      `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
+      { schema: OkSchema, validate: true },
+    );
+    return true;
   }
 
   // --- SchemaBackend ---
