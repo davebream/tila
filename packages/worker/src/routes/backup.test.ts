@@ -137,6 +137,7 @@ describe("backup operator routes", () => {
       statement.includes("FROM _project_repos"),
     )?.[0];
     expect(repoExport).toContain("oidc_enabled");
+    expect(repoExport).toContain("max_permission");
     expect(repoExport).toContain("oidc_max_permission");
     expect(repoExport).toContain("oidc_subject_pattern");
     expect(repoExport).toContain("oidc_allowed_events");

@@ -11,6 +11,7 @@ const CREATE_PROJECT_REPOS = `
     github_repo_id        INTEGER NOT NULL,
     min_read_permission   TEXT    NOT NULL DEFAULT 'read',
     min_write_permission  TEXT    NOT NULL DEFAULT 'write',
+    max_permission        TEXT    NOT NULL DEFAULT 'write',
     enabled               INTEGER NOT NULL DEFAULT 1,
     created_at            INTEGER NOT NULL,
     created_by            TEXT    NOT NULL,
@@ -101,6 +102,7 @@ describe("RepoAllowlistStore", () => {
       expect(r.github_repo_id).toBe(12345);
       expect(r.min_read_permission).toBe("write");
       expect(r.min_write_permission).toBe("write");
+      expect(r.max_permission).toBe("write");
       expect(r.enabled).toBe(1);
       expect(r.created_by).toBe("admin-user");
       expect(r.oidc_enabled).toBe(0);
@@ -152,6 +154,50 @@ describe("RepoAllowlistStore", () => {
         )
         .get(12345) as { cnt: number };
       expect(count.cnt).toBe(1);
+    });
+  });
+
+  describe("human access policy", () => {
+    it("reads and atomically replaces a valid policy", async () => {
+      const { store } = createTestStore();
+      await store.register(BASE_PARAMS);
+
+      const updated = await store.setAccessPolicy(
+        "proj-1",
+        "github.com",
+        12345,
+        {
+          min_read_permission: "read",
+          min_write_permission: "maintain",
+          max_permission: "admin",
+        },
+      );
+
+      expect(updated).toMatchObject({
+        status: "ok",
+        policy: {
+          min_read_permission: "read",
+          min_write_permission: "maintain",
+          max_permission: "admin",
+        },
+      });
+      await expect(
+        store.getAccessPolicy("proj-1", "github.com", 12345),
+      ).resolves.toMatchObject(updated);
+    });
+
+    it("fails closed when stored policy is malformed", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET min_read_permission = 'admin', min_write_permission = 'write'",
+        )
+        .run();
+
+      await expect(
+        store.getAccessPolicy("proj-1", "github.com", 12345),
+      ).resolves.toEqual({ status: "invalid-policy" });
     });
   });
 
