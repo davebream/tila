@@ -213,6 +213,7 @@ DO SQLite is the source of truth for everything per-project. It is *not* a cache
 - **Fences:** persisted indefinitely. Even after a resource is deleted, its fence counter survives (so future re-creates don't reuse fence numbers).
 - **Journal:** the audit log. Append-only, durable, recoverable via Cloudflare's DO SQLite point-in-time recovery.
 - **Presence:** the one mostly-ephemeral table. It is keyed by `(principal_id, participant_id)`, refreshed on heartbeat, and reaped by the sweeper. Crashes are recoverable (participants re-register).
+- **Signals:** `signals` stores sender and typed-target snapshots; `signal_deliveries` stores immutable recipient and acknowledgement identities; `signal_groups` and `signal_group_members` store named principal audiences. Group edits never rewrite prior deliveries.
 
 If a DO is wiped (catastrophic incident with no PIT recovery), the recovery story is:
 - **Artifacts are recoverable from R2 + object metadata.** `tila doctor --reconcile` walks R2 and synthesizes `artifact_pointers` rows from `x-amz-meta-tila-*` metadata.

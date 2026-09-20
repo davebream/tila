@@ -626,8 +626,7 @@ export class EmbeddedProject
 
   async sendSignal(
     input: SendSignalInput,
-    createdBy: string,
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string; recipient_count: number }> {
     return this.retry(() =>
       signalOps.send(this.db, {
         target: input.target,
@@ -635,31 +634,58 @@ export class EmbeddedProject
         resource: input.resource,
         payload: input.payload,
         ttl_ms: input.ttl_ms,
-        created_by: createdBy,
+        sender: {
+          principal_id: this.identity.principal_id,
+          participant_id: this.identity.participant_id,
+          display_name: this.identity.environment.client_name ?? null,
+          environment: this.identity.environment,
+        },
       }),
     );
   }
 
-  async listSignals(tokenName: string): Promise<SignalRecord[]> {
-    const rows = signalOps.inbox(this.db, tokenName);
-    return rows.map((row) => ({
-      id: row.id,
-      target: row.target,
-      kind: row.kind,
-      resource: row.resource,
-      payload: row.payload,
-      created_by: row.created_by,
-      created_at: row.created_at,
-      expires_at: row.expires_at,
-      acked_at: row.acked_at,
-    }));
+  async listSignals(): Promise<SignalRecord[]> {
+    return signalOps.inbox(this.db, this.identity);
   }
 
-  async ackSignal(
-    signalId: string,
-    acker: string,
-  ): Promise<{ found: boolean; authorized: boolean }> {
-    return this.retry(() => signalOps.ack(this.db, signalId, acker));
+  async historySignals(options: { limit?: number; cursor?: string } = {}) {
+    return signalOps.history(this.db, options);
+  }
+
+  async ackSignal(signalId: string) {
+    return this.retry(() =>
+      signalOps.ack(this.db, signalId, {
+        principal_id: this.identity.principal_id,
+        participant_id: this.identity.participant_id,
+        display_name: this.identity.environment.client_name ?? null,
+        environment: this.identity.environment,
+      }),
+    );
+  }
+
+  async listSignalGroups() {
+    return signalOps.listGroups(this.db);
+  }
+
+  async getSignalGroup(groupId: string) {
+    return signalOps.getGroup(this.db, groupId);
+  }
+
+  async setSignalGroup(
+    groupId: string,
+    input: { name: string; principal_ids: string[] },
+  ) {
+    return signalOps.setGroup(
+      this.db,
+      groupId,
+      input.name,
+      input.principal_ids,
+      this.identity,
+    );
+  }
+
+  async deleteSignalGroup(groupId: string) {
+    return signalOps.deleteGroup(this.db, groupId);
   }
 
   // ---------- SchemaBackend ----------

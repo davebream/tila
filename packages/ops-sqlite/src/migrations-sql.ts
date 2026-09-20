@@ -798,7 +798,10 @@ const TRANSFER_GUARDED_TABLES = [
   "artifact_search_docs",
   "entity_search_docs",
   "gates",
+  "signal_groups",
+  "signal_group_members",
   "signals",
+  "signal_deliveries",
   "records",
   "entity_tags",
   "artifact_tags",
@@ -818,6 +821,101 @@ export function runMigration0024(storage: MigrationStorage): void {
         )
         .toArray().length > 0;
     if (!exists) continue;
+    for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
+      storage.sql.exec(`
+        CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
+        BEFORE ${operation} ON ${table}
+        WHEN EXISTS (
+          SELECT 1 FROM _project_transfer_state
+          WHERE singleton = 1 AND applying = 0
+            AND (expires_at IS NULL OR expires_at > (unixepoch('subsec') * 1000))
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'project-maintenance');
+        END;
+      `);
+    }
+  }
+}
+
+/**
+ * Replace display-name-addressed signals with participant-scoped deliveries.
+ * Legacy rows cannot be mapped to canonical identities safely, so this
+ * migration intentionally purges them by rebuilding the signals table.
+ */
+export function runMigration0025(storage: MigrationStorage): void {
+  storage.sql.exec("DROP TABLE IF EXISTS signal_deliveries");
+  storage.sql.exec("DROP TABLE IF EXISTS signals");
+  storage.sql.exec("DROP TABLE IF EXISTS signal_group_members");
+  storage.sql.exec("DROP TABLE IF EXISTS signal_groups");
+  storage.sql.exec(`
+    CREATE TABLE signal_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      created_by_principal_id TEXT NOT NULL,
+      created_by_participant_id TEXT NOT NULL,
+      updated_by_principal_id TEXT NOT NULL,
+      updated_by_participant_id TEXT NOT NULL
+    );
+
+    CREATE TABLE signal_group_members (
+      group_id TEXT NOT NULL REFERENCES signal_groups(id) ON DELETE CASCADE,
+      principal_id TEXT NOT NULL,
+      added_at INTEGER NOT NULL,
+      added_by_principal_id TEXT NOT NULL,
+      added_by_participant_id TEXT NOT NULL,
+      PRIMARY KEY (group_id, principal_id)
+    );
+    CREATE INDEX idx_signal_group_members_principal
+      ON signal_group_members(principal_id);
+
+    CREATE TABLE signals (
+      id TEXT PRIMARY KEY,
+      target TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      resource TEXT,
+      payload TEXT NOT NULL DEFAULT '{}',
+      sender_principal_id TEXT NOT NULL,
+      sender_participant_id TEXT NOT NULL,
+      sender_display_name TEXT,
+      sender_environment TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_signals_expires ON signals(expires_at);
+
+    CREATE TABLE signal_deliveries (
+      signal_id TEXT NOT NULL REFERENCES signals(id) ON DELETE CASCADE,
+      recipient_principal_id TEXT NOT NULL,
+      recipient_participant_id TEXT NOT NULL,
+      recipient_display_name TEXT,
+      recipient_environment TEXT NOT NULL DEFAULT '{}',
+      acknowledged_at INTEGER,
+      acknowledged_by_principal_id TEXT,
+      acknowledged_by_participant_id TEXT,
+      acknowledged_by_display_name TEXT,
+      acknowledged_by_environment TEXT,
+      PRIMARY KEY (
+        signal_id,
+        recipient_principal_id,
+        recipient_participant_id
+      )
+    );
+    CREATE INDEX idx_signal_deliveries_inbox ON signal_deliveries(
+      recipient_principal_id,
+      recipient_participant_id,
+      acknowledged_at
+    );
+  `);
+
+  for (const table of [
+    "signal_groups",
+    "signal_group_members",
+    "signals",
+    "signal_deliveries",
+  ]) {
     for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
       storage.sql.exec(`
         CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
@@ -865,4 +963,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 22, sql: MIGRATION_0022 },
   { version: 23, run: runMigration0023 },
   { version: 24, run: runMigration0024 },
+  { version: 25, run: runMigration0025 },
 ];

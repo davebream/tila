@@ -6,6 +6,7 @@ import { JournalPage } from "@/pages/journal";
 import { LoginPage } from "@/pages/login";
 import { PresencePage } from "@/pages/presence";
 import { RecordsPage } from "@/pages/records";
+import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
 import { WorkspacePage } from "@/pages/workspace";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -94,6 +95,7 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       </Route>
       <Route path="journal" element={<JournalPage />} />
       <Route path="presence" element={<PresencePage />} />
+      <Route path="signals" element={<SignalsPage />} />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />
       </Route>

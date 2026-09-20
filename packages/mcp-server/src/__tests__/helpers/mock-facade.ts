@@ -14,11 +14,11 @@ export type MockServer = {
  * the old raw `client.get/post(path)` assertions. The shape mirrors the real
  * facade so tool handlers run unchanged.
  */
-export type MockFacade = {
-  [K in keyof TilaFacade]: K extends "close"
-    ? () => void
-    : Record<string, Mock>;
-};
+type Mockify<T> = T extends (...args: never[]) => unknown
+  ? Mock
+  : { [K in keyof T]: Mockify<T[K]> };
+
+export type MockFacade = Mockify<TilaFacade>;
 
 export function createMockServer(): MockServer {
   return { tool: vi.fn(), resource: vi.fn(), prompt: vi.fn() };
@@ -90,7 +90,9 @@ export type MockFacadeShape = {
     Mock
   >;
   gates: Record<"list" | "create" | "resolve" | "remove", Mock>;
-  signals: Record<"inbox" | "send" | "ack", Mock>;
+  signals: Record<"inbox" | "send" | "ack" | "history", Mock> & {
+    groups: Record<"list" | "get" | "set" | "delete", Mock>;
+  };
   journal: Record<"query", Mock>;
   presence: Record<"heartbeat" | "list" | "listAll", Mock>;
   schema: Record<"get" | "apply" | "history", Mock>;
@@ -149,7 +151,10 @@ export function createMockFacade(): MockFacadeShape {
       "listRelationships",
     ),
     gates: fns("list", "create", "resolve", "remove"),
-    signals: fns("inbox", "send", "ack"),
+    signals: {
+      ...fns("inbox", "send", "ack", "history"),
+      groups: fns("list", "get", "set", "delete"),
+    },
     journal: fns("query"),
     presence: fns("heartbeat", "list", "listAll"),
     schema: fns("get", "apply", "history"),

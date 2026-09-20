@@ -125,7 +125,7 @@ invocation time with a clear error:
 |------|-------------------|
 | `tila_artifact_put` (binary/base64 multipart upload to R2) | `tila_artifact_write_text` (content-addressed text artifacts) |
 
-## Tools (40)
+## Tools (45)
 
 > Tool names are derived from source registration. `work-unit` and `entity` are deprecated aliases for `task`; use `tila_task_*` tools.
 
@@ -189,9 +189,14 @@ invocation time with a clear error:
 
 | Tool | Description |
 |------|-------------|
-| `tila_signal_send` | Send a signal to another agent or broadcast |
-| `tila_signal_list` | List unacknowledged signals in inbox |
-| `tila_signal_ack` | Acknowledge a signal |
+| `tila_signal_send` | Send a signal to a participant, principal, group, or broadcast audience |
+| `tila_signal_list` | List this participant's unacknowledged signal deliveries |
+| `tila_signal_ack` | Acknowledge this participant's signal delivery |
+| `tila_signal_history` | List delivery and acknowledgement history (admin) |
+| `tila_signal_group_list` | List principal-based signal groups |
+| `tila_signal_group_get` | Get a signal group |
+| `tila_signal_group_set` | Create or replace a signal group (admin) |
+| `tila_signal_group_delete` | Delete a signal group (admin) |
 
 ### Journal, Schema & Templates
 

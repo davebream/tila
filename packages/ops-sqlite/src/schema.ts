@@ -270,6 +270,35 @@ export const gates = sqliteTable(
   ],
 );
 
+// --- signal groups ---
+export const signalGroups = sqliteTable("signal_groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+  created_by_principal_id: text("created_by_principal_id").notNull(),
+  created_by_participant_id: text("created_by_participant_id").notNull(),
+  updated_by_principal_id: text("updated_by_principal_id").notNull(),
+  updated_by_participant_id: text("updated_by_participant_id").notNull(),
+});
+
+export const signalGroupMembers = sqliteTable(
+  "signal_group_members",
+  {
+    group_id: text("group_id")
+      .notNull()
+      .references(() => signalGroups.id, { onDelete: "cascade" }),
+    principal_id: text("principal_id").notNull(),
+    added_at: integer("added_at").notNull(),
+    added_by_principal_id: text("added_by_principal_id").notNull(),
+    added_by_participant_id: text("added_by_participant_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.group_id, table.principal_id] }),
+    index("idx_signal_group_members_principal").on(table.principal_id),
+  ],
+);
+
 // --- signals ---
 export const signals = sqliteTable(
   "signals",
@@ -279,14 +308,47 @@ export const signals = sqliteTable(
     kind: text("kind").notNull(),
     resource: text("resource"),
     payload: text("payload").notNull().default("{}"),
-    created_by: text("created_by").notNull(),
+    sender_principal_id: text("sender_principal_id").notNull(),
+    sender_participant_id: text("sender_participant_id").notNull(),
+    sender_display_name: text("sender_display_name"),
+    sender_environment: text("sender_environment").notNull().default("{}"),
     created_at: integer("created_at").notNull(),
     expires_at: integer("expires_at").notNull(),
-    acked_at: integer("acked_at"),
+  },
+  (table) => [index("idx_signals_expires").on(table.expires_at)],
+);
+
+export const signalDeliveries = sqliteTable(
+  "signal_deliveries",
+  {
+    signal_id: text("signal_id")
+      .notNull()
+      .references(() => signals.id, { onDelete: "cascade" }),
+    recipient_principal_id: text("recipient_principal_id").notNull(),
+    recipient_participant_id: text("recipient_participant_id").notNull(),
+    recipient_display_name: text("recipient_display_name"),
+    recipient_environment: text("recipient_environment")
+      .notNull()
+      .default("{}"),
+    acknowledged_at: integer("acknowledged_at"),
+    acknowledged_by_principal_id: text("acknowledged_by_principal_id"),
+    acknowledged_by_participant_id: text("acknowledged_by_participant_id"),
+    acknowledged_by_display_name: text("acknowledged_by_display_name"),
+    acknowledged_by_environment: text("acknowledged_by_environment"),
   },
   (table) => [
-    index("idx_signals_target").on(table.target),
-    index("idx_signals_expires").on(table.expires_at),
+    primaryKey({
+      columns: [
+        table.signal_id,
+        table.recipient_principal_id,
+        table.recipient_participant_id,
+      ],
+    }),
+    index("idx_signal_deliveries_inbox").on(
+      table.recipient_principal_id,
+      table.recipient_participant_id,
+      table.acknowledged_at,
+    ),
   ],
 );
 

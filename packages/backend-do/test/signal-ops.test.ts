@@ -1,291 +1,493 @@
 import { signalOps, sweepOps } from "@tila/ops-sqlite";
+import type { SignalIdentity } from "@tila/schemas";
+import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { createTestDb } from "./helpers/create-test-db";
 
-describe("signal-ops", () => {
-  describe("send", () => {
-    it("returns a sig_-prefixed ID and inserts a row", () => {
-      const { db } = createTestDb();
-      const result = signalOps.send(db, {
-        target: "machine-B",
-        kind: "conflict",
-        created_by: "machine-A",
-      });
-      expect(result.id).toMatch(/^sig_/);
+const NOW = 1_000_000;
 
-      const rows = signalOps.inbox(db, "machine-B");
-      expect(rows).toHaveLength(1);
-      expect(rows[0].id).toBe(result.id);
-      expect(rows[0].kind).toBe("conflict");
-      expect(rows[0].created_by).toBe("machine-A");
-    });
+function actor(
+  principalId: string,
+  participantId: string,
+  displayName = `${principalId}:${participantId}`,
+): SignalIdentity {
+  return {
+    principal_id: principalId,
+    participant_id: participantId,
+    display_name: displayName,
+    environment: { client_name: "test", machine: participantId },
+  };
+}
 
-    it("stores payload as parsed JSON", () => {
-      const { db } = createTestDb();
-      signalOps.send(db, {
-        target: "machine-B",
-        kind: "info",
-        payload: { details: "something" },
-        created_by: "machine-A",
-      });
+function addPresence(
+  sqlite: InstanceType<typeof Database>,
+  identity: SignalIdentity,
+  lastSeen = NOW,
+) {
+  sqlite
+    .prepare(
+      `INSERT INTO presence
+       (principal_id, participant_id, environment, last_seen, info)
+       VALUES (?, ?, ?, ?, '{}')`,
+    )
+    .run(
+      identity.principal_id,
+      identity.participant_id,
+      JSON.stringify(identity.environment),
+      lastSeen,
+    );
+}
 
-      const rows = signalOps.inbox(db, "machine-B");
-      expect(rows[0].payload).toEqual({ details: "something" });
-    });
-
-    it("uses default TTL of 5 minutes", () => {
-      const { db } = createTestDb();
-      const now = 1000000;
-      signalOps.send(
-        db,
-        { target: "machine-B", kind: "info", created_by: "machine-A" },
-        now,
-      );
-
-      const rows = signalOps.inbox(db, "machine-B", now);
-      expect(rows[0].expires_at).toBe(now + 300_000);
-    });
-  });
-
-  describe("inbox", () => {
-    it("returns signals targeted to the querying token", () => {
-      const { db } = createTestDb();
-      signalOps.send(db, {
-        target: "machine-B",
-        kind: "conflict",
-        created_by: "machine-A",
-      });
-      signalOps.send(db, {
-        target: "machine-C",
-        kind: "info",
-        created_by: "machine-A",
-      });
-
-      const inbox = signalOps.inbox(db, "machine-B");
-      expect(inbox).toHaveLength(1);
-      expect(inbox[0].target).toBe("machine-B");
-    });
-
-    it("includes broadcast signals (target = '*')", () => {
-      const { db } = createTestDb();
-      signalOps.send(db, {
-        target: "*",
-        kind: "ready",
-        created_by: "machine-A",
-      });
-
-      const inboxB = signalOps.inbox(db, "machine-B");
-      const inboxC = signalOps.inbox(db, "machine-C");
-      expect(inboxB).toHaveLength(1);
-      expect(inboxC).toHaveLength(1);
-    });
-
-    it("excludes expired signals", () => {
-      const { db } = createTestDb();
-      const now = 1000000;
-      signalOps.send(
-        db,
-        {
-          target: "machine-B",
-          kind: "info",
-          ttl_ms: 100,
-          created_by: "machine-A",
-        },
-        now,
-      );
-
-      // Query after expiry
-      const inbox = signalOps.inbox(db, "machine-B", now + 200);
-      expect(inbox).toHaveLength(0);
-    });
-
-    it("excludes acked signals (an inbox lists only unacknowledged signals)", () => {
-      const { db } = createTestDb();
-      const result = signalOps.send(db, {
-        target: "machine-B",
-        kind: "info",
-        created_by: "machine-A",
-      });
-      signalOps.ack(db, result.id, "machine-B");
-
-      const inbox = signalOps.inbox(db, "machine-B");
-      expect(inbox).toHaveLength(0);
-    });
-  });
-
-  describe("ack", () => {
-    it("authorized ack by the target consumes the signal (removed from inbox)", () => {
-      const { db } = createTestDb();
-      const now = 1000000;
-      const result = signalOps.send(
-        db,
-        { target: "machine-B", kind: "info", created_by: "machine-A" },
-        now,
-      );
-
-      const ackResult = signalOps.ack(db, result.id, "machine-B", now + 1000);
-      expect(ackResult).toEqual({ found: true, authorized: true });
-
-      expect(signalOps.inbox(db, "machine-B", now + 1000)).toHaveLength(0);
-    });
-
-    it("does NOT let a non-target token consume another machine's signal", () => {
-      const { db } = createTestDb();
-      const now = 1000000;
-      const result = signalOps.send(
-        db,
-        { target: "machine-B", kind: "conflict", created_by: "machine-A" },
-        now,
-      );
-
-      // machine-C is neither the addressee nor the sender.
-      const ackResult = signalOps.ack(db, result.id, "machine-C", now + 1000);
-      expect(ackResult).toEqual({ found: true, authorized: false });
-
-      // The signal is untouched: machine-B still receives it.
-      const inbox = signalOps.inbox(db, "machine-B", now + 1000);
-      expect(inbox).toHaveLength(1);
-      expect(inbox[0].acked_at).toBeNull();
-    });
-
-    it("allows the original sender to ack their own signal", () => {
-      const { db } = createTestDb();
-      const result = signalOps.send(db, {
-        target: "machine-B",
-        kind: "info",
-        created_by: "machine-A",
-      });
-      expect(signalOps.ack(db, result.id, "machine-A")).toEqual({
-        found: true,
-        authorized: true,
-      });
-    });
-
-    it("allows any recipient to ack a broadcast (target = '*')", () => {
-      const { db } = createTestDb();
-      const result = signalOps.send(db, {
-        target: "*",
-        kind: "ready",
-        created_by: "machine-A",
-      });
-      expect(signalOps.ack(db, result.id, "machine-Z")).toEqual({
-        found: true,
-        authorized: true,
-      });
-    });
-
-    it("returns { found: false } for an unknown ID", () => {
-      const { db } = createTestDb();
-      const result = signalOps.ack(db, "sig_nonexistent", "machine-B");
-      expect(result).toEqual({ found: false, authorized: false });
-    });
-
-    it("is idempotent for an authorized re-ack", () => {
-      const { db } = createTestDb();
-      const now = 1000000;
-      const result = signalOps.send(
-        db,
-        { target: "machine-B", kind: "info", created_by: "machine-A" },
-        now,
-      );
-
-      expect(
-        signalOps.ack(db, result.id, "machine-B", now + 1000).authorized,
-      ).toBe(true);
-      expect(
-        signalOps.ack(db, result.id, "machine-B", now + 2000).authorized,
-      ).toBe(true);
-      expect(signalOps.inbox(db, "machine-B", now + 2000)).toHaveLength(0);
-    });
-
-    it("a second ack is a no-op: the original acked_at timestamp is preserved", () => {
-      const { db, sqlite } = createTestDb();
-      const now = 1000000;
-      const result = signalOps.send(
-        db,
-        { target: "machine-B", kind: "info", created_by: "machine-A" },
-        now,
-      );
-
-      // First ack stamps acked_at at now + 1000.
-      signalOps.ack(db, result.id, "machine-B", now + 1000);
-      const firstAckedAt = (
-        sqlite
-          .prepare("SELECT acked_at FROM signals WHERE id = ?")
-          .get(result.id) as { acked_at: number }
-      ).acked_at;
-      expect(firstAckedAt).toBe(now + 1000);
-
-      // A later ack must NOT re-stamp acked_at — the WHERE acked_at IS NULL guard
-      // makes it a true no-op so a concurrent double-ack cannot clobber the first.
-      signalOps.ack(db, result.id, "machine-B", now + 5000);
-      const secondAckedAt = (
-        sqlite
-          .prepare("SELECT acked_at FROM signals WHERE id = ?")
-          .get(result.id) as { acked_at: number }
-      ).acked_at;
-      expect(secondAckedAt).toBe(now + 1000);
-    });
-  });
-});
-
-describe("sweep signals", () => {
-  it("deletes expired signals", () => {
+describe("participant-scoped signal delivery", () => {
+  it("delivers directly without presence and snapshots complete identities", () => {
     const { db } = createTestDb();
-    const now = 1000000;
+    const sender = actor("principal-a", "participant-a", "Alice");
+    const result = signalOps.send(
+      db,
+      {
+        target: {
+          type: "participant",
+          principal_id: "principal-b",
+          participant_id: "participant-b",
+        },
+        kind: "conflict",
+        payload: { details: "overlap" },
+        sender,
+      },
+      NOW,
+    );
+
+    expect(result.id).toMatch(/^sig_/);
+    expect(result.recipient_count).toBe(1);
+    const inbox = signalOps.inbox(
+      db,
+      actor("principal-b", "participant-b"),
+      NOW,
+    );
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]).toMatchObject({
+      id: result.id,
+      kind: "conflict",
+      payload: { details: "overlap" },
+      sender,
+      target: {
+        type: "participant",
+        principal_id: "principal-b",
+        participant_id: "participant-b",
+      },
+    });
+    expect(inbox[0].deliveries[0].recipient).toMatchObject({
+      principal_id: "principal-b",
+      participant_id: "participant-b",
+    });
+    expect(inbox[0].expires_at).toBe(NOW + 300_000);
+  });
+
+  it("isolates two participants owned by the same principal", () => {
+    const { db } = createTestDb();
     signalOps.send(
       db,
       {
-        target: "machine-B",
+        target: {
+          type: "participant",
+          principal_id: "principal-b",
+          participant_id: "participant-1",
+        },
         kind: "info",
-        ttl_ms: 100,
-        created_by: "machine-A",
+        sender: actor("principal-a", "participant-a"),
       },
-      now,
+      NOW,
     );
 
-    const result = sweepOps.sweep(db, now + 200);
-    expect(result.signalsDeleted).toBe(1);
-
-    const inbox = signalOps.inbox(db, "machine-B", now + 200);
-    expect(inbox).toHaveLength(0);
+    expect(
+      signalOps.inbox(db, actor("principal-b", "participant-1"), NOW),
+    ).toHaveLength(1);
+    expect(
+      signalOps.inbox(db, actor("principal-b", "participant-2"), NOW),
+    ).toHaveLength(0);
   });
 
-  it("deletes acked signals", () => {
+  it("allows explicit direct self-targeting", () => {
     const { db } = createTestDb();
-    const now = 1000000;
-    const sig = signalOps.send(
+    const sender = actor("principal-a", "participant-a");
+    const result = signalOps.send(
       db,
-      { target: "machine-B", kind: "info", created_by: "machine-A" },
-      now,
+      {
+        target: {
+          type: "participant",
+          principal_id: sender.principal_id,
+          participant_id: sender.participant_id,
+        },
+        kind: "info",
+        sender,
+      },
+      NOW,
     );
-    signalOps.ack(db, sig.id, "machine-B", now + 100);
-
-    const result = sweepOps.sweep(db, now + 200);
-    expect(result.signalsDeleted).toBeGreaterThanOrEqual(1);
+    expect(result.recipient_count).toBe(1);
+    expect(signalOps.inbox(db, sender, NOW)).toHaveLength(1);
   });
 
-  it("does not delete unacked, non-expired signals", () => {
-    const { db } = createTestDb();
-    const now = 1000000;
-    signalOps.send(
+  it("expands principal targets to active participants and excludes only the sender", () => {
+    const { db, sqlite } = createTestDb();
+    const sender = actor("principal-a", "participant-a");
+    const sibling = actor("principal-a", "participant-sibling");
+    const other = actor("principal-b", "participant-b");
+    addPresence(sqlite, sender);
+    addPresence(sqlite, sibling);
+    addPresence(sqlite, other);
+
+    const result = signalOps.send(
       db,
-      { target: "machine-B", kind: "info", created_by: "machine-A" },
-      now,
+      {
+        target: { type: "principal", principal_id: "principal-a" },
+        kind: "request",
+        sender,
+      },
+      NOW,
     );
-
-    const result = sweepOps.sweep(db, now + 100);
-    expect(result.signalsDeleted).toBe(0);
-
-    const inbox = signalOps.inbox(db, "machine-B", now + 100);
-    expect(inbox).toHaveLength(1);
+    expect(result.recipient_count).toBe(1);
+    expect(signalOps.inbox(db, sender, NOW)).toHaveLength(0);
+    expect(signalOps.inbox(db, sibling, NOW)).toHaveLength(1);
+    expect(signalOps.inbox(db, other, NOW)).toHaveLength(0);
   });
 
-  it("preserves existing claimsDeleted and presenceDeleted counts", () => {
+  it("fans broadcast out to active presence and ignores stale presence", () => {
+    const { db, sqlite } = createTestDb();
+    const sender = actor("principal-a", "participant-a");
+    const active = actor("principal-b", "participant-b");
+    const stale = actor("principal-c", "participant-c");
+    addPresence(sqlite, sender);
+    addPresence(sqlite, active, NOW - 59_999);
+    addPresence(sqlite, stale, NOW - 60_000);
+
+    const result = signalOps.send(
+      db,
+      { target: { type: "broadcast" }, kind: "ready", sender },
+      NOW,
+    );
+    expect(result.recipient_count).toBe(1);
+    expect(signalOps.inbox(db, active, NOW)).toHaveLength(1);
+    expect(signalOps.inbox(db, stale, NOW)).toHaveLength(0);
+  });
+
+  it("fails atomically when an expanded target has no active recipients", () => {
+    const { db, sqlite } = createTestDb();
+    expect(() =>
+      signalOps.send(
+        db,
+        {
+          target: { type: "principal", principal_id: "nobody" },
+          kind: "info",
+          sender: actor("principal-a", "participant-a"),
+        },
+        NOW,
+      ),
+    ).toThrow(signalOps.NoActiveRecipientsError);
+    expect(
+      (
+        sqlite.prepare("SELECT count(*) AS count FROM signals").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(0);
+  });
+
+  it("distinguishes unknown groups from empty active audiences", () => {
     const { db } = createTestDb();
-    const result = sweepOps.sweep(db);
-    expect(result).toHaveProperty("claimsDeleted");
-    expect(result).toHaveProperty("presenceDeleted");
-    expect(result).toHaveProperty("signalsDeleted");
+    const sender = actor("principal-a", "participant-a");
+    expect(() =>
+      signalOps.send(
+        db,
+        {
+          target: { type: "group", group_id: "missing" },
+          kind: "info",
+          sender,
+        },
+        NOW,
+      ),
+    ).toThrow(signalOps.SignalGroupNotFoundError);
+
+    signalOps.setGroup(
+      db,
+      "reviewers",
+      "Reviewers",
+      ["principal-b"],
+      sender,
+      NOW,
+    );
+    expect(() =>
+      signalOps.send(
+        db,
+        {
+          target: { type: "group", group_id: "reviewers" },
+          kind: "info",
+          sender,
+        },
+        NOW,
+      ),
+    ).toThrow(signalOps.NoActiveRecipientsError);
+  });
+
+  it("snapshots group membership and deliveries at send time", () => {
+    const { db, sqlite } = createTestDb();
+    const sender = actor("principal-a", "participant-a");
+    const first = actor("principal-b", "participant-b");
+    const second = actor("principal-c", "participant-c");
+    addPresence(sqlite, first);
+    addPresence(sqlite, second);
+    signalOps.setGroup(
+      db,
+      "reviewers",
+      "Reviewers",
+      ["principal-b"],
+      sender,
+      NOW,
+    );
+
+    const sent = signalOps.send(
+      db,
+      {
+        target: { type: "group", group_id: "reviewers" },
+        kind: "request",
+        sender,
+      },
+      NOW,
+    );
+    signalOps.setGroup(
+      db,
+      "reviewers",
+      "New reviewers",
+      ["principal-c"],
+      sender,
+      NOW + 1,
+    );
+
+    expect(sent.recipient_count).toBe(1);
+    expect(signalOps.inbox(db, first, NOW + 1)).toHaveLength(1);
+    expect(signalOps.inbox(db, second, NOW + 1)).toHaveLength(0);
+  });
+});
+
+describe("signal acknowledgements and audit", () => {
+  it("requires the exact delivery identity and records acknowledger metadata", () => {
+    const { db } = createTestDb();
+    const recipient = actor("principal-b", "participant-1", "Bob");
+    const sent = signalOps.send(
+      db,
+      {
+        target: {
+          type: "participant",
+          principal_id: recipient.principal_id,
+          participant_id: recipient.participant_id,
+        },
+        kind: "info",
+        sender: actor("principal-a", "participant-a", "Alice"),
+      },
+      NOW,
+    );
+
+    expect(
+      signalOps.ack(
+        db,
+        sent.id,
+        actor("principal-b", "participant-2"),
+        NOW + 1,
+      ),
+    ).toEqual({ found: true, authorized: false, expired: false });
+    expect(signalOps.ack(db, sent.id, recipient, NOW + 2)).toEqual({
+      found: true,
+      authorized: true,
+      expired: false,
+    });
+
+    const delivery = signalOps.history(db, {}, NOW + 2).signals[0]
+      .deliveries[0];
+    expect(delivery.acknowledged_at).toBe(NOW + 2);
+    expect(delivery.acknowledged_by).toEqual(recipient);
+    expect(signalOps.inbox(db, recipient, NOW + 2)).toHaveLength(0);
+  });
+
+  it("makes repeated acknowledgement idempotent", () => {
+    const { db, sqlite } = createTestDb();
+    const recipient = actor("principal-b", "participant-b");
+    const sent = signalOps.send(
+      db,
+      {
+        target: {
+          type: "participant",
+          principal_id: recipient.principal_id,
+          participant_id: recipient.participant_id,
+        },
+        kind: "info",
+        sender: actor("principal-a", "participant-a"),
+      },
+      NOW,
+    );
+    signalOps.ack(db, sent.id, recipient, NOW + 10);
+    signalOps.ack(db, sent.id, recipient, NOW + 20);
+    const row = sqlite
+      .prepare(
+        "SELECT acknowledged_at FROM signal_deliveries WHERE signal_id = ?",
+      )
+      .get(sent.id) as { acknowledged_at: number };
+    expect(row.acknowledged_at).toBe(NOW + 10);
+  });
+
+  it("acknowledges fan-out deliveries independently", () => {
+    const { db, sqlite } = createTestDb();
+    const sender = actor("principal-a", "participant-a");
+    const first = actor("principal-b", "participant-b");
+    const second = actor("principal-c", "participant-c");
+    addPresence(sqlite, first);
+    addPresence(sqlite, second);
+    const sent = signalOps.send(
+      db,
+      { target: { type: "broadcast" }, kind: "ready", sender },
+      NOW,
+    );
+
+    signalOps.ack(db, sent.id, first, NOW + 1);
+
+    expect(signalOps.inbox(db, first, NOW + 1)).toHaveLength(0);
+    expect(signalOps.inbox(db, second, NOW + 1)).toHaveLength(1);
+    const deliveries = signalOps.history(db, {}, NOW + 1).signals[0].deliveries;
+    expect(
+      deliveries.find(
+        (delivery) =>
+          delivery.recipient.participant_id === first.participant_id,
+      )?.acknowledged_at,
+    ).toBe(NOW + 1);
+    expect(
+      deliveries.find(
+        (delivery) =>
+          delivery.recipient.participant_id === second.participant_id,
+      )?.acknowledged_at,
+    ).toBeNull();
+  });
+
+  it("paginates audit history without repeating signals", () => {
+    const { db } = createTestDb();
+    const sender = actor("principal-a", "participant-a");
+    const recipient = actor("principal-b", "participant-b");
+    const target = {
+      type: "participant" as const,
+      principal_id: recipient.principal_id,
+      participant_id: recipient.participant_id,
+    };
+    const first = signalOps.send(db, { target, kind: "first", sender }, NOW);
+    const second = signalOps.send(
+      db,
+      { target, kind: "second", sender },
+      NOW + 1,
+    );
+
+    const pageOne = signalOps.history(db, { limit: 1 }, NOW + 2);
+    const pageTwo = signalOps.history(
+      db,
+      { limit: 1, cursor: pageOne.next_cursor ?? undefined },
+      NOW + 2,
+    );
+
+    expect(pageOne.signals.map((signal) => signal.id)).toEqual([second.id]);
+    expect(pageOne.next_cursor).not.toBeNull();
+    expect(pageTwo.signals.map((signal) => signal.id)).toEqual([first.id]);
+    expect(pageTwo.next_cursor).toBeNull();
+  });
+
+  it("rejects acknowledgement after expiry", () => {
+    const { db } = createTestDb();
+    const recipient = actor("principal-b", "participant-b");
+    const sent = signalOps.send(
+      db,
+      {
+        target: {
+          type: "participant",
+          principal_id: recipient.principal_id,
+          participant_id: recipient.participant_id,
+        },
+        kind: "info",
+        ttl_ms: 1_000,
+        sender: actor("principal-a", "participant-a"),
+      },
+      NOW,
+    );
+    expect(signalOps.ack(db, sent.id, recipient, NOW + 1_000)).toEqual({
+      found: true,
+      authorized: false,
+      expired: true,
+    });
+    expect(signalOps.history(db, {}, NOW + 1_000).signals).toHaveLength(0);
+  });
+
+  it("retains acknowledged deliveries until expiry, then sweeps both tables", () => {
+    const { db, sqlite } = createTestDb();
+    const recipient = actor("principal-b", "participant-b");
+    const sent = signalOps.send(
+      db,
+      {
+        target: {
+          type: "participant",
+          principal_id: recipient.principal_id,
+          participant_id: recipient.participant_id,
+        },
+        kind: "info",
+        ttl_ms: 1_000,
+        sender: actor("principal-a", "participant-a"),
+      },
+      NOW,
+    );
+    signalOps.ack(db, sent.id, recipient, NOW + 10);
+    expect(sweepOps.sweep(db, NOW + 100).signalsDeleted).toBe(0);
+    expect(signalOps.history(db, {}, NOW + 100).signals).toHaveLength(1);
+
+    expect(sweepOps.sweep(db, NOW + 1_000).signalsDeleted).toBe(1);
+    expect(
+      (
+        sqlite
+          .prepare("SELECT count(*) AS count FROM signal_deliveries")
+          .get() as { count: number }
+      ).count,
+    ).toBe(0);
+  });
+});
+
+describe("signal groups", () => {
+  it("replaces memberships idempotently and deletes members explicitly", () => {
+    const { db, sqlite } = createTestDb();
+    const admin = actor("principal-admin", "participant-admin");
+    signalOps.setGroup(
+      db,
+      "reviewers",
+      "Reviewers",
+      ["principal-b", "principal-b", "principal-c"],
+      admin,
+      NOW,
+    );
+    expect(signalOps.getGroup(db, "reviewers")?.principal_ids).toEqual([
+      "principal-b",
+      "principal-c",
+    ]);
+    signalOps.setGroup(
+      db,
+      "reviewers",
+      "Primary reviewer",
+      ["principal-c"],
+      admin,
+      NOW + 1,
+    );
+    expect(signalOps.listGroups(db)[0]).toMatchObject({
+      id: "reviewers",
+      name: "Primary reviewer",
+      principal_ids: ["principal-c"],
+    });
+    expect(signalOps.deleteGroup(db, "reviewers")).toBe(true);
+    expect(signalOps.deleteGroup(db, "reviewers")).toBe(false);
+    expect(
+      (
+        sqlite
+          .prepare("SELECT count(*) AS count FROM signal_group_members")
+          .get() as { count: number }
+      ).count,
+    ).toBe(0);
   });
 });

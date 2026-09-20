@@ -350,19 +350,24 @@ export function Layout() {
           </span>
           <ProjectSwitcher />
           <nav className="flex items-center gap-1 overflow-x-auto">
-            {["Tasks", "Records", "Journal", "Presence", "Artifacts"].map(
-              (label) => (
-                <NavLink
-                  key={label}
-                  to={`${prefix}/${label.toLowerCase()}`}
-                  className={({ isActive }) =>
-                    `shrink-0 text-[13px] rounded-sm px-2.5 py-1.5 transition-[background-color,color] duration-150 ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue ${isActive ? "text-signal-blue bg-tint-blue-15" : "text-muted-foreground hover:text-foreground hover:bg-[var(--color-row-hover-2)]"}`
-                  }
-                >
-                  {label}
-                </NavLink>
-              ),
-            )}
+            {[
+              "Tasks",
+              "Records",
+              "Journal",
+              "Presence",
+              "Signals",
+              "Artifacts",
+            ].map((label) => (
+              <NavLink
+                key={label}
+                to={`${prefix}/${label.toLowerCase()}`}
+                className={({ isActive }) =>
+                  `shrink-0 text-[13px] rounded-sm px-2.5 py-1.5 transition-[background-color,color] duration-150 ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue ${isActive ? "text-signal-blue bg-tint-blue-15" : "text-muted-foreground hover:text-foreground hover:bg-[var(--color-row-hover-2)]"}`
+                }
+              >
+                {label}
+              </NavLink>
+            ))}
           </nav>
         </div>
         <div className="flex shrink-0 items-center gap-1">
