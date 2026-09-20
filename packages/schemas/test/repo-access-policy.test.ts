@@ -23,6 +23,8 @@ describe("repository access policy schemas", () => {
       min_read_permission: "triage",
       min_write_permission: "maintain",
       max_permission: "admin",
+      membership_enabled: true,
+      membership_role_cap: "participant",
     });
   });
 

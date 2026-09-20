@@ -413,6 +413,32 @@ export { TagSchema, type Tag, TagsSchema, type Tags } from "./tags";
 // --- GitHub validation constants ---
 export { GITHUB_LOGIN_REGEX } from "./github";
 
+// --- Canonical project membership ---
+export {
+  MembershipGrantRequestSchema,
+  type MembershipGrantRequest,
+  MembershipPolicyRequestSchema,
+  type MembershipPolicyRequest,
+  MembershipPrincipalSchema,
+  type MembershipPrincipal,
+  PrincipalRevocationRequestSchema,
+  type PrincipalRevocationRequest,
+  MembershipRoleUpdateRequestSchema,
+  type MembershipRoleUpdateRequest,
+  MembershipSourceSchema,
+  type MembershipSource,
+  MembershipSubjectKindSchema,
+  type MembershipSubjectKind,
+  PROJECT_ROLE_RANK,
+  ProjectMembershipModeSchema,
+  type ProjectMembershipMode,
+  ProjectMembershipSchema,
+  type ProjectMembership,
+  ProjectRoleSchema,
+  type ProjectRole,
+  roleToPermission,
+} from "./membership";
+
 // --- DPoP shared helpers ---
 export { canonicalizeHtu, DPOP_TYP, DPOP_ALG } from "./dpop";
 

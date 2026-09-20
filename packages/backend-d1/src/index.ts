@@ -41,6 +41,13 @@ export {
   type GrantParams,
 } from "./admin-grants";
 export {
+  canonicalMembershipPrincipal,
+  type EffectiveMembership,
+  type MembershipEventRow,
+  type MirroredMembershipCandidate,
+  ProjectMembershipStore,
+} from "./project-memberships";
+export {
   D1DeploymentMetaStore,
   DeploymentIdUnavailable,
 } from "./deployment-meta";

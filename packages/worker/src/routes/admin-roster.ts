@@ -1,16 +1,12 @@
-import { AdminGrantsStore } from "@tila/backend-d1";
+import { ProjectMembershipStore } from "@tila/backend-d1";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { adminCacheKey } from "../lib/admin-cache-key";
 import { applyAdminGrant } from "../lib/admin-grant";
 import {
   type AdminRosterOutcome,
   emitAdminRosterDatapoint,
 } from "../lib/analytics";
-import {
-  requireProjectAdmin,
-  revokeAdminGrantInCache,
-} from "../middleware/require-project-admin";
+import { requireProjectOwner } from "../middleware/require-project-owner";
 import type { Env, HonoVariables } from "../types";
 
 type AdminEnv = { Bindings: Env; Variables: HonoVariables };
@@ -45,15 +41,19 @@ function emit(
 // ─────────────────────────────────────────────────────────────────────────────
 // GET / — list active admins
 // ─────────────────────────────────────────────────────────────────────────────
-adminRoster.get("/", requireProjectAdmin, async (c) => {
+adminRoster.get("/", requireProjectOwner, async (c) => {
   const projectId = c.get("projectId");
-  const store = new AdminGrantsStore(c.env.DB);
-  const rows = await store.list(projectId);
+  const store = new ProjectMembershipStore(c.env.DB);
+  const rows = (await store.list(projectId)).filter(
+    (row) => row.provider === "github" && row.role === "owner",
+  );
 
   const admins = rows.map((r) => ({
-    github_user_id: r.github_user_id,
-    login: r.github_login_snapshot,
-    granted_by: r.granted_by_user_id,
+    github_user_id: Number(r.subject_id),
+    login: r.display_name,
+    granted_by: r.granted_by.startsWith("github:github.com:")
+      ? Number(r.granted_by.slice("github:github.com:".length))
+      : null,
     granted_at: r.granted_at,
   }));
 
@@ -74,7 +74,7 @@ adminRoster.get("/", requireProjectAdmin, async (c) => {
 //      returns 400 pre-emit; only the free-string emitInfraAdminDatapoint path
 //      in the seeder carries it.)
 // ─────────────────────────────────────────────────────────────────────────────
-adminRoster.post("/", requireProjectAdmin, async (c) => {
+adminRoster.post("/", requireProjectOwner, async (c) => {
   const projectId = c.get("projectId");
   const tokenResult = c.get("tokenResult");
 
@@ -152,7 +152,7 @@ adminRoster.post("/", requireProjectAdmin, async (c) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /:githubUserId — revoke admin
 // ─────────────────────────────────────────────────────────────────────────────
-adminRoster.delete("/:githubUserId", requireProjectAdmin, async (c) => {
+adminRoster.delete("/:githubUserId", requireProjectOwner, async (c) => {
   const projectId = c.get("projectId");
   const tokenResult = c.get("tokenResult");
 
@@ -174,12 +174,14 @@ adminRoster.delete("/:githubUserId", requireProjectAdmin, async (c) => {
   }
   const targetUserId = parsed;
 
-  const store = new AdminGrantsStore(c.env.DB);
+  const store = new ProjectMembershipStore(c.env.DB);
 
   // Call list() once — used for both the last-admin guard AND the revoked boolean.
-  const activeAdmins = await store.list(projectId);
+  const activeAdmins = (await store.list(projectId)).filter(
+    (row) => row.provider === "github" && row.role === "owner",
+  );
   const isTargetActive = activeAdmins.some(
-    (r) => r.github_user_id === targetUserId,
+    (r) => r.subject_id === String(targetUserId),
   );
 
   // Resolve actor identity (d1-token → null, session → githubUserId).
@@ -195,7 +197,7 @@ adminRoster.delete("/:githubUserId", requireProjectAdmin, async (c) => {
   if (
     !isD1Token &&
     activeAdmins.length === 1 &&
-    activeAdmins[0]?.github_user_id === targetUserId &&
+    activeAdmins[0]?.subject_id === String(targetUserId) &&
     callerUserId === targetUserId
   ) {
     emit(c, "revoke", "last-admin", 409);
@@ -215,21 +217,19 @@ adminRoster.delete("/:githubUserId", requireProjectAdmin, async (c) => {
 
   // Revoke (soft-delete; double-revoke is a no-op → still 200 with revoked:false).
   const revokedByUserId = callerUserId;
-  await store.revoke(
-    projectId,
-    "github.com",
-    targetUserId,
-    revokedByUserId ?? undefined,
+  const target = activeAdmins.find(
+    (row) => row.subject_id === String(targetUserId),
   );
-
-  // ── Same-isolate cache purge ────────────────────────────────────────────
-  // Both this revoke purge and the roster lookup in require-project-admin.ts
-  // call adminCacheKey() from lib/admin-cache-key.ts — the shared function
-  // enforces byte-identical key format. If GHES/multi-host support lands,
-  // update the host argument here to match the lookup site's githubHost value.
-  revokeAdminGrantInCache(
-    adminCacheKey({ host: "github.com", projectId, userId: targetUserId }),
-  );
+  if (target) {
+    await store.revoke({
+      projectId,
+      membershipId: target.membership_id,
+      actorPrincipalId:
+        callerUserId === null
+          ? "bootstrap:admin-roster"
+          : `github:github.com:${callerUserId}`,
+    });
+  }
 
   emit(c, "revoke", "success", 200);
   return c.json({

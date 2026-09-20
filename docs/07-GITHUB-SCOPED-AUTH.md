@@ -2,18 +2,18 @@
 
 ## Status
 
-Production. This is the default auth model for tila. For implementation details, see [`docs/10-AUTH-IMPLEMENTATION.md`](10-AUTH-IMPLEMENTATION.md).
+Production. GitHub is an optional project-membership adapter, not the canonical project authority. For implementation details, see [`docs/10-AUTH-IMPLEMENTATION.md`](10-AUTH-IMPLEMENTATION.md).
 
 ## Problem
 
 The original v0.1 auth model used tila project API tokens stored as hashes in D1. That worked for small teams sharing a token through a secret manager, but it did not let GitHub repo access be the source of truth.
 
-The target model is:
+The current model is:
 
-- GitHub determines who may use a tila project.
+- D1-backed project membership determines who may use a tila project.
 - Cloudflare still hosts and bills the tila infrastructure.
 - A public Worker URL must not be enough to use a tila instance for arbitrary repositories.
-- A tila instance must only handle repositories explicitly registered for that instance.
+- A registered repository may optionally mirror GitHub permission into a capped project role.
 
 ## Decision Direction
 
@@ -22,10 +22,10 @@ Cloudflare and GitHub should remain separate planes:
 | Plane | Responsibility |
 |---|---|
 | Cloudflare account | Owns Worker, Durable Object namespace, D1, R2, billing, data residency, operational access |
-| GitHub repo/org/team | Determines runtime user access to tila |
-| tila project | Binds one Cloudflare-hosted state engine to one or more explicitly allowed GitHub repositories |
+| GitHub repo/org/team | Optional mirrored-admission signal |
+| tila project | Owns explicit members, policy mode, roles, and repository adapters |
 
-Do not try to map Cloudflare users to GitHub users. The Cloudflare account is the infrastructure owner. GitHub is the runtime authorization authority.
+Do not try to map Cloudflare users to GitHub users. The Cloudflare account is the infrastructure owner. Canonical project membership is the runtime authorization authority; GitHub can supply a live, capped admission signal in `github-mirrored` and `hybrid` modes.
 
 ## Recommended Runtime Flow
 

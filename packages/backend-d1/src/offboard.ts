@@ -78,6 +78,18 @@ export async function revokePrincipalBatch(
       subjectId,
     );
 
+  const membershipStmt = db
+    .prepare(
+      "UPDATE _project_memberships SET revoked_at = ?, revoked_by = ? WHERE project_id = ? AND identity_host = ? AND subject_id = ? AND revoked_at IS NULL",
+    )
+    .bind(
+      params.nowMsValue,
+      params.revokedBySnapshot,
+      params.projectId,
+      identityHost,
+      subjectId,
+    );
+
   // Statement 1: arm the subject-revocation tombstone (upsert-MAX, ms cutoff).
   const tombstoneStmt = db
     .prepare(
@@ -99,18 +111,46 @@ export async function revokePrincipalBatch(
       ),
   );
 
-  const statements = [grantStmt, tombstoneStmt, ...tokenStmts];
+  const sessionStmt = db
+    .prepare(
+      "DELETE FROM _sessions WHERE project_id = ? AND principal_id IN (SELECT principal_id FROM _project_memberships WHERE project_id = ? AND identity_host = ? AND subject_id = ?)",
+    )
+    .bind(params.projectId, params.projectId, identityHost, subjectId);
+
+  const eventStmt = db
+    .prepare(
+      "INSERT INTO _membership_events (event_id, project_id, principal_id, actor_principal_id, action, source, role, details_json, occurred_at) SELECT lower(hex(randomblob(16))), project_id, principal_id, ?, 'revoke', 'explicit', role, '{\"bulk\":true}', ? FROM _project_memberships WHERE project_id = ? AND identity_host = ? AND subject_id = ? AND revoked_at = ?",
+    )
+    .bind(
+      params.revokedBySnapshot,
+      params.nowMsValue,
+      params.projectId,
+      identityHost,
+      subjectId,
+      params.nowMsValue,
+    );
+
+  const statements = [
+    grantStmt,
+    membershipStmt,
+    tombstoneStmt,
+    sessionStmt,
+    eventStmt,
+    ...tokenStmts,
+  ];
 
   // Single implicit transaction: all statements commit together or none do.
   const results = await db.batch<{ token_hash: string }>(statements);
 
   // results[0] = grant soft-delete. The `revoked_at IS NULL` guard means a
   // matched row always changes, so meta.changes>0 ⇔ an active grant existed.
-  const grantsRevoked = (results[0]?.meta?.changes ?? 0) > 0;
+  const grantsRevoked =
+    (results[0]?.meta?.changes ?? 0) > 0 ||
+    (results[1]?.meta?.changes ?? 0) > 0;
 
   // results[2..] = token revokes; RETURNING rows live in `.results`, not `.meta`.
   const tokenHashes: string[] = [];
-  for (let i = 2; i < results.length; i++) {
+  for (let i = 5; i < results.length; i++) {
     const rows = results[i]?.results ?? [];
     for (const row of rows) {
       if (row?.token_hash) tokenHashes.push(row.token_hash);

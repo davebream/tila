@@ -110,6 +110,76 @@ vi.mock("@tila/backend-d1", () => {
     }
   }
 
+  const membershipRow = (row: MockGrantRow) => ({
+    membership_id: `membership-${row.github_user_id}`,
+    project_id: row.project_id,
+    principal_id: `github:${row.github_host}:${row.github_user_id}`,
+    provider: "github",
+    identity_host: row.github_host,
+    subject_id: String(row.github_user_id),
+    subject_kind: "human",
+    role: "owner",
+    display_name: row.github_login_snapshot,
+    granted_by:
+      row.granted_by_user_id === null
+        ? "bootstrap:admin-seed"
+        : `github:github.com:${row.granted_by_user_id}`,
+    granted_at: row.granted_at,
+    revoked_at: row.revoked_at,
+    revoked_by: null,
+  });
+
+  class ProjectMembershipStore {
+    async list(projectId: string) {
+      return storeState.grants
+        .filter(
+          (row) => row.project_id === projectId && row.revoked_at === null,
+        )
+        .map(membershipRow);
+    }
+
+    async grant(params: {
+      projectId: string;
+      principal: { user_id: number; login?: string };
+      actorPrincipalId: string;
+    }) {
+      const existing = storeState.grants.find(
+        (row) =>
+          row.project_id === params.projectId &&
+          row.github_user_id === params.principal.user_id &&
+          row.revoked_at === null,
+      );
+      if (existing)
+        return { membership: membershipRow(existing), created: false };
+      const actorMatch = params.actorPrincipalId.match(/:(\d+)$/);
+      const row: MockGrantRow = {
+        project_id: params.projectId,
+        github_host: "github.com",
+        github_user_id: params.principal.user_id,
+        github_login_snapshot: params.principal.login ?? null,
+        granted_by_user_id: actorMatch ? Number(actorMatch[1]) : null,
+        granted_at: Math.floor(Date.now() / 1000),
+        revoked_at: null,
+        revoked_by_user_id: null,
+      };
+      storeState.grants.push(row);
+      return { membership: membershipRow(row), created: true };
+    }
+
+    async revoke(params: { membershipId: string; actorPrincipalId: string }) {
+      const userId = Number(params.membershipId.replace("membership-", ""));
+      const row = storeState.grants.find(
+        (candidate) =>
+          candidate.github_user_id === userId && candidate.revoked_at === null,
+      );
+      if (!row) return null;
+      const actorMatch = params.actorPrincipalId.match(/:(\d+)$/);
+      row.revoked_at = Math.floor(Date.now() / 1000);
+      row.revoked_by_user_id = actorMatch ? Number(actorMatch[1]) : null;
+      return { membership: membershipRow(row), revokedSessions: 0 };
+    }
+  }
+
   return {
     AdminGrantsStore: AdminGrantsStore as unknown as () => unknown,
     GitHubAppConfigStore: class {
@@ -122,6 +192,7 @@ vi.mock("@tila/backend-d1", () => {
       revoke = async () => undefined;
       isRevoked = async () => false;
     } as unknown as () => unknown,
+    ProjectMembershipStore: ProjectMembershipStore as unknown as () => unknown,
   };
 });
 
@@ -254,6 +325,17 @@ function createApp(
     c.set("doStub", {} as DurableObjectStub);
     c.set("projectId", "proj-target");
     c.set("tokenResult", tokenResult);
+    if (
+      tokenResult.kind === "session" &&
+      storeState.grants.some(
+        (row) =>
+          row.project_id === "proj-target" &&
+          row.github_user_id === tokenResult.githubUserId &&
+          row.revoked_at === null,
+      )
+    ) {
+      c.set("effectiveRole", "owner");
+    }
     await next();
   });
   app.route("/admins", adminRoster);

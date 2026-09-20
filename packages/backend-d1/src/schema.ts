@@ -17,6 +17,7 @@ export const projects = sqliteTable("_projects", {
   schema_version: integer("schema_version").notNull().default(1),
   archived: integer("archived").notNull().default(0),
   repo_admin_auto_admin: integer("repo_admin_auto_admin").notNull().default(0),
+  membership_mode: text("membership_mode").notNull().default("explicit"),
   // WI-B2: nullable OIDC config (migration 0020). NULL = OIDC not configured for this project.
   oidc_issuer: text("oidc_issuer"),
   oidc_audience: text("oidc_audience"),
@@ -66,6 +67,10 @@ export const projectRepos = sqliteTable(
       .notNull()
       .default("write"),
     max_permission: text("max_permission").notNull().default("write"),
+    membership_enabled: integer("membership_enabled").notNull().default(0),
+    membership_role_cap: text("membership_role_cap")
+      .notNull()
+      .default("participant"),
     // Legacy field retained for backup compatibility. GitHub Actions exchange
     // authorization uses the explicit fail-closed policy fields below.
     oidc_permission: text("oidc_permission").notNull().default("write"),
@@ -104,6 +109,9 @@ export const sessions = sqliteTable(
     principal_id: text("principal_id").notNull(),
     scopes: text("scopes").notNull().default("full"),
     permission: text("permission").notNull().default("read"),
+    role: text("role"),
+    membership_source: text("membership_source"),
+    source_repo_id: integer("source_repo_id"),
     created_at: integer("created_at").notNull(), // Unix ms (EpochMillis)
     expires_at: integer("expires_at").notNull(), // Unix ms (EpochMillis)
   },
@@ -240,6 +248,58 @@ export const revokedSubjects = sqliteTable(
       table.project_id,
       table.identity_host,
       table.subject_id,
+    ),
+  ],
+);
+
+// --- _project_memberships ---
+// Canonical project grants. Authentication identities are stored as both the
+// public principal_id and the canonical identity axes used by bulk revocation.
+export const projectMemberships = sqliteTable(
+  "_project_memberships",
+  {
+    membership_id: text("membership_id").primaryKey(),
+    project_id: text("project_id").notNull(),
+    principal_id: text("principal_id").notNull(),
+    provider: text("provider").notNull(),
+    identity_host: text("identity_host").notNull(),
+    subject_id: text("subject_id").notNull(),
+    subject_kind: text("subject_kind").notNull(),
+    role: text("role").notNull(),
+    display_name: text("display_name"),
+    granted_by: text("granted_by").notNull(),
+    granted_at: integer("granted_at").notNull(),
+    revoked_by: text("revoked_by"),
+    revoked_at: integer("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("idx_project_memberships_active")
+      .on(table.project_id, table.principal_id)
+      .where(sql`${table.revoked_at} is null`),
+    index("idx_project_memberships_project").on(table.project_id),
+  ],
+);
+
+// --- _membership_events ---
+// Append-only governance and mirrored-admission audit log.
+export const membershipEvents = sqliteTable(
+  "_membership_events",
+  {
+    event_id: text("event_id").primaryKey(),
+    project_id: text("project_id").notNull(),
+    principal_id: text("principal_id"),
+    actor_principal_id: text("actor_principal_id").notNull(),
+    action: text("action").notNull(),
+    source: text("source").notNull(),
+    role: text("role"),
+    github_repo_id: integer("github_repo_id"),
+    details_json: text("details_json").notNull().default("{}"),
+    occurred_at: integer("occurred_at").notNull(),
+  },
+  (table) => [
+    index("idx_membership_events_project_time").on(
+      table.project_id,
+      table.occurred_at,
     ),
   ],
 );

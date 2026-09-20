@@ -169,7 +169,7 @@ describe("C10 — requirePermission cookie-session read scope", () => {
     };
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe("permission-denied");
-    expect(body.error.message).toBe("Requires write permission");
+    expect(body.error.message).toBe("Requires participant role");
     expect(body.error.retryable).toBe(false);
   });
 

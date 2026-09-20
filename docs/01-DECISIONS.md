@@ -496,3 +496,25 @@ full model and the code-anchored detail live in
 **Code references:** `packages/auth-store/src/resolver.ts`, `trust.ts`, `ci-policy.ts` (client
 resolution + trust); `packages/worker/src/middleware/auth.ts` (instance-binding + subject-revocation
 checks); `packages/worker/migrations/global/0017_deployment_meta.sql`, `0019_revoked_subjects.sql`.
+
+## 24. Project authority uses canonical membership policies
+
+**Decision:** Authentication establishes a canonical GitHub or OIDC principal; it does not itself
+grant project access. Every project request resolves that principal through the current D1-backed
+membership policy before route permissions are evaluated. The supported modes are `explicit`,
+`github-mirrored`, `hybrid`, and `service-only`.
+
+Roles map to the existing route tiers as `viewer → read`, `participant → write`, and
+`maintainer → admin`. `owner` adds membership and admission-policy governance but does not grant
+token management, archive, destroy, or infrastructure-secret authority. Full-scope D1 tokens remain
+the bootstrap authority. GitHub adapters can grant at most `maintainer`, are individually enabled
+and capped, and never create owners.
+
+Existing projects migrate to `hybrid`; new projects default to `explicit`. Legacy admin grants and
+OIDC allowlist entries are retained as history but are no longer authorization inputs. Membership
+revocation, its audit event, the subject tombstone, and project-cookie deletion commit in one D1
+batch. There is no positive membership cache in v1.
+
+**Code references:** `packages/backend-d1/src/project-memberships.ts`,
+`packages/worker/src/middleware/membership.ts`, and
+`packages/worker/migrations/global/0026_project_memberships.sql`.

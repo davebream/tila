@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import { getInstallationAccessToken, mintAppJwt } from "../lib/github-app";
 import { getRepoMetadata } from "../lib/github-client";
 import { zodValidationError } from "../lib/validation";
-import { requireProjectAdminHttp } from "../middleware/require-project-admin";
+import { requireProjectOwnerHttp } from "../middleware/require-project-owner";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -23,7 +23,7 @@ function parseRepoId(value: string): number | null {
 
 // POST /api/repos -- Register a GitHub repo in the allowlist
 repos.post("/", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireProjectOwnerHttp(c);
   if (authz) return authz;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;
@@ -57,6 +57,8 @@ repos.post("/", async (c) => {
     min_read_permission,
     min_write_permission,
     max_permission,
+    membership_enabled,
+    membership_role_cap,
   } = parsed.data;
 
   // Resolve repo_id from GitHub API (Worker is sole authority — never trust client-supplied repo_id)
@@ -158,6 +160,8 @@ repos.post("/", async (c) => {
     minReadPermission: min_read_permission,
     minWritePermission: min_write_permission,
     maxPermission: max_permission,
+    membershipEnabled: membership_enabled,
+    membershipRoleCap: membership_role_cap,
     createdBy: tokenResult.name,
   });
 
@@ -174,7 +178,7 @@ repos.post("/", async (c) => {
 
 // GET /api/repos/:repoId/access-policy -- Read human repository access policy
 repos.get("/:repoId/access-policy", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireProjectOwnerHttp(c);
   if (authz) return authz;
   const repoId = parseRepoId(c.req.param("repoId"));
   if (repoId === null) {
@@ -228,7 +232,7 @@ repos.get("/:repoId/access-policy", async (c) => {
 
 // PUT /api/repos/:repoId/access-policy -- Atomically replace human access policy
 repos.put("/:repoId/access-policy", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireProjectOwnerHttp(c);
   if (authz) return authz;
   const repoId = parseRepoId(c.req.param("repoId"));
   if (repoId === null) {
@@ -303,7 +307,7 @@ repos.put("/:repoId/access-policy", async (c) => {
 
 // GET /api/repos/:repoId/oidc-policy -- Read the complete Actions OIDC policy
 repos.get("/:repoId/oidc-policy", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireProjectOwnerHttp(c);
   if (authz) return authz;
   const repoId = parseRepoId(c.req.param("repoId"));
   if (repoId === null) {
@@ -357,7 +361,7 @@ repos.get("/:repoId/oidc-policy", async (c) => {
 
 // PUT /api/repos/:repoId/oidc-policy -- Replace the complete Actions OIDC policy
 repos.put("/:repoId/oidc-policy", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireProjectOwnerHttp(c);
   if (authz) return authz;
   const repoId = parseRepoId(c.req.param("repoId"));
   if (repoId === null) {
@@ -432,7 +436,7 @@ repos.put("/:repoId/oidc-policy", async (c) => {
 
 // DELETE /api/repos/:repoId -- Remove a repo from the allowlist (idempotent)
 repos.delete("/:repoId", async (c) => {
-  const authz = await requireProjectAdminHttp(c);
+  const authz = await requireProjectOwnerHttp(c);
   if (authz) return authz;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;

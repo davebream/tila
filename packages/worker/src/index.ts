@@ -9,6 +9,7 @@ import { createCorsMiddleware } from "./middleware/cors";
 import { csrfGuard } from "./middleware/csrf";
 import { errorHandler } from "./middleware/error";
 import { createIdempotencyMiddleware } from "./middleware/idempotency";
+import { projectMembershipMiddleware } from "./middleware/membership";
 import { projectMiddleware } from "./middleware/project";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { requestIdentityMiddleware } from "./middleware/request-identity";
@@ -32,6 +33,7 @@ import { gates } from "./routes/gates";
 import { health } from "./routes/health";
 import { infra } from "./routes/infra";
 import { journal } from "./routes/journal";
+import { memberships } from "./routes/memberships";
 import { presence } from "./routes/presence";
 import { records } from "./routes/records";
 import { repos } from "./routes/repos";
@@ -182,6 +184,7 @@ projectRoutes.use("/*", csrfGuard);
 projectRoutes.use("/*", sourceResolution());
 projectRoutes.use("/*", requestIdentityMiddleware());
 projectRoutes.use("/*", projectMiddleware);
+projectRoutes.use("/*", projectMembershipMiddleware());
 projectRoutes.use("/*", async (c, next) => {
   if (
     c.req.method === "GET" ||
@@ -234,6 +237,7 @@ projectRoutes.route("/search", search);
 projectRoutes.route("/admin/backup", backup);
 projectRoutes.route("/admin", admin);
 projectRoutes.route("/admins", adminRoster);
+projectRoutes.route("/", memberships);
 projectRoutes.route("/", doctor);
 
 app.route("/projects/:projectId", projectRoutes);

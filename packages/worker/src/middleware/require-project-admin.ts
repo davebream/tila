@@ -1,4 +1,5 @@
 import { AdminGrantsStore, D1ProjectRegistry } from "@tila/backend-d1";
+import { PROJECT_ROLE_RANK } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
 import {
   ADMIN_GRANTS_CACHE_MAX_SIZE,
@@ -362,6 +363,17 @@ export const requireProjectAdmin: MiddlewareHandler<AdminEnv> = async (
       return next();
     }
     return deny(c);
+  }
+
+  // Project membership is the canonical source for operational admin access.
+  // The legacy roster paths below remain only for directly mounted compatibility
+  // tests and routes that have not passed through project membership middleware.
+  const effectiveRole = c.get("effectiveRole");
+  if (
+    effectiveRole &&
+    PROJECT_ROLE_RANK[effectiveRole] >= PROJECT_ROLE_RANK.maintainer
+  ) {
+    return next();
   }
 
   // (3) Bearer GitHub session → roster lookup against _admin_grants.

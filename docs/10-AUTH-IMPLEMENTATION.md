@@ -5,6 +5,18 @@
 
 ## 1. Overview
 
+Project authorization follows this pipeline:
+
+```text
+authenticate → canonical principal → resolve current D1 membership → effective role → route permission
+```
+
+Bearer and browser sessions carry `role`, `membership_sources`, and the legacy `permission` field,
+but the role snapshot is informational. Project middleware re-resolves the current policy on every
+request, so revocation or demotion takes effect without waiting for session expiry. Repository links
+participate only when `membership_enabled` is true; their mapped role is bounded by
+`membership_role_cap` and can never become `owner`.
+
 tila implements a unified authentication system with three distinct auth paths, all converging to a discriminated union type `UnifiedTokenResult` (defined in `packages/worker/src/types.ts` lines 16-49).
 
 ### Three Auth Paths

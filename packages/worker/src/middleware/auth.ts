@@ -325,6 +325,9 @@ function buildSessionTokenResult(
     scopes: string;
     expiresAt: number;
     permission?: string;
+    role?: string | null;
+    membershipSource?: string | null;
+    sourceRepoId?: number | null;
   },
 ): {
   tokenResult: WorkspaceSessionTokenResult | CookieSessionTokenResult;
@@ -357,6 +360,31 @@ function buildSessionTokenResult(
       expiresAt: cached.expiresAt,
       permission: cached.permission ?? "read",
       principalId: cached.principalId,
+      role:
+        cached.role === "viewer" ||
+        cached.role === "participant" ||
+        cached.role === "maintainer" ||
+        cached.role === "owner"
+          ? cached.role
+          : undefined,
+      membershipSources: (() => {
+        try {
+          const parsed = JSON.parse(cached.membershipSource ?? "[]");
+          return Array.isArray(parsed)
+            ? parsed.filter(
+                (
+                  source,
+                ): source is "explicit" | "github-mirrored" | "bootstrap" =>
+                  source === "explicit" ||
+                  source === "github-mirrored" ||
+                  source === "bootstrap",
+              )
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      })(),
+      sourceRepoId: cached.sourceRepoId ?? undefined,
     } satisfies CookieSessionTokenResult,
     authKind: "cookie",
   };
@@ -1028,6 +1056,8 @@ export function createAuthMiddleware(
           expiresAt: payload.expires_at,
           oidcIssuer: payload.oidc_issuer,
           oidcSubject: payload.oidc_subject,
+          role: payload.role,
+          membershipSources: payload.membership_sources,
         };
         tokenKindResult = oidcResult;
       } else {
@@ -1044,6 +1074,8 @@ export function createAuthMiddleware(
           githubUserId: payload.github_user_id,
           githubHost: payload.github_host,
           jti: payload.jti,
+          role: payload.role,
+          membershipSources: payload.membership_sources,
         };
         tokenKindResult = sessionResult;
       }

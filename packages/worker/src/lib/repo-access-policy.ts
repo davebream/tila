@@ -34,6 +34,17 @@ export function evaluateRepositoryAccess(
     min_read_permission: repo.min_read_permission,
     min_write_permission: repo.min_write_permission,
     max_permission: repo.max_permission,
+    // Rows read during a rolling deployment, and older test fixtures, predate
+    // the adapter columns. Existing links migrate enabled with a cap matching
+    // their previous maximum permission.
+    membership_enabled: repo.membership_enabled !== 0,
+    membership_role_cap:
+      repo.membership_role_cap ??
+      (repo.max_permission === "admin"
+        ? "maintainer"
+        : repo.max_permission === "read"
+          ? "viewer"
+          : "participant"),
   });
   if (!actual.success || !policy.success) return null;
 

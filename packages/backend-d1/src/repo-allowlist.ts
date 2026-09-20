@@ -1,6 +1,7 @@
 import {
   type GitHubRepositoryPermission,
   type RepoAccessPolicy,
+  type RepoAccessPolicyRequest,
   RepoAccessPolicySchema,
   type RepoOidcPolicy,
   RepoOidcPolicySchema,
@@ -19,6 +20,8 @@ export interface RepoAllowlistRow {
   min_read_permission: string;
   min_write_permission: string;
   max_permission: string;
+  membership_enabled?: number;
+  membership_role_cap?: string;
   oidc_permission: string;
   oidc_enabled: number;
   oidc_max_permission: string;
@@ -41,6 +44,8 @@ export interface RegisterParams {
   minReadPermission?: GitHubRepositoryPermission;
   minWritePermission?: GitHubRepositoryPermission;
   maxPermission?: SessionPermission;
+  membershipEnabled?: boolean;
+  membershipRoleCap?: "viewer" | "participant" | "maintainer";
   createdBy: string;
 }
 
@@ -59,6 +64,8 @@ function decodeAccessPolicy(row: RepoAllowlistRow): RepoAccessPolicyResult {
     min_read_permission: row.min_read_permission,
     min_write_permission: row.min_write_permission,
     max_permission: row.max_permission,
+    membership_enabled: row.membership_enabled === 1,
+    membership_role_cap: row.membership_role_cap ?? "participant",
   });
   return parsed.success
     ? { status: "ok", policy: parsed.data, repo: row }
@@ -149,15 +156,26 @@ export class RepoAllowlistStore {
     projectId: string,
     githubHost: string,
     githubRepoId: number,
-    policy: RepoAccessPolicy,
+    policy: RepoAccessPolicyRequest,
   ): Promise<RepoAccessPolicyResult> {
-    const validated = RepoAccessPolicySchema.parse(policy);
+    const current = await this.getAccessPolicy(
+      projectId,
+      githubHost,
+      githubRepoId,
+    );
+    if (current.status !== "ok") return current;
+    const validated = RepoAccessPolicySchema.parse({
+      ...current.policy,
+      ...policy,
+    });
     const updated = await this.drizzle
       .update(projectRepos)
       .set({
         min_read_permission: validated.min_read_permission,
         min_write_permission: validated.min_write_permission,
         max_permission: validated.max_permission,
+        membership_enabled: validated.membership_enabled ? 1 : 0,
+        membership_role_cap: validated.membership_role_cap,
       })
       .where(
         and(
@@ -233,6 +251,8 @@ export class RepoAllowlistStore {
         min_read_permission: params.minReadPermission ?? "write",
         min_write_permission: params.minWritePermission ?? "write",
         max_permission: params.maxPermission ?? "write",
+        membership_enabled: params.membershipEnabled ? 1 : 0,
+        membership_role_cap: params.membershipRoleCap ?? "participant",
         oidc_enabled: 0,
         oidc_max_permission: "read",
         oidc_subject_pattern: null,

@@ -1,5 +1,7 @@
+import type { MembershipSource, ProjectRole } from "@tila/schemas";
 import { Hono } from "hono";
 import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
+import { resolveTokenMembership } from "../middleware/membership";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 
 type WhoamiEnv = { Bindings: Env; Variables: HonoVariables };
@@ -36,6 +38,8 @@ whoami.get("/whoami", async (c) => {
     permission?: string;
     expires_at?: number;
     instance_id?: string;
+    role?: ProjectRole;
+    membership_sources?: MembershipSource[];
   } = {
     ok: true as const,
     project_id: token.projectId,
@@ -47,6 +51,22 @@ whoami.get("/whoami", async (c) => {
 
   if (instanceId !== undefined) {
     response.instance_id = instanceId;
+  }
+
+  if (token.projectId) {
+    try {
+      const membership = await resolveTokenMembership(
+        c.env.DB,
+        token,
+        token.projectId,
+      );
+      if (membership) {
+        response.role = membership.role;
+        response.membership_sources = membership.sources;
+      }
+    } catch {
+      // Best-effort identity inspection; guarded project routes still fail closed.
+    }
   }
 
   // Add session-specific fields
