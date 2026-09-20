@@ -13,6 +13,13 @@ Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
 </div>
 
+**Direction:** tila is evolving into one development-management product around this
+coordination core: an orchestrator with workers across Mac/Linux hosts, then native
+Mac/iPhone clients. Cloudflare will be the shared backend and project keys the
+supported auth path. These are planned changes; the current release still includes
+local persistence and GitHub auth. See [the roadmap](docs/03-ROADMAP.md) for the
+first milestone and runtime evaluation.
+
 **For:** framework authors, AI autopilot builders, and small teams (3 to 6 engineers) whose agents need shared state across multiple machines.
 
 ---
@@ -276,8 +283,9 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 ```bash
 pnpm install
 pnpm dev:setup                  # Generates dev config, applies D1 migrations, seeds project + token
-pnpm dev                        # Start Worker on :8787
-pnpm --filter @tila/ui dev      # Start UI on :5173 (separate terminal)
+pnpm dev                        # Source Worker :8787 + Vite UI :5173
+pnpm dev:cli --help              # CLI from this checkout
+pnpm dev:mcp                    # MCP from this checkout
 bash scripts/dev-seed.sh        # Populate with sample data (entities, claims, presence, artifacts)
 pnpm test                       # Run test suite
 pnpm typecheck                  # TypeScript type checking
@@ -285,7 +293,14 @@ pnpm check                      # Biome lint and format check
 pnpm build                      # Production build
 ```
 
-`dev:setup` is idempotent: re-running clears local state and reapplies from scratch. `dev-seed.sh` requires the Worker to be running.
+`dev:setup` clears existing local D1/DO state and recreates fixtures. The development
+Worker has no built UI assets; use Vite on :5173. Source commands need no package
+build or published release. Full tests/typechecks still build dependencies, including
+the SDK distribution checks. Source CLI execution uses Bun for `bun:sqlite`; MCP uses Node/tsx.
+Bun 1.4.2 can print a nonfatal `directory mismatch` diagnostic with
+`--tsconfig-override` ([upstream report](https://github.com/oven-sh/bun/issues/28605));
+the source CLI smoke check exits successfully. Production deployments and published
+packages still require their normal build steps. `dev-seed.sh` requires the Worker to be running.
 
 ## Project backups
 

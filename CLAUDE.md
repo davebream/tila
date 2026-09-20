@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-tila — a state-and-coordination engine for multi-machine agentic work. Cloudflare-native (Worker + DO SQLite + D1 + R2).
+tila is evolving into one self-hosted development-management product, with a reusable state-and-coordination core. Cloudflare (Worker, DO SQLite, D1, R2) is the authoritative shared backend. The first workflow is one orchestrator coordinating workers across macOS and Linux hosts; native Mac/iPhone clients and other interaction topologies come later.
+
+This is the target direction, not a claim that orchestration, native clients, key-only auth, or local-mode retirement have shipped. Preserve current compatibility until the corresponding migration is implemented. Keep the canonical project memberships delivered by #184 / #218. Evaluate existing host runtimes before building a terminal/process supervisor; Herdr is the first candidate, not an adopted dependency. See `docs/03-ROADMAP.md` for acceptance criteria and backlog drafts.
 
 ## Commands
 
 ```bash
-pnpm dev              # Start development (Worker via wrangler dev)
+pnpm dev              # Source development: Worker :8787 + Vite UI :5173
+pnpm dev:cli --help   # Run the CLI from this checkout
+pnpm dev:mcp          # Run the MCP server from this checkout
 pnpm build            # Production build (turbo, all packages)
 pnpm test             # Run all tests (turbo)
 pnpm lint             # Biome check (read-only, CI-safe)
@@ -37,11 +41,10 @@ One-time setup (generates dev config, applies D1 migrations, seeds test data):
 pnpm dev:setup
 ```
 
-Then start both services:
+Then start both services from source:
 
 ```bash
-pnpm dev                          # Worker on :8787
-pnpm --filter @tila/ui dev        # UI on :5173
+pnpm dev                          # Worker :8787 and UI :5173
 ```
 
 Login with the printed credentials (default: project `dev-project`, token `tila_dev_token_localonly`).
@@ -133,7 +136,7 @@ schemas → core → ops-sqlite → backend-do        → worker
          core → backend-r2                → worker
 schemas → sdk → mcp-server
                                     worker ← ui
-cli (standalone, imports schemas only)
+cli -> schemas, core, auth-store, backend-local, sdk
 ```
 
 `schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by `backend-local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK + MCP server), not just Bun. The DB file is portable between the CLI and a Node SDK/MCP consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
@@ -146,7 +149,7 @@ The `ProjectDO` class in `backend-do/src/project-do.ts` is thin: it constructs D
 
 ### Auth model
 
-Two auth paths unified in `middleware/auth.ts`:
+Current compatibility paths in `middleware/auth.ts` (key-only auth is planned):
 1. **GitHub session tokens** — short-lived, repo-scoped, default auth path (see `docs/07-GITHUB-SCOPED-AUTH.md`)
 2. **D1 API tokens** — hashed, stored in D1, admin/bootstrap credential
 
@@ -189,29 +192,20 @@ First-writer-wins with fencing tokens. Every claim returns a monotonic fence. Ev
 
 - `docs/01-DECISIONS.md` — settled decisions (the constitution)
 - `docs/02-ARCHITECTURE.md` — technical specification
-- `docs/03-ROADMAP.md` — v0.1 scope, success criteria, build order
+- `docs/03-ROADMAP.md` — current milestone, runtime evaluation, and backlog drafts
 - `docs/04-PERSISTENCE-SCHEMA.md` — ER diagram and cross-store boundaries
 - `docs/05-OPERATIONS.md` — production procedures, observability, troubleshooting
-- `docs/07-GITHUB-SCOPED-AUTH.md` — GitHub-scoped auth — default auth model
+- `docs/07-GITHUB-SCOPED-AUTH.md` — GitHub-scoped auth — current compatibility implementation
 - `docs/08-RECORDS.md` — typed mutable records design (implemented)
 - `DESIGN.md` — UI design system (colors, typography, components)
 
 ### Contributor dev MCP server
 
-MCP config templates are provided as `.example` files. Copy them to create your local configs:
+Copy the applicable `.mcp.json.example`, `.cursor/mcp.json.example`, or
+`.vscode/mcp.json.example` to the same filename without `.example`. The templates
+run `pnpm --silent dev:mcp` from the workspace root, using source and the local
+Worker credentials printed by `pnpm dev:setup`. Local configs remain gitignored.
 
-```bash
-cp .mcp.json.example .mcp.json
-cp .cursor/mcp.json.example .cursor/mcp.json
-cp .vscode/mcp.json.example .vscode/mcp.json
-```
-
-Then start the local Worker:
-
-```bash
-pnpm install   # ensures tsx is available for npx resolution
-pnpm dev       # starts the Worker locally via wrangler dev
-```
-
-Set `TILA_PROJECT_ID` to your project ID before using MCP tools.
-The actual config files (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`) are gitignored.
+The root `tsconfig.json` maps workspace imports to source for Wrangler, Bun and tsx.
+Package builds/typechecks keep their own configs and public exports. `pnpm test`
+still builds packages to cover distribution and CJS/ESM interoperability.

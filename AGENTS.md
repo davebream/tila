@@ -4,12 +4,16 @@ Guidance for Codex and other coding agents working in this repository.
 
 ## Project
 
-tila is a state-and-coordination engine for multi-machine agentic work. It is Cloudflare-native, built around a Worker, Durable Object SQLite, D1, and R2.
+tila is evolving into one self-hosted development-management product, with a reusable state-and-coordination core. Cloudflare (Worker, DO SQLite, D1, R2) is the authoritative shared backend. The first workflow is one orchestrator coordinating workers across macOS and Linux hosts; native Mac/iPhone clients and other interaction topologies come later.
+
+This is the target direction, not a claim that orchestration, native clients, key-only auth, or local-mode retirement have shipped. Preserve current compatibility until the corresponding migration is implemented. Keep the canonical project memberships delivered by #184 / #218. Evaluate existing host runtimes before building a terminal/process supervisor; Herdr is the first candidate, not an adopted dependency. See `docs/03-ROADMAP.md` for acceptance criteria and backlog drafts.
 
 ## Commands
 
 ```bash
-pnpm dev              # Start development (Worker via wrangler dev)
+pnpm dev              # Source development: Worker :8787 + Vite UI :5173
+pnpm dev:cli --help   # Run the CLI from this checkout
+pnpm dev:mcp          # Run the MCP server from this checkout
 pnpm build            # Production build (turbo, all packages)
 pnpm test             # Run all tests (turbo)
 pnpm lint             # Biome check (read-only, CI-safe)
@@ -73,7 +77,7 @@ schemas -> core -> ops-sqlite -> backend-do        -> worker
           core -> backend-r2                      -> worker
 schemas -> sdk -> mcp-server
                                        worker <- ui
-cli (standalone, imports schemas only)
+cli -> schemas, core, auth-store, backend-local, sdk
 ```
 
 `schemas` and `core` must remain platform-agnostic. `ops-sqlite` is the shared SQLite layer containing all Drizzle table definitions, migrations, and ops modules. Do not import Cloudflare Workers types into `schemas`, `core`, `ops-sqlite`, `cli`, or `sdk`.
@@ -127,19 +131,24 @@ tila uses three persistence layers:
 
 - `docs/01-DECISIONS.md` - settled decisions
 - `docs/02-ARCHITECTURE.md` - technical specification
-- `docs/03-ROADMAP.md` - v0.1 scope, success criteria, build order
+- `docs/03-ROADMAP.md` - current milestone, runtime evaluation, and backlog drafts
 - `docs/04-PERSISTENCE-SCHEMA.md` - ER diagram and cross-store boundaries
 - `docs/05-OPERATIONS.md` - production procedures, observability, troubleshooting
 
 ## Contributor Dev MCP Server
 
-When you open this repo in Claude Code, Cursor, or VS Code, the `tila-dev` MCP server is
-auto-configured to point at `http://localhost:8787`. Start it with:
+Copy the applicable `.mcp.json.example`, `.cursor/mcp.json.example`, or
+`.vscode/mcp.json.example` to the same filename without `.example`. These templates
+run `pnpm --silent dev:mcp` from the workspace root, using this checkout's source.
+They target the local Cloudflare Worker with the credentials from `pnpm dev:setup`.
 
 ```bash
-pnpm install   # ensures tsx is available for npx resolution
-pnpm dev       # starts the Worker locally via wrangler dev
+pnpm install
+pnpm dev:setup # Local fixture setup; clears existing local D1/DO state
+pnpm dev
 ```
 
-Set `TILA_PROJECT_ID` in `.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` to your
-project ID before using MCP tools.
+The root `tsconfig.json` maps workspace imports to source for Wrangler, Bun and tsx.
+Package builds and typechecks retain their own configs and public exports.
+`pnpm test` still builds packages: it includes distribution/interop coverage.
+Do not remove those checks merely to speed up interactive development.
