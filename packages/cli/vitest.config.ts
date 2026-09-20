@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // tsc emits copies of these tests into dist; running both races packaging fixtures.
+    include: ["src/**/*.test.ts"],
     // No Workers pool -- pure Node.js unit tests for CLI
     //
     // Raised from the 5s default: the first test in cold-start-sensitive suites

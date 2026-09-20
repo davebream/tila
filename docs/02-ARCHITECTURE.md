@@ -2,6 +2,28 @@
 
 > The technical specification. Detailed enough that an autopilot can implement against it without inventing things. Reads top to bottom; subsections reference each other but each section is meaningful on its own.
 
+## Direction and implementation status — 2026-09-20
+
+The existing sections describe the implemented coordination engine and historical
+plans. [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20) and
+[the active roadmap](03-ROADMAP.md) take precedence for new work.
+
+The target adds a management service in the same repo, with tasks distinct from
+attempts and replaceable provider sessions. One orchestrator coordinates workers
+first. Cloudflare owns shared state; a Mac/Linux host integration owns execution.
+Evaluate Herdr's runtime before writing a new supervisor. Native clients are later
+API consumers, not a requirement for workers to stay alive.
+
+Keys bound to native principals and explicit memberships will replace GitHub auth.
+The membership foundation from #184 / #218 is implemented; key-only onboarding,
+auth retirement and standalone local-mode retirement are not. Preserve current
+compatibility until migration/export and access tests cover each removal.
+
+For development, Wrangler, Bun and tsx use the root source path mappings; Vite reads
+schemas from source. Production package exports, declaration builds and packaging
+tests remain separate. Deployed hosts must use identifiable immutable revisions.
+Client/server API compatibility must be negotiated independently of release versions.
+
 ---
 
 ## Section 0: Implementation stack
@@ -13,7 +35,7 @@ The languages, frameworks, and libraries this is built with. Decisions are made;
 - **Language:** TypeScript throughout. CLI, Worker, shared schemas, UI bundle. One language eliminates client-server type drift and maximizes Claude Code's effectiveness during AI-assisted implementation.
 - **CLI runtime:** Bun (>=1.2). Source is TypeScript; distribution is a static binary per platform via `bun build --compile`. Cold start ~20-30ms vs Node's 200-500ms. Bun's test runner is acceptable for v0.1; Vitest is the fallback for tests that need `@cloudflare/vitest-pool-workers` (the Worker tests specifically).
 - **Worker runtime:** Cloudflare Workers (workerd). Same TypeScript source as the CLI; bundled via Wrangler.
-- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun is used only to compile the CLI binary (`bun build --compile`), not for workspace management.
+- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun runs the source CLI and compiles its release binary (`bun build --compile`); pnpm owns workspace management.
 - **Monorepo tooling:** Turborepo for task orchestration across packages (matching the maintainer's existing setup).
 - **ORM / DB access:** Drizzle for SQL access. In the Worker, `drizzle-orm/durable-sqlite` for the per-project DO (the primary persistence layer) and `drizzle-orm/d1` for the global D1 instance (auth tokens, idempotency). The EntityBackend interface preserves the option for v0.2+ alternatives (GitHub Issues, Linear, Upstash, self-hosted Postgres).
 - **HTTP framework in the Worker:** Hono. Route handlers, middleware, error handling.

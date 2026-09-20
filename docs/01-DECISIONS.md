@@ -4,19 +4,44 @@
 
 ---
 
-## 0. Name and scope
+## 0. Name and scope — amended 2026-09-20
 
-**`tila`** — Finnish for "state, space, condition, mode." A state-and-coordination engine for multi-machine agentic work. Generic, unopinionated, reusable. Includes the Cloudflare Worker, all backends (D1, DO, R2), and the `tila` CLI.
+**tila is one development-management product with a reusable coordination core.**
+Keep product workflows, service contracts, host integration and future native clients
+in this repository. Reusing external runtimes does not require a second product repo.
 
-**What tila is:** the primitives a higher-level framework needs to coordinate work across machines. CRUD on entities (tasks, issues, epics, or any user-defined type), first-writer-wins claims with fencing tokens, append-only journal, content-addressed artifact storage with lifecycle, schema-as-config.
+| Layer | Responsibility |
+|---|---|
+| Coordination core | Typed state, memberships, claims/fences, durable journal and artifacts |
+| Management service | Tasks, run attempts, assignments, questions, decisions and orchestration policy |
+| Host integration | Bind assignments to local processes/provider sessions; reuse a runtime where possible |
+| Clients | CLI, MCP, web and later Mac/iPhone views over the same service contracts |
 
-**What tila is not:** a workflow orchestrator, an opinion about how AI agents should plan or review work, a bundled set of agent prompts, or a pipeline runner. Those things belong in a framework that consumes tila — and a framework is exactly the kind of thing tila is designed to support, but it is not itself part of tila.
+The first topology is one orchestrator plus workers. Roles belong to a run; they are
+not permanent agent types. A task can have several attempts, and an attempt can
+outlive a provider session. Authenticated principals, runtime participants and
+provider session IDs remain distinct.
 
-**The test for any feature:** would this make sense for non-software-development agentic work — content moderation, research, automation pipelines, anything where multiple workers coordinate over a shared state? If yes, it belongs in tila. If no, it belongs in a framework on top.
+Cloudflare is the target authoritative shared backend. Local probes, tests, caches,
+execution and sandboxes remain useful. Standalone local persistence is shipped
+compatibility to retire through an explicit migration, not a new parity target.
+Do not delete shared `ops-sqlite` when retiring its local consumer.
 
-**CLI surface:** `tila` is the only binary. Short verbs, single-purpose, fast. `tila task claim T-142`, `tila artifact put plan.md`, `tila presence`, `tila state`. No workflow commands.
+The target auth path uses project API keys bound to stable native principals and
+explicit memberships. Keep #184 / #218's membership model. Full bootstrap tokens
+currently grant owner access; they are not suitable ordinary worker credentials.
+GitHub App/session paths remain implemented until key-only onboarding and migration
+are complete; removing them is a separate change with revocation/access tests.
 
-**The hypothetical framework consumer.** Throughout this document, an imagined framework named "sisu" is sometimes mentioned to clarify *what tila must support*. Sisu is not a thing tila ships. It's a thought-experiment consumer — a stand-in for any future framework that will run on top of tila — used to validate that tila's primitives are generic enough to support workflow orchestration without being workflow-specific.
+Evaluate Herdr before building a custom process supervisor. A host runtime owns
+processes and terminals; tila owns durable assignment and decision semantics.
+cmux remains inspiration, not a cross-platform runtime dependency. The integration
+must work from Mac cmux/tmux and Linux VPS tmux. No native terminal renderer,
+Iroh transport or sandbox scheduler is required for the first workflow.
+
+This amendment supersedes earlier engine-only exclusions and future-version sketches
+below. Existing persistence and correctness guarantees still apply. The active
+sequence and researched runtime tradeoffs are in [the roadmap](03-ROADMAP.md).
 
 ---
 
@@ -125,13 +150,13 @@ Stated explicitly because it shapes everything that follows. The unfilled gap in
 
 These two failure modes from earlier approaches are retired, not iterated forward:
 
-**Mode 1 (everything in the project repo)** is replaced by tila running on Cloudflare. D1 holds entities and the journal; DO holds live coordination; R2 holds artifacts. The project repo only contains `.tila/config.toml` (committed) and `.tila/.env` (gitignored). No autopilot exhaust touches git.
+**Mode 1 (everything in the project repo)** is replaced by tila running on Cloudflare. DO SQLite holds entities, the journal and coordination; D1 holds global auth/registry state; R2 holds artifacts. The project repo only contains `.tila/config.toml` (committed) and `.tila/.env` (gitignored). No autopilot exhaust touches git.
 
 Do NOT add a "local-only" or "git-synced" mode as a feature. Multi-machine sync via local files is exactly the failure mode being escaped from.
 
-**Amendment (v0.2 era) — DELIVERED.** A single-machine local SQLite backend is distinct from this prohibition and is now a **shipped feature** across CLI, SDK, and MCP. It targets co-located agents on one machine (laptop, VPS) using a runtime-agnostic embedded SQLite core (`@tila/backend-embedded`) with WAL mode + `busy_timeout` + application-layer busy-retry -- the same first-writer-wins correctness model as the DO, serialized via SQLite locking instead of DO single-threading. Two host wrappers consume the embedded core: `@tila/backend-local` (Bun, `bun:sqlite`) for the CLI, and `tila-sdk/local` (plain Node, `better-sqlite3` + `node:fs`) for the SDK (`createTila({ backend: "local" })`) and the MCP server — so local mode now runs under plain Node, not just Bun. No multi-machine sync; no files in the project repo; no git coordination. The backend interfaces explicitly anticipate this (see Decision 1: "allow alternative implementations to be added in future versions"). `tila project create` remains the default for multi-machine teams; `tila project create --local` is the zero-setup path for solo agents on a single machine. See `docs/02-ARCHITECTURE.md` §1.6a (Embedded local persistence) for the full description, including the documented divergences (idempotency accepted-but-not-honored locally, pre-feature DB upgrade limitation).
+**Historical implementation (v0.2 era) — DELIVERED; retirement planned under §0.** A single-machine local SQLite backend is distinct from this prohibition and is now a **shipped feature** across CLI, SDK, and MCP. It targets co-located agents on one machine (laptop, VPS) using a runtime-agnostic embedded SQLite core (`@tila/backend-embedded`) with WAL mode + `busy_timeout` + application-layer busy-retry -- the same first-writer-wins correctness model as the DO, serialized via SQLite locking instead of DO single-threading. Two host wrappers consume the embedded core: `@tila/backend-local` (Bun, `bun:sqlite`) for the CLI, and `tila-sdk/local` (plain Node, `better-sqlite3` + `node:fs`) for the SDK (`createTila({ backend: "local" })`) and the MCP server — so local mode now runs under plain Node, not just Bun. No multi-machine sync; no files in the project repo; no git coordination. The backend interfaces explicitly anticipate this (see Decision 1: "allow alternative implementations to be added in future versions"). `tila project create` remains the default for multi-machine teams; `tila project create --local` is the zero-setup path for solo agents on a single machine. See `docs/02-ARCHITECTURE.md` §1.6a (Embedded local persistence) for the full description, including the documented divergences (idempotency accepted-but-not-honored locally, pre-feature DB upgrade limitation).
 
-**Mode 2 (GitHub Issues + milestones)** is replaced by tila on Cloudflare as the primary coordination layer. A GitHub adapter (v0.2) optionally mirrors entity state to Issues for human visibility. One-way mirror, D1 is the source of truth. The autopilot does not wait on PR merges for state changes.
+**Mode 2 (GitHub Issues + milestones)** is replaced by tila on Cloudflare as the primary coordination layer. A GitHub adapter (v0.2) optionally mirrors entity state to Issues for human visibility. One-way mirror, DO SQLite is the project-state source of truth. The autopilot does not wait on PR merges for state changes.
 
 ---
 
@@ -186,12 +211,12 @@ These were considered and rejected. If they come back up, point to this section.
 - **No IPNS, DNS TXT, DHT, Discord/Slack/Matrix pins, chat-as-DB.** Each fails either correctness (no CAS) or latency (propagation in seconds-to-minutes).
 - **No GitHub Contents API as primary entity backend.** Rate limits at 5K req/hr per user kill it for 6 active machines. Available as an *adapter* for users who want it; not the default.
 - **No Linear or GitHub Issues as primary entity backend.** Both available as adapters; neither shapes the default.
-- **No competitor comparisons in the README or docs.** Describe what tila does and why. Comparisons invite users to make decisions on the wrong axes.
+- **Describe shipped behavior in the README.** Technical dependency evaluations belong in the roadmap or research docs, with dated sources and explicit limits.
 - **No competing with Beads.** Beads owns the "agent memory via git-native task graph" position. tila addresses an adjacent problem (real-time multi-machine coordination with artifact lifecycle), not a directly competing one.
 - **No bundling of Dolt.** Beads' Dolt dependency is correct for its use case; tila's D1 + JSON-data column achieves the schema flexibility we need with less infrastructure.
 - **No defensive coordination against multi-version installs.** Version mismatch is detected at startup and refuses to proceed; we do not try to make incompatible versions interop.
 - **No automatic migrations across destructive schema changes.** User must supply a strategy. Silent invalidation of existing data is unacceptable.
-- **No built-in lessons-learned feature in tila.** Lessons learned is a workflow shape, not a primitive. tila provides artifact kinds, cross-references, indexes, and journal events; any framework on top of tila composes them into a retrospective workflow. Same principle for retro, post-mortem, knowledge-base, decision-log features: they belong in the framework, not the engine.
+- **Retrospectives and knowledge workflows are deferred.** They may become product features, composed from core primitives; they are not prerequisites for the first orchestrator/worker flow.
 
 ---
 
@@ -220,7 +245,7 @@ A few principles to apply when decisions get ambiguous in the future:
 
 **"Does this serve me on a real project today?"** Build for the actual current use case, not the hypothetical future audience. The version of tila that works perfectly for one real user (the maintainer) is more likely to find its audience than the version optimized for hypothetical other users.
 
-**"Is this the engine's responsibility or the framework's?"** When in doubt about which layer something belongs in: primitives → tila; opinions and workflows → out of scope, belongs in a consuming framework. If the answer would be the same for a content-moderation use case as for software development, it belongs in tila.
+**Which layer owns this?** Reusable invariants belong in the core; workflow policy belongs in the management service; provider/terminal mechanics belong behind host adapters. All can live in tila. See the §0 amendment.
 
 **Opinionated by default; configurable for power users.** Most users should get a working setup without configuration. Power users should be able to customize. Avoid the trap of making everything configurable and shipping no defaults.
 
@@ -280,7 +305,7 @@ Specific platform capabilities the architecture depends on or benefits from. Nam
 
 ---
 
-## 16. The growth path, named
+## 16. Historical growth sketch — superseded by the roadmap
 
 To prevent feature creep on the wrong axis, here is what growth looks like over the next ~year:
 

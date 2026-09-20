@@ -7,7 +7,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev:setup": "bash scripts/dev-setup.sh",
-    "dev": "turbo dev",
+    "dev": "turbo dev --filter=@tila/worker --filter=@tila/ui",
     "build": "turbo build",
     "test": "turbo test && pnpm run test:scripts",
     "test:scripts": "node --test \"scripts/*.test.mjs\"",
@@ -16,7 +16,9 @@
     "typecheck": "turbo typecheck",
     "clean": "turbo clean",
     "version:check": "node scripts/check-public-versions.mjs",
-    "version:test": "node --test scripts/version-policy.test.mjs"
+    "version:test": "node --test scripts/version-policy.test.mjs",
+    "dev:cli": "pnpm --filter tila-cli dev",
+    "dev:mcp": "tsx --tsconfig tsconfig.json packages/mcp-server/src/index.ts"
   },
   "pnpm": {
     "overrides": {
@@ -40,6 +42,7 @@
     "lefthook": "^1.7.0",
     "turbo": "^2.9.18",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "tsx": "^4.22.4"
   }
 }
