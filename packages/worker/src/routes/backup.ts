@@ -93,6 +93,8 @@ export function createBackupRoutes(options: {
     "_github_app_config",
     "_admin_grants",
     "_oidc_principals",
+    "_project_memberships",
+    "_membership_events",
   ] as const;
 
   const D1_BACKUP_COLUMNS: Record<
@@ -110,6 +112,7 @@ export function createBackupRoutes(options: {
       "repo_admin_auto_admin",
       "oidc_issuer",
       "oidc_audience",
+      "membership_mode",
     ]),
     _project_repos: new Set([
       "project_id",
@@ -120,6 +123,8 @@ export function createBackupRoutes(options: {
       "min_read_permission",
       "min_write_permission",
       "max_permission",
+      "membership_enabled",
+      "membership_role_cap",
       "enabled",
       "created_at",
       "created_by",
@@ -159,6 +164,33 @@ export function createBackupRoutes(options: {
       "created_at",
       "created_by",
     ]),
+    _project_memberships: new Set([
+      "membership_id",
+      "project_id",
+      "principal_id",
+      "provider",
+      "identity_host",
+      "subject_id",
+      "subject_kind",
+      "role",
+      "display_name",
+      "granted_by",
+      "granted_at",
+      "revoked_by",
+      "revoked_at",
+    ]),
+    _membership_events: new Set([
+      "event_id",
+      "project_id",
+      "principal_id",
+      "actor_principal_id",
+      "action",
+      "source",
+      "role",
+      "github_repo_id",
+      "details_json",
+      "occurred_at",
+    ]),
   };
   const D1_BACKUP_ORDER: Record<(typeof D1_BACKUP_TABLES)[number], string[]> = {
     _projects: ["project_id"],
@@ -173,6 +205,8 @@ export function createBackupRoutes(options: {
       "github_user_id",
     ],
     _oidc_principals: ["project_id", "issuer", "subject"],
+    _project_memberships: ["project_id", "principal_id", "granted_at"],
+    _membership_events: ["project_id", "occurred_at", "event_id"],
   };
 
   backup.get("/transfer/status", async (c) => {

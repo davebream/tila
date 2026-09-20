@@ -4,14 +4,20 @@ import {
   D1SessionStore,
   D1TokenStore,
   GitHubAppConfigStore,
+  ProjectMembershipStore,
   RepoAllowlistStore,
+  canonicalMembershipPrincipal,
 } from "@tila/backend-d1";
 import {
   GitHubAppExchangeRequestSchema,
   GitHubAppInstallationConfigSchema,
   GitHubExchangeRequestSchema,
+  type MembershipSource,
   OidcExchangeRequestSchema,
+  PROJECT_ROLE_RANK,
+  type ProjectRole,
   type SessionPermission,
+  roleToPermission,
 } from "@tila/schemas";
 import { type Context, Hono } from "hono";
 import { SignJWT, importJWK, jwtVerify } from "jose";
@@ -250,6 +256,8 @@ async function mintSession(opts: {
   matchedRepo: { github_host: string; github_repo_id: number };
   githubUser: { login: string; id: number };
   permission: SessionPermission;
+  role: ProjectRole;
+  membershipSources: MembershipSource[];
   hmacKey: string;
   /**
    * Stable deployment instance id — resolved at the call site via
@@ -271,6 +279,8 @@ async function mintSession(opts: {
     matchedRepo,
     githubUser,
     permission,
+    role,
+    membershipSources,
     hmacKey,
     instanceId,
     jkt,
@@ -295,6 +305,8 @@ async function mintSession(opts: {
     github_login: githubUser.login,
     github_user_id: githubUser.id,
     permission,
+    role,
+    membership_sources: membershipSources,
     expires_at: expiresAt,
     issued_at: now,
     jti,
@@ -319,6 +331,8 @@ async function mintSession(opts: {
     github_login: githubUser.login,
     github_repo_id: matchedRepo.github_repo_id,
     permission,
+    role,
+    membership_sources: membershipSources,
     // NOTE (WI-J2/T11): a stale _idempotency cache entry created before this WI
     // deploys will replay a responseBody WITHOUT instance_id for up to the JWT TTL
     // window. The JWT claim itself is unaffected (always present for fresh mints).
@@ -328,6 +342,66 @@ async function mintSession(opts: {
   };
 
   return { responseBody };
+}
+
+function mirroredRole(
+  permission: SessionPermission,
+  cap: string,
+): Exclude<ProjectRole, "owner"> {
+  const mapped: Exclude<ProjectRole, "owner"> =
+    permission === "read"
+      ? "viewer"
+      : permission === "write"
+        ? "participant"
+        : "maintainer";
+  const parsedCap: Exclude<ProjectRole, "owner"> =
+    cap === "viewer"
+      ? "viewer"
+      : cap === "maintainer"
+        ? "maintainer"
+        : "participant";
+  return PROJECT_ROLE_RANK[mapped] <= PROJECT_ROLE_RANK[parsedCap]
+    ? mapped
+    : parsedCap;
+}
+
+async function resolveGithubMembership(
+  db: D1Database,
+  projectId: string,
+  githubUser: { login: string; id: number },
+  access: Awaited<ReturnType<typeof resolveRepositoryAccess>>,
+) {
+  const store = new ProjectMembershipStore(db);
+  const canonical = canonicalMembershipPrincipal({
+    provider: "github",
+    host: "github.com",
+    user_id: githubUser.id,
+    login: githubUser.login,
+  });
+  const mirrored =
+    access && access.repo.membership_enabled !== 0
+      ? {
+          role: mirroredRole(
+            access.permission,
+            access.repo.membership_role_cap ?? "participant",
+          ),
+          githubRepoId: access.repo.github_repo_id,
+        }
+      : null;
+  const membership = await store.resolve(
+    projectId,
+    canonical.principalId,
+    mirrored,
+  );
+  if (membership?.sources.includes("github-mirrored") && mirrored) {
+    await store.recordMirroredAdmission({
+      projectId,
+      principalId: canonical.principalId,
+      role: membership.role,
+      githubRepoId: mirrored.githubRepoId,
+    });
+  }
+  return membership;
 }
 
 /**
@@ -482,22 +556,9 @@ async function handleAppExchange(
     );
   }
 
-  const repos = await new RepoAllowlistStore(c.env.DB).listForProject(
-    project_id,
-  );
-  if (repos.length === 0) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "repo-not-allowed",
-          message: "No repos registered for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
+  const repos = (
+    await new RepoAllowlistStore(c.env.DB).listForProject(project_id)
+  ).filter((repo) => repo.membership_enabled !== 0);
 
   const access = await resolveRepositoryAccess(repos, (repo) =>
     checkUserMembership(
@@ -507,14 +568,20 @@ async function handleAppExchange(
       githubUser.login,
     ),
   );
-  if (!access) {
+  const membership = await resolveGithubMembership(
+    c.env.DB,
+    project_id,
+    githubUser,
+    access,
+  );
+  if (!membership) {
     await recordExchangeFailure(c.env, ip);
     return c.json(
       {
         ok: false,
         error: {
           code: "repo-not-allowed",
-          message: "Insufficient repository permissions",
+          message: "GitHub principal has no project membership",
           retryable: false,
         },
       },
@@ -525,9 +592,10 @@ async function handleAppExchange(
   // Authorization runs before replay. Including the selected source repository
   // and effective role prevents a tightened policy from replaying broader access.
   const tokenHash = await hashToken(user_token, c.env.HASH_PEPPER);
+  const effectivePermission = roleToPermission(membership.role);
   const idempotencyKey =
     `exchange:${project_id}:${tokenHash}:${jkt ?? "nojkt"}:` +
-    `${access.repo.github_repo_id}:${access.permission}`;
+    `${access?.repo.github_repo_id ?? 0}:${membership.role}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedBody = await checkIdempotentExchange(
@@ -553,9 +621,14 @@ async function handleAppExchange(
     const instanceId = await ensureDeploymentInstanceId(c.env.DB);
     const { responseBody } = await mintSession({
       projectId: project_id,
-      matchedRepo: access.repo,
+      matchedRepo: access?.repo ?? {
+        github_host: "github.com",
+        github_repo_id: 0,
+      },
       githubUser,
-      permission: access.permission,
+      permission: effectivePermission,
+      role: membership.role,
+      membershipSources: membership.sources,
       hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
       instanceId,
       jkt,
@@ -686,23 +759,9 @@ authGithub.post("/exchange", async (c) => {
     );
   }
 
-  const repos = await new RepoAllowlistStore(c.env.DB).listForProject(
-    project_id,
-  );
-
-  if (repos.length === 0) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "repo-not-allowed",
-          message: "No repos registered for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
+  const repos = (
+    await new RepoAllowlistStore(c.env.DB).listForProject(project_id)
+  ).filter((repo) => repo.membership_enabled !== 0);
 
   const access = await resolveRepositoryAccess(repos, (repo) =>
     getRepoPermission(
@@ -713,14 +772,20 @@ authGithub.post("/exchange", async (c) => {
     ),
   );
 
-  if (!access) {
+  const membership = await resolveGithubMembership(
+    c.env.DB,
+    project_id,
+    githubUser,
+    access,
+  );
+  if (!membership) {
     await recordExchangeFailure(c.env, ip);
     return c.json(
       {
         ok: false,
         error: {
           code: "repo-not-allowed",
-          message: "Insufficient repository permissions",
+          message: "GitHub principal has no project membership",
           retryable: false,
         },
       },
@@ -729,9 +794,10 @@ authGithub.post("/exchange", async (c) => {
   }
 
   const tokenHash = await hashToken(github_token, c.env.HASH_PEPPER);
+  const effectivePermission = roleToPermission(membership.role);
   const idempotencyKey =
     `exchange:${project_id}:${tokenHash}:${jkt ?? "nojkt"}:` +
-    `${access.repo.github_repo_id}:${access.permission}`;
+    `${access?.repo.github_repo_id ?? 0}:${membership.role}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedBody = await checkIdempotentExchange(
@@ -757,9 +823,14 @@ authGithub.post("/exchange", async (c) => {
     const instanceId = await ensureDeploymentInstanceId(c.env.DB);
     const { responseBody } = await mintSession({
       projectId: project_id,
-      matchedRepo: access.repo,
+      matchedRepo: access?.repo ?? {
+        github_host: "github.com",
+        github_repo_id: 0,
+      },
       githubUser,
-      permission: access.permission,
+      permission: effectivePermission,
+      role: membership.role,
+      membershipSources: membership.sources,
       hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
       instanceId,
       jkt,
@@ -1436,6 +1507,11 @@ authGithub.post("/exchange-oidc", async (c) => {
         id: claims.actor_id,
       },
       permission: policyResult.policy.max_permission,
+      role: mirroredRole(
+        policyResult.policy.max_permission,
+        policyResult.repo.membership_role_cap ?? "participant",
+      ),
+      membershipSources: ["github-mirrored"],
       hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
       instanceId,
     });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
 
 export const SessionPermissionSchema = z.enum(["read", "write", "admin"]);
 export type SessionPermission = z.infer<typeof SessionPermissionSchema>;
@@ -40,6 +41,8 @@ const SessionBaseSchema = z.object({
    * the legacy accept path (absent binding ⇒ no DPoP check).
    */
   cnf: z.object({ jkt: z.string().min(1) }).optional(),
+  role: ProjectRoleSchema.optional(),
+  membership_sources: z.array(MembershipSourceSchema).optional(),
 });
 
 /**
@@ -103,6 +106,8 @@ export const GitHubExchangeResponseSchema = z.object({
   github_login: z.string(),
   github_repo_id: z.number().int(),
   permission: SessionPermissionSchema,
+  role: ProjectRoleSchema.optional(),
+  membership_sources: z.array(MembershipSourceSchema).optional(),
   /**
    * Stable deployment instance id. Included in the login response so clients
    * can key stored credentials by deployment id rather than by URL (US-CLIENT).
@@ -131,6 +136,8 @@ export const OidcExchangeResponseSchema = z.object({
   oidc_issuer: z.string(),
   oidc_subject: z.string(),
   permission: SessionPermissionSchema,
+  role: ProjectRoleSchema.optional(),
+  membership_sources: z.array(MembershipSourceSchema).optional(),
   /**
    * Stable deployment instance id. Optional for the same back-compat reason as
    * `GitHubExchangeResponseSchema.instance_id`.

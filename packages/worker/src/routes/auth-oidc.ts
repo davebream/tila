@@ -25,11 +25,14 @@
 import {
   D1IdempotencyStore,
   D1RateLimitStore,
-  OidcPrincipalsStore,
+  ProjectMembershipStore,
+  canonicalMembershipPrincipal,
 } from "@tila/backend-d1";
 import {
+  type MembershipSource,
   OidcExchangeRequestSchema,
-  SessionPermissionSchema,
+  type ProjectRole,
+  roleToPermission,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { SESSION_TTL_SECONDS_BY_TIER } from "../config";
@@ -338,14 +341,17 @@ authOidc.post("/exchange", async (c) => {
     return c.json(cachedBody, 200);
   }
 
-  // 9. Principal allowlist check
-  const principalsStore = new OidcPrincipalsStore(c.env.DB);
-  const principalRow = await principalsStore.isAllowed(
-    project_id,
-    oidcIssuer,
+  // 9. Canonical project membership check
+  const canonical = canonicalMembershipPrincipal({
+    provider: "oidc",
+    issuer: oidcIssuer,
     subject,
+  });
+  const membership = await new ProjectMembershipStore(c.env.DB).resolve(
+    project_id,
+    canonical.principalId,
   );
-  if (!principalRow) {
+  if (!membership) {
     emitPrincipalNotAllowedAnalytics(c.env);
     await recordExchangeFailure(c.env, ip);
     return c.json(
@@ -353,8 +359,7 @@ authOidc.post("/exchange", async (c) => {
         ok: false,
         error: {
           code: "principal-not-allowed",
-          message:
-            "Principal is not registered or is disabled for this project",
+          message: "OIDC principal has no project membership",
           retryable: false,
         },
       },
@@ -362,16 +367,7 @@ authOidc.post("/exchange", async (c) => {
     );
   }
 
-  // 10. Validate permission (default to read on failure — least privilege)
-  const permissionParsed = SessionPermissionSchema.safeParse(
-    principalRow.permission,
-  );
-  if (!permissionParsed.success) {
-    console.warn(
-      `[auth-oidc] principal (${project_id}, ${oidcIssuer}, ${subject}) has unrecognized permission "${principalRow.permission}"; defaulting to "read"`,
-    );
-  }
-  const permission = permissionParsed.success ? permissionParsed.data : "read";
+  const permission = roleToPermission(membership.role);
 
   // 11. Resolve deployment instance id (B2 replay protection — WI-E).
   // Failure here propagates as 500 — we must not mint an unbound token.
@@ -399,6 +395,8 @@ authOidc.post("/exchange", async (c) => {
     oidcIssuer,
     subject,
     permission,
+    role: membership.role,
+    membershipSources: membership.sources,
     hmacKey,
     idempotencyStore,
     idempotencyKey,
@@ -417,6 +415,8 @@ async function mintAndStoreOidcSession(opts: {
   oidcIssuer: string;
   subject: string;
   permission: "read" | "write" | "admin";
+  role: ProjectRole;
+  membershipSources: MembershipSource[];
   hmacKey: string;
   idempotencyStore: D1IdempotencyStore;
   idempotencyKey: string;
@@ -433,6 +433,8 @@ async function mintAndStoreOidcSession(opts: {
     oidcIssuer,
     subject,
     permission,
+    role,
+    membershipSources,
     hmacKey,
     idempotencyStore,
     idempotencyKey,
@@ -453,6 +455,8 @@ async function mintAndStoreOidcSession(opts: {
     oidc_subject: subject,
     actor_name: subject,
     permission,
+    role,
+    membership_sources: membershipSources,
     expires_at: expiresAt,
     issued_at: now,
     jti: sessionJti,
@@ -478,6 +482,8 @@ async function mintAndStoreOidcSession(opts: {
     oidc_issuer: oidcIssuer,
     oidc_subject: subject,
     permission,
+    role,
+    membership_sources: membershipSources,
   };
 
   // Store idempotency record (non-fatal — response is still valid)

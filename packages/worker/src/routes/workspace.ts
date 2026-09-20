@@ -3,9 +3,15 @@ import {
   D1RateLimitStore,
   D1SessionStore,
   GitHubAppConfigStore,
+  ProjectMembershipStore,
   RepoAllowlistStore,
 } from "@tila/backend-d1";
-import type { SessionPermission } from "@tila/schemas";
+import {
+  type MembershipSource,
+  type ProjectRole,
+  type SessionPermission,
+  roleToPermission,
+} from "@tila/schemas";
 import { Hono } from "hono";
 import { z } from "zod";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
@@ -21,6 +27,7 @@ import {
   resolveRepositoryAccess,
 } from "../lib/repo-access-policy";
 import { invalidateSession } from "../lib/session-cache";
+import { principalIdFor } from "../middleware/request-identity";
 import type {
   CookieSessionTokenResult,
   Env,
@@ -43,6 +50,62 @@ function permissionToScope(permission: SessionPermission): string {
   return permission === "read" ? "read" : "full";
 }
 
+async function createSelectedSession(
+  c: import("hono").Context<AppEnv>,
+  wsSession: WorkspaceSessionTokenResult,
+  projectId: string,
+  role: ProjectRole,
+  sources: MembershipSource[],
+  sourceRepoId?: number,
+): Promise<Response> {
+  const sessionStore = new D1SessionStore(c.env.DB);
+  try {
+    await sessionStore.revoke(wsSession.sessionHash);
+  } catch {
+    // Non-fatal: proceed to create the project-scoped replacement.
+  }
+  invalidateSession(wsSession.sessionHash);
+
+  const newSessionToken = crypto.randomUUID();
+  const newSessionHash = await hashToken(newSessionToken, c.env.HASH_PEPPER);
+  const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
+  const permission = roleToPermission(role);
+  const scopes = permissionToScope(permission);
+  await sessionStore.create({
+    sessionHash: newSessionHash,
+    projectId,
+    tokenHash: "",
+    actorName: wsSession.githubLogin,
+    principalId: wsSession.principalId ?? "",
+    scopes,
+    permission,
+    role,
+    membershipSource: JSON.stringify(sources),
+    sourceRepoId,
+    expiresAt,
+  });
+
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      projectId,
+      scopes,
+      role,
+      membership_sources: sources,
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Set-Cookie": buildSessionCookie(
+          newSessionToken,
+          isLocalhost(c.req.url),
+        ),
+      },
+    },
+  );
+}
+
 workspace.get("/projects", async (c) => {
   const tokenResult = c.get("tokenResult");
   const githubLogin =
@@ -51,6 +114,17 @@ workspace.get("/projects", async (c) => {
       : tokenResult.name;
 
   const registry = new D1ProjectRegistry(c.env.DB);
+  let principalId: string | undefined;
+  try {
+    principalId = principalIdFor(tokenResult);
+  } catch {
+    principalId = undefined;
+  }
+  const explicitProjects = principalId
+    ? await new ProjectMembershipStore(c.env.DB).listProjectsForPrincipal(
+        principalId,
+      )
+    : [];
 
   if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
     // SEC-4: With the GitHub App unconfigured there is no way to resolve
@@ -62,7 +136,13 @@ workspace.get("/projects", async (c) => {
     // a project yet.
     const scopedProjectId = tokenResult.projectId;
     if (!scopedProjectId) {
-      return c.json({ ok: true, projects: [] });
+      return c.json({
+        ok: true,
+        projects: explicitProjects.map((project) => ({
+          ...project,
+          repos: [],
+        })),
+      });
     }
     const meta = await registry.get(scopedProjectId);
     return c.json({
@@ -234,6 +314,20 @@ workspace.post("/select", async (c) => {
 
   const { project_id: projectId } = parsed.data;
 
+  const explicitMembership = await new ProjectMembershipStore(c.env.DB).resolve(
+    projectId,
+    wsSession.principalId,
+  );
+  if (explicitMembership) {
+    return createSelectedSession(
+      c,
+      wsSession,
+      projectId,
+      explicitMembership.role,
+      explicitMembership.sources,
+    );
+  }
+
   // Check GitHub App config
   if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
     return c.json(
@@ -320,43 +414,20 @@ workspace.post("/select", async (c) => {
     );
   }
 
-  // Revoke workspace session and evict from cache
-  const sessionStore = new D1SessionStore(c.env.DB);
-  try {
-    await sessionStore.revoke(wsSession.sessionHash);
-  } catch {
-    // Non-fatal: proceed to create new session
-  }
-  invalidateSession(wsSession.sessionHash);
-
-  // Create project-scoped session
-  const newSessionToken = crypto.randomUUID();
-  const newSessionHash = await hashToken(newSessionToken, c.env.HASH_PEPPER);
-  const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
-  const permission = access.permission;
-  const scopes = permissionToScope(permission);
-  await sessionStore.create({
-    sessionHash: newSessionHash,
+  const mirroredRole: ProjectRole =
+    access.permission === "read"
+      ? "viewer"
+      : access.permission === "write"
+        ? "participant"
+        : "maintainer";
+  return createSelectedSession(
+    c,
+    wsSession,
     projectId,
-    tokenHash: "",
-    actorName: login,
-    principalId: wsSession.principalId,
-    scopes,
-    permission,
-    expiresAt,
-  });
-
-  // Build session cookie
-  const localDev = isLocalhost(c.req.url);
-  const cookie = buildSessionCookie(newSessionToken, localDev);
-
-  return new Response(JSON.stringify({ ok: true, projectId, scopes }), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Set-Cookie": cookie,
-    },
-  });
+    mirroredRole,
+    ["github-mirrored"],
+    access.repo.github_repo_id,
+  );
 });
 
 const WORKSPACE_SESSION_TTL_MS = 8 * 60 * 60 * 1000;

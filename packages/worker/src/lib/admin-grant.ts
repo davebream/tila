@@ -13,7 +13,7 @@
  * SECURITY: Never serialize or log `env` (holds GITHUB_APP_PRIVATE_KEY)
  * or any GitHub token / Authorization header value.
  */
-import { AdminGrantsStore, GitHubAppConfigStore } from "@tila/backend-d1";
+import { GitHubAppConfigStore, ProjectMembershipStore } from "@tila/backend-d1";
 import { GITHUB_LOGIN_REGEX } from "@tila/schemas";
 import { z } from "zod";
 import type { Env } from "../types";
@@ -194,27 +194,23 @@ export async function applyAdminGrant(
   }
 
   // ── Grant (idempotent) ────────────────────────────────────────────────────
-  const store = new AdminGrantsStore(env.DB);
-
-  // Pre-check: derive granted boolean without modifying AdminGrantsStore interface.
-  // Non-transactional race is accepted (documented in design C2).
-  const alreadyAdmin = await store.isActiveAdmin(
+  const result = await new ProjectMembershipStore(env.DB).grant({
     projectId,
-    "github.com",
-    githubUserId,
-  );
+    principal: {
+      provider: "github",
+      host: "github.com",
+      user_id: githubUserId,
+      login: githubLoginSnapshot ?? undefined,
+    },
+    subjectKind: "human",
+    role: "owner",
+    actorPrincipalId:
+      grantedByUserId === null
+        ? "bootstrap:admin-seed"
+        : `github:github.com:${grantedByUserId}`,
+  });
 
-  if (!alreadyAdmin) {
-    await store.grant({
-      projectId,
-      githubUserId,
-      githubLoginSnapshot: githubLoginSnapshot ?? undefined,
-      grantedByUserId: grantedByUserId ?? undefined,
-      githubHost: "github.com",
-    });
-  }
-
-  const granted = !alreadyAdmin;
+  const granted = result.created;
 
   return {
     ok: true,

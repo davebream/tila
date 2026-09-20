@@ -6,6 +6,7 @@ import {
 import { ClaimModeSchema } from "./claim";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
+import { ProjectRoleSchema } from "./membership";
 import { RecordKeySchema, RecordTagSchema, RecordTypeSchema } from "./record";
 import {
   EntityRelationshipSchema,
@@ -1055,11 +1056,23 @@ export const RepoAccessPolicySchema = z
     min_read_permission: GitHubRepositoryPermissionSchema,
     min_write_permission: GitHubRepositoryPermissionSchema,
     max_permission: SessionPermissionSchema,
+    membership_enabled: z.boolean().default(true),
+    membership_role_cap: ProjectRoleSchema.exclude(["owner"]).default(
+      "participant",
+    ),
   })
   .superRefine(validateRepoAccessThresholds);
 export type RepoAccessPolicy = z.infer<typeof RepoAccessPolicySchema>;
 
-export const RepoAccessPolicyRequestSchema = RepoAccessPolicySchema;
+export const RepoAccessPolicyRequestSchema = z
+  .object({
+    min_read_permission: GitHubRepositoryPermissionSchema,
+    min_write_permission: GitHubRepositoryPermissionSchema,
+    max_permission: SessionPermissionSchema,
+    membership_enabled: z.boolean().optional(),
+    membership_role_cap: ProjectRoleSchema.exclude(["owner"]).optional(),
+  })
+  .superRefine(validateRepoAccessThresholds);
 export type RepoAccessPolicyRequest = z.infer<
   typeof RepoAccessPolicyRequestSchema
 >;
@@ -1123,6 +1136,10 @@ export const RepoRegisterRequestSchema = z
     min_write_permission:
       GitHubRepositoryPermissionSchema.optional().default("write"),
     max_permission: SessionPermissionSchema.optional().default("write"),
+    membership_enabled: z.boolean().optional().default(false),
+    membership_role_cap: ProjectRoleSchema.exclude(["owner"])
+      .optional()
+      .default("participant"),
   })
   .superRefine(validateRepoAccessThresholds);
 export type RepoRegisterRequest = z.infer<typeof RepoRegisterRequestSchema>;

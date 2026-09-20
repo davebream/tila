@@ -1,4 +1,10 @@
-import { D1SessionStore, revokePrincipalBatch } from "@tila/backend-d1";
+import {
+  D1SessionStore,
+  ProjectMembershipStore,
+  canonicalMembershipPrincipal,
+  revokePrincipalBatch,
+} from "@tila/backend-d1";
+import { PrincipalRevocationRequestSchema } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -54,6 +60,96 @@ const RevokeSessionRequestSchema = z.object({
 const RevokePrincipalRequestSchema = z.object({
   host: z.string().min(1).max(255).optional(),
   revoke_tokens: z.array(z.string().min(1).max(255)).max(50).optional(),
+});
+
+admin.post("/principals/revoke", requireProjectAdmin, async (c) => {
+  const limited = await checkExchangeRateLimit(c);
+  if (limited) return limited;
+
+  const parsed = PrincipalRevocationRequestSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "A structured GitHub or OIDC principal is required",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  }
+
+  const projectId = c.get("projectId") ?? "";
+  const tokenResult = c.get("tokenResult");
+  const canonical = canonicalMembershipPrincipal(parsed.data.principal);
+  const membershipStore = new ProjectMembershipStore(c.env.DB);
+  const target = await membershipStore.getActive(
+    projectId,
+    canonical.principalId,
+  );
+  if (
+    tokenResult.kind !== "d1-token" &&
+    target?.role === "owner" &&
+    (await membershipStore.countActiveOwners(projectId)) <= 1
+  ) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "last-owner",
+          message: "Cannot revoke the last project owner",
+          retryable: false,
+        },
+      },
+      409,
+    );
+  }
+
+  const callerUserId =
+    tokenResult.kind === "session" ? (tokenResult.githubUserId ?? null) : null;
+  const actor = c.get("principalId") ?? "bootstrap:d1-token";
+  const tokenNames = parsed.data.revoke_tokens ?? [];
+  const result = await revokePrincipalBatch(c.env.DB, {
+    projectId,
+    host: canonical.identityHost,
+    subject: canonical.subjectId,
+    revokedByUserId: callerUserId,
+    revokedBySnapshot: actor,
+    tokenNames,
+    nowMsValue: nowMs(),
+    nowSecValue: nowSeconds(),
+  });
+
+  revokeSubjectInCache(
+    projectId,
+    canonical.identityHost,
+    canonical.subjectId,
+    result.revokedBefore,
+  );
+  for (const hash of result.tokenHashes) invalidate(hash);
+  const sessionStore = new D1SessionStore(c.env.DB);
+  for (const hash of result.tokenHashes) {
+    try {
+      await sessionStore.deleteByTokenHash(hash);
+    } catch (error) {
+      console.error(
+        "[admin] structured principal revoke session cascade failed:",
+        error,
+      );
+    }
+  }
+
+  return c.json({
+    ok: true,
+    principal: parsed.data.principal,
+    memberships_revoked: result.grantsRevoked,
+    subject_revoked_before: result.revokedBefore,
+    tokens_revoked: tokenNames,
+  });
 });
 
 admin.post("/restart", requireProjectAdmin, async (c) => {
@@ -251,6 +347,34 @@ admin.post("/principals/:id/revoke", requireProjectAdmin, async (c) => {
 
   const host = parsed.data.host ?? "github.com";
   const tokenNames = parsed.data.revoke_tokens ?? [];
+
+  const canonicalTarget = canonicalMembershipPrincipal({
+    provider: "github",
+    host,
+    user_id: idNum,
+  });
+  const membershipStore = new ProjectMembershipStore(c.env.DB);
+  const targetMembership = await membershipStore.getActive(
+    projectId,
+    canonicalTarget.principalId,
+  );
+  if (
+    tokenResult.kind !== "d1-token" &&
+    targetMembership?.role === "owner" &&
+    (await membershipStore.countActiveOwners(projectId)) <= 1
+  ) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "last-owner",
+          message: "Cannot revoke the last project owner",
+          retryable: false,
+        },
+      },
+      409,
+    );
+  }
 
   // Resolve acting admin identity (session → githubUserId; d1-token → null).
   const callerUserId =

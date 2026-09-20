@@ -1,3 +1,4 @@
+import { PROJECT_ROLE_RANK, type ProjectRole } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
 import { reverifySessionPermission } from "../lib/permission-recheck";
 import type { Env, HonoVariables } from "../types";
@@ -15,6 +16,12 @@ const PERMISSION_LEVELS: Record<string, number> = {
   read: 1,
   write: 2,
   [ADMIN_PERMISSION]: 3,
+};
+
+const REQUIRED_ROLE: Record<"read" | "write" | "admin", ProjectRole> = {
+  read: "viewer",
+  write: "participant",
+  admin: "maintainer",
 };
 
 /**
@@ -78,24 +85,43 @@ export function requirePermission(
       );
     }
 
-    if (tokenResult.kind === "session") {
-      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
-      const requiredLevel = PERMISSION_LEVELS[level] ?? 0;
-
-      if (userLevel < requiredLevel) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "permission-denied",
-              message: `Requires ${level} permission`,
-              retryable: false,
-            },
+    const snapshotPermission =
+      tokenResult.kind === "session" ||
+      tokenResult.kind === "cookie-session" ||
+      tokenResult.kind === "oidc-session"
+        ? tokenResult.permission
+        : "";
+    // Directly-mounted route tests and compatibility integrations may invoke
+    // the guard without projectMembershipMiddleware. Production project routes
+    // always set effectiveRole, so request-time membership remains authoritative.
+    const effectiveRole =
+      c.get("effectiveRole") ??
+      (snapshotPermission === "read"
+        ? "viewer"
+        : snapshotPermission === "write"
+          ? "participant"
+          : snapshotPermission === "admin"
+            ? "maintainer"
+            : undefined);
+    const requiredRole = REQUIRED_ROLE[level];
+    if (
+      !effectiveRole ||
+      PROJECT_ROLE_RANK[effectiveRole] < PROJECT_ROLE_RANK[requiredRole]
+    ) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "permission-denied",
+            message: `Requires ${requiredRole} role`,
+            retryable: false,
           },
-          403,
-        );
-      }
+        },
+        403,
+      );
+    }
 
+    if (tokenResult.kind === "session") {
       // Snapshot gate passed. For admin-level or destructive (DELETE) routes,
       // perform a live GitHub permission re-verify (Layer B, WI-H / #131).
       if (recheckInScope(level, c.req.method)) {
@@ -123,21 +149,7 @@ export function requirePermission(
       // Do NOT call reverifySessionPermission — that helper is GitHub-specific
       // (reads githubHost/githubRepoId/githubLogin) and OidcSessionTokenResult
       // carries none of those fields. The permission is locked at exchange time.
-      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
-      if (userLevel >= (PERMISSION_LEVELS[level] ?? 0)) {
-        return next();
-      }
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "permission-denied",
-            message: `Requires ${level} permission`,
-            retryable: false,
-          },
-        },
-        403,
-      );
+      return next();
     }
 
     if (tokenResult.kind === "cookie-session") {
@@ -146,23 +158,7 @@ export function requirePermission(
       // same as the bearer session branch above — closes the privilege-escalation gap
       // where a GitHub *write* user could previously reach admin routes via cookie
       // (because the old code mapped scopes:"full" → admin unconditionally).
-      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
-
-      if (userLevel >= (PERMISSION_LEVELS[level] ?? 0)) {
-        return next();
-      }
-
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "permission-denied",
-            message: `Requires ${level} permission`,
-            retryable: false,
-          },
-        },
-        403,
-      );
+      return next();
     }
 
     // Unknown token kind -- deny

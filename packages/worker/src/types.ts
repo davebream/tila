@@ -1,5 +1,9 @@
 import type { TokenResult } from "@tila/backend-d1";
-import type { EnvironmentMetadata } from "@tila/schemas";
+import type {
+  EnvironmentMetadata,
+  MembershipSource,
+  ProjectRole,
+} from "@tila/schemas";
 
 export interface Env {
   DB: D1Database;
@@ -55,6 +59,8 @@ export interface SessionTokenResult {
   // WI-C subject-revocation gate. Optional so existing test factories that don't
   // set a jti stay valid.
   jti?: string;
+  role?: ProjectRole;
+  membershipSources?: MembershipSource[];
 }
 
 export interface CookieSessionTokenResult {
@@ -67,6 +73,9 @@ export interface CookieSessionTokenResult {
   expiresAt: number;
   permission: string;
   principalId?: string;
+  role?: ProjectRole;
+  membershipSources?: MembershipSource[];
+  sourceRepoId?: number;
 }
 
 export interface WorkspaceSessionTokenResult {
@@ -97,6 +106,8 @@ export interface OidcSessionTokenResult {
   expiresAt: number;
   oidcIssuer: string;
   oidcSubject: string;
+  role?: ProjectRole;
+  membershipSources?: MembershipSource[];
 }
 
 export type UnifiedTokenResult =
@@ -117,6 +128,9 @@ export interface HonoVariables {
   principalId?: string;
   participantId?: string;
   environment?: EnvironmentMetadata;
+  effectiveRole?: ProjectRole;
+  membershipSources?: MembershipSource[];
+  membershipRepoId?: number;
   // Caller-scoped idempotency key + request-body hash, computed by the
   // idempotency middleware and forwarded to the DO so it can dedup the
   // fence-mutating write inside its own transaction (audit B1). Present only
