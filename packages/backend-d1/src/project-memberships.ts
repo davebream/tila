@@ -403,8 +403,8 @@ export class ProjectMembershipStore {
   ): Promise<MembershipEventRow[]> {
     const sql =
       cursor === null
-        ? "SELECT * FROM _membership_events WHERE project_id = ? ORDER BY occurred_at DESC, event_id DESC LIMIT ?"
-        : "SELECT * FROM _membership_events WHERE project_id = ? AND occurred_at < ? ORDER BY occurred_at DESC, event_id DESC LIMIT ?";
+        ? "SELECT * FROM _membership_events WHERE project_id = ? ORDER BY occurred_at DESC, rowid DESC LIMIT ?"
+        : "SELECT * FROM _membership_events WHERE project_id = ? AND occurred_at < ? ORDER BY occurred_at DESC, rowid DESC LIMIT ?";
     const statement =
       cursor === null
         ? this.db.prepare(sql).bind(projectId, limit)
