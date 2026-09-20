@@ -398,29 +398,37 @@ describe("LocalProject", () => {
 
   describe("SignalBackend", () => {
     it("sendSignal stores a signal and inbox returns it", async () => {
-      const result = await project.sendSignal(
-        { target: "*", kind: "info" },
-        "local",
-      );
+      const result = await project.sendSignal({
+        target: {
+          type: "participant",
+          principal_id: "local:test-org",
+          participant_id: "participant-1",
+        },
+        kind: "info",
+      });
       expect(result.id).toMatch(/^sig_/);
-      const signals = await project.listSignals("local");
+      const signals = await project.listSignals();
       const found = signals.find((s) => s.id === result.id);
       expect(found).toBeDefined();
       expect(found?.kind).toBe("info");
     });
 
     it("ackSignal marks signal as acknowledged", async () => {
-      const result = await project.sendSignal(
-        { target: "*", kind: "test-ack" },
-        "local",
-      );
-      const ackResult = await project.ackSignal(result.id, "local");
+      const result = await project.sendSignal({
+        target: {
+          type: "participant",
+          principal_id: "local:test-org",
+          participant_id: "participant-1",
+        },
+        kind: "info",
+      });
+      const ackResult = await project.ackSignal(result.id);
       expect(ackResult.found).toBe(true);
       expect(ackResult.authorized).toBe(true);
     });
 
     it("ackSignal returns found=false for missing signal", async () => {
-      const result = await project.ackSignal("sig_nonexistent", "local");
+      const result = await project.ackSignal("sig_nonexistent");
       expect(result.found).toBe(false);
     });
   });

@@ -41,7 +41,7 @@ describe("MCP README tool-table parity", () => {
   beforeEach(() => {
     savedCompatAliases = process.env.TILA_MCP_COMPAT_ALIASES;
     savedToolGroups = process.env.TILA_MCP_TOOLS;
-    // Clear both env vars so registerAllTools uses canonical default (40 tools)
+    // Clear both env vars so registerAllTools uses the canonical default.
     process.env.TILA_MCP_COMPAT_ALIASES = "";
     process.env.TILA_MCP_TOOLS = "";
   });
@@ -51,7 +51,7 @@ describe("MCP README tool-table parity", () => {
     process.env.TILA_MCP_TOOLS = savedToolGroups;
   });
 
-  it("README tool table lists exactly the 40 registered tools (no phantom, no missing)", async () => {
+  it("README tool table lists exactly the 45 registered tools (no phantom, no missing)", async () => {
     // 1. Enumerate registered tools via the real seam
     const server = createMockServer();
     registerAllTools(
@@ -65,7 +65,7 @@ describe("MCP README tool-table parity", () => {
     );
     const registeredSet = new Set(registeredNames);
 
-    expect(registeredNames.length).toBe(40);
+    expect(registeredNames.length).toBe(45);
 
     // 2. Parse README
     const readme = await readFile(README_PATH, "utf8");
@@ -73,7 +73,7 @@ describe("MCP README tool-table parity", () => {
     const readmeCount = parseReadmeToolCount(readme);
 
     // 3. Stated count must equal registered count
-    expect(readmeCount).toBe(40);
+    expect(readmeCount).toBe(45);
 
     // 4. No phantom tools in README (tools listed that aren't registered)
     const phantoms = [...readmeNames].filter((n) => !registeredSet.has(n));

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { TilaApiError } from "../../client";
 import {
   type TilaLocal,
   buildLocalResources,
@@ -104,6 +105,53 @@ describe("createTilaLocal — full local round-trip", () => {
 
     const got = await records.get("note", "cfg/main");
     expect(got.record.value).toEqual({ body: "v2" });
+  });
+
+  it("signals adapter enforces the same participant-scoped ack errors as remote", async () => {
+    const senderSignals = buildLocalResources(
+      local.project,
+      local.artifacts,
+    ).signals;
+    const sent = await senderSignals.send({
+      target: {
+        type: "participant",
+        principal_id: "local:recipient",
+        participant_id: "recipient-1",
+      },
+      kind: "request",
+    });
+
+    await expect(senderSignals.ack(sent.id)).rejects.toMatchObject({
+      status: 403,
+      code: "forbidden",
+    } satisfies Partial<TilaApiError>);
+
+    const recipient = await createTilaLocal({
+      dbPath: join(dir, "project.db"),
+      artifactsPath: join(dir, "artifacts"),
+      project: "test-project",
+      skipFilesystemCheck: true,
+      identity: {
+        principal_id: "local:recipient",
+        participant_id: "recipient-1",
+        environment: { client_name: "recipient-test" },
+      },
+    });
+    try {
+      const recipientSignals = buildLocalResources(
+        recipient.project,
+        recipient.artifacts,
+      ).signals;
+      await expect(recipientSignals.ack(sent.id)).resolves.toEqual({
+        ok: true,
+      });
+      await expect(recipientSignals.ack("sig_missing")).rejects.toMatchObject({
+        status: 404,
+        code: "not-found",
+      } satisfies Partial<TilaApiError>);
+    } finally {
+      recipient.close();
+    }
   });
 
   it("tasks.archive honors the caller fence (stale fence rejected, parity with remote)", async () => {

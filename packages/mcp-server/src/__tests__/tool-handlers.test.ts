@@ -131,21 +131,29 @@ describe("tool handler invocation — signals", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("tila_signal_send → signals.send with the full request object", async () => {
-    const payload = { ok: true, id: "sig-1" };
+    const payload = { ok: true, id: "sig-1", recipient_count: 1 };
     facade.signals.send.mockResolvedValue(payload);
 
     const handler = findToolHandler(server, "tila_signal_send");
     const result = await handler({
-      target: "agent-2",
-      kind: "assignment",
+      target: {
+        type: "participant",
+        principal_id: "principal-2",
+        participant_id: "participant-2",
+      },
+      kind: "request",
       resource: "T-1",
       payload: { note: "go" },
       ttl_ms: 60000,
     });
 
     expect(facade.signals.send).toHaveBeenCalledWith({
-      target: "agent-2",
-      kind: "assignment",
+      target: {
+        type: "participant",
+        principal_id: "principal-2",
+        participant_id: "participant-2",
+      },
+      kind: "request",
       resource: "T-1",
       payload: { note: "go" },
       ttl_ms: 60000,

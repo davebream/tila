@@ -278,6 +278,10 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "dpop-invalid",
     "participant-required",
     "invalid-environment",
+    "forbidden",
+    "signal-group-not-found",
+    "no-active-recipients",
+    "signal-expired",
   ]);
 
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {
