@@ -476,3 +476,4 @@ export {
 } from "./record";
 
 export * from "./continuity";
+export * from "./artifact-version";

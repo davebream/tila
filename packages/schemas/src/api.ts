@@ -923,6 +923,7 @@ export type UnifiedSearchQuery = z.infer<typeof UnifiedSearchQuerySchema>;
 // --- Artifact response schemas (promoted from CLI) ---
 
 export const ArtifactTextWriteRequestSchema = z.object({
+  ...ArtifactVersionFieldsSchema.shape,
   content: z.string().min(1).max(1_000_000),
   kind: z.string().min(1),
   mime_type: z.string().default("text/markdown"),
@@ -1351,3 +1352,4 @@ export const RecordTypesResponseSchema = z.object({
 });
 
 export type RecordTypesResponse = z.infer<typeof RecordTypesResponseSchema>;
+import { ArtifactVersionFieldsSchema } from "./artifact-version";

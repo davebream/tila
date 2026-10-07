@@ -940,6 +940,44 @@ function installTransferGuards(
   }
 }
 
+export function runMigration0027(storage: MigrationStorage): void {
+  for (const [name, type] of [
+    ["lineage_id", "TEXT"],
+    ["revision", "INTEGER"],
+    ["restored_from", "TEXT"],
+  ]) {
+    if (!columnExists(storage, "artifact_pointers", name)) {
+      storage.sql.exec(
+        `ALTER TABLE artifact_pointers ADD COLUMN ${name} ${type}`,
+      );
+    }
+  }
+  storage.sql.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_revision ON artifact_pointers(lineage_id, revision);
+    CREATE TABLE IF NOT EXISTS artifact_lineages (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, kind TEXT NOT NULL,
+      resource TEXT, next_revision INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS artifact_revision_operations (
+      id TEXT PRIMARY KEY, lineage_id TEXT NOT NULL, request_hash TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('reserved','accepted','published','aborted')),
+      record TEXT NOT NULL, search_text TEXT, created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifact_operations_lineage ON artifact_revision_operations(lineage_id, state);
+  `);
+  for (const table of ["artifact_lineages", "artifact_revision_operations"]) {
+    for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
+      storage.sql.exec(`
+        CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
+        BEFORE ${operation} ON ${table}
+        WHEN EXISTS (SELECT 1 FROM _project_transfer_state WHERE singleton = 1 AND applying = 0
+          AND (expires_at IS NULL OR expires_at > (unixepoch('subsec') * 1000)))
+        BEGIN SELECT RAISE(ABORT, 'project-maintenance'); END;
+      `);
+    }
+  }
+}
+
 /**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
@@ -998,4 +1036,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 24, run: runMigration0024 },
   { version: 25, run: runMigration0025 },
   { version: 26, run: runMigration0026 },
+  { version: 27, run: runMigration0027 },
 ];

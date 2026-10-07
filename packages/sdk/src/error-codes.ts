@@ -30,6 +30,12 @@ export const TILA_ERRORS = {
   PARTICIPANT_REQUIRED: "participant-required",
   INVALID_ENVIRONMENT: "invalid-environment",
   // DO errors (project-do-router — kebab-case wire values)
+  ARTIFACT_UNAVAILABLE: "artifact-unavailable",
+  ARTIFACT_LINEAGE_BUSY: "artifact-lineage-busy",
+  LINEAGE_CONFLICT: "lineage-conflict",
+  ARTIFACT_OPERATION_ABORTED: "artifact-operation-aborted",
+  INVALID_CURSOR: "invalid-cursor",
+  ARTIFACT_STORAGE_UNAVAILABLE: "artifact-storage-unavailable",
   STALE_FENCE: "stale-fence",
   NOT_FOUND: "not-found",
   GATE_ALREADY_SETTLED: "gate-already-settled",

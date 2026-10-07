@@ -17,6 +17,8 @@ const EXPECTED_DOMAIN_TABLES = [
   "entities",
   "entity_relationships",
   "artifact_pointers",
+  "artifact_lineages",
+  "artifact_revision_operations",
   "entity_artifact_references",
   "artifact_relationships",
   "journal",
