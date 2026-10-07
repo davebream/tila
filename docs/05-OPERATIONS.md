@@ -1123,3 +1123,128 @@ Current D1 installation/repository policy is checked before cached grants. Exter
 uninstall/revocation becomes visible when the verified entry expires or is invalidated;
 there is no cross-isolate instant-invalidation guarantee. After expiry, failure to
 verify denies the operation without using the stale grant.
+
+## Scoped service credentials (#185)
+
+Integrations authenticate as stable project service principals (`service:<uuid>`).
+A credential version identifies a secret, while `X-Tila-Participant-Id` identifies
+a running participant. Rotation changes the version, preserving the principal and
+canonical membership. Domain mutations keep both principal and participant
+attribution. Credential audit events record the authenticated principal, version,
+target and timestamp; they never contain bearer secrets or secret hashes.
+
+### Migration and compatibility
+
+Apply `packages/worker/migrations/global/0027_scoped_credentials.sql` to D1 **before**
+deploying the Worker and updated clients. It preserves existing token hashes, IDs,
+memberships and historical attribution, and adds service accounts, logical
+credentials, secret versions, workload bindings and audit events. No CI changes or
+automatic deployment are part of this change. Review and merge the authentication
+change explicitly before deploying it.
+
+Existing `full` keys retain their legacy compatibility policy. The old SDK
+`tokens.issue(name, note?)` signature remains supported, but legacy issuance is
+deprecated with no removal date. Only a legacy full bearer key can issue another
+legacy full key. Existing GitHub and OIDC login flows and canonical human memberships
+remain supported. Native services use the existing membership API to change roles.
+Project backups preserve service identities, workload bindings and audit history;
+API secrets are excluded, as with existing token backups. Issue fresh keys after a
+restore. Old secret versions do not become valid merely because metadata is restored.
+
+### Issuance examples
+
+Create a service with the required membership, then copy its returned `principal_id`
+into issuance. Owner membership and the explicit management capability are required
+for scoped callers; a legacy full bearer remains a bootstrap administrator.
+
+```sh
+tila service-account create --name reporter --display-name "Read-only reporting" --role viewer --json
+tila token issue --name reporter-key --principal 'service:<uuid>' --preset read-only --json
+
+# Coordination only: create this service with participant membership.
+tila token issue --name coordinator --principal 'service:<uuid>' --preset coordination-only --json
+
+# Upload artifacts without deletion: participant membership.
+tila token issue --name publisher --principal 'service:<uuid>' --preset artifact-writer --json
+
+# Exact task types and slash-delimited record prefixes: participant membership.
+tila token issue --name team-a --principal 'service:<uuid>' --role participant \
+  --capabilities tasks:read,tasks:write,records:read,records:write \
+  --restrictions '{"task_types":["task"],"records":[{"type":"config","key_prefixes":["team/a"]}]}' --json
+```
+
+The updated CLI requires a principal and defaults to the viewer/read-only preset.
+SDK object issuance accepts `{ name, principal_id, policy?, expires_at?, jkt? }`;
+omitting `policy` with a principal selects the same read-only preset. Presets expand
+to explicit capability lists, never wildcards. Use `tila token inspect --json` or
+`GET /api/whoami` to inspect principal, effective role/capabilities, restrictions,
+expiry and legacy status. `GET /api/tokens` also returns logical/version IDs, policy,
+effective policy, status, expiry and version retirement deadlines, without secrets.
+
+Absent namespace restrictions mean unrestricted; empty arrays grant nothing.
+Task types match exactly. Record prefix `team/a` permits that key and descendants
+such as `team/a/config`, but excludes `team/ab`. Lists filter before counts and
+pagination. Restricted keys cannot use project-wide search, journal, summary,
+exports, artifact access or global maintenance. Unsafe derived task views are
+also denied. Template expansion checks every generated task before any write.
+Ordinary writes do not imply delete: archive/unarchive and relationship removal
+require explicit delete capabilities. A service promotion cannot expand a key's
+issuance ceiling; demotions and revocations immediately reduce current authority.
+
+### Expiry, rotation and revocation
+
+New scoped keys expire after 90 days. Owners can specify an ISO timestamp or Unix
+seconds with `--expires`, or explicitly request `--expires never`. Save the returned
+secret once: it is never persisted for response replay.
+
+```sh
+tila token rotate reporter-key --expected-token-id '<current-version-uuid>' --json
+# Optional overlap, capped at 86,400 seconds:
+tila token rotate reporter-key --expected-token-id '<current-version-uuid>' --overlap-seconds 60 --json
+tila token revoke reporter-key --json
+tila service-account revoke 'service:<uuid>' --json
+```
+
+Rotation returns 409 for stale/concurrent version IDs and preserves policy and DPoP
+binding. Previous secrets retire immediately unless overlap is explicit. Subsequent
+rotations cannot extend an earlier retirement deadline. Revoking a logical
+credential rejects every version and derived browser session. Service revocation
+atomically disables its credentials, membership and workload bindings, while
+preserving last-owner protection.
+
+Every request revalidates D1 credential/session/binding and membership state against
+the primary database; positive authentication caches never establish continuing
+validity. Lookup failures fail closed with retryable errors. Revocation applies to
+requests authenticated after its commit, not mutations already authorized and
+executing. Scoped responses use `Cache-Control: no-store`. Retry identities include
+credential version and policy; resource authorization precedes transactional DO
+replay. Unbound keys may create cookies with the same lineage and capped expiry;
+DPoP-bound keys cannot exchange into cookies.
+
+### Workload bindings
+
+Owners configure exact verified issuer/subject mappings to service principals:
+
+```sh
+tila service-account workload create 'service:<uuid>' --name ci --provider github-actions \
+  --issuer https://token.actions.githubusercontent.com \
+  --subject 'repo:owner/repository:ref:refs/heads/main' --preset artifact-writer --json
+tila service-account workload list 'service:<uuid>' --json
+tila service-account workload update 'service:<uuid>' --binding '<binding-uuid>' --preset read-only --json
+tila service-account workload revoke 'service:<uuid>' --binding '<binding-uuid>' --json
+```
+
+Both existing exchange endpoints accept these bindings after validating the
+upstream signature, configured issuer/audience and existing repository/workflow
+restrictions. Generic OIDC bindings use `--provider oidc`. The optional `jkt` exchange
+field binds the resulting opaque bearer to the existing DPoP proof verifier.
+Unconfigured identities retain existing compatibility flows. A revoked binding
+remains a tombstone so its subject cannot fall back into an unrestricted exchange.
+
+Workload sessions last at most 15 minutes and cannot outlive the upstream assertion.
+Each assertion exchanges once; replay returns 409 without storing a reusable secret.
+Get a new upstream assertion for renewal. Issued sessions retain their original
+policy and intersect it with current binding policy and membership on every request.
+Tighter binding policy is immediate; later expansion does not expand an old session.
+Monitor `authorization/denied` and `auth/lookup` analytics alongside ordinary request
+errors and latency. Telemetry excludes bearer credentials and hashes.
