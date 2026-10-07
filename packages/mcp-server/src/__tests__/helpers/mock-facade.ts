@@ -93,7 +93,9 @@ export type MockFacadeShape = {
   signals: Record<"inbox" | "send" | "ack" | "history", Mock> & {
     groups: Record<"list" | "get" | "set" | "delete", Mock>;
   };
-  journal: Record<"query", Mock>;
+  journal: Record<"query" | "replay" | "getCursor" | "acknowledge", Mock>;
+  handoffs: Record<"create" | "get" | "list", Mock>;
+  reentry: Mock;
   presence: Record<"heartbeat" | "list" | "listAll", Mock>;
   schema: Record<"get" | "apply" | "history", Mock>;
   summary: Record<"get", Mock>;
@@ -155,7 +157,9 @@ export function createMockFacade(): MockFacadeShape {
       ...fns("inbox", "send", "ack", "history"),
       groups: fns("list", "get", "set", "delete"),
     },
-    journal: fns("query"),
+    journal: fns("query", "replay", "getCursor", "acknowledge"),
+    handoffs: fns("create", "get", "list"),
+    reentry: vi.fn(),
     presence: fns("heartbeat", "list", "listAll"),
     schema: fns("get", "apply", "history"),
     summary: fns("get"),
@@ -204,6 +208,8 @@ const _assertMockMatchesFacade: _MockMatchesFacade = {
   gates: true,
   signals: true,
   journal: true,
+  handoffs: true,
+  reentry: true,
   presence: true,
   schema: true,
   summary: true,
