@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { toolFailure } from "./tool-registration";
 
 /**
  * Tools that have NO local-backend equivalent and therefore require the remote
@@ -61,8 +62,8 @@ export function remoteOnlyError(name: string): McpError {
  * `server.tool` is returned unchanged, so there is zero behavior change for the
  * default cloud path.
  *
- * The wrapper intercepts at registration time (replacing the 4th `server.tool`
- * argument, the handler), so the guard is enforced uniformly regardless of how
+ * The wrapper intercepts both `registerTool` and legacy `tool` registration
+ * (replacing the last argument, the handler), so the guard is enforced uniformly regardless of how
  * each tool group calls the facade.
  */
 export function guardRemoteOnlyTools(
@@ -73,27 +74,33 @@ export function guardRemoteOnlyTools(
 
   const realTool = server.tool.bind(server) as (...args: unknown[]) => unknown;
 
-  const guarded = (...args: unknown[]): unknown => {
-    const name = args[0];
-    if (typeof name === "string" && isRemoteOnlyTool(name)) {
-      // The handler is always the LAST argument across the McpServer.tool
-      // overloads (name, [description], [schema], handler). Replace it with the
-      // guard so the tool still REGISTERS (clients can discover it) but rejects
-      // when invoked locally.
-      const replaced = [...args];
-      replaced[replaced.length - 1] = async () => {
-        throw remoteOnlyError(name);
-      };
-      return realTool(...replaced);
-    }
-    return realTool(...args);
-  };
+  const guard =
+    (register: (...args: unknown[]) => unknown) =>
+    (...args: unknown[]): unknown => {
+      const name = args[0];
+      if (typeof name === "string" && isRemoteOnlyTool(name)) {
+        // The handler is always the LAST argument across the McpServer.tool
+        // overloads (name, [description], [schema], handler). Replace it with the
+        // guard so the tool still REGISTERS (clients can discover it) but rejects
+        // when invoked locally.
+        const replaced = [...args];
+        replaced[replaced.length - 1] = async () => {
+          return toolFailure(remoteOnlyError(name));
+        };
+        return register(...replaced);
+      }
+      return register(...args);
+    };
 
-  // Return a proxy that overrides only `.tool`; everything else delegates to the
+  // Return a proxy that overrides tool registration; everything else delegates to the
   // real server (resource/prompt registration, connect, etc.).
   return new Proxy(server, {
     get(target, prop, receiver) {
-      if (prop === "tool") return guarded;
+      if (prop === "tool") return guard(realTool);
+      if (prop === "registerTool")
+        return guard(
+          target.registerTool.bind(target) as (...args: unknown[]) => unknown,
+        );
       const value = Reflect.get(target, prop, receiver);
       return typeof value === "function" ? value.bind(target) : value;
     },

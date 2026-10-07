@@ -27,6 +27,7 @@ function collectSourceFiles(dir: string): string[] {
 function collectEmittedCodesFromContent(content: string): string[] {
   const codes: string[] = [];
   const patterns = [
+    /ContinuityError\(\s*"([a-z][a-z0-9-]*)"/g,
     /ArtifactVersionError\(\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
     /code:\s*"([a-z][a-z0-9-]*)"/g,
     /zodValidationError\([^)]*?"([a-z][a-z0-9-]*)"/g,
@@ -60,12 +61,18 @@ function collectWorkerEmittedCodes(dir: string): Set<string> {
 
 const WORKER_SRC_DIR = join(__dirname, "../../../worker/src");
 const OPS_SQLITE_SRC_DIR = join(__dirname, "../../../ops-sqlite/src");
+const CORE_SRC_DIR = join(__dirname, "../../../core/src");
 const BACKEND_DO_SRC_DIR = join(__dirname, "../../../backend-do/src");
 
 /** Collect error.code literals from server packages that emit HTTP errors. */
 function collectServerEmittedCodes(): Set<string> {
   const codes = new Set<string>();
-  for (const dir of [WORKER_SRC_DIR, OPS_SQLITE_SRC_DIR, BACKEND_DO_SRC_DIR]) {
+  for (const dir of [
+    WORKER_SRC_DIR,
+    OPS_SQLITE_SRC_DIR,
+    BACKEND_DO_SRC_DIR,
+    CORE_SRC_DIR,
+  ]) {
     for (const code of collectWorkerEmittedCodes(dir)) {
       codes.add(code);
     }
@@ -234,6 +241,10 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   ]);
 
   const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "journal-history-unavailable",
+    "journal-history-conflict",
+    "handoff-not-found",
+    "handoff-conflict",
     "artifact-unavailable",
     "artifact-lineage-busy",
     "lineage-conflict",

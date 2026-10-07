@@ -4,6 +4,7 @@ import { type Mock, vi } from "vitest";
 
 export type MockServer = {
   tool: Mock;
+  registerTool: Mock;
   resource: Mock;
   prompt: Mock;
 };
@@ -21,7 +22,20 @@ type Mockify<T> = T extends (...args: never[]) => unknown
 export type MockFacade = Mockify<TilaFacade>;
 
 export function createMockServer(): MockServer {
-  return { tool: vi.fn(), resource: vi.fn(), prompt: vi.fn() };
+  const tool = vi.fn();
+  return {
+    tool,
+    registerTool: vi.fn((name, config, handler) =>
+      tool(
+        name,
+        config.description,
+        config.inputSchema.shape ?? config.inputSchema,
+        handler,
+      ),
+    ),
+    resource: vi.fn(),
+    prompt: vi.fn(),
+  };
 }
 
 /**
@@ -270,3 +284,61 @@ export function findToolHandler(
     content: Array<{ type: string; text: string }>;
   }>;
 }
+
+// Complete wire fixtures keep handler tests honest now that outputs are validated.
+export const TEST_ENTITY = {
+  id: "T-1",
+  type: "task",
+  schema_version: 1,
+  data: {},
+  archived: 0,
+  created_at: 0,
+  updated_at: 0,
+  created_by: "test",
+  tags: [],
+};
+export const TEST_GATE = {
+  id: "gate-1",
+  resource: "T-1",
+  await_type: "human",
+  status: "pending",
+  fence: 1,
+  timeout_at: null,
+  resolved_at: null,
+  resolution: null,
+  created_at: 0,
+  created_by: "test",
+  data: {},
+};
+export const TEST_RECORD = {
+  type: "config",
+  key: "main",
+  schema_version: 1,
+  value: {},
+  value_sha256: "hash",
+  revision: 1,
+  archived: 0,
+  created_at: 0,
+  updated_at: 0,
+  updated_by: "test",
+  tags: [],
+};
+export const TEST_ARTIFACT = {
+  r2_key: "abc.md",
+  resource: null,
+  kind: "report",
+  sha256: "hash",
+  bytes: 1,
+  fence: null,
+  mime_type: "text/plain",
+  produced_at: 0,
+  produced_by: "test",
+  expires_at: null,
+  tombstoned: 0,
+  tags: [],
+  lineage_id: null,
+  revision: null,
+  restored_from: null,
+  provenance: null,
+  review: { state: "unreviewed", review_revision: 0, latest: null },
+};

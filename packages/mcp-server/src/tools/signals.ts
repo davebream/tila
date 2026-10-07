@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 const targetSchema = z.discriminatedUnion("type", [
   z.object({
@@ -25,7 +26,8 @@ export function registerSignalTools(
 ): void {
   const signals = facade.signals;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_send",
     "Send a participant-scoped signal. Principal, group, and broadcast targets snapshot active recipients at send time.",
     {
@@ -44,7 +46,8 @@ export function registerSignalTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_list",
     "List unacknowledged signal deliveries for this exact principal and participant.",
     {},
@@ -57,7 +60,8 @@ export function registerSignalTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_ack",
     "Acknowledge this participant's delivery of a signal.",
     { id: z.string().describe("Signal ID to acknowledge") },
@@ -70,7 +74,8 @@ export function registerSignalTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_history",
     "List signal delivery and acknowledgement history. Requires project admin permission.",
     {
@@ -86,7 +91,8 @@ export function registerSignalTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_group_list",
     "List named signal groups and their principal memberships.",
     {},
@@ -99,7 +105,8 @@ export function registerSignalTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_group_get",
     "Get one named signal group.",
     { group_id: z.string() },
@@ -112,7 +119,8 @@ export function registerSignalTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_group_set",
     "Create or replace a named principal-based signal group. Requires project admin permission.",
     {
@@ -131,7 +139,8 @@ export function registerSignalTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_signal_group_delete",
     "Delete a named signal group. Requires project admin permission.",
     { group_id: z.string() },

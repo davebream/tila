@@ -51,13 +51,14 @@ describe("MCP README tool-table parity", () => {
     process.env.TILA_MCP_TOOLS = savedToolGroups;
   });
 
-  it("README lists released tools; artifact history awaits lifecycle #176", async () => {
+  it("README lists all default and opt-in tools", async () => {
     // 1. Enumerate registered tools via the real seam
     const server = createMockServer();
     registerAllTools(
       asServer(server),
       asFacade(createMockFacade()),
       PROJECT_ID,
+      ["workflow", "all"],
     );
 
     const registeredNames: string[] = server.tool.mock.calls.map(
@@ -65,7 +66,7 @@ describe("MCP README tool-table parity", () => {
     );
     const registeredSet = new Set(registeredNames);
 
-    expect(registeredNames.length).toBe(55);
+    expect(registeredNames.length).toBe(61);
 
     // 2. Parse README
     const readme = await readFile(README_PATH, "utf8");
@@ -73,7 +74,7 @@ describe("MCP README tool-table parity", () => {
     const readmeCount = parseReadmeToolCount(readme);
 
     // 3. Stated count covers publicly documented tools
-    expect(readmeCount).toBe(54);
+    expect(readmeCount).toBe(61);
 
     // 4. No phantom tools in README (tools listed that aren't registered)
     const phantoms = [...readmeNames].filter((n) => !registeredSet.has(n));
@@ -83,11 +84,10 @@ describe("MCP README tool-table parity", () => {
     ).toHaveLength(0);
 
     // 5. No missing tools in README (registered tools absent from README)
-    // #175 deliberately remains undocumented until lifecycle issue #176 lands.
     const missing = [...registeredSet].filter((n) => !readmeNames.has(n));
     expect(
       missing,
-      "Only the release-gated artifact history tool may be undocumented",
-    ).toEqual(["tila_artifact_history"]);
+      "All released default and primitive tools must be documented",
+    ).toEqual([]);
   });
 });

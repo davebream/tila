@@ -48,7 +48,7 @@ describe("MCP tools — local backend round-trip (real tila-sdk/local under node
 
     server = createMockServer();
     const guarded = guardRemoteOnlyTools(asServer(server), "local");
-    registerAllTools(guarded, facade, PROJECT_ID);
+    registerAllTools(guarded, facade, PROJECT_ID, ["all"]);
   });
 
   afterAll(() => {
@@ -110,7 +110,12 @@ describe("MCP tools — local backend round-trip (real tila-sdk/local under node
     const handler = findToolHandler(server, "tila_artifact_put");
     await expect(
       handler({ content: "aGVsbG8=", kind: "log", mime_type: "text/plain" }),
-    ).rejects.toThrow(/requires a remote backend/i);
+    ).resolves.toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: { message: expect.stringMatching(/requires a remote backend/i) },
+      },
+    });
   });
 
   it("write/read text artifact works locally (a local-capable artifact path)", async () => {

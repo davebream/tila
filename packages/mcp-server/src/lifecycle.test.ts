@@ -46,7 +46,7 @@ it("routes interleaved shared-daemon calls by session metadata, including captur
   }));
   let handler: (...args: unknown[]) => Promise<unknown> = async () => undefined;
   const server = {
-    tool: (...args: unknown[]) => {
+    registerTool: (...args: unknown[]) => {
       handler = args.at(-1) as typeof handler;
     },
   } as unknown as McpServer;
@@ -62,9 +62,13 @@ it("routes interleaved shared-daemon calls by session metadata, including captur
     {} as TilaFacade,
   );
   const captured = scoped.facade.claims;
-  scoped.server.tool("test", "test", {}, async () => ({
-    content: [{ type: "text", text: JSON.stringify(await captured.list()) }],
-  }));
+  scoped.server.registerTool(
+    "test",
+    { description: "test", inputSchema: {} },
+    async () => ({
+      content: [{ type: "text", text: JSON.stringify(await captured.list()) }],
+    }),
+  );
   try {
     const results = await Promise.all([
       handler({}, { _meta: { sessionId: "one", threadId: "child-one" } }),
@@ -75,13 +79,13 @@ it("routes interleaved shared-daemon calls by session metadata, including captur
     expect(closed.sort()).toEqual(
       [a.state.participantId, b.state.participantId].sort(),
     );
-    await expect(handler({}, {})).rejects.toThrow(
+    expect(JSON.stringify(await handler({}, {}))).toContain(
       "per-request session metadata",
     );
     await lifecycle.end(a.state.key);
-    await expect(handler({}, { _meta: { sessionId: "one" } })).rejects.toThrow(
-      "no unambiguous active session",
-    );
+    expect(
+      JSON.stringify(await handler({}, { _meta: { sessionId: "one" } })),
+    ).toContain("no unambiguous active session");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

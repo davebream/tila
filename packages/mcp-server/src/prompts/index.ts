@@ -94,7 +94,7 @@ ${readyLines}`;
                 role: "user" as const,
                 content: {
                   type: "text" as const,
-                  text: "No entities are currently ready for work. Check tila_summary for project status.",
+                  text: "No entities are currently ready for work. Inspect the project summary using an available tool or resource.",
                 },
               },
             ],
@@ -105,7 +105,7 @@ ${readyLines}`;
         const title = next.data.title ? ` "${next.data.title}"` : "";
         const text = `The next ready task is **${next.id}** (${next.type})${title}.
 
-Use tila_claim_acquire to acquire a claim before starting work. The claim returns a fencing token needed for updates.
+Use the advertised claim operation to acquire a claim before starting work. The claim returns a fencing token needed for updates.
 
 Data: ${JSON.stringify(next.data, null, 2)}`;
 

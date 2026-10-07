@@ -1,10 +1,11 @@
 #!/usr/bin/env node
+import { hasWorkflowTools } from "./tools/tool-groups";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { resolveServerConfig } from "./config";
 import { MCP_VERSION, buildFacade } from "./facade";
-import { SERVER_INSTRUCTIONS } from "./instructions";
+import { serverInstructions } from "./instructions";
 import { lifecycleTools } from "./lifecycle";
 import { registerAllPrompts } from "./prompts/index";
 import { guardRemoteOnlyTools } from "./remote-only";
@@ -26,7 +27,7 @@ async function main(): Promise<void> {
         resources: {},
         prompts: {},
       },
-      instructions: SERVER_INSTRUCTIONS,
+      instructions: serverInstructions(hasWorkflowTools()),
     },
   );
 

@@ -72,7 +72,12 @@ describe("registerPresenceTools", () => {
       facade.presence.heartbeat.mockRejectedValue(new Error("network error"));
 
       const handler = findHandler("tila_presence_heartbeat");
-      await expect(handler({ info: {} })).rejects.toThrow("network error");
+      await expect(handler({ info: {} })).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching("network error") },
+        },
+      });
     });
   });
 

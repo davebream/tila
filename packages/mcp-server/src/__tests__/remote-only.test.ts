@@ -57,7 +57,12 @@ describe("guardRemoteOnlyTools — local mode", () => {
     const handler = findToolHandler(baseServer, "tila_artifact_put");
     await expect(
       handler({ content: "aGVsbG8=", kind: "log", mime_type: "text/plain" }),
-    ).rejects.toThrow(/requires a remote backend/i);
+    ).resolves.toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: { message: expect.stringMatching(/requires a remote backend/i) },
+      },
+    });
     expect(facade.artifacts.upload).not.toHaveBeenCalled();
   });
 
