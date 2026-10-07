@@ -1,6 +1,10 @@
 import { CliSuccessEnvelopeSchema } from "@tila/schemas";
 import { expect, it } from "vitest";
-import { successEnvelope, withOutput } from "../../lib/output";
+import {
+  describeCliError,
+  successEnvelope,
+  withOutput,
+} from "../../lib/output";
 
 it("scopes limits independently and preserves non-list objects", async () => {
   const page = (limit: number) =>
@@ -32,4 +36,12 @@ it("does not invent cursors and distinguishes unknown completeness", async () =>
   );
   expect(unknown.meta?.has_more_unknown).toBe(true);
   expect(unknown.meta?.truncated).toBeUndefined();
+});
+
+it("keeps actionable setup instructions when shortening missing-input errors", () => {
+  const error = describeCliError(
+    new Error("No API token found.\n\nSet TILA_API_TOKEN or run tila init."),
+  );
+  expect(error.message).toBe("No API token found.");
+  expect(error.hint).toContain("TILA_API_TOKEN");
 });

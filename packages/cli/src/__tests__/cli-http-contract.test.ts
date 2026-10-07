@@ -377,3 +377,27 @@ it("reports a created task when the following parent-link write fails", async ()
   });
   expect(requests).toHaveLength(2);
 });
+
+it("reports invalid review inputs with their field name before sending a request", async () => {
+  const result = await invoke([
+    "artifact",
+    "review",
+    "file",
+    "--decision",
+    "invalid",
+    "--expected-review-revision",
+    "0",
+    "--json",
+  ]);
+  expect(result.status).toBe(1);
+  expect(JSON.parse(result.stderr)).toMatchObject({
+    ok: false,
+    error: {
+      kind: "invalid-argument",
+      message: expect.stringContaining("decision"),
+      hint: expect.any(String),
+    },
+  });
+  expect(result.stdout.length).toBe(0);
+  expect(requests).toHaveLength(0);
+});
