@@ -7,6 +7,6 @@
     "incur": "0.7.0",
     "zod": "4.3.6",
     "tsx": "4.22.4",
-    "@modelcontextprotocol/sdk": "1.29.0"
+    "@modelcontextprotocol/sdk": "1.31.0"
   }
 }
