@@ -3,6 +3,7 @@ import {
   ApiError,
   type ArtifactListResponse,
   type RecordTypesResponse,
+  getArtifactHistory,
   getRecord,
   getRecordHistory,
   getTaskDetail,
@@ -155,6 +156,19 @@ export function useArtifacts(params?: {
     queryFn: () => listArtifacts(requireProjectId(projectId), params),
     enabled: Boolean(projectId),
     refetchInterval: 10000,
+  });
+}
+
+export function useArtifactHistory(artifactKey: string, cursor?: string) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["artifact-history", projectId, artifactKey, cursor],
+    queryFn: () =>
+      getArtifactHistory(requireProjectId(projectId), artifactKey, {
+        limit: 20,
+        cursor,
+      }),
+    enabled: Boolean(projectId) && Boolean(artifactKey),
   });
 }
 

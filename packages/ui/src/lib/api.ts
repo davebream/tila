@@ -1,4 +1,6 @@
 import type {
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
   ArtifactMetaResponse,
   ArtifactReviewSummary,
   ArtifactReviewsResponse,
@@ -19,6 +21,7 @@ import type {
   StateListResponse,
 } from "@tila/schemas";
 import { API_BASE_URL } from "./config";
+import { encodeArtifactKey } from "./utils";
 
 export type { ArtifactSearchResponse };
 
@@ -447,7 +450,7 @@ export async function getArtifactBlob(
   key: string,
 ): Promise<Response> {
   const url = new URL(
-    projectPath(projectId, `/artifacts/${key}`),
+    projectPath(projectId, `/artifacts/${encodeArtifactKey(key)}`),
     API_BASE_URL || window.location.origin,
   );
   let response: Response;
@@ -467,6 +470,17 @@ export function getArtifactMeta(
   key: string,
 ): Promise<ArtifactMetaResponse> {
   return request(projectId, `/artifacts/${encodeURIComponent(key)}/meta`);
+}
+
+export function getArtifactHistory(
+  projectId: string,
+  key: string,
+  params?: ArtifactHistoryQuery,
+): Promise<ArtifactHistoryResponse> {
+  return request(projectId, `/artifacts/~/history/${encodeURIComponent(key)}`, {
+    limit: params?.limit === undefined ? undefined : String(params.limit),
+    cursor: params?.cursor,
+  });
 }
 export function getArtifactReviews(
   projectId: string,

@@ -1,11 +1,23 @@
 import { ArtifactReviewDetails } from "@/components/artifact-review-details";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { TableError } from "@/components/ui/table-error";
+import { TableSkeleton } from "@/components/ui/table-skeleton";
+import { useArtifactHistory } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { getArtifactBlob } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
+import { formatDateTime } from "@/lib/time";
+import { encodeArtifactKey, formatBytes, parseArtifactKey } from "@/lib/utils";
 import { ExternalLink, Maximize2, Minimize2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
@@ -20,26 +32,132 @@ const TEXT_TYPES = [
   "application/xml",
 ];
 
-function parseArtifactKey(key: string): { entity: string; hash: string } {
-  const parts = key.split("/");
-  if (parts.length >= 3) {
-    return { entity: parts[1], hash: parts.slice(2).join("/") };
-  }
-  return { entity: "", hash: key };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 type ContentState =
   | { type: "loading" }
   | { type: "error"; cause: unknown }
   | { type: "markdown"; html: string }
   | { type: "text"; text: string; truncated: boolean; fullSize: number }
   | { type: "binary"; contentType: string; key: string };
+
+function ArtifactVersionHistory({ artifactKey }: { artifactKey: string }) {
+  const { projectId } = useAuth();
+  const [cursor, setCursor] = useState<string>();
+  const history = useArtifactHistory(artifactKey, cursor);
+
+  return (
+    <section
+      aria-label="Version history"
+      className="space-y-3 border-b border-border pb-4"
+    >
+      <h2 className="text-sm font-semibold">Version history</h2>
+      {history.isError ? (
+        <TableError error={history.error} onRetry={() => history.refetch()} />
+      ) : history.data?.items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No version history available.
+        </p>
+      ) : (
+        <Table
+          aria-label="Artifact version history"
+          aria-busy={history.isPending}
+        >
+          <TableHeader>
+            <TableRow>
+              <TableHead>Revision</TableHead>
+              <TableHead>SHA-256</TableHead>
+              <TableHead>Size</TableHead>
+              <TableHead>Produced</TableHead>
+              <TableHead>Tags</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {history.isPending ? (
+              <TableSkeleton rows={3} columns={5} />
+            ) : (
+              history.data?.items.map((item) => (
+                <TableRow key={item.r2_key}>
+                  <TableCell>
+                    <Link
+                      to={`/p/${projectId}/artifacts/${encodeArtifactKey(item.r2_key)}`}
+                      aria-current={
+                        item.r2_key === artifactKey ? "page" : undefined
+                      }
+                      className="rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
+                    >
+                      {item.revision === null ? "Legacy" : `#${item.revision}`}
+                    </Link>
+                    {item.r2_key === artifactKey && (
+                      <Badge variant="secondary" className="ml-2">
+                        Viewing
+                      </Badge>
+                    )}
+                    {(item.tombstoned !== 0 ||
+                      item.blob_deleted_at != null) && (
+                      <span className="block text-xs text-muted-foreground">
+                        Content unavailable
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell title={item.sha256}>
+                    {item.sha256.slice(0, 12)}
+                  </TableCell>
+                  <TableCell className="tila-num">
+                    {formatBytes(item.bytes)}
+                  </TableCell>
+                  <TableCell className="tila-num">
+                    <time
+                      dateTime={new Date(item.produced_at).toISOString()}
+                      title={new Date(item.produced_at).toISOString()}
+                    >
+                      {formatDateTime(item.produced_at)}
+                    </time>
+                  </TableCell>
+                  <TableCell className="whitespace-normal">
+                    <div className="flex flex-wrap gap-1">
+                      {item.tags.length === 0
+                        ? "—"
+                        : item.tags.map((tag) => (
+                            <Badge
+                              key={tag}
+                              variant="secondary"
+                              className="h-auto min-h-[18px] whitespace-normal break-all"
+                            >
+                              {tag}
+                            </Badge>
+                          ))}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      )}
+      <div className="flex gap-2">
+        {history.data?.meta.next_cursor && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              setCursor(history.data.meta.next_cursor ?? undefined)
+            }
+          >
+            Older versions
+          </Button>
+        )}
+        {cursor !== undefined && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setCursor(undefined)}
+          >
+            Newest versions
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export function ArtifactDetailPage() {
   const { projectId } = useAuth();
@@ -139,7 +257,7 @@ export function ArtifactDetailPage() {
             </Link>
           </span>
         ) : (
-          key
+          parsed.label
         )
       }
       expanded={expanded}
@@ -162,7 +280,13 @@ export function ArtifactDetailPage() {
             artifactKey={key}
           />
         )}
-        {parsed.entity && (
+        {projectId && (
+          <ArtifactVersionHistory
+            key={`${projectId}:${key}`}
+            artifactKey={key}
+          />
+        )}
+        {parsed.label !== key && (
           <p className="break-all font-mono text-xs text-muted-foreground">
             {key}
           </p>
