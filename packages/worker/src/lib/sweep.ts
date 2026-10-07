@@ -21,6 +21,7 @@ import {
   emitSweepProjectDatapoint,
   emitSweepRollupDatapoint,
 } from "./analytics";
+import { journalArchiveObjects } from "./journal-archive";
 import { sweepExpiredKey } from "./sweep-key";
 
 /**
@@ -605,17 +606,11 @@ async function archiveJournal(args: {
 
     const throughSeq = archiveData.throughSeq;
 
-    // Group events by UTC year/month for human-navigable R2 layout.
-    const groups = new Map<string, JournalArchiveEvent[]>();
-    for (const event of archiveData.events) {
-      const d = new Date(event.t);
-      const year = d.getUTCFullYear();
-      const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-      const key = `${year}/${month}`;
-      const group = groups.get(key);
-      if (group) group.push(event);
-      else groups.set(key, [event]);
-    }
+    const objects = journalArchiveObjects(
+      projectId,
+      archiveData.events,
+      throughSeq,
+    );
 
     // Reserve the FULL remaining archive cost before touching R2: one put per
     // year/month group plus the final confirm. A pathological multi-year
@@ -625,23 +620,17 @@ async function archiveJournal(args: {
     // confirm, so the journal rows stay intact and the next run archives them
     // (preserving the all-or-nothing audit-log invariant). The archive request
     // already issued above is sunk, but harmless (read-only).
-    if (wouldExceed(budget, groups.size + 1)) {
+    if (wouldExceed(budget, objects.length + 1)) {
       console.warn(
-        `[sweep] project ${projectId} archive deferred: ${groups.size} groups + confirm would exceed subrequest budget (${budget.subrequests}/${budget.ceiling})`,
+        `[sweep] project ${projectId} archive deferred: ${objects.length} groups + confirm would exceed subrequest budget (${budget.subrequests}/${budget.ceiling})`,
       );
       return "skipped";
     }
 
-    for (const [yearMonth, groupEvents] of groups) {
-      // The throughSeq suffix makes this key unique per archive batch, so a
-      // later run archiving the same month writes a sibling object instead of
-      // clobbering this one.
-      const r2Key = `journal-archive/${projectId}/${yearMonth}.part-${throughSeq}.jsonl`;
-      const jsonl = groupEvents.map((e) => JSON.stringify(e)).join("\n");
-      // No try/catch here: a failed put must propagate so we do NOT confirm
-      // (and therefore do NOT delete) the journal rows — preserving the audit
-      // log. The throw is caught below and marks the project degraded.
-      await env.ARTIFACTS.put(r2Key, jsonl);
+    for (const object of objects) {
+      await env.ARTIFACTS.put(object.key, object.body, {
+        customMetadata: object.customMetadata,
+      });
       budget.subrequests++;
     }
 
