@@ -8,7 +8,7 @@ export {
   exchangeGitHubToken,
   createTila,
 } from "./client";
-export type { ClientOptions, TilaFacade } from "./client";
+export type { ClientOptions, RequestOptions, TilaFacade } from "./client";
 
 // Retry helper
 export { withRetry } from "./retry";
@@ -156,3 +156,19 @@ export {
   createReentryMethod,
   type CreateHandoffOptions,
 } from "./continuity";
+
+// Refreshable credentials (in-memory, per-client coordination).
+export {
+  createServiceTokenProvider,
+  createExternalTokenProvider,
+  createOidcWorkloadTokenProvider,
+  TokenProviderError,
+} from "./token-provider";
+export type {
+  TokenProvider,
+  TokenProviderContext,
+  TokenCredential,
+  DpopBinding,
+  DpopProofContext,
+  OidcWorkloadTokenProviderOptions,
+} from "./token-provider";

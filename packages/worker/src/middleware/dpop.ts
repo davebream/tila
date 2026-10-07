@@ -11,6 +11,7 @@
  *   - Passing `maxAgeMs` = DPOP_PROOF_MAX_AGE_MS and `clockSkewMs` = DPOP_CLOCK_SKEW_MS.
  */
 
+import { accessTokenHash } from "@tila/schemas";
 import {
   calculateJwkThumbprint,
   decodeProtectedHeader,
@@ -39,6 +40,7 @@ import {
  */
 export type DpopRejectCode =
   | "malformed-proof"
+  | "ath-mismatch"
   | "bad-header"
   | "thumbprint-mismatch"
   | "bad-signature"
@@ -85,6 +87,7 @@ interface EcPublicJwk {
 }
 
 interface DpopPayload {
+  ath?: unknown;
   htm: unknown;
   htu: unknown;
   iat: unknown;
@@ -113,6 +116,7 @@ interface DpopPayload {
  */
 export async function verifyDpopProof(opts: {
   proofJwt: string;
+  accessToken?: string;
   expectedJkt: string;
   htm: string;
   htu: string;
@@ -209,6 +213,22 @@ export async function verifyDpopProof(opts: {
   // 5b: htu (exact — both sides already canonical)
   if (typeof payload.htu !== "string" || payload.htu !== htu) {
     return { ok: false, code: "htu-mismatch" };
+  }
+
+  // Legacy proofs may omit ath. A supplied hash must bind the actual bearer.
+  if (payload.ath !== undefined) {
+    try {
+      if (
+        typeof payload.ath !== "string" ||
+        !/^[A-Za-z0-9_-]{43}$/.test(payload.ath) ||
+        !opts.accessToken ||
+        payload.ath !== (await accessTokenHash(opts.accessToken))
+      ) {
+        return { ok: false, code: "ath-mismatch" };
+      }
+    } catch {
+      return { ok: false, code: "ath-mismatch" };
+    }
   }
 
   // 5c: iat freshness window [nowMs - maxAgeMs, nowMs + clockSkewMs]

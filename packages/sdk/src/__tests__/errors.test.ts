@@ -27,6 +27,7 @@ function collectSourceFiles(dir: string): string[] {
 function collectEmittedCodesFromContent(content: string): string[] {
   const codes: string[] = [];
   const patterns = [
+    /OidcVerificationError\(\s*"([a-z][a-z0-9-]*)"/g,
     /ContinuityError\(\s*"([a-z][a-z0-9-]*)"/g,
     /ArtifactVersionError\(\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
     /code:\s*"([a-z][a-z0-9-]*)"/g,
@@ -241,6 +242,20 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   ]);
 
   const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "workload-revoked",
+    "workload-already-exchanged",
+    "auth-unavailable",
+    "config-unavailable",
+    "oidc-not-configured",
+    "issuer-discovery-failed",
+    "oidc-invalid-token",
+    "oidc-invalid-issuer",
+    "oidc-invalid-audience",
+    "oidc-token-expired",
+    "oidc-signature-invalid",
+    "oidc-jwks-unavailable",
+    "principal-not-allowed",
+
     "journal-history-unavailable",
     "journal-history-conflict",
     "handoff-not-found",

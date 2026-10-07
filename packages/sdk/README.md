@@ -53,6 +53,121 @@ const updated = await tila.tasks.update("task-1", {
 await tila.tasks.archive("task-1");
 ```
 
+### Refreshable credentials
+
+`TilaClient`, `TilaClient.fromConfig`, and the remote branch of `createTila`
+accept either a static token string or an async `TokenProvider`. Static strings
+and the legacy two-argument `dpopSigner` remain supported throughout the current
+`0.x` transition; removal requires a separately announced breaking release.
+
+```typescript
+import { TilaClient, createExternalTokenProvider } from "tila-sdk";
+
+const client = new TilaClient({
+  baseUrl: process.env.TILA_URL!,
+  token: createExternalTokenProvider(async (context) => {
+    // Application code owns login, storage, and customer selection.
+    const credential = await customerCredentials.load({
+      signal: context.signal,
+      forceRefresh: context.reason === "authentication",
+      previous: context.previousCredential?.refreshMetadata,
+    });
+    return {
+      token: credential.accessToken, // A Tila credential, not an upstream ID token.
+      tokenType: "Bearer",
+      expiresAt: credential.expiresAt, // Unix seconds, not milliseconds.
+      refreshMetadata: credential.refreshState,
+    };
+  }),
+  expirySkewMs: 30_000,
+  timeoutMs: 30_000,
+});
+
+await client.get("/projects/my-project/tasks", { signal: abortController.signal });
+```
+
+The application objects `customerCredentials` and `abortController` in this
+example are supplied by the caller. `createServiceTokenProvider` accepts a static
+string, a `TokenCredential`, or a callback with the same contract. The external
+adapter accepts a callback. Neither helper issues or rotates service keys, stores
+secrets, or runs a customer OAuth flow.
+
+| Behavior | Contract |
+|---|---|
+| Provider context | Request `method` and absolute `url`, acquisition `signal`, `reason`, optional `previousCredential` and `authenticationError`. |
+| Refresh reason | `initial`, `expiry`, `request` (unknown expiry), or `authentication`. The initiating request supplies context for shared acquisition. |
+| Cache | Per client, reusable until `expiresAt` minus `expirySkewMs` (default 30 seconds). No cross-client/customer cache. |
+| Unknown/near expiry | No expiry means acquire again on the next request. A newly acquired token inside the skew window serves current waiters but is not reused for later requests. Already expired tokens are rejected. |
+| Concurrency | Concurrent acquisition/refresh shares one provider call. A late 401 cannot invalidate a newer credential generation. |
+
+Use one client per customer/credential identity; providers must not select a
+different customer based on the request URL. Do not mutate returned credentials
+or their refresh metadata after returning them. Only `Bearer` is supported as
+`tokenType`; DPoP-bound Tila credentials also use this scheme.
+
+Every low-level client method accepts `signal`. The request deadline starts before
+credential acquisition and covers signing, HTTP, one authentication retry, and
+JSON body consumption. A caller can stop waiting even if its provider ignores
+cancellation. Cancelling one waiter leaves other waiters running; when all leave,
+the shared acquisition is aborted and late results are discarded. Raw-response
+streams returned by `requestRaw` are caller-owned after headers arrive.
+
+Provider clients retry once for HTTP 401 with `unauthorized` or `session-expired`,
+using refreshed credentials and the same body and idempotency key. Other auth
+errors, network failures, and static credentials do not trigger this retry.
+`withRetry` is a separate, opt-in retry policy; it honors non-retryable
+`TokenProviderError`/`TilaApiError` and supports a cancellation `signal` for attempts
+and backoff. Pass the same signal to requests when using a custom abort reason.
+
+Application-thrown errors retain their identity and fields. SDK provider failures
+use `TokenProviderError` (`code`, `retryable`, optional `cause`); exchange API
+failures use `TilaApiError` (`status`, typed `code`, `retryable`). The SDK does not
+log credentials, proofs, assertions, or refresh metadata. Application errors and
+causes may contain application-supplied secrets: select safe fields when logging.
+
+### OIDC workload credentials
+
+Configure a scoped `oidc` workload binding to a Tila service principal first.
+The deployment must already have its OIDC issuer/audience configured. The helper
+uses the existing generic exchange endpoint and rejects legacy human-session
+responses, missing service lineage, and mismatched projects.
+
+```typescript
+import { createTila, createOidcWorkloadTokenProvider } from "tila-sdk";
+
+const provider = createOidcWorkloadTokenProvider({
+  baseUrl: process.env.TILA_URL!,
+  projectId: "my-project",
+  // Your workload platform supplies a fresh assertion for every call.
+  getAssertion: ({ signal }) => workloadIdentity.getFreshAssertion({ signal }),
+});
+const tila = await createTila(config, provider);
+```
+
+`workloadIdentity` and `config` are application-owned. Each assertion exchanges
+once; renewal needs a new assertion. Exchange is never automatically replayed,
+including after ambiguous network failure. `workload-already-exchanged` and
+`workload-revoked` remain typed API errors. Credentials and exchange requests are
+restricted to the configured deployment origin, and automatic HTTP redirects are
+disabled so proofs remain bound to the intended request.
+
+### DPoP with providers
+
+A provider credential can include `dpop: { jkt, signProof }`. The workload helper
+accepts the same binding and sends `jkt` during exchange. `signProof` receives
+`{ htm, htu, accessToken, ath, signal }`. Use the supplied values in a fresh ES256
+JWT, with a public JWK header, `typ: "dpop+jwt"`, current Unix-second `iat`, and a
+new `jti`. The `htu` is canonicalized without query/fragment; `ath` is the
+base64url SHA-256 of the exact token sent in `Authorization`.
+
+The SDK checks the returned proof's request/token/key binding before sending it.
+The Worker verifies its signature and checks `ath` when present, while accepting
+existing proofs without `ath` during the compatibility transition. This is a
+compatibility profile, not mandatory RFC 9449 enforcement for legacy clients.
+Provider credentials must carry their own signer; combining a provider with the
+legacy top-level `dpopSigner` is rejected. Generated `Authorization` and `DPoP`
+headers take precedence over all case variants in `extraHeaders`.
+
 ### `createTila` — one facade, local or remote
 
 `createTila(config, token?)` returns a uniform facade exposing the same resource
