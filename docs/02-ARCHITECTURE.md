@@ -2384,6 +2384,47 @@ Bun resolves these to local paths; in publishing, they get rewritten to actual v
 
 ---
 
+## Artifact revisions (#174 / #175, release-gated on #176)
+
+Versioning is explicit: clients supply a lineage ID and a live fence for
+`artifact:<lineage_id>`. Ordinary artifact uploads retain their existing keys,
+deduplication and supersedes behavior. A lineage fixes its kind and resource;
+numbered revisions identify events while SHA-256 identifies bytes. Restore always
+appends a new revision, including when its bytes equal the current head.
+
+Migration 26 adds nullable pointer fields and the lineage/operation tables to the
+shared DO/embedded migration registry. Existing artifacts are not backfilled from
+supersedes links. Explicit adoption copies a selected legacy artifact into revision
+1 of a new lineage and records its original key; the old artifact stays unchanged.
+This replaces #174's originally proposed inferred historical backfill.
+
+The write protocol reserves an ordinal, persists an immutable revision blob,
+revalidates the fence, accepts the commit transactionally with its journal event,
+and publishes an immutable recovery record before exposing the pointer. Accepted
+operations form a durable outbox. DO alarms share scheduling with reindexing;
+embedded consumers resume the outbox on subsequent writes. Metadata and history
+reads never access the blob store. Replays of an accepted
+operation remain valid after lease expiry. New operations require a current live
+claim. Pending publication blocks later writes to that lineage but leaves the
+previously published head readable.
+
+R2 keys use the project-scoped `versioned/` prefix, outside the legacy `produced/`
+backstop. Every revision has separate bytes and a `.commit.json` recovery record.
+Recovery accepts records from the private project prefix, validates their identity,
+and preserves revision numbers, timestamps, producer identity, tags and restore
+provenance. A blob without an accepted recovery record is never a recoverable
+revision. Gaps from failed reservations are permitted. Project backup/destroy also
+includes lineage and operation state.
+
+History uses a lineage-bound cursor with a fixed initial revision ceiling and an
+exclusive next-page boundary. Metadata never includes inline or blob content.
+Tags are set on write/restore; omitted restore tags inherit the source and an
+empty list clears tags only on the new revision. The MCP addition is read-only
+history. Public documentation and announcements must wait for version-aware
+retention, tombstone recovery and lifecycle semantics in #176.
+
+---
+
 ## Section 13: Versioning and release
 
 - **Semantic versioning** for tila packages and the `tila` CLI.
