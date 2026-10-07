@@ -156,7 +156,7 @@ missing, and full bootstrap tokens still carry owner access.
 | #191 | Rewrite for key-only deployment and GitHub auth retirement; mark #182/#183/#184 completed |
 | #185 | Scoped service identities, capability credentials, namespace restrictions, rotation, revocation and workload exchange |
 | #187 | Keep open until the reachable permission-revalidation path is fixed or actually removed |
-| #186 | Defer workload exchange and general token-provider expansion |
+| #186 | Refreshable SDK token providers, scoped OIDC workload exchange, and compatible token-bound DPoP verification |
 | #102 | Defer broad governance UI; eventual small owner credential/membership screen |
 
 ### Artifact and distribution work
