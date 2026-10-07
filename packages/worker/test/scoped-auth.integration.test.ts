@@ -1,7 +1,18 @@
 import { CAPABILITIES, type CredentialPolicy } from "@tila/schemas";
 import { Hono } from "hono";
+import {
+  SignJWT,
+  calculateJwkThumbprint,
+  exportJWK,
+  generateKeyPair,
+} from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
+import { TilaClient } from "../../sdk/src/client";
+import {
+  type DpopProofContext,
+  createOidcWorkloadTokenProvider,
+} from "../../sdk/src/token-provider";
 import { generateToken, hashToken } from "../src/lib/hash";
 import { exchangeScopedWorkload } from "../src/lib/workload-credential";
 import {
@@ -44,6 +55,22 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
         expiresAt: Math.floor(Date.now() / 1000) + 1000,
       }).then((response) => response ?? c.json({ legacy: true })),
     );
+    // Exercise the SDK wire contract after upstream assertion verification.
+    // Signature/issuer validation remains covered by auth-oidc route tests.
+    app.post("/api/auth/oidc/exchange", async (c) => {
+      const body = await c.req.json();
+      return (
+        (await exchangeScopedWorkload(c, {
+          projectId: body.project_id,
+          provider: "oidc",
+          issuer: "https://issuer.example",
+          subject: "runner",
+          assertionId: body.oidc_token,
+          expiresAt: Math.floor(Date.now() / 1000) + 1000,
+          jkt: body.jkt,
+        })) ?? c.json({ legacy: true })
+      );
+    });
     app.use("*", createAuthMiddleware());
     app.route("/api/tokens", tokens);
     const project = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
@@ -143,7 +170,10 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
       createdAt: 1,
     });
   });
-  afterEach(() => f.sqlite.close());
+  afterEach(() => {
+    f.sqlite.close();
+    vi.unstubAllGlobals();
+  });
 
   it("authorizes every continuity aggregate component and denies restricted snapshots", async () => {
     const server = app();
@@ -525,6 +555,99 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
         })
       ).status,
     ).toBe(403);
+  });
+  it("renews SDK workload credentials with fresh assertions and token-bound proofs", async () => {
+    const service = await issue();
+    const binding = await f.store.createBinding(
+      "p",
+      service.principal_id,
+      {
+        name: "sdk",
+        provider: "oidc",
+        issuer: "https://issuer.example",
+        subject: "runner",
+        policy,
+      },
+      actor,
+    );
+    const pair = await generateKeyPair("ES256", { extractable: true });
+    const jwk = await exportJWK(pair.publicKey);
+    const jkt = await calculateJwkThumbprint(jwk);
+    const signProof = async ({ htm, htu, ath }: DpopProofContext) =>
+      new SignJWT({
+        htm,
+        htu,
+        ath,
+        iat: Math.floor(Date.now() / 1000),
+        jti: crypto.randomUUID(),
+      })
+        .setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+        .sign(pair.privateKey);
+    const server = app();
+    const responses: Array<{ session_token: string }> = [];
+    let firstProof = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        const response = await server.request(url, init, env, {
+          waitUntil: () => {},
+          passThroughOnException: () => {},
+        } as unknown as ExecutionContext);
+        if (url.endsWith("/exchange") && response.ok)
+          responses.push(await response.clone().json());
+        if (!firstProof && !url.endsWith("/exchange"))
+          firstProof = new Headers(init.headers).get("DPoP") ?? "";
+        return response;
+      }),
+    );
+    let assertion = 0;
+    const getAssertion = vi.fn(async () => `assertion-${++assertion}`);
+    const provider = createOidcWorkloadTokenProvider({
+      baseUrl: "https://tila.test",
+      projectId: "p",
+      getAssertion,
+      dpop: { jkt, signProof },
+    });
+    // Force renewal on subsequent operations without advancing server clocks.
+    const client = new TilaClient({
+      baseUrl: "https://tila.test",
+      token: provider,
+      expirySkewMs: 900_000,
+    });
+    await Promise.all([
+      client.get("/projects/p/records/config"),
+      client.get("/projects/p/records/config"),
+    ]);
+    expect(getAssertion).toHaveBeenCalledTimes(1);
+    await client.get("/projects/p/records/config");
+    expect(getAssertion).toHaveBeenCalledTimes(2);
+    expect(responses[0].session_token).not.toBe(responses[1].session_token);
+    // Same key, method and URL, but a different bearer: ath must reject substitution.
+    const substitute = await request(
+      server,
+      "https://tila.test/projects/p/records/config",
+      responses[1].session_token,
+      "GET",
+      undefined,
+      { DPoP: firstProof },
+    );
+    expect(substitute.status).toBe(401);
+    expect(await substitute.json()).toMatchObject({
+      error: { code: "dpop-invalid" },
+    });
+    await f.store.revokeBinding(
+      "p",
+      service.principal_id,
+      binding.binding_id,
+      actor,
+    );
+    await expect(
+      client.get("/projects/p/records/config"),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "workload-revoked",
+      retryable: false,
+    });
   });
   it("issues short-lived workload keys and revokes both exchange and issued access", async () => {
     const key = await issue();
