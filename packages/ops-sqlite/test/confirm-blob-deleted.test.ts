@@ -64,7 +64,7 @@ describe("confirmBlobDeleted", () => {
     expect(after.blob_deleted_at).toBe(T);
   });
 
-  it("makes a past-grace tombstoned pointer eligible for hard-delete only after confirmation", () => {
+  it("retains audit metadata after confirming blob deletion", () => {
     const { db, r2Key } = seedTombstoned();
     // tombstoned_at was stamped by tombstonePointer at real Date.now(); use a
     // cutoff far in the future so the row is unambiguously past grace.
@@ -75,7 +75,7 @@ describe("confirmBlobDeleted", () => {
 
     confirmBlobDeleted(db, r2Key, Date.now());
 
-    // After confirmation: eligible and deleted.
-    expect(deleteTombstonedPointers(db, cutoff)).toBe(1);
+    // Confirmation releases blob content, while audit metadata remains.
+    expect(deleteTombstonedPointers(db, cutoff)).toBe(0);
   });
 });

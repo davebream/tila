@@ -126,6 +126,6 @@ describe("MCP tools — local backend round-trip (real tila-sdk/local under node
 
     const readHandler = findToolHandler(server, "tila_artifact_read_text");
     const read = await readHandler({ key: wroteParsed.key });
-    expect(read.content[0].text).toContain("hello local");
+    expect(read.content[1].text).toContain("hello local");
   });
 });

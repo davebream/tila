@@ -49,14 +49,14 @@ describe("registerEntityTools", () => {
 });
 
 describe("registerArtifactTools", () => {
-  it("registers 10 artifact tools including read-only history", () => {
+  it("registers 12 artifact tools including read-only history", () => {
     const server = createMockServer();
     registerArtifactTools(
       asServer(server),
       asClient(createMockClient()),
       PROJECT_ID,
     );
-    expect(server.tool).toHaveBeenCalledTimes(10);
+    expect(server.tool).toHaveBeenCalledTimes(12);
   });
 
   it("registers artifact relationship tools, latest helper, and grep", () => {
@@ -292,7 +292,7 @@ describe("registerPresenceTools", () => {
 });
 
 describe("registerAllTools — group gating", () => {
-  it("registers all 53 tools when groups is omitted (no env var)", () => {
+  it("registers all 55 tools when groups is omitted (no env var)", () => {
     process.env.TILA_MCP_COMPAT_ALIASES = "";
     process.env.TILA_MCP_TOOLS = "";
     const server = createMockServer();
@@ -301,7 +301,7 @@ describe("registerAllTools — group gating", () => {
       asClient(createMockClient()),
       PROJECT_ID,
     );
-    expect(server.tool).toHaveBeenCalledTimes(53);
+    expect(server.tool).toHaveBeenCalledTimes(55);
   });
 
   it("registers only tasks+claims tools (11) when groups=['tasks','claims']", () => {

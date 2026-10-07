@@ -272,11 +272,11 @@ describe("listPointers tag filter", () => {
 // deleteTombstonedPointers: CRITICAL no-orphan test (FK-OFF)
 // -------------------------------------------------------------------------
 describe("deleteTombstonedPointers: no orphan artifact_tags (FK-OFF)", () => {
-  it("removes artifact_tags for deleted pointers even when FK enforcement is OFF", () => {
+  it("preserves audit metadata and tags even when FK enforcement is OFF", () => {
     const now = Date.now();
     const cutoff = now - 7 * 24 * 60 * 60 * 1000;
 
-    // Insert a pointer with tags that will be hard-deleted
+    // Insert a pointer with tags whose blob will be deleted
     const r2KeyOld = "artifacts/gc1/old.bin";
     upsertPointer(
       testDb.db,
@@ -289,7 +289,7 @@ describe("deleteTombstonedPointers: no orphan artifact_tags (FK-OFF)", () => {
     );
 
     // Manually set tombstoned=1 + tombstoned_at past the cutoff, with the blob
-    // deletion confirmed (blob_deleted_at) so the row is eligible for hard-delete.
+    // deletion confirmed (blob_deleted_at); metadata must still survive.
     testDb.rawDb
       .prepare(
         "UPDATE artifact_pointers SET tombstoned = 1, tombstoned_at = ?, blob_deleted_at = ? WHERE r2_key = ?",
@@ -310,23 +310,23 @@ describe("deleteTombstonedPointers: no orphan artifact_tags (FK-OFF)", () => {
 
     // CRITICAL: turn FK enforcement OFF to replicate DO production reality.
     // With FK ON, ON DELETE CASCADE would fire and give a FALSE GREEN.
-    // This asserts the EXPLICIT delete in deleteTombstonedPointers, not cascade.
+    // Metadata retention must not depend on FK enforcement.
     testDb.rawDb.pragma("foreign_keys = OFF");
 
     const deleted = deleteTombstonedPointers(testDb.db, cutoff);
-    expect(deleted).toBe(1);
+    expect(deleted).toBe(0);
 
-    // Verify the pointer row is gone
+    // Verify the pointer audit record remains
     const pointerRow = testDb.rawDb
       .prepare("SELECT r2_key FROM artifact_pointers WHERE r2_key = ?")
       .get(r2KeyOld);
-    expect(pointerRow).toBeUndefined();
+    expect(pointerRow).toBeDefined();
 
-    // CRITICAL: verify NO orphan artifact_tags rows remain for the deleted key
+    // Tags remain attached to the retained audit record
     const orphanTags = testDb.rawDb
       .prepare("SELECT COUNT(*) AS n FROM artifact_tags WHERE artifact_key = ?")
       .get(r2KeyOld) as { n: number };
-    expect(orphanTags.n).toBe(0);
+    expect(orphanTags.n).toBe(2);
 
     // Restore FK ON and verify live pointer's tags are intact
     testDb.rawDb.pragma("foreign_keys = ON");

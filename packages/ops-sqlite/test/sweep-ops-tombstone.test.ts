@@ -3,7 +3,7 @@
  *
  * The sweep function now:
  *   1. Calls deleteTombstonedPointers(db, now - TOMBSTONE_GRACE_MS) before the
- *      main transaction (hard-deletes pointers past grace).
+ *      main transaction (now retains metadata for audit).
  *   2. Returns tombstonedPointersDeleted in the SweepResult.
  *
  * The ordering constraint (tombstone-before-R2-delete) lives in the Worker's
@@ -31,7 +31,7 @@ function insertTombstonedPointer(
 ): void {
   // blob_deleted_at mirrors tombstoned_at: these rows represent the normal
   // successful-sweep case (blob delete confirmed), which is what makes them
-  // eligible for the time-grace hard-delete under test here.
+  // retained audit metadata even beyond the historical grace window.
   db.rawDb
     .prepare(
       `INSERT INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, tombstoned_at, blob_deleted_at)
@@ -52,7 +52,7 @@ describe("sweep tombstonedPointersDeleted field", () => {
     expect(result.tombstonedPointersDeleted).toBe(0);
   });
 
-  it("returns tombstonedPointersDeleted count when rows past grace are deleted", () => {
+  it("retains tombstoned metadata after grace for provenance and review history", () => {
     const now = Date.now();
     const cutoff = now - TOMBSTONE_GRACE_MS;
 
@@ -65,13 +65,13 @@ describe("sweep tombstonedPointersDeleted field", () => {
     insertTombstonedPointer(testDb, "produced/d/null.bin", null);
 
     const result = sweep(testDb.db, now);
-    expect(result.tombstonedPointersDeleted).toBe(2);
+    expect(result.tombstonedPointersDeleted).toBe(0);
 
     // Check that fresh and null rows remain
     const remaining = testDb.rawDb
       .prepare("SELECT r2_key FROM artifact_pointers ORDER BY r2_key")
       .all() as { r2_key: string }[];
-    expect(remaining).toHaveLength(2);
+    expect(remaining).toHaveLength(4);
     expect(remaining.map((r) => r.r2_key)).toContain("produced/c/fresh.bin");
     expect(remaining.map((r) => r.r2_key)).toContain("produced/d/null.bin");
   });
