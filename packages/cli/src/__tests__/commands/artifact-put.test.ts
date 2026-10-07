@@ -16,12 +16,20 @@ vi.mock("node:fs", () => ({
 }));
 
 const mockPut = vi.fn();
+const mockHistory = vi.fn();
+const mockRestore = vi.fn();
+const mockWrite = vi.fn();
 vi.mock("../../context", () => ({
   requireClient: (ctx: { client: unknown }) => ctx.client,
   resolveContext: () => ({
     client: {},
     config: { project_id: "proj-abc" },
-    artifact: { put: mockPut },
+    artifact: {
+      put: mockPut,
+      history: mockHistory,
+      restore: mockRestore,
+      writeText: mockWrite,
+    },
   }),
 }));
 
@@ -187,5 +195,97 @@ describe("artifact put output", () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
     expect(payload.code).toBe("stale-fence");
+  });
+  it("forwards lineage, separate fences and retry identity on writes", async () => {
+    mockPut.mockResolvedValue({
+      key: "versioned/p/report/1/hash.txt",
+      bytes: 13,
+    });
+    mockWrite.mockResolvedValue({
+      key: "versioned/p/report/2/hash.txt",
+      bytes: 4,
+    });
+    const cmd = await loadCommand();
+    const args = {
+      kind: "report",
+      lineage: "report",
+      "lineage-fence": "7",
+      fence: "3",
+      resource: "T-1",
+      tags: "env:prod,ready",
+      "idempotency-key": "retry",
+      json: true,
+    };
+    await runCmd(getSubCommand(cmd, "put"), { ...args, file: "report.txt" });
+    expect(mockPut).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lineageId: "report",
+        lineageFence: 7,
+        fence: 3,
+        tags: ["env:prod", "ready"],
+        idempotencyKey: "retry",
+      }),
+    );
+    expect(new TextDecoder().decode(mockPut.mock.calls[0][0].body)).toBe(
+      "file-contents",
+    );
+    await runCmd(getSubCommand(cmd, "write"), { ...args, text: "body" });
+    expect(mockWrite).toHaveBeenCalledWith(
+      "body",
+      expect.objectContaining({
+        lineageId: "report",
+        lineageFence: 7,
+        fence: 3,
+        tags: ["env:prod", "ready"],
+        idempotencyKey: "retry",
+      }),
+    );
+  });
+
+  it("preserves history pagination in JSON output", async () => {
+    const page = {
+      ok: true,
+      items: [],
+      meta: { limit: 2, total: 5, next_cursor: "next" },
+    };
+    mockHistory.mockResolvedValue(page);
+    const cmd = await loadCommand();
+    await runCmd(getSubCommand(cmd, "history"), {
+      key: "versioned/p/report/1/hash.txt",
+      limit: "2",
+      cursor: "previous",
+      json: true,
+    });
+    expect(mockHistory).toHaveBeenCalledWith("versioned/p/report/1/hash.txt", {
+      limit: 2,
+      cursor: "previous",
+    });
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual(page);
+  });
+
+  it("supports explicit adoption, empty tags and restore retry keys", async () => {
+    const result = {
+      ok: true,
+      key: "versioned/p/report/1/hash.txt",
+      restored_from: "sources/legacy.txt",
+      pointer: { revision: 1 },
+    };
+    mockRestore.mockResolvedValue(result);
+    const cmd = await loadCommand();
+    await runCmd(getSubCommand(cmd, "restore"), {
+      key: "sources/legacy.txt",
+      fence: "7",
+      lineage: "report",
+      tags: "",
+      "idempotency-key": "restore",
+      json: true,
+    });
+    expect(mockRestore).toHaveBeenCalledWith("sources/legacy.txt", {
+      fence: 7,
+      lineage_id: "report",
+      tags: [],
+      idempotencyKey: "restore",
+    });
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual(result);
   });
 });
