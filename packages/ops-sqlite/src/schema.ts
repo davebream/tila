@@ -543,3 +543,47 @@ export const projectTransferChunks = sqliteTable(
     }),
   ],
 );
+
+export const journalCursors = sqliteTable(
+  "journal_cursors",
+  {
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    seq: integer("seq").notNull(),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.principal_id, table.participant_id] }),
+  ],
+);
+
+export const handoffs = sqliteTable(
+  "handoffs",
+  {
+    id: text("id").primaryKey(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    created_seq: integer("created_seq").notNull().unique(),
+    request_json: text("request_json").notNull(),
+    snapshot: text("snapshot").notNull(),
+  },
+  (table) => [
+    index("idx_handoffs_creator").on(
+      table.principal_id,
+      table.participant_id,
+      table.created_seq,
+    ),
+  ],
+);
+
+export const handoffReferences = sqliteTable(
+  "handoff_references",
+  {
+    handoff_id: text("handoff_id").notNull(),
+    resource: text("resource").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.handoff_id, table.resource] }),
+    index("idx_handoff_resource").on(table.resource),
+  ],
+);

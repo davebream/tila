@@ -2,6 +2,7 @@ import type {
   EmbeddedArtifactBackend,
   EmbeddedProject,
 } from "@tila/backend-embedded";
+import { ContinuityError } from "@tila/core";
 /**
  * Local resource adapters — present the SAME public method surface the HTTP
  * resource-method factories expose (`createTaskMethods`, `createRecordMethods`,
@@ -37,6 +38,11 @@ import {
   parseTilaSchemaToml,
 } from "@tila/core";
 import { signalOps } from "@tila/ops-sqlite";
+import type {
+  HandoffListRequest,
+  JournalReplayRequest,
+  ReentryRequest,
+} from "@tila/schemas";
 import type {
   AckSignalResponse,
   AcquireSuccessResponse,
@@ -99,6 +105,7 @@ import {
 } from "@tila/schemas";
 import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
+import type { CreateHandoffOptions } from "../continuity";
 
 /**
  * Thrown when a consumer calls a facade method that has no local equivalent
@@ -848,6 +855,15 @@ function createLocalSignalMethods(project: EmbeddedProject) {
 /** Journal methods (mirrors `createJournalMethods` in `journal.ts`). */
 function createLocalJournalMethods(project: EmbeddedProject) {
   return {
+    replay: (input: JournalReplayRequest) => project.replayJournal(input),
+    getCursor: async () => ({
+      ok: true as const,
+      cursor: await project.getJournalCursor(),
+    }),
+    acknowledge: async (input: { seq: number }) => ({
+      ok: true as const,
+      cursor: await project.acknowledgeJournal(input),
+    }),
     async query(opts?: {
       resource?: string;
       kind?: string;
@@ -1118,6 +1134,27 @@ export function buildLocalResources(
     gates: createLocalGateMethods(project),
     signals: createLocalSignalMethods(project),
     journal: createLocalJournalMethods(project),
+    reentry: (input: ReentryRequest = {}) => project.reentry(input),
+    handoffs: {
+      create: async (input: CreateHandoffOptions) => ({
+        ok: true as const,
+        handoff: await project.createHandoff({
+          ...input,
+          id: input.id ?? crypto.randomUUID(),
+        }),
+      }),
+      get: async (id: string) => {
+        const handoff = await project.getHandoff(id);
+        if (!handoff)
+          throw new ContinuityError(
+            "handoff-not-found",
+            "Handoff does not exist",
+            404,
+          );
+        return { ok: true as const, handoff };
+      },
+      list: (input: HandoffListRequest = {}) => project.listHandoffs(input),
+    },
     presence: createLocalPresenceMethods(project),
     schema: createLocalSchemaMethods(project),
     summary: createLocalSummaryMethods(project),
@@ -1161,6 +1198,8 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   gates: true,
   signals: true,
   journal: true,
+  handoffs: true,
+  reentry: true,
   presence: true,
   schema: true,
   summary: true,

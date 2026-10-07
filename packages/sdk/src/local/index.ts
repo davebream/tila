@@ -1,3 +1,4 @@
+import { createBlobJournalArchiveReader } from "@tila/backend-embedded";
 import {
   EmbeddedArtifactBackend,
   EmbeddedProject,
@@ -89,7 +90,9 @@ export async function createTilaLocal(
     skipFilesystemCheck: opts.skipFilesystemCheck,
   });
 
+  const blobs = new NodeBlobStore(opts.artifactsPath);
   const projectBackend = new EmbeddedProject({
+    archives: createBlobJournalArchiveReader(blobs, project),
     db,
     org,
     project,
@@ -100,7 +103,7 @@ export async function createTilaLocal(
 
   const artifacts = new EmbeddedArtifactBackend({
     db,
-    blobs: new NodeBlobStore(opts.artifactsPath),
+    blobs,
     org,
     project,
     identity,

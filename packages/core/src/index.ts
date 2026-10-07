@@ -137,3 +137,7 @@ export {
   type OidcEgressInit,
   type OidcEgressOptions,
 } from "./oidc-egress";
+
+export * from "./continuity";
+
+export type { ContinuityBackend } from "./interfaces/continuity-backend";
