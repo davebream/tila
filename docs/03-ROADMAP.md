@@ -166,7 +166,7 @@ missing, and full bootstrap tokens still carry owner access.
 | #173 | Keep the broader artifact revision epic scoped to the accepted foundation/API slices |
 | #174 / #175 | Reactivated: explicit lineages, numbered immutable revisions, commit-record recovery, history/meta/restore; public documentation waits for #176 |
 | #176 / #177 | Defer version-aware retention/UI; independently fix any verified current data-deletion bug |
-| #188 | Preserve producer identity needs; defer elaborate review/trust workflow |
+| #188 | Implement immutable producer provenance, explicit writer reviews, and opt-in trusted-reference task transitions; preserve the read-only UI |
 | #178 | Split useful CLI JSON contract from binary packaging/signing polish; defer the latter |
 
 ### Evidence and positioning

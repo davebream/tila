@@ -2427,7 +2427,7 @@ history.
 Migration 28 separates permanent revision metadata (`artifact_revisions`) from
 live/disposable `artifact_pointers`. History and metadata use the ledger, including
 revision tags and deletion timestamps. Tombstoned pointers still require a
-confirmed blob deletion and the existing seven-day grace before hard deletion.
+confirmed blob deletion. Migration 29 retains pointer rows as provenance and review audit records after cleanup.
 The ledger and immutable recovery records remain until project destruction.
 
 Retention is opt-in per kind (`retention_days = 0` means keep forever). New writes
@@ -2480,3 +2480,63 @@ may cover `versioned/`; multipart-upload abortion remains bucket-wide.
 ---
 
 This is the technical spine. It's not exhaustive — implementation will surface details not captured here — but it's complete enough that an AI agent or engineer working from it can build the v1 without inventing the architecture.
+
+
+### Artifact provenance and review decisions (#188)
+
+Each artifact key has immutable `provenance` identifying its original producer and
+`revision_creation` identifying the actor creating that revision. Both contain
+principal, participant, timestamp, client name/version, and environment metadata.
+Cloud principals come from authentication. Participant and environment values are
+client-supplied; local identities are local assertions. Unknown legacy provenance
+is `null`, never inferred from a display name. Missing client versions are `null`.
+Deduplicated uploads retain the first accepted attribution. Restores preserve the
+original producer, record the restoring actor separately, and start unreviewed.
+Private revision commit records preserve provenance during recovery, but never
+carry mutable reviews. Old non-deduplicated publication records can recover a
+producer; a restore or deduplicated request alone cannot establish that identity.
+
+Any project writer may record a review, including self-review and replacement of
+another writer's decision. `trusted`, `rejected`, `superseded`, and `revoked` events
+are append-only. The latest event determines state; revocation yields `unreviewed`
+and does not reactivate an older approval. New revisions and `supersedes`
+relationships never implicitly change a review. A hash verifies byte integrity,
+not truth or safety. Reviews are explicit assertions, not automated evaluations.
+
+| Interface | Contract |
+|---|---|
+| GET `/projects/:projectId/artifacts/~/reviews/:key` | History newest first; `limit` 1–100 (default 50), exclusive `before_revision`; `next_revision` supplies the next cursor |
+| POST at the same path | `{decision, expected_review_revision, reason?}`; initial expected revision is 0; supports `Idempotency-Key` |
+| SDK | `artifacts.reviews(key, query)` and `artifacts.review(key, request)`; `idempotencyKey` is optional |
+| CLI | `tila artifact reviews KEY`; `tila artifact review KEY --decision trusted --expected-review-revision 0 --reason 'Checked source'` |
+| MCP | `tila_artifact_reviews`, `tila_artifact_review`; text reads separate structured metadata from artifact content |
+
+A review write atomically appends its event and journal entry. A stale expected
+revision returns `409 review-conflict`; reusing an idempotency key with different
+input returns `422 idempotency-key-conflict`. Identical retries return the original
+decision, while metadata reads always return the current state. Permissions use
+existing project membership and `artifacts:read` / `artifacts:write` capabilities;
+namespace-restricted credentials retain the existing artifact access restrictions.
+
+Artifact responses expose producer and review metadata by default. Raw downloads
+preserve their bytes and add `X-Tila-Artifact-Review-State` and
+`X-Tila-Artifact-Review-Revision`; full identity is available from artifact metadata.
+The web UI displays current decisions, provenance, and paginated review history,
+including for unavailable content. It does not submit review decisions.
+
+A work-unit reference slot can set `require_trusted_for_statuses = ["done"]`.
+Entering a selected status requires at least one reference in that slot and all
+its artifacts to be trusted, unexpired, and not tombstoned or confirmed deleted.
+Checks run within the task transaction, including direct and template creation.
+Failure returns `422 artifact-review-required` with failing slots and states.
+Absent rules preserve existing behavior. Later review changes do not undo a task
+transition; ordinary reads remain available. Backup restoration does not replay
+workflow checks. Tila does not execute agents or automatically assess content.
+
+Migration 29 adds immutable identity columns and append-only reviews to both DO
+and embedded stores. Backups require `artifact-review-v1`; older backups remain
+readable with unknown identity and no reviews where evidence is missing. Lifecycle
+cleanup removes blob/inline content but retains metadata, tags, and review history
+for audit. Full project destruction and authorized backup replacement remain
+explicit exceptions. Review loss during blob-only recovery yields unreviewed
+state, never an inferred approval.
