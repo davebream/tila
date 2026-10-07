@@ -303,3 +303,56 @@ export const membershipEvents = sqliteTable(
     ),
   ],
 );
+
+export const serviceAccounts = sqliteTable("_service_accounts", {
+  principal_id: text("principal_id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  name: text("name").notNull(),
+  display_name: text("display_name").notNull(),
+  created_at: integer("created_at").notNull(),
+  created_by: text("created_by").notNull(),
+  revoked_at: integer("revoked_at"),
+});
+export const credentials = sqliteTable("_credentials", {
+  credential_id: text("credential_id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  principal_id: text("principal_id").notNull(),
+  name: text("name").notNull(),
+  note: text("note"),
+  policy_json: text("policy_json").notNull(),
+  current_token_id: text("current_token_id").notNull(),
+  created_at: integer("created_at").notNull(),
+  created_by: text("created_by").notNull(),
+  revoked_at: integer("revoked_at"),
+  revoked_by: text("revoked_by"),
+  workload_binding_id: text("workload_binding_id"),
+});
+export const credentialVersions = sqliteTable("_credential_versions", {
+  token_id: text("token_id").primaryKey(),
+  credential_id: text("credential_id").notNull(),
+  expires_at: integer("expires_at"),
+  retire_at: integer("retire_at"),
+});
+export const workloadBindings = sqliteTable("_workload_bindings", {
+  binding_id: text("binding_id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  principal_id: text("principal_id").notNull(),
+  name: text("name").notNull(),
+  provider: text("provider").notNull(),
+  issuer: text("issuer").notNull(),
+  subject: text("subject").notNull(),
+  policy_json: text("policy_json").notNull(),
+  created_at: integer("created_at").notNull(),
+  created_by: text("created_by").notNull(),
+  revoked_at: integer("revoked_at"),
+});
+export const credentialEvents = sqliteTable("_credential_events", {
+  event_id: text("event_id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  actor_principal_id: text("actor_principal_id").notNull(),
+  actor_token_id: text("actor_token_id"),
+  target_id: text("target_id").notNull(),
+  action: text("action").notNull(),
+  occurred_at: integer("occurred_at").notNull(),
+  details_json: text("details_json").notNull().default("{}"),
+});

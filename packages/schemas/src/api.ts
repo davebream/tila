@@ -3,6 +3,7 @@ import {
   ArtifactSearchResultSchema,
   EntitySearchResultSchema,
 } from "./artifact";
+import { CredentialPolicySchema } from "./capability";
 import { ClaimModeSchema } from "./claim";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
@@ -484,10 +485,24 @@ export const WhoamiResponseSchema = z.object({
   project_id: z.string(),
   token_name: z.string(),
   scopes: z.string(),
-  auth_kind: z.enum(["d1-token", "session", "cookie-session"]).optional(),
+  auth_kind: z
+    .enum([
+      "d1-token",
+      "session",
+      "cookie-session",
+      "workspace-session",
+      "oidc-session",
+    ])
+    .optional(),
+  principal_id: z.string().optional(),
+  token_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  role: ProjectRoleSchema.optional(),
+  policy: CredentialPolicySchema.optional(),
+  legacy: z.boolean().optional(),
   github_login: z.string().optional(),
   permission: z.string().optional(),
-  expires_at: z.number().optional(),
+  expires_at: z.number().nullable().optional(),
 });
 
 export type WhoamiResponse = z.infer<typeof WhoamiResponseSchema>;
@@ -597,6 +612,12 @@ export type SearchDriftCheckName = z.infer<typeof SearchDriftCheckNameSchema>;
 // --- Token Management API ---
 
 export const TokenIssueRequestSchema = z.object({
+  principal_id: z
+    .string()
+    .regex(/^service:[0-9a-f-]{36}$/)
+    .optional(),
+  policy: CredentialPolicySchema.optional(),
+  expires_at: z.number().int().positive().nullable().optional(),
   name: z
     .string()
     .min(1)
@@ -619,6 +640,12 @@ export const TokenIssueRequestSchema = z.object({
 export type TokenIssueRequest = z.infer<typeof TokenIssueRequestSchema>;
 
 export const TokenIssueResponseSchema = z.object({
+  token_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  principal_id: z.string().optional(),
+  policy: CredentialPolicySchema.optional(),
+  expires_at: z.number().int().nullable().optional(),
+  legacy: z.boolean().optional(),
   ok: z.literal(true),
   token: z.string(),
   name: z.string(),
@@ -636,6 +663,24 @@ export const TokenRevokeResponseSchema = z.object({
 export type TokenRevokeResponse = z.infer<typeof TokenRevokeResponseSchema>;
 
 export const TokenListItemSchema = z.object({
+  token_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  principal_id: z.string().optional(),
+  policy: CredentialPolicySchema.optional(),
+  effective_policy: CredentialPolicySchema.nullable().optional(),
+  status: z.enum(["active", "revoked", "expired", "disabled"]).optional(),
+  expires_at: z.number().int().nullable().optional(),
+  legacy: z.boolean().optional(),
+  versions: z
+    .array(
+      z.object({
+        token_id: z.string(),
+        expires_at: z.number().int().nullable(),
+        retire_at: z.number().int().nullable(),
+        revoked_at: z.number().int().nullable(),
+      }),
+    )
+    .optional(),
   name: z.string(),
   note: z.string().nullable(),
   scopes: z.string(),

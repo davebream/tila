@@ -71,6 +71,15 @@ export async function authorizeProtectedOperation(
       },
       403,
     );
+  if (
+    (token.kind === "d1-token" || token.kind === "cookie-session") &&
+    token.policy &&
+    c.get("credentialPolicy")
+  ) {
+    return PROJECT_ROLE_RANK[token.policy.role] >= PROJECT_ROLE_RANK[required]
+      ? null
+      : denied();
+  }
   if (token.kind === "d1-token")
     return token.scopes === "full" ? null : denied();
   const invalid = requireRevocableSession(c);
@@ -105,6 +114,7 @@ export async function authorizeProtectedOperation(
 /** Mounted before maintenance, idempotency and response caching. */
 export function protectedOperationMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
+    if (c.get("authorizationChecked")) return next();
     let required: ProjectRole | undefined = isProtectedMutation(
       c.req.method,
       c.req.path,

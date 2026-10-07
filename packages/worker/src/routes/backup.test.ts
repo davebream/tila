@@ -127,7 +127,7 @@ describe("backup operator routes", () => {
       env,
     );
     expect(response.status).toBe(200);
-    expect(sql).toHaveBeenCalledTimes(7);
+    expect(sql).toHaveBeenCalledTimes(10);
     for (const [statement] of sql.mock.calls) {
       expect(statement).not.toContain("SELECT *");
       expect(statement).not.toContain("token_hash");

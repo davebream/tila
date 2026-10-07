@@ -47,11 +47,19 @@ function canonicalIssuer(raw: string): string {
 
 export function canonicalMembershipPrincipal(principal: MembershipPrincipal): {
   principalId: string;
-  provider: "github" | "oidc";
+  provider: "github" | "oidc" | "service";
   identityHost: string;
   subjectId: string;
   displayName: string | null;
 } {
+  if (principal.provider === "service")
+    return {
+      principalId: `service:${principal.id}`,
+      provider: "service",
+      identityHost: "tila",
+      subjectId: principal.id,
+      displayName: null,
+    };
   if (principal.provider === "github") {
     const { identityHost, subjectId } = canonicalizePrincipal(
       principal.host,

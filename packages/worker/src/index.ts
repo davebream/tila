@@ -5,6 +5,10 @@ import { forwardToDO } from "./lib/do-forward";
 import { runSweep } from "./lib/sweep";
 import { createAuthMiddleware } from "./middleware/auth";
 import { createCacheMiddleware } from "./middleware/cache";
+import {
+  auxiliaryCapabilityMiddleware,
+  capabilityMiddleware,
+} from "./middleware/capability";
 import { createCorsMiddleware } from "./middleware/cors";
 import { csrfGuard } from "./middleware/csrf";
 import { errorHandler } from "./middleware/error";
@@ -41,6 +45,7 @@ import { records } from "./routes/records";
 import { repos } from "./routes/repos";
 import { schemaRoutes } from "./routes/schema";
 import { search } from "./routes/search";
+import { serviceAccountRoutes } from "./routes/service-accounts";
 import { signals } from "./routes/signals";
 import { summary as summaryRoute } from "./routes/summary";
 import { templates } from "./routes/templates";
@@ -131,6 +136,7 @@ app.route("/", authSessionRoutes);
 const tokenRoutes = new Hono<AppEnv>();
 tokenRoutes.use("/*", createAuthMiddleware());
 tokenRoutes.use("/*", csrfGuard);
+tokenRoutes.use("/*", auxiliaryCapabilityMiddleware);
 tokenRoutes.route("/api/tokens", tokens);
 tokenRoutes.route("/api/repos", repos);
 tokenRoutes.route("/api", whoami);
@@ -141,6 +147,7 @@ app.route("/", tokenRoutes);
 const workspaceRoutes = new Hono<AppEnv>();
 workspaceRoutes.use("/*", createAuthMiddleware());
 workspaceRoutes.use("/*", csrfGuard);
+workspaceRoutes.use("/*", auxiliaryCapabilityMiddleware);
 workspaceRoutes.route("/", workspace);
 app.route("/api/workspace", workspaceRoutes);
 
@@ -187,6 +194,7 @@ projectRoutes.use("/*", sourceResolution());
 projectRoutes.use("/*", requestIdentityMiddleware());
 projectRoutes.use("/*", projectMiddleware);
 projectRoutes.use("/*", projectMembershipMiddleware());
+projectRoutes.use("/*", capabilityMiddleware());
 projectRoutes.use("/*", protectedOperationMiddleware());
 projectRoutes.use("/*", async (c, next) => {
   if (
@@ -222,6 +230,7 @@ projectRoutes.use("/*", async (c, next) => {
 });
 projectRoutes.use("/*", createIdempotencyMiddleware());
 projectRoutes.use("/*", createCacheMiddleware());
+projectRoutes.route("/service-accounts", serviceAccountRoutes);
 projectRoutes.route("/tasks", entities); // canonical
 // @deprecated -- use /tasks going forward; kept for backward compatibility
 projectRoutes.route("/entities", entities); // @deprecated

@@ -18,6 +18,7 @@ import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { getValidatedSchema } from "../lib/schema-validation";
 import { zodValidationError } from "../lib/validation";
+import { scopedPolicy } from "../middleware/capability";
 import { requirePermission } from "../middleware/permission";
 import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
@@ -164,6 +165,19 @@ records.get("/_types", async (c) => {
   }
   // schema absent, parse error, or validate error: declaredTypes stays empty (permissive)
 
+  const rules = scopedPolicy(c)?.restrictions?.records;
+  if (rules !== undefined) {
+    const allowed = new Set(
+      rules
+        .filter(
+          (rule) =>
+            rule.key_prefixes === undefined || rule.key_prefixes.length > 0,
+        )
+        .map((rule) => rule.type),
+    );
+    declaredTypes = declaredTypes.filter((type) => allowed.has(type));
+    inUseTypes = inUseTypes.filter((type) => allowed.has(type));
+  }
   // 3. Merge, deduplicate, sort
   const types = [...new Set([...declaredTypes, ...inUseTypes])].sort();
 

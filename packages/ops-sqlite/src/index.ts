@@ -139,5 +139,6 @@ export type {
   InstantiateTemplateResult,
 } from "./template-ops";
 
+export * from "./credential-policy";
 export * as continuityOps from "./continuity-ops";
 export * as summaryOps from "./summary-ops";

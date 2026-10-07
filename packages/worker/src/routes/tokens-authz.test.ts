@@ -12,7 +12,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { Env, HonoVariables } from "../types";
 
 // --- Mock D1TokenStore and D1SessionStore ---
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("@tila/backend-d1", async () => ({
+  ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {
       issue = vi.fn().mockResolvedValue({ tokenId: "tid_abc123" });
@@ -129,7 +130,7 @@ describe("Token authz — requireD1TokenHttp guard", () => {
       expect(body.ok).toBe(false);
       expect(body.error.code).toBe("token-authz-denied");
       expect(body.error.message).toBe(
-        "Token management requires a full-scope D1 API token",
+        "Owner membership and token capability required",
       );
       expect(body.error.retryable).toBe(false);
     });

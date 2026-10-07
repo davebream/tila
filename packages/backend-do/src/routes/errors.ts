@@ -1,5 +1,5 @@
 import { FenceError } from "@tila/core";
-import { mapProjectError } from "@tila/ops-sqlite";
+import { CredentialPolicyDenied, mapProjectError } from "@tila/ops-sqlite";
 import { errorEnvelope } from "@tila/schemas";
 import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -9,6 +9,8 @@ import { CORRELATION_ID_KEY } from "./types";
 
 export function installProjectErrorHandlers(app: Hono): void {
   app.onError((err, c) => {
+    if (err instanceof CredentialPolicyDenied)
+      return jsonError(c, 403, "permission-denied", err.message);
     if (err instanceof ZodError) {
       return jsonError(c, 400, "validation-error", formatZodIssues(err.issues));
     }

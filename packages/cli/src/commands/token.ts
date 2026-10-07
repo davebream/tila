@@ -7,6 +7,7 @@ import {
 import { defineCommand } from "citty";
 import { TilaApiError } from "tila-sdk";
 import { requireClient, resolveContext } from "../context";
+import { credentialPolicyArgs, policyFromArgs } from "../lib/credential-policy";
 import { jsonArg, printJson, printJsonError, tsToIso } from "../lib/output";
 
 export default defineCommand({
@@ -15,6 +16,18 @@ export default defineCommand({
     issue: defineCommand({
       meta: { name: "issue", description: "Issue a new API token" },
       args: {
+        ...credentialPolicyArgs,
+        principal: {
+          type: "string",
+          description: "Service principal ID",
+          required: true,
+        },
+        expires: {
+          type: "string",
+          description:
+            "ISO expiry, Unix seconds, or never; defaults to 90 days",
+        },
+        jkt: { type: "string", description: "Optional DPoP key thumbprint" },
         name: {
           type: "string",
           description: "Token name (slug format: a-z, 0-9, hyphens)",
@@ -49,12 +62,26 @@ export default defineCommand({
         try {
           const result = await client.post(
             "/api/tokens",
-            { name, note: args.note || undefined },
+            {
+              name,
+              note: args.note || undefined,
+              principal_id: args.principal,
+              policy: policyFromArgs(args),
+              jkt: args.jkt || undefined,
+              expires_at:
+                args.expires === "never"
+                  ? null
+                  : args.expires
+                    ? /^\d+$/.test(String(args.expires))
+                      ? Number(args.expires)
+                      : Math.floor(Date.parse(String(args.expires)) / 1000)
+                    : undefined,
+            },
             { schema: TokenIssueResponseSchema, validate: true },
           );
 
           if (args.json) {
-            printJson({ ok: true, name: result.name, token: result.token });
+            printJson(result);
             return;
           }
 
@@ -82,12 +109,55 @@ export default defineCommand({
               );
             }
             console.error(
-              "Error: This token does not have permission to issue tokens. Use a token with full scope.",
+              "Error: This token does not have permission to issue tokens. Use an owner credential with the required token capability.",
             );
             process.exit(1);
           }
           throw err;
         }
+      },
+    }),
+    rotate: defineCommand({
+      meta: {
+        name: "rotate",
+        description:
+          "Rotate a scoped credential without changing its principal",
+      },
+      args: {
+        name: { type: "positional", required: true },
+        "expected-token-id": { type: "string", required: true },
+        "overlap-seconds": { type: "string", default: "0" },
+        ...jsonArg,
+      },
+      async run({ args }) {
+        const ctx = await resolveContext();
+        const client = requireClient(ctx);
+        const result = await client.post(
+          `/api/tokens/${encodeURIComponent(args.name)}/rotate`,
+          {
+            expected_token_id: args["expected-token-id"],
+            overlap_seconds: Number(args["overlap-seconds"]),
+          },
+          { schema: TokenIssueResponseSchema, validate: true },
+        );
+        if (args.json) printJson(result);
+        else {
+          console.log(
+            `Token rotated: ${result.name}\n${result.token}\nSave this token -- it will not be shown again.`,
+          );
+        }
+      },
+    }),
+    inspect: defineCommand({
+      meta: {
+        name: "inspect",
+        description:
+          "Show effective identity, role, capabilities, and restrictions",
+      },
+      args: { ...jsonArg },
+      async run() {
+        const ctx = await resolveContext();
+        printJson(await requireClient(ctx).get("/api/whoami"));
       },
     }),
     revoke: defineCommand({
@@ -129,7 +199,7 @@ export default defineCommand({
             return;
           }
           console.log(
-            `Token '${name}' revoked. Note: revocation may take up to 60 seconds to propagate across all active sessions.`,
+            `Token '${name}' revoked. New requests and derived sessions are rejected immediately.`,
           );
         } catch (err) {
           if (err instanceof TilaApiError && err.status === 404) {
@@ -152,7 +222,7 @@ export default defineCommand({
               );
             }
             console.error(
-              "Error: This token does not have permission to revoke tokens. Use a token with full scope.",
+              "Error: This token does not have permission to revoke tokens. Use an owner credential with the required token capability.",
             );
             process.exit(1);
           }
@@ -197,7 +267,7 @@ export default defineCommand({
               );
             }
             console.error(
-              "Error: This token does not have permission to list tokens. Use a token with full scope.",
+              "Error: This token does not have permission to list tokens. Use an owner credential with the required token capability.",
             );
             process.exit(1);
           }

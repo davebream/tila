@@ -51,3 +51,11 @@ export {
   D1DeploymentMetaStore,
   DeploymentIdUnavailable,
 } from "./deployment-meta";
+
+export {
+  CredentialStore,
+  CredentialConflict,
+  CredentialDenied,
+  SCOPED_TOKEN_MARKER,
+  type CredentialActor,
+} from "./credential-store";

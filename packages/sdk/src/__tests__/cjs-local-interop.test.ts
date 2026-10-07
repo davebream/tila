@@ -50,6 +50,8 @@ describe("dist/index.cjs loads the local stack via the ./local.js rewrite", () =
     const require = createRequire(import.meta.url);
     const mod = require(distCjs) as typeof import("../index");
     expect(typeof mod.createTila).toBe("function");
+    expect(typeof mod.createServiceAccountMethods).toBe("function");
+    expect(mod.CREDENTIAL_PRESETS["read-only"].role).toBe("viewer");
 
     const dir = mkdtempSync(join(tmpdir(), "tila-cjs-interop-"));
     try {

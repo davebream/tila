@@ -58,7 +58,8 @@ const mockIdempotencyCheck = vi.fn().mockResolvedValue(null);
 const mockIdempotencyStoreMethod = vi.fn().mockResolvedValue(undefined);
 const mockIsAllowed = vi.fn();
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("@tila/backend-d1", async () => ({
+  ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1RateLimitStore: vi.fn().mockImplementation(
     class {
       check = mockRateLimitCheck;

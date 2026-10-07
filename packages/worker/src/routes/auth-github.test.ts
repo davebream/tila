@@ -76,7 +76,8 @@ const mockD1TokenValidate = vi.fn().mockResolvedValue(null);
 const mockD1TokenUpdateLastUsedAt = vi.fn().mockResolvedValue(undefined);
 const mockD1SessionCreate = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("@tila/backend-d1", async () => ({
+  ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1DeploymentMetaStore: vi.fn().mockImplementation(
     class {
       ensure = vi.fn().mockResolvedValue("test-deployment-instance-id");
@@ -186,6 +187,12 @@ const testEnv = {
 
 function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    Object.defineProperty(c, "executionCtx", {
+      value: { waitUntil: () => {}, passThroughOnException: () => {} },
+    });
+    await next();
+  });
   app.route("/api/auth/github", authGithub);
   return app;
 }
@@ -1264,7 +1271,8 @@ describe("GET /api/auth/github/app-info", () => {
 });
 
 describe("POST /api/auth/github/app-config", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    (await import("../middleware/auth"))._resetMiddlewareStateForTest();
     vi.clearAllMocks();
     mockD1TokenValidate.mockResolvedValue(null);
     mockRateLimitCheck.mockResolvedValue(false);
@@ -1326,7 +1334,7 @@ describe("POST /api/auth/github/app-config", () => {
       error: { code: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("forbidden");
+    expect(body.error.code).toBe("token-authz-denied");
   });
 
   it("returns 400 on invalid body", async () => {
@@ -1495,7 +1503,7 @@ describe("POST /api/auth/github/app-config", () => {
     expect(body.error.code).toBe("unauthorized");
     // The failure must be recorded against the IP (mirrors /exchange).
     expect(mockRateLimitRecordFailure).toHaveBeenCalledWith(
-      "exchange:9.8.7.6",
+      "9.8.7.6",
       RATE_LIMIT_WINDOW_MS,
     );
   });

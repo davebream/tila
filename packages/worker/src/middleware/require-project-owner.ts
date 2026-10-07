@@ -26,6 +26,7 @@ function denied(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
 export const requireProjectOwner: MiddlewareHandler<AppEnv> = withRequiredRole(
   "owner",
   async (c, next) => {
+    if (c.get("authorizationChecked")) return next();
     const token = c.get("tokenResult");
     if (token.kind === "d1-token" && token.scopes === "full") return next();
     const role = c.get("effectiveRole");

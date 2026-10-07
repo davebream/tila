@@ -105,7 +105,18 @@ export type MockFacadeShape = {
   search: Record<"search", Mock>;
   indexes: Record<"create" | "addEntry" | "listEntries", Mock>;
   templates: Record<"instantiate" | "list", Mock>;
-  tokens: Record<"issue" | "revoke" | "list", Mock>;
+  tokens: Record<"issue" | "revoke" | "list" | "rotate", Mock>;
+  serviceAccounts: Record<
+    | "create"
+    | "list"
+    | "update"
+    | "revoke"
+    | "createWorkloadBinding"
+    | "listWorkloadBindings"
+    | "updateWorkloadBinding"
+    | "revokeWorkloadBinding",
+    Mock
+  >;
   close: Mock;
 };
 
@@ -172,7 +183,17 @@ export function createMockFacade(): MockFacadeShape {
     search: fns("search"),
     indexes: fns("create", "addEntry", "listEntries"),
     templates: fns("instantiate", "list"),
-    tokens: fns("issue", "revoke", "list"),
+    tokens: fns("issue", "revoke", "list", "rotate"),
+    serviceAccounts: fns(
+      "create",
+      "list",
+      "update",
+      "revoke",
+      "createWorkloadBinding",
+      "listWorkloadBindings",
+      "updateWorkloadBinding",
+      "revokeWorkloadBinding",
+    ),
     close: vi.fn(),
   };
 }
@@ -223,6 +244,7 @@ const _assertMockMatchesFacade: _MockMatchesFacade = {
   indexes: true,
   templates: true,
   tokens: true,
+  serviceAccounts: true,
 };
 void _assertMockMatchesFacade;
 

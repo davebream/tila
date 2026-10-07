@@ -18,6 +18,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { MAX_DEBOUNCE_MAP_SIZE } from "../config";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { hashToken } from "../lib/hash-token";
 import { _clearCacheForTest } from "../lib/token-cache";
@@ -142,7 +143,8 @@ let mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
 // mockImplementation's call-signature parameter type. Do NOT "simplify" these
 // back to `() => ({...})` arrows — Biome's useArrowFunction would also rewrite a
 // plain `function` expression to an arrow, so `class` + cast is the stable form.
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("@tila/backend-d1", async () => ({
+  ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {
       validate = mockValidate;
@@ -188,6 +190,13 @@ vi.mock("@tila/backend-d1", () => ({
     }
     return { identityHost, subjectId };
   },
+}));
+
+// Exercise the real eviction boundary without thousands of crypto/HTTP requests.
+// The production limit stays unchanged; only this test file uses a small capacity.
+vi.mock("../config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config")>()),
+  MAX_DEBOUNCE_MAP_SIZE: 3,
 }));
 
 // --- Mock session-cache ---
@@ -334,7 +343,7 @@ describe("auth middleware", () => {
     expect(res.status).toBe(401);
   });
 
-  it("validates token via D1 on cache miss and caches positive result", async () => {
+  it("revalidates a previously accepted token and rejects revocation immediately", async () => {
     mockValidate.mockResolvedValueOnce(CLAIMS);
     const app = createTestApp();
 
@@ -345,17 +354,17 @@ describe("auth middleware", () => {
     expect(res.status).toBe(200);
     expect(mockValidate).toHaveBeenCalledTimes(1);
 
-    // Second request within 60s -- should hit cache, no D1 call
+    // The authoritative store no longer accepts the token, even within the old cache TTL.
     mockValidate.mockReset();
     const res2 = await fetchWithCtx(
       app,
       makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }),
     );
-    expect(res2.status).toBe(200);
-    expect(mockValidate).not.toHaveBeenCalled();
+    expect(res2.status).toBe(401);
+    expect(mockValidate).toHaveBeenCalledTimes(1);
   });
 
-  it("returns 401 and caches negative result when D1 returns null", async () => {
+  it("returns 401 for an invalid token on repeated authoritative checks", async () => {
     mockValidate.mockResolvedValueOnce(null);
     const app = createTestApp();
 
@@ -366,14 +375,14 @@ describe("auth middleware", () => {
     expect(res.status).toBe(401);
     expect(mockValidate).toHaveBeenCalledTimes(1);
 
-    // Second request within 10s -- negative cache hit, no D1 call
+    // Repeated requests remain invalid.
     mockValidate.mockReset();
     const res2 = await fetchWithCtx(
       app,
       makeReq("/test", { Authorization: "Bearer bad-token" }),
     );
     expect(res2.status).toBe(401);
-    expect(mockValidate).not.toHaveBeenCalled();
+    expect(mockValidate).toHaveBeenCalledTimes(1);
   });
 
   it("expires positive cache after 60s and re-queries D1", async () => {
@@ -523,17 +532,15 @@ describe("auth middleware", () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("[auth] updateLastUsedAt failed:"),
     );
-    expect(warnSpy).toHaveBeenCalledWith(
+    expect(warnSpy).not.toHaveBeenCalledWith(
       expect.stringContaining(hash.slice(0, 8)),
     );
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("D1 write failed"),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Error"));
     expect(mockWriteDataPoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        blobs: ["auth", "updateLastUsedAt_failure", "D1 write failed"],
+        blobs: ["auth", "updateLastUsedAt_failure", "Error"],
         doubles: [1],
-        indexes: [hash.slice(0, 8)],
+        indexes: ["auth"],
       }),
     );
 
@@ -823,106 +830,104 @@ describe("auth middleware", () => {
       mockValidate.mockResolvedValue(CLAIMS);
       const app = createTestApp();
 
-      const baseTime = Date.now();
-
-      for (let i = 0; i < 2001; i++) {
-        const token = `eviction-test-token-${i}`;
-        await fetchWithCtx(
+      for (let i = 0; i < MAX_DEBOUNCE_MAP_SIZE + 1; i++) {
+        const response = await fetchWithCtx(
           app,
-          makeReq("/test", { Authorization: `Bearer ${token}` }),
+          makeReq("/test", {
+            Authorization: `Bearer eviction-test-token-${i}`,
+          }),
         );
+        expect(response.status).toBe(200);
       }
-
-      expect(_debounceMapSizeForTest()).toBe(2000);
-
-      // The first token should have been evicted — re-sending it after the
-      // debounce window should trigger a fresh updateLastUsedAt call
-      vi.setSystemTime(baseTime + 120_000);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
       mockUpdateLastUsedAt.mockClear();
 
+      // A resident key remains debounced. An evicted key writes again immediately,
+      // before the debounce window expires, proving eviction rather than expiry.
       await fetchWithCtx(
         app,
-        makeReq("/test", {
-          Authorization: "Bearer eviction-test-token-0",
-        }),
+        makeReq("/test", { Authorization: "Bearer eviction-test-token-1" }),
       );
-
-      expect(mockUpdateLastUsedAt).toHaveBeenCalled();
+      expect(mockUpdateLastUsedAt).not.toHaveBeenCalled();
+      await fetchWithCtx(
+        app,
+        makeReq("/test", { Authorization: "Bearer eviction-test-token-0" }),
+      );
+      expect(mockUpdateLastUsedAt).toHaveBeenCalledTimes(1);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
     });
 
     it("preserves debounce behavior after eviction guard is active", async () => {
       mockValidate.mockResolvedValue(CLAIMS);
       const app = createTestApp();
+      for (let i = 0; i < MAX_DEBOUNCE_MAP_SIZE; i++) {
+        await fetchWithCtx(
+          app,
+          makeReq("/test", { Authorization: `Bearer debounce-filler-${i}` }),
+        );
+      }
+      mockUpdateLastUsedAt.mockClear();
+      mockValidate.mockClear();
 
-      // First request — triggers D1 write
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer debounce-token-A" }),
       );
       expect(mockUpdateLastUsedAt).toHaveBeenCalledTimes(1);
-
-      // Second request with same token within debounce window — no D1 write
       mockUpdateLastUsedAt.mockClear();
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer debounce-token-A" }),
       );
       expect(mockUpdateLastUsedAt).not.toHaveBeenCalled();
+      // Debouncing telemetry writes must never debounce authoritative authentication.
+      expect(mockValidate).toHaveBeenCalledTimes(2);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
     });
 
     it("evicts non-promoted entries read within debounce window", async () => {
       mockValidate.mockResolvedValue(CLAIMS);
       const app = createTestApp();
-
-      const baseTime = Date.now();
-
-      // Insert token A at position 1
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-A" }),
       );
-
-      // Fill map to capacity with 1999 more tokens
-      for (let i = 0; i < 1999; i++) {
+      for (let i = 0; i < MAX_DEBOUNCE_MAP_SIZE - 1; i++) {
         await fetchWithCtx(
           app,
-          makeReq("/test", {
-            Authorization: `Bearer np-filler-${i}`,
-          }),
+          makeReq("/test", { Authorization: `Bearer np-filler-${i}` }),
         );
       }
-      expect(_debounceMapSizeForTest()).toBe(2000);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
+      mockUpdateLastUsedAt.mockClear();
 
-      // Read token A within debounce window — no set, no promotion
+      // Reading A within the window does not promote its insertion order.
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-A" }),
       );
-
-      // Insert one more token — should evict token A (oldest, not promoted)
+      expect(mockUpdateLastUsedAt).not.toHaveBeenCalled();
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-C" }),
       );
-      expect(_debounceMapSizeForTest()).toBe(2000);
-
-      // Advance past debounce window and re-send token A
-      vi.setSystemTime(baseTime + 120_000);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
       mockUpdateLastUsedAt.mockClear();
-
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-A" }),
       );
-
-      // Token A was evicted despite being recently read — updateLastUsedAt fires
-      expect(mockUpdateLastUsedAt).toHaveBeenCalled();
+      expect(mockUpdateLastUsedAt).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe("cookie-session cache integration", () => {
-    it("positive cache hit: returns 200 without calling D1", async () => {
+  describe("cookie-session authoritative validation", () => {
+    beforeEach(() => {
+      mockValidate.mockResolvedValue(CLAIMS);
+    });
+    it("positive cache entry still requires a live session row", async () => {
       mockGetSessionFromCache.mockReturnValue(VALID_SESSION);
+      mockSessionValidate.mockResolvedValueOnce(VALID_SESSION);
       const app = createTestApp();
 
       const res = await fetchWithCtx(
@@ -931,7 +936,7 @@ describe("auth middleware", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(mockSessionValidate).not.toHaveBeenCalled();
+      expect(mockSessionValidate).toHaveBeenCalledTimes(1);
       const body = (await res.json()) as {
         ok: boolean;
         claims: { kind: string; projectId: string };
@@ -955,11 +960,11 @@ describe("auth middleware", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(mockInvalidateSession).toHaveBeenCalledTimes(1);
+      expect(mockInvalidateSession).not.toHaveBeenCalled();
       expect(mockSessionValidate).toHaveBeenCalledTimes(1);
     });
 
-    it("negative cache hit: returns 401 without calling D1, no rate-limit", async () => {
+    it("revoked session remains invalid after checking the live store", async () => {
       mockGetSessionFromCache.mockReturnValue(false);
       const mockRateLimitStore = new MockRateLimitStore();
       const app = createTestApp({ rateLimitStore: mockRateLimitStore });
@@ -972,7 +977,7 @@ describe("auth middleware", () => {
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("session-expired");
-      expect(mockSessionValidate).not.toHaveBeenCalled();
+      expect(mockSessionValidate).toHaveBeenCalledTimes(1);
     });
 
     it("cache miss → D1 valid: caches SessionResult and returns 200", async () => {
@@ -1069,6 +1074,7 @@ describe("auth middleware", () => {
         expiresAt: Date.now() + 60_000,
       };
       mockGetSessionFromCache.mockReturnValue(cachedWorkspace);
+      mockSessionValidate.mockResolvedValueOnce(cachedWorkspace);
 
       const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
       app.use("/*", createAuthMiddleware());
@@ -1094,8 +1100,8 @@ describe("auth middleware", () => {
       expect(body.claims.projectId).toBe("");
       expect(body.claims.githubLogin).toBe("gh-bob");
       expect(body.authKind).toBe("workspace");
-      // D1 should NOT have been called — this was a cache hit
-      expect(mockSessionValidate).not.toHaveBeenCalled();
+      // A cached entry never replaces the live lookup
+      expect(mockSessionValidate).toHaveBeenCalledTimes(1);
     });
 
     it("normal D1 session (projectId='proj_x') → still produces CookieSessionTokenResult (regression)", async () => {
@@ -1170,6 +1176,7 @@ describe("auth middleware", () => {
         expiresAt: Date.now() + 60_000,
       };
       mockGetSessionFromCache.mockReturnValue(writeSession);
+      mockSessionValidate.mockResolvedValueOnce(writeSession);
 
       const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
       app.use("/*", createAuthMiddleware());
@@ -1188,8 +1195,8 @@ describe("auth middleware", () => {
       };
       expect(body.claims.kind).toBe("cookie-session");
       expect(body.claims.permission).toBe("write");
-      // D1 should NOT have been called — this was a cache hit
-      expect(mockSessionValidate).not.toHaveBeenCalled();
+      // A cached entry never replaces the live lookup
+      expect(mockSessionValidate).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1295,7 +1302,7 @@ describe("auth middleware", () => {
       expect(body.error.code).toBe("unauthorized");
     });
 
-    it("uses cached not-revoked result (no D1 on second request)", async () => {
+    it("rechecks a previously accepted JWT before the old cache TTL", async () => {
       mockRevokedJtiIsRevoked = vi.fn().mockResolvedValue(false);
       const token = await mintSessionToken({ jti: "cache-test-jti" });
       const app = createTestApp();
@@ -1307,14 +1314,14 @@ describe("auth middleware", () => {
       );
       expect(mockRevokedJtiIsRevoked).toHaveBeenCalledTimes(1);
 
-      // Second request within TTL — cache hit, D1 should NOT be queried again
+      // Second request within the old TTL still consults current state
       mockRevokedJtiIsRevoked.mockClear();
       const res2 = await fetchWithSessionEnv(
         app,
         makeReq("/test", { Authorization: `Bearer ${token}` }),
       );
       expect(res2.status).toBe(200);
-      expect(mockRevokedJtiIsRevoked).not.toHaveBeenCalled();
+      expect(mockRevokedJtiIsRevoked).toHaveBeenCalledTimes(1);
     });
 
     it("re-queries D1 after JTI_REVCHECK_TTL_MS elapses (cache expiry)", async () => {
@@ -1444,8 +1451,11 @@ describe("auth middleware", () => {
       expect(body.error.code).toBe("unauthorized");
     });
 
-    it("cache key is per-project: a tombstone in project A does not deny project B", async () => {
-      // Arm the in-isolate cache for project A only, with a future cutoff.
+    it("live revocation is per-project: a tombstone in project A does not deny project B", async () => {
+      mockGetRevokedBefore = vi
+        .fn()
+        .mockResolvedValueOnce(Date.now() + 3_600_000);
+      // The database, not the positive cache, determines current revocation.
       revokeSubjectInCache(
         "proj-A",
         "github.com",
@@ -1453,7 +1463,7 @@ describe("auth middleware", () => {
         Date.now() + 3_600_000,
       );
 
-      // Project A request → cache hit → issued_at(now) < revoked_before(now+1h) → denied
+      // Project A reads the live tombstone and is denied.
       const tokenA = await mintSessionToken({ project_id: "proj-A" });
       const app = createTestApp();
       const resA = await fetchWithSessionEnv(
@@ -1465,7 +1475,7 @@ describe("auth middleware", () => {
         ((await resA.json()) as { error: { code: string } }).error.code,
       ).toBe("subject-revoked");
 
-      // Project B, same principal → cache miss (different key) → D1 null → allowed
+      // Project B reads its own project-scoped state and is allowed.
       mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
       const tokenB = await mintSessionToken({ project_id: "proj-B" });
       const resB = await fetchWithSessionEnv(
@@ -2010,6 +2020,8 @@ describe("auth middleware — instance_id validation (Bearer/JWT branch only)", 
   // (f) Cookie-session request is unaffected by the instance_id check
   it("(f) cookie-session request bypasses instance_id validation entirely", async () => {
     mockGetSessionFromCache.mockReturnValue(VALID_SESSION);
+    mockSessionValidate.mockResolvedValueOnce(VALID_SESSION);
+    mockValidate.mockResolvedValueOnce(CLAIMS);
     const app = createTestApp();
 
     const res = await app.fetch(
@@ -2267,7 +2279,7 @@ describe("DPoP enforcement — D1 token branch (WI-G)", () => {
     expect(body.error).toBeUndefined();
   });
 
-  it("cache-warmup pinning: D1 token bound in D1 but cache entry lacks cnfJkt ⇒ no DPoP during warm window", async () => {
+  it("stale cache entry cannot remove a live DPoP binding", async () => {
     // Simulate a pre-deploy positive-cache entry that was populated before WI-G
     // (i.e., cnfJkt is absent/undefined in the cached entry).
     // First request: populate cache WITH cnfJkt (simulating current deploy)
@@ -2294,14 +2306,15 @@ describe("DPoP enforcement — D1 token branch (WI-G)", () => {
     const tokenHash = await hash(VALID_TOKEN, undefined);
     setCacheEntry(tokenHash, { ...CLAIMS, cnfJkt: undefined });
 
-    // Second request: cache hit with cnfJkt=undefined → DPoP NOT enforced
-    mockValidate.mockReset(); // should not be called (cache hit)
+    // Second request must enforce the live binding despite stale cached metadata.
+    mockValidate.mockReset();
+    mockValidate.mockResolvedValueOnce({ ...CLAIMS, cnfJkt: dpopJkt });
     const res = await fetchWithCtx(
       app,
       makeReq("/test", { Authorization: `Bearer ${VALID_TOKEN}` }), // no DPoP header
     );
-    expect(res.status).toBe(200); // passes because cache entry lacks cnfJkt
-    expect(mockValidate).not.toHaveBeenCalled(); // confirmed: cache hit path
+    expect(res.status).toBe(401); // live binding requires proof
+    expect(mockValidate).toHaveBeenCalledTimes(1);
   });
 
   it("oracle test: bound D1 token + thumbprint-mismatch proof ⇒ dpop-invalid, generic message (key-material collapse)", async () => {
