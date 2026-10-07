@@ -14,8 +14,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   deleteTombstonedPointers,
   listPointers,
+  reconcilePointers,
   upsertPointer,
 } from "../src/artifact-ops";
+import { listJournal } from "../src/journal-ops";
+import { entities } from "../src/schema";
 import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
@@ -492,6 +495,77 @@ describe("listPointers tagFilter (multi-tag AND)", () => {
   });
 });
 
+describe("artifact journal payload", () => {
+  beforeEach(() => {
+    testDb.db
+      .insert(entities)
+      .values({
+        id: "report",
+        type: "task",
+        schema_version: 1,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        created_by: origin.actor,
+      })
+      .run();
+  });
+
+  it.each([
+    { key: "produced/report/abc123.txt", resource: "report" },
+    { key: "sources/abc123.txt", resource: null },
+  ])("identifies the blob for $key", ({ key, resource }) => {
+    const pointer = makePointer(key, { resource });
+    upsertPointer(testDb.db, pointer, origin);
+
+    expect(listJournal(testDb.db, {})).toEqual([
+      expect.objectContaining({
+        kind: "artifact.produced",
+        resource: resource ?? "source",
+        principal_id: origin.principalId,
+        participant_id: origin.participantId,
+        environment: origin.environment,
+        fence: pointer.fence,
+        data: { r2_key: key, sha256: pointer.sha256 },
+      }),
+    ]);
+  });
+
+  it("identifies a recovered blob without changing the reconciliation event kind", () => {
+    const key = "produced/report/recovered.txt";
+    const sha256 = "recovered-sha256";
+    const result = reconcilePointers(
+      testDb.db,
+      [
+        {
+          key,
+          size: 100,
+          metadata: {
+            "tila-kind": "output",
+            "tila-sha256": sha256,
+            "tila-task": "report",
+            "tila-fence": "7",
+          },
+        },
+      ],
+      origin,
+      true,
+    );
+
+    expect(result.orphans_recovered).toBe(1);
+    expect(listJournal(testDb.db, {})).toEqual([
+      expect.objectContaining({
+        kind: "artifact.reconciled",
+        resource: "report",
+        principal_id: origin.principalId,
+        participant_id: origin.participantId,
+        environment: origin.environment,
+        fence: 7,
+        data: { r2_key: key, sha256 },
+      }),
+    ]);
+  });
+});
+
 describe("upsertPointer deduplication signal", () => {
   function countProducedEvents(): number {
     const rows = testDb.rawDb
@@ -513,11 +587,33 @@ describe("upsertPointer deduplication signal", () => {
     const ptr = makePointer("artifacts/dedup/abc123.txt");
     upsertPointer(testDb.db, ptr, origin);
     expect(countProducedEvents()).toBe(1);
+    const originalEvents = listJournal(testDb.db, {});
 
     // Second identical content-addressed put: same r2_key/sha256.
     const res = upsertPointer(testDb.db, ptr, origin);
     expect(res).toEqual({ deduplicated: true });
     // The deduplicated put must not emit a duplicate artifact.produced event.
     expect(countProducedEvents()).toBe(1);
+    expect(listJournal(testDb.db, {})).toEqual(originalEvents);
+  });
+
+  it("preserves the original event when a duplicate put updates tags", () => {
+    const ptr = makePointer("artifacts/dedup/tagged.txt");
+    upsertPointer(testDb.db, ptr, origin);
+    const originalEvents = listJournal(testDb.db, {});
+
+    const res = upsertPointer(
+      testDb.db,
+      ptr,
+      testOrigin("another-participant"),
+      undefined,
+      undefined,
+      false,
+      ["reviewed"],
+    );
+
+    expect(res).toEqual({ deduplicated: true });
+    expect(getPointerByKey(ptr.r2_key)?.tags).toEqual(["reviewed"]);
+    expect(listJournal(testDb.db, {})).toEqual(originalEvents);
   });
 });
