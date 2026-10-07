@@ -330,8 +330,8 @@ Project IDs cannot be renamed during restore. Existing-project restore creates a
 The next release changes CLI JSON output. Success emits
 `{"ok":true,"result":...,"meta":...}` on stdout; failure emits
 `{"ok":false,"error":{"kind":"...","message":"...","retryable":false}}` on stderr.
-Errors may include `hint` and `details`; partial writes expose
-`error.details.partial_result` and must not be retried automatically.
+Errors may include `hint` and `details`; partial writes include recovery information
+in `details` (such as `partial_result`) and must not be retried automatically.
 JSON diagnostics are separate stderr lines with `type: diagnostic`, `level` and
 `message`. Parse stdout for results and the final error object on stderr for failures.
 Exit codes remain 0/1/2; `doctor` retains its separate pass/warn/fail health meaning.
