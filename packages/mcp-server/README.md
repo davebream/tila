@@ -125,7 +125,7 @@ invocation time with a clear error:
 |------|-------------------|
 | `tila_artifact_put` (binary/base64 multipart upload to R2) | `tila_artifact_write_text` (content-addressed text artifacts) |
 
-## Tools (45)
+## Tools (52)
 
 > Tool names are derived from source registration. `work-unit` and `entity` are deprecated aliases for `task`; use `tila_task_*` tools.
 
@@ -203,6 +203,13 @@ invocation time with a clear error:
 | Tool | Description |
 |------|-------------|
 | `tila_journal_list` | Query the project event journal |
+| `tila_reentry` | Recover summary, journal changes, live claims, pending signals, and a relevant handoff |
+| `tila_journal_replay` | Replay oldest-first journal pages, including archived history |
+| `tila_journal_cursor_get` | Read the current participant's durable acknowledged cursor |
+| `tila_journal_acknowledge` | Advance the current participant's acknowledged cursor |
+| `tila_handoff_create` | Save an immutable, attributable handoff; reuse its UUID for retries |
+| `tila_handoff_get` | Read a handoff by ID |
+| `tila_handoff_list` | List this participant's handoffs or handoffs referencing a resource |
 | `tila_schema_update` | Apply a new TOML schema definition |
 | `tila_template_list` | List available task templates |
 | `tila_template_instantiate` | Create tasks from a template |
@@ -252,3 +259,21 @@ For `github-repo` mode, the `[github]` section (owner, repo) and `worker_url` mu
 | `TILA_ARTIFACTS_PATH` | Local mode only | Artifacts dir (config `local.artifacts_path` wins) |
 | `TILA_ORG` | No | Org slug for local mode (config `local.org` wins; defaults to OS username) |
 | `TILA_PARTICIPANT_ID` | No | Stable participant identity for this MCP server process; defaults to a generated UUID |
+
+
+### Session continuity
+
+The `continuity` tool group is included in `core` and in the default full surface.
+`tila_reentry` is read-only: it never acknowledges journal events or signals,
+renews claims, or sends a heartbeat. Continue journal pages with `next_after_seq`
+and the original `through_seq`, then use `tila_journal_acknowledge` after processing.
+A saved cursor belongs to the authenticated principal and participant, not the machine.
+
+Use `handoff_id` or `resource` to consume another participant's handoff. Without
+those selectors, re-entry selects your participant's latest handoff. Resource
+selectors use `task:<id>`, `record:<type>:<key>`, `artifact:<key>`, or the exact
+claim resource. They select the handoff, not a filtered journal. Keep a stable UUID
+when retrying `tila_handoff_create`; the same ID and content returns the original
+snapshot, while changed content fails with `handoff-conflict`. Record facts and
+unresolved questions, never private reasoning. Historical claim snapshots do not
+confer permission to write or transfer a lease.
