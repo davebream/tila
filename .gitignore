@@ -53,3 +53,6 @@ packages/cli-*/bin/tila.exe
 
 # kombajn build-loop checkpoint (orchestration artifact, never committed)
 .build-checkpoint.json
+
+# graphify knowledge graph: generated locally, rebuild with `graphify update .`
+graphify-out/
