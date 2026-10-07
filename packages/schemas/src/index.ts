@@ -386,6 +386,8 @@ export {
   type GitHubAppExchangeRequest,
   GitHubAppInfoResponseSchema,
   type GitHubAppInfoResponse,
+  OidcExchangeResponseSchema,
+  type OidcExchangeResponse,
   OidcExchangeRequestSchema,
   type OidcExchangeRequest,
 } from "./session";
@@ -457,7 +459,7 @@ export {
 } from "./membership";
 
 // --- DPoP shared helpers ---
-export { canonicalizeHtu, DPOP_TYP, DPOP_ALG } from "./dpop";
+export { canonicalizeHtu, accessTokenHash, DPOP_TYP, DPOP_ALG } from "./dpop";
 
 // --- Record schemas ---
 export {

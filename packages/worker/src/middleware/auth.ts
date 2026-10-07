@@ -409,6 +409,7 @@ const DPOP_GENERIC_INVALID_MESSAGE =
 async function enforceDpop(
   c: Context,
   expectedJkt: string,
+  accessToken: string,
 ): Promise<Response | null> {
   const proofJwt = c.req.header("DPoP");
 
@@ -433,6 +434,7 @@ async function enforceDpop(
   const result = await verifyDpopProof({
     proofJwt,
     expectedJkt,
+    accessToken,
     htm,
     htu,
     nowMs: nowMs(),
@@ -1046,7 +1048,7 @@ export function createAuthMiddleware(
       // OIDC sessions never carry `cnf` (binding is out of scope for the CI
       // runner profile), so this is structurally a no-op on the OIDC branch.
       if (payload.cnf?.jkt) {
-        const dpopResult = await enforceDpop(c, payload.cnf.jkt);
+        const dpopResult = await enforceDpop(c, payload.cnf.jkt, rawToken);
         if (dpopResult !== null) return dpopResult;
       }
 
@@ -1210,7 +1212,7 @@ export function createAuthMiddleware(
     // proof for this request. Absent binding ⇒ skip (legacy/unbound accept).
     //
     if (claims?.cnfJkt) {
-      const dpopResult = await enforceDpop(c, claims.cnfJkt);
+      const dpopResult = await enforceDpop(c, claims.cnfJkt, rawToken);
       if (dpopResult !== null) return dpopResult;
     }
 

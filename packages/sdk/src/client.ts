@@ -4,14 +4,25 @@ import {
   ErrorEnvelopeSchema,
   ParticipantIdSchema,
   type TilaProjectConfig,
+  accessTokenHash,
   canonicalizeHtu,
 } from "@tila/schemas";
 import type { z } from "zod";
+import { abortable } from "./abort";
 import { createArtifactMethods } from "./artifacts";
 import { createClaimMethods } from "./claims";
 import { createHandoffMethods, createReentryMethod } from "./continuity";
+import { providerProof } from "./dpop";
 import { createTaskMethods } from "./entities";
-import { type TilaErrorCode, toTilaErrorCode } from "./error-codes";
+import { toTilaErrorCode } from "./error-codes";
+import { TilaApiError, isTilaApiError, readApiError } from "./errors";
+import {
+  CredentialManager,
+  type TokenCredential,
+  type TokenProvider,
+  TokenProviderError,
+} from "./token-provider";
+export { TilaApiError, isTilaApiError } from "./errors";
 import { createGateMethods } from "./gates";
 import { createIndexMethods } from "./indexes";
 import { createJournalMethods } from "./journal";
@@ -28,7 +39,9 @@ import { SDK_VERSION } from "./version";
 
 export interface ClientOptions {
   baseUrl: string;
-  token: string;
+  token: string | TokenProvider;
+  /** Refresh this far ahead of expiry. Default: 30000 milliseconds. */
+  expirySkewMs?: number;
   validate?: boolean;
   /** Request timeout in milliseconds. Default: 30000 (30s). */
   timeoutMs?: number;
@@ -52,7 +65,8 @@ export interface ClientOptions {
 
 export class TilaClient {
   private baseUrl: string;
-  private token: string;
+  private token: string | TokenProvider;
+  private credentials?: CredentialManager;
   private validate: boolean;
   private timeoutMs: number;
   private extraHeaders: Record<string, string>;
@@ -63,6 +77,20 @@ export class TilaClient {
   constructor(opts: ClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.token = opts.token;
+    const skew = opts.expirySkewMs ?? 30_000;
+    if (!Number.isFinite(skew) || skew < 0)
+      throw new TokenProviderError(
+        "invalid-options",
+        "expirySkewMs must be finite and nonnegative",
+      );
+    if (typeof opts.token === "function") {
+      if (opts.dpopSigner)
+        throw new TokenProviderError(
+          "invalid-options",
+          "Provider credentials must supply their own DPoP binding",
+        );
+      this.credentials = new CredentialManager(opts.token, skew);
+    }
     this.validate = opts.validate ?? false;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.participantId = ParticipantIdSchema.parse(
@@ -96,38 +124,17 @@ export class TilaClient {
     this.dpopSigner = opts.dpopSigner;
   }
 
-  /**
-   * Creates an AbortSignal that fires after this.timeoutMs.
-   * Uses AbortSignal.timeout() when available (Node 18.8+, Bun 0.5+, browsers),
-   * falls back to manual setTimeout + AbortController for older runtimes.
-   *
-   * Note: Cloudflare Workers has supported AbortSignal.timeout() since 2023;
-   * the fallback branch will never execute there.
-   */
-  private createAbortSignal(): AbortSignal {
-    if (typeof AbortSignal.timeout === "function") {
-      return AbortSignal.timeout(this.timeoutMs);
-    }
-    const controller = new AbortController();
-    setTimeout(
-      () =>
-        controller.abort(
-          new DOMException(
-            "The operation was aborted due to timeout",
-            "TimeoutError",
-          ),
-        ),
-      this.timeoutMs,
-    );
-    return controller.signal;
-  }
-
   static fromConfig(
     config: TilaProjectConfig,
-    token: string,
+    token: string | TokenProvider,
     opts?: Pick<
       ClientOptions,
-      "extraHeaders" | "participantId" | "environment" | "timeoutMs"
+      | "extraHeaders"
+      | "participantId"
+      | "environment"
+      | "timeoutMs"
+      | "expirySkewMs"
+      | "dpopSigner"
     >,
   ): TilaClient {
     if (config.backend === "local") {
@@ -152,324 +159,233 @@ export class TilaClient {
       ...(opts?.extraHeaders ? { extraHeaders: opts.extraHeaders } : {}),
       ...(opts?.participantId ? { participantId: opts.participantId } : {}),
       ...(opts?.environment ? { environment: opts.environment } : {}),
-      ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+      timeoutMs: opts?.timeoutMs,
+      expirySkewMs: opts?.expirySkewMs,
+      dpopSigner: opts?.dpopSigner,
     });
+  }
+
+  private async transport<T>(
+    method: string,
+    path: string,
+    opts: RequestOptions<T> | undefined,
+    body: BodyInit | undefined,
+    format: "json" | "multipart" | "raw",
+  ): Promise<T | Response> {
+    const url = new URL(path, `${this.baseUrl}/`);
+    if (this.credentials && url.origin !== new URL(this.baseUrl).origin) {
+      throw new TokenProviderError(
+        "credential-origin-mismatch",
+        "Provider credentials cannot be sent to another deployment",
+      );
+    }
+    if (opts?.query)
+      for (const [key, value] of Object.entries(opts.query)) {
+        if (value !== undefined) url.searchParams.set(key, value);
+      }
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const timeoutError = () =>
+      new DOMException(
+        `Request to ${url.origin} timed out after ${this.timeoutMs}ms`,
+        "TimeoutError",
+      );
+    const cancel = () => controller.abort(opts?.signal?.reason);
+    if (opts?.signal?.aborted) cancel();
+    else opts?.signal?.addEventListener("abort", cancel, { once: true });
+    const timer = setTimeout(
+      () => controller.abort(timeoutError()),
+      this.timeoutMs,
+    );
+    try {
+      signal.throwIfAborted();
+      const context = {
+        method: method.toUpperCase(),
+        url: url.toString(),
+        signal,
+      };
+      let generation = await this.credentials?.acquire(context);
+      for (let attempt = 0; ; attempt++) {
+        signal.throwIfAborted();
+        const credential: TokenCredential = generation?.credential ?? {
+          token: this.token as string,
+        };
+        const headers: Record<string, string> = {};
+        for (const [key, value] of Object.entries(this.extraHeaders)) {
+          if (!["authorization", "dpop"].includes(key.toLowerCase()))
+            headers[key] = value;
+        }
+        headers.Authorization = `Bearer ${credential.token}`;
+        if (format !== "raw") headers.Accept = "application/json";
+        if (format === "json" && body !== undefined)
+          headers["Content-Type"] = "application/json";
+        if (opts?.idempotencyKey)
+          headers["Idempotency-Key"] = opts.idempotencyKey;
+        const htu = canonicalizeHtu(url.toString());
+        if (credential.dpop) {
+          const ath = await abortable(
+            accessTokenHash(credential.token),
+            signal,
+          );
+          headers.DPoP = await providerProof(credential.dpop, {
+            htm: context.method,
+            htu,
+            accessToken: credential.token,
+            ath,
+            signal,
+          });
+        } else if (this.dpopSigner) {
+          const signer = this.dpopSigner;
+          headers.DPoP = await abortable(
+            Promise.resolve().then(() => signer(context.method, htu)),
+            signal,
+          );
+        }
+        signal.throwIfAborted();
+        let response: Response;
+        try {
+          response = await abortable(
+            fetch(url.toString(), {
+              method: context.method,
+              headers,
+              body,
+              signal,
+              redirect: "error",
+            }),
+            signal,
+          );
+        } catch (error) {
+          if (signal.aborted) throw signal.reason;
+          if (
+            error instanceof Error &&
+            ["AbortError", "TimeoutError"].includes(error.name)
+          )
+            throw timeoutError();
+          throw new Error(`Network error connecting to ${url.origin}`, {
+            cause: error,
+          });
+        }
+        if (!response.ok) {
+          const error = await abortable(readApiError(response), signal);
+          if (
+            attempt === 0 &&
+            this.credentials &&
+            generation &&
+            error.status === 401 &&
+            (error.code === "unauthorized" || error.code === "session-expired")
+          ) {
+            generation = await this.credentials.acquire(
+              context,
+              generation,
+              error,
+            );
+            continue;
+          }
+          throw error;
+        }
+        if (format === "raw") return response;
+        const result = await abortable(response.json(), signal);
+        if ((opts?.validate ?? this.validate) && opts?.schema) {
+          const parsed = opts.schema.safeParse(result);
+          if (!parsed.success) {
+            const issues = parsed.error.issues
+              .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
+              .join("\n");
+            throw new Error(
+              `Unexpected response shape from ${method} ${path}:\n${issues}`,
+            );
+          }
+          return parsed.data;
+        }
+        return result as T;
+      }
+    } finally {
+      clearTimeout(timer);
+      opts?.signal?.removeEventListener("abort", cancel);
+    }
   }
 
   async request<T>(
     method: string,
     path: string,
-    opts?: {
-      idempotencyKey?: string;
-      body?: unknown;
-      query?: Record<string, string | undefined>;
-      schema?: z.ZodType<T>;
-      validate?: boolean;
-    },
+    opts?: RequestOptions<T> & { body?: unknown },
   ): Promise<T> {
-    const url = new URL(path, `${this.baseUrl}/`);
-    if (opts?.query) {
-      for (const [key, value] of Object.entries(opts.query)) {
-        if (value !== undefined) {
-          url.searchParams.set(key, value);
-        }
-      }
-    }
-
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: "application/json",
-      ...this.extraHeaders,
-      ...(opts?.idempotencyKey
-        ? { "Idempotency-Key": opts.idempotencyKey }
-        : {}),
-    };
-
-    if (this.dpopSigner) {
-      const htu = canonicalizeHtu(url.toString());
-      headers.DPoP = await this.dpopSigner(method, htu);
-    }
-
-    const init: RequestInit = {
+    return this.transport(
       method,
-      headers,
-      signal: this.createAbortSignal(),
-    };
-    if (opts?.body !== undefined) {
-      headers["Content-Type"] = "application/json";
-      init.body = JSON.stringify(opts.body);
-    }
-
-    let res: Response;
-    try {
-      res = await fetch(url.toString(), init);
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.name === "AbortError" || err.name === "TimeoutError")
-      ) {
-        throw new Error(
-          `Request to ${url.origin} timed out after ${this.timeoutMs}ms`,
-        );
-      }
-      throw new Error(
-        `Network error connecting to ${url.origin}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    if (!res.ok) {
-      await this.throwApiError(res);
-    }
-
-    const body = await res.json();
-    const shouldValidate = opts?.validate ?? this.validate;
-    if (shouldValidate && opts?.schema) {
-      const result = opts.schema.safeParse(body);
-      if (!result.success) {
-        const issues = result.error.issues
-          .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
-          .join("\n");
-        throw new Error(
-          `Unexpected response shape from ${method} ${path}:\n${issues}`,
-        );
-      }
-      return result.data;
-    }
-    return body as T;
+      path,
+      opts,
+      opts?.body === undefined ? undefined : JSON.stringify(opts.body),
+      "json",
+    ) as Promise<T>;
   }
 
-  async get<T>(
-    path: string,
-    opts?: {
-      schema?: z.ZodType<T>;
-      query?: Record<string, string | undefined>;
-      validate?: boolean;
-    },
-  ): Promise<T> {
-    return this.request("GET", path, {
-      schema: opts?.schema,
-      query: opts?.query,
-      validate: opts?.validate,
-    });
+  async get<T>(path: string, opts?: RequestOptions<T>): Promise<T> {
+    return this.request("GET", path, opts);
   }
 
   async post<T>(
     path: string,
     body: unknown,
-    opts?: {
-      schema?: z.ZodType<T>;
-      validate?: boolean;
-      idempotencyKey?: string;
-    },
+    opts?: RequestOptions<T>,
   ): Promise<T> {
-    return this.request("POST", path, {
-      body,
-      idempotencyKey: opts?.idempotencyKey,
-      schema: opts?.schema,
-      validate: opts?.validate,
-    });
+    return this.request("POST", path, { ...opts, body });
   }
 
   async put<T>(
     path: string,
     body: unknown,
-    opts?: { schema?: z.ZodType<T>; validate?: boolean },
+    opts?: RequestOptions<T>,
   ): Promise<T> {
-    return this.request("PUT", path, {
-      body,
-      schema: opts?.schema,
-      validate: opts?.validate,
-    });
+    return this.request("PUT", path, { ...opts, body });
   }
 
   async patch<T>(
     path: string,
     body: unknown,
-    opts?: { schema?: z.ZodType<T>; validate?: boolean },
+    opts?: RequestOptions<T>,
   ): Promise<T> {
-    return this.request("PATCH", path, {
-      body,
-      schema: opts?.schema,
-      validate: opts?.validate,
-    });
+    return this.request("PATCH", path, { ...opts, body });
   }
 
-  async delete<T>(
-    path: string,
-    opts?: {
-      schema?: z.ZodType<T>;
-      validate?: boolean;
-      query?: Record<string, string | undefined>;
-      idempotencyKey?: string;
-    },
-  ): Promise<T> {
-    return this.request("DELETE", path, {
-      query: opts?.query,
-      idempotencyKey: opts?.idempotencyKey,
-      schema: opts?.schema,
-      validate: opts?.validate,
-    });
+  async delete<T>(path: string, opts?: RequestOptions<T>): Promise<T> {
+    return this.request("DELETE", path, opts);
   }
 
   async requestRaw(
     method: string,
     path: string,
-    opts?: { query?: Record<string, string | undefined> },
+    opts?: RequestOptions<never>,
   ): Promise<Response> {
-    const url = new URL(path, `${this.baseUrl}/`);
-    if (opts?.query) {
-      for (const [key, value] of Object.entries(opts.query)) {
-        if (value !== undefined) {
-          url.searchParams.set(key, value);
-        }
-      }
-    }
-
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      ...this.extraHeaders,
-    };
-
-    if (this.dpopSigner) {
-      const htu = canonicalizeHtu(url.toString());
-      headers.DPoP = await this.dpopSigner(method, htu);
-    }
-
-    let res: Response;
-    try {
-      res = await fetch(url.toString(), {
-        method,
-        headers,
-        signal: this.createAbortSignal(),
-      });
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.name === "AbortError" || err.name === "TimeoutError")
-      ) {
-        throw new Error(
-          `Request to ${url.origin} timed out after ${this.timeoutMs}ms`,
-        );
-      }
-      throw new Error(
-        `Network error connecting to ${url.origin}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    if (!res.ok) {
-      await this.throwApiError(res);
-    }
-
-    return res;
+    return this.transport(
+      method,
+      path,
+      opts,
+      undefined,
+      "raw",
+    ) as Promise<Response>;
   }
 
   async postFormData<T>(
     path: string,
     formData: FormData,
-    opts?: {
-      schema?: z.ZodType<T>;
-      validate?: boolean;
-      idempotencyKey?: string;
-    },
+    opts?: RequestOptions<T>,
   ): Promise<T> {
-    const url = new URL(path, `${this.baseUrl}/`);
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: "application/json",
-      ...this.extraHeaders,
-      ...(opts?.idempotencyKey
-        ? { "Idempotency-Key": opts.idempotencyKey }
-        : {}),
-    };
-    // Do NOT set Content-Type — fetch sets it with the boundary automatically for FormData
-
-    if (this.dpopSigner) {
-      const htu = canonicalizeHtu(url.toString());
-      headers.DPoP = await this.dpopSigner("POST", htu);
-    }
-
-    let res: Response;
-    try {
-      res = await fetch(url.toString(), {
-        method: "POST",
-        headers,
-        body: formData,
-        signal: this.createAbortSignal(),
-      });
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.name === "AbortError" || err.name === "TimeoutError")
-      ) {
-        throw new Error(
-          `Request to ${url.origin} timed out after ${this.timeoutMs}ms`,
-        );
-      }
-      throw new Error(
-        `Network error connecting to ${url.origin}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    if (!res.ok) {
-      await this.throwApiError(res);
-    }
-
-    const body = await res.json();
-    const shouldValidate = opts?.validate ?? this.validate;
-    if (shouldValidate && opts?.schema) {
-      const result = opts.schema.safeParse(body);
-      if (!result.success) {
-        const issues = result.error.issues
-          .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
-          .join("\n");
-        throw new Error(
-          `Unexpected response shape from POST ${path}:\n${issues}`,
-        );
-      }
-      return result.data;
-    }
-    return body as T;
-  }
-
-  private async throwApiError(res: Response): Promise<never> {
-    try {
-      const body = await res.json();
-      const parsed = ErrorEnvelopeSchema.safeParse(body);
-      if (parsed.success) {
-        const { code, message, retryable } = parsed.data.error;
-        throw new TilaApiError(
-          res.status,
-          toTilaErrorCode(code),
-          message,
-          retryable,
-        );
-      }
-    } catch (err) {
-      if (err instanceof TilaApiError) throw err;
-    }
-    throw new TilaApiError(
-      res.status,
-      "UNKNOWN",
-      `HTTP ${res.status}: ${res.statusText}`,
-      false,
-    );
+    return this.transport(
+      "POST",
+      path,
+      opts,
+      formData,
+      "multipart",
+    ) as Promise<T>;
   }
 }
 
-export class TilaApiError extends Error {
-  constructor(
-    public status: number,
-    public code: TilaErrorCode,
-    message: string,
-    public retryable: boolean,
-  ) {
-    super(message);
-    this.name = "TilaApiError";
-  }
-}
-
-export function isTilaApiError(err: unknown): err is TilaApiError {
-  return err instanceof TilaApiError;
+export interface RequestOptions<T = unknown> {
+  signal?: AbortSignal;
+  idempotencyKey?: string;
+  query?: Record<string, string | undefined>;
+  schema?: z.ZodType<T>;
+  validate?: boolean;
 }
 
 export async function exchangeGitHubToken(
@@ -644,10 +560,15 @@ export function buildHttpFacadeForTest(
  */
 export async function createTila(
   config: TilaProjectConfig,
-  token?: string,
+  token?: string | TokenProvider,
   opts?: Pick<
     ClientOptions,
-    "extraHeaders" | "participantId" | "environment" | "timeoutMs"
+    | "extraHeaders"
+    | "participantId"
+    | "environment"
+    | "timeoutMs"
+    | "expirySkewMs"
+    | "dpopSigner"
   >,
 ): Promise<TilaFacade> {
   if (config.backend === "local") {
@@ -706,6 +627,8 @@ export async function createTila(
     participantId: opts?.participantId,
     environment: opts?.environment,
     timeoutMs: opts?.timeoutMs,
+    expirySkewMs: opts?.expirySkewMs,
+    dpopSigner: opts?.dpopSigner,
   });
   return buildHttpFacade(client, config.project_id);
 }
