@@ -2,6 +2,7 @@ import { D1RevokedJtiStore } from "@tila/backend-d1";
 import { revokeJtiInCache } from "../middleware/auth";
 import type { Env } from "../types";
 import { forwardToDO } from "./do-forward";
+import { journalArchiveObjects } from "./journal-archive";
 
 interface JournalEvent {
   seq: number;
@@ -39,26 +40,14 @@ async function writeJournalArchiveToR2(
   events: JournalEvent[],
   projectId: string,
 ): Promise<void> {
-  // Group events by year/month based on their timestamp
-  const groups = new Map<string, JournalEvent[]>();
-  for (const event of events) {
-    const d = new Date(event.t);
-    const year = d.getUTCFullYear();
-    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const key = `${year}/${month}`;
-    const group = groups.get(key);
-    if (group) {
-      group.push(event);
-    } else {
-      groups.set(key, [event]);
-    }
-  }
-
-  for (const [yearMonth, groupEvents] of groups) {
-    const throughSeq = Math.max(...groupEvents.map((event) => event.seq));
-    const r2Key = `journal-archive/${projectId}/${yearMonth}.part-${throughSeq}.jsonl`;
-    const jsonl = groupEvents.map((e) => JSON.stringify(e)).join("\n");
-    await r2.put(r2Key, jsonl);
+  for (const object of journalArchiveObjects(
+    projectId,
+    events,
+    Math.max(...events.map((event) => event.seq)),
+  )) {
+    await r2.put(object.key, object.body, {
+      customMetadata: object.customMetadata,
+    });
   }
 }
 

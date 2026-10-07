@@ -292,7 +292,7 @@ describe("registerPresenceTools", () => {
 });
 
 describe("registerAllTools — group gating", () => {
-  it("registers all 45 tools when groups is omitted (no env var)", () => {
+  it("registers all 52 tools when groups is omitted (no env var)", () => {
     process.env.TILA_MCP_COMPAT_ALIASES = "";
     process.env.TILA_MCP_TOOLS = "";
     const server = createMockServer();
@@ -301,7 +301,7 @@ describe("registerAllTools — group gating", () => {
       asClient(createMockClient()),
       PROJECT_ID,
     );
-    expect(server.tool).toHaveBeenCalledTimes(45);
+    expect(server.tool).toHaveBeenCalledTimes(52);
   });
 
   it("registers only tasks+claims tools (11) when groups=['tasks','claims']", () => {
@@ -316,7 +316,7 @@ describe("registerAllTools — group gating", () => {
     expect(server.tool).toHaveBeenCalledTimes(11);
   });
 
-  it("expands the 'core' alias to 25 coordination tools", () => {
+  it("expands the 'core' alias to 32 coordination tools", () => {
     process.env.TILA_MCP_COMPAT_ALIASES = "";
     const server = createMockServer();
     registerAllTools(
@@ -326,7 +326,7 @@ describe("registerAllTools — group gating", () => {
       ["core"],
     );
     // core = tasks(8) + claims(3) + gates(3) + signals(8) + summary(1) + presence(1) + journal(1)
-    expect(server.tool).toHaveBeenCalledTimes(25);
+    expect(server.tool).toHaveBeenCalledTimes(32);
   });
 
   it("throws an actionable error with valid group list on unknown group", () => {

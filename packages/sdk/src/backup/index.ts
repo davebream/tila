@@ -29,7 +29,7 @@ import { createNodeConnection } from "../local/connection";
 import { SDK_VERSION } from "../version";
 
 export const SUPPORTED_BACKUP_FEATURES = new Set<string>();
-export const MAX_SUPPORTED_DO_MIGRATION = 24;
+export const MAX_SUPPORTED_DO_MIGRATION = 26;
 
 export type LocalBackupEndpoint = {
   backend: "local";

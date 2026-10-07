@@ -424,7 +424,9 @@ const result = await withRetry(
 | `createGateMethods(client, projectId)` | `list`, `create`, `resolve`, `remove` | Coordination gates |
 | `createTemplateMethods(client, projectId)` | `instantiate` | Entity template instantiation |
 | `createSummaryMethods(client, projectId)` | `get` | Project summary |
-| `createJournalMethods(client, projectId)` | `query` | Event journal queries |
+| `createJournalMethods(client, projectId)` | `query`, `replay`, `getCursor`, `acknowledge` | Journal queries and durable replay |
+| `createHandoffMethods(client, projectId)` | `create`, `get`, `list` | Immutable session handoffs |
+| `createReentryMethod(client, projectId)` | callable | Recover project context in one workflow |
 | `createSchemaMethods(client, projectId)` | `get`, `apply`, `history` | Schema-as-config management |
 | `createTokenMethods(client)` | `issue`, `revoke`, `list` | API token management (no `projectId`) |
 
@@ -453,3 +455,58 @@ const client = new TilaClient({
 ## License
 
 See the repository root for license information.
+
+
+### Durable cursors and handoffs
+
+Cloud and local facades expose `reentry`, `handoffs`, and journal continuity methods.
+Configure the same authenticated principal and stable participant ID to resume a
+cursor on another runtime. A different participant can consume a handoff without
+inheriting its creator's cursor or claims.
+
+```ts
+const state = await tila.reentry({ resource: "task:T-1", limit: 100 });
+// Process state.summary, state.active_claims, state.pending_signals,
+// state.handoff, and state.changes.events before acknowledging.
+await tila.journal.acknowledge({ seq: state.changes.next_after_seq });
+let page = state.changes;
+while (page.has_more) {
+  page = await tila.journal.replay({
+    after_seq: page.next_after_seq,
+    through_seq: page.through_seq,
+  });
+  // Process page.events before acknowledging.
+  await tila.journal.acknowledge({ seq: page.next_after_seq });
+}
+const handoff = await tila.handoffs.create({
+  id: crypto.randomUUID(), // Persist and reuse this ID if retrying after a crash.
+  summary: "Implementation ready for verification",
+  current_state: { phase: "verification" },
+  findings: ["Cloud and local schemas match"],
+  unresolved_questions: [],
+  based_on_seq: page.through_seq,
+  references: [{ type: "task", id: "T-1" }],
+});
+```
+
+Replay is oldest-first with a fixed `through_seq`, a default page size of 100,
+and a maximum of 200. `journal.query()` retains its existing behavior. Replay
+includes archived history; missing or unreadable history fails explicitly.
+`getCursor()` and `acknowledge()` return `{ ok, cursor: { seq, updated_at } }`.
+Acknowledgements never move backwards, reject future positions, and survive
+presence expiry. Reads do not automatically acknowledge signals or journal events.
+
+Re-entry chooses its starting sequence from explicit `after_seq`, then an existing
+saved cursor (including zero), then the selected handoff's `based_on_seq`, then zero.
+Select a handoff with `handoff_id` or `resource`, never both. Without a selector,
+the caller participant's latest handoff is used. A resource searches across project
+participants using `task:<id>`, `record:<type>:<key>`, `artifact:<key>`, or a claim's
+exact resource; it does not filter replay events. Handoff lists are newest-first,
+with `next_before_seq` passed as `before_seq` for the next page.
+
+Handoffs are immutable; save a new handoff with `supersedes_id` for corrections.
+The SDK generates an ID if omitted, but supply and persist an ID for retries across
+process restarts. Creation returns `{ ok, handoff }`; repeating the same ID, creator,
+and content returns the original snapshot. Referenced objects are not pinned, and
+historical claim snapshots never grant current write authority. Continuity state has
+no automatic expiry and is included in project backups.

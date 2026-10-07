@@ -9,6 +9,7 @@ import {
 import type { z } from "zod";
 import { createArtifactMethods } from "./artifacts";
 import { createClaimMethods } from "./claims";
+import { createHandoffMethods, createReentryMethod } from "./continuity";
 import { createTaskMethods } from "./entities";
 import { type TilaErrorCode, toTilaErrorCode } from "./error-codes";
 import { createGateMethods } from "./gates";
@@ -527,6 +528,8 @@ export async function exchangeGitHubToken(
  * backend (HTTP-only — D1 global token store).
  */
 export interface TilaFacade {
+  handoffs: ReturnType<typeof createHandoffMethods>;
+  reentry: ReturnType<typeof createReentryMethod>;
   tasks: ReturnType<typeof createTaskMethods>;
   records: ReturnType<typeof createRecordMethods>;
   claims: ReturnType<typeof createClaimMethods>;
@@ -559,6 +562,8 @@ function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
     gates: createGateMethods(client, projectId),
     signals: createSignalMethods(client, projectId),
     journal: createJournalMethods(client, projectId),
+    handoffs: createHandoffMethods(client, projectId),
+    reentry: createReentryMethod(client, projectId),
     presence: createPresenceMethods(client, projectId),
     schema: createSchemaMethods(client, projectId),
     summary: createSummaryMethods(client, projectId),

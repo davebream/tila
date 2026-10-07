@@ -136,3 +136,6 @@ export type {
   InstantiateTemplateParams,
   InstantiateTemplateResult,
 } from "./template-ops";
+
+export * as continuityOps from "./continuity-ops";
+export * as summaryOps from "./summary-ops";

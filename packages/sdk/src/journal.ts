@@ -1,10 +1,12 @@
 import type { JournalResponse } from "@tila/schemas";
 import type { TilaClient } from "./client";
+import { createJournalContinuityMethods } from "./continuity";
 
 export function createJournalMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}/journal`;
 
   return {
+    ...createJournalContinuityMethods(client, projectId),
     async query(opts?: {
       // Worker GET /journal query params: resource (entity id), kind (event
       // kind), after_seq (cursor), limit. These are the names the Worker route
