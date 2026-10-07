@@ -126,7 +126,7 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-// @clack/prompts mock — stable references via named mock fns
+// ../../lib/prompts mock — stable references via named mock fns
 const mockClackSpinnerStart = vi.fn();
 const mockClackSpinnerStop = vi.fn();
 const mockText = vi.fn();
@@ -139,7 +139,7 @@ const mockLogInfo = vi.fn();
 const mockLogWarn = vi.fn();
 const mockLogError = vi.fn();
 const mockLogSuccess = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   text: (...args: unknown[]) => mockText(...args),
   password: (...args: unknown[]) => mockPassword(...args),
   confirm: (...args: unknown[]) => mockConfirm(...args),

@@ -121,9 +121,9 @@ describe("tila task --json", () => {
       });
 
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(output).toHaveProperty("entities");
-      expect(output).toHaveProperty("count", 1);
-      expect(output).toHaveProperty("filters");
+      expect(output).toHaveProperty("result.items");
+      expect(output).toHaveProperty("meta.count", 1);
+      expect(output).toHaveProperty("result.filters");
     });
 
     it("outputs human-readable text when no --json", async () => {
@@ -166,8 +166,8 @@ describe("tila task --json", () => {
       await runCmd(showCmd, { id: "T-1", json: true });
 
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(output.id).toBe("T-1");
-      expect(output.type).toBe("task");
+      expect(output.result.id).toBe("T-1");
+      expect(output.result.type).toBe("task");
     });
 
     it("outputs human-readable table when no --json (behavioral change)", async () => {
@@ -202,11 +202,11 @@ describe("tila task --json", () => {
 
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
       expect(output.ok).toBe(true);
-      expect(output.acquired).toBe(true);
-      expect(output.fence).toBe(42);
-      expect(typeof output.fence).toBe("number");
-      expect(output.expires_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      expect(output.participant_id).toBe("participant-1");
+      expect(output.result.acquired).toBe(true);
+      expect(output.result.fence).toBe(42);
+      expect(typeof output.result.fence).toBe("number");
+      expect(output.result.expires_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(output.result.participant_id).toBe("participant-1");
     });
   });
 

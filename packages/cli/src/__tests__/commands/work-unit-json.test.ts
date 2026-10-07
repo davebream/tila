@@ -142,7 +142,7 @@ describe("tila work-unit --json (deprecated alias for task)", () => {
     await runCmd(sub, { json: true });
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(output.entities).toEqual([]);
+    expect(output.result.items).toEqual([]);
   });
 
   it("work-unit show --json returns entity via entity backend", async () => {
@@ -163,6 +163,6 @@ describe("tila work-unit --json (deprecated alias for task)", () => {
     await runCmd(sub, { id: "T-1", json: true });
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(output.id).toBe("T-1");
+    expect(output.result.id).toBe("T-1");
   });
 });
