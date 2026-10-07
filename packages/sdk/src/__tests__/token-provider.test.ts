@@ -46,6 +46,49 @@ afterEach(() => {
 });
 
 describe("credential coordinator", () => {
+  it.each(["pending", "completed"])(
+    "forces auth refresh when a %s ordinary acquisition returns the rejected token",
+    async (state) => {
+      const lateResponse = deferred<Response>();
+      const ordinaryLoad = deferred<TokenCredential>();
+      const contexts: TokenProviderContext[] = [];
+      const load = vi.fn(async (context: TokenProviderContext) => {
+        contexts.push(context);
+        if (context.reason === "authentication") return { token: "new" };
+        if (contexts.length === 1) return { token: "old" };
+        return ordinaryLoad.promise;
+      });
+      const fetch = vi.fn(async (url: string, init: RequestInit) => {
+        const token = new Headers(init.headers).get("Authorization");
+        if (url.endsWith("/slow") && token === "Bearer old")
+          return lateResponse.promise;
+        return ok();
+      });
+      vi.stubGlobal("fetch", fetch);
+      const client = new TilaClient({ baseUrl, token: load });
+      const first = client.get("/slow");
+      await flush();
+      const second = client.get("/other");
+      await flush();
+      if (state === "completed") {
+        ordinaryLoad.resolve({ token: "old" });
+        await second;
+      }
+      lateResponse.resolve(denied());
+      await flush();
+      ordinaryLoad.resolve({ token: "old" });
+      await Promise.all([first, second]);
+      expect(contexts.map((context) => context.reason)).toEqual([
+        "initial",
+        "request",
+        "authentication",
+      ]);
+      const retried = fetch.mock.calls.filter(([url]) => url.endsWith("/slow"));
+      expect(new Headers(retried[1][1].headers).get("Authorization")).toBe(
+        "Bearer new",
+      );
+    },
+  );
   it("does not reuse a newer but already expired token for a late 401", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_800_000_000_000);
