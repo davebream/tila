@@ -75,6 +75,8 @@ vi.mock("@tila/backend-d1", () => ({
 const mockRevokeJtiInCache = vi.fn();
 const mockRevokeSubjectInCache = vi.fn();
 vi.mock("../middleware/auth", () => ({
+  createAuthMiddleware: () => async (_c: unknown, next: () => Promise<void>) =>
+    next(),
   revokeJtiInCache: (...args: unknown[]) => mockRevokeJtiInCache(...args),
   revokeSubjectInCache: (...args: unknown[]) =>
     mockRevokeSubjectInCache(...args),

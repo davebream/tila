@@ -1,5 +1,6 @@
 import { TilaSchemaTomlSchema } from "@tila/schemas";
 import { beforeEach, describe, expect, it } from "vitest";
+import { CredentialPolicyDenied } from "../src/credential-policy";
 import { applySchema } from "../src/schema-ops";
 import {
   TemplateInstantiateError,
@@ -315,4 +316,31 @@ describe("templateOps.instantiateTemplate — atomicity (rollback proof)", () =>
     expect(countRelationships(testDb)).toBe(relsBefore);
     expect(countTemplateJournal(testDb)).toBe(journalBefore);
   });
+});
+
+it("authorizes every template task before writing any task, relationship, or journal entry", () => {
+  const fixture = createTestDb();
+  applySchema(fixture.db, SCHEMA_WITH_TEMPLATE, "test");
+  const before = fixture.rawDb
+    .prepare("SELECT count(*) AS n FROM journal")
+    .get();
+  expect(() =>
+    instantiateTemplate(fixture.db, {
+      templateName: "sprint",
+      rootId: "restricted",
+      vars: {},
+      origin: ORIGIN,
+      policy: {
+        role: "participant",
+        capabilities: ["templates:instantiate", "tasks:write"],
+        restrictions: { task_types: ["task"] },
+      },
+    }),
+  ).toThrow(CredentialPolicyDenied);
+  expect(countEntities(fixture)).toBe(0);
+  expect(countRelationships(fixture)).toBe(0);
+  expect(
+    fixture.rawDb.prepare("SELECT count(*) AS n FROM journal").get(),
+  ).toEqual(before);
+  fixture.rawDb.close();
 });

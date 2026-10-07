@@ -1,32 +1,4 @@
-/**
- * auth-revocation.test.ts — negative-path tests for session token revocation.
- *
- * Green-today assertions (real, no D1 mock required):
- *   - jti-revocation fail-closed (C9 on main): a session whose jti is in the
- *     per-isolate revocation cache is rejected 401 session-revoked (auth.ts:608).
- *     This is driven through the worker's REAL in-process cache via the re-exported
- *     revokeJtiInCache() — no @tila/backend-d1 mock is involved, so it exercises the
- *     genuine cache-hit branch (auth.ts:584 → 608).
- *   - positive counterpart: a fresh session (no jti) passes — guards against a
- *     blanket-reject bug masquerading as correct.
- *   - token-hash equality sanity check.
- *
- * Cross-package mock limitation (deliberate scope boundary):
- *   The D1-query revocation branch (auth.ts:596-615) is NOT exercised here. Mocking
- *   a @tila/backend-d1 store *method* from this package does not reliably intercept
- *   the worker's internal `new D1RevokedJtiStore(c.env.DB)` call: vitest's vi.mock
- *   only intercepts when the specifier resolves in this file's own module graph, and
- *   wiring that across the package boundary re-introduces a mock→worker→mocked-package
- *   import cycle. The D1 fail-closed branch is already covered by the worker's own
- *   co-located unit tests (packages/worker/src/middleware/auth.test.ts). The cache
- *   branch tested here is the production hot path.
- *
- * Subject-level bulk kill-switch (WI-C, #126):
- *   - Driven through the worker's REAL per-isolate subject cache via the
- *     re-exported revokeSubjectInCache() — the production hot path (cache hit,
- *     no D1). The D1-query branch + fail-closed behavior are covered by the
- *     worker's co-located unit tests (see the cross-package mock limitation above).
- */
+/** Regression coverage for live D1 subject revocation and confirmed-revoked JTI hints. */
 import {
   _resetMiddlewareStateForTest,
   authFixtures,
@@ -37,19 +9,21 @@ import {
 } from "@tila/worker/test-support";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Minimal empty-read D1 stub. auth-revocation.test.ts uses the REAL backend-d1
-// stores (no @tila/backend-d1 vi.mock — see header). The WI-C subject gate, unlike
-// the jti gate, ALWAYS queries D1 on a subject-cache miss, so the env's DB must be
-// able to serve a read that returns "no tombstone" (empty result → getRevokedBefore
-// returns null → request proceeds). Returns empty for every query; tombstone-present
-// cases in this file are driven through the in-isolate cache via revokeSubjectInCache.
+// The subject tombstone is authoritative D1 state, never a positive cache grant.
+let revokedBefore: number | null = null;
 const emptyD1 = {
-  prepare: () => ({
+  prepare: (query: string) => ({
     bind: () => ({
       all: async () => ({ results: [], success: true, meta: {} }),
-      first: async () => null,
+      first: async () =>
+        query.includes("_revoked_subjects") && revokedBefore !== null
+          ? { revoked_before: revokedBefore }
+          : null,
       run: async () => ({ success: true, meta: {} }),
-      raw: async () => [],
+      raw: async () =>
+        query.includes("_revoked_subjects") && revokedBefore !== null
+          ? [[revokedBefore]]
+          : [],
     }),
   }),
 } as unknown as D1Database;
@@ -60,6 +34,7 @@ beforeEach(() => {
   // Clear the per-isolate jti revocation cache between tests so the positive
   // counterpart cannot see a prior test's revoked jti.
   _resetMiddlewareStateForTest();
+  revokedBefore = null;
 });
 
 const execCtx = {
@@ -135,9 +110,10 @@ describe("token hash equality", () => {
 
 describe("subject-level bulk revocation — subject-revoked", () => {
   it("rejects a session token whose principal was revoked with a future cutoff (401 subject-revoked)", async () => {
-    // Arm the in-isolate tombstone for the default principal with a cutoff in the
+    // Set the authoritative database tombstone with a cutoff in the
     // future, so a token issued now is strictly before it and must be rejected.
-    revokeSubjectInCache("proj-1", "github.com", 12345, Date.now() + 3_600_000);
+    revokedBefore = Date.now() + 3_600_000;
+    revokeSubjectInCache("proj-1", "github.com", 12345, revokedBefore);
 
     const app = createAuthTestApp(env);
     const token = await authFixtures.mintSessionToken();
@@ -158,8 +134,9 @@ describe("subject-level bulk revocation — subject-revoked", () => {
   it("allows a token issued at/after the cutoff (strict <, positive counterpart)", async () => {
     // Same principal, but the tombstone cutoff is in the past, so a token issued
     // now is NOT before it — the kill-switch must not fire (guards against a
-    // blanket-reject bug). Cache hit → no D1 needed.
-    revokeSubjectInCache("proj-1", "github.com", 12345, Date.now() - 3_600_000);
+    // blanket-reject bug). D1 is checked even with a warm cache.
+    revokedBefore = Date.now() - 3_600_000;
+    revokeSubjectInCache("proj-1", "github.com", 12345, revokedBefore);
 
     const app = createAuthTestApp(env);
     const token = await authFixtures.mintSessionToken();

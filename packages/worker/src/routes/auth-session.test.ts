@@ -15,7 +15,8 @@ const mockTokenRevoke = vi
   .mockResolvedValue({ revoked: true, tokenHash: "tok-hash" });
 const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("@tila/backend-d1", async () => ({
+  ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1RateLimitStore: vi.fn().mockImplementation(
     class {
       check = mockRateLimitCheck;
@@ -99,6 +100,12 @@ function makeProtectedApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockTokenValidate.mockResolvedValue({
+    projectId: "test-project",
+    name: "test-token",
+    scopes: "full",
+    tokenId: "uuid-123",
+  });
   mockRateLimitCheck.mockResolvedValue(false);
   mockRateLimitRecordFailure.mockResolvedValue(undefined);
   mockSessionCreate.mockResolvedValue(undefined);
