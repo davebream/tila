@@ -184,7 +184,11 @@ export function createOidcWorkloadTokenProvider(
   };
 }
 
-type Generation = { credential: TokenCredential; id: number };
+type Generation = {
+  credential: TokenCredential;
+  id: number;
+  authenticationRefresh: boolean;
+};
 type Acquisition = {
   controller: AbortController;
   promise: Promise<Generation>;
@@ -209,7 +213,13 @@ export class CredentialManager {
     authenticationError?: TilaApiError,
   ): Promise<Generation> {
     context.signal.throwIfAborted();
-    if (rejected && this.current?.id === rejected.id) {
+    if (
+      rejected &&
+      this.current &&
+      (this.current.id === rejected.id ||
+        (this.current.credential.token === rejected.credential.token &&
+          !this.current.authenticationRefresh))
+    ) {
       this.invalidated = this.current;
       this.current = undefined;
     }
@@ -249,7 +259,11 @@ export class CredentialManager {
               }),
             );
             controller.signal.throwIfAborted();
-            const generation = { credential, id: ++this.nextId };
+            const generation = {
+              credential,
+              id: ++this.nextId,
+              authenticationRefresh: rejected !== undefined,
+            };
             if (this.pending === acquisition) {
               this.current = generation;
               this.invalidated = undefined;
@@ -265,7 +279,18 @@ export class CredentialManager {
     const acquisition = this.pending;
     acquisition.waiters++;
     try {
-      return await abortable(acquisition.promise, context.signal);
+      const result = await abortable(acquisition.promise, context.signal);
+      // An ordinary load may already be running when a 401 arrives. If it
+      // returns the rejected token, the provider still needs the auth context
+      // to force refresh. Share that follow-up acquisition across all waiters.
+      if (
+        rejected &&
+        !result.authenticationRefresh &&
+        result.credential.token === rejected.credential.token
+      ) {
+        return this.acquire(context, result, authenticationError);
+      }
+      return result;
     } finally {
       acquisition.waiters--;
       if (acquisition.waiters === 0 && this.pending === acquisition) {
