@@ -10,6 +10,10 @@ vi.mock("@tila/ops-sqlite", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tila/ops-sqlite")>();
   return {
     ...actual,
+    artifactLifecycleOps: {
+      ...actual.artifactLifecycleOps,
+      hasLifecycleWork: vi.fn().mockReturnValue(false),
+    },
     searchReindexOps: {
       ...actual.searchReindexOps,
       reindexBatch: reindexBatchMock,

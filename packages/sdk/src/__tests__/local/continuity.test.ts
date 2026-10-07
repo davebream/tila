@@ -1,7 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { journalArchiveOps } from "@tila/ops-sqlite";
+import {
+  artifactOps,
+  coordinationOps,
+  journalArchiveOps,
+} from "@tila/ops-sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { exportProjectBackup, importProjectBackup } from "../../backup";
 import {
@@ -117,4 +121,80 @@ describe("local continuity", () => {
       restored.close();
     }
   });
+});
+
+it("backs up metadata and immutable lifecycle records after all revision pointers were collected", async () => {
+  const opts = options();
+  const local = await createTilaLocal(opts);
+  let key: string;
+  try {
+    const claim = coordinationOps.acquire(
+      local.project.getDb(),
+      "artifact:report",
+      {
+        principalId: identity.principal_id,
+        participantId: identity.participant_id,
+        actor: identity.principal_id,
+        environment: identity.environment,
+      },
+      "exclusive",
+      60_000,
+    );
+    const artifact = await local.artifacts.writeText("retained history", {
+      kind: "report",
+      lineageId: "report",
+      lineageFence: claim.fence,
+    });
+    key = artifact.key;
+    await local.artifacts.destroyLineage("report", { fence: claim.fence });
+    await local.artifacts.drainLifecycle();
+    artifactOps.deleteTombstonedPointers(
+      local.project.getDb(),
+      Date.now() + 8 * 86_400_000,
+    );
+  } finally {
+    local.close();
+  }
+  const archive = join(roots[roots.length - 1], "lifecycle.tila-backup");
+  await exportProjectBackup({
+    source: {
+      backend: "local",
+      projectId: opts.project,
+      dbPath: opts.dbPath,
+      artifactsPath: opts.artifactsPath,
+    },
+    output: archive,
+  });
+  const destination = options();
+  await importProjectBackup({
+    archive,
+    destination: {
+      backend: "local",
+      projectId: destination.project,
+      dbPath: destination.dbPath,
+      artifactsPath: destination.artifactsPath,
+    },
+  });
+  const restored = await createTilaLocal(destination);
+  try {
+    expect((await restored.artifacts.meta(key)).pointer).toMatchObject({
+      tombstoned: 1,
+    });
+    expect((await restored.artifacts.history(key)).meta.total).toBe(1);
+    await expect(restored.artifacts.readText(key)).rejects.toMatchObject({
+      status: 410,
+    });
+    const blobs = new NodeBlobStore(destination.artifactsPath);
+    expect(await blobs.exists(`${key}.commit.json`)).toBe(true);
+    expect(await blobs.exists(`${key}.tombstone.json`)).toBe(true);
+    expect(await blobs.exists(`${key}.deleted.json`)).toBe(true);
+    expect(
+      await blobs.exists(
+        `${key.split("/").slice(0, 3).join("/")}/destroy.json`,
+      ),
+    ).toBe(true);
+    expect(await blobs.exists(key)).toBe(false);
+  } finally {
+    restored.close();
+  }
 });

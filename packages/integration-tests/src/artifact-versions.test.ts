@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createProjectRouter } from "../../backend-do/src/project-do-router";
+import { drainArtifactLifecycle } from "../../backend-do/src/routes/artifact-lifecycle-routes";
 import { flushArtifactCommits } from "../../backend-do/src/routes/artifact-version-routes";
 import type { RouterDeps } from "../../backend-do/src/routes/types";
 import {
@@ -45,6 +46,9 @@ beforeEach(async () => {
   failCommit = false;
   scope = "full";
   const bucket = {
+    delete: vi.fn(async (key: string) => {
+      objects.delete(key);
+    }),
     put: vi.fn(async (key: string, body: BodyInit, opts: R2PutOptions = {}) => {
       if (failCommit && key.endsWith(".commit.json"))
         throw new Error("R2 interrupted");
@@ -500,5 +504,190 @@ describe("artifact versions through Worker and DO", () => {
       ((await separate.json()) as { pointer: { revision: number } }).pointer
         .revision,
     ).toBe(3);
+  });
+});
+
+describe("versioned deletion through Worker and DO", () => {
+  it("requires a fence, returns 410 after deletion, and keeps history after pointer cleanup", async () => {
+    const first = await write("first");
+    const second = await write("second");
+    const url = `/${encodeURIComponent(second.key)}`;
+    expect(
+      (await app.request(url, { method: "DELETE" }, env, executionCtx)).status,
+    ).toBe(400);
+    expect(objects.has(second.key)).toBe(true);
+    const removed = await app.request(
+      `${url}?fence=${fence}`,
+      { method: "DELETE", headers: { "Idempotency-Key": "delete-second" } },
+      env,
+      executionCtx,
+    );
+    expect(removed.status).toBe(202);
+    expect((await app.request(url, {}, env, executionCtx)).status).toBe(410);
+    expect((await drainArtifactLifecycle(deps)).errors).toBe(0);
+    expect(objects.has(second.key)).toBe(false);
+    expect(objects.has(first.key)).toBe(true);
+    db.sqlite
+      .prepare(
+        "UPDATE artifact_pointers SET tombstoned_at = 1 WHERE r2_key = ?",
+      )
+      .run(second.key);
+    await doApp.request("/sweep", json({}));
+    expect(
+      db.sqlite
+        .prepare("SELECT r2_key FROM artifact_pointers WHERE r2_key = ?")
+        .get(second.key),
+    ).toBeUndefined();
+    const history = await app.request(
+      `/~/history/${encodeURIComponent(second.key)}`,
+      {},
+      env,
+      executionCtx,
+    );
+    const body = (await history.json()) as {
+      items: Array<{ blob_deleted_at: number | null }>;
+      meta: { total: number };
+    };
+    expect(body.meta.total).toBe(2);
+    expect(body.items[0].blob_deleted_at).toBeTypeOf("number");
+    expect(
+      (
+        await app.request(
+          `/~/restore/${encodeURIComponent(second.key)}`,
+          json({ fence }),
+          env,
+          executionCtx,
+        )
+      ).status,
+    ).toBe(410);
+  });
+
+  it("rejects expiry of the live head without authorizing blob deletion", async () => {
+    const head = await write("head");
+    const response = await doApp.request(
+      "/artifact/tombstone",
+      json({ r2_key: head.key, journal_kind: "artifact.expired", ...identity }),
+    );
+    expect(response.status).toBe(409);
+    expect(objects.has(head.key)).toBe(true);
+  });
+
+  it("recovers retirement even when a lineage has no published commit record", async () => {
+    objects.set("versioned/p1/report/destroy.json", {
+      bytes: new TextEncoder().encode(
+        JSON.stringify({
+          format: "tila-artifact-lifecycle-v1",
+          type: "destroy",
+          project_id: "p1",
+          lineage_id: "report",
+          kind: "report",
+          resource: null,
+          at: Date.now(),
+        }),
+      ),
+      customMetadata: {},
+      mime: "application/json",
+    });
+    const response = await app.request(
+      "/reconcile?apply=true",
+      json({}),
+      env,
+      executionCtx,
+    );
+    expect(response.status).toBe(200);
+    const writeResponse = await app.request(
+      "/text",
+      json({
+        content: "new",
+        kind: "report",
+        lineage_id: "report",
+        lineage_fence: fence,
+      }),
+      env,
+      executionCtx,
+    );
+    expect(writeResponse.status).toBe(410);
+  });
+
+  it("retires a lineage durably, forbids writes, and preserves deletion across R2 reconciliation", async () => {
+    const first = await write("first");
+    await write("second");
+    expect(
+      (
+        await app.request(
+          "/~/destroy/report",
+          json({ fence }),
+          env,
+          executionCtx,
+        )
+      ).status,
+    ).toBe(400);
+    const response = await app.request(
+      "/~/destroy/report",
+      {
+        ...json({ fence }),
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "destroy-report",
+        },
+      },
+      env,
+      executionCtx,
+    );
+    expect(response.status).toBe(202);
+    expect(objects.has("versioned/p1/report/destroy.json")).toBe(true);
+    await drainArtifactLifecycle(deps);
+    const later = await app.request(
+      "/text",
+      json({
+        content: "third",
+        kind: "report",
+        lineage_id: "report",
+        lineage_fence: fence,
+      }),
+      env,
+      executionCtx,
+    );
+    expect(later.status).toBe(410);
+    // Erase SQLite state only, retaining R2 recovery records.
+    for (const table of [
+      "artifact_tags",
+      "artifact_pointers",
+      "artifact_revision_operations",
+      "artifact_revisions",
+      "artifact_lifecycle_operations",
+      "artifact_lineages",
+    ])
+      db.sqlite.exec(`DELETE FROM ${table}`);
+    const reconcile = await doApp.request(
+      "/artifact/version/reconcile",
+      json({
+        project_id: "p1",
+        apply: true,
+        keys: [...objects.keys()].filter((key) => key.endsWith(".commit.json")),
+      }),
+    );
+    expect(reconcile.status).toBe(200);
+    expect(
+      (
+        await app.request(
+          `/${encodeURIComponent(first.key)}`,
+          {},
+          env,
+          executionCtx,
+        )
+      ).status,
+    ).toBe(410);
+    const meta = await app.request(
+      `/${encodeURIComponent(first.key)}/meta`,
+      {},
+      env,
+      executionCtx,
+    );
+    expect(meta.status).toBe(200);
+    expect(
+      ((await meta.json()) as { pointer: { tombstoned: number } }).pointer
+        .tombstoned,
+    ).toBe(1);
   });
 });

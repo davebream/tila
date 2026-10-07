@@ -496,6 +496,33 @@ describe("applyR2Lifecycle", () => {
     });
   });
 
+  it("never expires versioned content or recovery records", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const client = makeMockClient({
+      r2: { buckets: { lifecycle: { update } } },
+    });
+    const { applyR2Lifecycle } = await import("../../lib/cloudflare-resources");
+    await applyR2Lifecycle(client, "acct", "bucket");
+    const rules = update.mock.calls[0][1].rules as Array<{
+      enabled: boolean;
+      conditions: { prefix: string };
+      deleteObjectsTransition?: unknown;
+    }>;
+    for (const key of [
+      "versioned/p/report/1/hash.txt",
+      "versioned/p/report/1/hash.txt.commit.json",
+      "versioned/p/report/destroy.json",
+    ])
+      expect(
+        rules.some(
+          (rule) =>
+            rule.enabled &&
+            rule.deleteObjectsTransition &&
+            key.startsWith(rule.conditions.prefix),
+        ),
+      ).toBe(false);
+  });
+
   it("does not throw on SDK failure", async () => {
     const mockUpdate = vi.fn().mockRejectedValue(new Error("Access denied"));
     const client = makeMockClient({
