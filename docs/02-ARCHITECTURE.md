@@ -2392,7 +2392,7 @@ deduplication and supersedes behavior. A lineage fixes its kind and resource;
 numbered revisions identify events while SHA-256 identifies bytes. Restore always
 appends a new revision, including when its bytes equal the current head.
 
-Migration 26 adds nullable pointer fields and the lineage/operation tables to the
+Migration 27 adds nullable pointer fields and the lineage/operation tables to the
 shared DO/embedded migration registry. Existing artifacts are not backfilled from
 supersedes links. Explicit adoption copies a selected legacy artifact into revision
 1 of a new lineage and records its original key; the old artifact stays unchanged.
