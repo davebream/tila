@@ -1,4 +1,6 @@
 import type {
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
   ArtifactMetaResponse,
   ArtifactReviewSummary,
   ArtifactReviewsResponse,
@@ -468,6 +470,17 @@ export function getArtifactMeta(
   key: string,
 ): Promise<ArtifactMetaResponse> {
   return request(projectId, `/artifacts/${encodeURIComponent(key)}/meta`);
+}
+
+export function getArtifactHistory(
+  projectId: string,
+  key: string,
+  params?: ArtifactHistoryQuery,
+): Promise<ArtifactHistoryResponse> {
+  return request(projectId, `/artifacts/~/history/${encodeURIComponent(key)}`, {
+    limit: params?.limit === undefined ? undefined : String(params.limit),
+    cursor: params?.cursor,
+  });
 }
 export function getArtifactReviews(
   projectId: string,
