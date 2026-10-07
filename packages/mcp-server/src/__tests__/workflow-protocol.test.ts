@@ -731,7 +731,12 @@ it("returns actionable authentication, missing-fence and uncertain-delivery erro
     error: { code: "no-fence", retry_safety: "after_recovery" },
   });
   vi.spyOn(a.tasks, "ready").mockRejectedValueOnce(
-    new TilaApiError(401, "unauthorized", "Expired token", false),
+    new TilaApiError(
+      401,
+      "dpop-required",
+      "Authentication proof required",
+      false,
+    ),
   );
   const auth = await client.callTool({
     name: "tila_inspect",
@@ -739,7 +744,7 @@ it("returns actionable authentication, missing-fence and uncertain-delivery erro
   });
   expect(auth.structuredContent).toMatchObject({
     error: {
-      code: "unauthorized",
+      code: "dpop-required",
       retry_safety: "after_recovery",
       recovery_action: expect.stringContaining("authentication"),
     },
