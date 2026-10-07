@@ -209,3 +209,28 @@ Worker credentials printed by `pnpm dev:setup`. Local configs remain gitignored.
 The root `tsconfig.json` maps workspace imports to source for Wrangler, Bun and tsx.
 Package builds/typechecks keep their own configs and public exports. `pnpm test`
 still builds packages to cover distribution and CJS/ESM interoperability.
+
+## graphify
+
+A local knowledge graph of the code lives in `graphify-out/` (gitignored). It maps files, symbols, imports and calls across all packages. Query it to orient before reading files, when planning a change, and when investigating a bug. One query usually replaces a round of searching and file reads.
+
+If `graphify-out/graph.json` is missing (fresh clone, new worktree), build it with `graphify update .`. That parses code locally with no API key and finishes in under a minute. If the `graphify` CLI is not installed (`uv tool install graphifyy`), skip this section and work from source.
+
+| Task | Command |
+|---|---|
+| Investigate a symbol: where it lives, what touches it | `graphify explain "<symbol>"` |
+| Gather context for a feature or bug | `graphify query "<names from the code>"` |
+| Plan a change: what depends on X | `graphify affected "<symbol>" --depth 2` |
+| Trace how two parts connect | `graphify path "<A>" "<B>" --undirected` |
+| Find the hubs before a refactor | `graphify god-nodes` |
+| Survey the whole codebase | `graphify-out/GRAPH_REPORT.md` |
+
+Rules:
+
+- Query with names from the code (`assertFence`, `EmbeddedProject`, `record-ops`), not prose. Matching is by keyword: "how are fencing tokens validated" lands on the API-token routes, not the fence logic.
+- Treat results as pointers. Each node carries a file and line. Read the source there before you rely on it or edit it.
+- The graph is code-only (see `.graphifyignore`). For rationale, read `docs/01-DECISIONS.md` and `docs/02-ARCHITECTURE.md`.
+- Imports made by workspace package name (`@tila/core`) are not resolved to the imported symbol, so `affected` misses consumers in other packages. Confirm cross-package impact by searching for the symbol name.
+- Functions that share a name within one file, such as the `run` handlers in CLI commands, collapse into one node.
+- After changing code, run `graphify update .` so later queries see the change. Checkouts where `graphify hook install` was run rebuild after each commit, except in linked worktrees.
+- Give these rules to any subagent that explores code.
