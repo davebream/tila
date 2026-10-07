@@ -63,6 +63,7 @@ const MCP_ENVIRONMENT: EnvironmentMetadata = {
  */
 export async function buildFacade(
   config: McpServerConfig,
+  identity?: { participantId: string; environment: EnvironmentMetadata },
 ): Promise<TilaFacade> {
   if (config.mode === "local") {
     const tilaConfig: TilaProjectConfig = {
@@ -78,8 +79,8 @@ export async function buildFacade(
       created_at: new Date(0).toISOString(),
     };
     return createTila(tilaConfig, undefined, {
-      participantId: MCP_PARTICIPANT_ID,
-      environment: MCP_ENVIRONMENT,
+      participantId: identity?.participantId ?? MCP_PARTICIPANT_ID,
+      environment: identity?.environment ?? MCP_ENVIRONMENT,
     });
   }
 
@@ -98,7 +99,7 @@ export async function buildFacade(
   // on the remote path. Local mode makes no HTTP requests, so no header applies.
   return createTila(tilaConfig, token, {
     extraHeaders: { "X-Tila-Source": `mcp-server/${MCP_VERSION}` },
-    participantId: MCP_PARTICIPANT_ID,
-    environment: MCP_ENVIRONMENT,
+    participantId: identity?.participantId ?? MCP_PARTICIPANT_ID,
+    environment: identity?.environment ?? MCP_ENVIRONMENT,
   });
 }

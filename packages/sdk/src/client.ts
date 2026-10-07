@@ -127,7 +127,7 @@ export class TilaClient {
     token: string,
     opts?: Pick<
       ClientOptions,
-      "extraHeaders" | "participantId" | "environment"
+      "extraHeaders" | "participantId" | "environment" | "timeoutMs"
     >,
   ): TilaClient {
     if (config.backend === "local") {
@@ -152,6 +152,7 @@ export class TilaClient {
       ...(opts?.extraHeaders ? { extraHeaders: opts.extraHeaders } : {}),
       ...(opts?.participantId ? { participantId: opts.participantId } : {}),
       ...(opts?.environment ? { environment: opts.environment } : {}),
+      ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
     });
   }
 
@@ -644,7 +645,10 @@ export function buildHttpFacadeForTest(
 export async function createTila(
   config: TilaProjectConfig,
   token?: string,
-  opts?: Pick<ClientOptions, "extraHeaders" | "participantId" | "environment">,
+  opts?: Pick<
+    ClientOptions,
+    "extraHeaders" | "participantId" | "environment" | "timeoutMs"
+  >,
 ): Promise<TilaFacade> {
   if (config.backend === "local") {
     if (!config.local) {
@@ -701,6 +705,7 @@ export async function createTila(
     extraHeaders: opts?.extraHeaders,
     participantId: opts?.participantId,
     environment: opts?.environment,
+    timeoutMs: opts?.timeoutMs,
   });
   return buildHttpFacade(client, config.project_id);
 }

@@ -479,3 +479,4 @@ export * from "./capability";
 export * from "./continuity";
 export * from "./artifact-version";
 export * from "./artifact-lifecycle";
+export * from "./lifecycle";

@@ -11,7 +11,9 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { ParticipantIdSchema } from "@tila/schemas";
+import { SessionStore, sessionKey } from "@tila/client-lifecycle";
+import { type EnvironmentMetadata, ParticipantIdSchema } from "@tila/schemas";
+import { findConfig } from "../config";
 
 /** The pre-dispatch global flags. */
 export interface GlobalFlags {
@@ -26,9 +28,43 @@ let _flags: GlobalFlags = {};
 const generatedParticipantId = randomUUID();
 
 /** Resolve CLI participant precedence: flag, environment, then process UUID. */
-export function resolveParticipantId(): { id: string; explicit: boolean } {
+export function resolveParticipantId(): {
+  id: string;
+  explicit: boolean;
+  environment?: EnvironmentMetadata;
+} {
+  if (_flags.participantId !== undefined)
+    return {
+      id: ParticipantIdSchema.parse(_flags.participantId),
+      explicit: true,
+    };
   const configured =
     _flags.participantId ?? process.env.TILA_PARTICIPANT_ID?.trim();
+  const nativeId = process.env.CODEX_THREAD_ID;
+  const storedKey = process.env.TILA_LIFECYCLE_KEY;
+  if (nativeId || storedKey) {
+    const config = findConfig();
+    if (config?.worker_url) {
+      const namespace = JSON.stringify([
+        config.worker_url.replace(/\/+$/, ""),
+        config.project_id,
+      ]);
+      const state = new SessionStore().read(
+        storedKey || sessionKey(namespace, "codex", nativeId as string),
+      );
+      if (
+        state?.phase === "active" &&
+        state.namespace === namespace &&
+        (!configured || configured === state.participantId)
+      ) {
+        return {
+          id: state.participantId,
+          explicit: true,
+          environment: state.environment,
+        };
+      }
+    }
+  }
   return {
     id: ParticipantIdSchema.parse(configured || generatedParticipantId),
     explicit: Boolean(configured),

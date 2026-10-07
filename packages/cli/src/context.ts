@@ -93,6 +93,7 @@ export function resolveCliIdentity(): {
       worktree: gitMetadata("rev-parse", "--show-toplevel"),
       branch: gitMetadata("branch", "--show-current"),
       commit: gitMetadata("rev-parse", "HEAD"),
+      ...participant.environment,
     },
   };
 }

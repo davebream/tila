@@ -44,6 +44,7 @@ const main = defineCommand({
     },
   },
   subCommands: {
+    lifecycle: () => load(() => import("./commands/lifecycle")),
     task: () => load(() => import("./commands/task")),
     // @deprecated -- both "entity" and "work-unit" are deprecated aliases; use "task"
     entity: () => load(() => import("./commands/entity")),
