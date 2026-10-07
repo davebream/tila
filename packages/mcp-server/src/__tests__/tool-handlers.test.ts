@@ -41,7 +41,23 @@ describe("tool handler invocation — journal", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("tila_journal_list → journal.query with resource/kind/after_seq(stringified)/limit(stringified)", async () => {
-    const payload = { ok: true, events: [{ seq: 1 }] };
+    const payload = {
+      ok: true,
+      events: [
+        {
+          seq: 1,
+          t: 0,
+          kind: "entity.updated",
+          resource: "T-1",
+          principal_id: "test",
+          participant_id: "a",
+          environment: {},
+          token_id: null,
+          fence: null,
+          data: {},
+        },
+      ],
+    };
     facade.journal.query.mockResolvedValue(payload);
 
     const handler = findToolHandler(server, "tila_journal_list");
@@ -195,7 +211,19 @@ describe("tool handler invocation — summary", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("tila_summary → summary.get() and returns the result", async () => {
-    const payload = { ok: true, project: { entity_count: 3 } };
+    const payload = {
+      ok: true,
+      project: {
+        entity_count: 3,
+        entity_counts: {},
+        status_counts: {},
+        active_claims: 0,
+        ready_count: 0,
+        online_participants: [],
+        token_estimate: 0,
+        recent_events: [],
+      },
+    };
     facade.summary.get.mockResolvedValue(payload);
 
     const handler = findToolHandler(server, "tila_summary");
@@ -233,7 +261,7 @@ describe("tool handler invocation — templates", () => {
     const payload = {
       ok: true,
       created_entities: ["T-1"],
-      created_relationships: [],
+      created_relationships: 0,
       journal_seq: 1,
     };
     facade.templates.instantiate.mockResolvedValue(payload);
@@ -257,7 +285,7 @@ describe("tool handler invocation — templates", () => {
     facade.templates.instantiate.mockResolvedValue({
       ok: true,
       created_entities: [],
-      created_relationships: [],
+      created_relationships: 0,
       journal_seq: 0,
     });
 

@@ -3,6 +3,7 @@ import { registerArtifactTools } from "../tools/artifacts";
 import {
   type MockFacade,
   type MockServer,
+  TEST_ARTIFACT,
   asFacade,
   asServer,
   createMockFacade,
@@ -185,6 +186,7 @@ describe("registerArtifactTools", () => {
         ok: true,
         key: "sources/abc.md",
         bytes: 12,
+        deduplicated: false,
       });
 
       const handler = findHandler("tila_artifact_write_text");
@@ -227,9 +229,12 @@ describe("registerArtifactTools", () => {
       });
 
       const handler = findHandler("tila_artifact_read_text");
-      await expect(handler({ key: "sources/img.png" })).rejects.toThrow(
-        /only supports text/,
-      );
+      await expect(handler({ key: "sources/img.png" })).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching(/only supports text/) },
+        },
+      });
     });
 
     it("truncates text over max_chars and appends marker with char/byte counts", async () => {
@@ -327,14 +332,14 @@ describe("registerArtifactTools", () => {
 
   describe("tila_artifact_get_latest", () => {
     it("calls artifacts.getLatest and wraps the pointer in an envelope", async () => {
-      facade.artifacts.getLatest.mockResolvedValue({ r2_key: "abc.md" });
+      facade.artifacts.getLatest.mockResolvedValue(TEST_ARTIFACT);
 
       const handler = findHandler("tila_artifact_get_latest");
       const result = await handler({ kind: "plan", resource: "T-1" });
 
       expect(facade.artifacts.getLatest).toHaveBeenCalledWith("plan", "T-1");
       const parsed = JSON.parse(result.content[0].text);
-      expect(parsed).toEqual({ ok: true, pointer: { r2_key: "abc.md" } });
+      expect(parsed).toEqual({ ok: true, pointer: TEST_ARTIFACT });
     });
 
     it("returns ok:true with a null pointer when none exists", async () => {
@@ -387,7 +392,12 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_relationships_add");
       await expect(
         handler({ from_key: "sources/a.md", type: "derived-from" }),
-      ).rejects.toThrow(/to_key or to_uri/);
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching(/to_key or to_uri/) },
+        },
+      });
     });
   });
 
@@ -414,7 +424,12 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_write_text");
       await expect(
         handler({ content: "x", kind: "log", mime_type: "text/plain" }),
-      ).rejects.toThrow("server down");
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching("server down") },
+        },
+      });
     });
   });
 

@@ -391,7 +391,7 @@ async function runMcpRoundtrip(cwd: string): Promise<{
   const { spawn } = await import("node:child_process");
   const child = spawn("node", [MCP_DIST], {
     cwd,
-    env: { ...process.env },
+    env: { ...process.env, TILA_MCP_TOOLS: "all" },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
