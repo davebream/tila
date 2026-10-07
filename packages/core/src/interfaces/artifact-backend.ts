@@ -41,6 +41,10 @@ export interface ArtifactIndexEntry {
 }
 
 export interface ArtifactPutOptions {
+  lineageId?: string;
+  lineageFence?: number;
+  tags?: string[];
+  idempotencyKey?: string;
   key: string;
   body: ReadableStream | ArrayBuffer | string;
   sha256: string;
@@ -55,9 +59,25 @@ export interface ArtifactPutOptions {
   expiresAt?: number | null;
 }
 
-import type { ArtifactGrepResponse } from "@tila/schemas";
+import type {
+  ArtifactGrepResponse,
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactRestoreRequest,
+  ArtifactRevisionResponse,
+} from "@tila/schemas";
 
 export interface ArtifactBackend {
+  history?(
+    key: string,
+    options?: ArtifactHistoryQuery,
+  ): Promise<ArtifactHistoryResponse>;
+  meta?(key: string): Promise<ArtifactMetaResponse>;
+  restore?(
+    key: string,
+    options: ArtifactRestoreRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactRevisionResponse>;
   // `deduplicated` is true when the put was a no-op because a content-addressed
   // artifact with the same key already existed. Optional so older backends that
   // do not report it still satisfy the interface.
@@ -111,6 +131,10 @@ export interface ArtifactBackend {
       mimeType?: string;
       resource?: string;
       fence?: number;
+      lineageId?: string;
+      lineageFence?: number;
+      tags?: string[];
+      idempotencyKey?: string;
     },
   ): Promise<{ key: string; bytes: number }>;
   readText?(key: string): Promise<{ content: string; mimeType: string } | null>;

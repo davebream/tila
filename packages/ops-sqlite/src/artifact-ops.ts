@@ -4,19 +4,22 @@ import type {
   ArtifactSearchResult,
   JournalEventKind,
 } from "@tila/schemas";
-import { TagsSchema } from "@tila/schemas";
+import { ArtifactPointerSchema, TagsSchema } from "@tila/schemas";
 import {
   type SQL,
   and,
+  desc,
   eq,
   gt,
   inArray,
   isNotNull,
   isNull,
   lte,
+  notExists,
   or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
@@ -180,64 +183,72 @@ export function getLatestPointer(
   kind: string,
   resource: string,
 ): ArtifactPointer | null {
-  // NOTE: use `db.all(...)[0]` rather than `db.get(...)`. Under
-  // `drizzle-orm/bun-sqlite`, `db.get(sql\`raw\`)` returns a POSITIONAL array
-  // (not a column-keyed object), so `row.r2_key` would be undefined in the
-  // embedded backend. `db.all(...)` returns column-keyed objects across every
-  // sync driver (DO cf-workers, bun:sqlite, better-sqlite3). `LIMIT 1` keeps it
-  // single-row.
-  const rows = db.all<{
-    r2_key: string;
-    resource: string | null;
-    kind: string;
-    sha256: string;
-    bytes: number;
-    fence: number | null;
-    mime_type: string;
-    produced_at: number;
-    produced_by: string;
-    expires_at: number | null;
-    tombstoned: number;
-  }>(
-    sql`SELECT p.r2_key, p.resource, p.kind, p.sha256, p.bytes, p.fence, p.mime_type, p.produced_at, p.produced_by, p.expires_at, p.tombstoned
-        FROM artifact_pointers p
-        WHERE p.kind = ${kind} AND p.resource = ${resource} AND p.tombstoned = 0
-        AND p.r2_key NOT IN (
-          SELECT r.to_key FROM artifact_relationships r
-          WHERE r.type = 'supersedes'
-          AND r.to_key IN (
-            SELECT p2.r2_key FROM artifact_pointers p2
-            WHERE p2.kind = ${kind} AND p2.resource = ${resource} AND p2.tombstoned = 0
-          )
-        )
-        ORDER BY p.produced_at DESC
-        LIMIT 1`,
-  );
-
-  const row = rows[0];
+  const newer = alias(schema.artifactPointers, "newer_revision");
+  const old = alias(schema.artifactPointers, "legacy_target");
+  const row = db
+    .select()
+    .from(schema.artifactPointers)
+    .where(
+      and(
+        eq(schema.artifactPointers.kind, kind),
+        eq(schema.artifactPointers.resource, resource),
+        eq(schema.artifactPointers.tombstoned, 0),
+        or(
+          and(
+            isNotNull(schema.artifactPointers.lineage_id),
+            notExists(
+              db
+                .select({ key: newer.r2_key })
+                .from(newer)
+                .where(
+                  and(
+                    eq(newer.lineage_id, schema.artifactPointers.lineage_id),
+                    gt(newer.revision, schema.artifactPointers.revision),
+                    eq(newer.tombstoned, 0),
+                  ),
+                ),
+            ),
+          ),
+          and(
+            isNull(schema.artifactPointers.lineage_id),
+            notExists(
+              db
+                .select({ key: schema.artifactRelationships.to_key })
+                .from(schema.artifactRelationships)
+                .innerJoin(
+                  old,
+                  eq(old.r2_key, schema.artifactRelationships.to_key),
+                )
+                .where(
+                  and(
+                    eq(schema.artifactRelationships.type, "supersedes"),
+                    eq(
+                      schema.artifactRelationships.to_key,
+                      schema.artifactPointers.r2_key,
+                    ),
+                    eq(old.kind, kind),
+                    eq(old.resource, resource),
+                    eq(old.tombstoned, 0),
+                  ),
+                ),
+            ),
+          ),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(schema.artifactPointers.produced_at),
+      desc(schema.artifactPointers.revision),
+      desc(schema.artifactPointers.r2_key),
+    )
+    .get();
   if (!row) return null;
-
-  // Read tags for this pointer (single query)
-  const tagRows = db
+  const tags = db
     .select()
     .from(schema.artifactTags)
     .where(eq(schema.artifactTags.artifact_key, row.r2_key))
     .all();
-
-  return {
-    r2_key: row.r2_key,
-    resource: row.resource,
-    kind: row.kind,
-    sha256: row.sha256,
-    bytes: row.bytes,
-    fence: row.fence,
-    mime_type: row.mime_type,
-    produced_at: row.produced_at,
-    produced_by: row.produced_by,
-    expires_at: row.expires_at,
-    tombstoned: row.tombstoned,
-    tags: tagRows.map((t) => t.tag),
-  };
+  return ArtifactPointerSchema.parse({ ...row, tags: tags.map((t) => t.tag) });
 }
 
 export function listPointers(
