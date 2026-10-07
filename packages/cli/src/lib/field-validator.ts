@@ -1,5 +1,5 @@
 import { TILA_ERRORS } from "tila-sdk";
-import { printJsonError } from "./output";
+import { diagnostic, exit, printJsonError } from "./output";
 
 /**
  * Parse a `--field` argument as `key=value`.
@@ -70,7 +70,7 @@ export function parseFieldArg(
         1,
       );
     }
-    console.error((err as Error).message);
-    process.exit(1);
+    diagnostic((err as Error).message);
+    exit(1);
   }
 }

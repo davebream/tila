@@ -83,7 +83,7 @@ vi.mock("../../lib/mcp-targets", () => ({
   runMcpInitPrompt: (...args: unknown[]) => mockRunMcpInitPrompt(...args),
 }));
 
-// Mock @clack/prompts
+// Mock ../../lib/prompts
 const mockPassword = vi.fn();
 const mockIsCancel = vi.fn((_v?: unknown) => false);
 const mockLogInfo = vi.fn();
@@ -91,7 +91,7 @@ const mockLogWarn = vi.fn();
 const mockLogError = vi.fn();
 const mockLogSuccess = vi.fn();
 const mockNote = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   password: (arg: unknown) => mockPassword(arg),
   isCancel: (arg: unknown) => mockIsCancel(arg),
   note: (msg: unknown, title?: unknown) => mockNote(msg, title),

@@ -90,12 +90,14 @@ describe("tila token list --json", () => {
     await runCmd(listCmd, { json: true });
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(output.tokens).toHaveLength(1);
+    expect(output.result.items).toHaveLength(1);
     // Verify epoch seconds were converted (not epoch ms)
     // 1700000000 seconds = 2023-11-14T22:13:20.000Z
-    expect(output.tokens[0].created_at).toBe("2023-11-14T22:13:20.000Z");
-    expect(output.tokens[0].last_used_at).toBe("2023-11-14T22:15:00.000Z");
-    expect(output.tokens[0].revoked_at).toBeNull();
+    expect(output.result.items[0].created_at).toBe("2023-11-14T22:13:20.000Z");
+    expect(output.result.items[0].last_used_at).toBe(
+      "2023-11-14T22:15:00.000Z",
+    );
+    expect(output.result.items[0].revoked_at).toBeNull();
   });
   it("issues read-only scoped keys and preserves credential metadata in JSON", async () => {
     const result = {
@@ -120,7 +122,12 @@ describe("tila token list --json", () => {
     expect(body.policy.role).toBe("viewer");
     expect(body.policy.capabilities).toContain("records:read");
     expect(body.policy.capabilities).not.toContain("records:write");
-    expect(JSON.parse(logSpy.mock.calls[0][0] as string)).toEqual(result);
+    expect(JSON.parse(logSpy.mock.calls[0][0] as string)).toEqual({
+      ok: true,
+      result: Object.fromEntries(
+        Object.entries(result).filter(([key]) => key !== "ok"),
+      ),
+    });
   });
   it("rotation JSON includes the one-time secret and new version", async () => {
     mockPost.mockResolvedValue({
@@ -139,7 +146,9 @@ describe("tila token list --json", () => {
       "/api/tokens/key/rotate",
       { expected_token_id: "previous", overlap_seconds: 15 },
     ]);
-    expect(JSON.parse(logSpy.mock.calls[0][0] as string).token_id).toBe("next");
+    expect(JSON.parse(logSpy.mock.calls[0][0] as string).result.token_id).toBe(
+      "next",
+    );
   });
   it("inspection exposes effective policy without stripping restrictions", async () => {
     const result = {
@@ -154,6 +163,11 @@ describe("tila token list --json", () => {
     };
     mockGet.mockResolvedValue(result);
     await runCmd(getSubCommand(await loadCommand(), "inspect"), { json: true });
-    expect(JSON.parse(logSpy.mock.calls[0][0] as string)).toEqual(result);
+    expect(JSON.parse(logSpy.mock.calls[0][0] as string)).toEqual({
+      ok: true,
+      result: Object.fromEntries(
+        Object.entries(result).filter(([key]) => key !== "ok"),
+      ),
+    });
   });
 });

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { GitHubAppInfoResponseSchema } from "@tila/schemas";
 import { openInBrowser } from "./browser";
+import * as p from "./prompts";
 
 /**
  * Response from GitHub device flow initiation.

@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import type { TilaInfraConfig } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { parse } from "smol-toml";
@@ -8,6 +7,8 @@ import { findConfig } from "../../config";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
 import { resolveParticipantId } from "../../lib/global-flags";
 import { loadInfraConfig } from "../../lib/infra-config";
+import { exit, jsonText } from "../../lib/output";
+import * as p from "../../lib/prompts";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import {
   type DestroyPlan,
@@ -79,7 +80,7 @@ async function runInfraDestroy(
     p.cancel(
       "No INFRA_ADMIN_TOKEN available.\n\nSet it in the environment or add infra_admin_token to ~/.tila/infra.toml.\nThis secret authorizes destroying a project you have no local config for.",
     );
-    process.exit(1);
+    exit(1);
   }
 
   const cfApiToken = resolveCfApiToken();
@@ -87,7 +88,7 @@ async function runInfraDestroy(
     p.cancel(
       "CLOUDFLARE_API_TOKEN not found. Set it in ~/.tila/.env or export it.",
     );
-    process.exit(1);
+    exit(1);
   }
   const cf = createCloudflareClient(cfApiToken);
 
@@ -105,7 +106,7 @@ async function runInfraDestroy(
     });
     if (p.isCancel(answer) || answer !== slug) {
       p.cancel("Destroy cancelled.");
-      process.exit(1);
+      exit(1);
     }
   }
 
@@ -122,13 +123,13 @@ async function runInfraDestroy(
   );
   if (!wipe.ok) {
     if (args.json) {
-      process.stdout.write(
+      jsonText(
         `${JSON.stringify({ ok: false, slug, mode: "infra", failures: [wipe.errorMessage] })}\n`,
       );
     } else {
       p.log.error(wipe.errorMessage);
     }
-    process.exit(1);
+    exit(1);
   }
 
   // Step 2: Clean D1 non-token records (CF SDK).
@@ -142,7 +143,7 @@ async function runInfraDestroy(
   if (!tok.ok) failures.push({ label: "Project tokens", message: tok.message });
 
   if (args.json) {
-    process.stdout.write(
+    jsonText(
       `${JSON.stringify({
         ok: failures.length === 0,
         slug,
@@ -158,7 +159,7 @@ async function runInfraDestroy(
     p.log.success(`Project ${slug} destroyed.`);
   }
 
-  if (failures.length > 0) process.exit(1);
+  if (failures.length > 0) exit(1);
 }
 
 export default defineCommand({
@@ -211,14 +212,14 @@ export default defineCommand({
 
     if (plan.mode === "error") {
       p.cancel(plan.message);
-      process.exit(1);
+      exit(1);
     }
 
     if (plan.mode === "needs-picker") {
       p.cancel(
         "No project found in this directory.\n\nTo destroy a project you are not set up for locally, target it by ID:\n    tila project destroy <slug>\n\nList every project on this account with:\n    tila project list",
       );
-      process.exit(1);
+      exit(1);
     }
 
     if (plan.mode === "infra") {
@@ -251,7 +252,7 @@ export default defineCommand({
       p.cancel(
         "TILA_API_TOKEN not found in .tila/.env.\n\nThis token is required to wipe the remote project state.\nCheck that .tila/.env contains TILA_API_TOKEN=<your-token>.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     // If config indicates Cloudflare-mode but worker_url is missing → FAILURE (not silent skip)
@@ -260,7 +261,7 @@ export default defineCommand({
       p.cancel(
         "Project config is in Cloudflare mode but worker_url is missing.\n\nCannot safely destroy without wiping remote state.\nCheck .tila/config.toml or re-run provisioning.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     // Step 3: Resolve D1 database ID (admin-plane CF API path — allowed per flow-separation)
@@ -309,7 +310,7 @@ export default defineCommand({
       p.cancel(
         "CLOUDFLARE_API_TOKEN not found. Set it in ~/.tila/.env or export it.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     const cf =
@@ -331,13 +332,13 @@ export default defineCommand({
       });
       if (p.isCancel(answer)) {
         p.cancel("Destroy cancelled.");
-        process.exit(1);
+        exit(1);
       }
       if (answer !== slug) {
         p.log.error(
           `Confirmation failed. Expected "${slug}", got "${answer}".`,
         );
-        process.exit(1);
+        exit(1);
       }
     }
 
@@ -414,7 +415,7 @@ export default defineCommand({
         });
         // Do not remove .tila/ on worker failure (allow retry)
         if (args.json) {
-          process.stdout.write(
+          jsonText(
             `${JSON.stringify({
               ok: false,
               stores: storeResults,
@@ -426,7 +427,7 @@ export default defineCommand({
             `${failures.length} resource(s) failed. Clean up manually.`,
           );
         }
-        process.exit(1);
+        exit(1);
       }
     }
 
@@ -502,7 +503,7 @@ export default defineCommand({
     } else if (!verifyPassed) {
       // Do NOT remove .tila/ when verification fails — allow retry
       if (args.json) {
-        process.stdout.write(
+        jsonText(
           `${JSON.stringify({
             ok: false,
             stores: storeResults,
@@ -517,7 +518,7 @@ export default defineCommand({
           p.log.error(`  ${f.label}: ${f.message}`);
         }
       }
-      process.exit(1);
+      exit(1);
     }
 
     // Step 10: Remove local .tila/ directory (last step, unless --keep-local)
@@ -533,7 +534,7 @@ export default defineCommand({
 
     // Final output
     if (args.json) {
-      process.stdout.write(
+      jsonText(
         `${JSON.stringify({
           ok: failures.length === 0,
           stores: storeResults,
@@ -554,6 +555,6 @@ export default defineCommand({
       }
     }
 
-    if (failures.length > 0) process.exit(1);
+    if (failures.length > 0) exit(1);
   },
 });

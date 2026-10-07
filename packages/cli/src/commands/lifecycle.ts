@@ -8,6 +8,14 @@ import {
   runLifecycleHook,
   runLifecycleWorker,
 } from "../lib/lifecycle-runtime";
+import {
+  currentOutput,
+  diagnostic,
+  jsonArg,
+  outputText,
+  printJson,
+  protocolJson,
+} from "../lib/output";
 
 export default defineCommand({
   meta: {
@@ -44,14 +52,10 @@ export default defineCommand({
     status: defineCommand({
       async run() {
         const namespace = lifecycleNamespace();
-        console.log(
-          JSON.stringify(
-            new SessionStore()
-              .list()
-              .filter((state) => state.namespace === namespace),
-            null,
-            2,
-          ),
+        printJson(
+          new SessionStore()
+            .list()
+            .filter((state) => state.namespace === namespace),
         );
       },
     }),
@@ -82,8 +86,8 @@ export default defineCommand({
           // Hooks are advisory. Do not expose credential errors or block local work.
           const message =
             "Tila lifecycle degraded. Run tila lifecycle status; local work can continue.";
-          console.error(message);
-          console.log(JSON.stringify({ systemMessage: message }));
+          diagnostic(message);
+          protocolJson({ systemMessage: message });
         }
       },
     }),
@@ -93,7 +97,12 @@ export default defineCommand({
         generation: { type: "positional", required: true },
       },
       async run({ args }) {
-        await runLifecycleWorker(args.key, args.generation);
+        try {
+          await runLifecycleWorker(args.key, args.generation);
+        } catch {
+          // Detached workers have no presentation channel, including startup failures.
+          process.exitCode = 1;
+        }
       },
     }),
   },

@@ -7,7 +7,7 @@ vi.mock("../../config", () => ({
   findTilaDir: (...args: unknown[]) => mockFindTilaDir(...args),
 }));
 
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   log: {
     error: vi.fn(),
     info: vi.fn(),
@@ -78,7 +78,7 @@ describe("tila disconnect", () => {
     mockFindTilaDir.mockReturnValue(tempDir);
     // No credential files in tempDir — only the directory exists
 
-    const p = await import("@clack/prompts");
+    const p = await import("../../lib/prompts");
 
     await runDisconnect();
 
@@ -94,7 +94,7 @@ describe("tila disconnect", () => {
       throw new Error("exit");
     });
 
-    const p = await import("@clack/prompts");
+    const p = await import("../../lib/prompts");
 
     await expect(runDisconnect()).rejects.toThrow("exit");
 

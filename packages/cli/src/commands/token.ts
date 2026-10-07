@@ -8,7 +8,16 @@ import { defineCommand } from "citty";
 import { TilaApiError } from "tila-sdk";
 import { requireClient, resolveContext } from "../context";
 import { credentialPolicyArgs, policyFromArgs } from "../lib/credential-policy";
-import { jsonArg, printJson, printJsonError, tsToIso } from "../lib/output";
+import {
+  boundedItems,
+  diagnostic,
+  exit,
+  jsonArg,
+  outputText,
+  printJson,
+  printJsonError,
+  tsToIso,
+} from "../lib/output";
 
 export default defineCommand({
   meta: { name: "token", description: "Manage project API tokens" },
@@ -47,11 +56,11 @@ export default defineCommand({
               "REMOTE_ONLY",
             );
           } else {
-            console.error(
+            diagnostic(
               "Error: this command requires a remote connection (tila init)",
             );
           }
-          process.exit(1);
+          exit(1);
           return;
         }
         const client = requireClient(ctx);
@@ -85,9 +94,9 @@ export default defineCommand({
             return;
           }
 
-          console.log(`Token issued: ${result.name}\n`);
-          console.log(result.token);
-          console.log("\nSave this token -- it will not be shown again.");
+          outputText(`Token issued: ${result.name}\n`);
+          outputText(result.token);
+          outputText("\nSave this token -- it will not be shown again.");
         } catch (err) {
           if (err instanceof TilaApiError && err.status === 409) {
             if (args.json) {
@@ -96,10 +105,10 @@ export default defineCommand({
                 "CONFLICT",
               );
             }
-            console.error(
+            diagnostic(
               `Error: A token named "${name}" already exists. Use a different name or revoke the existing token first.`,
             );
-            process.exit(1);
+            exit(1);
           }
           if (err instanceof TilaApiError && err.status === 403) {
             if (args.json) {
@@ -108,10 +117,10 @@ export default defineCommand({
                 "FORBIDDEN",
               );
             }
-            console.error(
+            diagnostic(
               "Error: This token does not have permission to issue tokens. Use an owner credential with the required token capability.",
             );
-            process.exit(1);
+            exit(1);
           }
           throw err;
         }
@@ -142,7 +151,7 @@ export default defineCommand({
         );
         if (args.json) printJson(result);
         else {
-          console.log(
+          outputText(
             `Token rotated: ${result.name}\n${result.token}\nSave this token -- it will not be shown again.`,
           );
         }
@@ -179,11 +188,11 @@ export default defineCommand({
               "REMOTE_ONLY",
             );
           } else {
-            console.error(
+            diagnostic(
               "Error: this command requires a remote connection (tila init)",
             );
           }
-          process.exit(1);
+          exit(1);
           return;
         }
         const client = requireClient(ctx);
@@ -198,7 +207,7 @@ export default defineCommand({
             printJson({ ok: true, name });
             return;
           }
-          console.log(
+          outputText(
             `Token '${name}' revoked. New requests and derived sessions are rejected immediately.`,
           );
         } catch (err) {
@@ -209,10 +218,10 @@ export default defineCommand({
                 "NOT_FOUND",
               );
             }
-            console.error(
+            diagnostic(
               `Error: No active token named "${name}" found. Use 'tila token list' to see available tokens.`,
             );
-            process.exit(1);
+            exit(1);
           }
           if (err instanceof TilaApiError && err.status === 403) {
             if (args.json) {
@@ -221,10 +230,10 @@ export default defineCommand({
                 "FORBIDDEN",
               );
             }
-            console.error(
+            diagnostic(
               "Error: This token does not have permission to revoke tokens. Use an owner credential with the required token capability.",
             );
-            process.exit(1);
+            exit(1);
           }
           throw err;
         }
@@ -244,11 +253,11 @@ export default defineCommand({
               "REMOTE_ONLY",
             );
           } else {
-            console.error(
+            diagnostic(
               "Error: this command requires a remote connection (tila init)",
             );
           }
-          process.exit(1);
+          exit(1);
           return;
         }
         const client = requireClient(ctx);
@@ -266,10 +275,10 @@ export default defineCommand({
                 "FORBIDDEN",
               );
             }
-            console.error(
+            diagnostic(
               "Error: This token does not have permission to list tokens. Use an owner credential with the required token capability.",
             );
-            process.exit(1);
+            exit(1);
           }
           throw err;
         }
@@ -289,7 +298,7 @@ export default defineCommand({
         }
 
         if (result.tokens.length === 0) {
-          console.log("No tokens found.");
+          outputText("No tokens found.");
           return;
         }
 
@@ -301,7 +310,7 @@ export default defineCommand({
           lastUsed: 20,
           status: 10,
         };
-        console.log(
+        outputText(
           [
             "NAME".padEnd(cols.name),
             "SCOPES".padEnd(cols.scopes),
@@ -311,14 +320,14 @@ export default defineCommand({
           ].join("  "),
         );
 
-        for (const t of result.tokens) {
+        for (const t of boundedItems(result.tokens)) {
           const created = formatTimestamp(t.created_at);
           const lastUsed = t.last_used_at
             ? formatTimestamp(t.last_used_at)
             : "never";
           const status = t.revoked_at ? "revoked" : "active";
 
-          console.log(
+          outputText(
             [
               t.name.padEnd(cols.name),
               t.scopes.padEnd(cols.scopes),

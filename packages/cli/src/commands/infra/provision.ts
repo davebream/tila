@@ -1,7 +1,6 @@
 import { createPrivateKey } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { openInBrowser } from "../../lib/browser";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
@@ -29,7 +28,9 @@ import {
 } from "../../lib/infra-config";
 import { resolveInfraConfig } from "../../lib/infra-fallback";
 import { buildAuthStore } from "../../lib/instance-context";
-import { printJsonError } from "../../lib/output";
+import { diagnostic, exit, printJsonError, warning } from "../../lib/output";
+
+import * as p from "../../lib/prompts";
 import {
   generateHmacKey,
   resolveCfApiToken,
@@ -73,12 +74,12 @@ async function promptForCfToken(): Promise<string> {
   });
   if (p.isCancel(tokenResult)) {
     p.cancel("Operation cancelled.");
-    process.exit(1);
+    exit(1);
   }
   const token = String(tokenResult ?? "");
   if (!token.trim()) {
     p.cancel("No token provided. Aborting.");
-    process.exit(1);
+    exit(1);
   }
   return token.trim();
 }
@@ -95,7 +96,7 @@ async function runForceRedeploy(
     infraConfig = await resolveInfraConfig(tilaDir, buildAuthStore());
   } catch {
     p.cancel("No infra.toml found. Run full `tila infra provision` first.");
-    process.exit(1);
+    exit(1);
   }
 
   const scriptName = getInfraSlug(infraConfig);
@@ -110,7 +111,7 @@ async function runForceRedeploy(
       });
       if (p.isCancel(confirm) || !confirm) {
         p.log.info("Aborted.");
-        process.exit(0);
+        exit(0);
       }
     }
     hmacKey = generateHmacKey();
@@ -120,7 +121,7 @@ async function runForceRedeploy(
     p.cancel(
       "HMAC key not in infra.toml. Run full `tila infra provision` first.",
     );
-    process.exit(1);
+    exit(1);
   }
 
   // Resolve CF token
@@ -294,11 +295,11 @@ export default defineCommand({
       });
       if (p.isCancel(overwrite)) {
         p.cancel("Operation cancelled.");
-        process.exit(1);
+        exit(1);
       }
       if (!overwrite) {
         p.log.info("Aborted — keeping existing infra.toml.");
-        process.exit(0);
+        exit(0);
       }
     }
 
@@ -330,7 +331,7 @@ export default defineCommand({
     try {
       existingInfra = await resolveInfraConfig(tilaDir, buildAuthStore());
     } catch (err) {
-      console.warn(
+      warning(
         `[tila] Failed to load existing infra.toml: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -347,7 +348,7 @@ export default defineCommand({
       });
       if (p.isCancel(slugResult)) {
         p.cancel("Operation cancelled.");
-        process.exit(1);
+        exit(1);
       }
       infraSlug = slugResult as string;
     }

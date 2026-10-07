@@ -46,6 +46,7 @@ const mockPrintJsonError = vi.fn((..._args: unknown[]): void => {
   throw new Error("printJsonError");
 });
 vi.mock("../../lib/output", () => ({
+  exit: (code: number) => process.exit(code),
   printJson: (...args: unknown[]) => mockPrintJson(...args),
   printJsonError: (...args: unknown[]) => mockPrintJsonError(...args),
   jsonArg: {
@@ -62,7 +63,7 @@ const mockSpinnerStop = vi.fn();
 const mockNote = vi.fn();
 const mockCancel = vi.fn();
 const mockLogWarn = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   spinner: vi.fn(() => ({
     start: mockSpinnerStart,
     stop: mockSpinnerStop,

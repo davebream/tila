@@ -1093,7 +1093,7 @@ tila admin grant <github-user-id> --token <your-d1-init-token>
 tila admin list
 ```
 
-The full-scope D1 init token is printed by `tila project create` in `--json` mode (`token` field) and written to `.tila/.env` on disk. It bypasses `requireProjectAdmin` at `packages/worker/src/middleware/require-project-admin.ts` lines 117-122.
+The full-scope D1 init token is printed by `tila project create` in `--json` mode (`result.token` field) and written to `.tila/.env` on disk. It bypasses `requireProjectAdmin` at `packages/worker/src/middleware/require-project-admin.ts` lines 117-122.
 
 
 ## Protected operations unavailable during permission verification

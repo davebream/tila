@@ -120,6 +120,11 @@ let stderrWriteSpy: ReturnType<typeof vi.spyOn>;
 let processExitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(async () => {
+  vi.stubEnv("CI", "");
+  Object.defineProperty(process.stdin, "isTTY", {
+    value: true,
+    configurable: true,
+  });
   // Build-wide convention: reset global flags singleton before each test.
   resetGlobalFlags();
   vi.clearAllMocks();

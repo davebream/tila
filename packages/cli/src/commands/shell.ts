@@ -1,3 +1,5 @@
+import { eprintln, exit, jsonArg, requirePrompt } from "../lib/output";
+
 /**
  * `tila shell --instance <key>` — kubie-style per-shell pin (Task 8, WI-L).
  *
@@ -17,7 +19,6 @@ import { type InstanceKey, ParticipantIdSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { globalFlagArgs } from "../lib/global-flags";
 import { buildAuthStore } from "../lib/instance-context";
-import { eprintln, jsonArg } from "../lib/output";
 
 export default defineCommand({
   meta: {
@@ -32,6 +33,9 @@ export default defineCommand({
     ...globalFlagArgs,
   },
   async run({ args }) {
+    requirePrompt(
+      "tila shell requires an interactive terminal and does not support --json.",
+    );
     const key = args.instance as InstanceKey;
     const authStore = buildAuthStore();
 
@@ -41,7 +45,7 @@ export default defineCommand({
       eprintln(
         `Error: Unknown instance "${key}". Run \`tila instances\` to list registered instances.`,
       );
-      process.exit(1);
+      exit(1);
       return;
     }
 
@@ -69,13 +73,13 @@ export default defineCommand({
 
       child.on("error", (err) => {
         eprintln(`Error: Failed to spawn shell: ${err.message}`);
-        process.exit(1);
+        exit(1);
       });
 
       child.on("close", (code) => {
         const exitCode = code ?? 1;
         if (exitCode !== 0) {
-          process.exit(exitCode);
+          exit(exitCode);
         }
         resolve();
       });

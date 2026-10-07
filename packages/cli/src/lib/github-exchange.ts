@@ -1,9 +1,9 @@
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { TILA_ERRORS } from "tila-sdk";
 import { resolveAppUserToken } from "./github-oauth-device";
+import * as p from "./prompts";
 
 interface SessionCache {
   jkt?: string;

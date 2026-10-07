@@ -81,6 +81,7 @@ export function parseGlobalFlags(argv: string[]): GlobalFlags {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === "--") break;
 
     for (const key of keys) {
       const prefix = `--${key}=`;

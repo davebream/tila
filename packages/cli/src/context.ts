@@ -28,6 +28,7 @@ import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";
 import { getGlobalFlags, resolveParticipantId } from "./lib/global-flags";
+import { outputText } from "./lib/output";
 import { deriveOrg, resolveCfApiToken } from "./lib/provisioning";
 import { checkAccountMatch, verifyCloudflareAuth } from "./lib/wrangler";
 import { VERSION as CLI_VERSION } from "./version";
@@ -203,7 +204,7 @@ export async function runStartupChecks(
         checkAccountMatch(config.cloudflare.account_id, whoami);
       }
     } else {
-      console.log(
+      outputText(
         "  Skipping Cloudflare account verification (CLOUDFLARE_API_TOKEN not set).",
       );
     }

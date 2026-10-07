@@ -1,12 +1,13 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
 import { queryD1 } from "../../lib/cloudflare-resources";
 import { resolveInfraConfig } from "../../lib/infra-fallback";
 import { buildAuthStore } from "../../lib/instance-context";
-import { printJson, printJsonError } from "../../lib/output";
+import { exit, printJson, printJsonError } from "../../lib/output";
+
+import * as p from "../../lib/prompts";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import { R2_BUCKET_NAME } from "../../lib/resource-names";
 
@@ -34,7 +35,7 @@ export default defineCommand({
         printJsonError("No infrastructure found", "NOT_CONFIGURED");
       }
       p.cancel("No infrastructure found. Run `tila infra provision` first.");
-      process.exit(1);
+      exit(1);
     }
 
     // Step 4: D1 project count (shared between JSON and interactive paths)

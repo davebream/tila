@@ -1,5 +1,5 @@
-import * as p from "@clack/prompts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as p from "../../lib/prompts";
 
 const { mockRunD1Migrations } = vi.hoisted(() => ({
   mockRunD1Migrations: vi.fn(),
@@ -9,7 +9,7 @@ vi.mock("../../lib/d1-migrations", () => ({
   applyD1Migrations: mockRunD1Migrations,
 }));
 
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   text: vi.fn().mockResolvedValue(""),
   password: vi.fn().mockResolvedValue(""),
   confirm: vi.fn().mockResolvedValue(true),

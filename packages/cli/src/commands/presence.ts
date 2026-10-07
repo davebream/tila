@@ -3,6 +3,7 @@ import { resolveContext } from "../context";
 import {
   formatTimestamp,
   jsonArg,
+  outputText,
   printJson,
   renderTable,
 } from "../lib/output";
@@ -15,7 +16,7 @@ async function showPresenceList(json: boolean): Promise<void> {
     return;
   }
   if (participants.length === 0) {
-    console.log("No participants.");
+    outputText("No participants.");
     return;
   }
   renderTable(
@@ -61,7 +62,7 @@ const heartbeatCommand = defineCommand({
       printJson({ ok: true });
       return;
     }
-    console.log(`Heartbeat sent for participant ${participantId}`);
+    outputText(`Heartbeat sent for participant ${participantId}`);
   },
 });
 

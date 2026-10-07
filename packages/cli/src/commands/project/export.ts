@@ -1,10 +1,10 @@
 import { isAbsolute } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { type ProjectBackupSource, exportProjectBackup } from "tila-sdk/backup";
 import { requireTokenAsync } from "../../auth";
 import { findConfig } from "../../config";
 import { printJson } from "../../lib/output";
+import * as p from "../../lib/prompts";
 
 export default defineCommand({
   meta: {

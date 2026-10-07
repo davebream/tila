@@ -1,6 +1,14 @@
 import { defineCommand } from "citty";
 import { requireClient, resolveContext } from "../context";
-import { jsonArg, printJson } from "../lib/output";
+import {
+  boundedItems,
+  diagnostic,
+  exit,
+  jsonArg,
+  outputText,
+  printJson,
+  warning,
+} from "../lib/output";
 
 const queryCommand = defineCommand({
   meta: {
@@ -46,10 +54,10 @@ const queryCommand = defineCommand({
         searchAll: (query: { q: string; limit?: number }) => SearchResult[];
       };
       if (typeof localProject.searchAll !== "function") {
-        console.error(
+        diagnostic(
           "Error: unified search requires local backend with search support",
         );
-        process.exit(1);
+        exit(1);
       }
       const raw = localProject.searchAll({ q, limit });
       results = raw;
@@ -71,11 +79,11 @@ const queryCommand = defineCommand({
     }
 
     if (results.length === 0) {
-      console.log("No results found.");
+      outputText("No results found.");
       return;
     }
 
-    for (const r of results) {
+    for (const r of boundedItems(results)) {
       const id = r.type === "entity" ? r.entity_id : r.r2_key;
       const label =
         r.type === "entity"
@@ -84,7 +92,7 @@ const queryCommand = defineCommand({
       const name = r.type === "entity" ? r.name : r.title;
       const nameStr = name ? `  ${name}` : "";
       const snippet = r.snippet ? `\n  ${r.snippet}` : "";
-      console.log(`${id}  ${label}${nameStr}${snippet}`);
+      outputText(`${id}  ${label}${nameStr}${snippet}`);
     }
   },
 });
@@ -120,10 +128,10 @@ const reindexCommand = defineCommand({
       // Default: reindex both
       kindsToReindex.push("artifact", "entity");
     } else {
-      console.error(
+      diagnostic(
         `Error: invalid kind '${args.kind}'. Use 'artifact' or 'entity'.`,
       );
-      process.exit(1);
+      exit(1);
       return;
     }
 
@@ -138,16 +146,16 @@ const reindexCommand = defineCommand({
         };
       };
       if (typeof local.reindexSearch !== "function") {
-        console.error(
+        diagnostic(
           "Error: search reindex requires local backend with reindex support",
         );
-        process.exit(1);
+        exit(1);
         return;
       }
       for (const kind of kindsToReindex) {
-        console.log(`Starting reindex for kind: ${kind}...`);
+        outputText(`Starting reindex for kind: ${kind}...`);
         const counts = local.reindexSearch(kind);
-        console.log(
+        outputText(
           `Reindex complete for ${kind}. Indexed ${counts[kind]} rows.`,
         );
       }
@@ -157,7 +165,7 @@ const reindexCommand = defineCommand({
     const remote = requireClient(ctx);
 
     for (const kind of kindsToReindex) {
-      console.log(`Starting reindex for kind: ${kind}...`);
+      outputText(`Starting reindex for kind: ${kind}...`);
 
       const startPath = `/projects/${ctx.config.project_id}/search/reindex`;
       const statusPath = `/projects/${ctx.config.project_id}/search/reindex/status`;
@@ -167,7 +175,7 @@ const reindexCommand = defineCommand({
         body: { kind },
       });
 
-      console.log(`Reindex started for ${kind}. Polling status...`);
+      outputText(`Reindex started for ${kind}. Polling status...`);
 
       // Poll until done or idle
       let attempts = 0;
@@ -183,20 +191,20 @@ const reindexCommand = defineCommand({
         };
 
         if (statusResp.status === "idle") {
-          console.log(`Reindex complete for ${kind}.`);
+          outputText(`Reindex complete for ${kind}.`);
           break;
         }
 
         if (statusResp.status === "running") {
           const processed = statusResp.processed ?? 0;
-          console.log(`  ${kind}: processed ${processed} rows so far...`);
+          outputText(`  ${kind}: processed ${processed} rows so far...`);
         }
 
         attempts++;
       }
 
       if (attempts >= maxAttempts) {
-        console.warn(
+        warning(
           `Warning: reindex for ${kind} is still running after ${maxAttempts * 2}s. Check status manually.`,
         );
       }
@@ -232,10 +240,10 @@ export default defineCommand({
     const q = args.query as string | undefined;
 
     if (!q || q.trim() === "") {
-      console.error(
+      diagnostic(
         "Usage: tila search <query>\n       tila search reindex [--kind artifact|entity] [--all]",
       );
-      process.exit(1);
+      exit(1);
     }
 
     const limit = args.limit ? Number(args.limit) : undefined;
@@ -258,10 +266,10 @@ export default defineCommand({
         searchAll: (query: { q: string; limit?: number }) => SearchResult[];
       };
       if (typeof localProject.searchAll !== "function") {
-        console.error(
+        diagnostic(
           "Error: unified search requires local backend with search support",
         );
-        process.exit(1);
+        exit(1);
       }
       const raw = localProject.searchAll({ q, limit });
       results = raw;
@@ -281,11 +289,11 @@ export default defineCommand({
     }
 
     if (results.length === 0) {
-      console.log("No results found.");
+      outputText("No results found.");
       return;
     }
 
-    for (const r of results) {
+    for (const r of boundedItems(results)) {
       const id = r.type === "entity" ? r.entity_id : r.r2_key;
       const label =
         r.type === "entity"
@@ -294,7 +302,7 @@ export default defineCommand({
       const name = r.type === "entity" ? r.name : r.title;
       const nameStr = name ? `  ${name}` : "";
       const snippet = r.snippet ? `\n  ${r.snippet}` : "";
-      console.log(`${id}  ${label}${nameStr}${snippet}`);
+      outputText(`${id}  ${label}${nameStr}${snippet}`);
     }
   },
 });

@@ -1,6 +1,12 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { jsonArg, printJson, renderTable, tsToIso } from "../lib/output";
+import {
+  jsonArg,
+  outputText,
+  printJson,
+  renderTable,
+  tsToIso,
+} from "../lib/output";
 
 export default defineCommand({
   meta: { name: "journal", description: "Query the project journal" },
@@ -39,7 +45,7 @@ export default defineCommand({
           return;
         }
         if (events.length === 0) {
-          console.log("No journal events.");
+          outputText("No journal events.");
           return;
         }
         renderTable(

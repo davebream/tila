@@ -138,9 +138,7 @@ describe("artifact put output", () => {
     const payload = JSON.parse(String(logSpy.mock.calls[0][0]));
     expect(payload).toMatchObject({
       ok: true,
-      key: "produced/T-1/abc.md",
-      bytes: 42,
-      deduplicated: true,
+      result: { key: "produced/T-1/abc.md", bytes: 42, deduplicated: true },
     });
   });
 
@@ -194,7 +192,7 @@ describe("artifact put output", () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
-    expect(payload.code).toBe("stale-fence");
+    expect(payload.error.kind).toBe("stale-fence");
   });
   it("forwards lineage, separate fences and retry identity on writes", async () => {
     mockPut.mockResolvedValue({
@@ -260,7 +258,11 @@ describe("artifact put output", () => {
       limit: 2,
       cursor: "previous",
     });
-    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual(page);
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual({
+      ok: true,
+      result: { items: [] },
+      meta: { ...page.meta, count: 0, truncated: true },
+    });
   });
 
   it("supports explicit adoption, empty tags and restore retry keys", async () => {
@@ -286,6 +288,13 @@ describe("artifact put output", () => {
       tags: [],
       idempotencyKey: "restore",
     });
-    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual(result);
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual({
+      ok: true,
+      result: {
+        key: result.key,
+        pointer: result.pointer,
+        restored_from: result.restored_from,
+      },
+    });
   });
 });

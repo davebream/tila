@@ -18,8 +18,8 @@ vi.mock("node:fs", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-// Mock @clack/prompts
-vi.mock("@clack/prompts", () => ({
+// Mock ../../lib/prompts
+vi.mock("../../lib/prompts", () => ({
   note: vi.fn(),
   cancel: vi.fn(),
   isCancel: vi.fn(() => false),
@@ -38,12 +38,12 @@ vi.mock("../../lib/github-oauth-device", () => ({
   resolveAppUserToken: vi.fn(),
 }));
 
-import * as p from "@clack/prompts";
 import {
   resolveGithubRepoToken,
   warnIfRemoteMismatch,
 } from "../../lib/github-exchange";
 import { resolveAppUserToken } from "../../lib/github-oauth-device";
+import * as p from "../../lib/prompts";
 
 const baseConfig = {
   project_id: "test-proj",

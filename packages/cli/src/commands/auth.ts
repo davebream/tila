@@ -1,3 +1,20 @@
+import {
+  diagnostic,
+  eprintJson,
+  eprintln,
+  exit,
+  formatExpiry,
+  formatResolvesHere,
+  formatTrust,
+  jsonArg,
+  outputText,
+  warning as outputWarning,
+  printJson,
+  printJsonSuccess,
+  rawOutput,
+  renderTable,
+} from "../lib/output";
+
 /**
  * `tila auth` command group.
  *
@@ -13,7 +30,6 @@
 
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import {
   FakeSecretStore,
   promoteLegacy,
@@ -31,17 +47,8 @@ import {
   resolveInstanceContext,
   toInstanceMetadata,
 } from "../lib/instance-context";
-import {
-  eprintJson,
-  eprintln,
-  formatExpiry,
-  formatResolvesHere,
-  formatTrust,
-  jsonArg,
-  printJson,
-  printJsonSuccess,
-  renderTable,
-} from "../lib/output";
+
+import * as p from "../lib/prompts";
 import { tilaHome } from "../lib/provisioning";
 
 // ---------------------------------------------------------------------------
@@ -110,7 +117,7 @@ const statusCmd = defineCommand({
 
     // Table output
     if (instances.length === 0) {
-      console.log(
+      outputText(
         "No instances registered. Run `tila link <worker_url>` to register one.",
       );
       return;
@@ -192,7 +199,7 @@ const tokenCmd = defineCommand({
           "Hint: run `tila auth status` to diagnose or `tila link <url>` to register.",
         );
       }
-      process.exit(1);
+      exit(1);
       return;
     }
 
@@ -236,7 +243,7 @@ const tokenCmd = defineCommand({
     }
 
     // SECURITY: bare token + newline ONLY to stdout; nothing else goes here
-    process.stdout.write(`${token}\n`);
+    rawOutput(`${token}\n`);
   },
 });
 
@@ -269,7 +276,7 @@ const recoverCmd = defineCommand({
       p.log.error(
         "tila auth recover requires an interactive terminal to complete the GitHub device flow.\n\nIn CI or headless environments you cannot interactively authorize a new DPoP key.\nTo recover:\n  1. Run `tila auth recover` from an interactive terminal on any machine.\n  2. Copy the new .tila/.session into your CI secret store, or\n     set TILA_API_TOKEN to a newly issued bound token.",
       );
-      process.exit(1);
+      exit(1);
       return;
     }
 
@@ -280,7 +287,7 @@ const recoverCmd = defineCommand({
       p.log.error(
         "No .tila/config.toml found. Run `tila init` first to configure your project.",
       );
-      process.exit(1);
+      exit(1);
       return;
     }
 
@@ -324,7 +331,7 @@ async function recoverGithubSession(
     p.log.error(
       `Failed to generate DPoP key: ${err instanceof Error ? err.message : String(err)}`,
     );
-    process.exit(1);
+    exit(1);
     return;
   }
 
@@ -356,7 +363,7 @@ async function recoverGithubSession(
     p.log.error(
       "project_id or worker_url missing from .tila/config.toml. Run `tila init` to fix.",
     );
-    process.exit(1);
+    exit(1);
     return;
   }
 
@@ -366,7 +373,7 @@ async function recoverGithubSession(
     p.log.error(
       `Failed to complete GitHub exchange: ${err instanceof Error ? err.message : String(err)}`,
     );
-    process.exit(1);
+    exit(1);
     return;
   }
 
@@ -394,7 +401,7 @@ async function recoverTilaTokenMode(tilaDir: string): Promise<void> {
     p.log.error(
       `Failed to generate DPoP key: ${err instanceof Error ? err.message : String(err)}`,
     );
-    process.exit(1);
+    exit(1);
     return;
   }
 
@@ -449,7 +456,7 @@ const migrateCmd = defineCommand({
           "In CI or headless environments, use TILA_TOKEN or --token inline instead.\n" +
           "To migrate interactively: run `tila auth migrate` from a TTY terminal.",
       );
-      process.exit(1);
+      exit(1);
       return;
     }
 
@@ -490,7 +497,7 @@ const migrateCmd = defineCommand({
           infra_slugs_split: [],
         });
       } else {
-        console.log(
+        outputText(
           "No legacy locations or worker URLs discovered — nothing to migrate.",
         );
       }
@@ -567,7 +574,7 @@ const migrateCmd = defineCommand({
       if (args.json) {
         eprintln(`[tila] ${warning}`);
       } else {
-        console.warn(`[tila] ${warning}`);
+        outputWarning(`[tila] ${warning}`);
       }
     }
 
@@ -588,18 +595,18 @@ const migrateCmd = defineCommand({
       printJsonSuccess(report);
     } else {
       if (dryRun) {
-        console.log("Dry-run mode — no changes written.\n");
+        outputText("Dry-run mode — no changes written.\n");
       }
-      console.log(`Instances registered: ${report.instances_registered}`);
-      console.log(`Credentials promoted: ${report.credentials_promoted}`);
+      outputText(`Instances registered: ${report.instances_registered}`);
+      outputText(`Credentials promoted: ${report.credentials_promoted}`);
       if (report.infra_slugs_split.length > 0) {
-        console.log(
+        outputText(
           `Infra slugs split: ${report.infra_slugs_split.join(", ")} (secret fields: hmac_key, sweep_secret, infra_admin_token)`,
         );
       }
 
       if (legacySourcePaths.length > 0 && !dryRun) {
-        console.log(
+        outputText(
           `\nLegacy files left in place — safe to delete after verifying:\n${legacySourcePaths.map((p) => `  ${p}`).join("\n")}`,
         );
       }

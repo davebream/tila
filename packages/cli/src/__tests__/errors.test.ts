@@ -83,8 +83,8 @@ describe("printJsonError emits CliErrorEnvelope", () => {
     printJsonError("Task not found", TILA_ERRORS.NOT_FOUND);
     const output = JSON.parse(String(errorSpy.mock.calls[0][0]));
     expect(output.ok).toBe(false);
-    expect(output.code).toBe(TILA_ERRORS.NOT_FOUND);
-    expect(output.message).toBe("Task not found");
+    expect(output.error.kind).toBe(TILA_ERRORS.NOT_FOUND);
+    expect(output.error.message).toBe("Task not found");
   });
 
   it("includes hint when provided", () => {
@@ -94,7 +94,7 @@ describe("printJsonError emits CliErrorEnvelope", () => {
       "Check network and retry",
     );
     const output = JSON.parse(String(errorSpy.mock.calls[0][0]));
-    expect(output.hint).toBe("Check network and retry");
+    expect(output.error.hint).toBe("Check network and retry");
   });
 
   it("omits hint field when not provided", () => {
