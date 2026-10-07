@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseSchemaToml } from "@tila/core";
+import { artifactLifecycleOps } from "@tila/ops-sqlite";
 import type { EnrichOpts } from "@tila/ops-sqlite";
 import {
   artifactVersionOps,
@@ -11,6 +12,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { runMigrationsWithPitrRollback } from "./migration-runner";
 import { createProjectRouter } from "./project-do-router";
+import { drainArtifactLifecycle } from "./routes/artifact-lifecycle-routes";
 import {
   flushArtifactCommits,
   scheduleArtifactPublication,
@@ -43,7 +45,10 @@ export class ProjectDO extends DurableObject {
 
     ctx.blockConcurrencyWhile(async () => {
       await runMigrationsWithPitrRollback(ctx.storage, () => ctx.abort());
-      if (artifactVersionOps.listPendingArtifactCommits(this.db, 1).length) {
+      if (
+        artifactVersionOps.listPendingArtifactCommits(this.db, 1).length ||
+        artifactLifecycleOps.hasLifecycleWork(this.db)
+      ) {
         await scheduleArtifactPublication({
           ctx,
           db: this.db,
@@ -84,7 +89,10 @@ export class ProjectDO extends DurableObject {
    */
   async alarm(): Promise<void> {
     if (projectTransferOps.getTransferState(this.ctx.storage.sql)) {
-      if (artifactVersionOps.listPendingArtifactCommits(this.db, 1).length) {
+      if (
+        artifactVersionOps.listPendingArtifactCommits(this.db, 1).length ||
+        artifactLifecycleOps.hasLifecycleWork(this.db)
+      ) {
         await scheduleArtifactPublication({
           ctx: this.ctx,
           db: this.db,
@@ -103,6 +111,8 @@ export class ProjectDO extends DurableObject {
     };
     try {
       await flushArtifactCommits(artifactDeps);
+      if (artifactLifecycleOps.hasLifecycleWork(this.db))
+        await drainArtifactLifecycle(artifactDeps);
     } catch (error) {
       console.error("Artifact commit publication failed", error);
       await scheduleArtifactPublication(artifactDeps);

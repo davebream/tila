@@ -477,3 +477,4 @@ export {
 
 export * from "./continuity";
 export * from "./artifact-version";
+export * from "./artifact-lifecycle";

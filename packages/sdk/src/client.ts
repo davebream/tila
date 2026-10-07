@@ -294,9 +294,16 @@ export class TilaClient {
 
   async delete<T>(
     path: string,
-    opts?: { schema?: z.ZodType<T>; validate?: boolean },
+    opts?: {
+      schema?: z.ZodType<T>;
+      validate?: boolean;
+      query?: Record<string, string | undefined>;
+      idempotencyKey?: string;
+    },
   ): Promise<T> {
     return this.request("DELETE", path, {
+      query: opts?.query,
+      idempotencyKey: opts?.idempotencyKey,
       schema: opts?.schema,
       validate: opts?.validate,
     });

@@ -1,4 +1,8 @@
 import type {
+  ArtifactDeleteOptions,
+  ArtifactDestroyResponse,
+} from "@tila/schemas";
+import type {
   ArtifactHistoryQuery,
   ArtifactHistoryResponse,
   ArtifactMetaResponse,
@@ -32,6 +36,30 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}/artifacts`;
 
   return {
+    delete(
+      key: string,
+      options: ArtifactDeleteOptions = {},
+    ): Promise<{ ok: true }> {
+      return client.delete(`${base}/${encodeURIComponent(key)}`, {
+        query: {
+          fence:
+            options.fence === undefined ? undefined : String(options.fence),
+        },
+        idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
+      });
+    },
+    destroyLineage(
+      lineageId: string,
+      options: ArtifactDeleteOptions & { fence: number },
+    ): Promise<ArtifactDestroyResponse> {
+      return client.post(
+        `${base}/~/destroy/${encodeURIComponent(lineageId)}`,
+        { fence: options.fence },
+        {
+          idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
+        },
+      );
+    },
     history(
       key: string,
       options: ArtifactHistoryQuery = {},

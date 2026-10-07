@@ -1,5 +1,6 @@
 import { D1ProjectRegistry } from "@tila/backend-d1";
 import { R2ArtifactBackend } from "@tila/backend-r2";
+import { artifactVersionPrefix } from "@tila/schemas";
 import type { Env } from "../types";
 import { forwardToDO } from "./do-forward";
 
@@ -196,6 +197,25 @@ export async function destroyProjectResources(
     `journal-archive/${projectId}/`,
   );
   journalDeleted = journalResult.deleted;
+
+  // Versioned content and recovery records are private to this project. They
+  // must be removed even when their disposable pointer rows were collected.
+  const versionedResult = await r2.deleteByPrefix(
+    artifactVersionPrefix(projectId),
+  );
+
+  if (versionedResult.failed.length > 0)
+    return {
+      status: 502,
+      body: {
+        ok: false,
+        error: {
+          code: "versioned-cleanup-failed",
+          message:
+            "Versioned artifact cleanup failed; retry project destruction",
+        },
+      },
+    };
 
   // ── Step 4: Destroy the DO (LAST) ───────────────────────────────────────
   // ok-then-disconnect = durable wipe (abort() severs the connection).

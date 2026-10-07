@@ -506,7 +506,15 @@ async function drainExpiredArtifacts(args: {
     if (!res.ok) {
       throw new Error(`DO /sweep returned ${res.status}`);
     }
-    const data = (await res.json()) as { expiredKeys?: string[] };
+    const data = (await res.json()) as {
+      expiredKeys?: string[];
+      lifecycle?: { deleted: number; errors: number; pending: boolean };
+    };
+    if (data.lifecycle) {
+      expiredThisProject += data.lifecycle.deleted;
+      summary.artifactsExpired += data.lifecycle.deleted;
+      summary.r2DeleteErrors += data.lifecycle.errors;
+    }
     const keys = data.expiredKeys ?? [];
 
     for (const key of keys) {
@@ -541,7 +549,7 @@ async function drainExpiredArtifacts(args: {
     if (keys.length < drainPageSize) {
       return {
         expired: expiredThisProject,
-        remaining: 0,
+        remaining: data.lifecycle?.pending ? 1 : 0,
         budgetHit: false,
         clampHit: false,
       };

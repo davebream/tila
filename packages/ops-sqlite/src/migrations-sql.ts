@@ -1009,6 +1009,75 @@ export function runMigration0026(storage: MigrationStorage): void {
   ]);
 }
 
+export function runMigration0028(storage: MigrationStorage): void {
+  // Older embedded databases may predate artifact tags. Preserve their existing
+  // migration compatibility without inventing tags that were never stored.
+  const hasTags =
+    storage.sql
+      .exec(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'artifact_tags'",
+      )
+      .toArray().length > 0;
+  const tags = hasTags
+    ? "json((SELECT json_group_array(tag) FROM artifact_tags WHERE artifact_key = r2_key))"
+    : "json('[]')";
+  const lineageColumns = storage.sql
+    .exec("PRAGMA table_info(artifact_lineages)")
+    .toArray() as Array<{ name: string }>;
+  if (!lineageColumns.some((column) => column.name === "destroyed_at"))
+    storage.sql.exec(
+      "ALTER TABLE artifact_lineages ADD COLUMN destroyed_at INTEGER",
+    );
+  const pointerColumns = new Set(
+    (
+      storage.sql
+        .exec("PRAGMA table_info(artifact_pointers)")
+        .toArray() as Array<{ name: string }>
+    ).map((column) => column.name),
+  );
+  const tombstonedAt = pointerColumns.has("tombstoned_at")
+    ? "tombstoned_at"
+    : "NULL";
+  const blobDeletedAt = pointerColumns.has("blob_deleted_at")
+    ? "blob_deleted_at"
+    : "NULL";
+  storage.sql.exec(`
+    CREATE TABLE IF NOT EXISTS artifact_revisions (
+      r2_key TEXT PRIMARY KEY, lineage_id TEXT NOT NULL, revision INTEGER NOT NULL,
+      metadata TEXT NOT NULL, retention_assigned INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_revision_identity ON artifact_revisions(lineage_id, revision);
+    CREATE TABLE IF NOT EXISTS artifact_lifecycle_operations (
+      id TEXT PRIMARY KEY, lineage_id TEXT NOT NULL, record TEXT NOT NULL, request_id TEXT,
+      state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      retry_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_lifecycle_due ON artifact_lifecycle_operations(state, retry_at);
+    CREATE TABLE IF NOT EXISTS artifact_retention_state (
+      id INTEGER PRIMARY KEY, policy TEXT NOT NULL, cursor TEXT, complete INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO artifact_revisions(r2_key, lineage_id, revision, metadata)
+      SELECT r2_key, lineage_id, revision, json_object(
+        'r2_key', r2_key, 'lineage_id', lineage_id, 'revision', revision,
+        'restored_from', restored_from, 'resource', resource, 'kind', kind, 'sha256', sha256,
+        'bytes', bytes, 'fence', fence, 'mime_type', mime_type, 'produced_at', produced_at,
+        'produced_by', produced_by, 'expires_at', expires_at, 'tombstoned', tombstoned,
+        'tombstoned_at', ${tombstonedAt}, 'blob_deleted_at', ${blobDeletedAt},
+        'tags', ${tags}
+      ) FROM artifact_pointers WHERE lineage_id IS NOT NULL;
+    INSERT OR IGNORE INTO artifact_revisions(r2_key, lineage_id, revision, metadata)
+      SELECT json_extract(record, '$.pointer.r2_key'), lineage_id,
+        json_extract(record, '$.pointer.revision'),
+        json_set(json_extract(record, '$.pointer'), '$.tombstoned', 1, '$.tombstoned_at', created_at)
+      FROM artifact_revision_operations WHERE state = 'published' AND json_valid(record);
+  `);
+  installTransferGuards(storage, [
+    "artifact_revisions",
+    "artifact_lifecycle_operations",
+    "artifact_retention_state",
+  ]);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1037,4 +1106,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 25, run: runMigration0025 },
   { version: 26, run: runMigration0026 },
   { version: 27, run: runMigration0027 },
+  { version: 28, run: runMigration0028 },
 ];

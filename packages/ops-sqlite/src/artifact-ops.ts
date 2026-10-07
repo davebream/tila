@@ -21,6 +21,7 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import * as lifecycle from "./artifact-lifecycle-ops";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
@@ -443,6 +444,7 @@ export function listExpiredPointers(
     .where(
       and(
         isNotNull(schema.artifactPointers.expires_at),
+        isNull(schema.artifactPointers.lineage_id),
         lte(schema.artifactPointers.expires_at, now),
         eq(schema.artifactPointers.tombstoned, 0),
       ),
@@ -479,6 +481,8 @@ export function tombstonePointer(
       .where(eq(schema.artifactPointers.r2_key, r2Key))
       .run();
 
+    lifecycle.syncPointerLifecycle(tx, r2Key);
+
     // Delete search doc if one exists. No-op when the artifact was never indexed
     // (non-searchable kind, unsupported MIME, or uploaded before T5).
     // The asd_ad trigger (MIGRATION_0003) fires automatically on this DELETE,
@@ -512,6 +516,7 @@ export function confirmBlobDeleted(
   db.run(
     sql`UPDATE artifact_pointers SET blob_deleted_at = ${now} WHERE r2_key = ${r2Key}`,
   );
+  lifecycle.syncPointerLifecycle(db, r2Key);
 }
 
 /**
