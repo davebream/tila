@@ -151,6 +151,7 @@ export function upsertPointer(
         resource: pointer.resource ?? "source",
         ...origin,
         fence: pointer.fence,
+        data: { r2_key: pointer.r2_key, sha256: pointer.sha256 },
         tokenId: origin.tokenId,
         source: origin.source,
         sourceVersion: origin.sourceVersion,
