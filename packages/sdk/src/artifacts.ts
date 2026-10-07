@@ -1,4 +1,11 @@
 import type {
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactRestoreRequest,
+  ArtifactRevisionResponse,
+} from "@tila/schemas";
+import type {
   ArtifactGrepResponse,
   ArtifactListResponse,
   ArtifactPointer,
@@ -16,12 +23,39 @@ export interface ArtifactUploadOpts {
   mimeType?: string;
   flavor?: string;
   tags?: string[];
+  lineageId?: string;
+  lineageFence?: number;
+  idempotencyKey?: string;
 }
 
 export function createArtifactMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}/artifacts`;
 
   return {
+    history(
+      key: string,
+      options: ArtifactHistoryQuery = {},
+    ): Promise<ArtifactHistoryResponse> {
+      return client.get(`${base}/~/history/${encodeURIComponent(key)}`, {
+        query: {
+          limit:
+            options.limit === undefined ? undefined : String(options.limit),
+          cursor: options.cursor,
+        },
+      });
+    },
+    meta(key: string): Promise<ArtifactMetaResponse> {
+      return client.get(`${base}/${encodeURIComponent(key)}/meta`);
+    },
+    restore(
+      key: string,
+      options: ArtifactRestoreRequest & { idempotencyKey?: string },
+    ): Promise<ArtifactRevisionResponse> {
+      const { idempotencyKey, ...body } = options;
+      return client.post(`${base}/~/restore/${encodeURIComponent(key)}`, body, {
+        idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
+      });
+    },
     upload: Object.assign(
       function upload(
         input: File | Blob | ReadableStream,
@@ -40,6 +74,10 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
               type: opts.mimeType as string,
             });
             const formData = new FormData();
+            if (opts.lineageId !== undefined)
+              formData.append("lineage_id", opts.lineageId);
+            if (opts.lineageFence !== undefined)
+              formData.append("lineage_fence", String(opts.lineageFence));
             formData.append("file", uploadFile);
             formData.append("kind", opts.kind);
             formData.append("mime_type", opts.mimeType as string);
@@ -49,7 +87,9 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
             if (opts.flavor) formData.append("flavor", opts.flavor);
             if (opts.tags !== undefined)
               formData.append("tags", JSON.stringify(opts.tags));
-            return client.postFormData<ArtifactPutResponse>(base, formData);
+            return client.postFormData<ArtifactPutResponse>(base, formData, {
+              idempotencyKey: opts.idempotencyKey,
+            });
           });
         }
 
@@ -63,6 +103,10 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         }
 
         const formData = new FormData();
+        if (opts.lineageId !== undefined)
+          formData.append("lineage_id", opts.lineageId);
+        if (opts.lineageFence !== undefined)
+          formData.append("lineage_fence", String(opts.lineageFence));
         formData.append("file", input);
         formData.append("kind", opts.kind);
         formData.append("mime_type", contentType);
@@ -73,7 +117,9 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         if (opts.tags !== undefined)
           formData.append("tags", JSON.stringify(opts.tags));
 
-        return client.postFormData<ArtifactPutResponse>(base, formData);
+        return client.postFormData<ArtifactPutResponse>(base, formData, {
+          idempotencyKey: opts.idempotencyKey,
+        });
       },
       {} as {
         (
@@ -214,6 +260,9 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         resource?: string;
         fence?: number;
         tags?: string[];
+        lineageId?: string;
+        lineageFence?: number;
+        idempotencyKey?: string;
       },
     ): Promise<ArtifactPutResponse> {
       const body: Record<string, unknown> = {
@@ -222,9 +271,13 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         mime_type: opts.mimeType ?? "text/markdown",
         resource: opts.resource,
         fence: opts.fence,
+        lineage_id: opts.lineageId,
+        lineage_fence: opts.lineageFence,
       };
       if (opts.tags !== undefined) body.tags = opts.tags;
-      return client.post<ArtifactPutResponse>(`${base}/text`, body);
+      return client.post<ArtifactPutResponse>(`${base}/text`, body, {
+        idempotencyKey: opts.idempotencyKey,
+      });
     },
 
     async readText(

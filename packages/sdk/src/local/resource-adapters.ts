@@ -39,6 +39,8 @@ import {
 } from "@tila/core";
 import { signalOps } from "@tila/ops-sqlite";
 import type {
+  ArtifactHistoryQuery,
+  ArtifactRestoreRequest,
   HandoffListRequest,
   JournalReplayRequest,
   ReentryRequest,
@@ -528,6 +530,18 @@ function createLocalClaimMethods(project: EmbeddedProject) {
  */
 function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
   return {
+    history(key: string, options?: ArtifactHistoryQuery) {
+      return artifacts.history(key, options);
+    },
+    meta(key: string) {
+      return artifacts.meta(key);
+    },
+    restore(
+      key: string,
+      options: ArtifactRestoreRequest & { idempotencyKey?: string },
+    ) {
+      return artifacts.restore(key, options);
+    },
     // These stubs carry the SAME EXPLICIT parameter shape as the HTTP facade's
     // `upload`/`download` (the overloaded `upload` signature + the `download(key)`
     // signature, written out so they MUST line up with the facade). A zero-param
@@ -554,18 +568,13 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
         resource?: string;
         fence?: number;
         tags?: string[];
+        lineageId?: string;
+        lineageFence?: number;
+        idempotencyKey?: string;
       },
     ): Promise<ArtifactPutResponse> {
-      // Local DIVERGENCE (Task 14): the embedded artifact backend's writeText /
-      // put / upsertPointer chain carries no `tags` column, so artifact tags are
-      // not persisted locally. The opt is accepted (to keep the surface aligned
-      // with the HTTP factory) but is a no-op here.
-      const { tags: _tags, ...writeOpts } = opts;
-      const { key, bytes } = await artifacts.writeText(content, writeOpts);
-      // The embedded backend's put is INSERT-OR-IGNORE on the content-addressed
-      // key, so it does not surface a dedup flag; report false (the response
-      // contract requires the field).
-      return { ok: true, key, bytes, deduplicated: false };
+      const result = await artifacts.writeText(content, opts);
+      return { ok: true, ...result };
     },
 
     async readText(
