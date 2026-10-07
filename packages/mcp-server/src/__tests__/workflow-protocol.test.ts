@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { JsonSchemaValidatorResult } from "@modelcontextprotocol/sdk/validation";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { TilaProjectConfig } from "@tila/schemas";
 import { TilaApiError, type TilaFacade, createTila } from "tila-sdk";
@@ -13,6 +14,24 @@ import { registerAllTools } from "../tools/index";
 
 // Real SQLite connections and JSON Schema compilation can contend with the full monorepo suite.
 vi.setConfig({ testTimeout: 30_000 });
+
+// The SDK asks for validators eagerly on every tools/list. Compile only when
+// called and reuse identical advertised contracts across fixture connections.
+const compiler = new AjvJsonSchemaValidator();
+const compiled = new Map<string, ReturnType<typeof compiler.getValidator>>();
+const validator = {
+  getValidator<T>(schema: Parameters<typeof compiler.getValidator>[0]) {
+    const key = JSON.stringify(schema);
+    return (input: unknown): JsonSchemaValidatorResult<T> => {
+      let validate = compiled.get(key);
+      if (!validate) {
+        validate = compiler.getValidator(schema);
+        compiled.set(key, validate);
+      }
+      return validate(input) as JsonSchemaValidatorResult<T>;
+    };
+  },
+};
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -52,7 +71,10 @@ async function connect(facade: TilaFacade, groups?: string[]) {
     "workflow",
     groups,
   );
-  const client = new Client({ name: "test", version: "1" });
+  const client = new Client(
+    { name: "test", version: "1" },
+    { jsonSchemaValidator: validator },
+  );
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
   await client.connect(b);
@@ -60,7 +82,6 @@ async function connect(facade: TilaFacade, groups?: string[]) {
     () => client.close(),
     () => server.close(),
   );
-  const validator = new AjvJsonSchemaValidator();
   const contracts = new Map(
     (await client.listTools()).tools.map((tool) => {
       if (!tool.outputSchema)
