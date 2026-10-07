@@ -2420,8 +2420,52 @@ History uses a lineage-bound cursor with a fixed initial revision ceiling and an
 exclusive next-page boundary. Metadata never includes inline or blob content.
 Tags are set on write/restore; omitted restore tags inherit the source and an
 empty list clears tags only on the new revision. The MCP addition is read-only
-history. Public documentation and announcements must wait for version-aware
-retention, tombstone recovery and lifecycle semantics in #176.
+history.
+
+### Version-aware retention and deletion
+
+Migration 28 separates permanent revision metadata (`artifact_revisions`) from
+live/disposable `artifact_pointers`. History and metadata use the ledger, including
+revision tags and deletion timestamps. Tombstoned pointers still require a
+confirmed blob deletion and the existing seven-day grace before hard deletion.
+The ledger and immutable recovery records remain until project destruction.
+
+Retention is opt-in per kind (`retention_days = 0` means keep forever). New writes
+and restores snapshot the current policy at reservation. Existing revisions are
+assigned retention in bounded batches against one persisted project policy
+snapshot. Expiry is production time plus the configured days, so enabling this
+migration can immediately expire old non-head content. Later schema changes do
+not rewrite assigned expiry. A live lineage head is never automatically swept;
+deleting it selects the newest remaining live revision without cascading.
+
+Lifecycle operations persist retention assignments, tombstones, deletion
+confirmations, and lineage retirement as immutable JSON records beside revision
+commit records under the project-scoped `versioned/` prefix. Deletion intent must
+be durable before deleting bytes; the confirmation timestamp is persisted before
+publishing its record so retries write identical content. A durable SQLite queue
+retries failed work with capped exponential backoff. DO alarms and the daily
+sweep drain it; embedded consumers expose `drainLifecycle()` and also drain on
+subsequent writes. Metadata reads do not touch blob storage.
+
+Individual versioned DELETE requests require a live `artifact:<lineage_id>` fence
+via the `fence` query parameter. Ordinary artifact deletion is unchanged.
+`POST /artifacts/~/destroy/:lineageId` accepts `{ fence }` plus an idempotency key
+and returns 202 after permanent retirement is durable. This operation cascades
+blob deletion, preserves history, and rejects all future writes/restores into
+that lineage. SDK and embedded clients expose `destroyLineage()`; no destructive
+MCP tool is provided. Conflicts with pending revision publication return a
+retryable lineage-busy error. Accepted operation retries survive lease expiry.
+
+History/meta remain 200 for deleted revisions; downloads/restores return 410
+`artifact-unavailable`. Recovery applies lifecycle records before publishing
+recovered pointers, preventing deleted content or retired lineages from becoming
+live. Reconciliation also imports standalone retirement records for lineages that
+never published a revision. Backup includes the ledger, lifecycle queue, policy
+snapshot, and immutable recovery records even after pointer cleanup. Project
+destruction removes the entire private versioned prefix as well as SQLite state.
+
+The 365-day R2 backstop remains scoped to `produced/`. No object expiration rule
+may cover `versioned/`; multipart-upload abortion remains bucket-wide.
 
 ---
 

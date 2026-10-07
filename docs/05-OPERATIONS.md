@@ -1154,3 +1154,33 @@ A missing/corrupt archive produces `journal-history-unavailable`; conflicting
 versions of a sequence produce `journal-history-conflict`. Neither advances the
 saved cursor. Restore missing history from a verified backup before retrying;
 do not acknowledge past unavailable history as a repair.
+
+## Versioned artifact lifecycle
+
+Migration 28 applies configured per-kind retention to existing revisions using
+one persisted policy snapshot. A non-head revision older than `retention_days`
+can become immediately eligible. Before deploying, review configured retention
+and take a project backup if old content must remain available. Zero or omitted
+retention keeps content indefinitely. Live heads are protected regardless of age.
+
+The daily sweep and shared DO alarm process `artifact_lifecycle_operations`.
+Failures retain their work item, increment attempts, and retry with exponential
+backoff capped at one hour. The sweep response includes lifecycle deleted/error
+counts and a pending indicator. An unavailable R2 bucket cannot authorize byte
+deletion; failed tombstone HTTP responses also prevent the legacy sweep deleting
+content. Embedded callers can run `artifacts.drainLifecycle()` explicitly.
+
+A 410 `artifact-unavailable` response means the revision is known but its content
+has been removed; history/meta still return its metadata. The seven-day grace
+applies to pointer rows, not to availability of deleted bytes. Group destruction
+permanently retires a lineage while retaining revision metadata. It requires a
+current lineage fence and returns 202 once retirement is durable; physical cleanup
+continues in the background. Retrying an accepted request with its original
+idempotency key is safe after lease expiry.
+
+Preserve all commit and lifecycle JSON records under `versioned/` during manual
+maintenance. They are required to recover deletion state after SQLite loss.
+Never add a bucket lifecycle rule that expires this prefix. The provisioning
+rules keep the existing 365-day `produced/` backstop and one-day incomplete-upload
+cleanup. Backup/restore carries lifecycle records and metadata; full project
+destruction also removes the private versioned prefix.
