@@ -143,6 +143,7 @@ function makeTokenResult(
   if (tokenKind === "session") {
     return {
       kind: "session",
+      jti: "route-test-jti",
       projectId: "proj-target",
       name: "user",
       scopes,
@@ -171,6 +172,7 @@ function createApp(
     c.set("doStub", {} as DurableObjectStub);
     c.set("projectId", "proj-target");
     c.set("tokenResult", makeTokenResult(tokenKind, scopes));
+    if (tokenKind === "session") c.set("explicitRole", "maintainer");
     await next();
   });
   app.route("/admin", admin);

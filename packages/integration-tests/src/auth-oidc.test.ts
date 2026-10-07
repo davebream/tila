@@ -436,6 +436,7 @@ async function mintOidcSessionToken(
   return authFixtures.mintSessionToken({
     // Discriminator — selects the OIDC arm of the discriminated union
     sub_type: "oidc",
+    jti: crypto.randomUUID(),
     // Required OIDC session fields
     oidc_issuer: TEST_ISSUER,
     oidc_subject: TEST_SUBJECT,

@@ -111,6 +111,7 @@ describe("ADMIN_PERMISSION constant", () => {
     app.use("/*", async (c, next) => {
       c.set("tokenResult", {
         kind: "session",
+        jti: "constant-test",
         projectId: "proj-1",
         name: "u",
         scopes: ADMIN_PERMISSION,
@@ -120,6 +121,10 @@ describe("ADMIN_PERMISSION constant", () => {
         permission: ADMIN_PERMISSION,
         expiresAt: Math.floor(Date.now() / 1000) + 3600,
       });
+      return next();
+    });
+    app.use("/*", async (c, next) => {
+      c.set("explicitRole", "maintainer");
       return next();
     });
     app.use("/*", requirePermission("admin"));
@@ -169,7 +174,7 @@ function makeD1Token(scopes: string): D1TokenResult {
 
 function makeSessionToken(
   permission: string,
-  jti?: string,
+  jti = "test-jti",
 ): SessionTokenResult {
   return {
     kind: "session",
@@ -179,6 +184,7 @@ function makeSessionToken(
     tokenId: "",
     githubRepoId: 99999,
     githubLogin: "testuser",
+    githubUserId: 42,
     permission,
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
     githubHost: "github.com",
@@ -197,6 +203,8 @@ function makeCookieSessionToken(
     scopes,
     tokenId: "",
     sessionHash: "test-hash",
+    principalId: "github:github.com:42",
+    sourceRepoId: 99999,
     expiresAt: Date.now() + 3600_000,
     permission,
   };
@@ -227,6 +235,15 @@ function createTestApp(
   // Inject tokenResult before the permission guard
   app.use("/*", async (c, next) => {
     c.set("tokenResult", tokenResult);
+    if ("permission" in tokenResult)
+      c.set(
+        "explicitRole",
+        tokenResult.permission === "admin"
+          ? "maintainer"
+          : tokenResult.permission === "write"
+            ? "participant"
+            : "viewer",
+      );
     return next();
   });
   app.use("/*", requirePermission(requiredLevel));
@@ -503,6 +520,7 @@ describe("project middleware — PROJECT_MISMATCH guard", () => {
       tokenId: "",
       githubRepoId: 99999,
       githubLogin: "testuser",
+      githubUserId: 42,
       permission: "write",
       expiresAt: Math.floor(Date.now() / 1000) + 3600,
     };
@@ -546,6 +564,7 @@ describe("project middleware — PROJECT_MISMATCH guard", () => {
       tokenId: "",
       githubRepoId: 99999,
       githubLogin: "testuser",
+      githubUserId: 42,
       permission: "write",
       expiresAt: Math.floor(Date.now() / 1000) + 3600,
     };
@@ -679,6 +698,8 @@ describe("requirePermission — Layer B re-verify (recheckInScope)", () => {
       min_read_permission: "read",
       min_write_permission: "write",
       max_permission: "admin",
+      membership_enabled: 1,
+      membership_role_cap: "maintainer",
     });
     mockMintAppJwt.mockResolvedValue("app-jwt");
     mockGetInstallationAccessToken.mockResolvedValue("install-token");
@@ -697,6 +718,8 @@ describe("requirePermission — Layer B re-verify (recheckInScope)", () => {
       min_read_permission: "read",
       min_write_permission: "write",
       max_permission: "admin",
+      membership_enabled: 1,
+      membership_role_cap: "maintainer",
     });
     mockMintAppJwt.mockResolvedValue("app-jwt");
     mockGetInstallationAccessToken.mockResolvedValue("install-token");
@@ -735,14 +758,11 @@ describe("requirePermission — Layer B re-verify (recheckInScope)", () => {
     );
   });
 
-  it("write+POST route + session with jti → no re-verify, passes on snapshot alone", async () => {
-    // No D1/GitHub mocks needed — re-verify must NOT fire for POST on write route
-    const session = makeSessionToken("write", "jti-post-1");
-    const app = createRecheckApp("write", session);
-    const { status } = await fetchWithMethod(app, "POST");
-    expect(status).toBe(200);
-    // getInstallation must not be called (no re-verify)
-    expect(mockGetInstallation).not.toHaveBeenCalled();
+  it("write+POST route revalidates mirrored authority", async () => {
+    setupRevokedGitHubAccess();
+    const app = createRecheckApp("write", makeSessionToken("write"));
+    expect((await fetchWithMethod(app, "POST")).status).toBe(403);
+    expect(mockGetInstallation).toHaveBeenCalled();
   });
 
   it("d1-token admin path: no re-verify (d1-token branch unchanged)", async () => {
@@ -752,22 +772,21 @@ describe("requirePermission — Layer B re-verify (recheckInScope)", () => {
     expect(mockGetInstallation).not.toHaveBeenCalled();
   });
 
-  it("cookie-session admin path: no re-verify (cookie branch unchanged)", async () => {
+  it("cookie-session admin path revalidates mirrored authority", async () => {
+    setupRevokedGitHubAccess();
     const app = createRecheckApp(
       "admin",
       makeCookieSessionToken("full", "admin"),
     );
-    const { status } = await fetchWithMethod(app, "GET");
-    expect(status).toBe(200);
-    expect(mockGetInstallation).not.toHaveBeenCalled();
+    expect((await fetchWithMethod(app, "GET")).status).toBe(403);
+    expect(mockGetInstallation).toHaveBeenCalled();
   });
 
-  it("session without jti: no re-verify (pre-C9 token passes on snapshot)", async () => {
-    // no jti set → reverifySessionPermission skips re-check
-    const session = makeSessionToken("admin"); // no jti
-    const app = createRecheckApp("admin", session);
-    const { status } = await fetchWithMethod(app, "GET");
-    expect(status).toBe(200);
+  it("session without jti cannot perform admin operations", async () => {
+    const session = { ...makeSessionToken("admin"), jti: undefined };
+    expect(
+      (await fetchWithMethod(createRecheckApp("admin", session), "GET")).status,
+    ).toBe(401);
     expect(mockGetInstallation).not.toHaveBeenCalled();
   });
 });
@@ -779,6 +798,7 @@ describe("requirePermission — Layer B re-verify (recheckInScope)", () => {
 function makeOidcSessionToken(permission: string): OidcSessionTokenResult {
   return {
     kind: "oidc-session",
+    jti: "oidc-test",
     projectId: "proj-oidc",
     name: "user@example.com",
     scopes: permission,
@@ -798,6 +818,14 @@ describe("requirePermission — oidc-session kind (security R-1)", () => {
     const app = new Hono<AppEnv>();
     app.use("/*", async (c, next) => {
       c.set("tokenResult", tokenResult);
+      c.set(
+        "explicitRole",
+        tokenResult.permission === "admin"
+          ? "maintainer"
+          : tokenResult.permission === "write"
+            ? "participant"
+            : "viewer",
+      );
       return next();
     });
     app.use("/*", requirePermission(requiredLevel));
@@ -858,7 +886,7 @@ describe("requirePermission — oidc-session kind (security R-1)", () => {
   it("oidc-session admin gate does NOT trigger GitHub re-verify (no mockGetInstallation call)", async () => {
     // An oidc-session with admin permission passing an admin-level gate must NOT
     // call reverifySessionPermission (which reads githubHost/githubRepoId — fields
-    // absent from OidcSessionTokenResult). The snapshot permission check alone suffices.
+    // absent from OidcSessionTokenResult). Explicit membership supplies authority.
     mockGetInstallation.mockReset();
     const { status } = await fetchOidc(
       createOidcApp("admin", makeOidcSessionToken("admin")),
