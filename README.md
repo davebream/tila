@@ -82,7 +82,7 @@ $ tila record set service api ./api.yaml
 $ tila record get service api
 # => { "version": "2.3.1", "owner": "platform", "deploy_target": "prod-us" }
 
-$ tila record patch service api --json '{"owner":"infra"}' --fence=1
+$ tila record patch service api --data '{"owner":"infra"}' --fence=1
 # => Updated record service:api  revision=2  fence=2
 
 $ tila record history service api
@@ -324,6 +324,66 @@ tila project import /backups/my-project.tila-backup --rollback
 Project IDs cannot be renamed during restore. Existing-project restore creates an adjacent timestamped safety archive first. Cloud export freezes writes while reads remain available; restore keeps the destination hidden and write-locked until verification, resume, or rollback completes. See [Operations](docs/05-OPERATIONS.md#backup-and-recovery) for the recovery drill and compatibility rules.
 
 ---
+
+## CLI automation and JSON migration
+
+The next release changes CLI JSON output. Success emits
+`{"ok":true,"result":...,"meta":...}` on stdout; failure emits
+`{"ok":false,"error":{"kind":"...","message":"...","retryable":false}}` on stderr.
+Errors may include `hint` and `details`; partial writes expose
+`error.details.partial_result` and must not be retried automatically.
+JSON diagnostics are separate stderr lines with `type: diagnostic`, `level` and
+`message`. Parse stdout for results and the final error object on stderr for failures.
+Exit codes remain 0/1/2; `doctor` retains its separate pass/warn/fail health meaning.
+
+| Previously | Now |
+| --- | --- |
+| Command-specific top-level fields | Fields under `result` |
+| `entities`, `signals`, other list arrays | `result.items` |
+| List count, limit, totals and continuations | `meta.count`, `meta.limit`, `meta.total` when known, and supported continuation fields |
+| Top-level error text/code | `error.message`, `error.kind`, `error.retryable` |
+| `record patch --json '{...}'` payload | Prefer `--data '{...}'`; the old object/array payload spelling still works. Standalone `--json` selects output. |
+
+```sh
+tila --json task list --limit 25 --offset 25
+tila task list --json
+tila record patch service api --data '{"owner":"infra"}' --fence 1 --json
+tila schema --command "task list"        # offline CLI introspection
+tila schema show                        # existing project schema
+```
+
+Lists retain existing bounded defaults (search/history pages of 20, signal history
+and reviews of 50, record lists of 200); otherwise default to 100. Limits must be
+positive integers up to 1000, with lower backend caps applied. `meta.truncated`
+means more rows are known to exist. `meta.has_more_unknown` means a full page lacks
+enough metadata to establish completeness. Neither is a cursor. Artifact reviews
+use `--before-revision` with `meta.next_revision`; record lists without resumable
+cursors expose truncation without inventing one.
+
+Human output remains the default. JSON, CI, non-TTY stdin and `--non-interactive`
+never prompt. Supply required inputs and existing confirmation flags explicitly.
+Interactive shells reject these modes before spawning. Global flags respect `--`
+and option values; use `--option=--value` for values starting with dashes.
+
+External protocols stay distinct: hooks keep `hookSpecificOutput`/`systemMessage`,
+silent paths and advisory exits; background workers stay silent. `auth token`
+without JSON emits only the token. Raw `artifact get` preserves stdout bytes and
+sends trust metadata to stderr. JSON artifact downloads require `--output <file>`
+and return metadata. Provenance, revision creation and review state are preserved;
+a matching hash never implies trust.
+
+Generate completions without changing shell profiles:
+
+```sh
+tila complete bash > tila.bash
+tila complete zsh > _tila
+tila complete fish > tila.fish
+tila complete powershell > tila.ps1
+```
+
+Load the generated script using your shell's completion configuration. Root help
+groups canonical commands. Deprecated `entity`/`work-unit` aliases remain functional
+but hidden. Typo suggestions never execute the suggested command.
 
 ## Contributing
 

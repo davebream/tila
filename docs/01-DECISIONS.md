@@ -543,3 +543,63 @@ batch. There is no positive membership cache in v1.
 **Code references:** `packages/backend-d1/src/project-memberships.ts`,
 `packages/worker/src/middleware/membership.ts`, and
 `packages/worker/migrations/global/0026_project_memberships.sql`.
+
+## 25. CLI invocation contract and parser evaluation (#178)
+
+**Decision (7 October 2026): retain Citty in production.** An invocation-scoped
+output module owns results, errors, diagnostics, progress and explicit protocol
+bypasses. Shared Zod contracts live in `@tila/schemas`. The registry derives
+arguments and canonical paths from command definitions and adds conservative
+mutation markers, aliases, output descriptions and common errors. Unknown commands
+are considered mutating until reviewed; these markers never add confirmation
+prompts. Only known transient failures of read-only invocations are retryable.
+
+Discovery and completion are offline and do not resolve credentials or session
+identity. Native-session identity and explicit participant overrides retain the
+existing lifecycle resolver. Hooks keep their protocol payloads and advisory exits;
+workers stay silent. Artifact provenance, revision creation and review decisions
+survive normalization. A matching content hash establishes integrity, not trust.
+
+### Selected CLI Spec v0.2 behaviors
+
+The same **clispec auditor 0.2.0** scored the downloaded v0.2.7 Darwin ARM release
+**3/25** and the candidate native executable **7/25**. The issue's historical
+24-point score is not directly comparable. Reproduce with
+`clispec --json score <executable>` after compiling the candidate.
+
+| Behavior | Decision / deviation |
+| --- | --- |
+| Output | Explicit global `--json`; human output remains the default when piped. `--output` remains a destination filename. |
+| Introspection | `tila schema` returns the document under the standard envelope's `result`. The auditor expects root-level `commands` and consequently misses several implemented behaviors. Project-schema subcommands retain their meanings. |
+| Streams | Success data goes to stdout; errors and diagnostics go to stderr. JSON diagnostics are newline-delimited objects with `type: diagnostic`. Raw bytes, tokens, hooks and completion scripts have explicit exceptions. |
+| Bounds | Existing bounded defaults and caps are retained; otherwise default to 100. Metadata distinguishes proven truncation from unknown completeness. Only supported continuations are exposed. |
+| Interaction | JSON, CI, non-TTY stdin and `--non-interactive` prohibit prompts. Existing confirmation requirements remain. No universal `--yes`, mandatory dry-run, field projection or auto-JSON policy is added. |
+
+This is partial adoption, not full conformance. Subprocess contracts test behaviors
+the auditor cannot discover through the envelope. The README documents the breaking
+JSON migration. No storage migration or server API change accompanies this work.
+
+### Gunshi signal pilot
+
+The development-only `experiments/gunshi-parity` compares Gunshi 0.37.3 with Citty
+0.2.2 across all eight signal operations using shared production handlers and an
+in-memory backend. Separate native entrypoints enable adapter size comparisons.
+The existing Incur experiment and dependencies remain unchanged.
+
+| Gate | Evidence / recommendation |
+| --- | --- |
+| Parsing and output | All eight operations match. Required-input and stale-fence failures retain structured errors and exit status. |
+| Identity and context | Explicit project/participant values stay separate across invocations. Production lifecycle tests cover native-session isolation and overrides; the pilot does not independently implement native lifecycle integration. |
+| Global flags | **Blocker:** `--project project-one group list --json` fails before dispatch. Flags after the command work. Simpler global-option handling is not demonstrated. |
+| Completion | Citty's `@bomb.sh/tab` adapter supports all four shells. Gunshi's official plugin covers bash/zsh/fish; PowerShell parity remains unproven. |
+| Bun compilation | Both native Darwin ARM64 entrypoints compile and run. With Bun 1.4.2: Citty 64,175,346 bytes; Gunshi 64,224,882 bytes (+49,536). |
+| Startup | 25 interleaved, warmed native `inbox --json` runs: median 61.75/64.09 ms and p95 64.71/66.56 ms for Citty/Gunshi. Local warm-cache measurements are illustrative, not guarantees. |
+
+The pilot borrows Incur's context, identity and structured-error checks. Green
+negative assertions record blockers, not migration approval. Reconsider migration
+only with correctness parity, simpler global flags and four-shell completion.
+
+Distribution adds deterministic gzip assets, bundle-derived SPDX SBOMs and
+attestation verification before publication. Raw assets and npm OIDC provenance
+remain supported. **Apple signing/notarization (AC-6) is deferred; this delivery
+must not close #178.** The distribution runbook records the first-release boundary.
