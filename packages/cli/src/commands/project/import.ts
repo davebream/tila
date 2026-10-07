@@ -1,6 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import {
   type ProjectBackupDestination,
@@ -10,6 +9,7 @@ import {
 import { requireTokenAsync } from "../../auth";
 import { findConfig } from "../../config";
 import { printJson } from "../../lib/output";
+import * as p from "../../lib/prompts";
 import { tilaHome } from "../../lib/provisioning";
 
 function latestSafetyArchive(archive: string, projectId: string): string {

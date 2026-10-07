@@ -12,25 +12,278 @@ import { TILA_ERRORS } from "tila-sdk";
 import createSpinner from "yocto-spinner";
 import { EXIT_CODES, exitCodeFor } from "./exit-codes";
 
-// --- CLI JSON envelope types (NOT coupled to the HTTP ErrorEnvelope) ---
+import { AsyncLocalStorage } from "node:async_hooks";
+import { format, stripVTControlCharacters } from "node:util";
+import type {
+  CliDiagnostic,
+  CliErrorEnvelope,
+  CliPageMeta,
+  CliSuccessEnvelope,
+} from "@tila/schemas";
+export type { CliErrorEnvelope, CliSuccessEnvelope } from "@tila/schemas";
 
-/**
- * Standard success envelope for all CLI --json output.
- * Consumer automation should key on `ok: true` to detect success.
- */
-export type CliSuccessEnvelope<T> = { ok: true; result: T };
-
-/**
- * Standard error envelope for all CLI --json output.
- * `code` is a stable machine-readable error code (from TILA_ERRORS or CLI-local).
- * `hint` is optional remediation advice.
- */
-export type CliErrorEnvelope = {
-  ok: false;
-  code: string;
-  message: string;
-  hint?: string;
+type OutputState = {
+  json: boolean;
+  nonInteractive?: boolean;
+  mutating?: boolean;
+  limit?: number;
+  emitted: boolean;
+  failed: boolean;
+  messages: string[];
+  diagnostics: string[];
 };
+const outputState = new AsyncLocalStorage<OutputState>();
+const pendingWrites = new Set<Promise<void>>();
+function writeStdout(value: string | Uint8Array): void {
+  const pending = new Promise<void>((resolve, reject) => {
+    process.stdout.write(value, (error) => (error ? reject(error) : resolve()));
+  });
+  pendingWrites.add(pending);
+  void pending.then(
+    () => pendingWrites.delete(pending),
+    () => {},
+  );
+}
+export async function flushOutput(): Promise<void> {
+  await Promise.all(pendingWrites);
+}
+export function currentOutput() {
+  return outputState.getStore();
+}
+export async function withOutput<T>(
+  options: Pick<OutputState, "json" | "nonInteractive" | "mutating" | "limit">,
+  run: () => Promise<T>,
+): Promise<T> {
+  return outputState.run(
+    {
+      ...options,
+      emitted: false,
+      failed: false,
+      messages: [],
+      diagnostics: [],
+    },
+    async () => {
+      const value = await run();
+      const state = currentOutput();
+      if (state?.json && !state.emitted)
+        printJsonSuccess(
+          state.messages.length ? { messages: state.messages } : {},
+        );
+      return value;
+    },
+  );
+}
+export function canPrompt(): boolean {
+  const state = currentOutput();
+  return (
+    !state?.json &&
+    !state?.nonInteractive &&
+    !process.env.CI &&
+    Boolean(process.stdin.isTTY)
+  );
+}
+export function requirePrompt(
+  hint = "Supply the required input using command flags.",
+): void {
+  if (!canPrompt())
+    throw Object.assign(new Error(`Interactive input required. ${hint}`), {
+      code: "input-required",
+    });
+}
+export function outputText(...args: unknown[]): void {
+  const state = currentOutput();
+  const message = format(...args);
+  if (state?.json) state.messages.push(stripVTControlCharacters(message));
+  else
+    console.log(
+      process.stdout.isTTY && !process.env.NO_COLOR
+        ? message
+        : stripVTControlCharacters(message),
+    );
+}
+export function warning(...args: unknown[]): void {
+  const message = stripVTControlCharacters(format(...args));
+  console.warn(
+    currentOutput()?.json
+      ? JSON.stringify({
+          type: "diagnostic",
+          level: "warning",
+          message,
+        } satisfies CliDiagnostic)
+      : message,
+  );
+}
+export function diagnostic(...args: unknown[]): void {
+  const message = stripVTControlCharacters(format(...args));
+  currentOutput()?.diagnostics.push(message);
+  console.error(
+    currentOutput()?.json
+      ? JSON.stringify({
+          type: "diagnostic",
+          level: "info",
+          message,
+        } satisfies CliDiagnostic)
+      : message,
+  );
+}
+/** Explicit bypass for external protocols, tokens, and downloaded bytes. */
+export function rawOutput(value: string | Uint8Array): void {
+  const state = currentOutput();
+  if (state) state.emitted = true;
+  writeStdout(value);
+}
+export function protocolJson(value: unknown): void {
+  rawOutput(`${JSON.stringify(value)}\n`);
+}
+/** Adapter for older handlers that construct JSON text; never use for protocols. */
+export function jsonText(value: string): void {
+  const data = JSON.parse(value);
+  if (data.ok === false)
+    emitError(
+      "partial-failure",
+      "The operation did not fully complete",
+      undefined,
+      data,
+    );
+  else printJson(data);
+}
+export function exit(code = 0): never {
+  const state = currentOutput();
+  if (state?.json && !state.emitted) {
+    if (code)
+      emitError(
+        "command-failed",
+        state.diagnostics.at(-1) ?? "Command failed",
+        undefined,
+        { diagnostics: state.diagnostics },
+      );
+    else
+      printJsonSuccess(
+        state.messages.length ? { messages: state.messages } : {},
+      );
+  }
+  process.exit(code);
+}
+
+const collectionKeys = [
+  "items",
+  "templates",
+  "gates",
+  "service_accounts",
+  "bindings",
+  "entities",
+  "records",
+  "signals",
+  "groups",
+  "results",
+  "events",
+  "artifacts",
+  "tokens",
+  "instances",
+  "projects",
+  "types",
+  "relationships",
+  "revisions",
+  "entries",
+  "claims",
+  "participants",
+  "machines",
+  "refs",
+  "repos",
+];
+export function successEnvelope(data: unknown): CliSuccessEnvelope<unknown> {
+  let result = data;
+  let meta: CliPageMeta = {};
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const { ok: _ok, meta: page, ...rest } = data as Record<string, unknown>;
+    meta = page && typeof page === "object" ? { ...page } : {};
+    result =
+      Object.keys(rest).length === 1 && "result" in rest ? rest.result : rest;
+  }
+  if (Array.isArray(result)) result = { items: result };
+  if (result && typeof result === "object") {
+    const body = { ...result } as Record<string, unknown>;
+    const candidates = collectionKeys.filter((key) => Array.isArray(body[key]));
+    const collection =
+      candidates.length === 1 && !("resolved" in body)
+        ? candidates[0]
+        : undefined;
+    if (collection) {
+      const items = body[collection] as unknown[];
+      delete body[collection];
+      for (const key of [
+        "total",
+        "limit",
+        "offset",
+        "next_cursor",
+        "next_revision",
+        "truncated",
+      ]) {
+        if (body[key] !== undefined) {
+          meta[key] = body[key];
+          delete body[key];
+        }
+      }
+      body.count = undefined;
+      const limit =
+        currentOutput()?.limit ??
+        (typeof meta.limit === "number" ? meta.limit : 100);
+      body.items = items.slice(0, limit);
+      meta = { ...meta, count: (body.items as unknown[]).length, limit };
+      if (meta.next_cursor === "truncated") {
+        meta.next_cursor = undefined;
+        meta.truncated = true;
+      }
+      // Without a cursor or total a full page cannot prove completeness.
+      if (
+        items.length === limit &&
+        meta.total === undefined &&
+        !("next_cursor" in meta) &&
+        !("next_revision" in meta)
+      )
+        meta.has_more_unknown = true;
+      if (
+        items.length > limit ||
+        meta.next_cursor ||
+        meta.next_revision ||
+        (meta.total !== undefined &&
+          meta.total > (meta.offset ?? 0) + items.length)
+      )
+        meta.truncated = true;
+      result = body;
+    }
+  }
+  return {
+    ok: true,
+    result: result ?? null,
+    ...(Object.keys(meta).length ? { meta } : {}),
+  };
+}
+function emitError(
+  kind: string,
+  message: string,
+  hint?: string,
+  details?: unknown,
+): void {
+  const state = currentOutput();
+  if (state) {
+    state.emitted = true;
+    state.failed = true;
+  }
+  const envelope: CliErrorEnvelope = {
+    ok: false,
+    error: {
+      kind,
+      message: stripVTControlCharacters(message),
+      retryable:
+        exitCodeFor(kind) === EXIT_CODES.NETWORK_ERROR &&
+        state?.mutating === false,
+      ...(hint ? { hint } : {}),
+      ...(details === undefined ? {} : { details }),
+    },
+  };
+  console.error(JSON.stringify(envelope));
+}
 
 /**
  * Shared --json argument declaration. Spread this into every leaf subcommand's
@@ -50,47 +303,27 @@ export const jsonArg = {
 // --- Existing utilities (unchanged) ---
 
 /**
- * Serialize data as JSON to stdout with 2-space indentation.
+ * Serialize a compact success envelope to stdout.
  * Use for successful command output in --json mode.
  */
 export function printJson(data: unknown): void {
-  console.log(JSON.stringify(data, null, 2));
+  const state = currentOutput();
+  if (state) state.emitted = true;
+  const document = JSON.stringify(successEnvelope(data));
+  if (currentOutput()) writeStdout(`${document}\n`);
+  else console.log(document);
 }
-
-/**
- * Serialize a successful result as a {@link CliSuccessEnvelope} JSON to stdout.
- * Prefer this over raw `printJson({ ok: true, ... })` so the envelope shape
- * is consistent across all commands.
- */
 export function printJsonSuccess<T>(result: T): void {
-  printJson({ ok: true, result } satisfies CliSuccessEnvelope<T>);
+  printJson(result);
 }
-
-/**
- * Serialize an error as a {@link CliErrorEnvelope} JSON to stderr and exit.
- *
- * The caller is responsible for passing the correct exit code (typically
- * computed via `exitCodeFor` from `error-boundary`). This function does NOT
- * import from `error-boundary` to avoid a circular dependency.
- *
- * @param error - Human-readable error message
- * @param code - Machine-readable error code (e.g. "not-found", "do-unreachable")
- * @param hint - Optional remediation hint shown to the user
- * @param exitCode - Process exit code (default: 1 / USER_ERROR)
- */
 export function printJsonError(
   error: string,
   code: string,
   hint?: string,
   exitCode = 1,
+  details?: unknown,
 ): never {
-  const envelope: CliErrorEnvelope = {
-    ok: false,
-    code,
-    message: error,
-    ...(hint !== undefined ? { hint } : {}),
-  };
-  console.error(JSON.stringify(envelope, null, 2));
+  emitError(code, error, hint, details);
   process.exit(exitCode);
 }
 
@@ -157,6 +390,8 @@ export function describeCliError(err: unknown): {
  */
 function _remediationHint(code: string): string | undefined {
   if (exitCodeFor(code) === EXIT_CODES.NETWORK_ERROR) {
+    if (currentOutput()?.mutating === true)
+      return "Check whether the operation completed before trying again.";
     switch (code) {
       case TILA_ERRORS.RATE_LIMITED:
         return "The server is rate-limiting requests. Wait a moment and retry.";
@@ -183,7 +418,7 @@ function _remediationHint(code: string): string | undefined {
 export function failWithCliError(err: unknown, json: boolean): never {
   const { code, message, hint } = describeCliError(err);
   const exit = exitCodeFor(code);
-  if (json) {
+  if (json || currentOutput()?.json) {
     printJsonError(message, code, hint, exit);
   } else {
     console.error(message);
@@ -197,11 +432,23 @@ export function failWithCliError(err: unknown, json: boolean): never {
  * Render a table to stdout using console-table-printer.
  * No-op when rows is empty (caller handles empty state message).
  */
+export function boundedItems<T>(items: T[]): T[] {
+  const limit = currentOutput()?.limit ?? 100;
+  if (items.length > limit)
+    diagnostic(
+      `Showing ${limit} of ${items.length} results. Increase --limit to see more.`,
+    );
+  return items.slice(0, limit);
+}
 export function renderTable(
   rows: Record<string, unknown>[],
   columns: { key: string; label: string; color?: string }[],
   opts?: { title?: string },
 ): void {
+  if (currentOutput()?.json) {
+    printJson(rows);
+    return;
+  }
   if (rows.length === 0) return;
   const table = new Table({
     title: opts?.title,
@@ -211,10 +458,10 @@ export function renderTable(
       ...(col.color ? { color: col.color } : {}),
     })),
   });
-  for (const row of rows) {
+  for (const row of boundedItems(rows)) {
     table.addRow(row);
   }
-  table.printTable();
+  outputText(table.render());
 }
 
 /**
@@ -225,6 +472,8 @@ export async function withSpinner<T>(
   label: string,
   fn: () => Promise<T>,
 ): Promise<T> {
+  if (currentOutput()?.json || !process.stderr.isTTY || process.env.CI)
+    return fn();
   const spinner = createSpinner({ text: label, stream: process.stderr });
   spinner.start();
   try {
@@ -275,7 +524,7 @@ export function formatTimestamp(epochMs: number): string {
  * Render a tree view of a nested object to stdout.
  */
 export function renderTree(data: Record<string, unknown>): void {
-  console.log(treeify(data));
+  outputText(treeify(data));
 }
 
 // --- Auth-store output helpers (WI-L) ---
@@ -285,7 +534,8 @@ export function renderTree(data: Record<string, unknown>): void {
  * Use for agent-facing commands that must keep stdout clean (e.g. `auth token`).
  */
 export function eprintln(msg: string): void {
-  process.stderr.write(`${msg}\n`);
+  if (currentOutput()?.json) diagnostic(msg);
+  else process.stderr.write(`${msg}\n`);
 }
 
 /**
@@ -293,7 +543,19 @@ export function eprintln(msg: string): void {
  * Use for error/diagnostic JSON that must not contaminate stdout.
  */
 export function eprintJson(data: unknown): void {
-  process.stderr.write(`${JSON.stringify(data, null, 2)}\n`);
+  const value = data as Record<string, unknown>;
+  if (value?.ok === false || value?.error) {
+    const err =
+      typeof value.error === "object" && value.error
+        ? (value.error as Record<string, unknown>)
+        : value;
+    emitError(
+      String(err.code ?? value.code ?? "command-failed"),
+      String(err.message ?? value.message ?? value.error ?? "Command failed"),
+      typeof value.hint === "string" ? value.hint : undefined,
+      value,
+    );
+  } else process.stderr.write(`${JSON.stringify(data, null, 2)}\n`);
 }
 
 /**

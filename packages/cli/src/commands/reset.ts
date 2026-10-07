@@ -1,7 +1,14 @@
 import { defineCommand } from "citty";
 import { z } from "zod";
 import { requireClient, resolveContext } from "../context";
-import { jsonArg, printJson, printJsonError } from "../lib/output";
+import {
+  diagnostic,
+  exit,
+  jsonArg,
+  outputText,
+  printJson,
+  printJsonError,
+} from "../lib/output";
 
 const ResetResponseSchema = z.object({
   ok: z.literal(true),
@@ -25,10 +32,10 @@ export default defineCommand({
           "CONFIRMATION_REQUIRED",
         );
       }
-      console.error(
+      diagnostic(
         "This will DELETE ALL project data. Run with --confirm to proceed.",
       );
-      process.exit(1);
+      exit(1);
     }
     const ctx = await resolveContext();
     if (ctx.config.backend === "local") {
@@ -38,11 +45,11 @@ export default defineCommand({
           "REMOTE_ONLY",
         );
       } else {
-        console.error(
+        diagnostic(
           "Error: this command requires a remote connection (tila init)",
         );
       }
-      process.exit(1);
+      exit(1);
     }
     const client = requireClient(ctx);
     await client.post(
@@ -54,6 +61,6 @@ export default defineCommand({
       printJson({ ok: true });
       return;
     }
-    console.log("Project data reset successfully.");
+    outputText("Project data reset successfully.");
   },
 });

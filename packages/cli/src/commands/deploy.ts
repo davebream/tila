@@ -1,5 +1,4 @@
 import { createPrivateKey } from "node:crypto";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { createCloudflareClient } from "../lib/cloudflare-client";
 import { setWorkerSecrets } from "../lib/cloudflare-resources";
@@ -10,7 +9,9 @@ import {
 } from "../lib/deploy";
 import { loadGithubAppCredentials } from "../lib/github-app-setup";
 import { getInfraSlug, loadInfraConfig } from "../lib/infra-config";
-import { jsonArg, printJson, printJsonError } from "../lib/output";
+import { exit, jsonArg, printJson, printJsonError } from "../lib/output";
+
+import * as p from "../lib/prompts";
 import { resolveCfApiToken, tilaHome } from "../lib/provisioning";
 import { R2_BUCKET_NAME } from "../lib/resource-names";
 
@@ -36,7 +37,7 @@ export default defineCommand({
     function fatal(message: string, code: string): never {
       if (json) printJsonError(message, code);
       p.cancel(message);
-      process.exit(1);
+      exit(1);
     }
 
     let infraConfig: ReturnType<typeof loadInfraConfig>;
@@ -100,7 +101,7 @@ export default defineCommand({
       if (json) printJsonError(`Deploy failed: ${msg}`, "DEPLOY_FAILED");
       s?.stop("Deploy failed.");
       p.cancel(`Deploy failed: ${msg}`);
-      process.exit(1);
+      exit(1);
     }
 
     if (json) {

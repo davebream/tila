@@ -18,6 +18,7 @@ import {
   lifecycleNamespace,
   shellQuote,
 } from "./lifecycle-runtime";
+import { outputText } from "./output";
 
 type Json = Record<string, unknown>;
 const McpEntrySchema = z
@@ -174,7 +175,7 @@ export function configureLifecycle(
   if (action === "install") definitions.tila = installedMcp;
   else {
     if (!previous) {
-      console.log("Lifecycle integration is not installed.");
+      outputText("Lifecycle integration is not installed.");
       return;
     }
     if (previous.previousMcp === null)
@@ -183,7 +184,7 @@ export function configureLifecycle(
   }
   const changes = { hooksFile, mcpFile, hooks, mcp };
   if (dryRun) {
-    console.log(
+    outputText(
       JSON.stringify({ action, files: [hooksFile, mcpFile, manifest] }),
     );
     return;
@@ -220,7 +221,7 @@ export function configureLifecycle(
     client === "codex" ? stringify(mcp) : `${JSON.stringify(mcp, null, 2)}\n`,
   );
   if (action === "remove") rmSync(manifest);
-  console.log(
+  outputText(
     `${client} lifecycle integration ${action === "install" ? "installed. Restart the client and review/trust its hooks." : "removed. Existing sessions keep their current configuration until they end."}`,
   );
 }

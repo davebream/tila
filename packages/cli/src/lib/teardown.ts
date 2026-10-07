@@ -3,6 +3,7 @@ import type { Cloudflare } from "./cloudflare-client";
 import { queryD1 } from "./cloudflare-resources";
 import type { AppCredentials } from "./github-app-setup";
 import { mintAppJwt } from "./github-app-setup";
+import { diagnostic } from "./output";
 
 export interface TeardownResult {
   ok: boolean;
@@ -43,7 +44,7 @@ export async function deleteR2Bucket(
           account_id: accountId,
         });
       } catch (keyErr) {
-        console.error(
+        diagnostic(
           `R2 object delete failed for key ${obj.key}: ${keyErr instanceof Error ? keyErr.message : String(keyErr)}`,
         );
       }

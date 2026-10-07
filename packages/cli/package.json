@@ -86,6 +86,7 @@
     "yaml": "^2.7.0",
     "yocto-spinner": "^1.2.0",
     "zod": "^3.24.0",
-    "@tila/client-lifecycle": "workspace:*"
+    "@tila/client-lifecycle": "workspace:*",
+    "@bomb.sh/tab": "^0.0.22"
   }
 }

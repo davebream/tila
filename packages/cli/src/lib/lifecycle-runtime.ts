@@ -20,6 +20,7 @@ import {
 import { type TilaFacade, createTila } from "tila-sdk";
 import { requireTokenAsync } from "../auth";
 import { findConfig } from "../config";
+import { diagnostic, outputText, protocolJson } from "./output";
 
 export function lifecycleNamespace(): string {
   const config = findConfig();
@@ -138,17 +139,15 @@ export async function runLifecycleHook(
       } catch {
         warning =
           "Tila lifecycle degraded: could not attach session environment or start heartbeat worker. Run tila lifecycle status.";
-        console.error(warning);
+        diagnostic(warning);
       }
-      console.log(
-        JSON.stringify({
-          ...(warning ? { systemMessage: warning } : {}),
-          hookSpecificOutput: {
-            hookEventName: "SessionStart",
-            additionalContext: text,
-          },
-        }),
-      );
+      protocolJson({
+        ...(warning ? { systemMessage: warning } : {}),
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: text,
+        },
+      });
     } else if (event.hook_event_name === "SessionEnd") {
       await lifecycle.end(key);
       const state = lifecycle.store.read(key);
@@ -171,15 +170,13 @@ export async function runLifecycleHook(
           warning =
             "Tila lifecycle degraded: could not start heartbeat worker. Run tila lifecycle status.";
         }
-        console.log(
-          JSON.stringify({
-            ...(warning ? { systemMessage: warning } : {}),
-            hookSpecificOutput: {
-              hookEventName: "UserPromptSubmit",
-              additionalContext: recovered.text,
-            },
-          }),
-        );
+        protocolJson({
+          ...(warning ? { systemMessage: warning } : {}),
+          hookSpecificOutput: {
+            hookEventName: "UserPromptSubmit",
+            additionalContext: recovered.text,
+          },
+        });
       }
     }
   } finally {

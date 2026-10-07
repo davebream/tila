@@ -1,11 +1,12 @@
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { GITHUB_LOGIN_REGEX } from "@tila/schemas";
 import type { Cloudflare } from "./cloudflare-client";
 import {
   type MigrationResult,
   applyD1Migrations as runMigrations,
 } from "./d1-migrations";
+import { exit } from "./output";
+import * as p from "./prompts";
 import { D1_DATABASE_NAME } from "./resource-names";
 
 /**
@@ -68,7 +69,7 @@ export async function ensureD1Database(
   });
   if (!created.uuid) {
     p.cancel("Failed to create D1 database: no UUID in response");
-    process.exit(1);
+    exit(1);
   }
   return created.uuid;
 }
@@ -132,7 +133,7 @@ export async function ensureR2Bucket(
       return;
     }
     p.cancel(`Failed to create R2 bucket: ${msg}`);
-    process.exit(1);
+    exit(1);
   }
 }
 

@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import { findConfig } from "../config";
 import { openInBrowser } from "../lib/browser";
+import { diagnostic, exit, outputText } from "../lib/output";
 
 export default defineCommand({
   meta: {
@@ -18,27 +19,27 @@ export default defineCommand({
     const typedArgs = args as unknown as { print: boolean };
     const config = findConfig();
     if (!config) {
-      console.error("No tila project found. Run 'tila init' first.");
-      process.exit(1);
+      diagnostic("No tila project found. Run 'tila init' first.");
+      exit(1);
     }
 
     if (config.backend === "local" && !config.worker_url) {
-      console.error(
+      diagnostic(
         "This project uses a local backend with no worker_url configured. " +
           "Set worker_url in .tila/config.toml to use 'tila open'.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     if (!config.worker_url) {
-      console.error(
+      diagnostic(
         "No worker_url found in config. Set worker_url in .tila/config.toml.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     if (typedArgs.print) {
-      console.log(config.worker_url);
+      outputText(config.worker_url);
       return;
     }
 

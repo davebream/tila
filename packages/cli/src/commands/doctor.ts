@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import {
   InstanceKeyMismatchError,
   KeychainUnavailableError,
@@ -24,7 +23,9 @@ import {
   resolveInstanceContext,
   toInstanceMetadata,
 } from "../lib/instance-context";
-import { jsonArg, printJson } from "../lib/output";
+import { exit, jsonArg, outputText, printJson } from "../lib/output";
+
+import * as p from "../lib/prompts";
 import { tilaHome } from "../lib/provisioning";
 
 interface CheckResult {
@@ -356,7 +357,7 @@ export default defineCommand({
       const warned = allChecks.filter((ck) => ck.status === "warn").length;
       const failed = allChecks.filter((ck) => ck.status === "fail").length;
       if (jsonMode) {
-        console.log(
+        outputText(
           JSON.stringify({
             checks: allChecks,
             summary: { passed, warned, failed },
@@ -366,7 +367,7 @@ export default defineCommand({
         renderAuthChecks();
         p.cancel(msg);
       }
-      process.exit(2);
+      exit(2);
       return;
     }
 
@@ -388,7 +389,7 @@ export default defineCommand({
         renderAuthChecks();
         p.cancel("This command requires a remote connection (tila init).");
       }
-      process.exit(1);
+      exit(1);
       return;
     }
 
@@ -881,11 +882,11 @@ export default defineCommand({
 
     // Exit code: 0=all pass, 1=any warn, 2=any fail
     if (failed > 0) {
-      process.exit(2);
+      exit(2);
     } else if (warned > 0) {
-      process.exit(1);
+      exit(1);
     } else {
-      process.exit(0);
+      exit(0);
     }
   },
 });

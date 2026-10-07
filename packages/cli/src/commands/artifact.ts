@@ -4,9 +4,16 @@ import { ArtifactReviewRequestSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
 import {
+  boundedItems,
+  currentOutput,
+  diagnostic,
+  exit,
   failWithCliError,
   jsonArg,
+  outputText,
   printJson,
+  printJsonError,
+  rawOutput,
   renderTable,
   tsToIso,
 } from "../lib/output";
@@ -168,7 +175,7 @@ export default defineCommand({
             ],
           );
           if (result.meta.next_cursor)
-            console.log(`Next cursor: ${result.meta.next_cursor}`);
+            outputText(`Next cursor: ${result.meta.next_cursor}`);
         } catch (err) {
           failWithCliError(err, Boolean(args.json));
         }
@@ -211,7 +218,7 @@ export default defineCommand({
             printJson(result);
             return;
           }
-          console.log(
+          outputText(
             `Restored revision ${result.pointer.revision}: ${result.key}`,
           );
         } catch (err) {
@@ -283,9 +290,7 @@ export default defineCommand({
             return;
           }
           const verb = deduplicated ? "Deduplicated" : "Uploaded";
-          console.log(
-            `${verb} artifact: ${result.key} (${result.bytes} bytes)`,
-          );
+          outputText(`${verb} artifact: ${result.key} (${result.bytes} bytes)`);
         } catch (err) {
           failWithCliError(err, Boolean(args.json));
         }
@@ -305,33 +310,46 @@ export default defineCommand({
         },
       },
       async run({ args }) {
+        if (currentOutput()?.json && !args.output)
+          printJsonError(
+            "JSON downloads require --output <file>",
+            "invalid-argument",
+          );
         const ctx = await resolveContext();
         const key = args.key as string;
         const result = await ctx.artifact.get(key);
 
         if (!result) {
-          console.error(`Artifact not found: ${key}`);
-          process.exit(1);
+          diagnostic(`Artifact not found: ${key}`);
+          exit(1);
         }
 
-        if (ctx.artifact.meta)
-          console.error(
-            JSON.stringify({
-              artifact_metadata: (await ctx.artifact.meta(key)).pointer,
-            }),
-          );
+        const pointer = ctx.artifact.meta
+          ? (await ctx.artifact.meta(key)).pointer
+          : undefined;
+        if (pointer) diagnostic(JSON.stringify({ artifact_metadata: pointer }));
         const buffer = Buffer.from(
           await new Response(result.body).arrayBuffer(),
         );
 
         if (args.output) {
           writeFileSync(args.output as string, buffer);
-          console.error(
+          if (currentOutput()?.json) {
+            printJson({
+              key,
+              bytes: buffer.byteLength,
+              content_type: result.contentType,
+              output: args.output,
+              pointer,
+            });
+            return;
+          }
+          diagnostic(
             `Downloaded ${buffer.byteLength} bytes (${result.contentType}) to ${args.output}`,
           );
         } else {
-          process.stdout.write(buffer);
-          console.error(`Content-Type: ${result.contentType}`);
+          rawOutput(buffer);
+          diagnostic(`Content-Type: ${result.contentType}`);
         }
       },
     }),
@@ -369,10 +387,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.writeText) {
-          console.error(
+          diagnostic(
             "Error: artifact write is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
 
         let content: string;
@@ -387,8 +405,8 @@ export default defineCommand({
           }
           content = Buffer.concat(chunks).toString("utf-8");
         } else {
-          console.error("Error: provide --text or pipe content via stdin");
-          process.exit(1);
+          diagnostic("Error: provide --text or pipe content via stdin");
+          exit(1);
         }
 
         const result = await ctx.artifact.writeText(content, {
@@ -403,7 +421,7 @@ export default defineCommand({
           printJson({ ok: true, ...result });
           return;
         }
-        console.log(`Written artifact: ${result.key} (${result.bytes} bytes)`);
+        outputText(`Written artifact: ${result.key} (${result.bytes} bytes)`);
       },
     }),
     cat: defineCommand({
@@ -419,16 +437,16 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.readText) {
-          console.error(
+          diagnostic(
             "Error: artifact cat is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const key = args.key as string;
         const result = await ctx.artifact.readText(key);
         if (!result) {
-          console.error(`Artifact not found: ${key}`);
-          process.exit(1);
+          diagnostic(`Artifact not found: ${key}`);
+          exit(1);
         }
 
         if (args.json) {
@@ -440,7 +458,7 @@ export default defineCommand({
           });
           return;
         }
-        console.error(
+        diagnostic(
           JSON.stringify({
             artifact_metadata: result.pointer ?? {
               provenance: null,
@@ -448,7 +466,7 @@ export default defineCommand({
             },
           }),
         );
-        process.stdout.write(result.content);
+        rawOutput(result.content);
       },
     }),
     list: defineCommand({
@@ -467,10 +485,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.listPointers) {
-          console.error(
+          diagnostic(
             "Error: artifact list is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const pointers = await ctx.artifact.listPointers({
           resource: args.resource as string | undefined,
@@ -481,7 +499,7 @@ export default defineCommand({
           return;
         }
         if (pointers.length === 0) {
-          console.log("No artifacts found.");
+          outputText("No artifacts found.");
           return;
         }
         renderTable(
@@ -540,10 +558,10 @@ export default defineCommand({
           async run({ args }) {
             const ctx = await resolveContext();
             if (!ctx.artifact.addRelationship) {
-              console.error(
+              diagnostic(
                 "Error: artifact rel is not supported in this backend mode",
               );
-              process.exit(1);
+              exit(1);
             }
             const toKeyOrUri: { to_key?: string; to_uri?: string } = {};
             if (args.toKey) {
@@ -551,10 +569,10 @@ export default defineCommand({
             } else if (args.toUri) {
               toKeyOrUri.to_uri = args.toUri as string;
             } else {
-              console.error(
+              diagnostic(
                 "Error: either a positional toKey or --to-uri is required",
               );
-              process.exit(1);
+              exit(1);
             }
             await ctx.artifact.addRelationship(
               args.fromKey as string,
@@ -566,7 +584,7 @@ export default defineCommand({
               return;
             }
             const target = (args.toKey as string) || (args.toUri as string);
-            console.log(
+            outputText(
               `Added relationship: ${args.fromKey} -[${args.type}]-> ${target}`,
             );
           },
@@ -587,10 +605,10 @@ export default defineCommand({
           async run({ args }) {
             const ctx = await resolveContext();
             if (!ctx.artifact.listRelationships) {
-              console.error(
+              diagnostic(
                 "Error: artifact rel list is not supported in this backend mode",
               );
-              process.exit(1);
+              exit(1);
             }
             const rels = await ctx.artifact.listRelationships(
               args.key as string,
@@ -605,12 +623,12 @@ export default defineCommand({
               return;
             }
             if (rels.length === 0) {
-              console.log("No relationships found.");
+              outputText("No relationships found.");
               return;
             }
             for (const rel of rels) {
               const target = rel.to_key ?? rel.to_uri ?? "(none)";
-              console.log(
+              outputText(
                 `${rel.type}  ${target}  ${new Date(rel.created_at).toISOString()}`,
               );
             }
@@ -639,10 +657,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.getLatest) {
-          console.error(
+          diagnostic(
             "Error: artifact latest is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const pointer = await ctx.artifact.getLatest(
           args.kind as string,
@@ -650,17 +668,17 @@ export default defineCommand({
         );
         if (!pointer) {
           if (args.json) {
-            printJson({ ok: false, pointer: null });
+            printJson({ found: false, pointer: null });
             return;
           }
-          console.log("No artifact found.");
+          outputText("No artifact found.");
           return;
         }
         if (args.json) {
           printJson({ ok: true, pointer });
           return;
         }
-        console.log(JSON.stringify(pointer, null, 2));
+        outputText(JSON.stringify(pointer, null, 2));
       },
     }),
     grep: defineCommand({
@@ -699,10 +717,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.grepArtifacts) {
-          console.error(
+          diagnostic(
             "Error: artifact grep is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const response = await ctx.artifact.grepArtifacts({
           pattern: args.pattern as string,
@@ -718,23 +736,23 @@ export default defineCommand({
         }
 
         if (response.truncated) {
-          console.error(
+          diagnostic(
             "Warning: results truncated — narrow with --kind/--resource or raise --limit",
           );
         }
 
         if (response.results.length === 0) {
-          console.log("No results found.");
+          outputText("No results found.");
           return;
         }
 
-        for (const result of response.results) {
+        for (const result of boundedItems(response.results)) {
           const lines = result.lines;
           for (let i = 0; i < lines.length; i++) {
             const { line, text } = lines[i];
             const isLast = i === lines.length - 1;
             const suffix = isLast && result.truncated ? " (truncated)" : "";
-            console.log(`${result.key}:${line}: ${text}${suffix}`);
+            outputText(`${result.key}:${line}: ${text}${suffix}`);
           }
         }
       },
@@ -769,10 +787,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.searchArtifacts) {
-          console.error(
+          diagnostic(
             "Error: artifact search is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const results = await ctx.artifact.searchArtifacts({
           q: args.query as string,
@@ -787,14 +805,14 @@ export default defineCommand({
         }
 
         if (results.length === 0) {
-          console.log("No results found.");
+          outputText("No results found.");
           return;
         }
 
-        for (const r of results) {
+        for (const r of boundedItems(results)) {
           const title = r.title ? `  ${r.title}` : "";
           const snippet = r.snippet ? `\n  ${r.snippet}` : "";
-          console.log(`${r.r2_key}  ${r.kind}${title}${snippet}`);
+          outputText(`${r.r2_key}  ${r.kind}${title}${snippet}`);
         }
       },
     }),
