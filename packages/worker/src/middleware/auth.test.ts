@@ -18,6 +18,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { MAX_DEBOUNCE_MAP_SIZE } from "../config";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { hashToken } from "../lib/hash-token";
 import { _clearCacheForTest } from "../lib/token-cache";
@@ -189,6 +190,13 @@ vi.mock("@tila/backend-d1", async () => ({
     }
     return { identityHost, subjectId };
   },
+}));
+
+// Exercise the real eviction boundary without thousands of crypto/HTTP requests.
+// The production limit stays unchanged; only this test file uses a small capacity.
+vi.mock("../config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config")>()),
+  MAX_DEBOUNCE_MAP_SIZE: 3,
 }));
 
 // --- Mock session-cache ---
@@ -822,100 +830,94 @@ describe("auth middleware", () => {
       mockValidate.mockResolvedValue(CLAIMS);
       const app = createTestApp();
 
-      const baseTime = Date.now();
-
-      for (let i = 0; i < 2001; i++) {
-        const token = `eviction-test-token-${i}`;
-        await fetchWithCtx(
+      for (let i = 0; i < MAX_DEBOUNCE_MAP_SIZE + 1; i++) {
+        const response = await fetchWithCtx(
           app,
-          makeReq("/test", { Authorization: `Bearer ${token}` }),
+          makeReq("/test", {
+            Authorization: `Bearer eviction-test-token-${i}`,
+          }),
         );
+        expect(response.status).toBe(200);
       }
-
-      expect(_debounceMapSizeForTest()).toBe(2000);
-
-      // The first token should have been evicted — re-sending it after the
-      // debounce window should trigger a fresh updateLastUsedAt call
-      vi.setSystemTime(baseTime + 120_000);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
       mockUpdateLastUsedAt.mockClear();
 
+      // A resident key remains debounced. An evicted key writes again immediately,
+      // before the debounce window expires, proving eviction rather than expiry.
       await fetchWithCtx(
         app,
-        makeReq("/test", {
-          Authorization: "Bearer eviction-test-token-0",
-        }),
+        makeReq("/test", { Authorization: "Bearer eviction-test-token-1" }),
       );
-
-      expect(mockUpdateLastUsedAt).toHaveBeenCalled();
+      expect(mockUpdateLastUsedAt).not.toHaveBeenCalled();
+      await fetchWithCtx(
+        app,
+        makeReq("/test", { Authorization: "Bearer eviction-test-token-0" }),
+      );
+      expect(mockUpdateLastUsedAt).toHaveBeenCalledTimes(1);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
     });
 
     it("preserves debounce behavior after eviction guard is active", async () => {
       mockValidate.mockResolvedValue(CLAIMS);
       const app = createTestApp();
+      for (let i = 0; i < MAX_DEBOUNCE_MAP_SIZE; i++) {
+        await fetchWithCtx(
+          app,
+          makeReq("/test", { Authorization: `Bearer debounce-filler-${i}` }),
+        );
+      }
+      mockUpdateLastUsedAt.mockClear();
+      mockValidate.mockClear();
 
-      // First request — triggers D1 write
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer debounce-token-A" }),
       );
       expect(mockUpdateLastUsedAt).toHaveBeenCalledTimes(1);
-
-      // Second request with same token within debounce window — no D1 write
       mockUpdateLastUsedAt.mockClear();
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer debounce-token-A" }),
       );
       expect(mockUpdateLastUsedAt).not.toHaveBeenCalled();
+      // Debouncing telemetry writes must never debounce authoritative authentication.
+      expect(mockValidate).toHaveBeenCalledTimes(2);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
     });
 
     it("evicts non-promoted entries read within debounce window", async () => {
       mockValidate.mockResolvedValue(CLAIMS);
       const app = createTestApp();
-
-      const baseTime = Date.now();
-
-      // Insert token A at position 1
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-A" }),
       );
-
-      // Fill map to capacity with 1999 more tokens
-      for (let i = 0; i < 1999; i++) {
+      for (let i = 0; i < MAX_DEBOUNCE_MAP_SIZE - 1; i++) {
         await fetchWithCtx(
           app,
-          makeReq("/test", {
-            Authorization: `Bearer np-filler-${i}`,
-          }),
+          makeReq("/test", { Authorization: `Bearer np-filler-${i}` }),
         );
       }
-      expect(_debounceMapSizeForTest()).toBe(2000);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
+      mockUpdateLastUsedAt.mockClear();
 
-      // Read token A within debounce window — no set, no promotion
+      // Reading A within the window does not promote its insertion order.
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-A" }),
       );
-
-      // Insert one more token — should evict token A (oldest, not promoted)
+      expect(mockUpdateLastUsedAt).not.toHaveBeenCalled();
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-C" }),
       );
-      expect(_debounceMapSizeForTest()).toBe(2000);
-
-      // Advance past debounce window and re-send token A
-      vi.setSystemTime(baseTime + 120_000);
+      expect(_debounceMapSizeForTest()).toBe(MAX_DEBOUNCE_MAP_SIZE);
       mockUpdateLastUsedAt.mockClear();
-
       await fetchWithCtx(
         app,
         makeReq("/test", { Authorization: "Bearer np-token-A" }),
       );
-
-      // Token A was evicted despite being recently read — updateLastUsedAt fires
-      expect(mockUpdateLastUsedAt).toHaveBeenCalled();
+      expect(mockUpdateLastUsedAt).toHaveBeenCalledTimes(1);
     });
   });
 

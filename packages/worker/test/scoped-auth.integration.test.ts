@@ -214,6 +214,61 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
     ).toBe(403);
     expect(effects).not.toHaveBeenCalled();
   });
+  it("requires both read and write for artifact restore, and denies restricted keys", async () => {
+    const server = app();
+    for (const capabilities of [
+      ["artifacts:read"],
+      ["artifacts:write"],
+    ] as const) {
+      const key = await issue({
+        role: "participant",
+        capabilities: [...capabilities],
+      });
+      expect(
+        (
+          await request(
+            server,
+            "/projects/p/artifacts/~/restore/produced/task/blob.txt",
+            key.plaintext,
+            "POST",
+            {},
+          )
+        ).status,
+      ).toBe(403);
+    }
+    const restricted = await issue({
+      role: "participant",
+      capabilities: ["artifacts:read", "artifacts:write"],
+      restrictions: { task_types: ["task"] },
+    });
+    expect(
+      (
+        await request(
+          server,
+          "/projects/p/artifacts/~/restore/produced/task/blob.txt",
+          restricted.plaintext,
+          "POST",
+          {},
+        )
+      ).status,
+    ).toBe(403);
+    expect(effects).not.toHaveBeenCalled();
+    const writer = await issue({
+      role: "participant",
+      capabilities: ["artifacts:read", "artifacts:write"],
+    });
+    expect(
+      (
+        await request(
+          server,
+          "/projects/p/artifacts/~/restore/produced/task/blob.txt",
+          writer.plaintext,
+          "POST",
+          {},
+        )
+      ).status,
+    ).toBe(200);
+  });
   it("allows explicit capabilities, denies deletion/governance and cross-project access", async () => {
     const key = await issue();
     const server = app();
