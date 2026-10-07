@@ -1175,12 +1175,14 @@ describe("project admin routes", () => {
       // Two distinct year/month groups → two R2 puts
       expect(putMock).toHaveBeenCalledTimes(2);
       expect(putMock).toHaveBeenCalledWith(
-        "journal-archive/proj-target/2026/03.part-1.jsonl",
+        "journal-archive/proj-target/2026/03.part-2-from-1.jsonl",
         expect.any(String),
+        { customMetadata: { first_seq: "1", last_seq: "1" } },
       );
       expect(putMock).toHaveBeenCalledWith(
-        "journal-archive/proj-target/2026/04.part-2.jsonl",
+        "journal-archive/proj-target/2026/04.part-2-from-2.jsonl",
         expect.any(String),
+        { customMetadata: { first_seq: "2", last_seq: "2" } },
       );
       // confirm was forwarded with throughSeq
       expect(forwardToDOMock).toHaveBeenCalledWith(
