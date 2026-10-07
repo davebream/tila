@@ -43,6 +43,13 @@ import type {
   SummaryBackend,
 } from "@tila/core";
 import type {
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactRestoreRequest,
+  ArtifactRevisionResponse,
+} from "@tila/schemas";
+import type {
   ArtifactGrepResponse,
   Claim,
   Entity,
@@ -820,6 +827,38 @@ export class RemoteArtifactBackend implements ArtifactBackend {
 
   // --- ArtifactBackend ---
 
+  history(
+    key: string,
+    options: ArtifactHistoryQuery = {},
+  ): Promise<ArtifactHistoryResponse> {
+    return this.client.get(
+      `/projects/${this.projectId}/artifacts/~/history/${encodeURIComponent(key)}`,
+      {
+        query: {
+          limit:
+            options.limit === undefined ? undefined : String(options.limit),
+          cursor: options.cursor,
+        },
+      },
+    );
+  }
+  meta(key: string): Promise<ArtifactMetaResponse> {
+    return this.client.get(
+      `/projects/${this.projectId}/artifacts/${encodeURIComponent(key)}/meta`,
+    );
+  }
+  restore(
+    key: string,
+    options: ArtifactRestoreRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactRevisionResponse> {
+    const { idempotencyKey, ...body } = options;
+    return this.client.post(
+      `/projects/${this.projectId}/artifacts/~/restore/${encodeURIComponent(key)}`,
+      body,
+      { idempotencyKey: idempotencyKey ?? crypto.randomUUID() },
+    );
+  }
+
   async put(
     options: ArtifactPutOptions,
   ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
@@ -842,11 +881,21 @@ export class RemoteArtifactBackend implements ArtifactBackend {
     if (options.fence !== undefined)
       formData.append("fence", String(options.fence));
     if (options.flavor) formData.append("flavor", options.flavor);
+    if (options.lineageId !== undefined)
+      formData.append("lineage_id", options.lineageId);
+    if (options.lineageFence !== undefined)
+      formData.append("lineage_fence", String(options.lineageFence));
+    if (options.tags !== undefined)
+      formData.append("tags", JSON.stringify(options.tags));
 
     const result = await this.client.postFormData(
       `/projects/${this.projectId}/artifacts`,
       formData,
-      { schema: ArtifactPutResponseSchema, validate: true },
+      {
+        schema: ArtifactPutResponseSchema,
+        validate: true,
+        idempotencyKey: options.idempotencyKey,
+      },
     );
     return {
       key: result.key,
@@ -1057,6 +1106,10 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       mimeType?: string;
       resource?: string;
       fence?: number;
+      lineageId?: string;
+      lineageFence?: number;
+      tags?: string[];
+      idempotencyKey?: string;
     },
   ): Promise<{ key: string; bytes: number }> {
     const result = await this.client.post(
@@ -1067,8 +1120,15 @@ export class RemoteArtifactBackend implements ArtifactBackend {
         mime_type: opts.mimeType ?? "text/markdown",
         resource: opts.resource,
         fence: opts.fence,
+        lineage_id: opts.lineageId,
+        lineage_fence: opts.lineageFence,
+        tags: opts.tags,
       },
-      { schema: ArtifactPutResponseSchema, validate: true },
+      {
+        schema: ArtifactPutResponseSchema,
+        validate: true,
+        idempotencyKey: opts.idempotencyKey,
+      },
     );
     return { key: result.key, bytes: result.bytes };
   }

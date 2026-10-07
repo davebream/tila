@@ -75,6 +75,12 @@ export type {
   RenewSuccessResponse,
   ReleaseSuccessResponse,
   // Artifact types
+  ArtifactRevision,
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactRestoreRequest,
+  ArtifactRevisionResponse,
   ArtifactPutResponse,
   ArtifactListResponse,
   ArtifactSearchResponse,

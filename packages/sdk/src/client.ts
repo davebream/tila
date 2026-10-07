@@ -158,6 +158,7 @@ export class TilaClient {
     method: string,
     path: string,
     opts?: {
+      idempotencyKey?: string;
       body?: unknown;
       query?: Record<string, string | undefined>;
       schema?: z.ZodType<T>;
@@ -177,6 +178,9 @@ export class TilaClient {
       Authorization: `Bearer ${this.token}`,
       Accept: "application/json",
       ...this.extraHeaders,
+      ...(opts?.idempotencyKey
+        ? { "Idempotency-Key": opts.idempotencyKey }
+        : {}),
     };
 
     if (this.dpopSigner) {
@@ -250,10 +254,15 @@ export class TilaClient {
   async post<T>(
     path: string,
     body: unknown,
-    opts?: { schema?: z.ZodType<T>; validate?: boolean },
+    opts?: {
+      schema?: z.ZodType<T>;
+      validate?: boolean;
+      idempotencyKey?: string;
+    },
   ): Promise<T> {
     return this.request("POST", path, {
       body,
+      idempotencyKey: opts?.idempotencyKey,
       schema: opts?.schema,
       validate: opts?.validate,
     });
@@ -348,13 +357,20 @@ export class TilaClient {
   async postFormData<T>(
     path: string,
     formData: FormData,
-    opts?: { schema?: z.ZodType<T>; validate?: boolean },
+    opts?: {
+      schema?: z.ZodType<T>;
+      validate?: boolean;
+      idempotencyKey?: string;
+    },
   ): Promise<T> {
     const url = new URL(path, `${this.baseUrl}/`);
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.token}`,
       Accept: "application/json",
       ...this.extraHeaders,
+      ...(opts?.idempotencyKey
+        ? { "Idempotency-Key": opts.idempotencyKey }
+        : {}),
     };
     // Do NOT set Content-Type — fetch sets it with the boundary automatically for FormData
 

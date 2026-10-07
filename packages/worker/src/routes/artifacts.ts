@@ -32,6 +32,10 @@ export {
   callPointerWithRetry,
   compensateAndRespond,
 } from "../lib/artifact-service";
+import {
+  restoreArtifact,
+  writeVersionedArtifact,
+} from "../lib/artifact-version-service";
 import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO } from "../lib/do-forward";
 import { normalizeArtifactText } from "../lib/normalize-text";
@@ -149,6 +153,12 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
 
   const encoder = new TextEncoder();
   const fileBytes = encoder.encode(content);
+  if (
+    parsed.data.lineage_id !== undefined ||
+    parsed.data.lineage_fence !== undefined
+  ) {
+    return writeVersionedArtifact(c, parsed.data, fileBytes.buffer);
+  }
 
   const hashBuffer = await crypto.subtle.digest("SHA-256", fileBytes);
   const sha256 = Array.from(new Uint8Array(hashBuffer))
@@ -325,6 +335,23 @@ artifacts.post("/", requirePermission("write"), async (c) => {
 
   // Compute SHA-256 of file content
   const fileBytes = await file.arrayBuffer();
+  if (formData.has("lineage_id") || formData.has("lineage_fence")) {
+    return writeVersionedArtifact(
+      c,
+      {
+        kind,
+        resource,
+        fence,
+        mime_type: mimeType,
+        tags,
+        lineage_id: formData.get("lineage_id") as string | undefined,
+        lineage_fence: formData.has("lineage_fence")
+          ? Number(formData.get("lineage_fence"))
+          : undefined,
+      },
+      fileBytes,
+    );
+  }
   const hashBuffer = await crypto.subtle.digest("SHA-256", fileBytes);
   const sha256 = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -824,7 +851,7 @@ artifacts.get(
 const RECONCILE_SCAN_MAX_LIMIT = 1000;
 const RECONCILE_SCAN_DEFAULT_LIMIT = 500;
 
-type ReconcilePrefix = "produced" | "sources";
+type ReconcilePrefix = "produced" | "sources" | "versioned";
 
 interface CompositeCursor {
   prefix: ReconcilePrefix;
@@ -881,11 +908,16 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     metadata: Record<string, string>;
   };
   const allBlobs: BlobItem[] = [];
+  const versionCommitKeys: string[] = [];
   let nextCursor: string | null = null;
   let remaining = limit;
 
   const prefixOrder: ReconcilePrefix[] =
-    startPrefix === "produced" ? ["produced", "sources"] : ["sources"];
+    startPrefix === "produced"
+      ? ["produced", "sources", "versioned"]
+      : startPrefix === "sources"
+        ? ["sources", "versioned"]
+        : ["versioned"];
 
   for (let pi = 0; pi < prefixOrder.length; pi++) {
     const prefix = prefixOrder[pi];
@@ -900,7 +932,10 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     }
 
     const listed = await c.env.ARTIFACTS.list({
-      prefix: `${prefix}/`,
+      prefix:
+        prefix === "versioned"
+          ? `versioned/${encodeURIComponent(c.get("projectId"))}/`
+          : `${prefix}/`,
       limit: remaining,
       cursor: innerCursor,
       include: ["customMetadata"],
@@ -913,7 +948,13 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
         (o as unknown as { customMetadata?: Record<string, string> })
           .customMetadata ?? {},
     }));
-    allBlobs.push(...objects);
+    if (prefix === "versioned")
+      versionCommitKeys.push(
+        ...objects
+          .filter((o) => o.key.endsWith(".commit.json"))
+          .map((o) => o.key),
+      );
+    else allBlobs.push(...objects);
     remaining -= objects.length;
 
     if (listed.truncated) {
@@ -983,6 +1024,20 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     analyticsCtxFrom(c),
   );
 
+  let versionRecovered = 0;
+  if (versionCommitKeys.length) {
+    const revisionResponse = await forwardToDO(
+      stub,
+      "/artifact/version/reconcile",
+      "POST",
+      { project_id: c.get("projectId"), apply, keys: versionCommitKeys },
+    );
+    if (!revisionResponse.ok) return revisionResponse;
+    versionRecovered = (
+      (await revisionResponse.json()) as { recovered: number }
+    ).recovered;
+  }
+
   // Phase 2 (C6): Cross-check R2 blob existence for non-tombstoned searchable pointers.
   // Repair: tombstone any searchable pointer whose R2 blob is missing.
   // R2 head() lives here (Worker has the R2 binding); ops-sqlite listSearchablePointers is blob-free.
@@ -1048,7 +1103,7 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
   }
 
   return c.json(
-    { ...doBody, repairErrors, scanned, nextCursor },
+    { ...doBody, repairErrors, scanned, nextCursor, versionRecovered },
     doResponse.status as 200,
   );
 });
@@ -1159,6 +1214,26 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
 
 // GET /projects/:projectId/artifacts/:key{.+} -- download from R2 (with inline fast path)
 // Note: this must be registered AFTER all named routes to avoid matching them
+artifacts.get("/~/history/:key{.+$}", requirePermission("read"), (c) =>
+  forwardToDO(c.get("doStub"), "/artifact/history", "GET", undefined, {
+    key: c.req.param("key"),
+    ...Object.fromEntries(
+      Object.entries({
+        limit: c.req.query("limit"),
+        cursor: c.req.query("cursor"),
+      }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
+  }),
+);
+artifacts.get("/:key{.+}/meta", requirePermission("read"), (c) =>
+  forwardToDO(c.get("doStub"), "/artifact/meta", "GET", undefined, {
+    key: c.req.param("key"),
+  }),
+);
+artifacts.post("/~/restore/:key{.+$}", requirePermission("write"), async (c) =>
+  restoreArtifact(c, c.req.param("key"), await c.req.json()),
+);
+
 artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
   const key = c.req.param("key");
 
