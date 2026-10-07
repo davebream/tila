@@ -13,6 +13,26 @@ export function registerArtifactTools(
   const search = facade.search;
 
   server.tool(
+    "tila_artifact_history",
+    "List artifact revision metadata, newest first. Does not read blob contents or restore revisions.",
+    {
+      key: z.string().min(1),
+      limit: z.number().int().optional(),
+      cursor: z.string().optional(),
+    },
+    async ({ key, limit, cursor }) => {
+      try {
+        const result = await artifacts.history(key, { limit, cursor });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        };
+      } catch (err) {
+        throw toMcpError(err);
+      }
+    },
+  );
+
+  server.tool(
     "tila_artifact_put",
     "Upload an artifact (file content) to the project. Content must be base64-encoded. Returns the artifact key, byte count, and deduplication status.",
     {

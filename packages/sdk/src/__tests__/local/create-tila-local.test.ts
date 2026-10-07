@@ -38,6 +38,55 @@ describe("createTilaLocal — full local round-trip", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("exposes version history, metadata and append-only restore under Node", async () => {
+    const claim = await local.project.acquire(
+      "artifact:report",
+      "exclusive",
+      60_000,
+    );
+    const artifacts = buildLocalResources(
+      local.project,
+      local.artifacts,
+    ).artifacts;
+    const first = await artifacts.writeText("first", {
+      kind: "text",
+      lineageId: "report",
+      lineageFence: claim.fence,
+      tags: ["Env:Prod"],
+    });
+    await artifacts.writeText("second", {
+      kind: "text",
+      lineageId: "report",
+      lineageFence: claim.fence,
+    });
+    const duplicate = await artifacts.writeText("first", {
+      kind: "text",
+      lineageId: "report",
+      lineageFence: claim.fence,
+      tags: [],
+    });
+    expect(duplicate).toMatchObject({ key: first.key, deduplicated: true });
+    const restored = await artifacts.restore(first.key, {
+      fence: claim.fence,
+      idempotencyKey: "restore-once",
+    });
+    expect((await artifacts.meta(restored.key)).pointer).toMatchObject({
+      revision: 3,
+      tags: ["env:prod"],
+      restored_from: first.key,
+    });
+    expect(
+      (await artifacts.history(first.key)).items.map((p) => p.revision),
+    ).toEqual([3, 2, 1]);
+    expect((await artifacts.readText(restored.key)).content).toBe("first");
+    expect(
+      await artifacts.restore(first.key, {
+        fence: claim.fence,
+        idempotencyKey: "restore-once",
+      }),
+    ).toEqual(restored);
+  });
+
   it("creates a task, claims it (fence), sets a record, round-trips an artifact, lists journal", async () => {
     // 1. Create a task.
     const task = await local.project.create({

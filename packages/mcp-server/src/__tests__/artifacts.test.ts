@@ -26,11 +26,12 @@ describe("registerArtifactTools", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers 9 tools with correct names", () => {
-    expect(server.tool).toHaveBeenCalledTimes(9);
+  it("registers 10 tools with correct names", () => {
+    expect(server.tool).toHaveBeenCalledTimes(10);
 
     const toolNames = server.tool.mock.calls.map((call: unknown[]) => call[0]);
     expect(toolNames).toEqual([
+      "tila_artifact_history",
       "tila_artifact_put",
       "tila_artifact_search",
       "tila_artifact_write_text",
@@ -44,6 +45,28 @@ describe("registerArtifactTools", () => {
   });
 
   const findHandler = (name: string) => findToolHandler(server, name);
+
+  it("forwards history pagination and exposes no restore tool", async () => {
+    const response = {
+      ok: true,
+      items: [],
+      meta: { total: 0, limit: 20, next_cursor: null },
+    };
+    facade.artifacts.history.mockResolvedValue(response);
+    const result = await findHandler("tila_artifact_history")({
+      key: "versioned/p/report/1/abc.txt",
+      limit: 2,
+      cursor: "next",
+    });
+    expect(facade.artifacts.history).toHaveBeenCalledWith(
+      "versioned/p/report/1/abc.txt",
+      { limit: 2, cursor: "next" },
+    );
+    expect(JSON.parse(result.content[0].text)).toEqual(response);
+    expect(server.tool.mock.calls.map((call) => call[0])).not.toContain(
+      "tila_artifact_restore",
+    );
+  });
 
   describe("tila_artifact_put", () => {
     it("calls artifacts.upload with a Blob and upload opts", async () => {

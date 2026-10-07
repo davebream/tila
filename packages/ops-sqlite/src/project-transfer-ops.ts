@@ -11,6 +11,8 @@ export interface ProjectSqlStorage {
 export const PROJECT_BACKUP_TABLES = [
   "entities",
   "artifact_pointers",
+  "artifact_lineages",
+  "artifact_revision_operations",
   "records",
   "_schema_history",
   "claims",
@@ -43,6 +45,8 @@ export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
   entities: ["id"],
   artifact_pointers: ["r2_key"],
+  artifact_lineages: ["id"],
+  artifact_revision_operations: ["id"],
   records: ["type", "key"],
   _schema_history: ["version"],
   claims: ["resource"],

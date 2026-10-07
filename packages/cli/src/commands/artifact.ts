@@ -10,12 +10,148 @@ import {
   tsToIso,
 } from "../lib/output";
 
+const versionArgs = {
+  lineage: {
+    type: "string" as const,
+    description: "Explicit artifact lineage ID",
+  },
+  "lineage-fence": {
+    type: "string" as const,
+    description: "Fence for artifact:<lineage>",
+  },
+  tags: {
+    type: "string" as const,
+    description: "Comma-separated tags (empty clears tags)",
+  },
+  "idempotency-key": {
+    type: "string" as const,
+    description: "Reuse this key when retrying the same write",
+  },
+};
+function versionOptions(args: Record<string, unknown>) {
+  return {
+    lineageId: args.lineage as string | undefined,
+    lineageFence:
+      args["lineage-fence"] === undefined
+        ? undefined
+        : Number(args["lineage-fence"]),
+    tags:
+      args.tags === undefined
+        ? undefined
+        : String(args.tags).split(",").filter(Boolean),
+    idempotencyKey: args["idempotency-key"] as string | undefined,
+  };
+}
+
 export default defineCommand({
   meta: { name: "artifact", description: "Manage artifacts" },
   subCommands: {
+    history: defineCommand({
+      meta: { name: "history", description: "List artifact revisions" },
+      args: {
+        key: {
+          type: "positional",
+          required: true,
+          description: "Artifact key",
+        },
+        limit: {
+          type: "string",
+          description: "Page size (1–200)",
+          default: "20",
+        },
+        cursor: {
+          type: "string",
+          description: "Cursor from the previous page",
+        },
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.history)
+            throw new Error("Artifact history is unavailable in this backend");
+          const result = await artifact.history(args.key, {
+            limit: Number(args.limit),
+            cursor: args.cursor,
+          });
+          if (args.json) {
+            printJson(result);
+            return;
+          }
+          renderTable(
+            result.items.map((p) => ({
+              revision: p.revision ?? "legacy",
+              key: p.r2_key,
+              bytes: p.bytes,
+              produced_at: tsToIso(p.produced_at),
+              tags: p.tags.join(","),
+              unavailable: Boolean(p.tombstoned || p.blob_deleted_at),
+            })),
+            [
+              { key: "revision", label: "Revision" },
+              { key: "key", label: "Key" },
+              { key: "bytes", label: "Bytes" },
+              { key: "produced_at", label: "Created" },
+              { key: "tags", label: "Tags" },
+              { key: "unavailable", label: "Unavailable" },
+            ],
+          );
+          if (result.meta.next_cursor)
+            console.log(`Next cursor: ${result.meta.next_cursor}`);
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
+    restore: defineCommand({
+      meta: {
+        name: "restore",
+        description: "Append a revision from an existing artifact",
+      },
+      args: {
+        key: {
+          type: "positional",
+          required: true,
+          description: "Source artifact key",
+        },
+        fence: {
+          type: "string",
+          required: true,
+          description: "Fence for artifact:<lineage>",
+        },
+        lineage: versionArgs.lineage,
+        tags: versionArgs.tags,
+        "idempotency-key": versionArgs["idempotency-key"],
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.restore)
+            throw new Error("Artifact restore is unavailable in this backend");
+          const opts = versionOptions(args);
+          const result = await artifact.restore(args.key, {
+            fence: Number(args.fence),
+            lineage_id: opts.lineageId,
+            tags: opts.tags,
+            idempotencyKey: opts.idempotencyKey,
+          });
+          if (args.json) {
+            printJson(result);
+            return;
+          }
+          console.log(
+            `Restored revision ${result.pointer.revision}: ${result.key}`,
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
     put: defineCommand({
       meta: { name: "put", description: "Upload an artifact" },
       args: {
+        ...versionArgs,
         file: { type: "positional", description: "File path", required: true },
         kind: { type: "string", description: "Artifact kind", required: true },
         resource: {
@@ -53,8 +189,9 @@ export default defineCommand({
         // error instead of leaking a bundled stack trace.
         try {
           const result = await ctx.artifact.put({
+            ...versionOptions(args),
             key: fileName, // placeholder -- Worker derives the canonical key
-            body: content.buffer as ArrayBuffer,
+            body: new Uint8Array(content).buffer,
             sha256: "", // Worker recomputes SHA-256
             metadata: {},
             contentType,
@@ -127,6 +264,7 @@ export default defineCommand({
         description: "Write text content as an artifact",
       },
       args: {
+        ...versionArgs,
         kind: {
           type: "string",
           description: "Artifact kind (e.g. plan, report, lesson)",
@@ -177,6 +315,7 @@ export default defineCommand({
         }
 
         const result = await ctx.artifact.writeText(content, {
+          ...versionOptions(args),
           kind: args.kind as string,
           mimeType: args.mimeType as string,
           resource: args.resource as string | undefined,

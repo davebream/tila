@@ -434,7 +434,19 @@ describe("POST /artifacts/reconcile — composite-cursor pagination (C1)", () =>
       scanned: number;
     };
     expect(b3.scanned).toBe(1);
-    expect(b3.nextCursor).toBeNull();
+    expect(decodeCursor(b3.nextCursor as string).prefix).toBe("versioned");
+    const res4 = await app.fetch(
+      new Request(
+        `http://localhost/artifacts/reconcile?limit=1&cursor=${encodeURIComponent(b3.nextCursor as string)}`,
+        { method: "POST" },
+      ),
+      env,
+      makeCtx(),
+    );
+    expect(res4.status).toBe(200);
+    expect(
+      ((await res4.json()) as { nextCursor: string | null }).nextCursor,
+    ).toBeNull();
   });
 
   it("clamps oversized limit to max 1000", async () => {

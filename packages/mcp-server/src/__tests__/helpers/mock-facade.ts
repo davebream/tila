@@ -77,6 +77,9 @@ export type MockFacadeShape = {
   >;
   claims: Record<"acquire" | "renew" | "release" | "list" | "get", Mock>;
   artifacts: Record<
+    | "history"
+    | "meta"
+    | "restore"
     | "upload"
     | "download"
     | "writeText"
@@ -152,6 +155,9 @@ export function createMockFacade(): MockFacadeShape {
     ),
     claims: fns("acquire", "renew", "release", "list", "get"),
     artifacts: fns(
+      "history",
+      "meta",
+      "restore",
       "upload",
       "download",
       "writeText",

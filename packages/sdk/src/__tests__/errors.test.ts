@@ -27,6 +27,7 @@ function collectSourceFiles(dir: string): string[] {
 function collectEmittedCodesFromContent(content: string): string[] {
   const codes: string[] = [];
   const patterns = [
+    /ArtifactVersionError\(\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
     /code:\s*"([a-z][a-z0-9-]*)"/g,
     /zodValidationError\([^)]*?"([a-z][a-z0-9-]*)"/g,
     /jsonError\(\s*c\s*,\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
@@ -233,6 +234,12 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   ]);
 
   const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "artifact-unavailable",
+    "artifact-lineage-busy",
+    "lineage-conflict",
+    "artifact-operation-aborted",
+    "invalid-cursor",
+    "artifact-storage-unavailable",
     "unauthorized",
     "session-expired",
     "rate-limited",

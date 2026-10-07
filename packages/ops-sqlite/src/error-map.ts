@@ -175,6 +175,8 @@ export function mapProjectError(err: Error): {
       code: err.code,
       retryable: err.status === 503,
     };
+  if (err instanceof ArtifactVersionError)
+    return { status: err.status, code: err.code, retryable: err.retryable };
   for (const rule of projectErrorResponses) {
     if (err instanceof rule.errorClass) {
       return {
@@ -187,3 +189,4 @@ export function mapProjectError(err: Error): {
   }
   return null;
 }
+import { ArtifactVersionError } from "./artifact-version-ops";

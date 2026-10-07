@@ -1,0 +1,36 @@
+# graphify corpus exclusions (gitignore syntax), on top of .gitignore.
+#
+# The graph is code-only on purpose. Code is parsed locally (AST, no LLM), so the
+# graph rebuilds for free and never drifts. Prose docs would need a manual LLM
+# pass to stay current. For the "why", read docs/01-DECISIONS.md and
+# docs/02-ARCHITECTURE.md directly.
+
+# Prose docs, changelogs, runbooks, plans, ADRs
+*.md
+
+# Local working dumps
+audit/
+
+# Fixtures and seed data: fake project content
+packages/integration-tests/fixtures/
+scripts/seed-data/
+
+# CI, tooling config and markup that graphify treats as documents
+.github/
+*.yml
+*.yaml
+*.html
+
+# Build and tooling config: no architectural signal
+tsconfig*.json
+biome.json
+turbo.json
+components.json
+
+# Platform binary packages: distribution shells with no source
+packages/cli-*/
+
+# Images
+*.png
+*.gif
+*.svg

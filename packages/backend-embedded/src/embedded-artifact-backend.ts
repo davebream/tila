@@ -23,11 +23,18 @@ import {
   constraintOps,
   relationshipOps,
   schema,
+  artifactVersionOps as versions,
 } from "@tila/ops-sqlite";
 import {
   type ArtifactGrepResponse,
+  type ArtifactHistoryQuery,
+  type ArtifactRestoreRequest,
+  ArtifactRestoreRequestSchema,
+  type ArtifactRevision,
   type IdentityContext,
   IdentityContextSchema,
+  artifactCommitKey,
+  canonicalJsonSha256,
 } from "@tila/schemas";
 import { and, eq, like } from "drizzle-orm";
 
@@ -94,6 +101,181 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     };
   }
 
+  private async flushRevisions(): Promise<void> {
+    for (const op of versions.listPendingArtifactCommits(this.db)) {
+      const record = versions.revisionRecord(op);
+      await this.blobs.write(
+        artifactCommitKey(record.pointer),
+        JSON.stringify(record),
+      );
+      this.retry(() => versions.publishArtifactRevision(this.db, op.id));
+    }
+  }
+
+  async history(key: string, options?: ArtifactHistoryQuery) {
+    return versions.listArtifactHistory(this.db, key, options);
+  }
+
+  async meta(key: string) {
+    return {
+      ok: true as const,
+      pointer: versions.getArtifactMeta(this.db, key),
+    };
+  }
+
+  async restore(
+    key: string,
+    options: ArtifactRestoreRequest & { idempotencyKey?: string },
+  ) {
+    const opts = ArtifactRestoreRequestSchema.parse(options);
+    await this.flushRevisions();
+    const source = versions.getArtifactMeta(this.db, key);
+    if (
+      source.lineage_id &&
+      opts.lineage_id &&
+      source.lineage_id !== opts.lineage_id
+    )
+      throw new versions.ArtifactVersionError(
+        409,
+        "lineage-conflict",
+        "Restore must remain in its source lineage",
+      );
+    return this.writeRevision(
+      {
+        key,
+        body: "",
+        sha256: source.sha256,
+        metadata: {},
+        contentType: source.mime_type,
+        kind: source.kind,
+        resource: source.resource ?? undefined,
+        lineageId: source.lineage_id ?? opts.lineage_id,
+        lineageFence: opts.fence,
+        tags: opts.tags ?? source.tags,
+        idempotencyKey: options.idempotencyKey,
+      },
+      null,
+      source,
+    );
+  }
+
+  private async writeRevision(
+    options: ArtifactPutOptions,
+    bytes: Uint8Array | null,
+    source?: ArtifactRevision,
+  ) {
+    await this.flushRevisions();
+    if (!options.lineageId || !options.lineageFence)
+      throw new versions.ArtifactVersionError(
+        400,
+        "missing-fence",
+        "lineageId and lineageFence are required together",
+      );
+    const projectId = `${this._org}/${this._project}`;
+    const hash =
+      source?.sha256 ??
+      Array.from(
+        new Uint8Array(
+          await crypto.subtle.digest(
+            "SHA-256",
+            new Uint8Array(bytes as Uint8Array).buffer,
+          ),
+        ),
+        (b) => b.toString(16).padStart(2, "0"),
+      ).join("");
+    const request = {
+      lineage_id: options.lineageId,
+      lineage_fence: options.lineageFence,
+      kind: options.kind ?? this.deriveKind(options.contentType),
+      resource: options.resource ?? null,
+      fence: options.fence ?? null,
+      mime_type: options.contentType,
+      tags: options.tags,
+      sha256: hash,
+      restored_from: source?.r2_key,
+      adopt: source ? source.lineage_id === null : false,
+    };
+    const id = `${projectId}:${this.identity.principal_id}:${options.idempotencyKey ?? crypto.randomUUID()}`;
+    const parsed = constraintOps.resolveCurrentSchema(this.db);
+    if (parsed) {
+      const check = constraintOps.checkArtifactKindDeclared(
+        parsed,
+        request.kind,
+      );
+      if (!check.ok)
+        throw new versions.ArtifactVersionError(422, check.code, check.message);
+    }
+    const searchable =
+      parsed &&
+      constraintOps.checkArtifactKindSearchable(parsed, request.kind)
+        .searchable;
+    const requestHash = await canonicalJsonSha256(request);
+    const { operation, duplicate } = this.retry(() =>
+      versions.reserveArtifactRevision(
+        this.db,
+        {
+          ...request,
+          project_id: projectId,
+          operation_id: id,
+          request_hash: requestHash,
+          bytes: source?.bytes ?? bytes?.byteLength ?? 0,
+          search_text:
+            searchable && bytes
+              ? normalizeArtifactText(bytes, options.contentType)
+              : null,
+        },
+        this.origin(),
+      ),
+    );
+    if (duplicate) return versions.revisionResponse(duplicate, true);
+    if (!operation) throw new Error("Missing revision reservation");
+    if (operation.state === "published")
+      return versions.publishArtifactRevision(this.db, id);
+    if (operation.state === "reserved") {
+      const record = versions.revisionRecord(operation);
+      let revisionBytes = bytes;
+      if (source) {
+        const stream = await this.blobs.readStream(source.r2_key);
+        if (!stream) {
+          this.retry(() => versions.abortArtifactRevision(this.db, id));
+          throw new versions.ArtifactVersionError(
+            410,
+            "artifact-unavailable",
+            "Source blob is unavailable",
+          );
+        }
+        revisionBytes = await readStreamToBytes(stream);
+        const restoredHash = Array.from(
+          new Uint8Array(
+            await crypto.subtle.digest(
+              "SHA-256",
+              new Uint8Array(revisionBytes).buffer,
+            ),
+          ),
+          (b) => b.toString(16).padStart(2, "0"),
+        ).join("");
+        if (
+          restoredHash !== record.pointer.sha256 ||
+          revisionBytes.byteLength !== record.pointer.bytes
+        ) {
+          this.retry(() => versions.abortArtifactRevision(this.db, id));
+          throw new versions.ArtifactVersionError(
+            410,
+            "artifact-unavailable",
+            "Source blob failed its integrity check",
+          );
+        }
+      }
+      await this.blobs.write(
+        record.pointer.r2_key,
+        revisionBytes as Uint8Array,
+      );
+      this.retry(() => versions.acceptArtifactRevision(this.db, id));
+    }
+    await this.flushRevisions();
+    return versions.publishArtifactRevision(this.db, id);
+  }
+
   private retry<T>(fn: () => T): T {
     return withBusyRetry(fn, this.sleepSync);
   }
@@ -113,6 +295,15 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
       bytes = await readStreamToBytes(options.body);
     }
 
+    if (options.lineageId !== undefined || options.lineageFence !== undefined) {
+      return this.writeRevision(options, bytes);
+    }
+    if (options.key.startsWith("versioned/"))
+      throw new versions.ArtifactVersionError(
+        400,
+        "validation-error",
+        "Versioned artifact keys require lineage options",
+      );
     // 2. Write blob via the injected store
     const { bytes: written } = await this.blobs.write(options.key, bytes);
 
@@ -158,6 +349,8 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
         this.origin(),
         undefined, // journalKind -- default artifact.produced
         searchText,
+        undefined,
+        options.tags,
       ),
     );
 
@@ -551,8 +744,12 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
       mimeType?: string;
       resource?: string;
       fence?: number;
+      lineageId?: string;
+      lineageFence?: number;
+      tags?: string[];
+      idempotencyKey?: string;
     },
-  ): Promise<{ key: string; bytes: number }> {
+  ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
     const mimeType = opts.mimeType ?? "text/plain";
     const sha256 = await sha256Hex(content);
     const ext = extForMime(mimeType);
@@ -567,6 +764,10 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
       kind: opts.kind,
       resource: opts.resource,
       fence: opts.fence,
+      lineageId: opts.lineageId,
+      lineageFence: opts.lineageFence,
+      tags: opts.tags,
+      idempotencyKey: opts.idempotencyKey,
     });
   }
 

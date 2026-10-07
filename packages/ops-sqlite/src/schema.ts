@@ -66,6 +66,9 @@ export const artifactPointers = sqliteTable(
     tombstoned_at: integer("tombstoned_at"),
     blob_deleted_at: integer("blob_deleted_at"),
     content_inline: text("content_inline"),
+    lineage_id: text("lineage_id"),
+    revision: integer("revision"),
+    restored_from: text("restored_from"),
   },
   (table) => [
     index("idx_artifacts_produced").on(table.resource),
@@ -78,6 +81,32 @@ export const artifactPointers = sqliteTable(
 );
 
 // --- entity_artifact_references ---
+export const artifactLineages = sqliteTable("artifact_lineages", {
+  id: text("id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  kind: text("kind").notNull(),
+  resource: text("resource"),
+  next_revision: integer("next_revision").notNull().default(1),
+});
+
+export const artifactRevisionOperations = sqliteTable(
+  "artifact_revision_operations",
+  {
+    id: text("id").primaryKey(),
+    lineage_id: text("lineage_id").notNull(),
+    request_hash: text("request_hash").notNull(),
+    state: text("state", {
+      enum: ["reserved", "accepted", "published", "aborted"],
+    }).notNull(),
+    record: text("record").notNull(),
+    search_text: text("search_text"),
+    created_at: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_artifact_operations_lineage").on(table.lineage_id, table.state),
+  ],
+);
+
 export const entityArtifactReferences = sqliteTable(
   "entity_artifact_references",
   {
