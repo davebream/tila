@@ -42,6 +42,7 @@ describe("ProjectDO.alarm", () => {
     await ProjectDO.prototype.alarm.call({
       ctx: { storage },
       db: {},
+      env: {},
     });
 
     expect(storage.delete).toHaveBeenCalledWith("_reindex_state");
