@@ -2,6 +2,10 @@ import { PROJECT_ROLE_RANK } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
 import type { Env, HonoVariables } from "../types";
 import { resolveTokenMembership } from "./membership";
+import {
+  authorizeProtectedOperation,
+  withRequiredRole,
+} from "./protected-operation";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -19,17 +23,17 @@ function denied(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
   );
 }
 
-export const requireProjectOwner: MiddlewareHandler<AppEnv> = async (
-  c,
-  next,
-) => {
-  const token = c.get("tokenResult");
-  if (token.kind === "d1-token" && token.scopes === "full") return next();
-  const role = c.get("effectiveRole");
-  return role && PROJECT_ROLE_RANK[role] >= PROJECT_ROLE_RANK.owner
-    ? next()
-    : denied(c);
-};
+export const requireProjectOwner: MiddlewareHandler<AppEnv> = withRequiredRole(
+  "owner",
+  async (c, next) => {
+    const token = c.get("tokenResult");
+    if (token.kind === "d1-token" && token.scopes === "full") return next();
+    const role = c.get("effectiveRole");
+    return role && PROJECT_ROLE_RANK[role] >= PROJECT_ROLE_RANK.owner
+      ? ((await authorizeProtectedOperation(c, "owner")) ?? next())
+      : denied(c);
+  },
+);
 
 export async function requireProjectOwnerHttp(
   c: import("hono").Context<AppEnv>,
@@ -42,7 +46,11 @@ export async function requireProjectOwnerHttp(
       token,
       token.projectId,
     );
-    if (membership?.role === "owner") return null;
+    if (membership?.role === "owner") {
+      c.set("effectiveRole", membership.role);
+      c.set("explicitRole", membership.explicitRole);
+      return authorizeProtectedOperation(c, "owner");
+    }
   } catch {
     return c.json(
       {

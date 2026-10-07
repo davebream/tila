@@ -232,15 +232,14 @@ export const ADMIN_GRANTS_CACHE_MAX_SIZE = 2000;
 export const PERMISSION_RECHECK_TTL_MS = 60_000; // 60 seconds
 
 /**
- * Back-off window for a cached negative permission result (Layer B, WI-H).
- * After a confirmed downgrade / absent result, the deny is re-asserted for
- * this duration before the next re-check is attempted (prevents hammering
- * the GitHub API after a mass-offboarding event).
+ * Backoff for transient GitHub failures. Protected operations remain denied
+ * during this interval; the next request at expiry retries verification.
+ * Verified denials and unavailable installations use the settled 60-second TTL.
  */
 export const PERMISSION_RECHECK_BACKOFF_MS = 10_000; // 10 seconds
 
 /**
- * Maximum number of jti entries in the per-isolate permission re-check cache (Layer B, WI-H).
+ * Maximum number of credential/repository entries in the permission re-check cache (Layer B, WI-H).
  * Consistent with JTI_REV_CACHE_MAX_SIZE, ISOLATE_RL_MAX_MAP_SIZE, and MAX_DEBOUNCE_MAP_SIZE —
  * all per-isolate maps are capped to prevent unbounded memory growth.
  * Oldest entry is evicted on overflow (same pattern as isolateFailMap / jtiRevCache).

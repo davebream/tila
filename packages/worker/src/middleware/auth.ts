@@ -1056,6 +1056,7 @@ export function createAuthMiddleware(
           expiresAt: payload.expires_at,
           oidcIssuer: payload.oidc_issuer,
           oidcSubject: payload.oidc_subject,
+          jti: payload.jti,
           role: payload.role,
           membershipSources: payload.membership_sources,
         };
