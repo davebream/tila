@@ -86,9 +86,14 @@ export function requirePrompt(
   hint = "Supply the required input using command flags.",
 ): void {
   if (!canPrompt())
-    throw Object.assign(new Error(`Interactive input required. ${hint}`), {
-      code: "input-required",
-    });
+    throw Object.assign(
+      new Error(
+        `Interactive input required. ${hint} Use --help for available input flags.`,
+      ),
+      {
+        code: "input-required",
+      },
+    );
 }
 export function outputText(...args: unknown[]): void {
   const state = currentOutput();
@@ -278,7 +283,7 @@ function emitError(
       retryable:
         exitCodeFor(kind) === EXIT_CODES.NETWORK_ERROR &&
         state?.mutating === false,
-      ...(hint ? { hint } : {}),
+      ...(hint ? { hint: stripVTControlCharacters(hint) } : {}),
       ...(details === undefined ? {} : { details }),
     },
   };
@@ -359,7 +364,18 @@ export function describeCliError(err: unknown): {
     message?: string;
     currentFence?: number;
     claimedFence?: number;
+    hint?: string;
+    issues?: { path: (string | number)[]; message: string }[];
   };
+  if (e?.name === "ZodError" && Array.isArray(e.issues)) {
+    return {
+      code: "invalid-argument",
+      message: e.issues
+        .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
+        .join("; "),
+      hint: "Check the input values against --help or tila schema.",
+    };
+  }
   const isStaleFence =
     e?.name === "FenceError" ||
     (e?.name === "TilaApiError" && e?.code === "stale-fence");
@@ -376,7 +392,12 @@ export function describeCliError(err: unknown): {
   const code = typeof e?.code === "string" && e.code ? e.code : "ERROR";
   const raw =
     typeof e?.message === "string" && e.message ? e.message : String(err);
-  const hint = _remediationHint(code);
+  const hint =
+    _remediationHint(code) ??
+    e?.hint ??
+    (/^(No API token found|No tila project found|Invalid config at)/.test(raw)
+      ? raw.split("\n").slice(1).join("\n").trim()
+      : undefined);
   return {
     code,
     message: raw.split("\n")[0].trim(),
