@@ -81,7 +81,11 @@ export function routeCapability(
     ["PUT", /^\/records\/[^/]+\/.+$/, "records:write"],
     ["PATCH", /^\/records\/[^/]+\/.+$/, "records:write"],
     ["GET", /^\/artifacts(?:\/.*)?$/, "artifacts:read"],
-    ["POST", /^\/artifacts(?:\/text|\/relationship)?$/, "artifacts:write"],
+    [
+      "POST",
+      /^\/artifacts(?:\/text|\/relationship|\/~\/restore\/.+)?$/,
+      "artifacts:write",
+    ],
     ["DELETE", /^\/artifacts\/.+$/, "artifacts:delete"],
     ["POST", /^\/artifacts\/(?:reconcile|search-rebuild)$/, "search:reindex"],
     ["GET", /^\/claims(?:\/state\/.+)?$/, "claims:read"],
@@ -290,7 +294,8 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     if (!scoped) return next(); // Compatibility handlers retain GitHub rechecks and historical gates.
     c.set("credentialPolicy", policy);
     if (
-      /artifact-refs/.test(c.req.path) &&
+      (/artifact-refs/.test(c.req.path) ||
+        /\/artifacts\/~\/restore\//.test(c.req.path)) &&
       !policy.capabilities.includes("artifacts:read")
     )
       return denied(c);
