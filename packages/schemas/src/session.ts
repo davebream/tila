@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CredentialPolicySchema } from "./capability";
 import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
 
 export const SessionPermissionSchema = z.enum(["read", "write", "admin"]);
@@ -99,6 +100,10 @@ export const GitHubExchangeRequestSchema = z.object({
 export type GitHubExchangeRequest = z.infer<typeof GitHubExchangeRequestSchema>;
 
 export const GitHubExchangeResponseSchema = z.object({
+  principal_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  token_id: z.string().optional(),
+  policy: CredentialPolicySchema.optional(),
   ok: z.literal(true),
   session_token: z.string(),
   expires_at: z.number().int(),
@@ -129,6 +134,10 @@ export type GitHubExchangeResponse = z.infer<
  * GitHub fields.
  */
 export const OidcExchangeResponseSchema = z.object({
+  principal_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  token_id: z.string().optional(),
+  policy: CredentialPolicySchema.optional(),
   ok: z.literal(true),
   session_token: z.string(),
   expires_at: z.number().int(),
@@ -176,6 +185,10 @@ export const GitHubAppInfoResponseSchema = z.object({
 export type GitHubAppInfoResponse = z.infer<typeof GitHubAppInfoResponseSchema>;
 
 export const OidcExchangeRequestSchema = z.object({
+  jkt: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/)
+    .optional(),
   project_id: z.string().min(1),
   oidc_token: z.string().min(1),
 });

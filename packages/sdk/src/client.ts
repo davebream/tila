@@ -19,6 +19,7 @@ import { createPresenceMethods } from "./presence";
 import { createRecordMethods } from "./records";
 import { createSchemaMethods } from "./schema";
 import { createSearchMethods } from "./search";
+import { createServiceAccountMethods } from "./service-accounts";
 import { createSignalMethods } from "./signals";
 import { createSummaryMethods } from "./summary";
 import { createTemplateMethods } from "./templates";
@@ -566,6 +567,7 @@ export interface TilaFacade {
   search: ReturnType<typeof createSearchMethods>;
   templates: ReturnType<typeof createTemplateMethods>;
   tokens: ReturnType<typeof createTokenMethods>;
+  serviceAccounts: ReturnType<typeof createServiceAccountMethods>;
   /** Index artifact operations (create, addEntry, listEntries). */
   indexes: ReturnType<typeof createIndexMethods>;
   /**
@@ -593,6 +595,7 @@ function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
     search: createSearchMethods(client, projectId),
     templates: createTemplateMethods(client, projectId),
     tokens: createTokenMethods(client),
+    serviceAccounts: createServiceAccountMethods(client, projectId),
     indexes: createIndexMethods(client, projectId),
     close: () => {},
   };

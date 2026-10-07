@@ -66,6 +66,7 @@ const main = defineCommand({
     deploy: () => load(() => import("./commands/deploy")),
     reset: () => load(() => import("./commands/reset")),
     token: () => load(() => import("./commands/token")),
+    "service-account": () => load(() => import("./commands/service-account")),
     repos: () => load(() => import("./commands/repos")),
     admin: () => load(() => import("./commands/admin")),
     auth: () => load(() => import("./commands/auth")),

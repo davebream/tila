@@ -1,8 +1,11 @@
+import { CredentialStore } from "@tila/backend-d1";
+import { CredentialPolicySchema, policyContains } from "@tila/schemas";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { forwardToDO } from "../lib/do-forward";
 import { generateToken } from "../lib/hash";
 import { hashToken } from "../lib/hash-token";
+import { denied, scopedPolicy } from "../middleware/capability";
 import { requirePermission } from "../middleware/permission";
 import type { Env, HonoVariables } from "../types";
 import { requireD1Token } from "./admin";
@@ -95,12 +98,47 @@ export function createBackupRoutes(options: {
     "_oidc_principals",
     "_project_memberships",
     "_membership_events",
+    "_service_accounts",
+    "_workload_bindings",
+    "_credential_events",
   ] as const;
 
   const D1_BACKUP_COLUMNS: Record<
     (typeof D1_BACKUP_TABLES)[number],
     ReadonlySet<string>
   > = {
+    _service_accounts: new Set([
+      "principal_id",
+      "project_id",
+      "name",
+      "display_name",
+      "created_at",
+      "created_by",
+      "revoked_at",
+    ]),
+    _workload_bindings: new Set([
+      "binding_id",
+      "project_id",
+      "principal_id",
+      "name",
+      "provider",
+      "issuer",
+      "subject",
+      "policy_json",
+      "created_at",
+      "created_by",
+      "revoked_at",
+    ]),
+    _credential_events: new Set([
+      "event_id",
+      "project_id",
+      "actor_principal_id",
+      "actor_token_id",
+      "target_id",
+      "action",
+      "occurred_at",
+      "details_json",
+    ]),
     _projects: new Set([
       "project_id",
       "display_name",
@@ -193,6 +231,9 @@ export function createBackupRoutes(options: {
     ]),
   };
   const D1_BACKUP_ORDER: Record<(typeof D1_BACKUP_TABLES)[number], string[]> = {
+    _service_accounts: ["project_id", "principal_id"],
+    _workload_bindings: ["project_id", "binding_id"],
+    _credential_events: ["project_id", "occurred_at", "event_id"],
     _projects: ["project_id"],
     _project_repos: ["project_id", "github_host", "github_repo_id"],
     _github_app_config: ["project_id"],
@@ -368,6 +409,24 @@ export function createBackupRoutes(options: {
       sections: Record<string, Record<string, unknown>[]>;
       createBootstrapToken?: boolean;
     }>();
+    if (options.projectTokenAuth) {
+      const token = c.get("tokenResult");
+      if (
+        body.createBootstrapToken &&
+        !(token.kind === "d1-token" && token.scopes === "full")
+      )
+        return denied(c);
+      const policy = scopedPolicy(c);
+      if (policy) {
+        for (const binding of body.sections._workload_bindings ?? []) {
+          const imported = CredentialPolicySchema.safeParse(
+            JSON.parse(String(binding.policy_json)),
+          );
+          if (!imported.success || !policyContains(policy, imported.data))
+            return denied(c);
+        }
+      }
+    }
     const transfer = await requireOwnedTransfer(c, body.sessionId, [
       "import",
       "rollback",
@@ -435,6 +494,13 @@ export function createBackupRoutes(options: {
         );
       }
     }
+    // Restoring membership/binding metadata must not resurrect old credentials.
+    await new CredentialStore(c.env.DB).revokeProjectCredentials(projectId, {
+      principalId: callerOwner(c),
+      tokenId: options.projectTokenAuth
+        ? c.get("tokenResult").tokenId
+        : undefined,
+    });
     if (statements.length > 0) await c.env.DB.batch(statements);
     let bootstrapToken: string | undefined;
     if (body.createBootstrapToken) {

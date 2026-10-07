@@ -125,7 +125,9 @@ memberships.patch("/memberships/:membershipId", async (c) => {
     c.get("projectId"),
     c.req.param("membershipId"),
   );
-  const bootstrap = c.get("tokenResult").kind === "d1-token";
+  const credential = c.get("tokenResult");
+  const bootstrap =
+    credential.kind === "d1-token" && credential.scopes === "full";
   if (
     current?.role === "owner" &&
     parsed.data.role !== "owner" &&
@@ -167,7 +169,9 @@ memberships.delete("/memberships/:membershipId", async (c) => {
     c.get("projectId"),
     c.req.param("membershipId"),
   );
-  const bootstrap = c.get("tokenResult").kind === "d1-token";
+  const credential = c.get("tokenResult");
+  const bootstrap =
+    credential.kind === "d1-token" && credential.scopes === "full";
   if (
     current?.role === "owner" &&
     !bootstrap &&

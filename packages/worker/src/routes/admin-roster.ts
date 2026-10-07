@@ -188,7 +188,8 @@ adminRoster.delete("/:githubUserId", requireProjectOwner, async (c) => {
   // require-project-admin.ts:131 already rejected null-identity sessions.
   const callerUserId =
     tokenResult.kind === "session" ? (tokenResult.githubUserId ?? null) : null;
-  const isD1Token = tokenResult.kind === "d1-token";
+  const isD1Token =
+    tokenResult.kind === "d1-token" && tokenResult.scopes === "full";
 
   // ── Last-admin guard ────────────────────────────────────────────────────
   // Guard: active roster count==1 AND sole row id==target AND bearer caller

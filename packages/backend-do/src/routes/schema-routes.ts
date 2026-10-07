@@ -1,4 +1,10 @@
 import {
+  CredentialPolicyDenied,
+  assertResourceAccess,
+  filterRelationships,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
+import {
   type RequestOrigin,
   type TemplateInstantiateErrorCode,
   constraintOps,
@@ -140,6 +146,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
 
     try {
       const result = templateOps.instantiateTemplate(db, {
+        policy: readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
         templateName: template_name,
         rootId: root_id,
         vars,

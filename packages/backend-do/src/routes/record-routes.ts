@@ -1,5 +1,11 @@
 import { applyRecordLegacyDefaults } from "@tila/core";
 import {
+  CredentialPolicyDenied,
+  assertResourceAccess,
+  filterRelationships,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
+import {
   type RequestOrigin,
   artifactOps,
   constraintOps,
@@ -535,7 +541,11 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
   });
 
   app.get("/record/types-in-use", (c) => {
-    const types = recordOps.listRecordTypesInUse(deps.db);
+    const types = recordOps.listRecordTypesInUse(
+      deps.db,
+      readCredentialPolicy(c.req.header("X-Tila-Credential-Policy"))
+        ?.restrictions,
+    );
     return c.json({ ok: true, types });
   });
 
@@ -578,6 +588,9 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
 
     try {
       const result = recordOps.listRecords(deps.db, {
+        restrictions: readCredentialPolicy(
+          c.req.header("X-Tila-Credential-Policy"),
+        )?.restrictions,
         type,
         includeArchived,
         tag: tag ?? undefined,

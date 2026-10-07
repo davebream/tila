@@ -20,7 +20,7 @@ function canonicalIssuer(rawIssuer: string): string {
 export function principalIdFor(token: UnifiedTokenResult): string {
   switch (token.kind) {
     case "d1-token":
-      return `token:${token.tokenId}`;
+      return token.principalId ?? `token:${token.tokenId}`;
     case "session": {
       if (token.githubUserId === undefined || !token.githubHost) {
         throw new Error(

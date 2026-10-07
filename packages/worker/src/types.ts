@@ -1,4 +1,5 @@
 import type { TokenResult } from "@tila/backend-d1";
+import type { CredentialPolicy } from "@tila/schemas";
 import type {
   EnvironmentMetadata,
   MembershipSource,
@@ -31,7 +32,15 @@ export interface Env {
 // Re-export for convenience
 export type { TokenResult };
 
-export interface D1TokenResult {
+export interface ScopedAuth {
+  principalId?: string;
+  credentialId?: string;
+  policy?: CredentialPolicy;
+  expiresAt?: number | null;
+  cnfJkt?: string | null;
+}
+
+export interface D1TokenResult extends ScopedAuth {
   kind: "d1-token";
   projectId: string;
   name: string;
@@ -63,7 +72,8 @@ export interface SessionTokenResult {
   membershipSources?: MembershipSource[];
 }
 
-export interface CookieSessionTokenResult {
+export interface CookieSessionTokenResult
+  extends Omit<ScopedAuth, "expiresAt"> {
   kind: "cookie-session";
   projectId: string;
   name: string;
@@ -132,6 +142,9 @@ export interface HonoVariables {
   effectiveRole?: ProjectRole;
   explicitRole?: ProjectRole;
   protectedRoleChecked?: ProjectRole;
+
+  credentialPolicy?: CredentialPolicy;
+  authorizationChecked?: boolean;
   membershipSources?: MembershipSource[];
   membershipRepoId?: number;
   // Caller-scoped idempotency key + request-body hash, computed by the

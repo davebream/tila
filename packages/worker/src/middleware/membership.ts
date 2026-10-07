@@ -61,6 +61,18 @@ export async function resolveTokenMembership(
   sources: MembershipSource[];
   mirroredRepoId?: number;
 } | null> {
+  if (
+    (token.kind === "d1-token" || token.kind === "cookie-session") &&
+    token.policy &&
+    token.principalId
+  ) {
+    const membership = await new ProjectMembershipStore(db).resolve(
+      projectId,
+      token.principalId,
+    );
+    if (!membership) return null;
+    return { ...membership, role: token.policy.role };
+  }
   if (token.kind === "d1-token") {
     return token.scopes === "full"
       ? { role: "owner", sources: ["bootstrap"] }

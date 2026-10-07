@@ -1,3 +1,4 @@
+import { exchangeScopedWorkload } from "../lib/workload-credential";
 /**
  * Generic OIDC token exchange route — `POST /api/auth/oidc/exchange`.
  *
@@ -327,8 +328,19 @@ authOidc.post("/exchange", async (c) => {
     );
   }
 
+  const scopedResponse = await exchangeScopedWorkload(c, {
+    projectId: project_id,
+    provider: "oidc",
+    issuer: oidcIssuer,
+    subject,
+    assertionId: hasJti ? String(jti) : `${subject}:${iat}`,
+    expiresAt: Number(payload.exp),
+    jkt: parsed.data.jkt,
+  });
+  if (scopedResponse) return scopedResponse;
+
   // 8. Idempotency check — distinct `oidc-generic:` namespace (security R-3)
-  const idempotencyKey = `oidc-generic:${project_id}:${oidcIssuer}:${hasJti ? jti : `${subject}:${iat}`}`;
+  const idempotencyKey = `oidc-generic:${project_id}:${oidcIssuer}:${hasJti ? jti : `${subject}:${iat}`}${parsed.data.jkt ? `:jkt:${parsed.data.jkt}` : ""}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedBody = await checkIdempotentExchange(
@@ -397,6 +409,7 @@ authOidc.post("/exchange", async (c) => {
     permission,
     role: membership.role,
     membershipSources: membership.sources,
+    jkt: parsed.data.jkt,
     hmacKey,
     idempotencyStore,
     idempotencyKey,
@@ -411,6 +424,7 @@ authOidc.post("/exchange", async (c) => {
 // ---------------------------------------------------------------------------
 
 async function mintAndStoreOidcSession(opts: {
+  jkt?: string;
   projectId: string;
   oidcIssuer: string;
   subject: string;
@@ -449,6 +463,7 @@ async function mintAndStoreOidcSession(opts: {
   const sessionJti = crypto.randomUUID();
 
   const payload: Record<string, unknown> = {
+    ...(opts.jkt ? { cnf: { jkt: opts.jkt } } : {}),
     project_id: projectId,
     sub_type: "oidc",
     oidc_issuer: oidcIssuer,

@@ -36,7 +36,8 @@ type AdminEnv = { Bindings: Env; Variables: HonoVariables };
  */
 export const requireD1Token: MiddlewareHandler<AdminEnv> = async (c, next) => {
   const tokenResult = c.get("tokenResult");
-  if (tokenResult.kind !== "d1-token") {
+  if (c.get("authorizationChecked")) return next();
+  if (tokenResult.kind !== "d1-token" || tokenResult.scopes !== "full") {
     return c.json(
       {
         ok: false,
@@ -92,7 +93,7 @@ admin.post("/principals/revoke", requireProjectAdmin, async (c) => {
     canonical.principalId,
   );
   if (
-    tokenResult.kind !== "d1-token" &&
+    !(tokenResult.kind === "d1-token" && tokenResult.scopes === "full") &&
     target?.role === "owner" &&
     (await membershipStore.countActiveOwners(projectId)) <= 1
   ) {
@@ -359,7 +360,7 @@ admin.post("/principals/:id/revoke", requireProjectAdmin, async (c) => {
     canonicalTarget.principalId,
   );
   if (
-    tokenResult.kind !== "d1-token" &&
+    !(tokenResult.kind === "d1-token" && tokenResult.scopes === "full") &&
     targetMembership?.role === "owner" &&
     (await membershipStore.countActiveOwners(projectId)) <= 1
   ) {

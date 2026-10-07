@@ -1090,6 +1090,11 @@ function createLocalTemplateMethods(project: EmbeddedProject) {
  */
 function createLocalTokenMethods() {
   return {
+    async rotate(
+      ..._args: Parameters<TilaFacade["tokens"]["rotate"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("tokens.rotate");
+    },
     // `issue`/`revoke` carry the HTTP facade's explicit parameter shape (derived
     // from `TilaFacade["tokens"]` so they cannot drift) — a zero-param stub would
     // make `_assertLocalSurfaceMatchesFacade` pass vacuously for them. `list` is
@@ -1145,6 +1150,59 @@ function createLocalIndexMethods() {
  * `EmbeddedArtifactBackend`. The returned object's keys + method shapes mirror
  * the HTTP facade so `createTila`'s two branches are interchangeable.
  */
+function createLocalServiceAccountMethods() {
+  return {
+    async list(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["list"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.list");
+    },
+    async create(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["create"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.create");
+    },
+    async update(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["update"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.update");
+    },
+    async revoke(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["revoke"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.revoke");
+    },
+    async listWorkloadBindings(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["listWorkloadBindings"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.listWorkloadBindings");
+    },
+    async createWorkloadBinding(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["createWorkloadBinding"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.createWorkloadBinding");
+    },
+    async updateWorkloadBinding(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["updateWorkloadBinding"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.updateWorkloadBinding");
+    },
+    async revokeWorkloadBinding(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["revokeWorkloadBinding"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.revokeWorkloadBinding");
+    },
+  };
+}
+
 export function buildLocalResources(
   project: EmbeddedProject,
   artifacts: EmbeddedArtifactBackend,
@@ -1184,6 +1242,7 @@ export function buildLocalResources(
     search: createLocalSearchMethods(project),
     templates: createLocalTemplateMethods(project),
     tokens: createLocalTokenMethods(),
+    serviceAccounts: createLocalServiceAccountMethods(),
     indexes: createLocalIndexMethods(),
   };
 }
@@ -1229,6 +1288,7 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   search: true,
   templates: true,
   tokens: true,
+  serviceAccounts: true,
   indexes: true,
 };
 void _assertLocalSurfaceMatchesFacade;

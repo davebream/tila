@@ -154,7 +154,7 @@ missing, and full bootstrap tokens still carry owner access.
 | Issue | Draft disposition |
 |---|---|
 | #191 | Rewrite for key-only deployment and GitHub auth retirement; mark #182/#183/#184 completed |
-| #185 | Next auth slice: native stable principals, project memberships, revocable/rotatable keys |
+| #185 | Scoped service identities, capability credentials, namespace restrictions, rotation, revocation and workload exchange |
 | #187 | Keep open until the reachable permission-revalidation path is fixed or actually removed |
 | #186 | Defer workload exchange and general token-provider expansion |
 | #102 | Defer broad governance UI; eventual small owner credential/membership screen |
@@ -196,17 +196,22 @@ Keep #182/#183/#184 marked complete. Deliver #185's native principals and projec
 keys, key-only provisioning/onboarding, then migrate existing GitHub/OIDC ownership
 and remove unsupported auth routes, secrets and UI. Preserve a recoverable owner
 and fail closed on revoked access. Full bootstrap keys remain administration-only.
-Close #187 only after its affected path is fixed or no longer reachable. Do not
-bundle workload exchange or a governance UI into this migration.
+Close #187 only after its affected path is fixed or no longer reachable. Workload exchange is included in #185; the governance UI remains separate.
 
-### Narrow #185 — stable principals and project credentials
+### #185 — scoped service accounts and capability credentials
 
-Bind ordinary project API keys to stable native user/service principals and explicit
-membership roles. Key rotation must preserve identity/membership; revocation must
-take effect on requests and refresh/reconnect paths. Distinguish process participants
-from authenticated principals. Test viewer/participant/maintainer/owner boundaries,
-cross-project denial and last-owner protection. Defer resource-level capabilities,
-namespace ACLs and external workload credential exchange.
+Deliver the broader integration contract: stable project service principals with
+canonical memberships; explicit capability and role ceilings; task-type and record
+namespace restrictions; expiring, rotatable and revocable credential versions;
+short-lived GitHub Actions and generic OIDC workload exchange; and preserved DPoP
+binding. Revalidate current D1 authority on every request, before cached responses
+or retry replay. Keep process participants separate from authentication identities.
+
+Maintain existing GitHub authentication, human-session compatibility and legacy
+`full` keys. Deprecate new legacy issuance without scheduling removal. Provide SDK,
+CLI and owner token-management APIs for #102; its token panel stays separate. Apply
+the backward-compatible D1 migration before deploying the Worker or clients and
+leave authentication-boundary changes for explicit merge/deployment review.
 
 ### Adapt #181 — runtime and provider lifecycle boundary
 

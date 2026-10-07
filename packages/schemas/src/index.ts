@@ -475,6 +475,7 @@ export {
   canonicalJsonSha256,
 } from "./record";
 
+export * from "./capability";
 export * from "./continuity";
 export * from "./artifact-version";
 export * from "./artifact-lifecycle";
