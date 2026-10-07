@@ -92,8 +92,17 @@ export function registerWorkflowTools(
     InspectRequestSchema,
     async (input) => {
       switch (input.action) {
-        case "ready":
-          return facade.tasks.ready({ type: input.type });
+        case "ready": {
+          const result = await facade.tasks.ready({ type: input.type });
+          return result.entities.length <= input.limit
+            ? result
+            : {
+                ...result,
+                entities: result.entities.slice(0, input.limit),
+                truncated: true,
+                total: result.entities.length,
+              };
+        }
         case "task": {
           const result = await facade.tasks.get(input.id);
           const relationships = result.relationships ?? [];
@@ -139,8 +148,14 @@ export function registerWorkflowTools(
               idempotency_key: input.idempotency_key,
             },
           );
-        case "renew":
-          return facade.claims.renew(input.resource, input.fence, input.ttl_ms);
+        case "renew": {
+          const renewed = await facade.claims.renew(
+            input.resource,
+            input.fence,
+            input.ttl_ms,
+          );
+          return { ...renewed, fence: input.fence };
+        }
         case "release":
           return facade.claims.release(input.resource, input.fence);
       }

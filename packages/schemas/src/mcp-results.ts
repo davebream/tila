@@ -52,6 +52,22 @@ const reentry = ReentryResponseSchema.extend({
   changes: replay,
 });
 
+const capped = {
+  truncated: z.boolean().optional(),
+  total: z.number().int().optional(),
+};
+const ready = api.ListReadyEntitiesResponseSchema.extend(capped);
+const relationships = api.ListEntityRelationshipsResponseSchema.extend(capped);
+const grep = api.ArtifactGrepResponseSchema.extend({
+  matches_truncated: z.boolean().optional(),
+  matches_total: z.number().int().optional(),
+});
+const pagination = {
+  total: z.number().int().optional(),
+  limit: z.number().int().nullable().optional(),
+  offset: z.number().int().optional(),
+  has_more: z.boolean().optional(),
+};
 const ok = z.object({ ok: z.literal(true) });
 export const McpCursorResultSchema = ok.extend({ cursor: JournalCursorSchema });
 export const McpHandoffResultSchema = ok.extend({ handoff: HandoffSchema });
@@ -94,15 +110,15 @@ const templates = ok.extend({
 export const McpPrimitiveResults = {
   tila_task_create: api.EntityResponseSchema,
   tila_task_list: z.union([
-    api.CompactEntityListResponseSchema,
-    api.EntityListResponseSchema,
+    api.CompactEntityListResponseSchema.extend(pagination),
+    api.EntityListResponseSchema.extend(pagination),
   ]),
   tila_task_show: McpTaskDetailSchema,
   tila_task_update: api.EntityResponseSchema,
   tila_task_archive: api.ArchiveSuccessResponseSchema,
-  tila_task_ready: api.ListReadyEntitiesResponseSchema,
+  tila_task_ready: ready,
   tila_task_relationships_add: api.CreateEntityRelationshipResponseSchema,
-  tila_task_relationships_list: api.ListEntityRelationshipsResponseSchema,
+  tila_task_relationships_list: relationships,
   tila_claim_acquire: api.AcquireSuccessResponseSchema,
   tila_claim_release: api.ReleaseSuccessResponseSchema,
   tila_claim_list: api.StateListResponseSchema,
@@ -112,7 +128,7 @@ export const McpPrimitiveResults = {
   tila_artifact_write_text: api.ArtifactPutResponseSchema,
   tila_artifact_read_text: McpArtifactTextSchema,
   tila_artifact_search: api.ArtifactSearchResponseSchema,
-  tila_artifact_grep: api.ArtifactGrepResponseSchema,
+  tila_artifact_grep: grep,
   tila_artifact_get_latest: ok.extend({
     pointer: ArtifactRevisionSchema.nullable(),
   }),
@@ -159,11 +175,11 @@ export const McpPrimitiveResults = {
 export const McpWorkflowResults = {
   tila_session: z.union([
     reentry,
-    api.PresenceHeartbeatSuccessResponseSchema,
     McpCursorResultSchema,
+    api.PresenceHeartbeatSuccessResponseSchema,
   ]),
   tila_inspect: z.union([
-    api.ListReadyEntitiesResponseSchema,
+    ready,
     McpTaskDetailSchema,
     api.RecordGetResponseSchema,
     McpArtifactTextSchema,
@@ -174,7 +190,7 @@ export const McpWorkflowResults = {
   ]),
   tila_claim: z.union([
     api.AcquireSuccessResponseSchema,
-    api.RenewSuccessResponseSchema,
+    api.RenewSuccessResponseSchema.extend({ fence: z.number().int() }),
     api.ReleaseSuccessResponseSchema,
   ]),
   tila_publish: z.union([

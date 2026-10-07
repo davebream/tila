@@ -44,7 +44,13 @@ export const SessionRequestSchema = z.discriminatedUnion("action", [
   }).strict(),
 ]);
 export const InspectRequestSchema = z.discriminatedUnion("action", [
-  z.object({ action: action("ready"), type: id.optional() }).strict(),
+  z
+    .object({
+      action: action("ready"),
+      type: id.optional(),
+      limit: z.number().int().min(1).max(500).default(50),
+    })
+    .strict(),
   z
     .object({
       action: action("task"),

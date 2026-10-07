@@ -180,7 +180,19 @@ export function registerResultTool<S extends z.ZodRawShape>(
     },
     async (input) => {
       try {
-        return await handler(input as z.output<z.ZodObject<S>>);
+        const response = await handler(input as z.output<z.ZodObject<S>>);
+        if (response.isError) return response;
+        const parsed = resultSchema.safeParse(
+          response.structuredContent?.result,
+        );
+        if (!parsed.success) {
+          // A backend mutation may already have committed before output validation.
+          return toolFailure(
+            new Error(`Invalid result for ${name}: ${parsed.error.message}`),
+            annotations.readOnlyHint,
+          );
+        }
+        return { ...response, structuredContent: { result: parsed.data } };
       } catch (error) {
         return toolFailure(error, annotations.readOnlyHint);
       }
@@ -209,7 +221,7 @@ export function registerPrimitiveTool<S extends z.ZodRawShape>(
             truncated: /\.\.\.\[truncated: returned/.test(texts[1]?.text ?? ""),
           }
         : JSON.parse(texts[0]?.text ?? "null");
-    // The MCP SDK validates structuredContent against outputSchema before returning it.
+    // The registration wrapper validates and normalizes the machine-readable result.
     return { ...response, structuredContent: { result } };
   });
 }
