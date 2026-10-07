@@ -117,7 +117,9 @@ export function recoveryFor(error: unknown, readOnly = false): McpRecovery {
       "Inspect current claims and state. Stop writing with the old fence; acquire a new claim only when available, then reconcile changes before writing.";
     retry_safety = "after_recovery";
   } else if (
-    /unauthorized|expired|revoked|permission|forbidden|lifecycle-unavailable/.test(
+    candidate?.status === 401 ||
+    candidate?.status === 403 ||
+    /^(unauthorized|session-expired|session-revoked|subject-revoked|permission-denied|permission-revoked|forbidden|lifecycle-unavailable)$/.test(
       code,
     )
   ) {
