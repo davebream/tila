@@ -22,6 +22,7 @@ import {
 import { alias } from "drizzle-orm/sqlite-core";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as lifecycle from "./artifact-lifecycle-ops";
+import { enrichArtifacts, provenanceFromOrigin } from "./artifact-review-ops";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
@@ -94,10 +95,18 @@ export function upsertPointer(
     );
     const deduplicated = existing.length > 0;
 
-    // INSERT OR IGNORE -- idempotent for content-addressed artifacts
-    tx.run(
-      sql`INSERT OR IGNORE INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, content_inline) VALUES(${pointer.r2_key}, ${pointer.resource}, ${pointer.kind}, ${pointer.sha256}, ${pointer.bytes}, ${pointer.fence}, ${pointer.mime_type}, ${pointer.produced_at}, ${pointer.produced_by}, ${pointer.expires_at}, 0, ${pointer.content_inline ?? null})`,
-    );
+    const provenance = skipFenceValidation
+      ? null
+      : provenanceFromOrigin(origin, pointer.produced_at);
+    tx.insert(schema.artifactPointers)
+      .values({
+        ...pointer,
+        tombstoned: 0,
+        provenance,
+        revision_creation: provenance,
+      })
+      .onConflictDoNothing()
+      .run();
 
     // Tags: on re-upsert of an existing r2_key (content-addressed; INSERT OR IGNORE
     // is a no-op), delete-all-then-reinsert ONLY when tags provided; preserve when undefined.
@@ -249,7 +258,10 @@ export function getLatestPointer(
     .from(schema.artifactTags)
     .where(eq(schema.artifactTags.artifact_key, row.r2_key))
     .all();
-  return ArtifactPointerSchema.parse({ ...row, tags: tags.map((t) => t.tag) });
+  return ArtifactPointerSchema.parse({
+    ...enrichArtifacts(db, [row])[0],
+    tags: tags.map((t) => t.tag),
+  });
 }
 
 export function listPointers(
@@ -318,7 +330,10 @@ export function listPointers(
     arr.push(t.tag);
   }
 
-  return rows.map((row) => ({
+  return enrichArtifacts(db, rows).map((row) => ({
+    provenance: row.provenance,
+    revision_creation: row.revision_creation,
+    review: row.review,
     r2_key: row.r2_key,
     resource: row.resource,
     kind: row.kind,
@@ -413,7 +428,7 @@ export function listGrepCandidates(
   // are preserved so the Worker fetches them from R2 instead).
   let cumulativeInlineBytes = 0;
 
-  return rows.map((row) => {
+  return enrichArtifacts(db, rows).map((row) => {
     let inline = row.content_inline;
     if (inline !== null) {
       const byteLen = Buffer.byteLength(inline, "utf8");
@@ -429,6 +444,9 @@ export function listGrepCandidates(
       mime_type: row.mime_type,
       bytes: row.bytes,
       content_inline: inline,
+      provenance: row.provenance,
+      revision_creation: row.revision_creation,
+      review: row.review,
     };
   });
 }
@@ -452,7 +470,10 @@ export function listExpiredPointers(
     .limit(limit)
     .all();
 
-  return rows.map((row) => ({
+  return enrichArtifacts(db, rows).map((row) => ({
+    provenance: row.provenance,
+    revision_creation: row.revision_creation,
+    review: row.review,
     r2_key: row.r2_key,
     resource: row.resource,
     kind: row.kind,
@@ -502,11 +523,9 @@ export function tombstonePointer(
 }
 
 /**
- * Records confirmation that a tombstoned pointer's R2 blob has been deleted,
- * stamping `blob_deleted_at`. Called by the sweep after a SUCCESSFUL R2 blob
- * delete. Only confirmed rows are eligible for `deleteTombstonedPointers` —
- * this is what prevents a failed blob delete from stranding an orphan blob
- * (Finding #2). Idempotent and a no-op when the r2_key is unknown.
+ * Records successful blob deletion and releases inline content. Metadata and
+ * review history remain available for audit. Failed deletions stay eligible for
+ * retry. Idempotent and a no-op when the r2_key is unknown.
  */
 export function confirmBlobDeleted(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
@@ -514,56 +533,20 @@ export function confirmBlobDeleted(
   now: number = Date.now(),
 ): void {
   db.run(
-    sql`UPDATE artifact_pointers SET blob_deleted_at = ${now} WHERE r2_key = ${r2Key}`,
+    sql`UPDATE artifact_pointers SET blob_deleted_at = ${now}, content_inline = NULL WHERE r2_key = ${r2Key}`,
   );
   lifecycle.syncPointerLifecycle(db, r2Key);
 }
 
-/**
- * Hard-deletes artifact pointer rows that have been tombstoned past the grace window.
- *
- * Rows are only deleted when:
- *   - tombstoned = 1 (marker set)
- *   - tombstoned_at IS NOT NULL (stamped by tombstonePointer after migration 0016)
- *   - tombstoned_at < cutoff (past the grace window)
- *
- * Rows tombstoned before the migration have tombstoned_at = NULL and remain inert
- * until re-tombstoned (acceptable: they hold no live R2 blob).
- *
- * Returns the number of rows deleted.
- */
+/** Compatibility hook: sweeps retain metadata as a permanent provenance/review audit. */
 export function deleteTombstonedPointers(
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  cutoff: number,
+  _db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  _cutoff: number,
 ): number {
-  return db.transaction((tx) => {
-    // Explicitly delete artifact_tags BEFORE the pointer delete, using the
-    // same predicate subquery. ON DELETE CASCADE is inert in the DO (FK enforcement
-    // is off in production), so this explicit delete is required to prevent orphans.
-    tx.run(
-      sql`DELETE FROM artifact_tags
-          WHERE artifact_key IN (
-            SELECT r2_key FROM artifact_pointers
-            WHERE tombstoned = 1
-              AND tombstoned_at IS NOT NULL
-              AND tombstoned_at < ${cutoff}
-              AND blob_deleted_at IS NOT NULL
-          )`,
-    );
-
-    // blob_deleted_at IS NOT NULL gates the hard-delete on a CONFIRMED R2 blob
-    // deletion. A tombstoned pointer whose blob delete permanently failed keeps
-    // blob_deleted_at NULL and is retained, so the orphan blob stays
-    // reconcilable rather than being silently stranded (Finding #2).
-    tx.run(
-      sql`DELETE FROM artifact_pointers
-          WHERE tombstoned = 1
-            AND tombstoned_at IS NOT NULL
-            AND tombstoned_at < ${cutoff}
-            AND blob_deleted_at IS NOT NULL`,
-    );
-    return tx.get<{ n: number }>(sql`SELECT changes() AS n`)?.n ?? 0;
-  });
+  // Artifact metadata is an audit record. Blob lifecycle cleanup must not erase
+  // provenance, review history, or restore links, including for legacy artifacts.
+  // Keep this compatibility entry point for existing sweep callers.
+  return 0;
 }
 
 export function addArtifactRelationship(
@@ -640,7 +623,7 @@ export function listIndexEntries(
         ORDER BY p.produced_at DESC`,
   );
 
-  return rows.map((row) => ({
+  return enrichArtifacts(db, rows).map((row) => ({
     ...row,
     exists: row.tombstoned !== 1,
   }));
@@ -798,7 +781,7 @@ export function searchArtifacts(
       LIMIT ${limit}
     `);
 
-    return rows;
+    return enrichArtifacts(db, rows);
   } catch (err: unknown) {
     if (err instanceof Error) {
       const msg = err.message;

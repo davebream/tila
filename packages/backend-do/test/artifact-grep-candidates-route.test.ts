@@ -95,9 +95,15 @@ describe("GET /artifact/grep-candidates route", () => {
 
   it("filters by kind via parseMulti (single kind)", async () => {
     artifactOps.upsertPointer(db, makePointer({ kind: "lesson" }), {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
       actor: "test-actor",
     });
     artifactOps.upsertPointer(db, makePointer({ kind: "output" }), {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
       actor: "test-actor",
     });
 
@@ -114,12 +120,21 @@ describe("GET /artifact/grep-candidates route", () => {
 
   it("filters by kind via parseMulti (comma-separated = array)", async () => {
     artifactOps.upsertPointer(db, makePointer({ kind: "lesson" }), {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
       actor: "test-actor",
     });
     artifactOps.upsertPointer(db, makePointer({ kind: "output" }), {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
       actor: "test-actor",
     });
     artifactOps.upsertPointer(db, makePointer({ kind: "other" }), {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
       actor: "test-actor",
     });
 

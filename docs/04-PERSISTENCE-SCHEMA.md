@@ -262,3 +262,23 @@ Looking at the structure end-to-end, three things stand out:
 **The cross-store edge is narrow.** R2 connects to DO through exactly one column: `artifact_pointers.r2_key`. Every R2 object should have exactly one pointer row, and every non-tombstoned pointer row should reference exactly one R2 object. If this invariant breaks, `tila doctor` detects it and reports orphans on either side.
 
 **The audit trail is unified.** All meaningful state changes emit a journal row in the same transaction as the change itself. There's no journal-vs-state-table drift to worry about because the journal IS in the same SQLite database as the state. This is the largest 2024-vs-2026 improvement: the old design split journal across two backends (D1 for durability, DO for fast queries), creating a class of consistency bugs that simply cannot occur now.
+
+
+## Artifact provenance and reviews (migration 29)
+
+`artifact_pointers.provenance` and `revision_creation` are nullable JSON columns.
+They contain principal ID, participant ID, creation timestamp, client name/version,
+and environment metadata. SQLite rejects modifications to these columns after
+insertion. Legacy display names remain compatibility fields, not verified identity.
+
+`artifact_reviews` is keyed by `(artifact_key, review_revision)` and stores reviewer
+principal/participant, timestamp, decision, optional reason, unique operation ID,
+and normalized request data for duplicate-safe retries. Review revisions increase
+monotonically per artifact; the latest event supplies current state. Updates are
+forbidden; deletes are reserved for authorized backup replacement/project deletion.
+The review event and its journal record commit together. Transfer guards include
+the new table, and project exports include it in the semantic digest.
+
+Blob lifecycle cleanup retains pointer and review rows, including legacy metadata.
+Confirmed deletion clears inline content. Audit metadata grows with artifact and
+review count until the project is explicitly destroyed or replaced from backup.

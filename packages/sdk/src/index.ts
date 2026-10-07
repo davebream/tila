@@ -90,6 +90,13 @@ export type {
   RenewSuccessResponse,
   ReleaseSuccessResponse,
   // Artifact types
+  ArtifactProvenance,
+  ArtifactReviewEvent,
+  ArtifactReviewSummary,
+  ArtifactReviewRequest,
+  ArtifactReviewResponse,
+  ArtifactReviewsQuery,
+  ArtifactReviewsResponse,
   ArtifactRevision,
   ArtifactHistoryQuery,
   ArtifactHistoryResponse,

@@ -42,6 +42,13 @@ import type {
   SignalRecord,
   SummaryBackend,
 } from "@tila/core";
+import { ArtifactRevisionSchema } from "@tila/schemas";
+import type {
+  ArtifactReviewRequest,
+  ArtifactReviewResponse,
+  ArtifactReviewsQuery,
+  ArtifactReviewsResponse,
+} from "@tila/schemas";
 import type {
   ArtifactDeleteOptions,
   ArtifactDestroyResponse,
@@ -100,6 +107,7 @@ import {
   SummaryResponseSchema,
 } from "@tila/schemas";
 import { z } from "zod";
+import { createArtifactMethods } from "../artifacts";
 import { TilaApiError, type TilaClient } from "../client";
 
 // Internal schemas for artifact endpoints not exported from @tila/schemas.
@@ -830,6 +838,24 @@ export class RemoteArtifactBackend implements ArtifactBackend {
   ) {}
 
   // --- ArtifactBackend ---
+  reviews(
+    key: string,
+    query: ArtifactReviewsQuery = {},
+  ): Promise<ArtifactReviewsResponse> {
+    return createArtifactMethods(this.client, this.projectId).reviews(
+      key,
+      query,
+    );
+  }
+  review(
+    key: string,
+    input: ArtifactReviewRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactReviewResponse> {
+    return createArtifactMethods(this.client, this.projectId).review(
+      key,
+      input,
+    );
+  }
 
   history(
     key: string,
@@ -863,9 +889,12 @@ export class RemoteArtifactBackend implements ArtifactBackend {
     );
   }
 
-  async put(
-    options: ArtifactPutOptions,
-  ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
+  async put(options: ArtifactPutOptions): Promise<{
+    key: string;
+    bytes: number;
+    deduplicated: boolean;
+    pointer?: import("@tila/schemas").ArtifactRevision;
+  }> {
     // Convert body to Blob for FormData
     let bodyBlob: Blob;
     if (typeof options.body === "string") {
@@ -905,6 +934,10 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       key: result.key,
       bytes: result.bytes,
       deduplicated: result.deduplicated,
+      pointer:
+        result.pointer === undefined
+          ? undefined
+          : ArtifactRevisionSchema.parse(result.pointer),
     };
   }
 
@@ -938,7 +971,12 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       body: response.body as ReadableStream,
       contentType:
         response.headers.get("Content-Type") ?? "application/octet-stream",
-      metadata: {},
+      metadata: {
+        review_state:
+          response.headers.get("X-Tila-Artifact-Review-State") ?? "unreviewed",
+        review_revision:
+          response.headers.get("X-Tila-Artifact-Review-Revision") ?? "0",
+      },
     };
   }
 
@@ -1134,7 +1172,11 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       tags?: string[];
       idempotencyKey?: string;
     },
-  ): Promise<{ key: string; bytes: number }> {
+  ): Promise<{
+    key: string;
+    bytes: number;
+    pointer?: import("@tila/schemas").ArtifactRevision;
+  }> {
     const result = await this.client.post(
       `/projects/${this.projectId}/artifacts/text`,
       {
@@ -1153,12 +1195,21 @@ export class RemoteArtifactBackend implements ArtifactBackend {
         idempotencyKey: opts.idempotencyKey,
       },
     );
-    return { key: result.key, bytes: result.bytes };
+    return {
+      key: result.key,
+      bytes: result.bytes,
+      pointer:
+        result.pointer === undefined
+          ? undefined
+          : ArtifactRevisionSchema.parse(result.pointer),
+    };
   }
 
-  async readText(
-    key: string,
-  ): Promise<{ content: string; mimeType: string } | null> {
+  async readText(key: string): Promise<{
+    content: string;
+    mimeType: string;
+    pointer?: import("@tila/schemas").ArtifactRevision;
+  } | null> {
     let response: Response;
     try {
       response = await this.client.requestRaw(
@@ -1180,7 +1231,11 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       );
     }
     const text = await response.text();
-    return { content: text, mimeType: contentType };
+    return {
+      content: text,
+      mimeType: contentType,
+      pointer: (await this.meta(key)).pointer,
+    };
   }
 }
 

@@ -139,7 +139,10 @@ describe("LocalArtifactBackend", () => {
       const result = await backend.get(key);
       expect(result).not.toBeNull();
       expect(result?.contentType).toBe("text/plain");
-      expect(result?.metadata).toEqual({});
+      expect(result?.metadata).toEqual({
+        review_state: "unreviewed",
+        review_revision: "0",
+      });
 
       // Read and concatenate the stream
       if (!result) throw new Error("expected result to be non-null");

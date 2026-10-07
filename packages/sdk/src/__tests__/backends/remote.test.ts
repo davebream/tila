@@ -427,7 +427,10 @@ describe("RemoteArtifactBackend", () => {
 
       expect(result).not.toBeNull();
       expect(result?.contentType).toBe("text/markdown");
-      expect(result?.metadata).toEqual({});
+      expect(result?.metadata).toEqual({
+        review_state: "unreviewed",
+        review_revision: "0",
+      });
 
       // Verify body is readable
       const text = await new Response(result?.body).text();

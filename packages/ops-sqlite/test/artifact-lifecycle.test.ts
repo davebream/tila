@@ -123,11 +123,14 @@ describe("version-aware lifecycle", () => {
       .where(eq(schema.artifactPointers.r2_key, two.r2_key))
       .run();
     test.rawDb.exec(
-      "DROP TABLE artifact_revisions; DROP TABLE artifact_lifecycle_operations; DROP TABLE artifact_retention_state; ALTER TABLE artifact_lineages DROP COLUMN destroyed_at;",
+      "DROP TRIGGER artifact_reviews_no_delete; DROP TABLE artifact_revisions; DROP TABLE artifact_lifecycle_operations; DROP TABLE artifact_retention_state; ALTER TABLE artifact_lineages DROP COLUMN destroyed_at;",
     );
     const migration = MIGRATIONS.find((m) => m.version === 28);
     if (!migration) throw new Error("Missing lifecycle migration");
     runMigration(test.rawDb, migration);
+    const reviewMigration = MIGRATIONS.find((m) => m.version === 29);
+    if (!reviewMigration) throw new Error("Missing review migration");
+    runMigration(test.rawDb, reviewMigration);
     expect(versions.getArtifactMeta(test.db, one.r2_key)).toMatchObject({
       tags: ["keep"],
       tombstoned: 0,
@@ -232,7 +235,7 @@ describe("version-aware lifecycle", () => {
       one.r2_key,
     );
   });
-  it("keeps history, tags, and deleted pagination anchors after pointer hard-delete", async () => {
+  it("keeps history, tags, and deleted pagination anchors after audit-preserving cleanup", async () => {
     const one = commit("1");
     const two = commit("2");
     const page = versions.listArtifactHistory(test.db, two.r2_key, {
@@ -240,7 +243,7 @@ describe("version-aware lifecycle", () => {
     });
     lifecycle.acceptDeletion(test.db, two.r2_key, { fence }, origin);
     await lifecycle.drainLifecycle(test.db, store);
-    expect(deleteTombstonedPointers(test.db, T + 7 * DAY + 1)).toBe(1);
+    expect(deleteTombstonedPointers(test.db, T + 7 * DAY + 1)).toBe(0);
     const meta = versions.getArtifactMeta(test.db, two.r2_key);
     expect(meta).toMatchObject({
       tombstoned: 1,
@@ -446,7 +449,7 @@ describe("version-aware lifecycle", () => {
       ).toBe(T);
       if (failure === "tombstone")
         expect(store.deleteBlob).not.toHaveBeenCalledWith(one.r2_key);
-      expect(deleteTombstonedPointers(test.db, T + 8 * DAY)).toBe(1);
+      expect(deleteTombstonedPointers(test.db, T + 8 * DAY)).toBe(0);
       fail = false;
       await lifecycle.drainLifecycle(test.db, failing, 50, T + 6000);
       expect(

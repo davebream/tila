@@ -40,6 +40,10 @@ import {
 import { signalOps } from "@tila/ops-sqlite";
 import type { ArtifactDeleteOptions } from "@tila/schemas";
 import type {
+  ArtifactReviewRequest,
+  ArtifactReviewsQuery,
+} from "@tila/schemas";
+import type {
   ArtifactHistoryQuery,
   ArtifactRestoreRequest,
   HandoffListRequest,
@@ -544,6 +548,15 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
     ) {
       return artifacts.destroyLineage(lineageId, options);
     },
+    reviews(key: string, query: ArtifactReviewsQuery = {}) {
+      return artifacts.reviews(key, query);
+    },
+    review(
+      key: string,
+      input: ArtifactReviewRequest & { idempotencyKey?: string },
+    ) {
+      return artifacts.review(key, input);
+    },
     history(key: string, options?: ArtifactHistoryQuery) {
       return artifacts.history(key, options);
     },
@@ -591,9 +604,11 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
       return { ok: true, ...result };
     },
 
-    async readText(
-      key: string,
-    ): Promise<{ content: string; mimeType: string }> {
+    async readText(key: string): Promise<{
+      content: string;
+      mimeType: string;
+      pointer?: import("@tila/schemas").ArtifactRevision;
+    }> {
       const result = await artifacts.readText(key);
       if (!result) throw new Error(`Artifact not found: ${key}`);
       return result;

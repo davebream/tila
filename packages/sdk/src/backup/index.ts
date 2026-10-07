@@ -34,8 +34,10 @@ import * as tar from "tar-stream";
 import { createNodeConnection } from "../local/connection";
 import { SDK_VERSION } from "../version";
 
-export const SUPPORTED_BACKUP_FEATURES = new Set<string>();
-export const MAX_SUPPORTED_DO_MIGRATION = 28;
+export const SUPPORTED_BACKUP_FEATURES = new Set<string>([
+  "artifact-review-v1",
+]);
+export const MAX_SUPPORTED_DO_MIGRATION = 29;
 
 export type LocalBackupEndpoint = {
   backend: "local";
@@ -401,7 +403,7 @@ async function exportLocal(
         do_migration_version: MAX_SUPPORTED_DO_MIGRATION,
         schema_version: options.source.schemaVersion ?? 1,
       },
-      required_features: [],
+      required_features: ["artifact-review-v1"],
       optional_sections: ["d1/project.jsonl"],
       entries,
       content_root: contentRoot(entries),
@@ -633,7 +635,10 @@ async function extractLocalArchive(
       tables,
       manifest.journal_next_sequence,
     );
-    const digest = await projectTransferOps.semanticDigest(connection.sql);
+    const digest = await projectTransferOps.semanticDigest(
+      connection.sql,
+      manifest.source.do_migration_version,
+    );
     if (digest !== manifest.semantic_digest)
       throw new Error(
         "Restored SQLite semantic digest does not match the backup",
@@ -1128,7 +1133,7 @@ async function exportCloud(
             }
           : {}),
       },
-      required_features: [],
+      required_features: ["artifact-review-v1"],
       optional_sections: [],
       entries,
       content_root: contentRoot(entries),
@@ -1390,6 +1395,7 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
         sessionId,
         journalNextSequence: inspected.manifest.journal_next_sequence,
         semanticDigest: inspected.manifest.semantic_digest,
+        migrationVersion: inspected.manifest.source.do_migration_version,
       }),
     });
     return {

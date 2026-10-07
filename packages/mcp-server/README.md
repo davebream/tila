@@ -125,7 +125,7 @@ invocation time with a clear error:
 |------|-------------------|
 | `tila_artifact_put` (binary/base64 multipart upload to R2) | `tila_artifact_write_text` (content-addressed text artifacts) |
 
-## Tools (52)
+## Tools (54)
 
 > Tool names are derived from source registration. `work-unit` and `entity` are deprecated aliases for `task`; use `tila_task_*` tools.
 
@@ -167,6 +167,8 @@ invocation time with a clear error:
 
 | Tool | Description |
 |------|-------------|
+| `tila_artifact_reviews` | Read paginated artifact review history |
+| `tila_artifact_review` | Trust, reject, supersede, or revoke a review using the current review revision |
 | `tila_artifact_put` | Upload an artifact (base64 content) |
 | `tila_artifact_write_text` | Write a text artifact (content-addressed) |
 | `tila_artifact_read_text` | Read a text artifact by key |
@@ -277,3 +279,13 @@ when retrying `tila_handoff_create`; the same ID and content returns the origina
 snapshot, while changed content fails with `handoff-conflict`. Record facts and
 unresolved questions, never private reasoning. Historical claim snapshots do not
 confer permission to write or transfer a lease.
+
+
+Artifact reviews are explicit writer decisions; matching SHA-256 hashes do not
+establish content safety. Any project writer may trust, reject, supersede, or revoke
+a review, including their own artifacts. Supply `expected_review_revision` (0 for
+an artifact with no review history); stale decisions fail instead of overwriting
+newer reviews. Revocation returns the artifact to unreviewed state. Text reads
+return a metadata block followed by artifact content, including when truncated.
+Participant and environment metadata are client-supplied. Local reviews use the
+configured local identity and do not imply remote authentication.

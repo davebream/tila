@@ -1,6 +1,7 @@
 import { normalizeArtifactText } from "@tila/core";
 import {
   artifactLifecycleOps,
+  artifactReviewOps,
   constraintOps,
   artifactVersionOps as versions,
 } from "@tila/ops-sqlite";
@@ -72,6 +73,27 @@ export async function flushArtifactCommits(deps: RouterDeps): Promise<void> {
 export function createArtifactVersionRoutes(deps: RouterDeps) {
   const app = new Hono();
   app.route("/", createArtifactLifecycleRoutes(deps));
+  app.get("/artifact/reviews", (c) =>
+    c.json(
+      artifactReviewOps.listArtifactReviews(
+        deps.db,
+        c.req.query("key") ?? "",
+        c.req.query(),
+      ),
+    ),
+  );
+  app.post("/artifact/review", async (c) => {
+    const body = await c.req.json();
+    return c.json(
+      artifactReviewOps.reviewArtifact(
+        deps.db,
+        body.key,
+        body.review,
+        originFromBody(body),
+        body.operation_id,
+      ),
+    );
+  });
   app.get("/artifact/meta", (c) =>
     c.json({
       ok: true,

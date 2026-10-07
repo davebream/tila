@@ -22,6 +22,7 @@ const EXPECTED_DOMAIN_TABLES = [
   "artifact_revisions",
   "artifact_lifecycle_operations",
   "artifact_retention_state",
+  "artifact_reviews",
   "entity_artifact_references",
   "artifact_relationships",
   "journal",

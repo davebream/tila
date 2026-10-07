@@ -1,8 +1,21 @@
 import type {
   ArtifactDeleteOptions,
   ArtifactDestroyResponse,
+  ArtifactProvenance,
+  ArtifactReviewRequest,
+  ArtifactReviewResponse,
+  ArtifactReviewSummary,
+  ArtifactReviewsQuery,
+  ArtifactReviewsResponse,
+  ArtifactRevision,
 } from "@tila/schemas";
-export interface ArtifactPointerRecord {
+
+export interface ArtifactTrust {
+  provenance?: ArtifactProvenance | null;
+  revision_creation?: ArtifactProvenance | null;
+  review?: ArtifactReviewSummary;
+}
+export interface ArtifactPointerRecord extends ArtifactTrust {
   r2_key: string;
   resource: string | null;
   kind: string;
@@ -23,14 +36,14 @@ export interface ArtifactRelationship {
   created_at: number;
 }
 
-export interface ArtifactSearchResultRecord {
+export interface ArtifactSearchResultRecord extends ArtifactTrust {
   r2_key: string;
   kind: string;
   title: string | null;
   snippet: string | null;
 }
 
-export interface ArtifactIndexEntry {
+export interface ArtifactIndexEntry extends ArtifactTrust {
   r2_key: string;
   resource: string | null;
   kind: string;
@@ -73,6 +86,14 @@ import type {
 } from "@tila/schemas";
 
 export interface ArtifactBackend {
+  reviews?(
+    key: string,
+    query?: ArtifactReviewsQuery,
+  ): Promise<ArtifactReviewsResponse>;
+  review?(
+    key: string,
+    input: ArtifactReviewRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactReviewResponse>;
   history?(
     key: string,
     options?: ArtifactHistoryQuery,
@@ -89,6 +110,7 @@ export interface ArtifactBackend {
     key: string;
     bytes: number;
     deduplicated?: boolean;
+    pointer?: ArtifactRevision;
   }>;
   get(key: string): Promise<{
     body: ReadableStream;
@@ -147,6 +169,10 @@ export interface ArtifactBackend {
       tags?: string[];
       idempotencyKey?: string;
     },
-  ): Promise<{ key: string; bytes: number }>;
-  readText?(key: string): Promise<{ content: string; mimeType: string } | null>;
+  ): Promise<{ key: string; bytes: number; pointer?: ArtifactRevision }>;
+  readText?(key: string): Promise<{
+    content: string;
+    mimeType: string;
+    pointer?: ArtifactRevision;
+  } | null>;
 }

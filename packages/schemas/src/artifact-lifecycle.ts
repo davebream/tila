@@ -30,7 +30,7 @@ export const ArtifactLifecycleRecordSchema = z
     kind: z.string(),
     resource: z.string().nullable(),
     at: z.number().int(),
-    pointer: ArtifactRevisionSchema.optional(),
+    pointer: ArtifactRevisionSchema.omit({ review: true }).optional(),
   })
   .superRefine((record, ctx) => {
     if (

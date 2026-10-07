@@ -168,6 +168,105 @@ async function write(content: string, key = crypto.randomUUID()) {
 }
 
 describe("artifact versions through Worker and DO", () => {
+  it("reviews exact revisions through the Worker, enforces permission and CAS, and exposes download state", async () => {
+    const first = await write("review me");
+    const path = `/~/reviews/${encodeURIComponent(first.key)}`;
+    const request = {
+      decision: "trusted",
+      expected_review_revision: 0,
+      reason: "Checked evidence",
+    };
+    scope = "read";
+    expect(
+      (await app.request(path, json(request), env, executionCtx)).status,
+    ).toBe(403);
+    scope = "full";
+    expect(
+      (
+        await app.request(
+          path,
+          json({ ...request, principal_id: "forged" }),
+          env,
+          executionCtx,
+        )
+      ).status,
+    ).toBe(400);
+    const init = json(request);
+    const review = await app.request(
+      path,
+      { ...init, headers: { ...init.headers, "Idempotency-Key": "review-1" } },
+      env,
+      executionCtx,
+    );
+    expect(review.status).toBe(200);
+    const saved = await review.json();
+    expect(saved).toMatchObject({
+      review: {
+        state: "trusted",
+        review_revision: 1,
+        latest: {
+          principal_id: identity.principal_id,
+          participant_id: identity.participant_id,
+        },
+      },
+    });
+    const retry = await app.request(
+      path,
+      { ...init, headers: { ...init.headers, "Idempotency-Key": "review-1" } },
+      env,
+      executionCtx,
+    );
+    expect(await retry.json()).toEqual(saved);
+    const stale = await app.request(
+      path,
+      json({ decision: "rejected", expected_review_revision: 0 }),
+      env,
+      executionCtx,
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      error: { code: "review-conflict" },
+    });
+    const meta = await app.request(
+      `/${encodeURIComponent(first.key)}/meta`,
+      undefined,
+      env,
+      executionCtx,
+    );
+    expect(await meta.json()).toMatchObject({
+      pointer: {
+        provenance: { principal_id: identity.principal_id },
+        review: { state: "trusted" },
+      },
+    });
+    const blob = await app.request(
+      `/${encodeURIComponent(first.key)}`,
+      undefined,
+      env,
+      executionCtx,
+    );
+    expect(blob.headers.get("X-Tila-Artifact-Review-State")).toBe("trusted");
+    expect(await blob.text()).toBe("review me");
+    const foreign = await app.request(
+      "/~/reviews/versioned%2Fother-project%2Fmissing.txt",
+      json(request),
+      env,
+      executionCtx,
+    );
+    expect(foreign.status).toBe(404);
+    scope = "full";
+    const history = await app.request(
+      `${path}?limit=1`,
+      undefined,
+      env,
+      executionCtx,
+    );
+    expect(history.status).toBe(200);
+    expect(await history.json()).toMatchObject({
+      items: [{ decision: "trusted" }],
+    });
+  });
+
   it("round-trips history/meta/restore, encoded slash keys, tags and raw downloads", async () => {
     const first = await write("first");
     await write("second");
@@ -537,7 +636,7 @@ describe("versioned deletion through Worker and DO", () => {
       db.sqlite
         .prepare("SELECT r2_key FROM artifact_pointers WHERE r2_key = ?")
         .get(second.key),
-    ).toBeUndefined();
+    ).toEqual({ r2_key: second.key });
     const history = await app.request(
       `/~/history/${encodeURIComponent(second.key)}`,
       {},

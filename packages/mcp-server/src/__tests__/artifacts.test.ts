@@ -26,11 +26,13 @@ describe("registerArtifactTools", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers 10 tools with correct names", () => {
-    expect(server.tool).toHaveBeenCalledTimes(10);
+  it("registers 12 tools with correct names", () => {
+    expect(server.tool).toHaveBeenCalledTimes(12);
 
     const toolNames = server.tool.mock.calls.map((call: unknown[]) => call[0]);
     expect(toolNames).toEqual([
+      "tila_artifact_reviews",
+      "tila_artifact_review",
       "tila_artifact_history",
       "tila_artifact_put",
       "tila_artifact_search",
@@ -45,6 +47,45 @@ describe("registerArtifactTools", () => {
   });
 
   const findHandler = (name: string) => findToolHandler(server, name);
+
+  it("forwards review concurrency, idempotency, and history pagination", async () => {
+    const response = {
+      ok: true,
+      review: { state: "unreviewed", review_revision: 3, latest: null },
+    };
+    facade.artifacts.review.mockResolvedValue(response);
+    const result = await findHandler("tila_artifact_review")({
+      key: "sources/evidence.txt",
+      decision: "revoked",
+      expected_review_revision: 2,
+      reason: "Evidence changed",
+      idempotency_key: "once",
+    });
+    expect(facade.artifacts.review).toHaveBeenCalledWith(
+      "sources/evidence.txt",
+      {
+        decision: "revoked",
+        expected_review_revision: 2,
+        reason: "Evidence changed",
+        idempotencyKey: "once",
+      },
+    );
+    expect(JSON.parse(result.content[0].text)).toEqual(response);
+    facade.artifacts.reviews.mockResolvedValue({
+      ok: true,
+      items: [],
+      next_revision: null,
+    });
+    await findHandler("tila_artifact_reviews")({
+      key: "sources/evidence.txt",
+      limit: 2,
+      before_revision: 3,
+    });
+    expect(facade.artifacts.reviews).toHaveBeenCalledWith(
+      "sources/evidence.txt",
+      { limit: 2, before_revision: 3 },
+    );
+  });
 
   it("forwards history pagination and exposes no restore tool", async () => {
     const response = {
@@ -176,7 +217,7 @@ describe("registerArtifactTools", () => {
       const result = await handler({ key: "sources/abc.md" });
 
       expect(facade.artifacts.readText).toHaveBeenCalledWith("sources/abc.md");
-      expect(result.content[0].text).toBe("# Hello");
+      expect(result.content[1].text).toBe("# Hello");
     });
 
     it("throws McpError for non-text content types", async () => {
@@ -201,7 +242,10 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/big.txt", max_chars: 100 });
 
-      const text = result.content[0].text;
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        artifact_metadata: { review: { state: "unreviewed" } },
+      });
+      const text = result.content[1].text;
       expect(text).toHaveLength(
         100 +
           "\n\n...[truncated: returned 100 chars of 20000 bytes total]".length,
@@ -224,7 +268,7 @@ describe("registerArtifactTools", () => {
         max_chars: 10000,
       });
 
-      expect(result.content[0].text).toBe("short content");
+      expect(result.content[1].text).toBe("short content");
     });
 
     it("uses default max_chars of 10000 when not specified", async () => {
@@ -236,7 +280,10 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/big.txt" });
 
-      const text = result.content[0].text;
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        artifact_metadata: { review: { state: "unreviewed" } },
+      });
+      const text = result.content[1].text;
       expect(text.startsWith("x".repeat(10000))).toBe(true);
       expect(text).toContain(
         "...[truncated: returned 10000 chars of 15000 bytes total]",
@@ -255,7 +302,10 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/emoji.txt", max_chars: 50 });
 
-      const text = result.content[0].text;
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        artifact_metadata: { review: { state: "unreviewed" } },
+      });
+      const text = result.content[1].text;
       expect(text).toContain(
         "...[truncated: returned 50 chars of 800 bytes total]",
       );

@@ -30,7 +30,11 @@ export function createCorsMiddleware(): MiddlewareHandler<AppEnv> {
       credentials: true,
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowHeaders: ["Authorization", "Content-Type"],
-      exposeHeaders: ["X-Tila-Token-Estimate"],
+      exposeHeaders: [
+        "X-Tila-Token-Estimate",
+        "X-Tila-Artifact-Review-State",
+        "X-Tila-Artifact-Review-Revision",
+      ],
       maxAge: 86400,
     });
 

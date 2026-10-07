@@ -1,3 +1,7 @@
+import {
+  ArtifactProvenanceSchema,
+  ArtifactReviewEventSchema,
+} from "@tila/schemas";
 import type { ProjectTransferMode, ProjectTransferState } from "@tila/schemas";
 
 export interface SqlRows<T = Record<string, unknown>> {
@@ -16,6 +20,7 @@ export const PROJECT_BACKUP_TABLES = [
   "artifact_revisions",
   "artifact_lifecycle_operations",
   "artifact_retention_state",
+  "artifact_reviews",
   "records",
   "_schema_history",
   "claims",
@@ -53,6 +58,7 @@ const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
   artifact_revisions: ["r2_key"],
   artifact_lifecycle_operations: ["id"],
   artifact_retention_state: ["id"],
+  artifact_reviews: ["artifact_key", "review_revision"],
   records: ["type", "key"],
   _schema_history: ["version"],
   claims: ["resource"],
@@ -158,14 +164,50 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
   ).join("");
 }
 
-export async function semanticDigest(sql: ProjectSqlStorage): Promise<string> {
+export async function semanticDigest(
+  sql: ProjectSqlStorage,
+  migrationVersion = 29,
+): Promise<string> {
   const sections: string[] = [];
   for (const table of PROJECT_BACKUP_TABLES) {
+    if (
+      migrationVersion < 28 &&
+      [
+        "artifact_revisions",
+        "artifact_lifecycle_operations",
+        "artifact_retention_state",
+      ].includes(table)
+    )
+      continue;
     let offset: number | null = 0;
     while (offset !== null) {
       const page = readSnapshotPage(sql, table, { offset, limit: 500 });
-      for (const row of page.rows)
+      for (const sourceRow of page.rows) {
+        let row = sourceRow;
+        if (migrationVersion < 28 && table === "artifact_lineages") {
+          const { destroyed_at: _destroyedAt, ...legacyRow } = row;
+          row = legacyRow;
+        }
+        if (migrationVersion < 29 && table === "artifact_revisions") {
+          const {
+            provenance: _provenance,
+            revision_creation: _creation,
+            ...metadata
+          } = JSON.parse(String(row.metadata));
+          row = { ...row, metadata: JSON.stringify(metadata) };
+        }
+        if (migrationVersion < 29 && table === "artifact_reviews") continue;
+        if (migrationVersion < 29 && table === "artifact_pointers") {
+          const {
+            provenance: _provenance,
+            revision_creation: _creation,
+            ...legacyRow
+          } = row;
+          sections.push(`${table}\0${canonicalJson(legacyRow)}\n`);
+          continue;
+        }
         sections.push(`${table}\0${canonicalJson(row)}\n`);
+      }
       offset = page.nextOffset;
     }
   }
@@ -252,6 +294,13 @@ export function insertSnapshotRows(
     ).map(({ name }) => name),
   );
   for (const row of rows) {
+    if (table === "artifact_pointers") {
+      for (const column of ["provenance", "revision_creation"]) {
+        if (row[column] != null)
+          ArtifactProvenanceSchema.parse(JSON.parse(String(row[column])));
+      }
+    }
+    if (table === "artifact_reviews") ArtifactReviewEventSchema.parse(row);
     const columns = Object.keys(row).filter((column) => available.has(column));
     if (columns.length === 0) continue;
     const quoted = columns.map((column) => `"${column}"`).join(", ");

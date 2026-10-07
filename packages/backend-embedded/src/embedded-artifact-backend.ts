@@ -21,11 +21,16 @@ import { artifactLifecycleOps as lifecycle } from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   artifactOps,
+  artifactReviewOps,
   constraintOps,
   relationshipOps,
   schema,
   artifactVersionOps as versions,
 } from "@tila/ops-sqlite";
+import type {
+  ArtifactReviewRequest,
+  ArtifactReviewsQuery,
+} from "@tila/schemas";
 import {
   type ArtifactDeleteOptions,
   ArtifactLifecycleRecordSchema,
@@ -150,6 +155,30 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
       );
       this.retry(() => versions.publishArtifactRevision(this.db, op.id));
     }
+  }
+
+  async reviews(key: string, query: ArtifactReviewsQuery = {}) {
+    return artifactReviewOps.listArtifactReviews(this.db, key, query);
+  }
+
+  async review(
+    key: string,
+    input: ArtifactReviewRequest & { idempotencyKey?: string },
+  ) {
+    const { idempotencyKey, ...request } = input;
+    const operation = JSON.stringify([
+      this.identity.principal_id,
+      idempotencyKey ?? crypto.randomUUID(),
+    ]);
+    return this.retry(() =>
+      artifactReviewOps.reviewArtifact(
+        this.db,
+        key,
+        request,
+        this.origin(),
+        operation,
+      ),
+    );
   }
 
   async history(key: string, options?: ArtifactHistoryQuery) {
@@ -320,9 +349,12 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     return withBusyRetry(fn, this.sleepSync);
   }
 
-  async put(
-    options: ArtifactPutOptions,
-  ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
+  async put(options: ArtifactPutOptions): Promise<{
+    key: string;
+    bytes: number;
+    deduplicated: boolean;
+    pointer?: ArtifactRevision;
+  }> {
     // 1. Resolve body to bytes (content-addressing stays above BlobStore)
     let bytes: Uint8Array;
 
@@ -395,7 +427,12 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
       ),
     );
 
-    return { key: options.key, bytes: written, deduplicated };
+    return {
+      key: options.key,
+      bytes: written,
+      deduplicated,
+      pointer: versions.getArtifactMeta(this.db, options.key),
+    };
   }
 
   async get(key: string): Promise<{
@@ -426,10 +463,14 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     const stream = await this.blobs.readStream(key);
     if (!stream) return null;
 
+    const review = versions.getArtifactMeta(this.db, key).review;
     return {
       body: stream,
       contentType: row.mime_type,
-      metadata: {}, // artifact_pointers has no metadata column
+      metadata: {
+        review_state: review?.state ?? "unreviewed",
+        review_revision: String(review?.review_revision ?? 0),
+      },
     };
   }
 
@@ -486,6 +527,9 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
   }): Promise<ArtifactPointerRecord[]> {
     const rows = artifactOps.listPointers(this.db, query);
     return rows.map((r) => ({
+      provenance: r.provenance,
+      revision_creation: r.revision_creation,
+      review: r.review,
       r2_key: r.r2_key,
       resource: r.resource,
       kind: r.kind,
@@ -549,6 +593,9 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
   }): Promise<ArtifactSearchResultRecord[]> {
     const rows = artifactOps.searchArtifacts(this.db, query);
     return rows.map((r) => ({
+      provenance: r.provenance,
+      revision_creation: r.revision_creation,
+      review: r.review,
       r2_key: r.r2_key,
       kind: r.kind,
       title: r.title ?? null,
@@ -640,6 +687,9 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
 
         if (lines.length > 0 || blobTruncated) {
           results.push({
+            ...artifactReviewOps
+              .artifactTrustByKeys(this.db, [candidate.r2_key])
+              .get(candidate.r2_key),
             key: candidate.r2_key,
             kind: candidate.kind,
             resource: candidate.resource,
@@ -747,6 +797,9 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
 
           if (lines.length > 0 || blobTruncated) {
             results.push({
+              ...artifactReviewOps
+                .artifactTrustByKeys(this.db, [candidate.r2_key])
+                .get(candidate.r2_key),
               key: candidate.r2_key,
               kind: candidate.kind,
               resource: candidate.resource,
@@ -782,6 +835,9 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     const ptr = artifactOps.getLatestPointer(this.db, kind, resource);
     if (!ptr) return null;
     return {
+      provenance: ptr.provenance,
+      revision_creation: ptr.revision_creation,
+      review: ptr.review,
       r2_key: ptr.r2_key,
       resource: ptr.resource,
       kind: ptr.kind,
@@ -812,7 +868,12 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
       tags?: string[];
       idempotencyKey?: string;
     },
-  ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
+  ): Promise<{
+    key: string;
+    bytes: number;
+    deduplicated: boolean;
+    pointer?: ArtifactRevision;
+  }> {
     const mimeType = opts.mimeType ?? "text/plain";
     const sha256 = await sha256Hex(content);
     const ext = extForMime(mimeType);
@@ -838,9 +899,11 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
    * Read an artifact's text content + mime type by key, or null if absent
    * (tombstoned pointer or missing blob).
    */
-  async readText(
-    key: string,
-  ): Promise<{ content: string; mimeType: string } | null> {
+  async readText(key: string): Promise<{
+    content: string;
+    mimeType: string;
+    pointer?: ArtifactRevision;
+  } | null> {
     const revision = lifecycle.revisionMetadata(this.db, key);
     if (revision && (revision.tombstoned || revision.blob_deleted_at != null))
       throw new versions.ArtifactVersionError(
@@ -863,7 +926,11 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     const content = await this.blobs.read(key);
     if (content === null) return null;
 
-    return { content, mimeType: row.mime_type };
+    return {
+      content,
+      mimeType: row.mime_type,
+      pointer: versions.getArtifactMeta(this.db, key),
+    };
   }
 
   /**

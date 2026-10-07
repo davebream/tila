@@ -1,3 +1,4 @@
+import { ArtifactReviewDetails } from "@/components/artifact-review-details";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -154,6 +155,13 @@ export function ArtifactDetailPage() {
       }
     >
       <div className="space-y-4 p-6">
+        {projectId && (
+          <ArtifactReviewDetails
+            key={`${projectId}:${key}`}
+            projectId={projectId}
+            artifactKey={key}
+          />
+        )}
         {parsed.entity && (
           <p className="break-all font-mono text-xs text-muted-foreground">
             {key}
@@ -171,7 +179,7 @@ export function ArtifactDetailPage() {
         {content.type === "markdown" && (
           <div
             className="tila-prose"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: Rendered markdown from trusted artifact blob, sanitized by DOMPurify
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: Artifact markdown sanitized by DOMPurify; sanitization does not establish review trust
             dangerouslySetInnerHTML={{ __html: content.html }}
           />
         )}

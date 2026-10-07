@@ -69,7 +69,7 @@ export const ArtifactCommitRecordSchema = z.object({
   operation_id: z.string().min(1),
   request_hash: z.string(),
   deduplicated: z.boolean().optional(),
-  pointer: ArtifactRevisionSchema.extend({
+  pointer: ArtifactRevisionSchema.omit({ review: true }).extend({
     lineage_id: ArtifactLineageIdSchema,
     revision: z.number().int().positive(),
   }),

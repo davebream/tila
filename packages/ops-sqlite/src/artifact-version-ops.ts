@@ -13,6 +13,7 @@ import {
 } from "@tila/schemas";
 import { and, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { enrichArtifacts, provenanceFromOrigin } from "./artifact-review-ops";
 import {
   assertResourceFence,
   assertResourceFenceWithCanonical,
@@ -50,7 +51,8 @@ export interface ReserveArtifactRevision {
 
 export function getArtifactMeta(db: Db, key: string): ArtifactRevision {
   const archived = lifecycle.revisionMetadata(db, key);
-  if (archived) return archived;
+  if (archived)
+    return ArtifactRevisionSchema.parse(enrichArtifacts(db, [archived])[0]);
   const row = db
     .select()
     .from(schema.artifactPointers)
@@ -68,7 +70,10 @@ export function getArtifactMeta(db: Db, key: string): ArtifactRevision {
     .where(eq(schema.artifactTags.artifact_key, key))
     .all()
     .map((t) => t.tag);
-  return ArtifactRevisionSchema.parse({ ...row, tags });
+  return ArtifactRevisionSchema.parse({
+    ...enrichArtifacts(db, [row])[0],
+    tags,
+  });
 }
 
 export function assertRestorable(db: Db, key: string): ArtifactRevision {
@@ -221,6 +226,10 @@ export function reserveArtifactRevision(
       mime_type: input.mime_type,
       produced_at: producedAt,
       produced_by: origin.actor,
+      provenance: input.restored_from
+        ? (getArtifactMeta(tx, input.restored_from).provenance ?? null)
+        : provenanceFromOrigin(origin, producedAt),
+      revision_creation: provenanceFromOrigin(origin, producedAt),
       expires_at: retention > 0 ? producedAt + retention * 86_400_000 : null,
       tombstoned: 0,
       tombstoned_at: null,
@@ -422,11 +431,19 @@ function insertPublishedPointer(
   record: ArtifactCommitRecord,
   searchText: string | null,
 ): void {
-  lifecycle.saveRevision(
-    db,
-    record.pointer,
-    record.retention_assigned === true,
-  );
+  const pointer = { ...record.pointer };
+  // Old restore/dedup records identify the request actor, not the producer.
+  const fallback =
+    !record.deduplicated && !pointer.restored_from
+      ? provenanceFromOrigin(record.origin, pointer.produced_at)
+      : null;
+  pointer.provenance =
+    pointer.provenance === undefined ? fallback : pointer.provenance;
+  pointer.revision_creation =
+    pointer.revision_creation === undefined && !record.deduplicated
+      ? provenanceFromOrigin(record.origin, pointer.produced_at)
+      : (pointer.revision_creation ?? null);
+  lifecycle.saveRevision(db, pointer, record.retention_assigned === true);
   const effective = lifecycle.revisionMetadata(db, record.pointer.r2_key);
   if (!effective)
     throw new Error("Missing revision metadata after publication");
@@ -436,9 +453,9 @@ function insertPublishedPointer(
     lifecycle.isLineageDestroyed(db, record.pointer.lineage_id)
   )
     return;
-  const { tags, ...pointer } = effective;
+  const { tags, ...effectivePointer } = effective;
   db.insert(schema.artifactPointers)
-    .values(pointer)
+    .values(effectivePointer)
     .onConflictDoNothing()
     .run();
   for (const tag of tags)
