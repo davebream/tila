@@ -28,8 +28,8 @@ export function createCliClient(
     participantId: identity?.participantId,
     environment: {
       ...identity?.environment,
-      client_name: "cli",
-      client_version: CLI_VERSION,
+      client_name: identity?.environment.client_name ?? "cli",
+      client_version: identity?.environment.client_version ?? CLI_VERSION,
     },
     ...(dpopSigner ? { dpopSigner } : {}),
   });

@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // A developer may run tests from an integrated coding session. Individual
+    // identity tests supply their own native session environment explicitly.
+    env: { CODEX_THREAD_ID: "", TILA_LIFECYCLE_KEY: "" },
     // tsc emits copies of these tests into dist; running both races packaging fixtures.
     include: ["src/**/*.test.ts"],
     // No Workers pool -- pure Node.js unit tests for CLI

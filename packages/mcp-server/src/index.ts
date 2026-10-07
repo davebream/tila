@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { resolveServerConfig } from "./config";
 import { MCP_VERSION, buildFacade } from "./facade";
 import { SERVER_INSTRUCTIONS } from "./instructions";
+import { lifecycleTools } from "./lifecycle";
 import { registerAllPrompts } from "./prompts/index";
 import { guardRemoteOnlyTools } from "./remote-only";
 import { registerAllResources } from "./resources/index";
@@ -32,10 +33,11 @@ async function main(): Promise<void> {
   // In local mode, wrap the server so tools in REMOTE_ONLY_TOOLS register with a
   // clear "requires a remote backend" guard instead of their cloud-bound
   // implementation. In remote mode this is a transparent pass-through.
-  const server = guardRemoteOnlyTools(baseServer, config.mode);
+  const scoped = lifecycleTools(baseServer, config, facade);
+  const server = guardRemoteOnlyTools(scoped.server, config.mode);
 
   // Register all MCP primitives against the uniform facade.
-  registerAllTools(server, facade, config.projectId);
+  registerAllTools(server, scoped.facade, config.projectId);
   await registerAllResources(server, facade, config.projectId);
   registerAllPrompts(server, facade, config.projectId);
 

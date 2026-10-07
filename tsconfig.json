@@ -24,7 +24,8 @@
       "@tila/auth-store": ["./packages/auth-store/src/index.ts"],
       "tila-sdk": ["./packages/sdk/src/index.ts"],
       "tila-sdk/local": ["./packages/sdk/src/local/index.ts"],
-      "tila-sdk/backup": ["./packages/sdk/src/backup/index.ts"]
+      "tila-sdk/backup": ["./packages/sdk/src/backup/index.ts"],
+      "@tila/client-lifecycle": ["./packages/client-lifecycle/src/index.ts"]
     }
   }
 }

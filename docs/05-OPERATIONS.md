@@ -1312,3 +1312,100 @@ Never add a bucket lifecycle rule that expires this prefix. The provisioning
 rules keep the existing 365-day `produced/` backstop and one-day incomplete-upload
 cleanup. Backup/restore carries lifecycle records and metadata; full project
 destruction also removes the private versioned prefix.
+
+## Coding-client lifecycle integration
+
+The opt-in lifecycle adapters support **Claude Code CLI and Codex CLI on macOS
+and Linux**, using a configured Cloudflare-backed Tila project. Existing manual
+CLI/MCP use and local mode remain available. Desktop clients, Conductor-managed
+sessions, Windows, and independent subagent participants are outside this initial
+integration. Tila never takes control of client execution.
+
+### Install and remove
+
+Use a CLI and MCP server build that both include lifecycle support. From the
+project root, with normal Tila authentication already configured:
+
+```sh
+tila lifecycle install claude-code --dry-run
+tila lifecycle install claude-code
+# Or, for Codex (the default shared daemon is supported):
+tila lifecycle install codex --dry-run
+tila lifecycle install codex
+```
+
+Restart the client, review the installed hooks, and approve its normal project
+and hook trust prompts. Installation does not grant trust or override managed
+policy. Codex hooks must be enabled, and `codex app-server proxy --help` must be
+available. Claude Code must use its native CLI installation (opaque Node/npm
+launch wrappers cannot be identified safely) and support SessionStart, SessionEnd, UserPromptSubmit,
+PreToolUse, Stop, and `CLAUDE_ENV_FILE`. Codex must supply `sessionId` (or root
+`threadId`) in MCP request metadata. Missing MCP session metadata fails with a degraded state instead of silently
+sharing a participant. If no session appears in lifecycle status after startup,
+verify hook support, configuration, and trust in the client. See the supported
+[Claude hook interfaces](https://code.claude.com/docs/en/hooks) and
+[Codex hook interfaces](https://learn.chatgpt.com/docs/hooks).
+
+| Client | Project hooks | Project MCP configuration |
+| --- | --- | --- |
+| Claude Code | `.claude/settings.local.json` | `.mcp.json` |
+| Codex | `.codex/hooks.json` | `.codex/config.toml` |
+
+The installer preserves other hook commands and MCP entries. It adds
+`TILA_LIFECYCLE_CLIENT` only to the Tila MCP entry. If no Tila entry exists, it
+creates `npx -y tila-mcp-server`; source checkouts should configure their existing
+source MCP command first. It records ownership under the private `$TILA_HOME/client-lifecycle/installations`
+directory (default `~/.tila/client-lifecycle/installations`) and refuses to
+replace a Tila MCP entry subsequently edited by the user. JSON/TOML formatting and
+TOML comments may change during serialization; configuration values are preserved.
+Dry-run reports affected files without exposing configuration secrets.
+
+```sh
+tila lifecycle status
+tila lifecycle retry                 # Retry incomplete clean shutdowns
+tila lifecycle remove claude-code
+tila lifecycle remove codex
+```
+
+Removal deletes only the installed hook commands and restores the previous Tila
+MCP entry. Restart the client after removal. Existing helper processes finish
+with their sessions; removal does not kill a client or discard pending cleanup.
+Lifecycle state remains available for diagnosis and retry.
+
+### Identity, presence, and shutdown
+
+Each native session gets a stable participant scoped to Worker URL, project, and
+client. The adapters attach machine, repository, worktree, branch, commit, client,
+and version metadata. Claude shell commands inherit the participant through
+`CLAUDE_ENV_FILE`; Codex shell commands resolve their `CODEX_THREAD_ID`. Explicit
+CLI participant overrides retain precedence. MCP tool calls resolve identity for
+each request, so one Codex daemon connection can serve concurrent sessions safely.
+Codex subagent MCP calls use their parent session's identity. MCP resources and
+prompts retain their existing read-only connection identity.
+
+Startup/resume supplies a bounded re-entry page containing summary, changes,
+active claims, pending signals, and the latest handoff. Later hooks confirm the
+observed cursor. Presence updates run every 15 seconds while client liveness is
+verified. Claim leases are not automatically renewed.
+
+A clean SessionEnd queues a handoff containing coordination facts only, then
+acknowledges observed journal events and releases eligible claims. Owner claims
+are preserved; release always uses the captured fencing token. Cleanup can finish
+after the client exits. A crash sends no fabricated handoff or acknowledgment and
+lets leases expire. In default Codex mode, closing a frontend connection can leave
+the daemon's thread alive; the session ends according to Codex's SessionEnd rules,
+not merely when a terminal disappears.
+
+Network failures do not block local work. Hook stderr and `tila lifecycle status`
+report degradation; the next prompt retries re-entry. If the Codex observer cannot
+verify thread status, heartbeats pause. Failed clean shutdowns remain `closing`
+with retryable intent; repair connectivity/authentication and run `tila lifecycle
+retry` before resuming that session. A killed local lock holder may take ten
+seconds to become recoverable. Never delete a live session's state to force cleanup.
+
+The implementation drives actual CLI hooks and detached helpers for two concurrent
+native-client fixtures and SIGKILL against the shared SQLite backend, plus hook
+installation/removal and interleaved MCP metadata.
+Upstream client behavior is represented by protocol fixtures; a real-client smoke
+check remains advisable when upgrading either client. The separate Incur trial in
+`experiments/incur-parity` documents why this integration retains existing frameworks.
