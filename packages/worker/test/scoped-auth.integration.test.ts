@@ -145,6 +145,75 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
   });
   afterEach(() => f.sqlite.close());
 
+  it("authorizes every continuity aggregate component and denies restricted snapshots", async () => {
+    const server = app();
+    for (const missing of [
+      "journal:read",
+      "tasks:read",
+      "records:read",
+      "artifacts:read",
+      "claims:read",
+      "summary:read",
+      "signals:read",
+    ] as const) {
+      const key = await issue({
+        role: "owner",
+        capabilities: CAPABILITIES.filter((cap) => cap !== missing),
+      });
+      expect(
+        (await request(server, "/projects/p/reentry", key.plaintext)).status,
+      ).toBe(403);
+      if (missing !== "summary:read" && missing !== "signals:read") {
+        expect(
+          (await request(server, "/projects/p/handoffs", key.plaintext)).status,
+        ).toBe(403);
+        expect(
+          (
+            await request(
+              server,
+              "/projects/p/handoffs",
+              key.plaintext,
+              "POST",
+              {},
+            )
+          ).status,
+        ).toBe(403);
+      }
+    }
+    const restricted = await issue({
+      role: "owner",
+      capabilities: [...CAPABILITIES],
+      restrictions: { task_types: ["task"] },
+    });
+    for (const path of [
+      "reentry",
+      "handoffs",
+      "handoffs/one",
+      "journal/replay",
+      "journal/cursor",
+    ]) {
+      expect(
+        (await request(server, `/projects/p/${path}`, restricted.plaintext))
+          .status,
+      ).toBe(403);
+    }
+    const viewer = await issue({
+      role: "viewer",
+      capabilities: ["journal:read"],
+    });
+    expect(
+      (
+        await request(
+          server,
+          "/projects/p/journal/cursor",
+          viewer.plaintext,
+          "PUT",
+          { seq: 1 },
+        )
+      ).status,
+    ).toBe(403);
+    expect(effects).not.toHaveBeenCalled();
+  });
   it("allows explicit capabilities, denies deletion/governance and cross-project access", async () => {
     const key = await issue();
     const server = app();

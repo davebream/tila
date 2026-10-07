@@ -144,6 +144,15 @@ export function createCacheMiddleware(): MiddlewareHandler {
     const method = c.req.method;
     const reqUrl = new URL(c.req.url);
     const urlPath = reqUrl.pathname;
+    if (
+      /\/(?:journal\/(?:replay|cursor)|handoffs(?:\/[^/]+)?|reentry)\/?$/.test(
+        urlPath,
+      )
+    ) {
+      await next();
+      c.header("Cache-Control", "private, no-store");
+      return;
+    }
     const tier = classifyRoute(urlPath);
 
     // Detect Cache API availability at request time

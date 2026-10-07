@@ -32,6 +32,7 @@ import {
 } from "./routes/auth-session";
 import { backup } from "./routes/backup";
 import { claims } from "./routes/claims";
+import { continuity } from "./routes/continuity";
 import { doctor } from "./routes/doctor";
 import { entities } from "./routes/entities";
 import { gates } from "./routes/gates";
@@ -236,6 +237,7 @@ projectRoutes.route("/entities", entities); // @deprecated
 projectRoutes.route("/work-units", entities); // @deprecated
 projectRoutes.route("/claims", claims);
 projectRoutes.route("/artifacts", artifacts);
+projectRoutes.route("/", continuity);
 projectRoutes.route("/journal", journal);
 projectRoutes.route("/presence", presence);
 projectRoutes.route("/signals", signals);

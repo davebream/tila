@@ -1,4 +1,4 @@
-import { FenceError } from "@tila/core";
+import { ContinuityError, FenceError } from "@tila/core";
 import { DoIdempotencyConflictError } from "./do-idempotency-ops";
 import { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
 import {
@@ -169,6 +169,12 @@ export function mapProjectError(err: Error): {
   retryable: boolean;
   extras?: Record<string, unknown>;
 } | null {
+  if (err instanceof ContinuityError)
+    return {
+      status: err.status,
+      code: err.code,
+      retryable: err.status === 503,
+    };
   for (const rule of projectErrorResponses) {
     if (err instanceof rule.errorClass) {
       return {

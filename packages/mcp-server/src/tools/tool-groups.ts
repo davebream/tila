@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { registerArtifactTools } from "./artifacts";
 import { registerClaimTools } from "./claims";
+import { registerContinuityTools } from "./continuity";
 import { registerEntityTools } from "./entities";
 import { registerGateTools } from "./gates";
 import { registerJournalTools } from "./journal";
@@ -31,6 +32,7 @@ export const GROUP_MAP: Record<string, RegisterFn> = {
   records: registerRecordTools,
   presence: registerPresenceTools,
   journal: registerJournalTools,
+  continuity: registerContinuityTools,
   schema: registerSchemaTools,
   templates: registerTemplateTools,
   summary: registerSummaryTool,
@@ -38,7 +40,7 @@ export const GROUP_MAP: Record<string, RegisterFn> = {
 
 /**
  * `core` is a convenience alias that expands to a coordination-focused subset.
- * tasks(8) + claims(3) + gates(3) + signals(3) + summary(1) + presence(1) + journal(1) = 20
+ * tasks(8) + claims(3) + gates(3) + signals(8) + summary(1) + presence(1) + journal(1) + continuity(7) = 32
  */
 const CORE_GROUPS = [
   "tasks",
@@ -48,6 +50,7 @@ const CORE_GROUPS = [
   "summary",
   "presence",
   "journal",
+  "continuity",
 ] as const;
 
 const VALID_GROUPS = [...Object.keys(GROUP_MAP), "core"] as const;

@@ -2,6 +2,7 @@ import {
   CAPABILITIES,
   type Capability,
   type CredentialPolicy,
+  PROJECT_ROLE_RANK,
   type ProjectRole,
   capabilityRole,
   effectiveCredentialPolicy,
@@ -106,7 +107,11 @@ export function routeCapability(
     ["GET", /^\/search$/, "search:read"],
     ["POST", /^\/search\/reindex$/, "search:reindex"],
     ["GET", /^\/search\/reindex\/status$/, "search:reindex"],
-    ["GET", /^\/journal$/, "journal:read"],
+    ["GET", /^\/journal(?:\/(?:replay|cursor))?$/, "journal:read"],
+    ["PUT", /^\/journal\/cursor$/, "journal:read"],
+    ["GET", /^\/handoffs(?:\/[^/]+)?$/, "journal:read"],
+    ["POST", /^\/handoffs$/, "tasks:write"],
+    ["GET", /^\/reentry$/, "summary:read"],
     ["GET", /^\/summary$/, "summary:read"],
     ["GET", /^\/doctor\/(?:search-drift|schema|probe)$/, "project:inspect"],
     ["POST", /^\/admin\/restart$/, "project:restart"],
@@ -258,6 +263,30 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     }
     if (!capability || !policy.capabilities.includes(capability))
       return denied(c);
+    // Continuity aggregates embed references, claims, and (for re-entry) signals.
+    // Authorize every component before reading a snapshot or replaying a response.
+    const continuityPath = c.req.path
+      .replace(/^\/projects\/[^/]+/, "")
+      .replace(/\/$/, "");
+    if (
+      c.req.method === "PUT" &&
+      continuityPath === "/journal/cursor" &&
+      PROJECT_ROLE_RANK[policy.role] < PROJECT_ROLE_RANK.participant
+    )
+      return denied(c);
+    if (/^\/(?:handoffs(?:\/[^/]+)?|reentry)$/.test(continuityPath)) {
+      const required: Capability[] = [
+        "journal:read",
+        "tasks:read",
+        "records:read",
+        "artifacts:read",
+        "claims:read",
+      ];
+      if (continuityPath === "/reentry")
+        required.push("summary:read", "signals:read");
+      if (required.some((cap) => !policy.capabilities.includes(cap)))
+        return denied(c);
+    }
     if (!scoped) return next(); // Compatibility handlers retain GitHub rechecks and historical gates.
     c.set("credentialPolicy", policy);
     if (

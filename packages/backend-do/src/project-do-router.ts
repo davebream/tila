@@ -7,6 +7,7 @@ import { projectTransferOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
 import { createAdminRoutes } from "./routes/admin-routes";
 import { createArtifactRoutes } from "./routes/artifact-routes";
+import { createContinuityRoutes } from "./routes/continuity-routes";
 import { createCoordinationRoutes } from "./routes/coordination-routes";
 import { createDiagnosticRoutes } from "./routes/diagnostic-routes";
 import { createEntityRoutes } from "./routes/entity-routes";
@@ -108,6 +109,7 @@ export function createProjectRouter(deps: RouterDeps) {
   app.route("/", createEntityRoutes(deps));
   app.route("/", createArtifactRoutes(deps));
   app.route("/", createCoordinationRoutes(deps));
+  app.route("/", createContinuityRoutes(deps));
   app.route("/", createGateRoutes(deps));
   app.route("/", createSignalRoutes(deps));
   app.route("/", createSchemaRoutes(deps));

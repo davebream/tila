@@ -137,3 +137,9 @@ export type {
   UnifiedSearchResult,
   UnifiedSearchQuery,
 } from "@tila/schemas";
+
+export {
+  createHandoffMethods,
+  createReentryMethod,
+  type CreateHandoffOptions,
+} from "./continuity";

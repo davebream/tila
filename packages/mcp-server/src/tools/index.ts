@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { registerArtifactTools } from "./artifacts";
 import { registerClaimTools } from "./claims";
+import { registerContinuityTools } from "./continuity";
 import { registerEntityTools } from "./entities";
 import { registerGateTools } from "./gates";
 import { registerJournalTools } from "./journal";
@@ -23,6 +24,7 @@ const ALL_REGISTER_FNS = [
   registerSummaryTool,
   registerSignalTools,
   registerJournalTools,
+  registerContinuityTools,
   registerSchemaTools,
   registerTemplateTools,
   registerPresenceTools,

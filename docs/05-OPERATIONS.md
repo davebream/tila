@@ -1186,7 +1186,11 @@ Task types match exactly. Record prefix `team/a` permits that key and descendant
 such as `team/a/config`, but excludes `team/ab`. Lists filter before counts and
 pagination. Restricted keys cannot use project-wide search, journal, summary,
 exports, artifact access or global maintenance. Unsafe derived task views are
-also denied. Template expansion checks every generated task before any write.
+also denied, including journal replay, handoffs, and re-entry. Unrestricted
+handoff access requires journal, task, record, artifact, and claim read capabilities;
+creation also requires `tasks:write`. Re-entry additionally requires summary and
+signal reads. Updating a journal cursor requires `journal:read` and at least
+participant membership. Template expansion checks every generated task before any write.
 Ordinary writes do not imply delete: archive/unarchive and relationship removal
 require explicit delete capabilities. A service promotion cannot expand a key's
 issuance ceiling; demotions and revocations immediately reduce current authority.
@@ -1248,3 +1252,33 @@ policy and intersect it with current binding policy and membership on every requ
 Tighter binding policy is immediate; later expansion does not expand an old session.
 Monitor `authorization/denied` and `auth/lookup` analytics alongside ordinary request
 errors and latency. Telemetry excludes bearer credentials and hashes.
+
+## Journal continuity and archival recovery
+
+Migration 26 adds durable participant cursors, immutable handoffs, and handoff
+reference indexes to the shared cloud/local schema. Project export, restore,
+diagnostics, and destruction include these tables. The backup SDK accepts schema
+versions through 26; older backups restore with empty continuity tables.
+
+The continuity HTTP surface is project-scoped: `GET /journal/replay`,
+`GET /journal/cursor`, `PUT /journal/cursor` with `{ "seq": n }`, `POST /handoffs`,
+`GET /handoffs`, `GET /handoffs/:id`, and `GET /reentry`. All require an authenticated
+principal and `X-Tila-Participant-Id`. Reads require project read access; cursor and
+handoff writes require write access. These responses bypass shared caches.
+
+Re-entry reads database state and the replay boundary in one transaction, then
+streams immutable archives. New archive objects retain canonical principal,
+participant, and environment fields, carry sequence-range metadata, and use keys
+containing both the batch's upper sequence and the object's first sequence. This
+prevents overlapping archive runs from overwriting different ranges. Deletion is
+confirmed only after every object write succeeds. Age-based archival stops at the
+first recent sequence, even if subsequent event timestamps move backwards.
+
+Existing JSONL archives remain readable. Missing identity fields are represented
+with the migration's `legacy-principal:<actor>` and `legacy-event:<seq>` markers;
+historical authenticated identity cannot be reconstructed. Legacy objects without
+range metadata require streaming scans, so replay of old history can be slower.
+A missing/corrupt archive produces `journal-history-unavailable`; conflicting
+versions of a sequence produce `journal-history-conflict`. Neither advances the
+saved cursor. Restore missing history from a verified backup before retrying;
+do not acknowledge past unavailable history as a repair.

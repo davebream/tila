@@ -14,6 +14,7 @@ import { adminRoster } from "../routes/admin-roster";
 import { artifacts } from "../routes/artifacts";
 import { backup } from "../routes/backup";
 import { claims } from "../routes/claims";
+import { continuity } from "../routes/continuity";
 import { doctor } from "../routes/doctor";
 import { entities } from "../routes/entities";
 import { gates } from "../routes/gates";
@@ -42,6 +43,7 @@ describe("route capability inventory", () => {
     ["/presence", presence],
     ["/gates", gates],
     ["/journal", journal],
+    ["", continuity],
     ["/templates", templates],
     ["/schema", schemaRoutes],
     ["/search", search],
@@ -87,7 +89,7 @@ describe("route capability inventory", () => {
                 policy: effectiveCredentialPolicy(
                   {
                     role: "owner",
-                    capabilities: grant ? [required, "artifacts:read"] : [],
+                    capabilities: grant ? [...CAPABILITIES] : [],
                   },
                   role,
                 ),
@@ -115,6 +117,11 @@ describe("route capability inventory", () => {
             );
             expect(response.status).toBe(
               grant &&
+                !(
+                  route.method === "PUT" &&
+                  path === "/journal/cursor" &&
+                  role === "viewer"
+                ) &&
                 PROJECT_ROLE_RANK[role] >=
                   PROJECT_ROLE_RANK[capabilityRole(required)]
                 ? 200

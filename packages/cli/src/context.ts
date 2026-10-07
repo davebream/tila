@@ -157,6 +157,7 @@ export async function runStartupChecks(
       config.project_id,
       undefined,
       identity,
+      config.local.artifacts_path,
     );
     const localArtifact = new LocalArtifactBackend(
       localProject.getDb(),

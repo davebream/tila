@@ -910,12 +910,19 @@ export function runMigration0025(storage: MigrationStorage): void {
     );
   `);
 
-  for (const table of [
+  installTransferGuards(storage, [
     "signal_groups",
     "signal_group_members",
     "signals",
     "signal_deliveries",
-  ]) {
+  ]);
+}
+
+function installTransferGuards(
+  storage: MigrationStorage,
+  tables: string[],
+): void {
+  for (const table of tables) {
     for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
       storage.sql.exec(`
         CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
@@ -938,6 +945,32 @@ export function runMigration0025(storage: MigrationStorage): void {
  * guarded function.
  * The runner executes only versions not yet recorded in _migrations.
  */
+export const MIGRATION_0026 = `
+CREATE TABLE IF NOT EXISTS journal_cursors (
+  principal_id TEXT NOT NULL, participant_id TEXT NOT NULL,
+  seq INTEGER NOT NULL CHECK(seq >= 0), updated_at INTEGER NOT NULL,
+  PRIMARY KEY (principal_id, participant_id)
+);
+CREATE TABLE IF NOT EXISTS handoffs (
+  id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, participant_id TEXT NOT NULL,
+  created_seq INTEGER NOT NULL UNIQUE, request_json TEXT NOT NULL, snapshot TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_handoffs_creator ON handoffs(principal_id, participant_id, created_seq);
+CREATE TABLE IF NOT EXISTS handoff_references (
+  handoff_id TEXT NOT NULL, resource TEXT NOT NULL, PRIMARY KEY(handoff_id, resource)
+);
+CREATE INDEX IF NOT EXISTS idx_handoff_resource ON handoff_references(resource);
+`;
+
+export function runMigration0026(storage: MigrationStorage): void {
+  storage.sql.exec(MIGRATION_0026);
+  installTransferGuards(storage, [
+    "journal_cursors",
+    "handoffs",
+    "handoff_references",
+  ]);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -964,4 +997,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 23, run: runMigration0023 },
   { version: 24, run: runMigration0024 },
   { version: 25, run: runMigration0025 },
+  { version: 26, run: runMigration0026 },
 ];

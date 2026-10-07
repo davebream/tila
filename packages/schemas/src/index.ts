@@ -476,3 +476,4 @@ export {
 } from "./record";
 
 export * from "./capability";
+export * from "./continuity";
