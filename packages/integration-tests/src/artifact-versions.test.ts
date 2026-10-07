@@ -316,7 +316,7 @@ describe("artifact versions through Worker and DO", () => {
       env,
       executionCtx,
     );
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(503);
     const before = await app.request(
       `/~/history/${encodeURIComponent(first.key)}`,
       {},
@@ -402,5 +402,103 @@ describe("artifact versions through Worker and DO", () => {
         )
       ).status,
     ).toBe(400);
+  });
+  it("retries an interrupted blob write without allocating another revision", async () => {
+    const init = json({
+      content: "first",
+      kind: "report",
+      lineage_id: "report",
+      lineage_fence: fence,
+    });
+    const request = {
+      ...init,
+      headers: { ...init.headers, "Idempotency-Key": "blob-retry" },
+    };
+    vi.mocked(env.ARTIFACTS.put).mockRejectedValueOnce(
+      new Error("before persistence"),
+    );
+    const interrupted = await app.request("/text", request, env, executionCtx);
+    expect(interrupted.status).toBe(503);
+    expect(objects.size).toBe(0);
+    const retry = await app.request("/text", request, env, executionCtx);
+    expect(retry.status).toBe(200);
+    const result = (await retry.json()) as {
+      key: string;
+      pointer: { revision: number };
+    };
+    expect(result.pointer.revision).toBe(1);
+    const replay = await app.request("/text", request, env, executionCtx);
+    expect(await replay.json()).toEqual(result);
+    const conflict = await app.request(
+      "/text",
+      {
+        ...request,
+        body: JSON.stringify({
+          ...JSON.parse(init.body),
+          content: "different",
+        }),
+      },
+      env,
+      executionCtx,
+    );
+    expect(conflict.status).toBe(422);
+  });
+
+  it("recovers a published commit record before pointer visibility and replays a lost response", async () => {
+    const first = await write("first");
+    const originalPut = vi.mocked(env.ARTIFACTS.put).getMockImplementation();
+    if (!originalPut) throw new Error("Missing bucket implementation");
+    let interrupt = true;
+    vi.mocked(env.ARTIFACTS.put).mockImplementation(async (...args) => {
+      const result = await originalPut(...args);
+      if (interrupt && args[0].endsWith(".commit.json")) {
+        interrupt = false;
+        throw new Error("after persistence, before response");
+      }
+      return result;
+    });
+    const init = json({ fence });
+    const request = {
+      ...init,
+      headers: { ...init.headers, "Idempotency-Key": "restore-retry" },
+    };
+    const path = `/~/restore/${encodeURIComponent(first.key)}`;
+    const interrupted = await app.request(path, request, env, executionCtx);
+    expect(interrupted.status).toBe(503);
+    expect(
+      [...objects.keys()].filter((k) => k.endsWith(".commit.json")),
+    ).toHaveLength(2);
+    const before = await app.request(
+      `/~/history/${encodeURIComponent(first.key)}`,
+      {},
+      env,
+      executionCtx,
+    );
+    expect(((await before.json()) as { items: unknown[] }).items).toHaveLength(
+      1,
+    );
+    const retry = await app.request(path, request, env, executionCtx);
+    expect(retry.status).toBe(200);
+    const result = (await retry.json()) as {
+      key: string;
+      pointer: { revision: number };
+    };
+    expect(result.pointer.revision).toBe(2);
+    // The caller lost that successful response and resends the same operation.
+    const replay = await app.request(path, request, env, executionCtx);
+    expect(await replay.json()).toEqual(result);
+    const separate = await app.request(
+      path,
+      {
+        ...request,
+        headers: { ...request.headers, "Idempotency-Key": "another-restore" },
+      },
+      env,
+      executionCtx,
+    );
+    expect(
+      ((await separate.json()) as { pointer: { revision: number } }).pointer
+        .revision,
+    ).toBe(3);
   });
 });
