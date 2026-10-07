@@ -1,4 +1,5 @@
 import { applyLegacyDefaults } from "@tila/core";
+import type { NamespaceRestrictions } from "@tila/schemas";
 import type {
   ArtifactSearchResult,
   CompactEntity,
@@ -14,6 +15,7 @@ import {
   searchArtifacts,
   validateFtsQuery,
 } from "./artifact-ops";
+import { taskRestrictionCondition } from "./credential-policy";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
 import {
@@ -228,6 +230,7 @@ export function list(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   filter?: {
     type?: string | string[];
+    restrictions?: NamespaceRestrictions;
     archived?: 0 | 1;
     dataFilter?: Record<string, unknown>;
     sort?: "created_at" | "updated_at" | "type" | "title" | "status";
@@ -240,6 +243,8 @@ export function list(
   enrichOpts?: EnrichOpts,
 ): { entities: Entity[]; total: number } {
   const conditions: SQL[] = [];
+  const restricted = taskRestrictionCondition(db, filter?.restrictions);
+  if (restricted) conditions.push(restricted);
 
   if (filter?.type) {
     if (Array.isArray(filter.type)) {

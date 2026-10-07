@@ -1,10 +1,17 @@
 import {
+  CredentialPolicyDenied,
+  assertResourceAccess,
+  filterRelationships,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
+import {
   type RequestOrigin,
   coordinationOps,
   journalArchiveOps,
   journalOps,
   resolveEntityResource,
 } from "@tila/ops-sqlite";
+import { hasNamespaceRestrictions } from "@tila/schemas";
 import {
   AcquireRequestSchema,
   EnvironmentMetadataSchema,
@@ -139,7 +146,19 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.get("/coord/claims", (c) => {
     const { db } = deps;
-    const claims = coordinationOps.listClaims(db);
+    const policy = readCredentialPolicy(
+      c.req.header("X-Tila-Credential-Policy"),
+    );
+    const claims = coordinationOps.listClaims(db).filter((claim) => {
+      if (!policy || !hasNamespaceRestrictions(policy)) return true;
+      try {
+        assertResourceAccess(db, policy, claim.resource);
+        return true;
+      } catch (error) {
+        if (error instanceof CredentialPolicyDenied) return false;
+        throw error;
+      }
+    });
     return c.json({ ok: true, claims });
   });
 

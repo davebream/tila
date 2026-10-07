@@ -136,3 +136,5 @@ export type {
   InstantiateTemplateParams,
   InstantiateTemplateResult,
 } from "./template-ops";
+
+export * from "./credential-policy";

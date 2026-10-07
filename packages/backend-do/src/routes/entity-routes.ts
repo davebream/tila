@@ -1,5 +1,11 @@
 import { validatedWrite } from "@tila/core";
 import {
+  CredentialPolicyDenied,
+  assertResourceAccess,
+  filterRelationships,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
+import {
   type RequestOrigin,
   artifactOps,
   constraintOps,
@@ -126,7 +132,15 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         ),
       )
       .all();
-    return c.json({ ok: true, entity, relationships });
+    return c.json({
+      ok: true,
+      entity,
+      relationships: filterRelationships(
+        db,
+        readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
+        relationships,
+      ),
+    });
   });
 
   app.get("/entity/list", (c) => {
@@ -185,6 +199,9 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     const { entities, total } = entityOps.list(
       db,
       {
+        restrictions: readCredentialPolicy(
+          c.req.header("X-Tila-Credential-Policy"),
+        )?.restrictions,
         type,
         archived,
         ...(Object.keys(dataFilter).length > 0 ? { dataFilter } : {}),
@@ -364,7 +381,14 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       to_id,
       type,
     });
-    return c.json({ ok: true, relationships });
+    return c.json({
+      ok: true,
+      relationships: filterRelationships(
+        db,
+        readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
+        relationships,
+      ),
+    });
   });
 
   app.post("/entity/relationship/delete", async (c) => {

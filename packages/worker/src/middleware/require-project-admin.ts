@@ -303,6 +303,7 @@ function deny(c: Parameters<MiddlewareHandler<AdminEnv>>[0]) {
  */
 export const requireProjectAdmin: MiddlewareHandler<AdminEnv> =
   withRequiredRole("maintainer", async (c, next) => {
+    if (c.get("authorizationChecked")) return next();
     const tokenResult = c.get("tokenResult");
 
     // (1) Defensive: missing tokenResult → fail-closed.

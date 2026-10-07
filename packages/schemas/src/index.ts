@@ -474,3 +474,5 @@ export {
   canonicalJson,
   canonicalJsonSha256,
 } from "./record";
+
+export * from "./capability";

@@ -1,3 +1,8 @@
+import {
+  CredentialPolicyDenied,
+  assertCredentialRequest,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
 import { projectTransferOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
 import { createAdminRoutes } from "./routes/admin-routes";
@@ -22,6 +27,47 @@ export function createProjectRouter(deps: RouterDeps) {
   const app = new Hono();
 
   installProjectErrorHandlers(app);
+  app.use("*", async (c, next) => {
+    const raw = c.req.header("X-Tila-Credential-Policy");
+    if (raw !== undefined) {
+      try {
+        const policy = readCredentialPolicy(raw);
+        const body =
+          c.req.method === "GET" || c.req.method === "HEAD"
+            ? {}
+            : await c.req.raw
+                .clone()
+                .json()
+                .catch(() => ({}));
+        if (policy)
+          assertCredentialRequest(
+            deps.db,
+            policy,
+            c.req.method,
+            c.req.path,
+            new URL(c.req.url).searchParams,
+            body && typeof body === "object" && !Array.isArray(body)
+              ? (body as Record<string, unknown>)
+              : {},
+          );
+      } catch (error) {
+        if (error instanceof CredentialPolicyDenied)
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "permission-denied",
+                message: error.message,
+                retryable: false,
+              },
+            },
+            403,
+          );
+        throw error;
+      }
+    }
+    await next();
+  });
 
   // Correlation middleware: read X-Request-ID, sanitize (strip control chars,
   // cap at 128 chars), stash on context, and echo on every response.

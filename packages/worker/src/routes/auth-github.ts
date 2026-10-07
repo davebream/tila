@@ -50,6 +50,10 @@ import { OidcVerificationError, verifyOidcToken } from "../lib/oidc-verify";
 import { parseCookieHeader } from "../lib/parse-cookie";
 import { resolveRepositoryAccess } from "../lib/repo-access-policy";
 import { asEpochMillis, asEpochSeconds, nowMs, nowSeconds } from "../lib/time";
+import { exchangeScopedWorkload } from "../lib/workload-credential";
+import { createAuthMiddleware } from "../middleware/auth";
+import { credentialManagementGuard } from "../middleware/capability";
+import { csrfGuard } from "../middleware/csrf";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -316,7 +320,7 @@ async function mintSession(opts: {
   };
 
   // DPoP sender-constraint (WI-G): only set cnf when jkt was supplied by an
-  // in-scope flow (PAT or App). OIDC callers never pass jkt (no key holder).
+  // supported flow. Workload clients may also supply a proof key.
   if (jkt) {
     payload.cnf = { jkt };
   }
@@ -1174,78 +1178,15 @@ authGithub.get("/oauth/callback", async (c) => {
 });
 
 // POST /app-config -- Store GitHub App installation ID for a project
-authGithub.post("/app-config", async (c) => {
-  // SEC-5: this route is on the pre-auth router and does its own inline token
-  // check, so it needs the same upfront IP rate-limit guard as /exchange.
-  // Without it, an attacker could brute-force D1 API tokens here with no
-  // rate-limit consequence recorded (the failed-token branch below calls
-  // recordExchangeFailure to feed the shared exchange:${ip} counter).
-  const ip = c.req.raw.headers.get("CF-Connecting-IP");
+authGithub.post("/app-config", createAuthMiddleware(), csrfGuard, async (c) => {
+  // Shared authentication validates live credentials and DPoP before the
+  // repository-policy owner gate. Keep the exchange-family rate limit too.
   const limited = await checkExchangeRateLimit(c);
   if (limited) return limited;
 
-  // Inline token auth check (this route is on the pre-auth router)
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "unauthorized",
-          message: "Missing or invalid Authorization header",
-          retryable: false,
-        },
-      },
-      401,
-    );
-  }
-
-  const rawToken = authHeader.slice("Bearer ".length);
-  // SEC-1: pepper to match the D1-token mint in tokens.ts:51
-  const tokenHash = await hashToken(rawToken, c.env.HASH_PEPPER);
-
-  const tokenStore = new D1TokenStore(c.env.DB);
-  const tokenResult = await tokenStore.validate(tokenHash);
-
-  if (!tokenResult) {
-    // SEC-5: record the failed-token attempt against the IP so brute-force
-    // attempts accumulate toward the rate limit (parity with /exchange's
-    // GITHUB_AUTH_FAILED branch).
-    await recordExchangeFailure(c.env, ip);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "unauthorized",
-          message: "Invalid or revoked token",
-          retryable: false,
-        },
-      },
-      401,
-    );
-  }
-
-  // Verify token has full scope (admin-level access)
-  if (tokenResult.scopes !== "full") {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "forbidden",
-          message: "This operation requires full token scope",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  // Update token last_used_at
-  try {
-    await tokenStore.updateLastUsedAt(tokenHash);
-  } catch {
-    // Non-fatal
-  }
+  const authz = await credentialManagementGuard(c, "repository-policy:manage");
+  if (authz) return authz;
+  const tokenResult = c.get("tokenResult");
 
   // Parse and validate body
   let body: unknown;
@@ -1465,8 +1406,21 @@ authGithub.post("/exchange-oidc", async (c) => {
     throw new Error("OIDC policy decision invariant violated");
   }
 
+  const scopedResponse = await exchangeScopedWorkload(c, {
+    projectId: project_id,
+    provider: "github-actions",
+    issuer: "https://token.actions.githubusercontent.com",
+    subject: claims.sub,
+    githubLogin: claims.actor,
+    githubRepoId: claims.repository_id,
+    assertionId: claims.jti,
+    expiresAt: claims.exp,
+    jkt: parsed.data.jkt,
+  });
+  if (scopedResponse) return scopedResponse;
+
   // Idempotency check (keyed by project_id + jti from verified claims)
-  const idempotencyKey = `oidc:${project_id}:${claims.jti}`;
+  const idempotencyKey = `oidc:${project_id}:${claims.jti}${parsed.data.jkt ? `:jkt:${parsed.data.jkt}` : ""}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedOidcBody = await checkIdempotentExchange(
@@ -1514,6 +1468,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       membershipSources: ["github-mirrored"],
       hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
       instanceId,
+      jkt: parsed.data.jkt,
     });
     // Finalize the reservation with the minted response. Non-fatal, mirroring the
     // pre-WI-I fail-soft idempotency write: a transient D1 error or a lost/stolen

@@ -1,3 +1,4 @@
+import { CredentialStore, SCOPED_TOKEN_MARKER } from "@tila/backend-d1";
 import { D1SessionStore, D1TokenStore } from "@tila/backend-d1";
 import { SessionExchangeRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
@@ -113,10 +114,42 @@ authSessionExchange.post("/", async (c) => {
     );
   }
 
+  if (tokenResult.cnfJkt)
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "dpop-cookie-unsupported",
+          message: "Bound credentials cannot be exchanged for browser cookies",
+          retryable: false,
+        },
+      },
+      403,
+    );
+  const scoped =
+    tokenResult.scopes === SCOPED_TOKEN_MARKER
+      ? await new CredentialStore(c.env.DB).resolve(tokenResult.tokenId)
+      : null;
+  if (tokenResult.scopes === SCOPED_TOKEN_MARKER && !scoped)
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "unauthorized",
+          message: "Credential is no longer active",
+          retryable: false,
+        },
+      },
+      401,
+    );
   // Create session (SEC-1: pepper to match the cookie-session lookup in auth.ts:302)
   const sessionUUID = crypto.randomUUID();
   const sessionHash = await hashToken(sessionUUID, c.env.HASH_PEPPER);
-  const expiresAt = Date.now() + COOKIE_SESSION_TTL_MS;
+  const expiresAt = Math.min(
+    Date.now() + COOKIE_SESSION_TTL_MS,
+    scoped?.expiresAt ? scoped.expiresAt * 1000 : Number.POSITIVE_INFINITY,
+    scoped?.retireAt ? scoped.retireAt * 1000 : Number.POSITIVE_INFINITY,
+  );
 
   const sessionStore = new D1SessionStore(c.env.DB);
   try {
@@ -125,13 +158,13 @@ authSessionExchange.post("/", async (c) => {
       projectId: project_id,
       tokenHash,
       actorName: tokenResult.name,
-      principalId: `token:${tokenResult.tokenId}`,
+      principalId: scoped?.principalId ?? `token:${tokenResult.tokenId}`,
       scopes: tokenResult.scopes,
       permission: tokenResult.scopes === "full" ? "admin" : "read",
       expiresAt,
     });
   } catch (err) {
-    console.error("[auth-session] session create failed:", err);
+    console.error("[auth-session] session create failed");
     return c.json(
       {
         ok: false,
@@ -153,6 +186,20 @@ authSessionExchange.post("/", async (c) => {
 
   return c.json({ ok: true });
 });
+
+authSessionExchange.onError((_error, c) =>
+  c.json(
+    {
+      ok: false,
+      error: {
+        code: "auth-unavailable",
+        message: "Authentication temporarily unavailable",
+        retryable: true,
+      },
+    },
+    503,
+  ),
+);
 
 // Auth-protected session routes (require auth middleware upstream)
 export const authSessionProtected = new Hono<AppEnv>();
@@ -186,6 +233,31 @@ authSessionProtected.post("/logout", async (c) => {
       break;
     }
     case "d1-token": {
+      if (tokenResult.policy && tokenResult.principalId) {
+        try {
+          await new CredentialStore(c.env.DB).revoke(
+            tokenResult.projectId,
+            tokenResult.name,
+            {
+              principalId: tokenResult.principalId,
+              tokenId: tokenResult.tokenId,
+            },
+          );
+        } catch {
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "credential-unavailable",
+                message: "Could not revoke credential; retry logout",
+                retryable: true,
+              },
+            },
+            503,
+          );
+        }
+        break;
+      }
       // Self-service revoke of the caller's own durable D1 API token.
       try {
         const tokenStore = new D1TokenStore(c.env.DB);
@@ -199,14 +271,11 @@ authSessionProtected.post("/logout", async (c) => {
           try {
             await new D1SessionStore(c.env.DB).deleteByTokenHash(tokenHash);
           } catch (err) {
-            console.error(
-              "[auth-session] d1-token session cascade failed:",
-              err,
-            );
+            console.error("[auth-session] d1-token session cascade failed:");
           }
         }
       } catch (err) {
-        console.error("[auth-session] d1-token revoke failed:", err);
+        console.error("[auth-session] d1-token revoke failed");
       }
       break;
     }
@@ -224,7 +293,7 @@ authSessionProtected.post("/logout", async (c) => {
         try {
           await sessionStore.revoke(sessionHash);
         } catch (err) {
-          console.error("[auth-session] session revoke failed:", err);
+          console.error("[auth-session] session revoke failed");
           // Log error but still clear cookie (idempotent logout)
         }
         // Always invalidate session cache regardless of D1 result
@@ -265,6 +334,15 @@ function effectivePermission(
 }
 
 function canManageTokens(tokenResult: UnifiedTokenResult): boolean {
+  if (
+    (tokenResult.kind === "d1-token" ||
+      tokenResult.kind === "cookie-session") &&
+    tokenResult.policy
+  )
+    return (
+      tokenResult.policy.role === "owner" &&
+      tokenResult.policy.capabilities.includes("tokens:read")
+    );
   return effectivePermission(tokenResult) === "admin";
 }
 

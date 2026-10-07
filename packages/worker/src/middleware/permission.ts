@@ -48,6 +48,7 @@ export function requirePermission(
 ): MiddlewareHandler<AppEnv> {
   return withRequiredRole(REQUIRED_ROLE[level], async (c, next) => {
     const tokenResult = c.get("tokenResult");
+    if (c.get("authorizationChecked")) return next();
 
     if (tokenResult.kind === "workspace-session") {
       return c.json(

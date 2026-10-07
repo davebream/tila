@@ -28,6 +28,21 @@ export { createClaimMethods } from "./claims";
 export { createArtifactMethods } from "./artifacts";
 export type { ArtifactUploadOpts } from "./artifacts";
 export { createTokenMethods } from "./tokens";
+export {
+  createServiceAccountMethods,
+  type WorkloadBinding,
+} from "./service-accounts";
+export {
+  CREDENTIAL_PRESETS,
+  CredentialPolicySchema,
+  CapabilitySchema,
+  NamespaceRestrictionsSchema,
+  type CredentialPolicy,
+  type Capability,
+  type NamespaceRestrictions,
+  type ServiceAccount,
+  type WorkloadBindingRequest,
+} from "@tila/schemas";
 export { createJournalMethods } from "./journal";
 export { createPresenceMethods } from "./presence";
 export { createRecordMethods } from "./records";
