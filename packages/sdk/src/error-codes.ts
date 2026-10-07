@@ -75,6 +75,10 @@ export const TILA_ERRORS = {
   // SDK-generated for non-HTTP artifact failures (no wire code from server)
   ARTIFACT_GET_FAILED: "artifact-get-failed",
   ARTIFACT_GET_LATEST_FAILED: "artifact-get-latest-failed",
+  JOURNAL_HISTORY_UNAVAILABLE: "journal-history-unavailable",
+  JOURNAL_HISTORY_CONFLICT: "journal-history-conflict",
+  HANDOFF_NOT_FOUND: "handoff-not-found",
+  HANDOFF_CONFLICT: "handoff-conflict",
   // Fallback (SDK-generated when response is unparseable)
   UNKNOWN: "UNKNOWN",
 } as const;
