@@ -303,6 +303,7 @@ function bearerSession(userId: number, isAdmin = true): UnifiedTokenResult {
   }
   return {
     kind: "session",
+    jti: "route-test-jti",
     projectId: "proj-target",
     name: `user-${userId}`,
     scopes: "admin",
@@ -335,6 +336,7 @@ function createApp(
       )
     ) {
       c.set("effectiveRole", "owner");
+      c.set("explicitRole", "owner");
     }
     await next();
   });
@@ -417,6 +419,7 @@ describe("GET /admins", () => {
     // Do NOT seed storeState.grants — user is not in roster
     const token: UnifiedTokenResult = {
       kind: "session",
+      jti: "route-test-jti",
       projectId: "proj-target",
       name: "nobody",
       scopes: "admin",

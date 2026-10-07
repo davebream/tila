@@ -6,14 +6,13 @@ import {
   ADMIN_GRANTS_CACHE_TTL_MS,
 } from "../config";
 import { adminCacheKey } from "../lib/admin-cache-key";
-import { reverifySessionPermission } from "../lib/permission-recheck";
-import type {
-  Env,
-  HonoVariables,
-  SessionTokenResult,
-  UnifiedTokenResult,
-} from "../types";
+import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 import { ADMIN_PERMISSION } from "./permission";
+import {
+  authorizeProtectedOperation,
+  requireRevocableSession,
+  withRequiredRole,
+} from "./protected-operation";
 
 // AdminEnv is declared LOCALLY here, not imported from routes/admin.ts: the
 // middleware must not depend on the route module (that would invert the
@@ -185,44 +184,6 @@ export async function autoAdminGrants(
 }
 
 /**
- * Layer B re-verify for the auto-admin session admit path (WI-H, Task 8).
- *
- * Called ONLY when `autoAdminGrants` has returned true AND the principal is a
- * `kind === "session"` (bearer GitHub session). Cookie-sessions are excluded:
- * they lack `githubRepoId` (needed for `isRegistered`) so re-verify is not
- * possible for them; they remain out of scope per the plan scope decision.
- *
- * Returns null (admit) on allow/not-possible, or a 403 Response on deny.
- * Mirrors the `reverifyOrDeny` pattern from permission.ts but uses the
- * "token-authz-denied" code for the Http path and "permission-denied" for
- * the middleware path — each caller produces the matching error shape.
- *
- * @param c       - Hono context (admin env, must have c.env for App secrets)
- * @param session - The narrowed SessionTokenResult (kind:"session")
- */
-async function reverifyAutoAdminOrDeny(
-  c: import("hono").Context<AdminEnv>,
-  session: SessionTokenResult,
-): Promise<Response | null> {
-  const verdict = await reverifySessionPermission(c, session, "admin");
-  if (verdict.decision === "deny") {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "permission-revoked",
-          message: "Repository permission was revoked or downgraded",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-  // allow (grant / not-possible / transient) — proceed; return null (no deny).
-  return null;
-}
-
-/**
  * Async admin gate for token/repo routes (C5).
  * These routes mount WITHOUT projectMiddleware, so projectId is sourced from
  * tokenResult.projectId (not c.get("projectId"), which is empty on these mounts).
@@ -246,17 +207,12 @@ export async function requireProjectAdminHttp(
   if (tokenResult.kind === "d1-token" && tokenResult.scopes === "full") {
     return null;
   }
+  const invalidSession = requireRevocableSession(c);
+  if (invalidSession) return invalidSession;
   // (2) Flag-gated auto-admin (bearer or cookie-session with admin permission).
   // projectId comes from tokenResult because these routes have no projectMiddleware.
   if (await autoAdminGrants(c.env.DB, tokenResult, tokenResult.projectId)) {
-    // Layer B (WI-H): re-verify live GitHub permission for bearer sessions only.
-    // Cookie-sessions lack githubRepoId needed by reverifySessionPermission and are
-    // out of scope per the plan scope decision; they admit here unchanged.
-    if (tokenResult.kind === "session") {
-      const denyResp = await reverifyAutoAdminOrDeny(c, tokenResult);
-      if (denyResp !== null) return denyResp;
-    }
-    return null;
+    return authorizeProtectedOperation(c, "maintainer");
   }
   return c.json(
     {
@@ -345,106 +301,108 @@ function deny(c: Parameters<MiddlewareHandler<AdminEnv>>[0]) {
  *   3. bearer session → cached roster lookup (fail-closed on D1 error).
  *   4. anything else (cookie-session, workspace-session) → deny.
  */
-export const requireProjectAdmin: MiddlewareHandler<AdminEnv> = async (
-  c,
-  next,
-) => {
-  const tokenResult = c.get("tokenResult");
+export const requireProjectAdmin: MiddlewareHandler<AdminEnv> =
+  withRequiredRole("maintainer", async (c, next) => {
+    const tokenResult = c.get("tokenResult");
 
-  // (1) Defensive: missing tokenResult → fail-closed.
-  if (!tokenResult || typeof tokenResult.kind !== "string") {
-    return deny(c);
-  }
-
-  // (2) Full-scope D1 token is project-admin unconditionally. MUST check
-  // scopes === "full" (not kind alone) — a non-full D1 token is not admin.
-  if (tokenResult.kind === "d1-token") {
-    if (tokenResult.scopes === "full") {
-      return next();
-    }
-    return deny(c);
-  }
-
-  // Project membership is the canonical source for operational admin access.
-  // The legacy roster paths below remain only for directly mounted compatibility
-  // tests and routes that have not passed through project membership middleware.
-  const effectiveRole = c.get("effectiveRole");
-  if (
-    effectiveRole &&
-    PROJECT_ROLE_RANK[effectiveRole] >= PROJECT_ROLE_RANK.maintainer
-  ) {
-    return next();
-  }
-
-  // (3) Bearer GitHub session → roster lookup against _admin_grants.
-  if (tokenResult.kind === "session") {
-    const githubUserId = tokenResult.githubUserId;
-    const githubHost = tokenResult.githubHost;
-    const projectId = c.get("projectId");
-
-    // Null-identity / missing-project guard — fail-closed before any lookup.
-    if (githubUserId == null || githubHost == null || !projectId) {
+    // (1) Defensive: missing tokenResult → fail-closed.
+    if (!tokenResult || typeof tokenResult.kind !== "string") {
       return deny(c);
     }
 
-    // host must be canonical across grant + mint paths; #98 is github.com-only —
-    // defer GHES normalization (follow-up).
-    const cacheKey = adminCacheKey({
-      host: githubHost,
-      projectId,
-      userId: githubUserId,
-    });
-    const cached = getAdminGrantFromCache(cacheKey);
-    // Roster cache HIT — positive: admit immediately (no flag read needed).
-    // Roster cache HIT — negative: skip the D1 roster lookup but still try
-    //   auto-admin below (the flag is a separate allow path).
-    if (cached === true) {
-      return next();
+    // (2) Full-scope D1 token is project-admin unconditionally. MUST check
+    // scopes === "full" (not kind alone) — a non-full D1 token is not admin.
+    if (tokenResult.kind === "d1-token") {
+      if (tokenResult.scopes === "full") {
+        return next();
+      }
+      return deny(c);
     }
 
-    if (cached === null) {
-      // Cache miss — query D1 for roster membership.
-      let isAdmin: boolean;
-      try {
-        // Both store construction AND the awaited lookup are inside the try:
-        // a throw from either path DENIES and the error is NOT cached.
-        const store = new AdminGrantsStore(c.env.DB);
-        isAdmin = await store.isActiveAdmin(
-          projectId,
-          githubHost,
-          githubUserId,
-        );
-      } catch {
+    const invalidSession = requireRevocableSession(c);
+    if (invalidSession) return invalidSession;
+
+    // Project membership is the canonical source for operational admin access.
+    // The legacy roster paths below remain only for directly mounted compatibility
+    // tests and routes that have not passed through project membership middleware.
+    const effectiveRole = c.get("effectiveRole");
+    if (
+      effectiveRole &&
+      PROJECT_ROLE_RANK[effectiveRole] >= PROJECT_ROLE_RANK.maintainer
+    ) {
+      return (await authorizeProtectedOperation(c, "maintainer")) ?? next();
+    }
+    if (effectiveRole) return deny(c);
+
+    // (3) Bearer GitHub session → roster lookup against _admin_grants.
+    if (tokenResult.kind === "session") {
+      const githubUserId = tokenResult.githubUserId;
+      const githubHost = tokenResult.githubHost;
+      const projectId = c.get("projectId");
+
+      // Null-identity / missing-project guard — fail-closed before any lookup.
+      if (githubUserId == null || githubHost == null || !projectId) {
         return deny(c);
       }
 
-      setAdminGrantInCache(cacheKey, { isAdmin, cachedAt: Date.now() });
+      // host must be canonical across grant + mint paths; #98 is github.com-only —
+      // defer GHES normalization (follow-up).
+      const cacheKey = adminCacheKey({
+        host: githubHost,
+        projectId,
+        userId: githubUserId,
+      });
+      const cached = getAdminGrantFromCache(cacheKey);
+      // Roster cache HIT — positive: admit immediately (no flag read needed).
+      // Roster cache HIT — negative: skip the D1 roster lookup but still try
+      //   auto-admin below (the flag is a separate allow path).
+      if (cached === true) {
+        return next();
+      }
 
-      if (isAdmin) return next();
+      if (cached === null) {
+        // Cache miss — query D1 for roster membership.
+        let isAdmin: boolean;
+        try {
+          // Both store construction AND the awaited lookup are inside the try:
+          // a throw from either path DENIES and the error is NOT cached.
+          const store = new AdminGrantsStore(c.env.DB);
+          isAdmin = await store.isActiveAdmin(
+            projectId,
+            githubHost,
+            githubUserId,
+          );
+        } catch {
+          return deny(c);
+        }
+
+        setAdminGrantInCache(cacheKey, { isAdmin, cachedAt: Date.now() });
+
+        if (isAdmin) return next();
+      }
+
+      // (#101) Roster miss (or cached-false) — try the per-project auto-admin flag.
+      if (await autoAdminGrants(c.env.DB, tokenResult, projectId)) {
+        // Layer B (WI-H): re-verify live GitHub permission for the snapshot-trusting
+        // auto-admin path. `tokenResult` is narrowed to `kind:"session"` here.
+        const denyResp = await authorizeProtectedOperation(c, "maintainer");
+        if (denyResp !== null) return denyResp;
+        return next();
+      }
+      return deny(c);
     }
 
-    // (#101) Roster miss (or cached-false) — try the per-project auto-admin flag.
-    if (await autoAdminGrants(c.env.DB, tokenResult, projectId)) {
-      // Layer B (WI-H): re-verify live GitHub permission for the snapshot-trusting
-      // auto-admin path. `tokenResult` is narrowed to `kind:"session"` here.
-      const denyResp = await reverifyAutoAdminOrDeny(c, tokenResult);
-      if (denyResp !== null) return denyResp;
-      return next();
+    // (3b) Cookie-session → auto-admin only (no roster identity to look up).
+    // projectId from c.get("projectId") because projectMiddleware runs at these
+    // requireProjectAdmin sites and populates the variable; do NOT use
+    // tokenResult.projectId here (that convention is for tokens/repos routes only).
+    if (tokenResult.kind === "cookie-session") {
+      const cookieProjectId = c.get("projectId");
+      if (await autoAdminGrants(c.env.DB, tokenResult, cookieProjectId))
+        return (await authorizeProtectedOperation(c, "maintainer")) ?? next();
+      return deny(c);
     }
-    return deny(c);
-  }
 
-  // (3b) Cookie-session → auto-admin only (no roster identity to look up).
-  // projectId from c.get("projectId") because projectMiddleware runs at these
-  // requireProjectAdmin sites and populates the variable; do NOT use
-  // tokenResult.projectId here (that convention is for tokens/repos routes only).
-  if (tokenResult.kind === "cookie-session") {
-    const cookieProjectId = c.get("projectId");
-    if (await autoAdminGrants(c.env.DB, tokenResult, cookieProjectId))
-      return next();
+    // (4) workspace-session, or any other kind → deny.
     return deny(c);
-  }
-
-  // (4) workspace-session, or any other kind → deny.
-  return deny(c);
-};
+  });

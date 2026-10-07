@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PERMISSION_RECHECK_BACKOFF_MS,
   PERMISSION_RECHECK_CACHE_MAX_SIZE,
+  PERMISSION_RECHECK_TTL_MS,
 } from "../config";
 import type { Env, SessionTokenResult } from "../types";
 
@@ -115,6 +116,7 @@ function makeSession(
     tokenId: "tok-1",
     githubRepoId: 42,
     githubLogin: "alice",
+    githubUserId: 42,
     permission: "admin",
     expiresAt: Math.floor(Date.now() / 1000) + 300,
     jti: "jti-test-123",
@@ -140,12 +142,19 @@ const DEFAULT_REPO_ROW = {
   min_read_permission: "read",
   min_write_permission: "write",
   max_permission: "admin",
+  membership_enabled: 1,
+  membership_role_cap: "maintainer",
 };
 const INSTALL_TOKEN = "ghs_install_token";
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("reverifySessionPermission", () => {
   beforeEach(() => {
@@ -190,7 +199,7 @@ describe("reverifySessionPermission", () => {
 
     expect(result.decision).toBe("deny");
     if (result.decision === "deny") {
-      expect(result.reason).toMatch(/access revoked/i);
+      expect(result.reason).toMatch(/access was revoked/i);
     }
   });
 
@@ -251,9 +260,9 @@ describe("reverifySessionPermission", () => {
   });
 
   // -------------------------------------------------------------------------
-  // (d) no App installation → allow (not-possible, cacheable:true)
+  // (d) no App installation → deny (unavailable)
   // -------------------------------------------------------------------------
-  it("(d) allows when no App installation is configured (not-possible)", async () => {
+  it("(d) denies when no App installation is configured (unavailable)", async () => {
     mockGetInstallation.mockResolvedValue(null);
     const fetchSpy = vi.fn();
     global.fetch = fetchSpy;
@@ -262,17 +271,14 @@ describe("reverifySessionPermission", () => {
 
     const result = await reverifySessionPermission(c, session, "admin");
 
-    expect(result.decision).toBe("allow");
-    if (result.decision === "allow") {
-      expect(result.cacheable).toBe(true);
-    }
+    expect(result.decision).toBe("deny");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
-  // (d2) App secrets absent → allow (not-possible), cached — MUST NOT throw/500
+  // (d2) App secrets absent → deny (unavailable) — MUST NOT throw/500
   // -------------------------------------------------------------------------
-  it("(d2) allows when GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY are absent", async () => {
+  it("(d2) denies when GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY are absent", async () => {
     const fetchSpy = vi.fn();
     global.fetch = fetchSpy;
     const c = makeContext({
@@ -283,24 +289,21 @@ describe("reverifySessionPermission", () => {
 
     const result = await reverifySessionPermission(c, session, "admin");
 
-    expect(result.decision).toBe("allow");
-    if (result.decision === "allow") {
-      expect(result.cacheable).toBe(true);
-    }
+    expect(result.decision).toBe("deny");
     expect(fetchSpy).not.toHaveBeenCalled();
 
     // Second call: should be cache-served (still allow)
     const result2 = await reverifySessionPermission(c, session, "admin");
-    expect(result2.decision).toBe("allow");
+    expect(result2.decision).toBe("deny");
     // getInstallation should not have been called (secrets guard fires first)
     expect(mockGetInstallation).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
   // (e) App uninstalled (getInstallationAccessToken throws GitHubAppTokenError
-  //     status 404) → allow (not-possible), cached; second call issues no GitHub call
+  //     status 404) → deny (unavailable); second call issues no GitHub call
   // -------------------------------------------------------------------------
-  it("(e) allows as not-possible and caches when App is uninstalled (404 token error)", async () => {
+  it("(e) denies as unavailable and caches when App is uninstalled (404 token error)", async () => {
     mockGetInstallationAccessToken.mockRejectedValue(
       new GitHubAppTokenError(404, "GitHub API returned 404"),
     );
@@ -310,22 +313,19 @@ describe("reverifySessionPermission", () => {
     const session = makeSession({ jti: "jti-e" });
 
     const result = await reverifySessionPermission(c, session, "admin");
-    expect(result.decision).toBe("allow");
-    if (result.decision === "allow") {
-      expect(result.cacheable).toBe(true);
-    }
+    expect(result.decision).toBe("deny");
 
     // Second call: must be cache-served — no new GitHub calls
     const result2 = await reverifySessionPermission(c, session, "admin");
-    expect(result2.decision).toBe("allow");
+    expect(result2.decision).toBe("deny");
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(mockMintAppJwt).toHaveBeenCalledTimes(1);
   });
 
   // -------------------------------------------------------------------------
-  // (e2) non-404 install-token throw → allow{cacheable:false} + backoff
+  // (e2) non-404 install-token throw → deny (retryable) + backoff
   // -------------------------------------------------------------------------
-  it("(e2) allows with cacheable:false when getInstallationAccessToken throws non-404", async () => {
+  it("(e2) denies transiently when getInstallationAccessToken throws non-404", async () => {
     mockGetInstallationAccessToken.mockRejectedValue(
       new GitHubAppTokenError(500, "GitHub API returned 500"),
     );
@@ -334,10 +334,7 @@ describe("reverifySessionPermission", () => {
     const session = makeSession({ jti: "jti-e2" });
 
     const result = await reverifySessionPermission(c, session, "admin");
-    expect(result.decision).toBe("allow");
-    if (result.decision === "allow") {
-      expect(result.cacheable).toBe(false);
-    }
+    expect(result.decision).toBe("deny");
   });
 
   // -------------------------------------------------------------------------
@@ -392,7 +389,7 @@ describe("reverifySessionPermission", () => {
   });
 
   // -------------------------------------------------------------------------
-  // (h) membership 503 → allow{cacheable:false} + backoff:
+  // (h) membership 503 → deny (retryable) + backoff:
   //   - call within backoff issues no GitHub call
   //   - call after backoff retries
   // -------------------------------------------------------------------------
@@ -403,16 +400,13 @@ describe("reverifySessionPermission", () => {
     const session = makeSession({ jti: "jti-h" });
 
     const result1 = await reverifySessionPermission(c, session, "admin");
-    expect(result1.decision).toBe("allow");
-    if (result1.decision === "allow") {
-      expect(result1.cacheable).toBe(false);
-    }
+    expect(result1.decision).toBe("deny");
 
     // Second call within backoff window — must NOT hit GitHub again
     const fetchSpy2 = vi.fn();
     global.fetch = fetchSpy2;
     const result2 = await reverifySessionPermission(c, session, "admin");
-    expect(result2.decision).toBe("allow");
+    expect(result2.decision).toBe("deny");
     expect(fetchSpy2).not.toHaveBeenCalled();
 
     // Simulate backoff window expiry
@@ -530,9 +524,9 @@ describe("reverifySessionPermission", () => {
   });
 
   // -------------------------------------------------------------------------
-  // pre-C9 token (no jti) → skip re-verify, allow without cache key
+  // pre-C9 token (no jti) → deny without cache key
   // -------------------------------------------------------------------------
-  it("allows without re-verify when session has no jti (pre-C9 token)", async () => {
+  it("denies without re-verify when session has no jti (pre-C9 token)", async () => {
     const fetchSpy = vi.fn();
     global.fetch = fetchSpy;
     const c = makeContext();
@@ -540,10 +534,179 @@ describe("reverifySessionPermission", () => {
 
     const result = await reverifySessionPermission(c, session, "admin");
 
-    expect(result.decision).toBe("allow");
-    if (result.decision === "allow") {
-      expect(result.cacheable).toBe(false);
-    }
+    expect(result.decision).toBe("deny");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("fail-closed cache transitions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetPermissionRecheckCacheForTest();
+    mockGetInstallation.mockResolvedValue(DEFAULT_INSTALLATION);
+    mockIsRegistered.mockResolvedValue({ ...DEFAULT_REPO_ROW });
+    mockMintAppJwt.mockResolvedValue("app-jwt");
+    mockGetInstallationAccessToken.mockResolvedValue("installation-token");
+    global.fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        makeResponse(200, { permission: "admin" }),
+      );
+    vi.useFakeTimers();
+  });
+  it.each([404, 500, 429])(
+    "expired grant followed by installation HTTP %s never reuses old authority",
+    async (status) => {
+      const c = makeContext();
+      const session = makeSession();
+      expect(
+        (await reverifySessionPermission(c, session, "admin")).decision,
+      ).toBe("allow");
+      vi.advanceTimersByTime(PERMISSION_RECHECK_TTL_MS);
+      mockGetInstallationAccessToken.mockRejectedValue(
+        new GitHubAppTokenError(status),
+      );
+      const failure = await reverifySessionPermission(c, session, "admin");
+      expect(failure).toMatchObject({
+        decision: "deny",
+        status: 503,
+        retryable: status !== 404,
+      });
+      expect(await reverifySessionPermission(c, session, "admin")).toEqual(
+        failure,
+      );
+      expect(mockGetInstallationAccessToken).toHaveBeenCalledTimes(2);
+      mockGetInstallationAccessToken.mockResolvedValue("new-token");
+      vi.advanceTimersByTime(
+        status === 404
+          ? PERMISSION_RECHECK_TTL_MS
+          : PERMISSION_RECHECK_BACKOFF_MS,
+      );
+      expect(
+        (await reverifySessionPermission(c, session, "admin")).decision,
+      ).toBe("allow");
+    },
+  );
+  it("cached collaborator denial expires exactly at the settled TTL", async () => {
+    global.fetch = vi.fn().mockResolvedValue(makeResponse(404));
+    const c = makeContext();
+    const session = makeSession();
+    const failure = await reverifySessionPermission(c, session, "write");
+    expect(failure).toMatchObject({ status: 403, retryable: false });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(makeResponse(200, { permission: "admin" }));
+    vi.advanceTimersByTime(PERMISSION_RECHECK_TTL_MS - 1);
+    expect(await reverifySessionPermission(c, session, "write")).toEqual(
+      failure,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(
+      (await reverifySessionPermission(c, session, "write")).decision,
+    ).toBe("allow");
+  });
+  it.each([
+    "secrets",
+    "installation",
+    "repository",
+    "disabled",
+    "policy",
+    "membership-cap",
+    "D1",
+  ])("a warm grant cannot hide changed %s", async (change) => {
+    const c = makeContext();
+    const session = makeSession();
+    expect(
+      (await reverifySessionPermission(c, session, "admin")).decision,
+    ).toBe("allow");
+    if (change === "secrets") c.env.GITHUB_APP_PRIVATE_KEY = undefined;
+    if (change === "installation") mockGetInstallation.mockResolvedValue(null);
+    if (change === "repository") mockIsRegistered.mockResolvedValue(null);
+    if (change === "disabled")
+      mockIsRegistered.mockResolvedValue({
+        ...DEFAULT_REPO_ROW,
+        membership_enabled: 0,
+      });
+    if (change === "policy")
+      mockIsRegistered.mockResolvedValue({
+        ...DEFAULT_REPO_ROW,
+        max_permission: "write",
+      });
+    if (change === "membership-cap")
+      mockIsRegistered.mockResolvedValue({
+        ...DEFAULT_REPO_ROW,
+        membership_role_cap: "participant",
+      });
+    if (change === "D1")
+      mockGetInstallation.mockRejectedValue(new Error("D1 offline"));
+    expect(
+      (await reverifySessionPermission(c, session, "admin")).decision,
+    ).toBe("deny");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+  it("rotation to an invalid App key cannot reuse a cached grant", async () => {
+    const c = makeContext();
+    const session = makeSession();
+    await reverifySessionPermission(c, session, "admin");
+    c.env.GITHUB_APP_PRIVATE_KEY = "invalid-rotated-key";
+    mockMintAppJwt.mockRejectedValue(new Error("invalid PEM"));
+    expect(await reverifySessionPermission(c, session, "admin")).toMatchObject({
+      status: 503,
+      retryable: false,
+      reason: expect.stringMatching(/repair/i),
+    });
+  });
+  it.each(["jti", "project", "repo", "installation", "cookie"])(
+    "does not share verified authority across %s identities",
+    async (change) => {
+      const c = makeContext();
+      const session = makeSession();
+      await reverifySessionPermission(c, session, "admin");
+      global.fetch = vi.fn().mockResolvedValue(makeResponse(404));
+      if (change === "jti") session.jti = "another-jti";
+      if (change === "project") session.projectId = "another-project";
+      if (change === "repo") session.githubRepoId = 99;
+      if (change === "installation")
+        mockGetInstallation.mockResolvedValue({ installation_id: 1000 });
+      const credential =
+        change === "cookie"
+          ? {
+              kind: "cookie-session" as const,
+              projectId: session.projectId,
+              name: "alice",
+              scopes: "admin",
+              tokenId: "",
+              sessionHash: session.jti ?? "missing-jti",
+              expiresAt: session.expiresAt,
+              permission: "admin",
+              principalId: "github:github.com:42",
+              sourceRepoId: 42,
+            }
+          : session;
+      expect(
+        await reverifySessionPermission(c, credential, "admin"),
+      ).toMatchObject({ status: 403 });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("network failure stays denied through backoff and recovers at its boundary", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("network down"));
+    const c = makeContext();
+    const session = makeSession();
+    const failure = await reverifySessionPermission(c, session, "admin");
+    expect(failure).toMatchObject({ status: 503, retryable: true });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(makeResponse(200, { permission: "admin" }));
+    vi.advanceTimersByTime(PERMISSION_RECHECK_BACKOFF_MS - 1);
+    expect(await reverifySessionPermission(c, session, "admin")).toEqual(
+      failure,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(
+      (await reverifySessionPermission(c, session, "admin")).decision,
+    ).toBe("allow");
   });
 });

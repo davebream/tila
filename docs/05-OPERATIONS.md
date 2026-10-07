@@ -1094,3 +1094,32 @@ tila admin list
 ```
 
 The full-scope D1 init token is printed by `tila project create` in `--json` mode (`token` field) and written to `.tila/.env` on disk. It bypasses `requireProjectAdmin` at `packages/worker/src/middleware/require-project-admin.ts` lines 117-122.
+
+
+## Protected operations unavailable during permission verification
+
+A `503 permission-recheck-unavailable` response means a mirrored GitHub membership
+could not be verified. The write or administrative operation has not run. Ordinary
+reads remain governed by existing authentication and D1 membership checks.
+Explicit Tila memberships that independently authorize the operation, and service
+principals using those memberships, do not depend on GitHub availability.
+
+| Response detail | Operator action |
+|---|---|
+| Missing or invalid `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` | Configure the deployed Worker's App ID and matching private key; never expose the private key in logs |
+| Missing installation or GitHub installation-token 404 | Confirm the App is installed and linked to the project, with access to the selected repository; reinstall/relink if needed |
+| GitHub error with `retryable: true` | Check GitHub availability/rate limits and retry after 10 seconds |
+| D1 error or `membership-unavailable` | Restore D1 availability; the request must not fall back to session authority |
+| `401 unauthorized` requesting sign-in | Exchange a fresh bearer session carrying a revocable `jti` |
+
+Confirmed loss of collaborator permission returns `403 permission-revoked`, distinct
+from unavailable verification. Do not solve an outage by granting new membership
+unless that grant is independently intended. Existing explicit owners and bootstrap
+credentials retain their own authorization and revocation rules.
+
+GitHub observations and settled failures are cached per isolate for up to 60 seconds;
+transient failures are cached for 10 seconds and remain denied throughout backoff.
+Current D1 installation/repository policy is checked before cached grants. External
+uninstall/revocation becomes visible when the verified entry expires or is invalidated;
+there is no cross-isolate instant-invalidation guarantee. After expiry, failure to
+verify denies the operation without using the stale grant.

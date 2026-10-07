@@ -57,6 +57,7 @@ export async function resolveTokenMembership(
   projectId: string,
 ): Promise<{
   role: ProjectRole;
+  explicitRole?: ProjectRole;
   sources: MembershipSource[];
   mirroredRepoId?: number;
 } | null> {
@@ -100,6 +101,7 @@ export function projectMembershipMiddleware(): MiddlewareHandler<{
         );
       }
       c.set("effectiveRole", membership.role);
+      c.set("explicitRole", membership.explicitRole);
       c.set("membershipSources", membership.sources);
       c.set("membershipRepoId", membership.mirroredRepoId);
       return next();

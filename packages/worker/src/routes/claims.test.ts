@@ -25,6 +25,7 @@ function makeSessionToken(
 ): SessionTokenResult {
   return {
     kind: "session",
+    jti: "route-test-jti",
     projectId: "proj-1",
     name,
     scopes: permission,
@@ -42,6 +43,15 @@ function createApp(tokenResult: SessionTokenResult): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("/*", async (c, next) => {
     c.set("tokenResult", tokenResult);
+    if (tokenResult.kind === "session")
+      c.set(
+        "explicitRole",
+        tokenResult.permission === "admin"
+          ? "maintainer"
+          : tokenResult.permission === "write"
+            ? "participant"
+            : "viewer",
+      );
     c.set("doStub", {} as DurableObjectStub);
     c.set("projectId", "proj-1");
     c.set("principalId", "github:github.com:1");

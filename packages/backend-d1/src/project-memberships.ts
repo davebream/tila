@@ -11,6 +11,8 @@ import { canonicalizePrincipal } from "./principal";
 
 export interface EffectiveMembership {
   role: ProjectRole;
+  /** Authority independently granted by current Tila membership policy. */
+  explicitRole?: ProjectRole;
   sources: MembershipSource[];
   explicitMembershipId?: string;
   mirroredRepoId?: number;
@@ -155,6 +157,7 @@ export class ProjectMembershipStore {
     if (explicitAllowed && mirroredAllowed) {
       return {
         role: strongerRole(explicit.role, mirrored.role),
+        explicitRole: explicit.role,
         sources: ["explicit", "github-mirrored"],
         explicitMembershipId: explicit.membership_id,
         mirroredRepoId: mirrored.githubRepoId,
@@ -163,6 +166,7 @@ export class ProjectMembershipStore {
     if (explicitAllowed) {
       return {
         role: explicit.role,
+        explicitRole: explicit.role,
         sources: ["explicit"],
         explicitMembershipId: explicit.membership_id,
       };

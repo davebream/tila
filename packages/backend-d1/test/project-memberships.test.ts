@@ -108,7 +108,11 @@ describe("ProjectMembershipStore", () => {
         role: "maintainer",
         githubRepoId: 9,
       }),
-    ).toMatchObject({ role: "participant", sources: ["explicit"] });
+    ).toMatchObject({
+      role: "participant",
+      explicitRole: "participant",
+      sources: ["explicit"],
+    });
   });
 
   it("keeps explicit owners active and caps ordinary admission in mirrored mode", async () => {
@@ -138,6 +142,36 @@ describe("ProjectMembershipStore", () => {
         githubRepoId: 7,
       }),
     ).toMatchObject({ role: "maintainer", sources: ["github-mirrored"] });
+  });
+
+  it("retains independent explicit authority when hybrid mirroring grants a stronger role", async () => {
+    await store.setMode("p1", "hybrid", "bootstrap:test");
+    await store.grant({
+      projectId: "p1",
+      principal: { provider: "github", host: "github.com", user_id: 42 },
+      subjectKind: "human",
+      role: "participant",
+      actorPrincipalId: "bootstrap:test",
+    });
+    expect(
+      await store.resolve("p1", "github:github.com:42", {
+        role: "maintainer",
+        githubRepoId: 9,
+      }),
+    ).toMatchObject({
+      role: "maintainer",
+      explicitRole: "participant",
+      sources: ["explicit", "github-mirrored"],
+    });
+    await store.setMode("p1", "github-mirrored", "bootstrap:test");
+    expect(
+      (
+        await store.resolve("p1", "github:github.com:42", {
+          role: "maintainer",
+          githubRepoId: 9,
+        })
+      )?.explicitRole,
+    ).toBeUndefined();
   });
 
   it("admits only explicit service subjects in service-only mode", async () => {

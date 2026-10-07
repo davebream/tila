@@ -204,6 +204,50 @@ thresholds and cap, and requires re-exchange when that link no longer qualifies.
 Project backup/export includes all three policy fields. A legacy backup without
 `max_permission` restores with the database default of `write`.
 
+## Protected-operation permission checks
+
+All project mutations (`POST`, `PUT`, `PATCH`, `DELETE`) and administrative reads
+require current authority. The read-only `POST /projects/:projectId/schema/preview`
+endpoint is exempt from live revalidation. Ordinary reads retain their existing
+session and membership checks without a GitHub round-trip.
+
+Current D1 membership policy determines whether GitHub is needed. An explicit role
+that independently meets the route requirement authorizes the operation without
+GitHub. In hybrid mode, an explicit participant can write during a GitHub outage,
+but cannot use a mirrored maintainer role for administration until GitHub verifies
+that authority. OIDC service principals use Tila membership and revocation state.
+GitHub never grants project ownership.
+
+Bearer and browser sessions follow the same rule. Protected bearer operations
+require a `jti`, including operations authorized by explicit membership; legacy
+sessions must sign in again. Browser sessions use their persisted session hash and
+canonical principal, with their source repository and login for mirrored checks.
+
+The protected-operation guard runs after membership resolution and before
+maintenance checks, idempotency replay, and response caching. Route guards declare
+the required role so replay cannot bypass a stronger administrative requirement.
+
+| Verification result | HTTP response | Recovery |
+|---|---|---|
+| Collaborator absent, insufficient permission, or disabled repository adapter | `403 permission-revoked` | Restore qualifying access or use an independently authorized explicit membership |
+| App configuration invalid/missing, installation missing, or installation-token 404 | `503 permission-recheck-unavailable`, `retryable: false` | Repair App configuration or reinstall and link the App |
+| GitHub 5xx, rate limiting, network error, or timeout | `503 permission-recheck-unavailable`, `retryable: true` | Retry after the transient backoff |
+| D1 verification failure | Retryable `503 permission-recheck-unavailable` | Restore D1 availability; membership-resolution failures retain `membership-unavailable` |
+| Bearer session without `jti` | `401 unauthorized`, `retryable: false` | Sign in again |
+
+The per-isolate cache distinguishes verified grants, verified denials, unavailable
+verification, and transient failures. Settled entries expire after 60 seconds;
+transient failures back off for 10 seconds. Every protected mirrored check consults
+current installation and repository policy before accepting a cached GitHub
+observation. Credential, project, repository, installation, and App credential
+changes cannot share cached authority. Entries are bounded to 2,000 per isolate.
+
+External GitHub revocation or uninstall can take up to the remaining 60-second
+verified-cache lifetime to be observed. Once invalidated or expired, the next
+request must verify again and denies if verification is unavailable. Cached failures
+never grant authority, and an expired grant is never reused after a failed refresh.
+There is no positive cache for explicit Tila membership.
+
 ## CLI Behavior
 
 Add an auth mode to `.tila/config.toml`:

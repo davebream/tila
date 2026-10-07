@@ -106,6 +106,7 @@ export interface OidcSessionTokenResult {
   expiresAt: number;
   oidcIssuer: string;
   oidcSubject: string;
+  jti?: string;
   role?: ProjectRole;
   membershipSources?: MembershipSource[];
 }
@@ -129,6 +130,8 @@ export interface HonoVariables {
   participantId?: string;
   environment?: EnvironmentMetadata;
   effectiveRole?: ProjectRole;
+  explicitRole?: ProjectRole;
+  protectedRoleChecked?: ProjectRole;
   membershipSources?: MembershipSource[];
   membershipRepoId?: number;
   // Caller-scoped idempotency key + request-body hash, computed by the

@@ -11,6 +11,7 @@ import { errorHandler } from "./middleware/error";
 import { createIdempotencyMiddleware } from "./middleware/idempotency";
 import { projectMembershipMiddleware } from "./middleware/membership";
 import { projectMiddleware } from "./middleware/project";
+import { protectedOperationMiddleware } from "./middleware/protected-operation";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { requestIdentityMiddleware } from "./middleware/request-identity";
 import { sourceResolution } from "./middleware/source-resolution";
@@ -185,6 +186,7 @@ projectRoutes.use("/*", sourceResolution());
 projectRoutes.use("/*", requestIdentityMiddleware());
 projectRoutes.use("/*", projectMiddleware);
 projectRoutes.use("/*", projectMembershipMiddleware());
+projectRoutes.use("/*", protectedOperationMiddleware());
 projectRoutes.use("/*", async (c, next) => {
   if (
     c.req.method === "GET" ||
