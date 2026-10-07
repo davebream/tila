@@ -1,24 +1,26 @@
 import { normalizeArtifactText } from "@tila/core";
 import {
+  artifactLifecycleOps,
   constraintOps,
   artifactVersionOps as versions,
 } from "@tila/ops-sqlite";
 import {
   ArtifactCommitRecordSchema,
+  ArtifactLifecycleRecordSchema,
   artifactCommitKey,
+  artifactLifecycleKey,
   artifactVersionPrefix,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { originFromBody } from "./origin";
 import type { RouterDeps } from "./types";
 
-export async function scheduleArtifactPublication(
-  deps: RouterDeps,
-): Promise<void> {
-  const next = Date.now() + 5000;
-  const alarm = await deps.ctx.storage.getAlarm();
-  if (alarm === null || alarm > next) await deps.ctx.storage.setAlarm(next);
-}
+import { scheduleArtifactPublication } from "./artifact-alarm";
+export { scheduleArtifactPublication } from "./artifact-alarm";
+import {
+  createArtifactLifecycleRoutes,
+  recoverArtifactLifecycle,
+} from "./artifact-lifecycle-routes";
 
 async function publish(deps: RouterDeps, id: string) {
   const op = versions.getRevisionOperation(deps.db, id);
@@ -69,6 +71,7 @@ export async function flushArtifactCommits(deps: RouterDeps): Promise<void> {
 
 export function createArtifactVersionRoutes(deps: RouterDeps) {
   const app = new Hono();
+  app.route("/", createArtifactLifecycleRoutes(deps));
   app.get("/artifact/meta", (c) =>
     c.json({
       ok: true,
@@ -152,7 +155,7 @@ export function createArtifactVersionRoutes(deps: RouterDeps) {
       if (
         typeof key !== "string" ||
         !key.startsWith(artifactVersionPrefix(project_id)) ||
-        !key.endsWith(".commit.json")
+        (!key.endsWith(".commit.json") && !key.endsWith("/destroy.json"))
       )
         throw new versions.ArtifactVersionError(
           422,
@@ -161,6 +164,24 @@ export function createArtifactVersionRoutes(deps: RouterDeps) {
         );
       const blob = await deps.artifacts.get(key);
       if (!blob) continue;
+      if (key.endsWith("/destroy.json")) {
+        const record = ArtifactLifecycleRecordSchema.parse(await blob.json());
+        if (
+          record.type !== "destroy" ||
+          artifactLifecycleKey(record) !== key ||
+          record.project_id !== project_id
+        )
+          throw new versions.ArtifactVersionError(
+            422,
+            "invalid-lifecycle-record",
+            "Invalid lineage retirement key",
+          );
+        if (apply) {
+          await scheduleArtifactPublication(deps);
+          artifactLifecycleOps.reconcileLifecycle(deps.db, record, project_id);
+        }
+        continue;
+      }
       const record = ArtifactCommitRecordSchema.parse(await blob.json());
       if (
         artifactCommitKey(record.pointer) !== key ||
@@ -168,6 +189,8 @@ export function createArtifactVersionRoutes(deps: RouterDeps) {
       )
         throw new Error("Invalid artifact commit key");
       if (apply) {
+        await scheduleArtifactPublication(deps);
+        await recoverArtifactLifecycle(deps, record);
         const parsedSchema = constraintOps.resolveCurrentSchema(deps.db);
         let searchText = null;
         if (

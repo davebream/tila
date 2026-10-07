@@ -149,6 +149,8 @@ export async function applyR2Lifecycle(
       account_id: accountId,
       rules: [
         {
+          // Versioned revisions and their recovery records are intentionally
+          // outside this prefix; only tila may expire their content.
           id: "backstop-produced-1y",
           conditions: { prefix: "produced/" },
           enabled: true,

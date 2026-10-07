@@ -80,6 +80,8 @@ export type MockFacadeShape = {
     | "history"
     | "meta"
     | "restore"
+    | "delete"
+    | "destroyLineage"
     | "upload"
     | "download"
     | "writeText"
@@ -158,6 +160,8 @@ export function createMockFacade(): MockFacadeShape {
       "history",
       "meta",
       "restore",
+      "delete",
+      "destroyLineage",
       "upload",
       "download",
       "writeText",

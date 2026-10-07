@@ -359,6 +359,7 @@ async function sweepProject(args: {
 
   // --- 1. Expired-artifact drain loop ---
   let runBudgetHit = false;
+  const deletionErrorsBefore = summary.r2DeleteErrors;
   try {
     const drained = await drainExpiredArtifacts({
       projectId,
@@ -384,8 +385,9 @@ async function sweepProject(args: {
     }
     // The per-project iteration clamp marks ONLY this project degraded; it does
     // NOT set a resume point, so sibling projects still run.
-    if (drained.clampHit) {
+    if (drained.clampHit || summary.r2DeleteErrors > deletionErrorsBefore) {
       status.sweep = "error";
+      status.status = "degraded";
     }
   } catch (err) {
     console.error(
@@ -504,7 +506,15 @@ async function drainExpiredArtifacts(args: {
     if (!res.ok) {
       throw new Error(`DO /sweep returned ${res.status}`);
     }
-    const data = (await res.json()) as { expiredKeys?: string[] };
+    const data = (await res.json()) as {
+      expiredKeys?: string[];
+      lifecycle?: { deleted: number; errors: number; pending: boolean };
+    };
+    if (data.lifecycle) {
+      expiredThisProject += data.lifecycle.deleted;
+      summary.artifactsExpired += data.lifecycle.deleted;
+      summary.r2DeleteErrors += data.lifecycle.errors;
+    }
     const keys = data.expiredKeys ?? [];
 
     for (const key of keys) {
@@ -526,8 +536,12 @@ async function drainExpiredArtifacts(args: {
       // sweepExpiredKey's single side-effecting contract intact — do not replace
       // it with a return value without also updating that function and its tests.
       const before = summary.artifactsExpired;
-      await sweepExpiredKey(key, doStub, (k) => r2.delete(k), summary);
-      budget.subrequests += SWEEP_SUBREQUESTS_PER_KEY;
+      budget.subrequests += await sweepExpiredKey(
+        key,
+        doStub,
+        (k) => r2.delete(k),
+        summary,
+      );
       if (summary.artifactsExpired > before) expiredThisProject++;
     }
 
@@ -535,7 +549,7 @@ async function drainExpiredArtifacts(args: {
     if (keys.length < drainPageSize) {
       return {
         expired: expiredThisProject,
-        remaining: 0,
+        remaining: data.lifecycle?.pending ? 1 : 0,
         budgetHit: false,
         clampHit: false,
       };

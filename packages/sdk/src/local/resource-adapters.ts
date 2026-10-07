@@ -38,6 +38,7 @@ import {
   parseTilaSchemaToml,
 } from "@tila/core";
 import { signalOps } from "@tila/ops-sqlite";
+import type { ArtifactDeleteOptions } from "@tila/schemas";
 import type {
   ArtifactHistoryQuery,
   ArtifactRestoreRequest,
@@ -530,6 +531,19 @@ function createLocalClaimMethods(project: EmbeddedProject) {
  */
 function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
   return {
+    async delete(
+      key: string,
+      options?: ArtifactDeleteOptions,
+    ): Promise<{ ok: true }> {
+      await artifacts.delete(key, options);
+      return { ok: true };
+    },
+    destroyLineage(
+      lineageId: string,
+      options: ArtifactDeleteOptions & { fence: number },
+    ) {
+      return artifacts.destroyLineage(lineageId, options);
+    },
     history(key: string, options?: ArtifactHistoryQuery) {
       return artifacts.history(key, options);
     },

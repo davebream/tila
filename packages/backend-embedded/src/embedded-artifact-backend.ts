@@ -17,6 +17,7 @@ import {
   splitChunkIntoLines,
   validateGrepPattern,
 } from "@tila/core";
+import { artifactLifecycleOps as lifecycle } from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   artifactOps,
@@ -25,6 +26,10 @@ import {
   schema,
   artifactVersionOps as versions,
 } from "@tila/ops-sqlite";
+import {
+  type ArtifactDeleteOptions,
+  ArtifactLifecycleRecordSchema,
+} from "@tila/schemas";
 import {
   type ArtifactGrepResponse,
   type ArtifactHistoryQuery,
@@ -101,7 +106,42 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     };
   }
 
+  private lifecycleStore(): lifecycle.LifecycleStore {
+    return {
+      writeRecord: async (key, record) => {
+        const previous = await this.blobs.read(key);
+        if (previous !== null) {
+          if (
+            JSON.stringify(
+              ArtifactLifecycleRecordSchema.parse(JSON.parse(previous)),
+            ) !== JSON.stringify(record)
+          )
+            throw new Error("Conflicting lifecycle record");
+          return;
+        }
+        await this.blobs.write(key, JSON.stringify(record));
+      },
+      deleteBlob: (key) => this.blobs.unlink(key),
+    };
+  }
+
+  async drainLifecycle(limit = 50) {
+    return lifecycle.drainLifecycle(this.db, this.lifecycleStore(), limit);
+  }
+
+  async destroyLineage(
+    lineageId: string,
+    options: ArtifactDeleteOptions & { fence: number },
+  ) {
+    const { id, response } = this.retry(() =>
+      lifecycle.destroyLineage(this.db, lineageId, options, this.origin()),
+    );
+    await lifecycle.publishLifecycleRecord(this.db, this.lifecycleStore(), id);
+    return response;
+  }
+
   private async flushRevisions(): Promise<void> {
+    await this.drainLifecycle();
     for (const op of versions.listPendingArtifactCommits(this.db)) {
       const record = versions.revisionRecord(op);
       await this.blobs.write(
@@ -304,6 +344,7 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
         "validation-error",
         "Versioned artifact keys require lineage options",
       );
+    await this.flushRevisions();
     // 2. Write blob via the injected store
     const { bytes: written } = await this.blobs.write(options.key, bytes);
 
@@ -362,6 +403,13 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     contentType: string;
     metadata: Record<string, string>;
   } | null> {
+    const revision = lifecycle.revisionMetadata(this.db, key);
+    if (revision && (revision.tombstoned || revision.blob_deleted_at != null))
+      throw new versions.ArtifactVersionError(
+        410,
+        "artifact-unavailable",
+        "Revision content is unavailable",
+      );
     const row = this.db
       .select()
       .from(schema.artifactPointers)
@@ -403,7 +451,22 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
     return rows.map((r) => ({ key: r.key, size: r.size }));
   }
 
-  async delete(key: string): Promise<void> {
+  async delete(
+    key: string,
+    options: ArtifactDeleteOptions = {},
+  ): Promise<void> {
+    if (lifecycle.revisionMetadata(this.db, key)) {
+      const id = this.retry(() =>
+        lifecycle.acceptDeletion(this.db, key, options, this.origin()),
+      );
+      if (id)
+        await lifecycle.publishLifecycleRecord(
+          this.db,
+          this.lifecycleStore(),
+          id,
+        );
+      return;
+    }
     // Soft tombstone, matching DO behavior. Physical blob cleanup via sweepOps.
     this.retry(() => artifactOps.tombstonePointer(this.db, key, this.origin()));
   }
@@ -778,6 +841,13 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
   async readText(
     key: string,
   ): Promise<{ content: string; mimeType: string } | null> {
+    const revision = lifecycle.revisionMetadata(this.db, key);
+    if (revision && (revision.tombstoned || revision.blob_deleted_at != null))
+      throw new versions.ArtifactVersionError(
+        410,
+        "artifact-unavailable",
+        "Revision content is unavailable",
+      );
     const row = this.db
       .select()
       .from(schema.artifactPointers)

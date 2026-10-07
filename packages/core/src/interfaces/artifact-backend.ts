@@ -1,3 +1,7 @@
+import type {
+  ArtifactDeleteOptions,
+  ArtifactDestroyResponse,
+} from "@tila/schemas";
 export interface ArtifactPointerRecord {
   r2_key: string;
   resource: string | null;
@@ -92,7 +96,14 @@ export interface ArtifactBackend {
     metadata: Record<string, string>;
   } | null>;
   list(prefix: string): Promise<{ key: string; size: number }[]>;
-  delete(key: string): Promise<void>;
+  delete(key: string, options?: ArtifactDeleteOptions): Promise<void>;
+  destroyLineage?(
+    lineageId: string,
+    options: ArtifactDeleteOptions & { fence: number },
+  ): Promise<ArtifactDestroyResponse>;
+  drainLifecycle?(
+    limit?: number,
+  ): Promise<{ deleted: number; errors: number; pending: boolean }>;
   listWithMetadata?(
     prefix: string,
   ): Promise<{ key: string; size: number; metadata: Record<string, string> }[]>;

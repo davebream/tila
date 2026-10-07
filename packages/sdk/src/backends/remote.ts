@@ -43,6 +43,10 @@ import type {
   SummaryBackend,
 } from "@tila/core";
 import type {
+  ArtifactDeleteOptions,
+  ArtifactDestroyResponse,
+} from "@tila/schemas";
+import type {
   ArtifactHistoryQuery,
   ArtifactHistoryResponse,
   ArtifactMetaResponse,
@@ -956,10 +960,29 @@ export class RemoteArtifactBackend implements ArtifactBackend {
     }));
   }
 
-  async delete(key: string): Promise<void> {
+  async destroyLineage(
+    lineageId: string,
+    options: ArtifactDeleteOptions & { fence: number },
+  ): Promise<ArtifactDestroyResponse> {
+    return this.client.post(
+      `/projects/${this.projectId}/artifacts/~/destroy/${encodeURIComponent(lineageId)}`,
+      { fence: options.fence },
+      { idempotencyKey: options.idempotencyKey ?? crypto.randomUUID() },
+    );
+  }
+
+  async delete(
+    key: string,
+    options: ArtifactDeleteOptions = {},
+  ): Promise<void> {
     await this.client.delete(
       `/projects/${this.projectId}/artifacts/${encodeURIComponent(key)}`,
       {
+        query: {
+          fence:
+            options.fence === undefined ? undefined : String(options.fence),
+        },
+        idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
         schema: OkSchema,
         validate: true,
       },

@@ -98,3 +98,42 @@ describe("embedded revision parity", () => {
     ]);
   });
 });
+
+describe("embedded artifact lifecycle", () => {
+  it("deletes fenced revisions, retains metadata, and permanently retires groups", async () => {
+    const one = await h.artifacts.writeText("first", {
+      kind: "report",
+      lineageId: "report",
+      lineageFence: fence,
+    });
+    const two = await h.artifacts.writeText("second", {
+      kind: "report",
+      lineageId: "report",
+      lineageFence: fence,
+    });
+    await expect(h.artifacts.delete(two.key)).rejects.toMatchObject({
+      code: "missing-fence",
+    });
+    await h.artifacts.delete(two.key, { fence, idempotencyKey: "delete" });
+    await h.artifacts.drainLifecycle();
+    await expect(h.artifacts.get(two.key)).rejects.toMatchObject({
+      status: 410,
+    });
+    expect((await h.artifacts.history(two.key)).meta.total).toBe(2);
+    expect(await h.blobs.exists(two.key)).toBe(false);
+    expect(await h.blobs.exists(one.key)).toBe(true);
+    await h.artifacts.destroyLineage("report", {
+      fence,
+      idempotencyKey: "destroy",
+    });
+    await h.artifacts.drainLifecycle();
+    expect(await h.blobs.exists(one.key)).toBe(false);
+    await expect(
+      h.artifacts.writeText("third", {
+        kind: "report",
+        lineageId: "report",
+        lineageFence: fence,
+      }),
+    ).rejects.toMatchObject({ code: "artifact-lineage-destroyed" });
+  });
+});

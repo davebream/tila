@@ -16,6 +16,12 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { projectTransferOps } from "@tila/ops-sqlite";
 import {
+  ArtifactCommitRecordSchema,
+  ArtifactLifecycleRecordSchema,
+  artifactCommitKey,
+  artifactLifecycleKey,
+} from "@tila/schemas";
+import {
   PROJECT_BACKUP_FORMAT,
   PROJECT_BACKUP_FORMAT_VERSION,
   type ProjectBackupEntry,
@@ -29,7 +35,7 @@ import { createNodeConnection } from "../local/connection";
 import { SDK_VERSION } from "../version";
 
 export const SUPPORTED_BACKUP_FEATURES = new Set<string>();
-export const MAX_SUPPORTED_DO_MIGRATION = 26;
+export const MAX_SUPPORTED_DO_MIGRATION = 28;
 
 export type LocalBackupEndpoint = {
   backend: "local";
@@ -238,6 +244,7 @@ async function exportLocal(
 
     let rowsTotal = 0;
     const pointerRows: Record<string, unknown>[] = [];
+    const recoveryRecords = new Map<string, Buffer>();
     for (const table of projectTransferOps.PROJECT_BACKUP_TABLES) {
       const rows: Record<string, unknown>[] = [];
       let offset: number | null = 0;
@@ -251,6 +258,7 @@ async function exportLocal(
         projectTransferOps.renewExport(sql, sessionId, 300_000);
       }
       if (table === "artifact_pointers") pointerRows.push(...rows);
+      collectRecoveryRecords(table, rows, recoveryRecords);
       rowsTotal += rows.length;
       await addBuffer(
         pack,
@@ -322,6 +330,17 @@ async function exportLocal(
         "Archived journal files contradict the confirmed watermark",
       );
     }
+    for (const [key, body] of recoveryRecords)
+      objects.push({
+        key,
+        sha256: digestBuffer(body),
+        bytes: body.length,
+        blob_path: `blobs/${digestBuffer(body)}`,
+        tombstoned: false,
+        blob_deleted: false,
+        http_metadata: { contentType: "application/json" },
+        custom_metadata: {},
+      });
     await addBuffer(
       pack,
       entries,
@@ -335,6 +354,12 @@ async function exportLocal(
     for (const object of objects) {
       if (!object.blob_path || emitted.has(object.sha256)) continue;
       emitted.add(object.sha256);
+      const recovery = recoveryRecords.get(object.key);
+      if (recovery) {
+        await addBuffer(pack, entries, object.blob_path, recovery);
+        blobBytes += recovery.length;
+        continue;
+      }
       const blobFile = join(options.source.artifactsPath, object.key);
       if (!existsSync(blobFile))
         throw new Error(`Required blob is missing: ${object.key}`);
@@ -882,6 +907,7 @@ async function exportCloud(
     }>(`/transfer/meta?sessionId=${encodeURIComponent(sessionId)}`);
     let rowsTotal = 0;
     const pointerRows: Record<string, unknown>[] = [];
+    const recoveryRecords = new Map<string, Buffer>();
     for (const table of meta.tables) {
       const rows: Record<string, unknown>[] = [];
       let offset: number | null = 0;
@@ -901,6 +927,7 @@ async function exportCloud(
         });
       }
       if (table === "artifact_pointers") pointerRows.push(...rows);
+      collectRecoveryRecords(table, rows, recoveryRecords);
       rowsTotal += rows.length;
       await addBuffer(
         pack,
@@ -1005,6 +1032,17 @@ async function exportCloud(
         "Archived journal objects contradict the confirmed watermark",
       );
     }
+    for (const [key, body] of recoveryRecords)
+      objects.push({
+        key,
+        sha256: digestBuffer(body),
+        bytes: body.length,
+        blob_path: `blobs/${digestBuffer(body)}`,
+        tombstoned: false,
+        blob_deleted: false,
+        http_metadata: { contentType: "application/json" },
+        custom_metadata: {},
+      });
     await addBuffer(
       pack,
       entries,
@@ -1018,6 +1056,12 @@ async function exportCloud(
     for (const object of objects) {
       if (!object.blob_path || emitted.has(object.sha256)) continue;
       emitted.add(object.sha256);
+      const recovery = recoveryRecords.get(object.key);
+      if (recovery) {
+        await addBuffer(pack, entries, object.blob_path, recovery);
+        blobBytes += recovery.length;
+        continue;
+      }
       const response = await client.request(
         `/object?sessionId=${encodeURIComponent(sessionId)}&key=${encodeURIComponent(object.key)}`,
       );
@@ -1357,5 +1401,39 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
     };
   } finally {
     await rm(spoolRoot, { recursive: true, force: true });
+  }
+}
+
+/** Published records are reconstructible from the locked SQLite snapshot, even
+ * when their content pointers have already been garbage collected. */
+function collectRecoveryRecords(
+  table: string,
+  rows: Record<string, unknown>[],
+  records: Map<string, Buffer>,
+): void {
+  for (const row of rows) {
+    if (table === "artifact_revision_operations" && row.state === "published") {
+      const record = ArtifactCommitRecordSchema.parse(
+        JSON.parse(String(row.record)),
+      );
+      if (!record.deduplicated)
+        records.set(
+          artifactCommitKey(record.pointer),
+          Buffer.from(JSON.stringify(record)),
+        );
+    }
+    if (
+      table === "artifact_lifecycle_operations" &&
+      row.state !== "pending" &&
+      !String(row.id).startsWith("request:")
+    ) {
+      const record = ArtifactLifecycleRecordSchema.parse(
+        JSON.parse(String(row.record)),
+      );
+      records.set(
+        artifactLifecycleKey(record),
+        Buffer.from(JSON.stringify(record)),
+      );
+    }
   }
 }

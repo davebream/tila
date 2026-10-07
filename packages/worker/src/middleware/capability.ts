@@ -87,6 +87,7 @@ export function routeCapability(
       "artifacts:write",
     ],
     ["DELETE", /^\/artifacts\/.+$/, "artifacts:delete"],
+    ["POST", /^\/artifacts\/~\/destroy\/[^/]+$/, "artifacts:delete"],
     ["POST", /^\/artifacts\/(?:reconcile|search-rebuild)$/, "search:reindex"],
     ["GET", /^\/claims(?:\/state\/.+)?$/, "claims:read"],
     ["POST", /^\/claims\/acquire$/, "claims:acquire"],

@@ -908,7 +908,7 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     metadata: Record<string, string>;
   };
   const allBlobs: BlobItem[] = [];
-  const versionCommitKeys: string[] = [];
+  const versionRecoveryKeys: string[] = [];
   let nextCursor: string | null = null;
   let remaining = limit;
 
@@ -949,9 +949,12 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
           .customMetadata ?? {},
     }));
     if (prefix === "versioned")
-      versionCommitKeys.push(
+      versionRecoveryKeys.push(
         ...objects
-          .filter((o) => o.key.endsWith(".commit.json"))
+          .filter(
+            (o) =>
+              o.key.endsWith(".commit.json") || o.key.endsWith("/destroy.json"),
+          )
           .map((o) => o.key),
       );
     else allBlobs.push(...objects);
@@ -1025,12 +1028,12 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
   );
 
   let versionRecovered = 0;
-  if (versionCommitKeys.length) {
+  if (versionRecoveryKeys.length) {
     const revisionResponse = await forwardToDO(
       stub,
       "/artifact/version/reconcile",
       "POST",
-      { project_id: c.get("projectId"), apply, keys: versionCommitKeys },
+      { project_id: c.get("projectId"), apply, keys: versionRecoveryKeys },
     );
     if (!revisionResponse.ok) return revisionResponse;
     versionRecovered = (
@@ -1174,6 +1177,19 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
   const stub = c.get("doStub");
   const r2 = new R2ArtifactBackend(c.env.ARTIFACTS);
 
+  if (key.startsWith("versioned/")) {
+    return forwardToDO(stub, "/artifact/version/delete", "POST", {
+      key,
+      fence:
+        c.req.query("fence") === undefined
+          ? undefined
+          : Number(c.req.query("fence")),
+      idempotencyKey: `${c.get("principalId")}:${c.req.header("Idempotency-Key") ?? crypto.randomUUID()}`,
+      actor: tokenResult.name,
+      ...identityPayload(c),
+    });
+  }
+
   // Step 1: Tombstone-first (DO pointer before R2 blob)
   const tombstoneRes = await forwardToDO(
     stub,
@@ -1230,6 +1246,33 @@ artifacts.get("/:key{.+}/meta", requirePermission("read"), (c) =>
     key: c.req.param("key"),
   }),
 );
+artifacts.post(
+  "/~/destroy/:lineageId",
+  requirePermission("write"),
+  async (c) => {
+    const idempotencyKey = c.req.header("Idempotency-Key");
+    if (!idempotencyKey)
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "missing-idempotency-key",
+            message: "Lineage destruction requires an Idempotency-Key",
+          },
+        },
+        400,
+      );
+    const body = await c.req.json();
+    return forwardToDO(c.get("doStub"), "/artifact/version/destroy", "POST", {
+      fence: body.fence,
+      lineage_id: c.req.param("lineageId"),
+      idempotencyKey: `${c.get("principalId")}:${idempotencyKey}`,
+      actor: c.get("tokenResult").name,
+      ...identityPayload(c),
+    });
+  },
+);
+
 artifacts.post("/~/restore/:key{.+$}", requirePermission("write"), async (c) =>
   restoreArtifact(c, c.req.param("key"), await c.req.json()),
 );
@@ -1251,6 +1294,7 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
     analyticsCtxFrom(c),
   );
   if (!metaRes.ok) {
+    if (metaRes.status === 410) return metaRes;
     return c.json(
       {
         ok: false,

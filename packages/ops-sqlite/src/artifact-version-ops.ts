@@ -21,16 +21,13 @@ import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 
 type Db = BaseSQLiteDatabase<"sync", unknown, typeof schema>;
-export class ArtifactVersionError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string,
-    public readonly retryable = false,
-  ) {
-    super(message);
-  }
-}
+export { ArtifactVersionError } from "./artifact-version-error";
+import * as lifecycle from "./artifact-lifecycle-ops";
+import { ArtifactVersionError } from "./artifact-version-error";
+import {
+  getArtifactKindRetention,
+  resolveCurrentSchema,
+} from "./constraint-ops";
 export type RevisionOperation =
   typeof schema.artifactRevisionOperations.$inferSelect;
 export interface ReserveArtifactRevision {
@@ -52,6 +49,8 @@ export interface ReserveArtifactRevision {
 }
 
 export function getArtifactMeta(db: Db, key: string): ArtifactRevision {
+  const archived = lifecycle.revisionMetadata(db, key);
+  if (archived) return archived;
   const row = db
     .select()
     .from(schema.artifactPointers)
@@ -87,6 +86,7 @@ export function getArtifactLineageHead(
   db: Db,
   lineage: string,
 ): ArtifactRevision | null {
+  if (lifecycle.isLineageDestroyed(db, lineage)) return null;
   const row = db
     .select({ key: schema.artifactPointers.r2_key })
     .from(schema.artifactPointers)
@@ -94,6 +94,7 @@ export function getArtifactLineageHead(
       and(
         eq(schema.artifactPointers.lineage_id, lineage),
         eq(schema.artifactPointers.tombstoned, 0),
+        isNull(schema.artifactPointers.blob_deleted_at),
       ),
     )
     .orderBy(desc(schema.artifactPointers.revision))
@@ -194,7 +195,13 @@ export function reserveArtifactRevision(
         "Lineage already exists with incompatible identity or cannot be adopted into",
       );
     }
+    lifecycle.assertLineageWritable(tx, input.lineage_id);
     const revision = lineage?.next_revision ?? 1;
+    const producedAt = Date.now();
+    const currentSchema = resolveCurrentSchema(tx);
+    const retention = currentSchema
+      ? getArtifactKindRetention(currentSchema, input.kind)
+      : 0;
     const pointer: ArtifactCommitRecord["pointer"] = {
       r2_key: artifactRevisionKey(
         input.project_id,
@@ -212,9 +219,9 @@ export function reserveArtifactRevision(
       bytes: input.bytes,
       fence: input.fence,
       mime_type: input.mime_type,
-      produced_at: Date.now(),
+      produced_at: producedAt,
       produced_by: origin.actor,
-      expires_at: null,
+      expires_at: retention > 0 ? producedAt + retention * 86_400_000 : null,
       tombstoned: 0,
       tombstoned_at: null,
       blob_deleted_at: null,
@@ -222,6 +229,7 @@ export function reserveArtifactRevision(
     };
     const record = ArtifactCommitRecordSchema.parse({
       format: "tila-artifact-revision-v1",
+      retention_assigned: true,
       project_id: input.project_id,
       operation_id: input.operation_id,
       request_hash: input.request_hash,
@@ -414,7 +422,21 @@ function insertPublishedPointer(
   record: ArtifactCommitRecord,
   searchText: string | null,
 ): void {
-  const { tags, ...pointer } = record.pointer;
+  lifecycle.saveRevision(
+    db,
+    record.pointer,
+    record.retention_assigned === true,
+  );
+  const effective = lifecycle.revisionMetadata(db, record.pointer.r2_key);
+  if (!effective)
+    throw new Error("Missing revision metadata after publication");
+  if (
+    effective.tombstoned ||
+    effective.blob_deleted_at != null ||
+    lifecycle.isLineageDestroyed(db, record.pointer.lineage_id)
+  )
+    return;
+  const { tags, ...pointer } = effective;
   db.insert(schema.artifactPointers)
     .values(pointer)
     .onConflictDoNothing()
@@ -627,13 +649,13 @@ export function listArtifactHistory(
       meta: { total: 1, limit, next_cursor: null },
     };
   }
-  const base = eq(schema.artifactPointers.lineage_id, anchor.lineage_id);
+  const base = eq(schema.artifactRevisions.lineage_id, anchor.lineage_id);
   let ceiling =
     db
-      .select({ revision: schema.artifactPointers.revision })
-      .from(schema.artifactPointers)
+      .select({ revision: schema.artifactRevisions.revision })
+      .from(schema.artifactRevisions)
       .where(base)
-      .orderBy(desc(schema.artifactPointers.revision))
+      .orderBy(desc(schema.artifactRevisions.revision))
       .get()?.revision ?? 0;
   let before = ceiling + 1;
   if (opts.cursor) {
@@ -662,23 +684,23 @@ export function listArtifactHistory(
   const total =
     db
       .select({ count: sql<number>`count(*)` })
-      .from(schema.artifactPointers)
-      .where(and(base, lte(schema.artifactPointers.revision, ceiling)))
+      .from(schema.artifactRevisions)
+      .where(and(base, lte(schema.artifactRevisions.revision, ceiling)))
       .get()?.count ?? 0;
   const rows = db
     .select({
-      key: schema.artifactPointers.r2_key,
-      revision: schema.artifactPointers.revision,
+      key: schema.artifactRevisions.r2_key,
+      revision: schema.artifactRevisions.revision,
     })
-    .from(schema.artifactPointers)
+    .from(schema.artifactRevisions)
     .where(
       and(
         base,
-        lte(schema.artifactPointers.revision, ceiling),
-        lt(schema.artifactPointers.revision, before),
+        lte(schema.artifactRevisions.revision, ceiling),
+        lt(schema.artifactRevisions.revision, before),
       ),
     )
-    .orderBy(desc(schema.artifactPointers.revision))
+    .orderBy(desc(schema.artifactRevisions.revision))
     .limit(limit + 1)
     .all();
   const page = rows.slice(0, limit);

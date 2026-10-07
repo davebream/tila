@@ -6,6 +6,7 @@ import {
   primaryKey,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 // --- entities ---
@@ -87,6 +88,43 @@ export const artifactLineages = sqliteTable("artifact_lineages", {
   kind: text("kind").notNull(),
   resource: text("resource"),
   next_revision: integer("next_revision").notNull().default(1),
+  destroyed_at: integer("destroyed_at"),
+});
+
+// Permanent metadata, independent of the disposable live pointer projection.
+export const artifactRevisions = sqliteTable(
+  "artifact_revisions",
+  {
+    r2_key: text("r2_key").primaryKey(),
+    lineage_id: text("lineage_id").notNull(),
+    revision: integer("revision").notNull(),
+    metadata: text("metadata").notNull(),
+    retention_assigned: integer("retention_assigned").notNull().default(0),
+  },
+  (t) => [uniqueIndex("idx_revision_identity").on(t.lineage_id, t.revision)],
+);
+
+export const artifactLifecycleOperations = sqliteTable(
+  "artifact_lifecycle_operations",
+  {
+    id: text("id").primaryKey(),
+    lineage_id: text("lineage_id").notNull(),
+    record: text("record").notNull(),
+    request_id: text("request_id"),
+    state: text("state", { enum: ["pending", "published", "done"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    retry_at: integer("retry_at").notNull().default(0),
+  },
+  (t) => [index("idx_lifecycle_due").on(t.state, t.retry_at)],
+);
+
+export const artifactRetentionState = sqliteTable("artifact_retention_state", {
+  id: integer("id").primaryKey(),
+  policy: text("policy").notNull(),
+  cursor: text("cursor"),
+  complete: integer("complete").notNull().default(0),
 });
 
 export const artifactRevisionOperations = sqliteTable(

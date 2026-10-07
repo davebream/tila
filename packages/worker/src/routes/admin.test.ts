@@ -904,6 +904,25 @@ describe("project admin routes", () => {
       expect(targetPageIdx).toBe(2);
     });
 
+    it("removes versioned recovery records after pointer cleanup and retains SQLite if prefix cleanup fails", async () => {
+      setupDestroyMocks({ targetKeys: [] });
+      listAllIncludingArchivedMock.mockResolvedValue([
+        { projectId: "proj-target" },
+      ]);
+      deleteByPrefixMock.mockImplementation(async (prefix: string) => ({
+        deleted: 0,
+        failed: prefix.startsWith("versioned/")
+          ? ["versioned/proj-target/report/destroy.json"]
+          : [],
+      }));
+      const response = await req(createApp("full"), "/admin/destroy", "POST");
+      expect(response.status).toBe(502);
+      expect(deleteByPrefixMock).toHaveBeenCalledWith("versioned/proj-target/");
+      expect(
+        forwardToDOMock.mock.calls.some((call) => call[1] === "/admin/destroy"),
+      ).toBe(false);
+    });
+
     it("(g) surfaces failure when DO destroy returns a non-ok body", async () => {
       setupDestroyMocks({
         targetKeys: [],

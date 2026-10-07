@@ -64,6 +64,7 @@ export type ArtifactRevisionResponse = z.infer<
 // store. No public route accepts a caller-supplied record for import.
 export const ArtifactCommitRecordSchema = z.object({
   format: z.literal("tila-artifact-revision-v1"),
+  retention_assigned: z.literal(true).optional(),
   project_id: z.string().min(1),
   operation_id: z.string().min(1),
   request_hash: z.string(),
