@@ -16,6 +16,7 @@ export const DOMAIN_TABLE_NAMES = [
   "artifact_revisions",
   "artifact_lifecycle_operations",
   "artifact_retention_state",
+  "artifact_reviews",
   "entity_artifact_references",
   "artifact_relationships",
   "journal",
@@ -78,6 +79,7 @@ export function countStoreRows(
       entities: countTable(db, "entities"),
       entity_relationships: countTable(db, "entity_relationships"),
       artifact_pointers: countTable(db, "artifact_pointers"),
+      artifact_reviews: countTable(db, "artifact_reviews"),
       artifact_lineages: countTable(db, "artifact_lineages"),
       artifact_revisions: countTable(db, "artifact_revisions"),
       artifact_lifecycle_operations: countTable(

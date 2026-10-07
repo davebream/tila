@@ -8,6 +8,8 @@ import {
   matchLine,
   validateGrepPattern,
 } from "@tila/core";
+import type { ArtifactReviewSummary, ArtifactRevision } from "@tila/schemas";
+import { ArtifactReviewRequestSchema } from "@tila/schemas";
 import {
   ArtifactGrepQuerySchema,
   ArtifactSearchQuerySchema,
@@ -251,6 +253,9 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     key: r2Key,
     bytes: fileBytes.byteLength,
     deduplicated,
+    pointer: (
+      (await pointerResult.response.json()) as { pointer?: ArtifactRevision }
+    ).pointer,
   });
 });
 
@@ -459,6 +464,9 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     key: r2Key,
     bytes: fileBytes.byteLength,
     deduplicated,
+    pointer: (
+      (await pointerResult.response.json()) as { pointer?: ArtifactRevision }
+    ).pointer,
   });
 });
 
@@ -634,6 +642,9 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
 
     if (acc.lines.length > 0) {
       results.push({
+        provenance: candidate.provenance,
+        revision_creation: candidate.revision_creation,
+        review: candidate.review,
         key: candidate.r2_key,
         kind: candidate.kind,
         resource: candidate.resource,
@@ -1230,6 +1241,44 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
 
 // GET /projects/:projectId/artifacts/:key{.+} -- download from R2 (with inline fast path)
 // Note: this must be registered AFTER all named routes to avoid matching them
+artifacts.get("/~/reviews/:key{.+$}", requirePermission("read"), (c) =>
+  forwardToDO(
+    c.get("doStub"),
+    "/artifact/reviews",
+    "GET",
+    undefined,
+    {
+      ...c.req.query(),
+      key: c.req.param("key"),
+    },
+    analyticsCtxFrom(c),
+  ),
+);
+artifacts.post(
+  "/~/reviews/:key{.+$}",
+  requirePermission("write"),
+  async (c) => {
+    const review = ArtifactReviewRequestSchema.parse(await c.req.json());
+    const identity = identityPayload(c);
+    return forwardToDO(
+      c.get("doStub"),
+      "/artifact/review",
+      "POST",
+      {
+        key: c.req.param("key"),
+        review,
+        ...identity,
+        operation_id: JSON.stringify([
+          identity.principal_id,
+          c.req.header("Idempotency-Key") ?? crypto.randomUUID(),
+        ]),
+      },
+      undefined,
+      analyticsCtxFrom(c),
+    );
+  },
+);
+
 artifacts.get("/~/history/:key{.+$}", requirePermission("read"), (c) =>
   forwardToDO(c.get("doStub"), "/artifact/history", "GET", undefined, {
     key: c.req.param("key"),
@@ -1284,7 +1333,11 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
   const stub = c.get("doStub");
   const { response: metaRes, json: meta } = await forwardTypedDO<{
     ok: boolean;
-    pointer?: { content_inline: string | null; mime_type: string } | null;
+    pointer?: {
+      content_inline: string | null;
+      mime_type: string;
+      review?: ArtifactReviewSummary;
+    } | null;
   }>(
     stub,
     DO_PATHS.artifactPointerMeta,
@@ -1320,9 +1373,15 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
       404,
     );
   }
+  const reviewHeaders = {
+    "X-Tila-Artifact-Review-State": meta.pointer.review?.state ?? "unreviewed",
+    "X-Tila-Artifact-Review-Revision": String(
+      meta.pointer.review?.review_revision ?? 0,
+    ),
+  };
   if (meta.pointer.content_inline != null) {
     return new Response(meta.pointer.content_inline, {
-      headers: { "Content-Type": meta.pointer.mime_type },
+      headers: { "Content-Type": meta.pointer.mime_type, ...reviewHeaders },
     });
   }
 
@@ -1345,6 +1404,7 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
   return new Response(result.body, {
     headers: {
       "Content-Type": result.contentType,
+      ...reviewHeaders,
     },
   });
 });

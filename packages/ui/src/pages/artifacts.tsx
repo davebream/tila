@@ -21,6 +21,7 @@ import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { relativeTime } from "@/lib/time";
+import type { ArtifactReviewSummary } from "@tila/schemas";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
@@ -254,6 +255,7 @@ function ArtifactList({
 }: {
   projectId: string | null;
   artifacts: Array<{
+    review?: ArtifactReviewSummary;
     r2_key: string;
     resource: string | null;
     kind: string;
@@ -365,7 +367,10 @@ function ArtifactList({
                   </span>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{a.kind}</Badge>
+                  <Badge variant="secondary">{a.kind}</Badge>{" "}
+                  <Badge variant="secondary">
+                    {a.review?.state ?? "unreviewed"}
+                  </Badge>
                 </TableCell>
                 <TableCell className="text-foreground">{a.mime_type}</TableCell>
                 <TableCell className="tila-num text-foreground">
@@ -401,6 +406,7 @@ function SearchResults({
   data:
     | {
         results: Array<{
+          review?: ArtifactReviewSummary;
           r2_key: string;
           kind: string;
           resource: string | null;
@@ -459,7 +465,10 @@ function SearchResults({
                 </Link>
               </TableCell>
               <TableCell>
-                <Badge variant="secondary">{r.kind}</Badge>
+                <Badge variant="secondary">{r.kind}</Badge>{" "}
+                <Badge variant="secondary">
+                  {r.review?.state ?? "unreviewed"}
+                </Badge>
               </TableCell>
               <TableCell className="text-foreground">
                 {r.resource ?? "—"}

@@ -15,6 +15,7 @@ import {
   searchArtifacts,
   validateFtsQuery,
 } from "./artifact-ops";
+import { assertArtifactReviewPolicy } from "./artifact-review-ops";
 import { taskRestrictionCondition } from "./credential-policy";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
@@ -134,6 +135,7 @@ export function create(
     input.tags !== undefined ? (TagsSchema.parse(input.tags) as string[]) : [];
 
   return db.transaction((tx) => {
+    assertArtifactReviewPolicy(tx, input.id, input.type, input.data.status);
     try {
       tx.insert(schema.entities)
         .values({
@@ -505,6 +507,8 @@ export function update(
       // Merge data: spread existing + new fields (passthrough preservation)
       const existingData = JSON.parse(existing.data) as Record<string, unknown>;
       const mergedData = { ...existingData, ...data };
+      if (mergedData.status !== existingData.status)
+        assertArtifactReviewPolicy(tx, id, existing.type, mergedData.status);
 
       tx.update(schema.entities)
         .set({

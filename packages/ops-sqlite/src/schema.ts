@@ -1,3 +1,4 @@
+import type { ArtifactProvenance } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -70,6 +71,12 @@ export const artifactPointers = sqliteTable(
     lineage_id: text("lineage_id"),
     revision: integer("revision"),
     restored_from: text("restored_from"),
+    provenance: text("provenance", {
+      mode: "json",
+    }).$type<ArtifactProvenance>(),
+    revision_creation: text("revision_creation", {
+      mode: "json",
+    }).$type<ArtifactProvenance>(),
   },
   (table) => [
     index("idx_artifacts_produced").on(table.resource),
@@ -652,5 +659,26 @@ export const handoffReferences = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.handoff_id, table.resource] }),
     index("idx_handoff_resource").on(table.resource),
+  ],
+);
+
+export const artifactReviews = sqliteTable(
+  "artifact_reviews",
+  {
+    artifact_key: text("artifact_key").notNull(),
+    review_revision: integer("review_revision").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    created_at: integer("created_at").notNull(),
+    decision: text("decision", {
+      enum: ["trusted", "rejected", "superseded", "revoked"],
+    }).notNull(),
+    reason: text("reason"),
+    operation_id: text("operation_id").notNull(),
+    request_json: text("request_json").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.artifact_key, table.review_revision] }),
+    uniqueIndex("idx_artifact_reviews_operation").on(table.operation_id),
   ],
 );

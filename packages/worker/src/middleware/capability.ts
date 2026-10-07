@@ -83,7 +83,7 @@ export function routeCapability(
     ["GET", /^\/artifacts(?:\/.*)?$/, "artifacts:read"],
     [
       "POST",
-      /^\/artifacts(?:\/text|\/relationship|\/~\/restore\/.+)?$/,
+      /^\/artifacts(?:\/text|\/relationship|\/~\/(?:restore|reviews)\/.+)?$/,
       "artifacts:write",
     ],
     ["DELETE", /^\/artifacts\/.+$/, "artifacts:delete"],

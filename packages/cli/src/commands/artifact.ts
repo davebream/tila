@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
+import { ArtifactReviewRequestSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
 import {
@@ -46,6 +47,76 @@ function versionOptions(args: Record<string, unknown>) {
 export default defineCommand({
   meta: { name: "artifact", description: "Manage artifacts" },
   subCommands: {
+    review: defineCommand({
+      meta: {
+        name: "review",
+        description:
+          "Record an explicit artifact review (a hash does not establish trust)",
+      },
+      args: {
+        key: { type: "positional", required: true },
+        decision: {
+          type: "string",
+          required: true,
+          description: "trusted, rejected, superseded, or revoked",
+        },
+        "expected-review-revision": {
+          type: "string",
+          required: true,
+          description: "Current review revision (0 before the first review)",
+        },
+        reason: { type: "string" },
+        "idempotency-key": versionArgs["idempotency-key"],
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.review)
+            throw new Error("Artifact review is unavailable in this backend");
+          const request = ArtifactReviewRequestSchema.parse({
+            decision: args.decision,
+            expected_review_revision: Number(args["expected-review-revision"]),
+            reason: args.reason,
+          });
+          printJson(
+            await artifact.review(args.key, {
+              ...request,
+              idempotencyKey: args["idempotency-key"],
+            }),
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
+    reviews: defineCommand({
+      meta: { name: "reviews", description: "Read artifact review history" },
+      args: {
+        key: { type: "positional", required: true },
+        limit: { type: "string" },
+        "before-revision": { type: "string" },
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.reviews)
+            throw new Error("Artifact reviews are unavailable in this backend");
+          printJson(
+            await artifact.reviews(args.key, {
+              limit: args.limit === undefined ? undefined : Number(args.limit),
+              before_revision:
+                args["before-revision"] === undefined
+                  ? undefined
+                  : Number(args["before-revision"]),
+            }),
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
     history: defineCommand({
       meta: { name: "history", description: "List artifact revisions" },
       args: {
@@ -243,6 +314,12 @@ export default defineCommand({
           process.exit(1);
         }
 
+        if (ctx.artifact.meta)
+          console.error(
+            JSON.stringify({
+              artifact_metadata: (await ctx.artifact.meta(key)).pointer,
+            }),
+          );
         const buffer = Buffer.from(
           await new Response(result.body).arrayBuffer(),
         );
@@ -323,7 +400,7 @@ export default defineCommand({
         });
 
         if (args.json) {
-          printJson({ ok: true, key: result.key, bytes: result.bytes });
+          printJson({ ok: true, ...result });
           return;
         }
         console.log(`Written artifact: ${result.key} (${result.bytes} bytes)`);
@@ -358,10 +435,19 @@ export default defineCommand({
           printJson({
             key,
             content: result.content,
+            pointer: result.pointer,
             mime_type: result.mimeType,
           });
           return;
         }
+        console.error(
+          JSON.stringify({
+            artifact_metadata: result.pointer ?? {
+              provenance: null,
+              review: { state: "unreviewed" },
+            },
+          }),
+        );
         process.stdout.write(result.content);
       },
     }),

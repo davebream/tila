@@ -92,7 +92,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({
       digest,
       journal,
-      migrationVersion: 24,
+      migrationVersion: 29,
       tables: projectTransferOps.PROJECT_BACKUP_TABLES,
     });
   });
@@ -160,6 +160,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       sessionId: string;
       journalNextSequence: number;
       semanticDigest: string;
+      migrationVersion?: number;
     }>();
     const state = projectTransferOps.getTransferState(sql);
     if (
@@ -175,7 +176,10 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       );
     }
     projectTransferOps.finalizeSnapshotRestore(sql, body.journalNextSequence);
-    const actual = await projectTransferOps.semanticDigest(sql);
+    const actual = await projectTransferOps.semanticDigest(
+      sql,
+      body.migrationVersion ?? 29,
+    );
     if (actual !== body.semanticDigest) {
       return jsonError(
         c,

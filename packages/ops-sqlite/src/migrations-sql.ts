@@ -1,3 +1,4 @@
+import { ArtifactCommitRecordSchema, artifactRevisionKey } from "@tila/schemas";
 /**
  * Bootstrap migration: creates the _migrations tracking table.
  * Uses CREATE TABLE IF NOT EXISTS so it is safe to run on every cold start
@@ -1078,6 +1079,110 @@ export function runMigration0028(storage: MigrationStorage): void {
   ]);
 }
 
+export function runMigration0029(storage: MigrationStorage): void {
+  const columns = new Set(
+    (
+      storage.sql.exec("PRAGMA table_info(artifact_pointers)").toArray() as {
+        name: string;
+      }[]
+    ).map((c) => c.name),
+  );
+  for (const column of ["provenance", "revision_creation"]) {
+    if (!columns.has(column))
+      storage.sql.exec(
+        `ALTER TABLE artifact_pointers ADD COLUMN ${column} TEXT`,
+      );
+  }
+  // Only a published, non-deduplicated commit identifies this revision's creator.
+  // Never guess a principal from a display name or the actor of a deduplicated put.
+  for (const row of storage.sql
+    .exec(
+      "SELECT record FROM artifact_revision_operations WHERE state = 'published'",
+    )
+    .toArray() as { record: string }[]) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(row.record);
+    } catch {
+      continue;
+    }
+    const parsed = ArtifactCommitRecordSchema.safeParse(raw);
+    if (
+      !parsed.success ||
+      parsed.data.deduplicated ||
+      !parsed.data.origin.principalId ||
+      !parsed.data.origin.participantId
+    )
+      continue;
+    const record = parsed.data;
+    const p = record.pointer;
+    if (
+      p.r2_key !==
+      artifactRevisionKey(
+        record.project_id,
+        p.lineage_id,
+        p.revision,
+        p.sha256,
+        p.mime_type,
+      )
+    )
+      continue;
+    const creator = {
+      principal_id: record.origin.principalId,
+      participant_id: record.origin.participantId,
+      created_at: p.produced_at,
+      environment: record.origin.environment,
+      client_name:
+        record.origin.environment.client_name ?? record.origin.source ?? null,
+      client_version:
+        record.origin.environment.client_version ??
+        record.origin.sourceVersion ??
+        null,
+    };
+    const provenance =
+      p.provenance === undefined
+        ? p.restored_from
+          ? null
+          : creator
+        : p.provenance;
+    storage.sql.exec(
+      "UPDATE artifact_pointers SET provenance = ?, revision_creation = ? WHERE r2_key = ? AND provenance IS NULL AND revision_creation IS NULL",
+      provenance === null ? null : JSON.stringify(provenance),
+      JSON.stringify(p.revision_creation ?? creator),
+      p.r2_key,
+    );
+  }
+  storage.sql.exec(`
+    UPDATE artifact_revisions SET metadata = json_set(metadata,
+      '$.provenance', json((SELECT provenance FROM artifact_pointers WHERE r2_key = artifact_revisions.r2_key)),
+      '$.revision_creation', json((SELECT revision_creation FROM artifact_pointers WHERE r2_key = artifact_revisions.r2_key)))
+      WHERE EXISTS (SELECT 1 FROM artifact_pointers WHERE r2_key = artifact_revisions.r2_key AND revision_creation IS NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS artifact_revision_provenance_immutable BEFORE UPDATE OF metadata ON artifact_revisions
+      WHEN json_extract(NEW.metadata, '$.provenance') IS NOT json_extract(OLD.metadata, '$.provenance')
+        OR json_extract(NEW.metadata, '$.revision_creation') IS NOT json_extract(OLD.metadata, '$.revision_creation')
+      BEGIN SELECT RAISE(ABORT, 'artifact-provenance-immutable'); END;
+    CREATE TABLE IF NOT EXISTS artifact_reviews (
+      artifact_key TEXT NOT NULL,
+      review_revision INTEGER NOT NULL CHECK(review_revision > 0),
+      principal_id TEXT NOT NULL, participant_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      decision TEXT NOT NULL CHECK(decision IN ('trusted','rejected','superseded','revoked')),
+      reason TEXT, operation_id TEXT NOT NULL, request_json TEXT NOT NULL,
+      PRIMARY KEY(artifact_key, review_revision)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_reviews_operation ON artifact_reviews(operation_id);
+    CREATE TRIGGER IF NOT EXISTS artifact_provenance_immutable BEFORE UPDATE OF provenance, revision_creation ON artifact_pointers
+      WHEN NEW.provenance IS NOT OLD.provenance OR NEW.revision_creation IS NOT OLD.revision_creation
+      BEGIN SELECT RAISE(ABORT, 'artifact-provenance-immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS artifact_reviews_immutable BEFORE UPDATE ON artifact_reviews
+      BEGIN SELECT RAISE(ABORT, 'artifact-review-immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS artifact_reviews_no_delete BEFORE DELETE ON artifact_reviews
+      WHEN (EXISTS (SELECT 1 FROM artifact_pointers WHERE r2_key = OLD.artifact_key) OR EXISTS (SELECT 1 FROM artifact_revisions WHERE r2_key = OLD.artifact_key)) AND NOT EXISTS (SELECT 1 FROM _project_transfer_state WHERE singleton = 1 AND applying = 1)
+      BEGIN SELECT RAISE(ABORT, 'artifact-review-immutable'); END;
+  `);
+  installTransferGuards(storage, ["artifact_reviews"]);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1107,4 +1212,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 26, run: runMigration0026 },
   { version: 27, run: runMigration0027 },
   { version: 28, run: runMigration0028 },
+  { version: 29, run: runMigration0029 },
 ];

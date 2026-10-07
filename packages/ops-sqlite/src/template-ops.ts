@@ -2,6 +2,7 @@ import { type CredentialPolicy, permitsTask } from "@tila/schemas";
 import type { TemplateDefinition, TilaSchemaToml } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { assertArtifactReviewPolicy } from "./artifact-review-ops";
 import {
   checkEntityTypeDeclared,
   resolveCurrentSchema,
@@ -226,6 +227,7 @@ export function instantiateTemplate(
         entity.data as Record<string, unknown>,
         vars,
       );
+      assertArtifactReviewPolicy(tx, entityId, entity.type, data.status);
       tx.insert(schema.entities)
         .values({
           id: entityId,

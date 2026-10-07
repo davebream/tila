@@ -1,6 +1,10 @@
 import type {
   ArtifactDeleteOptions,
   ArtifactDestroyResponse,
+  ArtifactReviewRequest,
+  ArtifactReviewResponse,
+  ArtifactReviewsQuery,
+  ArtifactReviewsResponse,
 } from "@tila/schemas";
 import type {
   ArtifactHistoryQuery,
@@ -59,6 +63,29 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
           idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
         },
       );
+    },
+    reviews(
+      key: string,
+      query: ArtifactReviewsQuery = {},
+    ): Promise<ArtifactReviewsResponse> {
+      return client.get(`${base}/~/reviews/${encodeURIComponent(key)}`, {
+        query: {
+          limit: query.limit === undefined ? undefined : String(query.limit),
+          before_revision:
+            query.before_revision === undefined
+              ? undefined
+              : String(query.before_revision),
+        },
+      });
+    },
+    review(
+      key: string,
+      input: ArtifactReviewRequest & { idempotencyKey?: string },
+    ): Promise<ArtifactReviewResponse> {
+      const { idempotencyKey, ...body } = input;
+      return client.post(`${base}/~/reviews/${encodeURIComponent(key)}`, body, {
+        idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
+      });
     },
     history(
       key: string,
@@ -308,9 +335,11 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
       });
     },
 
-    async readText(
-      key: string,
-    ): Promise<{ content: string; mimeType: string }> {
+    async readText(key: string): Promise<{
+      content: string;
+      mimeType: string;
+      pointer?: import("@tila/schemas").ArtifactRevision;
+    }> {
       const res = await client.requestRaw(
         "GET",
         `${base}/${encodeURIComponent(key)}`,
@@ -323,7 +352,10 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         );
       }
       const text = await res.text();
-      return { content: text, mimeType: contentType };
+      const meta = await client.get<ArtifactMetaResponse>(
+        `${base}/${encodeURIComponent(key)}/meta`,
+      );
+      return { content: text, mimeType: contentType, pointer: meta.pointer };
     },
   };
 }

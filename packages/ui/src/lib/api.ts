@@ -1,4 +1,9 @@
 import type {
+  ArtifactMetaResponse,
+  ArtifactReviewSummary,
+  ArtifactReviewsResponse,
+} from "@tila/schemas";
+import type {
   ArtifactSearchResponse,
   EntityArtifactReferenceListResponse,
   EntityDetailResponse,
@@ -242,6 +247,7 @@ export async function listTaskArtifactRefs(
 export type ArtifactListResponse = {
   ok: true;
   artifacts: Array<{
+    review?: ArtifactReviewSummary;
     r2_key: string;
     resource: string | null;
     kind: string;
@@ -454,4 +460,24 @@ export async function getArtifactBlob(
     throw new ApiError(`http-${response.status}`, `HTTP ${response.status}`);
   }
   return response;
+}
+
+export function getArtifactMeta(
+  projectId: string,
+  key: string,
+): Promise<ArtifactMetaResponse> {
+  return request(projectId, `/artifacts/${encodeURIComponent(key)}/meta`);
+}
+export function getArtifactReviews(
+  projectId: string,
+  key: string,
+  beforeRevision?: number,
+): Promise<ArtifactReviewsResponse> {
+  return request(
+    projectId,
+    `/artifacts/~/reviews/${encodeURIComponent(key)}`,
+    beforeRevision === undefined
+      ? undefined
+      : { before_revision: String(beforeRevision) },
+  );
 }

@@ -1,4 +1,8 @@
-import { artifactLifecycleOps } from "@tila/ops-sqlite";
+import {
+  artifactLifecycleOps,
+  artifactReviewOps,
+  artifactVersionOps,
+} from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   artifactOps,
@@ -106,7 +110,11 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       autoSupersedes,
       body.tags,
     );
-    return jsonOkRows(c, {}, 1);
+    return jsonOkRows(
+      c,
+      { pointer: artifactVersionOps.getArtifactMeta(db, body.r2_key) },
+      1,
+    );
   });
 
   app.get("/artifact/pointer-meta", (c) => {
@@ -145,6 +153,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
         r2_key: row.r2_key,
         mime_type: row.mime_type,
         content_inline: row.content_inline,
+        ...artifactReviewOps.artifactTrustByKeys(db, [key]).get(key),
       },
     });
   });

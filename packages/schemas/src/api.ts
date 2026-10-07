@@ -3,6 +3,8 @@ import {
   ArtifactSearchResultSchema,
   EntitySearchResultSchema,
 } from "./artifact";
+import { ArtifactTrustFieldsSchema } from "./artifact-review";
+import { ArtifactRevisionSchema } from "./artifact-version";
 import { CredentialPolicySchema } from "./capability";
 import { ClaimModeSchema } from "./claim";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
@@ -757,7 +759,7 @@ export type AddEntityArtifactReferenceRequest = z.infer<
 export const EntityArtifactReferenceListResponseSchema = z.object({
   ok: z.literal(true),
   references: z.array(
-    z.object({
+    ArtifactTrustFieldsSchema.extend({
       entity_id: z.string(),
       artifact_key: z.string(),
       slot: z.string(),
@@ -885,7 +887,7 @@ export const ArtifactGrepLineSchema = z.object({
   col: z.number().int(), // 1-based column of first match in the line
 });
 
-export const ArtifactGrepResultSchema = z.object({
+export const ArtifactGrepResultSchema = ArtifactTrustFieldsSchema.extend({
   key: z.string(),
   kind: z.string(),
   resource: z.string().nullable(),
@@ -981,6 +983,7 @@ export type ArtifactTextWriteRequest = z.infer<
 >;
 
 export const ArtifactPutResponseSchema = z.object({
+  pointer: ArtifactRevisionSchema.optional(),
   ok: z.literal(true),
   key: z.string(),
   bytes: z.number(),
