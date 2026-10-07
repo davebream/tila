@@ -33,10 +33,19 @@ async function publish(deps: RouterDeps, id: string) {
   if (!deps.artifacts) throw new Error("Artifact bucket unavailable");
   const record = versions.revisionRecord(op);
   const key = artifactCommitKey(record.pointer);
-  const result = await deps.artifacts.put(key, JSON.stringify(record), {
-    onlyIf: { etagDoesNotMatch: "*" },
-    httpMetadata: { contentType: "application/json" },
-  });
+  const result = await deps.artifacts
+    .put(key, JSON.stringify(record), {
+      onlyIf: { etagDoesNotMatch: "*" },
+      httpMetadata: { contentType: "application/json" },
+    })
+    .catch(() => {
+      throw new versions.ArtifactVersionError(
+        503,
+        "artifact-storage-unavailable",
+        "Commit record publication failed; retry with the same idempotency key",
+        true,
+      );
+    });
   if (!result) {
     const existing = await deps.artifacts.get(key);
     if (
