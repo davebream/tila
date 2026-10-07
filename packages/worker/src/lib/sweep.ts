@@ -359,6 +359,7 @@ async function sweepProject(args: {
 
   // --- 1. Expired-artifact drain loop ---
   let runBudgetHit = false;
+  const deletionErrorsBefore = summary.r2DeleteErrors;
   try {
     const drained = await drainExpiredArtifacts({
       projectId,
@@ -384,8 +385,9 @@ async function sweepProject(args: {
     }
     // The per-project iteration clamp marks ONLY this project degraded; it does
     // NOT set a resume point, so sibling projects still run.
-    if (drained.clampHit) {
+    if (drained.clampHit || summary.r2DeleteErrors > deletionErrorsBefore) {
       status.sweep = "error";
+      status.status = "degraded";
     }
   } catch (err) {
     console.error(
@@ -526,8 +528,12 @@ async function drainExpiredArtifacts(args: {
       // sweepExpiredKey's single side-effecting contract intact — do not replace
       // it with a return value without also updating that function and its tests.
       const before = summary.artifactsExpired;
-      await sweepExpiredKey(key, doStub, (k) => r2.delete(k), summary);
-      budget.subrequests += SWEEP_SUBREQUESTS_PER_KEY;
+      budget.subrequests += await sweepExpiredKey(
+        key,
+        doStub,
+        (k) => r2.delete(k),
+        summary,
+      );
       if (summary.artifactsExpired > before) expiredThisProject++;
     }
 

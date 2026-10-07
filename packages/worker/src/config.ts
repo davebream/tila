@@ -67,7 +67,7 @@ export const MAX_DEBOUNCE_MAP_SIZE = 2000;
  * Kept modest (well under the DO clamp ceiling) so a single drain round can
  * never itself approach the Workers subrequest cap: each key costs
  * SWEEP_SUBREQUESTS_PER_KEY subrequests, so one round is at most
- * page * SWEEP_SUBREQUESTS_PER_KEY (150 * 3 = 450) — leaving the
+ * page * SWEEP_SUBREQUESTS_PER_KEY (150 * 4 = 600) — leaving the
  * per-invocation bound (SWEEP_SUBREQUEST_BUDGET) as the real limiter.
  */
 export const SWEEP_DRAIN_PAGE_SIZE = 150;
@@ -89,15 +89,16 @@ export const ARTIFACT_REPAIR_SCAN_LIMIT = 100;
 export const SWEEP_TIME_BUDGET_MS = 25_000;
 
 /**
- * Subrequests consumed per expired artifact key during the drain:
+ * Maximum subrequests reserved per expired artifact key during the drain:
  *   1. POST /artifact/tombstone   (DO fetch)
  *   2. r2.delete                  (R2 binding call)
- *   3. POST /artifact/confirm-blob-deleted (DO fetch)
- * A failed delete adds a retry, so this is the nominal (not worst-case) cost;
- * the budget ceiling below carries headroom to absorb retries and per-project
- * overhead (/sweep, /journal/archive, /search-drift, reconcile).
+ *   3. Optional r2.delete retry   (R2 binding call)
+ *   4. POST /artifact/confirm-blob-deleted (DO fetch)
+ * Reserve the worst case before starting a key, then charge actual requests.
+ * Per-project overhead (/sweep, /journal/archive, /search-drift, reconcile)
+ * consumes the same shared budget.
  */
-export const SWEEP_SUBREQUESTS_PER_KEY = 3;
+export const SWEEP_SUBREQUESTS_PER_KEY = 4;
 
 /**
  * Per-Worker-invocation subrequest budget for the sweep — a DELIBERATE
