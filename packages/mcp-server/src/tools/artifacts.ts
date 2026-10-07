@@ -3,6 +3,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerArtifactTools(
   server: McpServer,
@@ -11,7 +12,8 @@ export function registerArtifactTools(
 ): void {
   const artifacts = facade.artifacts;
   const search = facade.search;
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_reviews",
     "Read explicit artifact review history. Hash integrity does not establish trust.",
     {
@@ -34,7 +36,8 @@ export function registerArtifactTools(
       }
     },
   );
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_review",
     "Explicitly trust, reject, supersede, or revoke an artifact review. Any project writer may review. Does not evaluate content automatically.",
     {
@@ -65,7 +68,8 @@ export function registerArtifactTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_history",
     "List artifact revision metadata, newest first. Does not read blob contents or restore revisions.",
     {
@@ -85,7 +89,8 @@ export function registerArtifactTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_put",
     "Upload an artifact (file content) to the project. Content must be base64-encoded. Returns the artifact key, byte count, and deduplication status.",
     {
@@ -135,7 +140,8 @@ export function registerArtifactTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_search",
     "Full-text search restricted to artifacts, with optional `kind` and associated-task (`resource`) filters. Prefer `tila_search` for general discovery; use this only when you know the target is an artifact and need an artifact-specific filter.",
     {
@@ -176,7 +182,8 @@ export function registerArtifactTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_write_text",
     "Write text content directly as an artifact. Use for markdown, plain text, JSON, YAML, or any text content. No file or base64 encoding required. Returns the artifact key, byte count, and deduplication status.",
     {
@@ -222,7 +229,8 @@ export function registerArtifactTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_read_text",
     "Read the text content of an artifact by key. Only works for text/* MIME types (markdown, plain text, JSON, YAML). Returns up to max_chars characters (default 10000); larger artifacts are truncated with a marker. Pass a higher max_chars to read more.",
     {
@@ -287,7 +295,8 @@ export function registerArtifactTools(
   );
 
   // Unified search across tasks and artifacts
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_search",
     "Unified full-text search across tasks and artifacts. Use this for general discovery when you don't know whether the match is a task or an artifact. Each result is tagged by type — `entity` (a task) or `artifact`.",
     {
@@ -321,7 +330,8 @@ export function registerArtifactTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_get_latest",
     "Get the latest (most recent) artifact of a given kind for a resource. Follows supersedes chains when available, falls back to produced_at ordering. Returns null if no artifact exists.",
     {
@@ -346,7 +356,8 @@ export function registerArtifactTools(
   );
 
   // Artifact relationship tools
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_relationships_add",
     "Add a relationship between artifacts. Requires at least one of to_key or to_uri.",
     {
@@ -384,7 +395,8 @@ export function registerArtifactTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_relationships_list",
     "List all relationships for an artifact.",
     {
@@ -403,7 +415,8 @@ export function registerArtifactTools(
   );
 
   // Content grep tool
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_artifact_grep",
     "Exact substring / bounded-regex line-level matching over raw artifact bytes, returning {line,text,col} per match (col is a character offset, ASCII-accurate). Returns up to max_matches lines (default 200) across all matched artifacts; when capped the response sets matches_truncated:true and matches_total:n. Use this for precise content checks (does an artifact contain X? does a patch contain a forbidden token?). For ranked discovery use tila_search / tila_artifact_search.",
     {

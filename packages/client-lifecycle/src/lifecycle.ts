@@ -89,7 +89,7 @@ export function reentryContext(
       text: JSON.stringify({
         participant_id: participantId,
         degraded:
-          "Re-entry context exceeds hook budget. Use tila_reentry to recover context; cursor was not advanced.",
+          "Re-entry context exceeds hook budget. Use the configured MCP re-entry operation to recover context; cursor was not advanced.",
       }),
       seq: cursor,
     };

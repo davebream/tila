@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerPresenceTools(
   server: McpServer,
@@ -10,7 +11,8 @@ export function registerPresenceTools(
 ): void {
   const presence = facade.presence;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_presence_heartbeat",
     "Record a heartbeat for this MCP server participant. Call periodically (e.g. every 60s) to maintain presence visibility.",
     {

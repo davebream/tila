@@ -12,6 +12,7 @@ import { registerSchemaTools } from "./schema";
 import { registerSignalTools } from "./signals";
 import { registerSummaryTool } from "./summary";
 import { registerTemplateTools } from "./templates";
+import { registerWorkflowTools } from "./workflow";
 
 export type RegisterFn = (
   server: McpServer,
@@ -24,6 +25,7 @@ export type RegisterFn = (
  * Each group name maps to the corresponding registration function.
  */
 export const GROUP_MAP: Record<string, RegisterFn> = {
+  workflow: registerWorkflowTools,
   tasks: registerEntityTools,
   claims: registerClaimTools,
   gates: registerGateTools,
@@ -53,11 +55,11 @@ const CORE_GROUPS = [
   "continuity",
 ] as const;
 
-const VALID_GROUPS = [...Object.keys(GROUP_MAP), "core"] as const;
+const VALID_GROUPS = [...Object.keys(GROUP_MAP), "core", "all"] as const;
 
 /**
  * Parse the TILA_MCP_TOOLS env var into a list of group names.
- * Returns undefined when unset or empty (meaning: all groups).
+ * Returns undefined when unset or empty (meaning: workflow).
  */
 export function parseToolGroups(env?: string): string[] | undefined {
   if (!env || env.trim() === "") return undefined;
@@ -75,7 +77,13 @@ export function parseToolGroups(env?: string): string[] | undefined {
 export function resolveGroups(groups: string[]): RegisterFn[] {
   const expanded: string[] = [];
   for (const g of groups) {
-    if (g === "core") {
+    if (g === "all") {
+      for (const name of Object.keys(GROUP_MAP).filter(
+        (name) => name !== "workflow",
+      )) {
+        if (!expanded.includes(name)) expanded.push(name);
+      }
+    } else if (g === "core") {
       for (const name of CORE_GROUPS) {
         if (!expanded.includes(name)) expanded.push(name);
       }
@@ -103,4 +111,10 @@ export function resolveGroups(groups: string[]): RegisterFn[] {
     }
   }
   return result;
+}
+
+export function hasWorkflowTools(): boolean {
+  return resolveGroups(
+    parseToolGroups(process.env.TILA_MCP_TOOLS) ?? ["workflow"],
+  ).includes(registerWorkflowTools);
 }

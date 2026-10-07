@@ -5,6 +5,7 @@ import { LifecycleClientSchema, type LifecycleState } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import type { McpServerConfig } from "./config";
 import { buildFacade } from "./facade";
+import { toolFailure } from "./tool-registration";
 
 /** Lazy method forwarding also covers tool modules which capture facade.claims at registration. */
 export function scopedFacade(
@@ -47,12 +48,15 @@ export function lifecycleTools(
   ]);
   const store = new SessionStore();
   const storage = new AsyncLocalStorage<TilaFacade>();
-  const realTool = server.tool.bind(server) as (...args: unknown[]) => unknown;
+  const realTool = server.tool?.bind(server) as (...args: unknown[]) => unknown;
+  const realRegister = server.registerTool.bind(server) as (
+    ...args: unknown[]
+  ) => unknown;
   return {
     facade: scopedFacade(storage, fallback),
     server: new Proxy(server, {
       get(target, prop, receiver) {
-        if (prop !== "tool") {
+        if (prop !== "tool" && prop !== "registerTool") {
           const value = Reflect.get(target, prop, receiver);
           return typeof value === "function" ? value.bind(target) : value;
         }
@@ -103,7 +107,17 @@ export function lifecycleTools(
               facade.close();
             }
           };
-          return realTool(...registration.slice(0, -1), wrapped);
+          const register = prop === "registerTool" ? realRegister : realTool;
+          return register(
+            ...registration.slice(0, -1),
+            async (...args: unknown[]) => {
+              try {
+                return await wrapped(...args);
+              } catch (error) {
+                return toolFailure(error);
+              }
+            },
+          );
         };
       },
     }),
