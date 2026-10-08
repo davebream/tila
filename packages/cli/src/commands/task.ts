@@ -4,10 +4,13 @@ import { TILA_ERRORS, TilaApiError } from "tila-sdk";
 import { resolveContext } from "../context";
 import { parseFieldArg } from "../lib/field-validator";
 import {
+  diagnostic,
+  exit,
   failWithCliError,
   formatStatus,
   formatTimestamp,
   jsonArg,
+  outputText,
   printJson,
   printJsonError,
   renderTable,
@@ -87,8 +90,8 @@ const relationshipCommand = defineCommand({
           if (args.json) {
             printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
           } else {
-            console.error(msg);
-            process.exit(1);
+            diagnostic(msg);
+            exit(1);
           }
           return;
         }
@@ -115,9 +118,9 @@ const relationshipCommand = defineCommand({
 
         const verb = relationshipVerb(resolvedType);
         if (result.created) {
-          console.log(`Added: ${from} ${verb} ${to}`);
+          outputText(`Added: ${from} ${verb} ${to}`);
         } else {
-          console.log(`Already linked: ${from} ${verb} ${to}`);
+          outputText(`Already linked: ${from} ${verb} ${to}`);
         }
       },
     }),
@@ -152,8 +155,8 @@ const relationshipCommand = defineCommand({
             if (args.json) {
               printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
             } else {
-              console.error(msg);
-              process.exit(1);
+              diagnostic(msg);
+              exit(1);
             }
             return;
           }
@@ -183,7 +186,7 @@ const relationshipCommand = defineCommand({
         }
 
         if (relationships.length === 0) {
-          console.log("No relationships found.");
+          outputText("No relationships found.");
           return;
         }
 
@@ -235,8 +238,8 @@ const relationshipCommand = defineCommand({
           if (args.json) {
             printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
           } else {
-            console.error(msg);
-            process.exit(1);
+            diagnostic(msg);
+            exit(1);
           }
           return;
         }
@@ -263,9 +266,9 @@ const relationshipCommand = defineCommand({
 
         const verb = relationshipVerb(resolvedType);
         if (result.removed) {
-          console.log(`Removed: ${from} ${verb} ${to}`);
+          outputText(`Removed: ${from} ${verb} ${to}`);
         } else {
-          console.log(`Not found: ${from} ${verb} ${to}`);
+          outputText(`Not found: ${from} ${verb} ${to}`);
         }
       },
     }),
@@ -306,8 +309,8 @@ export default defineCommand({
               TILA_ERRORS.VALIDATION_ERROR,
             );
           } else {
-            console.error("--link-parent requires --parent");
-            process.exit(1);
+            diagnostic("--link-parent requires --parent");
+            exit(1);
           }
           return;
         }
@@ -321,8 +324,8 @@ export default defineCommand({
           if (args.json) {
             printJsonError(msg, TILA_ERRORS.VALIDATION_ERROR);
           } else {
-            console.error(msg);
-            process.exit(1);
+            diagnostic(msg);
+            exit(1);
           }
           return;
         }
@@ -353,8 +356,8 @@ export default defineCommand({
             if (args.json) {
               printJsonError(msg, "already-exists");
             } else {
-              console.error(msg);
-              process.exit(1);
+              diagnostic(msg);
+              exit(1);
             }
             return;
           }
@@ -379,7 +382,7 @@ export default defineCommand({
                 linked: true,
               });
             } else {
-              console.log(`Created task ${result.id}: ${args.title}`);
+              outputText(`Created task ${result.id}: ${args.title}`);
             }
           } catch (linkErr) {
             const reason =
@@ -390,21 +393,19 @@ export default defineCommand({
             if (args.json) {
               const errCode =
                 linkErr instanceof TilaApiError ? linkErr.code : "LINK_FAILED";
-              process.stderr.write(
-                `${JSON.stringify({
-                  ok: false,
+              printJsonError(partialMsg, errCode, undefined, 1, {
+                partial_result: {
                   id: result.id,
                   type: taskType,
-                  title: args.title as string,
-                  parent: args.parent as string,
+                  title: args.title,
+                  parent: args.parent,
                   linked: false,
-                  error: { code: errCode, message: reason },
-                })}\n`,
-              );
+                },
+              });
             } else {
-              console.error(partialMsg);
+              diagnostic(partialMsg);
             }
-            process.exit(1);
+            exit(1);
           }
           return;
         }
@@ -420,12 +421,22 @@ export default defineCommand({
           printJson(payload);
           return;
         }
-        console.log(`Created task ${result.id}: ${args.title}`);
+        outputText(`Created task ${result.id}: ${args.title}`);
       },
     }),
     list: defineCommand({
       meta: { name: "list", description: "List tasks" },
       args: {
+        limit: {
+          type: "string",
+          default: "100",
+          description: "Maximum results",
+        },
+        offset: {
+          type: "string",
+          default: "0",
+          description: "Skip this many results",
+        },
         status: { type: "string", description: "Filter by status" },
         parent: { type: "string", description: "Filter by parent" },
         compact: {
@@ -456,6 +467,8 @@ export default defineCommand({
             async () =>
               Promise.all([
                 entity.list({
+                  limit: Number(args.limit ?? 100),
+                  offset: Number(args.offset ?? 0),
                   type: "task",
                   dataFilter: {
                     ...(args.status ? { status: args.status as string } : {}),
@@ -468,7 +481,7 @@ export default defineCommand({
               ]),
           );
           const claimByResource = new Map(
-            claims.map((c) => [c.resource, `${c.machine}/${c.user}`]),
+            claims.map((c) => [c.resource, c.participant_id]),
           );
           const entities = tasks.map((e) => {
             const data = e.data as Record<string, unknown>;
@@ -481,11 +494,15 @@ export default defineCommand({
             };
           });
           if (args.json) {
-            printJson({ entities, count: entities.length });
+            printJson({
+              entities,
+              count: entities.length,
+              offset: Number(args.offset ?? 0),
+            });
             return;
           }
           if (entities.length === 0) {
-            console.log("No tasks found.");
+            outputText("No tasks found.");
             return;
           }
           renderTable(
@@ -513,6 +530,8 @@ export default defineCommand({
         const { entity } = await resolveContext();
         const result = await withSpinner("Fetching tasks...", () =>
           entity.list({
+            limit: Number(args.limit ?? 100),
+            offset: Number(args.offset ?? 0),
             type: "task",
             dataFilter: {
               ...(args.status ? { status: args.status as string } : {}),
@@ -524,6 +543,7 @@ export default defineCommand({
           printJson({
             entities: result,
             count: result.length,
+            offset: Number(args.offset ?? 0),
             filters: {
               ...(args.status ? { status: args.status } : {}),
               ...(args.parent ? { parent: args.parent } : {}),
@@ -532,7 +552,7 @@ export default defineCommand({
           return;
         }
         if (result.length === 0) {
-          console.log("No tasks found.");
+          outputText("No tasks found.");
           return;
         }
         renderTable(
@@ -588,7 +608,7 @@ export default defineCommand({
           return;
         }
         if (entities.length === 0) {
-          console.log("No ready tasks found.");
+          outputText("No ready tasks found.");
           return;
         }
         renderTable(
@@ -621,8 +641,8 @@ export default defineCommand({
           if (args.json) {
             printJsonError("Task not found", "NOT_FOUND");
           }
-          console.error(`Task ${args.id} not found.`);
-          process.exit(1);
+          diagnostic(`Task ${args.id} not found.`);
+          exit(1);
         }
         if (args.json) {
           printJson(result);
@@ -688,7 +708,7 @@ export default defineCommand({
             printJson({ ok: true, entity: updated });
             return;
           }
-          console.log(`Updated task ${updated.id}`);
+          outputText(`Updated task ${updated.id}`);
         } catch (err) {
           failWithCliError(err, Boolean(args.json));
         }
@@ -719,7 +739,7 @@ export default defineCommand({
           });
           return;
         }
-        console.log(`Closed task ${result.id} with outcome: ${args.outcome}`);
+        outputText(`Closed task ${result.id} with outcome: ${args.outcome}`);
       },
     }),
     archive: defineCommand({
@@ -735,7 +755,7 @@ export default defineCommand({
           printJson({ ok: true, id: args.id as string });
           return;
         }
-        console.log(`Archived task ${args.id}`);
+        outputText(`Archived task ${args.id}`);
       },
     }),
     claim: defineCommand({
@@ -746,12 +766,10 @@ export default defineCommand({
         ...jsonArg,
       },
       async run({ args }) {
-        const { coordination, machine } = await resolveContext();
+        const { coordination } = await resolveContext();
         const ttlMs = Number(args.ttl) * 1000;
         const result = await coordination.acquire(
           `task:${args.id}`,
-          machine,
-          machine,
           "exclusive",
           ttlMs,
         );
@@ -761,11 +779,12 @@ export default defineCommand({
             acquired: true,
             fence: result.fence,
             expires_at: tsToIso(result.expires_at),
+            participant_id: result.participant_id,
           });
           return;
         }
-        console.log(
-          `Claimed task ${args.id}  fence=${result.fence}  expires=${new Date(result.expires_at).toISOString()}`,
+        outputText(
+          `Claimed task ${args.id}  fence=${result.fence}  participant=${result.participant_id}  expires=${new Date(result.expires_at).toISOString()}`,
         );
       },
     }),
@@ -782,11 +801,14 @@ export default defineCommand({
         ...jsonArg,
       },
       async run({ args }) {
-        const { coordination, machine } = await resolveContext();
+        const { coordination, participantIdExplicit } = await resolveContext();
+        if (!participantIdExplicit) {
+          throw new Error(
+            "Renew requires --participant-id or TILA_PARTICIPANT_ID from the acquiring session.",
+          );
+        }
         await coordination.renew(
           `task:${args.id}`,
-          machine,
-          machine,
           Number(args.fence),
           Number(args.ttl) * 1000,
         );
@@ -794,7 +816,7 @@ export default defineCommand({
           printJson({ ok: true });
           return;
         }
-        console.log(`Renewed claim on ${args.id}`);
+        outputText(`Renewed claim on ${args.id}`);
       },
     }),
     release: defineCommand({
@@ -809,13 +831,18 @@ export default defineCommand({
         ...jsonArg,
       },
       async run({ args }) {
-        const { coordination } = await resolveContext();
+        const { coordination, participantIdExplicit } = await resolveContext();
+        if (!participantIdExplicit) {
+          throw new Error(
+            "Release requires --participant-id or TILA_PARTICIPANT_ID from the acquiring session.",
+          );
+        }
         await coordination.release(`task:${args.id}`, Number(args.fence));
         if (args.json) {
           printJson({ ok: true });
           return;
         }
-        console.log(`Released claim on ${args.id}`);
+        outputText(`Released claim on ${args.id}`);
       },
     }),
     tree: defineCommand({
@@ -838,7 +865,7 @@ export default defineCommand({
           : nodes;
 
         if (filteredNodes.length === 0) {
-          console.log("No tasks found.");
+          outputText("No tasks found.");
           return;
         }
         if (args.json) {
@@ -940,7 +967,7 @@ export default defineCommand({
               printJson({ ok: true });
               return;
             }
-            console.log(
+            outputText(
               `Added artifact ref: ${args.entityId} -> ${args.artifactKey} (slot: ${args.slot})`,
             );
           },
@@ -975,11 +1002,11 @@ export default defineCommand({
             }
 
             if (references.length === 0) {
-              console.log("No artifact references found.");
+              outputText("No artifact references found.");
               return;
             }
             for (const ref of references) {
-              console.log(
+              outputText(
                 `${ref.slot}  ${ref.artifact_key}  ${new Date(ref.created_at).toISOString()}`,
               );
             }

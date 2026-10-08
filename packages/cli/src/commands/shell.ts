@@ -1,3 +1,5 @@
+import { eprintln, exit, jsonArg, requirePrompt } from "../lib/output";
+
 /**
  * `tila shell --instance <key>` — kubie-style per-shell pin (Task 8, WI-L).
  *
@@ -12,11 +14,11 @@
  */
 
 import { spawn } from "node:child_process";
-import type { InstanceKey } from "@tila/schemas";
+import { randomUUID } from "node:crypto";
+import { type InstanceKey, ParticipantIdSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { globalFlagArgs } from "../lib/global-flags";
 import { buildAuthStore } from "../lib/instance-context";
-import { eprintln, jsonArg } from "../lib/output";
 
 export default defineCommand({
   meta: {
@@ -31,6 +33,9 @@ export default defineCommand({
     ...globalFlagArgs,
   },
   async run({ args }) {
+    requirePrompt(
+      "tila shell requires an interactive terminal and does not support --json.",
+    );
     const key = args.instance as InstanceKey;
     const authStore = buildAuthStore();
 
@@ -40,12 +45,17 @@ export default defineCommand({
       eprintln(
         `Error: Unknown instance "${key}". Run \`tila instances\` to list registered instances.`,
       );
-      process.exit(1);
+      exit(1);
       return;
     }
 
     // Resolve the shell to spawn
     const shell = process.env.SHELL ?? "/bin/sh";
+    const participantId = ParticipantIdSchema.parse(
+      ((args["participant-id"] as string | undefined) ??
+        process.env.TILA_PARTICIPANT_ID?.trim()) ||
+        randomUUID(),
+    );
 
     // Spawn the child shell with TILA_INSTANCE + TILA_SHELL_PINNED injected.
     // stdio: "inherit" — the child is interactive (stdin/stdout/stderr pass through).
@@ -57,18 +67,19 @@ export default defineCommand({
           ...process.env,
           TILA_INSTANCE: key,
           TILA_SHELL_PINNED: "1",
+          TILA_PARTICIPANT_ID: participantId,
         },
       });
 
       child.on("error", (err) => {
         eprintln(`Error: Failed to spawn shell: ${err.message}`);
-        process.exit(1);
+        exit(1);
       });
 
       child.on("close", (code) => {
         const exitCode = code ?? 1;
         if (exitCode !== 0) {
-          process.exit(exitCode);
+          exit(exitCode);
         }
         resolve();
       });

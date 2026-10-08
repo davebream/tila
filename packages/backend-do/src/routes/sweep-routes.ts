@@ -1,5 +1,6 @@
 import { artifactOps, sweepOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
+import { drainArtifactLifecycle } from "./artifact-lifecycle-routes";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 export function createSweepRoutes(deps: RouterDeps): ProjectSubRouter {
@@ -12,6 +13,10 @@ export function createSweepRoutes(deps: RouterDeps): ProjectSubRouter {
     };
     const batchSize = Math.min(Math.max(body.batch_size ?? 100, 1), 500);
 
+    const lifecycle = await drainArtifactLifecycle(
+      deps,
+      Math.min(batchSize, 50),
+    );
     const result = sweepOps.sweep(db);
     const expiredPointers = artifactOps.listExpiredPointers(
       db,
@@ -24,6 +29,7 @@ export function createSweepRoutes(deps: RouterDeps): ProjectSubRouter {
       ok: true,
       ...result,
       expiredKeys,
+      lifecycle,
     });
   });
 

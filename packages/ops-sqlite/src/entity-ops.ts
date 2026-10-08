@@ -1,4 +1,5 @@
 import { applyLegacyDefaults } from "@tila/core";
+import type { NamespaceRestrictions } from "@tila/schemas";
 import type {
   ArtifactSearchResult,
   CompactEntity,
@@ -14,6 +15,8 @@ import {
   searchArtifacts,
   validateFtsQuery,
 } from "./artifact-ops";
+import { assertArtifactReviewPolicy } from "./artifact-review-ops";
+import { taskRestrictionCondition } from "./credential-policy";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
 import {
@@ -132,6 +135,7 @@ export function create(
     input.tags !== undefined ? (TagsSchema.parse(input.tags) as string[]) : [];
 
   return db.transaction((tx) => {
+    assertArtifactReviewPolicy(tx, input.id, input.type, input.data.status);
     try {
       tx.insert(schema.entities)
         .values({
@@ -164,7 +168,7 @@ export function create(
     appendJournal(tx, {
       kind: "entity.created",
       resource: input.id,
-      actor: origin.actor,
+      ...origin,
       fence: null,
       tokenId: origin.tokenId,
       source: origin.source,
@@ -228,6 +232,7 @@ export function list(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   filter?: {
     type?: string | string[];
+    restrictions?: NamespaceRestrictions;
     archived?: 0 | 1;
     dataFilter?: Record<string, unknown>;
     sort?: "created_at" | "updated_at" | "type" | "title" | "status";
@@ -240,6 +245,8 @@ export function list(
   enrichOpts?: EnrichOpts,
 ): { entities: Entity[]; total: number } {
   const conditions: SQL[] = [];
+  const restricted = taskRestrictionCondition(db, filter?.restrictions);
+  if (restricted) conditions.push(restricted);
 
   if (filter?.type) {
     if (Array.isArray(filter.type)) {
@@ -370,7 +377,11 @@ export function list(
 export function compactEntity(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   entity: Entity,
-  activeClaims: Array<{ resource: string; machine: string; user: string }>,
+  activeClaims: Array<{
+    resource: string;
+    principal_id: string;
+    participant_id: string;
+  }>,
   stats: CompactEntityStats,
 ): CompactEntity {
   const data = entity.data as Record<string, unknown>;
@@ -384,7 +395,7 @@ export function compactEntity(
     type: entity.type,
     title: (data.title as string | undefined) ?? null,
     status: (data.status as string | undefined) ?? null,
-    claimed_by: claim ? `${claim.machine}/${claim.user}` : null,
+    claimed_by: claim?.participant_id ?? null,
     blockers,
     artifacts,
   };
@@ -496,6 +507,8 @@ export function update(
       // Merge data: spread existing + new fields (passthrough preservation)
       const existingData = JSON.parse(existing.data) as Record<string, unknown>;
       const mergedData = { ...existingData, ...data };
+      if (mergedData.status !== existingData.status)
+        assertArtifactReviewPolicy(tx, id, existing.type, mergedData.status);
 
       tx.update(schema.entities)
         .set({
@@ -518,7 +531,7 @@ export function update(
       appendJournal(tx, {
         kind: "entity.updated",
         resource: id,
-        actor: origin.actor,
+        ...origin,
         fence: fence,
         tokenId: origin.tokenId,
         source: origin.source,
@@ -631,7 +644,7 @@ export function archive(
       appendJournal(tx, {
         kind: "entity.archived",
         resource: id,
-        actor: origin.actor,
+        ...origin,
         fence: fence,
         tokenId: origin.tokenId,
         source: origin.source,

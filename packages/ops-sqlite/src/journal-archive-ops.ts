@@ -1,3 +1,5 @@
+import { normalizeArchiveEvent } from "@tila/core";
+import type { EnvironmentMetadata } from "@tila/schemas";
 import { and, count, eq, lt, max } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
@@ -8,6 +10,9 @@ export interface ArchiveWatermark {
 }
 
 export interface JournalRow {
+  principal_id: string;
+  participant_id: string;
+  environment: EnvironmentMetadata;
   seq: number;
   t: number;
   kind: string;
@@ -72,20 +77,20 @@ export function getArchivableEvents(
   const baseRows = db
     .select()
     .from(schema.journal)
-    .where(lt(schema.journal.t, cutoffT))
     .orderBy(schema.journal.seq)
     .all();
 
   // If maxRows is specified and total journal count exceeds the cap,
   // we take only the oldest batch to bring the count under the cap.
-  let rows = baseRows;
+  const firstRecent = baseRows.findIndex((row) => row.t >= cutoffT);
+  let rows = firstRecent === -1 ? baseRows : baseRows.slice(0, firstRecent);
   if (maxRows !== undefined) {
     const total = db.select({ total: count() }).from(schema.journal).get();
     const totalCount = total?.total ?? 0;
     if (totalCount > maxRows) {
       const excess = totalCount - maxRows;
       // Keep only up to excess oldest rows from baseRows
-      rows = baseRows.slice(0, excess);
+      rows = rows.slice(0, excess);
     }
   }
 
@@ -94,6 +99,11 @@ export function getArchivableEvents(
   }
 
   const events: JournalRow[] = rows.map((row) => ({
+    ...normalizeArchiveEvent({
+      ...row,
+      environment: row.environment ? JSON.parse(row.environment) : undefined,
+      data: JSON.parse(row.data),
+    }),
     seq: row.seq ?? 0,
     t: row.t,
     kind: row.kind,

@@ -35,7 +35,7 @@ vi.mock("../../lib/mcp-targets", () => ({
   runMcpInit: mockRunMcpInit,
 }));
 
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   log: {
     info: vi.fn(),
     warn: vi.fn(),

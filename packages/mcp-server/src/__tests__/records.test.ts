@@ -4,6 +4,7 @@ import { registerRecordTools } from "../tools/records";
 import {
   type MockFacade,
   type MockServer,
+  TEST_RECORD,
   asFacade,
   asServer,
   createMockFacade,
@@ -45,7 +46,7 @@ describe("registerRecordTools", () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
     facade.records.get.mockResolvedValue({
       ok: true,
-      record: { type: "config", key: "main", value: {} },
+      record: TEST_RECORD,
       fence: 1,
     });
 
@@ -80,7 +81,12 @@ describe("registerRecordTools", () => {
 
   it("tila_record_put creates on a missing key and returns fence/revision", async () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
-    facade.records.put.mockResolvedValue({ ok: true, fence: 1, revision: 1 });
+    facade.records.put.mockResolvedValue({
+      ok: true,
+      record: TEST_RECORD,
+      fence: 1,
+      revision: 1,
+    });
 
     const handler = server.tool.mock.calls[2][3] as (
       args: unknown,
@@ -102,7 +108,12 @@ describe("registerRecordTools", () => {
 
   it("tila_record_put replaces on an existing key (no fence required)", async () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
-    facade.records.put.mockResolvedValue({ ok: true, fence: 7, revision: 2 });
+    facade.records.put.mockResolvedValue({
+      ok: true,
+      record: { ...TEST_RECORD, revision: 2 },
+      fence: 7,
+      revision: 2,
+    });
 
     const handler = server.tool.mock.calls[2][3] as (
       args: unknown,
@@ -137,7 +148,7 @@ describe("registerRecordTools", () => {
 
     await expect(
       handler({ type: "config", key: "main", value: { bad: true } }),
-    ).rejects.toThrow();
+    ).resolves.toMatchObject({ isError: true });
   });
 
   it("tila_record_patch calls records.patch with patch and fence", async () => {

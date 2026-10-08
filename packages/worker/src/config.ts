@@ -67,7 +67,7 @@ export const MAX_DEBOUNCE_MAP_SIZE = 2000;
  * Kept modest (well under the DO clamp ceiling) so a single drain round can
  * never itself approach the Workers subrequest cap: each key costs
  * SWEEP_SUBREQUESTS_PER_KEY subrequests, so one round is at most
- * page * SWEEP_SUBREQUESTS_PER_KEY (150 * 3 = 450) — leaving the
+ * page * SWEEP_SUBREQUESTS_PER_KEY (150 * 4 = 600) — leaving the
  * per-invocation bound (SWEEP_SUBREQUEST_BUDGET) as the real limiter.
  */
 export const SWEEP_DRAIN_PAGE_SIZE = 150;
@@ -89,15 +89,16 @@ export const ARTIFACT_REPAIR_SCAN_LIMIT = 100;
 export const SWEEP_TIME_BUDGET_MS = 25_000;
 
 /**
- * Subrequests consumed per expired artifact key during the drain:
+ * Maximum subrequests reserved per expired artifact key during the drain:
  *   1. POST /artifact/tombstone   (DO fetch)
  *   2. r2.delete                  (R2 binding call)
- *   3. POST /artifact/confirm-blob-deleted (DO fetch)
- * A failed delete adds a retry, so this is the nominal (not worst-case) cost;
- * the budget ceiling below carries headroom to absorb retries and per-project
- * overhead (/sweep, /journal/archive, /search-drift, reconcile).
+ *   3. Optional r2.delete retry   (R2 binding call)
+ *   4. POST /artifact/confirm-blob-deleted (DO fetch)
+ * Reserve the worst case before starting a key, then charge actual requests.
+ * Per-project overhead (/sweep, /journal/archive, /search-drift, reconcile)
+ * consumes the same shared budget.
  */
-export const SWEEP_SUBREQUESTS_PER_KEY = 3;
+export const SWEEP_SUBREQUESTS_PER_KEY = 4;
 
 /**
  * Per-Worker-invocation subrequest budget for the sweep — a DELIBERATE
@@ -232,15 +233,14 @@ export const ADMIN_GRANTS_CACHE_MAX_SIZE = 2000;
 export const PERMISSION_RECHECK_TTL_MS = 60_000; // 60 seconds
 
 /**
- * Back-off window for a cached negative permission result (Layer B, WI-H).
- * After a confirmed downgrade / absent result, the deny is re-asserted for
- * this duration before the next re-check is attempted (prevents hammering
- * the GitHub API after a mass-offboarding event).
+ * Backoff for transient GitHub failures. Protected operations remain denied
+ * during this interval; the next request at expiry retries verification.
+ * Verified denials and unavailable installations use the settled 60-second TTL.
  */
 export const PERMISSION_RECHECK_BACKOFF_MS = 10_000; // 10 seconds
 
 /**
- * Maximum number of jti entries in the per-isolate permission re-check cache (Layer B, WI-H).
+ * Maximum number of credential/repository entries in the permission re-check cache (Layer B, WI-H).
  * Consistent with JTI_REV_CACHE_MAX_SIZE, ISOLATE_RL_MAX_MAP_SIZE, and MAX_DEBOUNCE_MAP_SIZE —
  * all per-isolate maps are capped to prevent unbounded memory growth.
  * Oldest entry is evicted on overflow (same pattern as isolateFailMap / jtiRevCache).
@@ -262,3 +262,13 @@ export const DPOP_PROOF_MAX_AGE_MS = 60_000; // 60 seconds
  * accommodating minor client clock drift without widening the replay window.
  */
 export const DPOP_CLOCK_SKEW_MS = 5_000; // 5 seconds
+
+/**
+ * Step-up reauthentication window for high-impact membership and credential
+ * mutations made from an interactive cookie session (#102). A session whose
+ * last authentication is older than this must sign in again before the
+ * mutation is accepted. Override per deployment with the optional
+ * STEP_UP_MAX_AGE_SECONDS secret; bearer credentials are exempt because they
+ * cannot re-authenticate interactively.
+ */
+export const STEP_UP_MAX_AGE_SECONDS_DEFAULT = 600;

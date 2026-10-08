@@ -2,6 +2,7 @@ import { D1RevokedJtiStore } from "@tila/backend-d1";
 import { revokeJtiInCache } from "../middleware/auth";
 import type { Env } from "../types";
 import { forwardToDO } from "./do-forward";
+import { journalArchiveObjects } from "./journal-archive";
 
 interface JournalEvent {
   seq: number;
@@ -30,32 +31,23 @@ interface ConfirmResponse {
 
 /**
  * Write journal events to R2 as JSONL files grouped by year/month.
- * Key format: journal-archive/<projectId>/<year>/<month>.jsonl
+ * Key format: journal-archive/<projectId>/<year>/<month>.part-<throughSeq>.jsonl
+ * The sequence suffix makes every confirmed range immutable and prevents a
+ * later manual archive from overwriting earlier events in the same month.
  */
 async function writeJournalArchiveToR2(
   r2: R2Bucket,
   events: JournalEvent[],
   projectId: string,
 ): Promise<void> {
-  // Group events by year/month based on their timestamp
-  const groups = new Map<string, JournalEvent[]>();
-  for (const event of events) {
-    const d = new Date(event.t);
-    const year = d.getUTCFullYear();
-    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const key = `${year}/${month}`;
-    const group = groups.get(key);
-    if (group) {
-      group.push(event);
-    } else {
-      groups.set(key, [event]);
-    }
-  }
-
-  for (const [yearMonth, groupEvents] of groups) {
-    const r2Key = `journal-archive/${projectId}/${yearMonth}.jsonl`;
-    const jsonl = groupEvents.map((e) => JSON.stringify(e)).join("\n");
-    await r2.put(r2Key, jsonl);
+  for (const object of journalArchiveObjects(
+    projectId,
+    events,
+    Math.max(...events.map((event) => event.seq)),
+  )) {
+    await r2.put(object.key, object.body, {
+      customMetadata: object.customMetadata,
+    });
   }
 }
 

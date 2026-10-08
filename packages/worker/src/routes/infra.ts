@@ -10,6 +10,7 @@ import { constantTimeSecretMatch } from "../lib/constant-time-compare";
 import { destroyProjectResources } from "../lib/destroy-project";
 import { forwardToDO } from "../lib/do-forward";
 import type { Env, HonoVariables } from "../types";
+import { createBackupRoutes } from "./backup";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -145,6 +146,65 @@ export function resolveTargetProject(opts?: {
 export const infra = new Hono<AppEnv>();
 
 infra.use("/*", requireInfraPrincipal);
+
+infra.post("/admin/projects/:projectId/backup/bootstrap", async (c) => {
+  const projectId = c.req.param("projectId");
+  if (c.req.header("X-Confirm-Slug") !== projectId) {
+    return c.json(
+      {
+        error: {
+          code: "confirm-slug-mismatch",
+          message: "X-Confirm-Slug must match the project ID",
+        },
+      },
+      400,
+    );
+  }
+  const existing = await c.env.DB.prepare(
+    "SELECT project_id FROM _projects WHERE project_id = ?",
+  )
+    .bind(projectId)
+    .first();
+  if (existing) return c.json({ ok: true, created: false });
+  const body = await c.req.json<{
+    cloudflareAccountId: string;
+    schemaVersion?: number;
+  }>();
+  if (!body.cloudflareAccountId) {
+    return c.json(
+      {
+        error: {
+          code: "validation-error",
+          message: "cloudflareAccountId is required",
+        },
+      },
+      400,
+    );
+  }
+  await c.env.DB.prepare(
+    `INSERT INTO _projects
+      (project_id, display_name, created_at, created_by, cloudflare_account_id, schema_version, archived)
+      VALUES (?, ?, ?, 'infra-backup-restore', ?, ?, 1)`,
+  )
+    .bind(
+      projectId,
+      projectId,
+      Date.now(),
+      body.cloudflareAccountId,
+      body.schemaVersion ?? 1,
+    )
+    .run();
+  return c.json({ ok: true, created: true }, 201);
+});
+
+infra.use(
+  "/admin/projects/:projectId/backup/*",
+  resolveTargetProject({ includeArchived: true }),
+);
+infra.route(
+  "/admin/projects/:projectId/backup",
+  createBackupRoutes({ projectTokenAuth: false }),
+);
 
 infra.post(
   "/admin/projects/:projectId/destroy",

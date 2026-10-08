@@ -34,6 +34,9 @@ detect_platform() {
   esac
 
   BINARY_FILENAME="tila-${PLATFORM_OS}-${PLATFORM_ARCH}"
+  if [ "${PLATFORM_OS}" = "linux" ] && ldd --version 2>&1 | grep -qi musl; then
+    BINARY_FILENAME="${BINARY_FILENAME}-musl"
+  fi
 }
 
 # --- Version resolution ---
@@ -79,14 +82,20 @@ download_and_verify() {
   TMP_DIR=$(mktemp -d)
   trap 'rm -rf "${TMP_DIR}"' EXIT
 
-  BINARY_URL="${BASE_URL}/${RELEASE_TAG}/${BINARY_FILENAME}"
   CHECKSUM_URL="${BASE_URL}/${RELEASE_TAG}/checksums.txt"
-
-  echo "Downloading ${BINARY_FILENAME} (${RELEASE_TAG})..."
-  if ! curl -fsSL -o "${TMP_DIR}/${BINARY_FILENAME}" "${BINARY_URL}"; then
-    echo "ERROR: Failed to download binary from: ${BINARY_URL}" >&2
-    exit 1
-  fi
+  ASSET_FILENAME="${BINARY_FILENAME}.gz"
+  echo "Downloading ${ASSET_FILENAME} (${RELEASE_TAG})..."
+  STATUS=$(curl -sSL -w '%{http_code}' -o "${TMP_DIR}/${ASSET_FILENAME}" "${BASE_URL}/${RELEASE_TAG}/${ASSET_FILENAME}") || {
+    echo "ERROR: Download failed" >&2; exit 1;
+  }
+  case "${STATUS}" in
+    200) ;;
+    404)
+      ASSET_FILENAME="${BINARY_FILENAME}"
+      curl -fsSL -o "${TMP_DIR}/${ASSET_FILENAME}" "${BASE_URL}/${RELEASE_TAG}/${ASSET_FILENAME}"
+      ;;
+    *) echo "ERROR: Download returned HTTP ${STATUS}" >&2; exit 1 ;;
+  esac
 
   echo "Downloading checksums..."
   if ! curl -fsSL -o "${TMP_DIR}/checksums.txt" "${CHECKSUM_URL}"; then
@@ -95,19 +104,19 @@ download_and_verify() {
   fi
 
   echo "Verifying SHA-256 checksum..."
-  EXPECTED_HASH=$(grep "${BINARY_FILENAME}$" "${TMP_DIR}/checksums.txt" | awk '{print $1}')
+  EXPECTED_HASH=$(awk -v name="${ASSET_FILENAME}" '$2 == name {print $1}' "${TMP_DIR}/checksums.txt")
   if [ -z "${EXPECTED_HASH}" ]; then
     echo "ERROR: Binary ${BINARY_FILENAME} not found in checksums.txt" >&2
     exit 1
   fi
 
   if command -v sha256sum >/dev/null 2>&1; then
-    ACTUAL_HASH=$(sha256sum "${TMP_DIR}/${BINARY_FILENAME}" | awk '{print $1}')
+    ACTUAL_HASH=$(sha256sum "${TMP_DIR}/${ASSET_FILENAME}" | awk '{print $1}')
   elif command -v shasum >/dev/null 2>&1; then
-    ACTUAL_HASH=$(shasum -a 256 "${TMP_DIR}/${BINARY_FILENAME}" | awk '{print $1}')
+    ACTUAL_HASH=$(shasum -a 256 "${TMP_DIR}/${ASSET_FILENAME}" | awk '{print $1}')
   else
-    echo "WARNING: Neither sha256sum nor shasum found. Skipping checksum verification." >&2
-    ACTUAL_HASH="${EXPECTED_HASH}"
+    echo "ERROR: Install sha256sum or shasum to verify this download." >&2
+    exit 1
   fi
 
   if [ "${ACTUAL_HASH}" != "${EXPECTED_HASH}" ]; then
@@ -118,6 +127,9 @@ download_and_verify() {
     exit 1
   fi
   echo "Checksum verified."
+  if [ "${ASSET_FILENAME}" != "${BINARY_FILENAME}" ]; then
+    gzip -dc "${TMP_DIR}/${ASSET_FILENAME}" > "${TMP_DIR}/${BINARY_FILENAME}"
+  fi
 }
 
 # --- Install ---

@@ -369,6 +369,47 @@ Run any `tila` command (e.g., `tila doctor`). The CLI will exchange the GitHub t
 - The CLI auto-refreshes 10 minutes before expiry
 - Cached sessions are stored in `.tila/.session` (mode 0o600, gitignored)
 
+### Enabling GitHub Actions OIDC exchange
+
+Repository links do not authorize Actions OIDC exchange by default. After registering the
+repository, use an admin credential to replace its complete policy:
+
+```bash
+curl --fail-with-body --request PUT \
+  --header "Authorization: Bearer <admin-token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "enabled": true,
+    "max_permission": "write",
+    "subject_pattern": "repo:acme/api:*",
+    "allowed_events": ["push", "workflow_dispatch"],
+    "allowed_refs": ["refs/heads/main", "refs/tags/v1.2.3"],
+    "allowed_environments": ["production"],
+    "allowed_workflows": [
+      "acme/platform/.github/workflows/deploy.yml@refs/tags/v1"
+    ]
+  }' \
+  "https://<tila-host>/api/repos/<numeric-repo-id>/oidc-policy"
+```
+
+Read the current policy with `GET /api/repos/<numeric-repo-id>/oidc-policy`. PUT is full
+replacement: omitted fields fail validation. Events, refs, environments, and complete workflow
+refs use exact matching. Only `subject_pattern` supports a wildcard, where case-sensitive `*`
+matches zero or more characters across the full subject.
+
+When either refs or environments are configured, one of those two context values must match. All
+other configured categories must also match. A constrained environment or reusable workflow claim
+that GitHub omitted is denied. See
+[`docs/10-AUTH-IMPLEMENTATION.md`](10-AUTH-IMPLEMENTATION.md) for the full evaluation model and
+branch, tag, environment, and reusable-workflow examples.
+
+Migration `0024_repo_oidc_policy.sql` explicitly disables OIDC exchange and resets the maximum
+permission to `read` for every existing repository link. The provisioning command prints one
+warning with the affected link count only when that migration is first applied. It does not warn
+for a fresh database with no links or on subsequent provisioning runs. Existing minted sessions
+remain valid until their normal expiry; the new policy is checked before every later exchange or
+cached replay.
+
 ### D1 API Tokens (Admin/Bootstrap)
 
 Administrative credential for initial provisioning and machine-to-machine access. A shared API token is hashed and stored in D1. Use this path for CI pipelines or service accounts that do not have a GitHub identity.
@@ -561,25 +602,49 @@ Common failure modes and remediation steps.
 | `do-reachable` FAIL + 502 | DO cold start race or DO eviction in progress | Retry once; if persistent, run `tila doctor --json` for structured output |
 | `doRttMs` > 200ms | Smart Placement not yet converged or disabled | Check `wrangler.toml` `[placement] mode = "smart"`; wait 24h for convergence |
 | `expired-claims` WARN | Sweep cron did not run | Check `wrangler tail` for sweep errors; trigger manually via `/_internal/sweep` if needed |
-| `journal-size` WARN (>= 10,000 rows) | High write volume without archival | Monitor growth rate; journal archival is v0.2; no action required unless near 10GB DO SQLite limit |
+| `journal-size` WARN (>= 10,000 rows) | High write volume without recent archival | Run the journal archive operation, then create and verify a project backup |
 | `search-missing-doc` FAIL | Index drift from interrupted sweep | Run `tila doctor --search-drift --search-rebuild --apply` |
 | R2 objects absent, no `artifact.expired` journal events | R2 lifecycle backstop fired | Run `tila doctor --reconcile --apply` to sync DO state with R2 |
 | Schema version mismatch in Worker logs | Worker and DO on different schema versions | Redeploy Worker: `wrangler deploy`; DO migrates on next request |
 | `HMAC_NOT_CONFIGURED` on GitHub exchange | HMAC signing key not set | Generate key and run `wrangler secret put GITHUB_SESSION_HMAC_KEY`; see [Authentication Setup](#authentication-setup) |
 | `REPO_NOT_REGISTERED` on GitHub exchange | Repo not in project allowlist | Run `tila infra provision` from the repo root |
 | `SESSION_EXPIRED` during CLI operation | Session older than 1 hour or revoked | Re-run the CLI command (auto-refreshes); check server/client clock sync |
-| `PERMISSION_INSUFFICIENT` on GitHub exchange | GitHub permission below minimum | Check repo collaborator settings; verify allowlist `min_read_permission` |
+| `PERMISSION_INSUFFICIENT` on GitHub exchange | No enabled repository link admits the user under its current thresholds and cap | Check collaborator access and the link's complete access policy with `GET /api/repos/:repoId/access-policy` |
 | GitHub exchange succeeds, CLI errors on API call | Git remote doesn't match `[github]` config | Check CLI warning about remote mismatch; update `.tila/config.toml` `[github]` section |
 
 ## Backup and Recovery
 
-### v0.1 backup story
+### Create and verify a backup
 
-Cloudflare manages DO SQLite point-in-time recovery automatically. There is no user-controllable backup export in v0.1. The recovery story relies on:
+```bash
+tila project export --output /absolute/path/project.tila-backup
+```
 
-1. **DO SQLite durability** -- Cloudflare's built-in PIT recovery restores DO state to a recent snapshot. Users do not trigger this manually; it is infrastructure-level protection.
-2. **R2 as long-tail backstop** -- Artifact blobs in R2 survive DO state loss. `tila doctor --reconcile` can reconstruct `artifact_pointers` from R2 object metadata.
-3. **`tila reset --force`** -- Last resort: wipes the project and starts fresh.
+Export refuses to overwrite its destination. It freezes writes, leaves reads available, streams a consistent snapshot, verifies the final manifest and checksums, rechecks the D1 ACL digest, then unlocks. A failed client eventually releases an export lock through its renewable TTL; missing blobs, archive gaps, contradictory journal ranges, corruption, duplicate paths, and unsafe paths fail visibly and do not produce a completed archive.
+
+The archive deliberately excludes bearer credentials and hashes, sessions, rate limits, idempotency caches, revoked JTIs/subjects, and deployment-global metadata. Store the archive outside the source Cloudflare account. Archives are not encrypted; protect them with the storage system's encryption and access controls.
+
+### Restore, resume, and roll back
+
+```bash
+# New local destination
+tila project import /absolute/path/project.tila-backup --local
+
+# Replace the configured project (prompts for its exact slug)
+tila project import /absolute/path/project.tila-backup --replace
+
+# Continue a matching fail-closed session
+tila project import /absolute/path/project.tila-backup --resume
+
+# Restore the adjacent timestamped pre-restore safety archive
+tila project import /absolute/path/project.tila-backup --rollback
+```
+
+Use `--force` only to skip typed confirmation in automation. Existing restore automatically creates `<timestamp>-<project>-pre-restore.tila-backup` beside the input archive. After that verified export, the same cloud lock is promoted to a non-expiring import lock: the project stays hidden and all normal access returns `423 project-maintenance` until finalize, resume, or rollback verifies the semantic digest. Existing destination tokens and revocation tables remain untouched. A new cloud destination receives one fresh bootstrap token after successful ACL restore; source credentials never cross the archive boundary.
+
+Local replace builds and verifies sibling temporary database/artifact paths before swapping them. A pre-swap failure leaves the original untouched. Cloud restore uploads checksum-addressed R2 bytes before DO pointers, restores DO rows in dependency order and the exact journal sequence, replaces approved D1 ACL metadata in a batch, rebuilds FTS, then unlocks.
+
+Cross-backend restore supports local→local, cloud→cloud, local→cloud, and cloud→local without changing the project ID. Source account and GitHub installation identifiers remain in the manifest for audit. `cloudflare_account_id` stays the destination value. GitHub installation metadata is retained only when already usable at the destination; otherwise restore warns and requires reconnection.
 
 ### Recovery scenarios
 
@@ -588,14 +653,16 @@ Cloudflare manages DO SQLite point-in-time recovery automatically. There is no u
 | DO eviction (idle, normal) | Automatic -- state survives in DO SQLite, cold start adds ~50-100ms |
 | DO evicted, state intact | `tila doctor` to verify; `tila doctor --reconcile` if R2 drift suspected |
 | Partial R2 loss | `tila doctor --reconcile --apply` to sync DO pointers with remaining R2 objects |
-| Full DO loss (Cloudflare incident) | Contact Cloudflare support for PIT recovery; then `tila doctor --reconcile --apply` |
+| Full project-store loss | Import the latest verified `.tila-backup`, then run `tila doctor` |
 | Intentional reset | `tila reset --force` |
 
-### What is NOT available in v0.1
+### Recovery objectives and unsupported cases
 
-- `tila restore --from-r2-and-backup` -- external backup export/import is a v0.2 feature
-- Manual DO SQLite snapshots -- not exposed by the Cloudflare API
-- Journal archival or export -- v0.2 scope
+- **RPO (data-loss window):** time since the latest verified export. A completed archive is consistent at its maintenance-freeze boundary.
+- **RTO (recovery duration):** depends on row count, blob bytes, and network throughput. Export/import report measured rows, bytes, and elapsed time; format v1 has no fixed recovery-time SLA.
+- Unsupported: project renaming, online/no-downtime restore, encrypted archives, secret-bearing annexes, and importing a newer unsupported DO migration.
+
+Run a recovery drill periodically: seed representative entities, relationships, claims/fences, schemas, records/revisions, live and archived journal events, tombstones, ACL rows, and blobs; export; isolate or destroy the source; import into a clean destination; compare the reported semantic/blob digests; then perform one fenced write. Record archive bytes plus export/restore elapsed time.
 
 ### Artifact recovery detail
 
@@ -623,7 +690,7 @@ If `doRttMs > 200ms` persistently:
 
 ### DO cold start
 
-First request after idle eviction adds ~50-100ms latency. Subsequent requests are fast. There are no user-configurable knobs to prevent eviction in v0.1. The DO evicts after ~30 seconds of inactivity.
+First request after idle eviction pays the DO startup cost; measure it with the `cold-start` benchmark scenario against your deployment (`docs/benchmarks/README.md`; the project baseline is in `docs/benchmarks/BASELINE.md`). Subsequent requests are fast. There are no user-configurable knobs to prevent eviction in v0.1. The idle window before eviction is not measured by tila; do not poll a DO to find it, every request resets the timer.
 
 **Mitigation:** For latency-sensitive workloads, send a periodic keepalive (e.g., `tila doctor` on a 20-second interval). This is generally unnecessary for production workloads with regular traffic.
 
@@ -768,7 +835,25 @@ Note: `tila doctor --reconcile` alone handles pointer recovery (syncing `artifac
 
 D1 (the global database) has its own migration files at `packages/worker/migrations/global/`. These are separate from the per-project DO SQLite migrations that run automatically via `blockConcurrencyWhile` on DO cold start.
 
-D1 migrations must be applied **before** deploying a new Worker version when the update includes schema changes to the global D1 tables (tokens, projects, sessions, repos).
+D1 migrations must be applied **before** deploying a new Worker version when the update includes schema changes to the global D1 tables (tokens, projects, sessions, repos). For example, `0028_session_authenticated_at.sql` adds the column that session creation writes; a Worker deployed ahead of it cannot create browser sessions.
+
+### CLI deployment
+
+`tila deploy` applies pending bundled D1 migrations before uploading the Worker
+and UI. A migration error stops deployment. The completion summary includes the
+latest applied migration filename; `--json` includes it in
+`migrations.watermark`, alongside the applied/skipped counts and applied names.
+
+For pipelines that apply migrations separately, use `tila deploy --no-migrate`.
+It reads both tila's `_d1_migrations` tracker and Wrangler's `d1_migrations`
+tracker without changing the database. If any bundled migrations are pending,
+it lists their filenames and refuses to deploy. Query failures also block deployment.
+
+The CLI records a migration only after every statement succeeds. Its statements
+are not wrapped in a file-wide transaction, so failures can leave partial changes.
+After resolving the cause, rerunning skips existing tables, indexes, triggers and
+columns. For the interrupted `0027_scoped_credentials.sql` trigger failure,
+rerunning with the fixed CLI completes the migration and records it.
 
 ### Manual application
 
@@ -841,6 +926,14 @@ Per-project DO SQLite migrations run automatically inside `blockConcurrencyWhile
 ### C7 fence-resource convention migration (deploy guidance)
 
 Migration 17 (C7) backfills canonical `<type>:<id>` fence rows from any pre-existing bare-id fence rows. **Deploy during low activity**: any agent that held a bare-id entity claim before deploy will have its fence superseded by the MAX-backfilled typed row on the first post-deploy request; a stale bare fence will be rejected and the agent must re-acquire. This is a one-time effect — after migration 17 runs, all new acquires use the canonical typed form and no re-acquire is needed.
+
+### V23 canonical identity migration (deploy guidance)
+
+Migration 23 intentionally clears active claims and presence rows because legacy rows do not contain a recoverable participant identity. Fence counters are preserved unchanged, so reacquiring never reuses a stale fence. Historical journal rows are retained and marked with explicit `legacy-principal:<actor>` and `legacy-event:<seq>` identities. The corresponding D1 migration clears browser sessions that lack a stored immutable principal, requiring affected users to authenticate again.
+
+Migration 25 intentionally discards pending legacy signals while rebuilding signal storage around canonical principal/participant identities. Legacy signal targets and acknowledgers were display-name strings and cannot be authorized safely. Their TTL was capped at 24 hours, so the migration does not preserve or translate them. New signals use immutable per-participant deliveries and principal-based group membership.
+
+Deploy upgraded clients with the Worker. Older clients may continue reading the clean claim, presence, and journal response shapes, but mutations without `X-Tila-Participant-Id` fail with `400 participant-required` and an upgrade message.
 
 ## Local Development with Production Data
 
@@ -938,7 +1031,7 @@ Verifies that Durable Object SQLite state survives an eviction+restart cycle. Ca
 
 **Requirements:**
 - `TILA_BASE_URL` — live worker URL (e.g. `https://your-worker.workers.dev`)
-- `TILA_TOKEN` — an **admin-scoped** token. `POST /projects/:id/admin/restart` is protected by `requirePermission("admin")`. A 403 response means the token lacks admin permission. Issue one with: `tila token issue --name <name>` from an admin credential.
+- `TILA_TOKEN` — a full-scope D1 token for the project. `POST /projects/:id/admin/restart` is protected by `requireProjectAdmin`. A 403 response means the credential cannot administer that project.
 
 ```bash
 TILA_BASE_URL=https://your-worker.workers.dev \
@@ -948,7 +1041,7 @@ pnpm --filter @tila/integration-tests exec vitest run src/do-eviction.test.ts
 
 The test:
 1. Writes a uniquely-stamped task to the live project.
-2. POSTs `/projects/:id/admin/restart` — evicts the DO from memory.
+2. POSTs `/projects/:id/admin/restart` — evicts the DO from memory and requires `200 { ok: true }`. The Worker acknowledges the specific remote exception from the deliberate abort; other exceptions and HTTP errors, including 5xx, remain failures. The benchmark's `cold-start` scenario uses the same contract.
 3. Reads the task back — **hard assertion:** if the data is absent, SQLite persistence is broken.
 4. Runs a best-of-3 read latency check — **advisory only:** fails are logged as warnings, never blocking. A latency above 5 000 ms is noted but does not fail the release.
 
@@ -963,6 +1056,27 @@ pnpm run typecheck && pnpm run check && pnpm test
 ### Gate 3: Biome formatting gate
 
 `pnpm run check` (Biome `--write`) must produce no diff after running. If it reformats files, stage and commit the result before tagging. CI runs `pnpm lint` (read-only) — format drift that slips past pre-commit will cause a red CI build on the tagged commit.
+
+### Gate 4: Coordination benchmarks
+
+Run the deployed benchmark matrix against a throwaway project and compare it with the previous baseline. CI only runs the in-process smoke subset; this gate is the only place deployed throughput and tail latency are measured. Full methodology, flags and the throwaway-project flow are in `docs/benchmarks/README.md`.
+
+**Requirements:** `TILA_BASE_URL`, `TILA_TOKEN` (full-scope token of the throwaway project; `cold-start` needs it for `POST /admin/restart`), `TILA_PROJECT_ID`, and `TILA_BENCH_ALLOW_REMOTE=1`.
+
+```bash
+TILA_BENCH_ALLOW_REMOTE=1 TILA_BASE_URL=https://your-worker.workers.dev \
+TILA_TOKEN=<throwaway project token> TILA_PROJECT_ID=tila-bench-<date> \
+pnpm bench -- --tier http --scenario all --participants 8 --duration 30s --warmup 5s --md
+# then: claims-contended --mode owner --participants 24, claims-uncontended --cadence 500ms --participants 6, cold-start
+pnpm bench:report -- --in packages/bench/results --out docs/benchmarks/BASELINE.md
+```
+
+What to compare against the previous `docs/benchmarks/BASELINE.md`:
+1. **Hard:** every scenario reports `PASS` for all invariants and an error rate of 0. A failing invariant (a second winner on an exclusive claim, an accepted stale fence, a journal gap) blocks the tag.
+2. **Advisory:** p95 for `acquire`, `update`/`set`, `send` and `replay` within ~25% of the previous deployed baseline on the same colo; `missed_cadence_deadlines` of the 500 ms cadence run stays 0; `cold_first_request` p50 has not doubled. Investigate regressions beyond that before tagging; they are not automatically blocking because colo, time of day and Cloudflare load move the numbers.
+3. Commit the regenerated `BASELINE.md` with the release. Raw JSON stays in `packages/bench/results/` (gitignored).
+
+Also run this gate after any material change to claims, fences, journal, signals, presence or artifact metadata paths, not only before tags.
 
 See also `OSS-RELEASE-RUNBOOK.md §7` for the full pre-tag checklist.
 
@@ -1018,4 +1132,470 @@ tila admin grant <github-user-id> --token <your-d1-init-token>
 tila admin list
 ```
 
-The full-scope D1 init token is printed by `tila project create` in `--json` mode (`token` field) and written to `.tila/.env` on disk. It bypasses `requireProjectAdmin` at `packages/worker/src/middleware/require-project-admin.ts` lines 117-122.
+The full-scope D1 init token is printed by `tila project create` in `--json` mode (`result.token` field) and written to `.tila/.env` on disk. It bypasses `requireProjectAdmin` at `packages/worker/src/middleware/require-project-admin.ts` lines 117-122.
+
+
+## Protected operations unavailable during permission verification
+
+A `503 permission-recheck-unavailable` response means a mirrored GitHub membership
+could not be verified. The write or administrative operation has not run. Ordinary
+reads remain governed by existing authentication and D1 membership checks.
+Explicit Tila memberships that independently authorize the operation, and service
+principals using those memberships, do not depend on GitHub availability.
+
+| Response detail | Operator action |
+|---|---|
+| Missing or invalid `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` | Configure the deployed Worker's App ID and matching private key; never expose the private key in logs |
+| Missing installation or GitHub installation-token 404 | Confirm the App is installed and linked to the project, with access to the selected repository; reinstall/relink if needed |
+| GitHub error with `retryable: true` | Check GitHub availability/rate limits and retry after 10 seconds |
+| D1 error or `membership-unavailable` | Restore D1 availability; the request must not fall back to session authority |
+| `401 unauthorized` requesting sign-in | Exchange a fresh bearer session carrying a revocable `jti` |
+
+Confirmed loss of collaborator permission returns `403 permission-revoked`, distinct
+from unavailable verification. Do not solve an outage by granting new membership
+unless that grant is independently intended. Existing explicit owners and bootstrap
+credentials retain their own authorization and revocation rules.
+
+GitHub observations and settled failures are cached per isolate for up to 60 seconds;
+transient failures are cached for 10 seconds and remain denied throughout backoff.
+Current D1 installation/repository policy is checked before cached grants. External
+uninstall/revocation becomes visible when the verified entry expires or is invalidated;
+there is no cross-isolate instant-invalidation guarantee. After expiry, failure to
+verify denies the operation without using the stale grant.
+
+## Scoped service credentials (#185)
+
+Integrations authenticate as stable project service principals (`service:<uuid>`).
+A credential version identifies a secret, while `X-Tila-Participant-Id` identifies
+a running participant. Rotation changes the version, preserving the principal and
+canonical membership. Domain mutations keep both principal and participant
+attribution. Credential audit events record the authenticated principal, version,
+target and timestamp; they never contain bearer secrets or secret hashes.
+
+### Migration and compatibility
+
+Apply `packages/worker/migrations/global/0027_scoped_credentials.sql` to D1 **before**
+deploying the Worker and updated clients. It preserves existing token hashes, IDs,
+memberships and historical attribution, and adds service accounts, logical
+credentials, secret versions, workload bindings and audit events. No CI changes or
+automatic deployment are part of this change. Review and merge the authentication
+change explicitly before deploying it.
+
+Existing `full` keys retain their legacy compatibility policy. The old SDK
+`tokens.issue(name, note?)` signature remains supported, but legacy issuance is
+deprecated with no removal date. Only a legacy full bearer key can issue another
+legacy full key. Existing GitHub and OIDC login flows and canonical human memberships
+remain supported. Native services use the existing membership API to change roles.
+Project backups preserve service identities, workload bindings and audit history;
+API secrets are excluded, as with existing token backups. Issue fresh keys after a
+restore. Old secret versions do not become valid merely because metadata is restored.
+
+### Issuance examples
+
+Create a service with the required membership, then copy its returned `principal_id`
+into issuance. Owner membership and the explicit management capability are required
+for scoped callers; a legacy full bearer remains a bootstrap administrator.
+
+```sh
+tila service-account create --name reporter --display-name "Read-only reporting" --role viewer --json
+tila token issue --name reporter-key --principal 'service:<uuid>' --preset read-only --json
+
+# Coordination only: create this service with participant membership.
+tila token issue --name coordinator --principal 'service:<uuid>' --preset coordination-only --json
+
+# Upload artifacts without deletion: participant membership.
+tila token issue --name publisher --principal 'service:<uuid>' --preset artifact-writer --json
+
+# Exact task types and slash-delimited record prefixes: participant membership.
+tila token issue --name team-a --principal 'service:<uuid>' --role participant \
+  --capabilities tasks:read,tasks:write,records:read,records:write \
+  --restrictions '{"task_types":["task"],"records":[{"type":"config","key_prefixes":["team/a"]}]}' --json
+```
+
+The updated CLI requires a principal and defaults to the viewer/read-only preset.
+SDK object issuance accepts `{ name, principal_id, policy?, expires_at?, jkt? }`;
+omitting `policy` with a principal selects the same read-only preset. Presets expand
+to explicit capability lists, never wildcards. Use `tila token inspect --json` or
+`GET /api/whoami` to inspect principal, effective role/capabilities, restrictions,
+expiry and legacy status. `GET /api/tokens` also returns logical/version IDs, policy,
+effective policy, status, expiry and version retirement deadlines, without secrets.
+
+Absent namespace restrictions mean unrestricted; empty arrays grant nothing.
+Task types match exactly. Record prefix `team/a` permits that key and descendants
+such as `team/a/config`, but excludes `team/ab`. Lists filter before counts and
+pagination. Restricted keys cannot use project-wide search, journal, summary,
+exports, artifact access or global maintenance. Unsafe derived task views are
+also denied, including journal replay, handoffs, and re-entry. Unrestricted
+handoff access requires journal, task, record, artifact, and claim read capabilities;
+creation also requires `tasks:write`. Re-entry additionally requires summary and
+signal reads. Updating a journal cursor requires `journal:read` and at least
+participant membership. Template expansion checks every generated task before any write.
+Ordinary writes do not imply delete: archive/unarchive and relationship removal
+require explicit delete capabilities. A service promotion cannot expand a key's
+issuance ceiling; demotions and revocations immediately reduce current authority.
+
+### Expiry, rotation and revocation
+
+New scoped keys expire after 90 days. Owners can specify an ISO timestamp or Unix
+seconds with `--expires`, or explicitly request `--expires never`. Save the returned
+secret once: it is never persisted for response replay.
+
+```sh
+tila token rotate reporter-key --expected-token-id '<current-version-uuid>' --json
+# Optional overlap, capped at 86,400 seconds:
+tila token rotate reporter-key --expected-token-id '<current-version-uuid>' --overlap-seconds 60 --json
+tila token revoke reporter-key --json
+tila service-account revoke 'service:<uuid>' --json
+```
+
+Rotation returns 409 for stale/concurrent version IDs and preserves policy and DPoP
+binding. Previous secrets retire immediately unless overlap is explicit. Subsequent
+rotations cannot extend an earlier retirement deadline. Revoking a logical
+credential rejects every version and derived browser session. Service revocation
+atomically disables its credentials, membership and workload bindings, while
+preserving last-owner protection.
+
+Every request revalidates D1 credential/session/binding and membership state against
+the primary database; positive authentication caches never establish continuing
+validity. Lookup failures fail closed with retryable errors. Revocation applies to
+requests authenticated after its commit, not mutations already authorized and
+executing. Scoped responses use `Cache-Control: no-store`. Retry identities include
+credential version and policy; resource authorization precedes transactional DO
+replay. Unbound keys may create cookies with the same lineage and capped expiry;
+DPoP-bound keys cannot exchange into cookies.
+
+### Workload bindings
+
+Owners configure exact verified issuer/subject mappings to service principals:
+
+```sh
+tila service-account workload create 'service:<uuid>' --name ci --provider github-actions \
+  --issuer https://token.actions.githubusercontent.com \
+  --subject 'repo:owner/repository:ref:refs/heads/main' --preset artifact-writer --json
+tila service-account workload list 'service:<uuid>' --json
+tila service-account workload update 'service:<uuid>' --binding '<binding-uuid>' --preset read-only --json
+tila service-account workload revoke 'service:<uuid>' --binding '<binding-uuid>' --json
+```
+
+Both existing exchange endpoints accept these bindings after validating the
+upstream signature, configured issuer/audience and existing repository/workflow
+restrictions. Generic OIDC bindings use `--provider oidc`. The optional `jkt` exchange
+field binds the resulting opaque bearer to the existing DPoP proof verifier.
+Unconfigured identities retain existing compatibility flows. A revoked binding
+remains a tombstone so its subject cannot fall back into an unrestricted exchange.
+
+Workload sessions last at most 15 minutes and cannot outlive the upstream assertion.
+Each assertion exchanges once; replay returns 409 without storing a reusable secret.
+Get a new upstream assertion for renewal. Issued sessions retain their original
+policy and intersect it with current binding policy and membership on every request.
+Tighter binding policy is immediate; later expansion does not expand an old session.
+Monitor `authorization/denied` and `auth/lookup` analytics alongside ordinary request
+errors and latency. Telemetry excludes bearer credentials and hashes.
+
+### Browser administration (#102)
+
+The dashboard's **Settings** page (`/p/<project>/settings`) lets a project owner
+administer memberships and credentials from a browser session. It is an
+observation and administration surface only: it never launches, assigns,
+schedules, cancels or retries agents, and it exposes no project destroy or
+archive operation.
+
+What it can do:
+
+- List explicit memberships (GitHub, OIDC and service principals), change roles,
+  revoke memberships and grant new ones. GitHub logins are resolved to numeric
+  user ids in the browser via GitHub's public API, so explicit-membership projects
+  need no GitHub App. A manual id field covers lookup failures and rate limits.
+- Change the membership policy mode. Leaving `explicit` asks for confirmation
+  because it widens access to GitHub collaborators.
+- Show the mirrored-access policy of each linked repository (`membership_enabled`
+  and `membership_role_cap`) and explain where the caller's own role comes from.
+  Mirrored members are evaluated per request and are **not** materialized, so they
+  cannot be listed.
+- List credentials with principal, status, effective policy, expiry and last-use
+  metadata, and revoke them with a typed-name confirmation. No secret material is
+  ever requested or shown.
+
+What it cannot do: issue or rotate credentials (use the CLI commands above),
+delete service accounts, or destroy/archive the project.
+
+Controls render only when `GET /auth/session/status` reports
+`capabilities.memberships_manage` / `capabilities.credentials_manage`. The Worker
+computes those flags with the same explicit-owner checks that guard the routes;
+GitHub repository permission, the legacy `permission` field and `scopes:"full"`
+are never consulted. When the membership store cannot be reached the flags are
+false and `membership_available` is false, and the page shows an unavailable
+state with no controls.
+
+Mutations from an interactive cookie session additionally require a recent
+sign-in (step-up reauthentication). A session older than
+`STEP_UP_MAX_AGE_SECONDS` (default 600) receives `403 step-up-required`; the UI
+offers to sign in again and returns to the page afterwards without replaying the
+change. Set the optional `STEP_UP_MAX_AGE_SECONDS` secret to adjust the window.
+Bearer credentials cannot re-authenticate interactively and are exempt. Migration
+`0028_session_authenticated_at.sql` records the authentication time and must be
+applied before deploying this Worker.
+
+## Journal continuity and archival recovery
+
+Migration 26 adds durable participant cursors, immutable handoffs, and handoff
+reference indexes to the shared cloud/local schema. Project export, restore,
+diagnostics, and destruction include these tables. The backup SDK accepts schema
+versions through 26; older backups restore with empty continuity tables.
+
+The continuity HTTP surface is project-scoped: `GET /journal/replay`,
+`GET /journal/cursor`, `PUT /journal/cursor` with `{ "seq": n }`, `POST /handoffs`,
+`GET /handoffs`, `GET /handoffs/:id`, and `GET /reentry`. All require an authenticated
+principal and `X-Tila-Participant-Id`. Reads require project read access; cursor and
+handoff writes require write access. These responses bypass shared caches.
+
+Re-entry reads database state and the replay boundary in one transaction, then
+streams immutable archives. New archive objects retain canonical principal,
+participant, and environment fields, carry sequence-range metadata, and use keys
+containing both the batch's upper sequence and the object's first sequence. This
+prevents overlapping archive runs from overwriting different ranges. Deletion is
+confirmed only after every object write succeeds. Age-based archival stops at the
+first recent sequence, even if subsequent event timestamps move backwards.
+
+Existing JSONL archives remain readable. Missing identity fields are represented
+with the migration's `legacy-principal:<actor>` and `legacy-event:<seq>` markers;
+historical authenticated identity cannot be reconstructed. Legacy objects without
+range metadata require streaming scans, so replay of old history can be slower.
+A missing/corrupt archive produces `journal-history-unavailable`; conflicting
+versions of a sequence produce `journal-history-conflict`. Neither advances the
+saved cursor. Restore missing history from a verified backup before retrying;
+do not acknowledge past unavailable history as a repair.
+
+## Versioned artifact lifecycle
+
+Migration 28 applies configured per-kind retention to existing revisions using
+one persisted policy snapshot. A non-head revision older than `retention_days`
+can become immediately eligible. Before deploying, review configured retention
+and take a project backup if old content must remain available. Zero or omitted
+retention keeps content indefinitely. Live heads are protected regardless of age.
+
+The daily sweep and shared DO alarm process `artifact_lifecycle_operations`.
+Failures retain their work item, increment attempts, and retry with exponential
+backoff capped at one hour. The sweep response includes lifecycle deleted/error
+counts and a pending indicator. An unavailable R2 bucket cannot authorize byte
+deletion; failed tombstone HTTP responses also prevent the legacy sweep deleting
+content. Embedded callers can run `artifacts.drainLifecycle()` explicitly.
+
+A 410 `artifact-unavailable` response means the revision is known but its content
+has been removed; history/meta still return its metadata. The seven-day grace
+applies to pointer rows, not to availability of deleted bytes. Group destruction
+permanently retires a lineage while retaining revision metadata. It requires a
+current lineage fence and returns 202 once retirement is durable; physical cleanup
+continues in the background. Retrying an accepted request with its original
+idempotency key is safe after lease expiry.
+
+Preserve all commit and lifecycle JSON records under `versioned/` during manual
+maintenance. They are required to recover deletion state after SQLite loss.
+Never add a bucket lifecycle rule that expires this prefix. The provisioning
+rules keep the existing 365-day `produced/` backstop and one-day incomplete-upload
+cleanup. Backup/restore carries lifecycle records and metadata; full project
+destruction also removes the private versioned prefix.
+
+## Coding-client lifecycle integration
+
+The opt-in lifecycle adapters support **Claude Code CLI and Codex CLI on macOS
+and Linux**, using a configured Cloudflare-backed Tila project. Existing manual
+CLI/MCP use and local mode remain available. Desktop clients, Conductor-managed
+sessions, Windows, and independent subagent participants are outside this initial
+integration. Tila never takes control of client execution.
+
+### Install and remove
+
+Use a CLI and MCP server build that both include lifecycle support. From the
+project root, with normal Tila authentication already configured:
+
+```sh
+tila lifecycle install claude-code --dry-run
+tila lifecycle install claude-code
+# Or, for Codex (the default shared daemon is supported):
+tila lifecycle install codex --dry-run
+tila lifecycle install codex
+```
+
+Restart the client, review the installed hooks, and approve its normal project
+and hook trust prompts. Installation does not grant trust or override managed
+policy. Codex hooks must be enabled, and `codex app-server proxy --help` must be
+available. Claude Code must use its native CLI installation (opaque Node/npm
+launch wrappers cannot be identified safely) and support SessionStart, SessionEnd, UserPromptSubmit,
+PreToolUse, Stop, and `CLAUDE_ENV_FILE`. Codex must supply `sessionId` (or root
+`threadId`) in MCP request metadata. Missing MCP session metadata fails with a degraded state instead of silently
+sharing a participant. If no session appears in lifecycle status after startup,
+verify hook support, configuration, and trust in the client. See the supported
+[Claude hook interfaces](https://code.claude.com/docs/en/hooks) and
+[Codex hook interfaces](https://learn.chatgpt.com/docs/hooks).
+
+| Client | Project hooks | Project MCP configuration |
+| --- | --- | --- |
+| Claude Code | `.claude/settings.local.json` | `.mcp.json` |
+| Codex | `.codex/hooks.json` | `.codex/config.toml` |
+
+The installer preserves other hook commands and MCP entries. It adds
+`TILA_LIFECYCLE_CLIENT` only to the Tila MCP entry. If no Tila entry exists, it
+creates `npx -y tila-mcp-server`; source checkouts should configure their existing
+source MCP command first. It records ownership under the private `$TILA_HOME/client-lifecycle/installations`
+directory (default `~/.tila/client-lifecycle/installations`) and refuses to
+replace a Tila MCP entry subsequently edited by the user. JSON/TOML formatting and
+TOML comments may change during serialization; configuration values are preserved.
+Dry-run reports affected files without exposing configuration secrets.
+
+```sh
+tila lifecycle status
+tila lifecycle retry                 # Retry incomplete clean shutdowns
+tila lifecycle remove claude-code
+tila lifecycle remove codex
+```
+
+Removal deletes only the installed hook commands and restores the previous Tila
+MCP entry. Restart the client after removal. Existing helper processes finish
+with their sessions; removal does not kill a client or discard pending cleanup.
+Lifecycle state remains available for diagnosis and retry.
+
+### Identity, presence, and shutdown
+
+Each native session gets a stable participant scoped to Worker URL, project, and
+client. The adapters attach machine, repository, worktree, branch, commit, client,
+and version metadata. Claude shell commands inherit the participant through
+`CLAUDE_ENV_FILE`; Codex shell commands resolve their `CODEX_THREAD_ID`. Explicit
+CLI participant overrides retain precedence. MCP tool calls resolve identity for
+each request, so one Codex daemon connection can serve concurrent sessions safely.
+Codex subagent MCP calls use their parent session's identity. MCP resources and
+prompts retain their existing read-only connection identity.
+
+Startup/resume supplies a bounded re-entry page containing summary, changes,
+active claims, pending signals, and the latest handoff. Later hooks confirm the
+observed cursor. Presence updates run every 15 seconds while client liveness is
+verified. Claim leases are not automatically renewed.
+
+A clean SessionEnd queues a handoff containing coordination facts only, then
+acknowledges observed journal events and releases eligible claims. Owner claims
+are preserved; release always uses the captured fencing token. Cleanup can finish
+after the client exits. A crash sends no fabricated handoff or acknowledgment and
+lets leases expire. In default Codex mode, closing a frontend connection can leave
+the daemon's thread alive; the session ends according to Codex's SessionEnd rules,
+not merely when a terminal disappears.
+
+Network failures do not block local work. Hook stderr and `tila lifecycle status`
+report degradation; the next prompt retries re-entry. If the Codex observer cannot
+verify thread status, heartbeats pause. Failed clean shutdowns remain `closing`
+with retryable intent; repair connectivity/authentication and run `tila lifecycle
+retry` before resuming that session. A killed local lock holder may take ten
+seconds to become recoverable. Never delete a live session's state to force cleanup.
+
+The implementation drives actual CLI hooks and detached helpers for two concurrent
+native-client fixtures and SIGKILL against the shared SQLite backend, plus hook
+installation/removal and interleaved MCP metadata.
+Upstream client behavior is represented by protocol fixtures; a real-client smoke
+check remains advisable when upgrading either client. The separate Incur trial in
+`experiments/incur-parity` documents why this integration retains existing frameworks.
+
+## Repository CI
+
+Pull requests and main pushes run read-only lint/version checks, typechecking,
+package tests, root script tests, and a high-severity dependency audit. Secret
+scanning runs independently. The required `ci` check succeeds only when every
+required job succeeds, including after failures, cancellations, or skips.
+
+New pushes cancel superseded runs for the same PR. Main and release runs are not
+cancelled by this policy. Full validation is also available through the CI
+workflow's manual dispatch and runs daily at 04:17 UTC; those runs bypass Turbo
+result reuse. Diagnostic artifacts retain command logs (including test counts),
+step timings, and Turbo run summaries for seven days, including on failures.
+
+### Cache correctness and affected-selection rollout
+
+Root Turbo commands resolve the checked-out revision and runtime/platform identity
+before computing task hashes. CLI/SDK/DO version modules are generated, ignored
+outputs; run the documented root commands or the package version generators before
+invoking compilers directly. Worker dry-run output is explicit and cacheable.
+
+PRs restore caches only. Successful main verification saves download and Turbo
+caches keyed by toolchain, lockfile and commit. Release output must be built fresh.
+Environment-gated integration tests are not cached. CI still runs the full suite:
+the affected task list is recorded in `selection.json` for observation only.
+Enable selective execution in a follow-up change only after ten paired PR runs
+prove selection includes required tests for schema, SQLite, migration, SDK, UI,
+installer, root-config and lockfile changes. Missing Git history falls back to full
+execution. Revert to full selection immediately if any dependency is missed.
+
+Manual CI dispatch with `benchmark=true` runs the baseline and Turbo concurrency
+2/4 × Vitest workers 1/2, three times each on one revision. It does not tune CI
+automatically. Select the lowest median with no failures and at most 10% extra
+runner time; retain the baseline if none qualifies. Reports last seven days.
+
+### Local Cloudflare runtime validation
+
+`pnpm test:runtime` runs the required Workers suite with local DO SQLite, D1 and
+R2. It uses the production compatibility date/flags and real migration sources,
+resets data between tests, and rejects unexpected outbound fetches. The suite
+checks exclusive claims/fences, stale writes, migration upgrades and transaction
+rollback, eviction/reconstruction, D1 authorization/revocation, and recovery of
+interrupted artifact commit publication without duplicates. JSON reports reject
+skipped, TODO, failed or empty runtime results. Placeholder-only tests in the
+older integration suite are explicitly TODO; meaningful assertions are retained.
+
+Primary CI uses Node 24. Node 22 SDK/MCP compatibility remains a full-run check
+on the daily schedule, manual full validation, and release validation. Bun and
+pnpm remain pinned. Runtime tests run in parallel with verification and secret
+scanning and are required by `ci`. They do **not** prove production PITR or
+remote latency/performance: keep the existing manual live-infrastructure release
+gates above.
+
+### Release artifacts and rehearsals
+
+The Release workflow validates the exact checkout before packaging. A publish tag
+must equal `v<product version>` and point to a commit reachable from main. Run the
+manual pre-tag live-infrastructure gates above before creating a release tag;
+local runtime validation does not replace them.
+
+The pipeline runs full lint/version, typecheck, Node/Bun package tests, root script
+tests, local runtime tests and audit. It builds a fresh workspace with no restored
+Turbo output, generates one Worker sidecar, compiles eight binaries and packs all
+eleven public npm packages. `manifest.json` records the revision, version, compiler,
+commit timestamp, target inventory, tarball integrity and every file checksum.
+
+Clean-directory consumers install the tarballs and check SDK ESM/CommonJS local
+SQLite persistence, MCP stdio initialization/tool discovery, and the npm CLI.
+Native Linux, macOS and Windows x64/arm64 runners execute the binaries and local
+installer fixtures; both musl binaries run in native-architecture Alpine containers.
+The POSIX installer detects musl and selects that target. SDK private implementation
+packages are bundled build dependencies, never unpublished npm runtime dependencies.
+
+Only after all smoke checks pass are provenance/SBOM attestations generated and
+verified against this repository, release workflow and source revision. Publishing
+jobs download the same payload, reverify it, and never rebuild. SDK/platform
+packages publish before MCP/the main CLI; the GitHub release follows successful
+npm publication. A retry skips an existing npm version only if registry integrity
+matches the tested tarball. Retry failed jobs while their seven-day artifacts remain
+available; a complete rebuild may produce different binary bytes and must not be
+silently substituted for a partly published release.
+
+Use Actions → Release → Run workflow, selecting the desired branch, for a rehearsal.
+It performs validation, packing, platform/consumer smoke tests and attestation
+verification, but cannot publish npm packages, a GitHub release or Homebrew changes.
+Locally, after `pnpm build`, `pnpm --filter tila-cli compile` builds all targets;
+standalone `compile:<target>` commands remain supported. `node scripts/release-pack.mjs`
+requires a fresh `.release` output directory. `node scripts/release-smoke.mjs .release
+consumer` installs into a temporary directory and tests the local platform.
+
+Homebrew updating is a downstream reusable workflow, no longer a release-event
+listener. It remains disabled unless a maintainer explicitly enables the workflow,
+sets `ENABLE_HOMEBREW_PUBLISH=true`, and supplies the tap credential. A rehearsal
+never calls it. No release versions, production settings or schemas change here.
+
+### CI rollout measurements
+
+The initial observed median was about four minutes. Stage-one hosted verification
+completed in 3m35s on its final run. Stage-two's first cache-cold PR verification
+completed in 4m56s; successful main validation then seeded the trusted cache. The
+Node-24 runtime stage passed hosted verification in 3m16s with a 34s parallel
+runtime job. These are individual observations, not comparable cold/warm medians.
+Use the saved step timings and Turbo summaries for comparison; the concurrency
+benchmark runs fifteen samples on one fixed revision. Keep the baseline until a
+candidate meets the speed, zero-failure and runner-time criteria. Affected-only
+execution remains disabled pending ten paired PR observations. The under-two-minute
+warm-PR target is not yet demonstrated.

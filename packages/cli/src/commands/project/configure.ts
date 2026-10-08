@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { findConfig, writeConfigFile } from "../../config";
 import {
@@ -7,6 +6,8 @@ import {
   resolveZoneId,
 } from "../../lib/cloudflare-resources";
 import { getInfraSlug, loadInfraConfig } from "../../lib/infra-config";
+import { exit } from "../../lib/output";
+import * as p from "../../lib/prompts";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 
 export default defineCommand({
@@ -30,13 +31,13 @@ export default defineCommand({
     const config = findConfig(cwd);
     if (!config) {
       p.cancel("No tila project found. Run `tila project create` first.");
-      process.exit(1);
+      exit(1);
     }
 
     // Step 2: Validate project is Cloudflare-backed
     if (config.backend === "local") {
       p.cancel("Custom domains require a Cloudflare-backed project.");
-      process.exit(1);
+      exit(1);
     }
 
     // Step 3: Resolve CF API token
@@ -46,7 +47,7 @@ export default defineCommand({
         "No CLOUDFLARE_API_TOKEN found in environment or ~/.tila/.env.\n\n" +
           "Set the token via `export CLOUDFLARE_API_TOKEN=...` or in ~/.tila/.env before running this command.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     // Step 4: Load infra config — need account_id
@@ -58,7 +59,7 @@ export default defineCommand({
       p.cancel(
         `No infrastructure found. Run \`tila infra provision\` first.\n\n${msg}`,
       );
-      process.exit(1);
+      exit(1);
     }
 
     const accountId = infraConfig.account_id;
@@ -72,7 +73,7 @@ export default defineCommand({
       });
       if (p.isCancel(result)) {
         p.cancel("Cancelled.");
-        process.exit(1);
+        exit(1);
       }
       hostname = result;
     }
@@ -89,7 +90,7 @@ export default defineCommand({
       p.cancel(
         `No zone found for '${hostname}' on this Cloudflare account.\n\n${msg}`,
       );
-      process.exit(1);
+      exit(1);
     }
     s.stop("Zone verified.");
 
@@ -108,7 +109,7 @@ export default defineCommand({
       const msg = err instanceof Error ? err.message : String(err);
       s2.stop("Domain attachment failed.");
       p.cancel(`Failed to create custom domain: ${msg}`);
-      process.exit(1);
+      exit(1);
     }
     s2.stop("Custom domain attached.");
 

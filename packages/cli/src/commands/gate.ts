@@ -1,6 +1,6 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { jsonArg, printJson, tsToIso } from "../lib/output";
+import { jsonArg, outputText, printJson, tsToIso } from "../lib/output";
 
 export default defineCommand({
   meta: { name: "gate", description: "Manage coordination gates" },
@@ -52,7 +52,7 @@ export default defineCommand({
           });
           return;
         }
-        console.log(`Created gate ${g.id} on ${g.resource} (${g.await_type})`);
+        outputText(`Created gate ${g.id} on ${g.resource} (${g.await_type})`);
       },
     }),
     list: defineCommand({
@@ -87,11 +87,11 @@ export default defineCommand({
           return;
         }
         if (gates.length === 0) {
-          console.log("No gates found.");
+          outputText("No gates found.");
           return;
         }
         for (const g of gates) {
-          console.log(
+          outputText(
             `${g.id}  ${g.resource}  ${g.await_type}  ${g.status}  ${tsToIso(g.created_at)}`,
           );
         }
@@ -121,7 +121,7 @@ export default defineCommand({
           printJson({ ok: true });
           return;
         }
-        console.log(`Resolved gate ${args.gateId}`);
+        outputText(`Resolved gate ${args.gateId}`);
       },
     }),
     cancel: defineCommand({
@@ -141,7 +141,7 @@ export default defineCommand({
           printJson({ ok: true });
           return;
         }
-        console.log(`Cancelled gate ${args.gateId}`);
+        outputText(`Cancelled gate ${args.gateId}`);
       },
     }),
   },

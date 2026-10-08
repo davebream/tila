@@ -91,15 +91,23 @@ class FakeIdempotencyStore implements IdempotencyStoreLike {
 
 function makeApp(
   fake: IdempotencyStoreLike,
-  opts: { handlerStatus?: number } = {},
+  opts: { handlerStatus?: number; participantId?: string } = {},
 ) {
   let handlerCount = 0;
 
-  const app = new Hono<{ Variables: { projectId: string } }>();
+  const app = new Hono<{
+    Variables: {
+      projectId: string;
+      principalId: string;
+      participantId: string;
+    };
+  }>();
 
   // stub middleware: sets projectId (mimics projectMiddleware)
   app.use("/*", async (c, next) => {
     c.set("projectId", "p1");
+    c.set("principalId", "principal-1");
+    c.set("participantId", opts.participantId ?? "participant-1");
     await next();
   });
 
@@ -163,6 +171,28 @@ describe("createIdempotencyMiddleware", () => {
     expect(getHandlerCount()).toBe(1);
   });
 
+  it("does not replay a mutation result across participants", async () => {
+    const fake = new FakeIdempotencyStore();
+    const first = makeApp(fake, { participantId: "participant-1" });
+    const second = makeApp(fake, { participantId: "participant-2" });
+    const request = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "shared-key",
+      },
+      body: JSON.stringify({ a: 1 }),
+    };
+
+    const firstResponse = await first.app.request("/", request);
+    const secondResponse = await second.app.request("/", request);
+
+    expect(firstResponse.headers.get("Idempotency-Replayed")).toBeNull();
+    expect(secondResponse.headers.get("Idempotency-Replayed")).toBeNull();
+    expect(first.getHandlerCount()).toBe(1);
+    expect(second.getHandlerCount()).toBe(1);
+  });
+
   it("same key + different body: returns 422 idempotency-key-conflict", async () => {
     const fake = new FakeIdempotencyStore();
     const { app, getHandlerCount } = makeApp(fake);
@@ -204,8 +234,7 @@ describe("createIdempotencyMiddleware", () => {
     const { app, getHandlerCount } = makeApp(fake);
 
     // Pre-seed a stored entry with requestHash: null (legacy pre-migration row).
-    // The key is caller-scoped; the test stub sets no tokenResult, so caller="anon".
-    const legacyKey = "dp:p1:anon:POST:/:key-legacy";
+    const legacyKey = 'dp:p1:["principal-1","participant-1"]:POST:/:key-legacy';
     await fake.store(
       legacyKey,
       "p1",

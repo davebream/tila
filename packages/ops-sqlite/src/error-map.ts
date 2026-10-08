@@ -1,4 +1,5 @@
-import { FenceError } from "@tila/core";
+import { ContinuityError, FenceError } from "@tila/core";
+import { ArtifactReviewError } from "./artifact-review-ops";
 import { DoIdempotencyConflictError } from "./do-idempotency-ops";
 import { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
 import {
@@ -169,6 +170,21 @@ export function mapProjectError(err: Error): {
   retryable: boolean;
   extras?: Record<string, unknown>;
 } | null {
+  if (err instanceof ArtifactReviewError)
+    return {
+      status: err.status,
+      code: err.code,
+      retryable: false,
+      extras: err.details ? { details: err.details } : undefined,
+    };
+  if (err instanceof ContinuityError)
+    return {
+      status: err.status,
+      code: err.code,
+      retryable: err.status === 503,
+    };
+  if (err instanceof ArtifactVersionError)
+    return { status: err.status, code: err.code, retryable: err.retryable };
   for (const rule of projectErrorResponses) {
     if (err instanceof rule.errorClass) {
       return {
@@ -181,3 +197,4 @@ export function mapProjectError(err: Error): {
   }
   return null;
 }
+import { ArtifactVersionError } from "./artifact-version-ops";

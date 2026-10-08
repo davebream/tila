@@ -55,6 +55,7 @@ export function createIdempotencyMiddleware(deps?: {
     const contentType = c.req.header("Content-Type");
 
     if (
+      c.req.path.endsWith("/admin/backup/d1/restore") ||
       !ACTIVE_METHODS.has(c.req.method) ||
       !clientKey ||
       !contentType?.includes("application/json")
@@ -63,11 +64,23 @@ export function createIdempotencyMiddleware(deps?: {
     }
 
     const projectId = c.get("projectId");
-    // Caller-scoped: two actors with write access to the same project must not
-    // collide on the same client-supplied Idempotency-Key.
-    const tokenResult = c.get("tokenResult");
-    const caller = tokenResult?.tokenId || tokenResult?.name || "anon";
+    // Identity-scoped: participants sharing one credential cannot replay one
+    // another's mutation result.
+    const caller = JSON.stringify([
+      c.get("principalId"),
+      c.get("participantId"),
+      ...(c.get("credentialPolicy")
+        ? [c.get("tokenResult").tokenId, c.get("credentialPolicy")]
+        : []),
+    ]);
     const key = `dp:${projectId}:${caller}:${c.req.method}:${c.req.path}:${clientKey}`;
+    if (c.get("credentialPolicy")) {
+      // Let the DO authorize every resource before its transactional replay.
+      // D1 response replay would skip those checks after resource state changes.
+      c.set("idempotencyKey", key);
+      c.set("idempotencyHash", await sha256Hex(await c.req.raw.clone().text()));
+      return next();
+    }
     const store = (deps?.makeStore ?? defaultMakeStore)(c.env);
 
     let requestHash = "";

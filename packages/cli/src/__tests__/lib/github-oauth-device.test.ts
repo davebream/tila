@@ -20,8 +20,8 @@ vi.mock("node:child_process", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-// Mock @clack/prompts for user output
-vi.mock("@clack/prompts", () => ({
+// Mock ../../lib/prompts for user output
+vi.mock("../../lib/prompts", () => ({
   note: vi.fn(),
   cancel: vi.fn(),
   isCancel: vi.fn(() => false),
@@ -35,13 +35,13 @@ vi.mock("@clack/prompts", () => ({
   },
 }));
 
-import * as p from "@clack/prompts";
 import {
   fetchClientId,
   pollForToken,
   resolveAppUserToken,
   startDeviceFlow,
 } from "../../lib/github-oauth-device";
+import * as p from "../../lib/prompts";
 
 describe("fetchClientId", () => {
   beforeEach(() => {

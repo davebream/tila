@@ -23,7 +23,12 @@ function createEntity(
       created_by: "test-actor",
     },
     1,
-    { actor: "test-actor" },
+    {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    },
   );
 }
 
@@ -34,8 +39,12 @@ function acquireClaim(
   const result = coordinationOps.acquire(
     db,
     entityId,
-    "test-actor",
-    "test-actor",
+    {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: { machine: "test-actor" },
+      actor: "test-actor/test-actor",
+    },
     "exclusive",
     60_000,
   );
@@ -58,6 +67,9 @@ describe("searchEntities", () => {
     createEntity(db, { id: "e2", data: { name: "Deploy pipeline" } });
     const fence = acquireClaim(db, "e2");
     entityOps.update(db, "e2", { name: "Release pipeline" }, fence, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
       actor: "test-actor",
     });
     const found = entityOps.searchEntities(db, { q: "release" });
@@ -71,7 +83,12 @@ describe("searchEntities", () => {
     const { db } = createTestDb();
     createEntity(db, { id: "e3", data: { name: "Archive test entity" } });
     const fence = acquireClaim(db, "e3");
-    entityOps.archive(db, "e3", fence, { actor: "test-actor" });
+    entityOps.archive(db, "e3", fence, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
     const results = entityOps.searchEntities(db, { q: "archive" });
     expect(results).toHaveLength(0);
   });
@@ -126,6 +143,9 @@ describe("searchEntities", () => {
     createEntity(db, { id: "t2", data: { title: "Auth System" } });
     const fence = acquireClaim(db, "t2");
     entityOps.update(db, "t2", { title: "Billing System" }, fence, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
       actor: "test-actor",
     });
     expect(
@@ -207,7 +227,12 @@ describe("searchAll returns all three result types", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const results = entityOps.searchAll(db, { q: "unifiedterm", limit: 10 });

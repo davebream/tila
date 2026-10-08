@@ -3,6 +3,7 @@ import { registerEntityTools } from "../tools/entities";
 import {
   type MockFacade,
   type MockServer,
+  TEST_ENTITY,
   asFacade,
   asServer,
   createMockFacade,
@@ -48,7 +49,7 @@ describe("registerEntityTools", () => {
     it("calls tasks.create with id, type, data, and tags", async () => {
       facade.tasks.create.mockResolvedValue({
         ok: true,
-        entity: { id: "T-1" },
+        entity: { ...TEST_ENTITY, id: "T-1" },
       });
 
       const handler = findHandler("tila_task_create");
@@ -70,7 +71,7 @@ describe("registerEntityTools", () => {
     it("forwards tags when provided", async () => {
       facade.tasks.create.mockResolvedValue({
         ok: true,
-        entity: { id: "T-2" },
+        entity: { ...TEST_ENTITY, id: "T-2" },
       });
 
       const handler = findHandler("tila_task_create");
@@ -140,7 +141,7 @@ describe("registerEntityTools", () => {
     it("calls tasks.get with the id", async () => {
       facade.tasks.get.mockResolvedValue({
         ok: true,
-        entity: { id: "T-1" },
+        entity: { ...TEST_ENTITY, id: "T-1" },
         relationships: [],
       });
 
@@ -156,10 +157,13 @@ describe("registerEntityTools", () => {
         from_id: "t",
         to_id: `x${i}`,
         type: "blocks",
+        schema_version: 1,
+        created_at: 0,
       }));
       facade.tasks.get.mockResolvedValue({
         ok: true,
         entity: {
+          ...TEST_ENTITY,
           id: "t",
           type: "task",
           schema_version: 1,
@@ -187,6 +191,7 @@ describe("registerEntityTools", () => {
       facade.tasks.get.mockResolvedValue({
         ok: true,
         entity: {
+          ...TEST_ENTITY,
           id: "t",
           type: "task",
           schema_version: 1,
@@ -197,7 +202,15 @@ describe("registerEntityTools", () => {
           created_by: "u",
           tags: [],
         },
-        relationships: [{ from_id: "t", to_id: "x", type: "blocks" }],
+        relationships: [
+          {
+            from_id: "t",
+            to_id: "x",
+            type: "blocks",
+            schema_version: 1,
+            created_at: 0,
+          },
+        ],
       });
 
       const handler = findHandler("tila_task_show");
@@ -236,7 +249,10 @@ describe("registerEntityTools", () => {
     });
 
     it("slices entities to limit and adds truncated+total when over limit", async () => {
-      const entities = Array.from({ length: 60 }, (_, i) => ({ id: `T-${i}` }));
+      const entities = Array.from({ length: 60 }, (_, i) => ({
+        ...TEST_ENTITY,
+        id: `T-${i}`,
+      }));
       facade.tasks.ready.mockResolvedValue({ ok: true, entities });
 
       const handler = findHandler("tila_task_ready");
@@ -249,7 +265,10 @@ describe("registerEntityTools", () => {
     });
 
     it("returns result unchanged when under limit (no truncated key)", async () => {
-      const entities = Array.from({ length: 10 }, (_, i) => ({ id: `T-${i}` }));
+      const entities = Array.from({ length: 10 }, (_, i) => ({
+        ...TEST_ENTITY,
+        id: `T-${i}`,
+      }));
       facade.tasks.ready.mockResolvedValue({ ok: true, entities });
 
       const handler = findHandler("tila_task_ready");
@@ -278,7 +297,13 @@ describe("registerEntityTools", () => {
       facade.tasks.addRelationship.mockResolvedValue({ ok: true });
 
       const handler = findHandler("tila_task_relationships_add");
-      await handler({ from_id: "T-1", to_id: "T-2", type: "blocks" });
+      await handler({
+        from_id: "T-1",
+        to_id: "T-2",
+        type: "blocks",
+        schema_version: 1,
+        created_at: 0,
+      });
 
       expect(facade.tasks.addRelationship).toHaveBeenCalledWith(
         "T-1",
@@ -308,6 +333,8 @@ describe("registerEntityTools", () => {
         from_id: `T-${i}`,
         to_id: "T-X",
         type: "blocks",
+        schema_version: 1,
+        created_at: 0,
       }));
       facade.tasks.listRelationships.mockResolvedValue({
         ok: true,
@@ -328,6 +355,8 @@ describe("registerEntityTools", () => {
         from_id: `T-${i}`,
         to_id: "T-X",
         type: "blocks",
+        schema_version: 1,
+        created_at: 0,
       }));
       facade.tasks.listRelationships.mockResolvedValue({
         ok: true,
@@ -351,7 +380,12 @@ describe("registerEntityTools", () => {
       const handler = findHandler("tila_task_create");
       await expect(
         handler({ id: "T-1", type: "task", data: {} }),
-      ).rejects.toThrow("network failure");
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching("network failure") },
+        },
+      });
     });
   });
 

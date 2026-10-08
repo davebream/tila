@@ -52,94 +52,68 @@ describe("dev-seed.sh enum correctness", () => {
 // --- Documentation-style tests (no live server required) ---
 describe("Entity Relationship API routes", () => {
   describe("POST /tasks/relationships (add — idempotent)", () => {
-    it("returns 201 with created:true on first add", () => {
-      // POST /projects/:pid/tasks/relationships
-      // Body: { from_id: "T-a", to_id: "T-b", type: "blocks" }
-      // Expected: 201, body.ok === true, body.created === true
-      expect(true).toBe(true);
-    });
+    // POST /projects/:pid/tasks/relationships
+    // Body: { from_id: "T-a", to_id: "T-b", type: "blocks" }
+    // Expected: 201, body.ok === true, body.created === true
+    it.todo("returns 201 with created:true on first add");
 
-    it("returns 200 with created:false on duplicate add (idempotent)", () => {
-      // POST same { from_id, to_id, type } again
-      // Expected: 200, body.ok === true, body.created === false
-      // Exactly one row in the relationships table (no duplicate insert)
-      expect(true).toBe(true);
-    });
+    // POST same { from_id, to_id, type } again
+    // Expected: 200, body.ok === true, body.created === false
+    // Exactly one row in the relationships table (no duplicate insert)
+    it.todo("returns 200 with created:false on duplicate add (idempotent)");
 
-    it("returns 400 with validation-error on invalid type", () => {
-      // POST with { from_id: "T-a", to_id: "T-b", type: "parent" }
-      // Expected: 400, body.error.code === "validation-error"
-      // Note: "parent" is not a valid enum value; use "parent-child"
-      expect(true).toBe(true);
-    });
+    // POST with { from_id: "T-a", to_id: "T-b", type: "parent" }
+    // Expected: 400, body.error.code === "validation-error"
+    // Note: "parent" is not a valid enum value; use "parent-child"
+    it.todo("returns 400 with validation-error on invalid type");
   });
 
   describe("GET /tasks/relationships (list)", () => {
-    it("returns relationships filtered by type", () => {
-      // GET /projects/:pid/tasks/relationships?type=blocks
-      // Expected: 200, body.ok === true, all returned relationships have type === "blocks"
-      expect(true).toBe(true);
-    });
+    // GET /projects/:pid/tasks/relationships?type=blocks
+    // Expected: 200, body.ok === true, all returned relationships have type === "blocks"
+    it.todo("returns relationships filtered by type");
 
-    it("returns relationships filtered by from_id", () => {
-      // GET /projects/:pid/tasks/relationships?from_id=T-a
-      // Expected: 200, body.ok === true, all returned relationships have from_id === "T-a"
-      expect(true).toBe(true);
-    });
+    // GET /projects/:pid/tasks/relationships?from_id=T-a
+    // Expected: 200, body.ok === true, all returned relationships have from_id === "T-a"
+    it.todo("returns relationships filtered by from_id");
 
-    it("returns all relationships when no filter provided", () => {
-      // GET /projects/:pid/tasks/relationships
-      // Expected: 200, body.ok === true, body.relationships is an array
-      expect(true).toBe(true);
-    });
+    // GET /projects/:pid/tasks/relationships
+    // Expected: 200, body.ok === true, body.relationships is an array
+    it.todo("returns all relationships when no filter provided");
 
-    it("requires at minimum read permission", () => {
-      // No token or invalid token → 401
-      // Read-scoped token → 200
-      expect(true).toBe(true);
-    });
+    // No token or invalid token → 401
+    // Read-scoped token → 200
+    it.todo("requires at minimum read permission");
   });
 
   describe("DELETE /tasks/relationships (remove)", () => {
-    it("returns 200 with removed:true when relationship exists", () => {
-      // DELETE /projects/:pid/tasks/relationships?from_id=T-a&to_id=T-b&type=blocks
-      // Expected: 200, body.ok === true, body.removed === true
-      expect(true).toBe(true);
-    });
+    // DELETE /projects/:pid/tasks/relationships?from_id=T-a&to_id=T-b&type=blocks
+    // Expected: 200, body.ok === true, body.removed === true
+    it.todo("returns 200 with removed:true when relationship exists");
 
-    it("returns 200 with removed:false when relationship does not exist", () => {
-      // DELETE same edge again after first remove
-      // Expected: 200, body.ok === true, body.removed === false
-      expect(true).toBe(true);
-    });
+    // DELETE same edge again after first remove
+    // Expected: 200, body.ok === true, body.removed === false
+    it.todo("returns 200 with removed:false when relationship does not exist");
 
-    it("requires write permission (read-scoped token → 403)", () => {
-      // Read-scoped token → 403
-      // Write-scoped token → 200
-      expect(true).toBe(true);
-    });
+    // Read-scoped token → 403
+    // Write-scoped token → 200
+    it.todo("requires write permission (read-scoped token → 403)");
   });
 
   describe("Deterministic task creation (--id + --type)", () => {
-    it("POST /tasks with explicit id creates task with that exact id", () => {
-      // POST /projects/:pid/tasks
-      // Body: { id: "my-custom-id", type: "epic", data: { title: "Epic task" }, created_by: "test" }
-      // Expected: 200/201, body.entity.id === "my-custom-id", body.entity.type === "epic"
-      expect(true).toBe(true);
-    });
+    // POST /projects/:pid/tasks
+    // Body: { id: "my-custom-id", type: "epic", data: { title: "Epic task" }, created_by: "test" }
+    // Expected: 200/201, body.entity.id === "my-custom-id", body.entity.type === "epic"
+    it.todo("POST /tasks with explicit id creates task with that exact id");
 
-    it("POST /tasks with same id twice returns 409 already-exists", () => {
-      // POST same id again
-      // Expected: 409, body.error.code === "already-exists"
-      expect(true).toBe(true);
-    });
+    // POST same id again
+    // Expected: 409, body.error.code === "already-exists"
+    it.todo("POST /tasks with same id twice returns 409 already-exists");
 
-    it("can create parent-child relationship after deterministic create", () => {
-      // Create parent task with explicit id, create child task with explicit id,
-      // then POST /tasks/relationships { from_id: parent, to_id: child, type: "parent-child" }
-      // Expected: 201, body.ok === true, body.created === true
-      expect(true).toBe(true);
-    });
+    // Create parent task with explicit id, create child task with explicit id,
+    // then POST /tasks/relationships { from_id: parent, to_id: child, type: "parent-child" }
+    // Expected: 201, body.ok === true, body.created === true
+    it.todo("can create parent-child relationship after deterministic create");
   });
 });
 

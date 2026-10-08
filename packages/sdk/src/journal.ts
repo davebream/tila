@@ -1,16 +1,19 @@
 import type { JournalResponse } from "@tila/schemas";
 import type { TilaClient } from "./client";
+import { createJournalContinuityMethods } from "./continuity";
 
 export function createJournalMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}/journal`;
 
   return {
+    ...createJournalContinuityMethods(client, projectId),
     async query(opts?: {
       // Worker GET /journal query params: resource (entity id), kind (event
       // kind), after_seq (cursor), limit. These are the names the Worker route
       // actually reads — `entity_id`/`event_kind` were silently ignored.
       resource?: string;
       kind?: string;
+      client_name?: string;
       after_seq?: string;
       limit?: string;
     }): Promise<JournalResponse> {
@@ -18,6 +21,7 @@ export function createJournalMethods(client: TilaClient, projectId: string) {
         query: {
           resource: opts?.resource,
           kind: opts?.kind,
+          client_name: opts?.client_name,
           after_seq: opts?.after_seq,
           limit: opts?.limit,
         },

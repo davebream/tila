@@ -10,7 +10,7 @@ import {
   registerWithWorker,
 } from "../../lib/github-app-setup";
 
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   note: vi.fn(),
   cancel: vi.fn(),
   isCancel: vi.fn(() => false),

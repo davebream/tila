@@ -304,6 +304,35 @@ describe("verifyOidcToken (GitHub backward-compat)", () => {
     });
   });
 
+  it.each(["repository_id", "event_name", "sub", "actor", "actor_id", "jti"])(
+    "rejects a token missing required claim %s",
+    async (claim) => {
+      await setupMockJwks();
+      const claims = Object.fromEntries(
+        Object.entries(VALID_GITHUB_CLAIMS).filter(([name]) => name !== claim),
+      );
+      const token = await signTestJwt(claims);
+
+      await expect(
+        verifyOidcToken(token, "https://tila.example.com"),
+      ).rejects.toMatchObject({ code: "oidc-invalid-token" });
+    },
+  );
+
+  it("accepts missing environment and reusable-workflow claims", async () => {
+    await setupMockJwks();
+    const claims = Object.fromEntries(
+      Object.entries(VALID_GITHUB_CLAIMS).filter(
+        ([name]) => name !== "environment" && name !== "job_workflow_ref",
+      ),
+    );
+    const token = await signTestJwt(claims);
+
+    const verified = await verifyOidcToken(token, "https://tila.example.com");
+    expect(verified.environment).toBeUndefined();
+    expect(verified.job_workflow_ref).toBeUndefined();
+  });
+
   it("throws oidc-invalid-token on malformed JWT (not 3 parts)", async () => {
     await expect(
       verifyOidcToken("not.a.jwt", "https://tila.example.com"),

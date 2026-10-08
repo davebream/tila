@@ -1,3 +1,4 @@
+import type { ArtifactProvenance } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -6,6 +7,7 @@ import {
   primaryKey,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 // --- entities ---
@@ -66,6 +68,15 @@ export const artifactPointers = sqliteTable(
     tombstoned_at: integer("tombstoned_at"),
     blob_deleted_at: integer("blob_deleted_at"),
     content_inline: text("content_inline"),
+    lineage_id: text("lineage_id"),
+    revision: integer("revision"),
+    restored_from: text("restored_from"),
+    provenance: text("provenance", {
+      mode: "json",
+    }).$type<ArtifactProvenance>(),
+    revision_creation: text("revision_creation", {
+      mode: "json",
+    }).$type<ArtifactProvenance>(),
   },
   (table) => [
     index("idx_artifacts_produced").on(table.resource),
@@ -78,6 +89,69 @@ export const artifactPointers = sqliteTable(
 );
 
 // --- entity_artifact_references ---
+export const artifactLineages = sqliteTable("artifact_lineages", {
+  id: text("id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  kind: text("kind").notNull(),
+  resource: text("resource"),
+  next_revision: integer("next_revision").notNull().default(1),
+  destroyed_at: integer("destroyed_at"),
+});
+
+// Permanent metadata, independent of the disposable live pointer projection.
+export const artifactRevisions = sqliteTable(
+  "artifact_revisions",
+  {
+    r2_key: text("r2_key").primaryKey(),
+    lineage_id: text("lineage_id").notNull(),
+    revision: integer("revision").notNull(),
+    metadata: text("metadata").notNull(),
+    retention_assigned: integer("retention_assigned").notNull().default(0),
+  },
+  (t) => [uniqueIndex("idx_revision_identity").on(t.lineage_id, t.revision)],
+);
+
+export const artifactLifecycleOperations = sqliteTable(
+  "artifact_lifecycle_operations",
+  {
+    id: text("id").primaryKey(),
+    lineage_id: text("lineage_id").notNull(),
+    record: text("record").notNull(),
+    request_id: text("request_id"),
+    state: text("state", { enum: ["pending", "published", "done"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    retry_at: integer("retry_at").notNull().default(0),
+  },
+  (t) => [index("idx_lifecycle_due").on(t.state, t.retry_at)],
+);
+
+export const artifactRetentionState = sqliteTable("artifact_retention_state", {
+  id: integer("id").primaryKey(),
+  policy: text("policy").notNull(),
+  cursor: text("cursor"),
+  complete: integer("complete").notNull().default(0),
+});
+
+export const artifactRevisionOperations = sqliteTable(
+  "artifact_revision_operations",
+  {
+    id: text("id").primaryKey(),
+    lineage_id: text("lineage_id").notNull(),
+    request_hash: text("request_hash").notNull(),
+    state: text("state", {
+      enum: ["reserved", "accepted", "published", "aborted"],
+    }).notNull(),
+    record: text("record").notNull(),
+    search_text: text("search_text"),
+    created_at: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_artifact_operations_lineage").on(table.lineage_id, table.state),
+  ],
+);
+
 export const entityArtifactReferences = sqliteTable(
   "entity_artifact_references",
   {
@@ -124,6 +198,11 @@ export const journal = sqliteTable(
     t: integer("t").notNull(),
     kind: text("kind").notNull(),
     resource: text("resource").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    environment: text("environment").notNull().default("{}"),
+    // Retained physically for archived-row compatibility; public reads use the
+    // canonical identity columns above.
     actor: text("actor").notNull(),
     token_id: text("token_id"),
     fence: integer("fence"),
@@ -135,6 +214,7 @@ export const journal = sqliteTable(
     index("idx_journal_resource").on(table.resource),
     index("idx_journal_kind").on(table.kind),
     index("idx_journal_source").on(table.source),
+    index("idx_journal_participant").on(table.participant_id),
   ],
 );
 
@@ -156,9 +236,9 @@ export const claims = sqliteTable(
   "claims",
   {
     resource: text("resource").primaryKey(),
-    holder: text("holder").notNull(),
-    machine: text("machine").notNull(),
-    user: text("user").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    environment: text("environment").notNull().default("{}"),
     mode: text("mode").notNull(),
     fence: integer("fence").notNull(),
     acquired_at: integer("acquired_at").notNull(),
@@ -178,11 +258,16 @@ export const fences = sqliteTable("fences", {
 export const presence = sqliteTable(
   "presence",
   {
-    machine: text("machine").primaryKey(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    environment: text("environment").notNull().default("{}"),
     last_seen: integer("last_seen").notNull(),
     info: text("info").notNull().default("{}"),
   },
-  (table) => [index("idx_presence_last_seen").on(table.last_seen)],
+  (table) => [
+    primaryKey({ columns: [table.principal_id, table.participant_id] }),
+    index("idx_presence_last_seen").on(table.last_seen),
+  ],
 );
 
 // --- _schema_history ---
@@ -259,6 +344,35 @@ export const gates = sqliteTable(
   ],
 );
 
+// --- signal groups ---
+export const signalGroups = sqliteTable("signal_groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+  created_by_principal_id: text("created_by_principal_id").notNull(),
+  created_by_participant_id: text("created_by_participant_id").notNull(),
+  updated_by_principal_id: text("updated_by_principal_id").notNull(),
+  updated_by_participant_id: text("updated_by_participant_id").notNull(),
+});
+
+export const signalGroupMembers = sqliteTable(
+  "signal_group_members",
+  {
+    group_id: text("group_id")
+      .notNull()
+      .references(() => signalGroups.id, { onDelete: "cascade" }),
+    principal_id: text("principal_id").notNull(),
+    added_at: integer("added_at").notNull(),
+    added_by_principal_id: text("added_by_principal_id").notNull(),
+    added_by_participant_id: text("added_by_participant_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.group_id, table.principal_id] }),
+    index("idx_signal_group_members_principal").on(table.principal_id),
+  ],
+);
+
 // --- signals ---
 export const signals = sqliteTable(
   "signals",
@@ -268,14 +382,47 @@ export const signals = sqliteTable(
     kind: text("kind").notNull(),
     resource: text("resource"),
     payload: text("payload").notNull().default("{}"),
-    created_by: text("created_by").notNull(),
+    sender_principal_id: text("sender_principal_id").notNull(),
+    sender_participant_id: text("sender_participant_id").notNull(),
+    sender_display_name: text("sender_display_name"),
+    sender_environment: text("sender_environment").notNull().default("{}"),
     created_at: integer("created_at").notNull(),
     expires_at: integer("expires_at").notNull(),
-    acked_at: integer("acked_at"),
+  },
+  (table) => [index("idx_signals_expires").on(table.expires_at)],
+);
+
+export const signalDeliveries = sqliteTable(
+  "signal_deliveries",
+  {
+    signal_id: text("signal_id")
+      .notNull()
+      .references(() => signals.id, { onDelete: "cascade" }),
+    recipient_principal_id: text("recipient_principal_id").notNull(),
+    recipient_participant_id: text("recipient_participant_id").notNull(),
+    recipient_display_name: text("recipient_display_name"),
+    recipient_environment: text("recipient_environment")
+      .notNull()
+      .default("{}"),
+    acknowledged_at: integer("acknowledged_at"),
+    acknowledged_by_principal_id: text("acknowledged_by_principal_id"),
+    acknowledged_by_participant_id: text("acknowledged_by_participant_id"),
+    acknowledged_by_display_name: text("acknowledged_by_display_name"),
+    acknowledged_by_environment: text("acknowledged_by_environment"),
   },
   (table) => [
-    index("idx_signals_target").on(table.target),
-    index("idx_signals_expires").on(table.expires_at),
+    primaryKey({
+      columns: [
+        table.signal_id,
+        table.recipient_principal_id,
+        table.recipient_participant_id,
+      ],
+    }),
+    index("idx_signal_deliveries_inbox").on(
+      table.recipient_principal_id,
+      table.recipient_participant_id,
+      table.acknowledged_at,
+    ),
   ],
 );
 
@@ -439,4 +586,99 @@ export const doIdempotency = sqliteTable(
     created_at: integer("created_at").notNull(),
   },
   (table) => [index("idx_do_idempotency_created").on(table.created_at)],
+);
+
+export const projectTransferState = sqliteTable("_project_transfer_state", {
+  singleton: integer("singleton").primaryKey(),
+  session_id: text("session_id").notNull().unique(),
+  mode: text("mode").notNull(),
+  owner: text("owner").notNull(),
+  archive_digest: text("archive_digest"),
+  safety_archive: text("safety_archive"),
+  started_at: integer("started_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+  expires_at: integer("expires_at"),
+  applying: integer("applying").notNull().default(0),
+});
+
+export const projectTransferChunks = sqliteTable(
+  "_project_transfer_chunks",
+  {
+    session_id: text("session_id").notNull(),
+    section: text("section").notNull(),
+    chunk_index: integer("chunk_index").notNull(),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    accepted_at: integer("accepted_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.session_id, table.section, table.chunk_index],
+    }),
+  ],
+);
+
+export const journalCursors = sqliteTable(
+  "journal_cursors",
+  {
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    seq: integer("seq").notNull(),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.principal_id, table.participant_id] }),
+  ],
+);
+
+export const handoffs = sqliteTable(
+  "handoffs",
+  {
+    id: text("id").primaryKey(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    created_seq: integer("created_seq").notNull().unique(),
+    request_json: text("request_json").notNull(),
+    snapshot: text("snapshot").notNull(),
+  },
+  (table) => [
+    index("idx_handoffs_creator").on(
+      table.principal_id,
+      table.participant_id,
+      table.created_seq,
+    ),
+  ],
+);
+
+export const handoffReferences = sqliteTable(
+  "handoff_references",
+  {
+    handoff_id: text("handoff_id").notNull(),
+    resource: text("resource").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.handoff_id, table.resource] }),
+    index("idx_handoff_resource").on(table.resource),
+  ],
+);
+
+export const artifactReviews = sqliteTable(
+  "artifact_reviews",
+  {
+    artifact_key: text("artifact_key").notNull(),
+    review_revision: integer("review_revision").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    created_at: integer("created_at").notNull(),
+    decision: text("decision", {
+      enum: ["trusted", "rejected", "superseded", "revoked"],
+    }).notNull(),
+    reason: text("reason"),
+    operation_id: text("operation_id").notNull(),
+    request_json: text("request_json").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.artifact_key, table.review_revision] }),
+    uniqueIndex("idx_artifact_reviews_operation").on(table.operation_id),
+  ],
 );

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { acquire } from "../src/coordination-ops";
 import { checkPendingGates, createGate } from "../src/gate-ops";
 import * as schema from "../src/schema";
-import { createEntity, createTestDb } from "./helpers";
+import { createEntity, createTestDb, testOrigin } from "./helpers";
 
 // The append-only journal must stay complete: every meaningful state change
 // emits a journal row in the same transaction. checkPendingGates (the
@@ -14,7 +14,13 @@ describe("checkPendingGates journals timed-out gates (write path)", () => {
   it("emits a gate.timed_out journal row when resolving an expired timer gate", () => {
     const { db } = createTestDb();
     createEntity(db, { id: "task-g" });
-    const claim = acquire(db, "task:task-g", "m1", "u1", "exclusive", 60_000);
+    const claim = acquire(
+      db,
+      "task:task-g",
+      testOrigin("m1", "u1"),
+      "exclusive",
+      60_000,
+    );
 
     const T0 = 1_000_000;
     createGate(
@@ -26,7 +32,7 @@ describe("checkPendingGates journals timed-out gates (write path)", () => {
         fence: claim.fence,
         timeout_at: T0 + 1_000,
       },
-      { actor: "m1/u1" },
+      testOrigin("m1/u1"),
       T0,
     );
 

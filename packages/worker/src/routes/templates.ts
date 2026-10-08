@@ -4,6 +4,7 @@ import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const templates = new Hono<{
@@ -38,9 +39,7 @@ templates.post("/instantiate", requirePermission("write"), async (c) => {
     {
       ...parsed.data,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
