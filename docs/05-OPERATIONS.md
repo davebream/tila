@@ -1533,8 +1533,9 @@ invoking compilers directly. Worker dry-run output is explicit and cacheable.
 
 PRs restore caches only. Successful main verification saves download and Turbo
 caches keyed by toolchain, lockfile and commit. Release output must be built fresh.
-Environment-gated integration tests are not cached. CI still runs the full suite:
-the affected task list is recorded in `selection.json` for observation only.
+Environment-gated integration tests are not cached. Every CI run still runs the
+full suite. The affected task list in `selection.json` informs Mergify scopes,
+but does not select which tests CI executes.
 Enable selective execution in a follow-up change only after ten paired PR runs
 prove selection includes required tests for schema, SQLite, migration, SDK, UI,
 installer, root-config and lockfile changes. Missing Git history falls back to full
@@ -1544,6 +1545,39 @@ Manual CI dispatch with `benchmark=true` runs the baseline and Turbo concurrency
 2/4 × Vitest workers 1/2, three times each on one revision. It does not tune CI
 automatically. Select the lowest median with no failures and at most 10% extra
 runner time; retain the baseline if none qualifies. Reports last seven days.
+
+### Mergify scopes and batching
+
+Mergify processes one batch at a time, with up to three ready PRs and a maximum
+30-second wait to fill a batch. Apply `merge-ready` after the latest required
+`ci` succeeds. Keep GitHub's required `ci` check, but leave "Require branches to
+be up to date before merging" disabled: Mergify validates the combined changes
+against `main` on a temporary batch PR.
+
+Scopes use the `manual` source, meaning CI supplies them automatically. The
+selector uses Mergify's queue-aware base/head commits and Turbo's `--affected`
+package set, including downstream consumers. A UI change therefore includes the
+Worker; shared SQLite changes include both cloud and local consumers. The shared
+integration-test package intentionally makes many changes overlap.
+
+Package manifest changes, files outside known packages (including documentation,
+CI and build tooling), missing history, empty selections, or detection errors
+set `all_scopes: true`. These changes become barriers: they are validated alone.
+Renames include both paths and deletions retain the old package's scope.
+
+A separate `scopes` job uploads only JSON to Mergify, keyed by the PR head SHA,
+after `verify` succeeds. It executes no repository code and holds the
+`MERGIFY_TOKEN` secret only during upload. The token must be a Mergify application
+key with the `ci` scope; an admin-only key is not sufficient. Missing tokens or
+failed uploads block the required `ci` gate on same-repository PRs. Fork and
+Dependabot PRs skip upload and use Mergify's catch-all behavior.
+
+Scopes affect merge safety: Mergify can skip queue CI when intervening recorded
+merges touch only unrelated scopes. Keep the scope contract tests green and
+retain full test execution inside CI. To roll back scopes, set
+`scopes.source: null` in `.mergify.yml`; batching and full CI remain available.
+See [Mergify scopes](https://docs.mergify.com/merge-queue/scopes/) and
+[Direct Merge](https://docs.mergify.com/merge-queue/direct-merge/).
 
 ### Local Cloudflare runtime validation
 
