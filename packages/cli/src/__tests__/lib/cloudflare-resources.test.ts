@@ -106,6 +106,33 @@ describe("applyD1Migrations provisioning warning", () => {
 
     expect(p.log.warn).not.toHaveBeenCalled();
   });
+  it("returns migration status without prompt output in quiet mode", async () => {
+    const result = {
+      applied: 1,
+      skipped: 23,
+      appliedNames: ["0024_repo_oidc_policy.sql"],
+      watermark: "0024_repo_oidc_policy.sql",
+    };
+    mockRunD1Migrations.mockResolvedValue(result);
+    const client = makeMockClient();
+    const { applyD1Migrations } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(
+      applyD1Migrations(client, "acct-1", "db-1", "/migrations", {
+        quiet: true,
+        migrate: true,
+      }),
+    ).resolves.toEqual(result);
+    expect(mockRunD1Migrations).toHaveBeenCalledWith({
+      queryFn: expect.any(Function),
+      migrationsDir: "/migrations",
+      migrate: true,
+    });
+    expect(p.log.info).not.toHaveBeenCalled();
+    expect(p.log.warn).not.toHaveBeenCalled();
+    expect(client.d1.database.query).not.toHaveBeenCalled();
+  });
 });
 
 describe("ensureD1Database", () => {
