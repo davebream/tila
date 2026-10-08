@@ -68,8 +68,8 @@
     "gen:version": "node ../../scripts/generate-version.mjs sdk"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.2",
-    "tar-stream": "^3.2.1",
+    "drizzle-orm": "^0.45.4",
+    "tar-stream": "^3.2.2",
     "zod": "^3.24.0"
   },
   "peerDependencies": {
@@ -86,9 +86,9 @@
     "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^22.20.1",
-    "@types/tar-stream": "^3.1.4",
-    "better-sqlite3": "^12.10.0",
+    "@types/node": "^22.20.5",
+    "@types/tar-stream": "^3.1.5",
+    "better-sqlite3": "^12.11.1",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9"

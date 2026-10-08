@@ -19,14 +19,14 @@
     "@tila/core": "workspace:*",
     "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.26",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.13",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260602.1",
     "@types/better-sqlite3": "^7.6.13",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.11.1",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9"
   }
