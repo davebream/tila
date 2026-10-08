@@ -22,7 +22,7 @@
     "@types/node": "^22.20.0",
     "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.26",
+    "hono": "^4.13.7",
     "tila-sdk": "workspace:*",
     "tsx": "^4.22.4",
     "typescript": "^5.7.0",
