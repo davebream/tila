@@ -57,8 +57,8 @@ TILA_BENCH_ALLOW_REMOTE=1 for any non-localhost base URL.
 `;
 
 async function main(rawArgv: string[]): Promise<number> {
-  // pnpm forwards a literal "--" separator; drop it.
-  const argv = rawArgv.filter((a, i) => !(a === "--" && i === 0));
+  // pnpm forwards a literal "--" separator (after the script's own args); drop it.
+  const argv = rawArgv.filter((a) => a !== "--");
   const [first, ...rest] = argv;
   const sub = first && !first.startsWith("-") ? first : "run";
   const args = first && !first.startsWith("-") ? rest : argv;
