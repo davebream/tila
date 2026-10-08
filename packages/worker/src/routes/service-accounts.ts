@@ -14,6 +14,7 @@ import {
 import { Hono } from "hono";
 import { zodValidationError } from "../lib/validation";
 import { denied, scopedPolicy } from "../middleware/capability";
+import { stepUpGuard } from "../middleware/protected-operation";
 import { principalIdFor } from "../middleware/request-identity";
 import { requireProjectOwner } from "../middleware/require-project-owner";
 import type { Env, HonoVariables } from "../types";
@@ -22,7 +23,7 @@ export const serviceAccountRoutes = new Hono<{
   Bindings: Env;
   Variables: HonoVariables;
 }>();
-serviceAccountRoutes.use("*", requireProjectOwner);
+serviceAccountRoutes.use("*", requireProjectOwner, stepUpGuard);
 serviceAccountRoutes.get("/", async (c) =>
   c.json({
     ok: true,

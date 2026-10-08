@@ -27,6 +27,10 @@ export interface Env {
   // accepts a matching bearer to operate on ANY project by slug (no per-project
   // token). When unset, those endpoints return 404 (invisible). See routes/infra.ts.
   INFRA_ADMIN_TOKEN?: string;
+  // Optional override (seconds) for the step-up reauthentication window applied
+  // to high-impact membership/credential mutations from cookie sessions. See
+  // STEP_UP_MAX_AGE_SECONDS_DEFAULT in config.ts and middleware/protected-operation.ts.
+  STEP_UP_MAX_AGE_SECONDS?: string;
 }
 
 // Re-export for convenience

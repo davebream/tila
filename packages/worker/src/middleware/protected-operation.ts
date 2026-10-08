@@ -5,6 +5,7 @@ import {
 } from "@tila/schemas";
 import type { Context, MiddlewareHandler } from "hono";
 import { matchedRoutes } from "hono/route";
+import { STEP_UP_MAX_AGE_SECONDS_DEFAULT } from "../config";
 import {
   permissionRecheckResponse,
   reverifySessionPermission,
@@ -139,3 +140,80 @@ export function protectedOperationMiddleware(): MiddlewareHandler<AppEnv> {
     return next();
   };
 }
+
+// ─── Step-up reauthentication (#102) ────────────────────────────────────────
+//
+// High-impact membership and credential mutations made from an interactive
+// cookie session require a recent authentication. Bearer credentials (D1
+// tokens, scoped credentials, GitHub/OIDC JWT sessions) and cookie sessions
+// exchanged from a scoped credential cannot re-authenticate interactively, so
+// they are exempt; their protection is the explicit-owner/capability gate.
+
+/** Routes that call `requireFreshAuthentication` / mount `stepUpGuard`. */
+export const STEP_UP_PROTECTED = [
+  "POST /projects/:projectId/memberships",
+  "PATCH /projects/:projectId/memberships/:membershipId",
+  "DELETE /projects/:projectId/memberships/:membershipId",
+  "PUT /projects/:projectId/membership-policy",
+  "POST /projects/:projectId/admins",
+  "DELETE /projects/:projectId/admins/:githubUserId",
+  "POST|PATCH|DELETE /projects/:projectId/service-accounts/**",
+  "POST /api/tokens",
+  "DELETE /api/tokens/:name",
+  "POST /api/tokens/:name/rotate",
+] as const;
+
+export function stepUpMaxAgeMs(
+  env: Pick<Env, "STEP_UP_MAX_AGE_SECONDS">,
+): number {
+  const raw = env.STEP_UP_MAX_AGE_SECONDS;
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  const seconds =
+    Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : STEP_UP_MAX_AGE_SECONDS_DEFAULT;
+  return seconds * 1000;
+}
+
+/**
+ * Deny with 403 `step-up-required` when an interactive cookie session last
+ * authenticated longer ago than the configured window. Returns null when the
+ * session is fresh or the token kind is exempt. A cookie session with no
+ * recorded authentication time is treated as stale (fail closed).
+ */
+export function requireFreshAuthentication(
+  c: Context<AppEnv>,
+): Response | null {
+  const token = c.get("tokenResult");
+  if (token.kind !== "cookie-session" || token.policy) return null;
+  const maxAgeMs = stepUpMaxAgeMs(c.env);
+  const authenticatedAt = token.authenticatedAt;
+  const fresh =
+    typeof authenticatedAt === "number" &&
+    Date.now() - authenticatedAt <= maxAgeMs;
+  if (fresh) return null;
+  return c.json(
+    {
+      ok: false,
+      error: {
+        code: "step-up-required",
+        message: "Re-authenticate to continue",
+        retryable: false,
+        details: {
+          max_age_seconds: Math.floor(maxAgeMs / 1000),
+          authenticated_at: authenticatedAt ?? null,
+        },
+      },
+    },
+    403,
+  );
+}
+
+/** Mount after the owner/capability guard so a non-owner never learns the window. */
+export const stepUpGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(c.req.method)) {
+    const stale = requireFreshAuthentication(c);
+    if (stale) return stale;
+  }
+  return next();
+};

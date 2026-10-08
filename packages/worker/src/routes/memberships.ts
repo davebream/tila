@@ -5,15 +5,18 @@ import {
   MembershipRoleUpdateRequestSchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { stepUpGuard } from "../middleware/protected-operation";
 import { requireProjectOwner } from "../middleware/require-project-owner";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
 export const memberships = new Hono<AppEnv>();
-memberships.use("/membership-policy", requireProjectOwner);
-memberships.use("/memberships", requireProjectOwner);
-memberships.use("/memberships/*", requireProjectOwner);
+// Owner first, then step-up: mutations from a stale cookie session get
+// 403 step-up-required only after ownership is established.
+memberships.use("/membership-policy", requireProjectOwner, stepUpGuard);
+memberships.use("/memberships", requireProjectOwner, stepUpGuard);
+memberships.use("/memberships/*", requireProjectOwner, stepUpGuard);
 memberships.use("/membership-events", requireProjectOwner);
 
 function actor(c: import("hono").Context<AppEnv>): string {
