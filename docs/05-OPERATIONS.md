@@ -1526,3 +1526,21 @@ Manual CI dispatch with `benchmark=true` runs the baseline and Turbo concurrency
 2/4 × Vitest workers 1/2, three times each on one revision. It does not tune CI
 automatically. Select the lowest median with no failures and at most 10% extra
 runner time; retain the baseline if none qualifies. Reports last seven days.
+
+### Local Cloudflare runtime validation
+
+`pnpm test:runtime` runs the required Workers suite with local DO SQLite, D1 and
+R2. It uses the production compatibility date/flags and real migration sources,
+resets data between tests, and rejects unexpected outbound fetches. The suite
+checks exclusive claims/fences, stale writes, migration upgrades and transaction
+rollback, eviction/reconstruction, D1 authorization/revocation, and recovery of
+interrupted artifact commit publication without duplicates. JSON reports reject
+skipped, TODO, failed or empty runtime results. Placeholder-only tests in the
+older integration suite are explicitly TODO; meaningful assertions are retained.
+
+Primary CI uses Node 24. Node 22 SDK/MCP compatibility remains a full-run check
+on the daily schedule, manual full validation, and release validation. Bun and
+pnpm remain pinned. Runtime tests run in parallel with verification and secret
+scanning and are required by `ci`. They do **not** prove production PITR or
+remote latency/performance: keep the existing manual live-infrastructure release
+gates above.

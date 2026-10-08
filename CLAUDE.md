@@ -15,7 +15,8 @@ pnpm dev              # Source development: Worker :8787 + Vite UI :5173
 pnpm dev:cli --help   # Run the CLI from this checkout
 pnpm dev:mcp          # Run the MCP server from this checkout
 pnpm build            # Production build (turbo, all packages)
-pnpm test             # Run all tests (turbo)
+pnpm test             # Run all Node/Bun package and root-script tests (turbo)
+pnpm test:runtime     # Required local Cloudflare runtime tests (DO SQLite, D1, R2)
 pnpm lint             # Biome check (read-only, CI-safe)
 pnpm run check        # Biome check --write (auto-fixes formatting + imports)
 pnpm run typecheck    # TypeScript type checking (turbo)

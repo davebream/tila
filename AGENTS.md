@@ -15,7 +15,8 @@ pnpm dev              # Source development: Worker :8787 + Vite UI :5173
 pnpm dev:cli --help   # Run the CLI from this checkout
 pnpm dev:mcp          # Run the MCP server from this checkout
 pnpm build            # Production build (turbo, all packages)
-pnpm test             # Run all tests (turbo)
+pnpm test             # Run all Node/Bun package and root-script tests (turbo)
+pnpm test:runtime     # Required local Cloudflare runtime tests (DO SQLite, D1, R2)
 pnpm lint             # Biome check (read-only, CI-safe)
 pnpm run check        # Biome check --write (auto-fixes formatting + imports)
 pnpm run typecheck    # TypeScript type checking (turbo)
@@ -31,7 +32,7 @@ pnpm --filter @tila/backend-do test -- --run artifact-ops
 pnpm --filter @tila/worker typecheck
 ```
 
-Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. `backend-do` tests live in `test/`, not `src/`. Integration tests use `@cloudflare/vitest-pool-workers`.
+Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. `backend-do` tests live in `test/`, not `src/`. Required Cloudflare runtime tests use `@cloudflare/vitest-plugin` and a separate configuration. They require no deployed service or credentials; skipped/TODO runtime cases fail CI.
 
 Lefthook runs Biome auto-fix, gitleaks secret detection, and targeted version lockstep checks on staged files.
 
