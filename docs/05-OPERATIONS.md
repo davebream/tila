@@ -690,7 +690,7 @@ If `doRttMs > 200ms` persistently:
 
 ### DO cold start
 
-First request after idle eviction adds ~50-100ms latency. Subsequent requests are fast. There are no user-configurable knobs to prevent eviction in v0.1. The DO evicts after ~30 seconds of inactivity.
+First request after idle eviction pays the DO startup cost; measure it with the `cold-start` benchmark scenario against your deployment (`docs/benchmarks/README.md`; the project baseline is in `docs/benchmarks/BASELINE.md`). Subsequent requests are fast. There are no user-configurable knobs to prevent eviction in v0.1. The idle window before eviction is not measured by tila; do not poll a DO to find it, every request resets the timer.
 
 **Mitigation:** For latency-sensitive workloads, send a periodic keepalive (e.g., `tila doctor` on a 20-second interval). This is generally unnecessary for production workloads with regular traffic.
 
@@ -1038,6 +1038,27 @@ pnpm run typecheck && pnpm run check && pnpm test
 ### Gate 3: Biome formatting gate
 
 `pnpm run check` (Biome `--write`) must produce no diff after running. If it reformats files, stage and commit the result before tagging. CI runs `pnpm lint` (read-only) — format drift that slips past pre-commit will cause a red CI build on the tagged commit.
+
+### Gate 4: Coordination benchmarks
+
+Run the deployed benchmark matrix against a throwaway project and compare it with the previous baseline. CI only runs the in-process smoke subset; this gate is the only place deployed throughput and tail latency are measured. Full methodology, flags and the throwaway-project flow are in `docs/benchmarks/README.md`.
+
+**Requirements:** `TILA_BASE_URL`, `TILA_TOKEN` (full-scope token of the throwaway project; `cold-start` needs it for `POST /admin/restart`), `TILA_PROJECT_ID`, and `TILA_BENCH_ALLOW_REMOTE=1`.
+
+```bash
+TILA_BENCH_ALLOW_REMOTE=1 TILA_BASE_URL=https://your-worker.workers.dev \
+TILA_TOKEN=<throwaway project token> TILA_PROJECT_ID=tila-bench-<date> \
+pnpm bench -- --tier http --scenario all --participants 8 --duration 30s --warmup 5s --md
+# then: claims-contended --mode owner --participants 24, claims-uncontended --cadence 500ms --participants 6, cold-start
+pnpm bench:report -- --in packages/bench/results --out docs/benchmarks/BASELINE.md
+```
+
+What to compare against the previous `docs/benchmarks/BASELINE.md`:
+1. **Hard:** every scenario reports `PASS` for all invariants and an error rate of 0. A failing invariant (a second winner on an exclusive claim, an accepted stale fence, a journal gap) blocks the tag.
+2. **Advisory:** p95 for `acquire`, `update`/`set`, `send` and `replay` within ~25% of the previous deployed baseline on the same colo; `missed_cadence_deadlines` of the 500 ms cadence run stays 0; `cold_first_request` p50 has not doubled. Investigate regressions beyond that before tagging; they are not automatically blocking because colo, time of day and Cloudflare load move the numbers.
+3. Commit the regenerated `BASELINE.md` with the release. Raw JSON stays in `packages/bench/results/` (gitignored).
+
+Also run this gate after any material change to claims, fences, journal, signals, presence or artifact metadata paths, not only before tags.
 
 See also `OSS-RELEASE-RUNBOOK.md §7` for the full pre-tag checklist.
 
