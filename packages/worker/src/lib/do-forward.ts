@@ -1,6 +1,7 @@
 import type { Context, ExecutionContext } from "hono";
 import type { Env, HonoVariables } from "../types";
 import { emitDoOperationDatapoint } from "./analytics";
+import type { RequestTiming } from "./server-timing";
 
 /**
  * Build the extra headers that forward the caller-scoped idempotency key + body
@@ -57,6 +58,7 @@ export async function forwardToDO(
     ctx: ExecutionContext;
     projectId: string;
     requestId?: string;
+    timing?: RequestTiming;
   },
   extraHeaders?: Record<string, string>,
 ): Promise<Response> {
@@ -82,7 +84,13 @@ export async function forwardToDO(
   const start = analyticsCtx ? Date.now() : 0;
   let res: Response | undefined;
   try {
-    res = await stub.fetch(new Request(url, init));
+    const fetch = () => stub.fetch(new Request(url, init));
+    res = analyticsCtx?.timing
+      ? await analyticsCtx.timing.measure(
+          path === "/admin/transfer/status" ? "transfer" : "do",
+          fetch,
+        )
+      : await fetch();
     return res;
   } catch (error) {
     // ctx.abort() resets the DO before its response can cross the RPC boundary.
