@@ -275,14 +275,14 @@ export function ArtifactDetailPage() {
       <div className="space-y-4 p-6">
         {projectId && (
           <ArtifactReviewDetails
-            key={`${projectId}:${key}`}
+            key={`review:${projectId}:${key}`}
             projectId={projectId}
             artifactKey={key}
           />
         )}
         {projectId && (
           <ArtifactVersionHistory
-            key={`${projectId}:${key}`}
+            key={`history:${projectId}:${key}`}
             artifactKey={key}
           />
         )}
