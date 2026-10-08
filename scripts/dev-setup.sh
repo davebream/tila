@@ -22,7 +22,9 @@ fi
 
 # 1. Generate wrangler.dev.toml
 echo "→ Generating $WORKER_DIR/wrangler.dev.toml"
-sed 's/database_id = ""/database_id = "local-dev"/' \
+# Vite serves the UI in development; do not require a prebuilt UI dist.
+sed -e 's/database_id = ""/database_id = "local-dev"/' \
+  -e '/^\[assets\]/,/^run_worker_first = /d' \
   "$WORKER_DIR/wrangler.toml" > "$WORKER_DIR/wrangler.dev.toml"
 
 # 2. Write .dev.vars for CORS
@@ -47,10 +49,10 @@ fi
 echo "→ Applying D1 migrations"
 for f in "$WORKER_DIR"/migrations/global/*.sql; do
   echo "  $(basename "$f")"
-  if ! npx wrangler d1 execute tila-global \
+  if ! pnpm --filter @tila/worker exec wrangler d1 execute tila-global \
     --local --yes \
-    --file "$f" \
-    --config "$WORKER_DIR/wrangler.dev.toml" \
+    --file "$PWD/$f" \
+    --config wrangler.dev.toml \
     > /dev/null 2>&1; then
     echo "  ✗ Failed: $(basename "$f")" >&2
     echo "  Run with --verbose or check the migration SQL." >&2
@@ -60,9 +62,9 @@ done
 
 # 5. Seed test project and token
 echo "→ Seeding dev project and token"
-if ! npx wrangler d1 execute tila-global \
+if ! pnpm --filter @tila/worker exec wrangler d1 execute tila-global \
   --local --yes \
-  --config "$WORKER_DIR/wrangler.dev.toml" \
+  --config wrangler.dev.toml \
   --command "
     INSERT OR IGNORE INTO _projects (project_id, display_name, created_at, created_by, cloudflare_account_id)
       VALUES ('$DEV_PROJECT', 'Dev Project', strftime('%s','now'), 'dev-setup', 'local');
@@ -77,8 +79,7 @@ echo ""
 echo "=== Ready ==="
 echo ""
 echo "Start the Worker and UI:"
-echo "  pnpm dev                          # Worker on :8787"
-echo "  pnpm --filter @tila/ui dev        # UI on :5173"
+echo "  pnpm dev                          # Worker :8787 and UI :5173"
 echo ""
 echo "Login credentials:"
 echo "  Project ID: $DEV_PROJECT"

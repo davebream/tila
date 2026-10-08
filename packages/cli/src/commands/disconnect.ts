@@ -1,8 +1,9 @@
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { findTilaDir } from "../config";
+import { exit } from "../lib/output";
+import * as p from "../lib/prompts";
 
 export default defineCommand({
   meta: {
@@ -13,7 +14,7 @@ export default defineCommand({
     const tilaDir = findTilaDir();
     if (!tilaDir) {
       p.log.error("No .tila/ directory found.");
-      process.exit(1);
+      exit(1);
     }
 
     const credentialFiles = [".env", ".session", "github-token-cache.json"];

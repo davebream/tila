@@ -8,7 +8,7 @@ import {
   assertResourceFence,
   assertResourceFenceWithCanonical,
 } from "../src/fence-ops";
-import { createEntity, createTestDb } from "./helpers";
+import { createEntity, createTestDb, testOrigin } from "./helpers";
 
 // Real fence-enforcement coverage for the destructive entity-write path,
 // exercising the acquire -> write-with-fence contract end to end (not a mock).
@@ -18,7 +18,13 @@ describe("fence enforcement on entity writes", () => {
     const { db } = createTestDb();
     createEntity(db, { id: "task-1" });
 
-    const claim = acquire(db, "task:task-1", "m1", "u1", "exclusive", 60_000);
+    const claim = acquire(
+      db,
+      "task:task-1",
+      testOrigin("m1", "u1"),
+      "exclusive",
+      60_000,
+    );
     expect(claim.acquired).toBe(true);
 
     expect(() =>
@@ -32,7 +38,13 @@ describe("fence enforcement on entity writes", () => {
     const { db } = createTestDb();
     createEntity(db, { id: "task-2" });
 
-    const claim = acquire(db, "task:task-2", "m1", "u1", "exclusive", 60_000);
+    const claim = acquire(
+      db,
+      "task:task-2",
+      testOrigin("m1", "u1"),
+      "exclusive",
+      60_000,
+    );
 
     expect(() =>
       update(db, "task-2", { status: "in_progress" }, claim.fence + 99, {
@@ -51,8 +63,7 @@ describe("fence enforcement on entity writes", () => {
     const claim = acquire(
       db,
       "task:task-z",
-      "m1",
-      "u1",
+      testOrigin("m1", "u1"),
       "exclusive",
       1_000,
       undefined,
@@ -85,7 +96,7 @@ describe("fence enforcement on entity writes", () => {
     // throw rather than silently succeed (the "fail closed when required fence
     // row is missing" rule).
     expect(() =>
-      update(db, "task-3", { status: "in_progress" }, 1, { actor: "m1/u1" }),
+      update(db, "task-3", { status: "in_progress" }, 1, testOrigin("m1/u1")),
     ).toThrow(FenceNotFoundError);
   });
 });
@@ -127,8 +138,7 @@ describe("assertResourceFenceWithCanonical error payload", () => {
     acquire(
       db,
       "task:task-payload-ec",
-      "m1",
-      "u1",
+      testOrigin("m1", "u1"),
       "exclusive",
       1_000,
       undefined,
@@ -183,8 +193,7 @@ describe("assertResourceFenceWithCanonical error payload", () => {
     const claim = acquire(
       db,
       "task:task-e2e-ec",
-      "m1",
-      "u1",
+      testOrigin("m1", "u1"),
       "exclusive",
       1_000,
       undefined,

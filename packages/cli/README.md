@@ -30,7 +30,7 @@ See the [latest release](https://github.com/davebream/tila/releases/latest) for 
 | `mcp` | MCP server configuration |
 | `gate` | Manage coordination gates |
 | `signal` | Send a signal to a target |
-| `presence` | Show all machines (active and inactive) |
+| `presence` | Show all participants (active and inactive) |
 | `journal` | Query the project journal |
 | `schema` | Manage project schema |
 | `search` | Unified full-text search across tasks and artifacts |
@@ -78,6 +78,18 @@ tila doctor
 tila summary
 tila presence
 ```
+
+## Participant identity
+
+Every CLI process has one participant ID. Resolution order is `--participant-id`, then `TILA_PARTICIPANT_ID`, then a generated UUID. `tila task claim` prints the participant ID it used. Standalone renew/release require the same ID explicitly so a new process cannot silently act as another participant:
+
+```bash
+tila --participant-id session-7 task claim T-abc123
+tila --participant-id session-7 task renew T-abc123 --fence 1
+tila shell --instance work # injects one TILA_PARTICIPANT_ID for the subshell
+```
+
+Hostname and Git repository/worktree/branch/commit details are collected best-effort as environment metadata only; they never establish ownership.
 
 ## MCP server setup
 

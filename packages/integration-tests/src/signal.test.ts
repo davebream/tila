@@ -4,74 +4,59 @@ import { describe, expect, it } from "vitest";
  * Signal primitives integration tests.
  *
  * These tests require @cloudflare/vitest-pool-workers to be configured
- * with a DO binding. The test worker must have MIGRATION_0007 applied
- * and a project in the D1 registry with at least two active tokens.
+ * with a DO binding. The test worker must have MIGRATION_0025 applied
+ * and a project in the D1 registry with at least two active participants.
  *
  * Until the pool-workers vitest config is set up, these tests document
  * the expected behavior and can be run once the infrastructure exists.
  */
 describe("Signal primitives", () => {
-  it("SIG-1: send targeted signal appears in correct target's inbox", () => {
-    // POST /projects/:projectId/signals/send
-    // Body: { target: "machine-B", kind: "conflict", resource: "task:T-1", payload: { details: "..." } }
-    // Expected: 200 { ok: true, id: "sig_<uuid>" }
-    //
-    // GET /projects/:projectId/signals (authed as machine-B)
-    // Expected: signals array contains the sent signal
-    expect(true).toBe(true);
-  });
+  // POST /projects/:projectId/signals/send
+  // Body: { target: { type: "participant", principal_id: "token:b", participant_id: "worker-b" }, kind: "conflict" }
+  // Expected: 200 { ok: true, id: "sig_<uuid>", recipient_count: 1 }
+  //
+  // GET /projects/:projectId/signals with X-Tila-Participant-Id: worker-b
+  // Expected: signals array contains the sent signal
+  it.todo("SIG-1: direct signal appears only in the exact participant's inbox");
 
-  it("SIG-2: broadcast signal (target: '*') appears in any token's inbox", () => {
-    // POST /projects/:projectId/signals/send
-    // Body: { target: "*", kind: "ready", payload: {} }
-    // Expected: 200 { ok: true, id: "sig_<uuid>" }
-    //
-    // GET /projects/:projectId/signals (authed as machine-A)
-    // Expected: signals array includes the broadcast signal
-    // GET /projects/:projectId/signals (authed as machine-B)
-    // Expected: signals array includes the broadcast signal
-    expect(true).toBe(true);
-  });
+  // POST /projects/:projectId/signals/send
+  // Body: { target: { type: "broadcast" }, kind: "ready", payload: {} }
+  // Expected: recipient_count matches the deduplicated active audience
+  //
+  // GET /projects/:projectId/signals (authed as machine-A)
+  // Expected: signals array includes the broadcast signal
+  // GET /projects/:projectId/signals (authed as machine-B)
+  // Expected: signals array includes the broadcast signal
+  it.todo("SIG-2: broadcast snapshots active participants except the sender");
 
-  it("SIG-3: ack signal sets acked_at in subsequent inbox response", () => {
-    // Step 1: Send signal to machine-B
-    // Step 2: POST /projects/:projectId/signals/<id>/ack (authed as machine-B)
-    // Expected: 200 { ok: true }
-    // Step 3: GET /projects/:projectId/signals (authed as machine-B)
-    // Expected: signal in array has acked_at set (not null)
-    expect(true).toBe(true);
-  });
+  // Step 1: Send a signal to a principal with two active participants
+  // Step 2: POST /projects/:projectId/signals/<id>/ack as one participant
+  // Expected: 200 { ok: true }
+  // Step 3: That participant's inbox omits it; the other participant still sees it
+  it.todo("SIG-3: acknowledgement is scoped to one participant delivery");
 
-  it("SIG-4: signal with short TTL expires after sweep", () => {
-    // Step 1: Send signal with ttl_ms: 100
-    // Step 2: Wait 200ms
-    // Step 3: POST /projects/:projectId/sweep
-    // Expected: response includes signalsDeleted >= 1
-    // Step 4: GET /projects/:projectId/signals
-    // Expected: expired signal is NOT in inbox
-    expect(true).toBe(true);
-  });
+  // Step 1: Send signal with ttl_ms: 100
+  // Step 2: Wait 200ms
+  // Step 3: POST /projects/:projectId/sweep
+  // Expected: response includes signalsDeleted >= 1
+  // Step 4: GET /projects/:projectId/signals
+  // Expected: expired signal is NOT in inbox
+  it.todo("SIG-4: signal with short TTL expires after sweep");
 
-  it("SIG-5: acked signal is cleaned by sweep", () => {
-    // Step 1: Send signal, ack it
-    // Step 2: POST /projects/:projectId/sweep
-    // Expected: response includes signalsDeleted >= 1
-    expect(true).toBe(true);
-  });
+  // Step 1: Send signal, ack it
+  // Step 2: Sweep before expiry; signal history still includes the delivery
+  // Step 3: Sweep after expiry; signal and delivery are deleted together
+  it.todo("SIG-5: acknowledged deliveries remain until expiry");
 
-  it("SIG-6: targeted signal not visible to wrong token's inbox", () => {
-    // Step 1: Send signal to machine-B
-    // Step 2: GET /projects/:projectId/signals (authed as machine-C)
-    // Expected: signals array does NOT contain the signal
-    expect(true).toBe(true);
-  });
+  // Step 1: Send signal to principal-B/participant-B
+  // Step 2: GET /projects/:projectId/signals as another participant
+  // Expected: signals array does NOT contain the signal
+  it.todo("SIG-6: targeted signal is hidden from unrelated participants");
 
-  it("SIG-7: sweep does not delete unacked, non-expired signals", () => {
-    // Step 1: Send signal with default TTL (5 min)
-    // Step 2: POST /projects/:projectId/sweep (immediately)
-    // Expected: signalsDeleted = 0
-    // Step 3: GET /projects/:projectId/signals
-    // Expected: signal is still in inbox
-    expect(true).toBe(true);
-  });
+  // Step 1: Send signal with default TTL (5 min)
+  // Step 2: POST /projects/:projectId/sweep (immediately)
+  // Expected: signalsDeleted = 0
+  // Step 3: GET /projects/:projectId/signals
+  // Expected: signal is still in inbox
+  it.todo("SIG-7: sweep does not delete unacked, non-expired signals");
 });

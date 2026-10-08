@@ -2,7 +2,7 @@
   "name": "tila-sdk",
   "version": "0.2.7",
   "license": "MIT",
-  "description": "TypeScript SDK for tila — durable state & coordination for multi-machine agentic work",
+  "description": "TypeScript SDK for tila \u2014 durable state & coordination for multi-machine agentic work",
   "keywords": [
     "tila",
     "sdk",
@@ -12,7 +12,7 @@
     "state-management",
     "typescript"
   ],
-  "author": "Dawid Leszczyński (https://github.com/davebream)",
+  "author": "Dawid Leszczy\u0144ski (https://github.com/davebream)",
   "homepage": "https://github.com/davebream/tila#readme",
   "bugs": "https://github.com/davebream/tila/issues",
   "repository": {
@@ -47,21 +47,29 @@
         "types": "./dist/local.d.cts",
         "default": "./dist/local.cjs"
       }
+    },
+    "./backup": {
+      "import": {
+        "types": "./dist/backup.d.ts",
+        "default": "./dist/backup.js"
+      },
+      "require": {
+        "types": "./dist/backup.d.cts",
+        "default": "./dist/backup.cjs"
+      }
     }
   },
   "files": ["dist"],
   "sideEffects": false,
   "scripts": {
-    "build": "node scripts/gen-version.mjs && tsup",
-    "typecheck": "tsc --noEmit",
+    "build": "pnpm run gen:version && tsup",
+    "typecheck": "pnpm run gen:version && tsc --noEmit",
     "test": "vitest run",
-    "gen:version": "node scripts/gen-version.mjs"
+    "gen:version": "node ../../scripts/generate-version.mjs sdk"
   },
   "dependencies": {
-    "@tila/backend-embedded": "workspace:*",
-    "@tila/core": "workspace:*",
-    "@tila/ops-sqlite": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "tar-stream": "^3.2.1",
     "zod": "^3.24.0"
   },
   "peerDependencies": {
@@ -73,9 +81,13 @@
     }
   },
   "devDependencies": {
+    "@tila/backend-embedded": "workspace:*",
+    "@tila/core": "workspace:*",
+    "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.20.0",
+    "@types/tar-stream": "^3.1.4",
     "better-sqlite3": "^12.10.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",

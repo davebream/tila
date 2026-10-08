@@ -136,9 +136,23 @@ function withCacheControl(res: Response, value: string): Response {
  */
 export function createCacheMiddleware(): MiddlewareHandler {
   return async (c, next) => {
+    if (c.get("credentialPolicy")) {
+      await next();
+      c.header("Cache-Control", "no-store");
+      return;
+    }
     const method = c.req.method;
     const reqUrl = new URL(c.req.url);
     const urlPath = reqUrl.pathname;
+    if (
+      /\/(?:journal\/(?:replay|cursor)|handoffs(?:\/[^/]+)?|reentry)\/?$/.test(
+        urlPath,
+      )
+    ) {
+      await next();
+      c.header("Cache-Control", "private, no-store");
+      return;
+    }
     const tier = classifyRoute(urlPath);
 
     // Detect Cache API availability at request time

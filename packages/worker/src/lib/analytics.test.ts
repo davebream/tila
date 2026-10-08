@@ -169,6 +169,66 @@ describe("analytics middleware (request datapoints)", () => {
   });
 });
 
+describe("forwardToDO restart completion", () => {
+  it("acknowledges the deliberate abort without retrying the restart", async () => {
+    const stub = {
+      fetch: vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error("admin restart requested"), { remote: true }),
+        ),
+    } as unknown as DurableObjectStub;
+
+    const res = await forwardToDO(stub, "/admin/restart", "POST");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(stub.fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["/admin/restart", "POST", "DO unavailable"],
+    ["/admin/restart", "POST", "migration failed"],
+    ["/admin/restart", "POST", "admin restart requested: unexpected suffix"],
+    ["/admin/restart", "GET", "admin restart requested"],
+    ["/entity/create", "POST", "admin restart requested"],
+  ])("preserves failures for %s %s: %s", async (path, method, message) => {
+    const failure = Object.assign(new Error(message), { remote: true });
+    const stub = {
+      fetch: vi.fn().mockRejectedValue(failure),
+    } as unknown as DurableObjectStub;
+
+    await expect(forwardToDO(stub, path, method)).rejects.toBe(failure);
+    expect(stub.fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each([200, 403, 500, 503])(
+    "preserves an actual HTTP %s response",
+    async (status) => {
+      const response = Response.json({ ok: status === 200 }, { status });
+      const stub = {
+        fetch: vi.fn().mockResolvedValue(response),
+      } as unknown as DurableObjectStub;
+
+      expect(await forwardToDO(stub, "/admin/restart", "POST")).toBe(response);
+    },
+  );
+
+  it.each([
+    new Error("admin restart requested"),
+    Object.assign(new Error("admin restart requested"), { remote: false }),
+    { message: "admin restart requested", remote: true },
+    "admin restart requested",
+  ])("does not acknowledge a non-remote exception: %s", async (failure) => {
+    const stub = {
+      fetch: vi.fn().mockRejectedValue(failure),
+    } as unknown as DurableObjectStub;
+    await expect(forwardToDO(stub, "/admin/restart", "POST")).rejects.toBe(
+      failure,
+    );
+  });
+});
+
 describe("forwardToDO analytics emission", () => {
   it("emits a DO operation datapoint when analyticsCtx is provided", async () => {
     const mockWriteDataPoint = vi.fn();

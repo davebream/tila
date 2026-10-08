@@ -48,6 +48,76 @@ function emit(obj: unknown): void {
 
 async function main(): Promise<void> {
   switch (OP) {
+    case "ack-cursor": {
+      const proj = LocalProject.open(
+        DB,
+        ORG,
+        PROJECT,
+        { skipFilesystemCheck: true },
+        {
+          principal_id: "local:x-org",
+          participant_id: "bun-session",
+          environment: {},
+        },
+        ARTIFACTS,
+      );
+      const positions = requireEnv("POSITIONS").split(",").map(Number);
+      for (let i = 0; i < 30; i++)
+        for (const seq of positions) await proj.acknowledgeJournal({ seq });
+      const cursor = await proj.getJournalCursor();
+      proj.close();
+      emit({ cursor });
+      return;
+    }
+
+    case "write-handoff": {
+      const identity = {
+        principal_id: "local:x-org",
+        participant_id: "bun-session",
+        environment: { client_name: "bun" },
+      };
+      const proj = LocalProject.open(
+        DB,
+        ORG,
+        PROJECT,
+        { skipFilesystemCheck: true },
+        identity,
+        ARTIFACTS,
+      );
+      const handoff = await proj.createHandoff({
+        id: crypto.randomUUID(),
+        summary: "Bun findings",
+        based_on_seq: 0,
+        references: [{ type: "task", id: "work" }],
+      });
+      await proj.acknowledgeJournal({ seq: handoff.created_seq });
+      proj.close();
+      emit({ handoff });
+      return;
+    }
+    case "read-handoff": {
+      const proj = LocalProject.open(
+        DB,
+        ORG,
+        PROJECT,
+        { skipFilesystemCheck: true },
+        {
+          principal_id: "local:x-org",
+          participant_id: "bun-session",
+          environment: {},
+        },
+        ARTIFACTS,
+      );
+      const result = await proj.reentry({
+        resource: "task:work",
+        after_seq: 0,
+      });
+      const cursor = await proj.getJournalCursor();
+      proj.close();
+      emit({ result, cursor });
+      return;
+    }
+
     case "write-task": {
       const proj = LocalProject.open(DB, ORG, PROJECT, {
         skipFilesystemCheck: true,

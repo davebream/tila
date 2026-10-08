@@ -1,3 +1,12 @@
+import {
+  type GitHubRepositoryPermission,
+  type RepoAccessPolicy,
+  type RepoAccessPolicyRequest,
+  RepoAccessPolicySchema,
+  type RepoOidcPolicy,
+  RepoOidcPolicySchema,
+  type SessionPermission,
+} from "@tila/schemas";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { projectRepos } from "./schema";
@@ -10,7 +19,17 @@ export interface RepoAllowlistRow {
   github_repo_id: number;
   min_read_permission: string;
   min_write_permission: string;
+  max_permission: string;
+  membership_enabled?: number;
+  membership_role_cap?: string;
   oidc_permission: string;
+  oidc_enabled: number;
+  oidc_max_permission: string;
+  oidc_subject_pattern: string | null;
+  oidc_allowed_events: string;
+  oidc_allowed_refs: string;
+  oidc_allowed_environments: string;
+  oidc_allowed_workflows: string;
   enabled: number;
   created_at: number;
   created_by: string;
@@ -22,9 +41,54 @@ export interface RegisterParams {
   githubOwner: string;
   githubRepo: string;
   githubRepoId: number;
-  minReadPermission?: string;
-  minWritePermission?: string;
+  minReadPermission?: GitHubRepositoryPermission;
+  minWritePermission?: GitHubRepositoryPermission;
+  maxPermission?: SessionPermission;
+  membershipEnabled?: boolean;
+  membershipRoleCap?: "viewer" | "participant" | "maintainer";
   createdBy: string;
+}
+
+export type RepoAccessPolicyResult =
+  | { status: "ok"; policy: RepoAccessPolicy; repo: RepoAllowlistRow }
+  | { status: "not-found" }
+  | { status: "invalid-policy" };
+
+export type RepoOidcPolicyResult =
+  | { status: "ok"; policy: RepoOidcPolicy; repo: RepoAllowlistRow }
+  | { status: "not-found" }
+  | { status: "invalid-policy" };
+
+function decodeAccessPolicy(row: RepoAllowlistRow): RepoAccessPolicyResult {
+  const parsed = RepoAccessPolicySchema.safeParse({
+    min_read_permission: row.min_read_permission,
+    min_write_permission: row.min_write_permission,
+    max_permission: row.max_permission,
+    membership_enabled: row.membership_enabled === 1,
+    membership_role_cap: row.membership_role_cap ?? "participant",
+  });
+  return parsed.success
+    ? { status: "ok", policy: parsed.data, repo: row }
+    : { status: "invalid-policy" };
+}
+
+function decodeOidcPolicy(row: RepoAllowlistRow): RepoOidcPolicyResult {
+  try {
+    const parsed = RepoOidcPolicySchema.safeParse({
+      enabled: row.oidc_enabled === 1,
+      max_permission: row.oidc_max_permission,
+      subject_pattern: row.oidc_subject_pattern,
+      allowed_events: JSON.parse(row.oidc_allowed_events),
+      allowed_refs: JSON.parse(row.oidc_allowed_refs),
+      allowed_environments: JSON.parse(row.oidc_allowed_environments),
+      allowed_workflows: JSON.parse(row.oidc_allowed_workflows),
+    });
+    return parsed.success
+      ? { status: "ok", policy: parsed.data, repo: row }
+      : { status: "invalid-policy" };
+  } catch {
+    return { status: "invalid-policy" };
+  }
 }
 
 export class RepoAllowlistStore {
@@ -78,6 +142,120 @@ export class RepoAllowlistStore {
   }
 
   /**
+   * Human access policy for every enabled repository of a project, for the
+   * membership administration surface (#102). Rows with an invalid stored
+   * policy are skipped rather than failing the whole listing.
+   */
+  async listAccessPolicies(
+    projectId: string,
+  ): Promise<Array<{ repo: RepoAllowlistRow; policy: RepoAccessPolicy }>> {
+    const rows = await this.listForProject(projectId);
+    const result: Array<{ repo: RepoAllowlistRow; policy: RepoAccessPolicy }> =
+      [];
+    for (const row of rows) {
+      const decoded = decodeAccessPolicy(row);
+      if (decoded.status === "ok")
+        result.push({ repo: decoded.repo, policy: decoded.policy });
+    }
+    return result;
+  }
+
+  /** Read and validate a repository's complete human access policy. */
+  async getAccessPolicy(
+    projectId: string,
+    githubHost: string,
+    githubRepoId: number,
+  ): Promise<RepoAccessPolicyResult> {
+    const row = await this.isRegistered(projectId, githubHost, githubRepoId);
+    return row ? decodeAccessPolicy(row) : { status: "not-found" };
+  }
+
+  /** Atomically replace a repository's complete human access policy. */
+  async setAccessPolicy(
+    projectId: string,
+    githubHost: string,
+    githubRepoId: number,
+    policy: RepoAccessPolicyRequest,
+  ): Promise<RepoAccessPolicyResult> {
+    const current = await this.getAccessPolicy(
+      projectId,
+      githubHost,
+      githubRepoId,
+    );
+    if (current.status !== "ok") return current;
+    const validated = RepoAccessPolicySchema.parse({
+      ...current.policy,
+      ...policy,
+    });
+    const updated = await this.drizzle
+      .update(projectRepos)
+      .set({
+        min_read_permission: validated.min_read_permission,
+        min_write_permission: validated.min_write_permission,
+        max_permission: validated.max_permission,
+        membership_enabled: validated.membership_enabled ? 1 : 0,
+        membership_role_cap: validated.membership_role_cap,
+      })
+      .where(
+        and(
+          eq(projectRepos.project_id, projectId),
+          eq(projectRepos.github_host, githubHost),
+          eq(projectRepos.github_repo_id, githubRepoId),
+          eq(projectRepos.enabled, 1),
+        ),
+      )
+      .returning();
+
+    const row = updated[0] as RepoAllowlistRow | undefined;
+    return row ? decodeAccessPolicy(row) : { status: "not-found" };
+  }
+
+  /** Read and validate a repository's complete GitHub Actions OIDC policy. */
+  async getOidcPolicy(
+    projectId: string,
+    githubHost: string,
+    githubRepoId: number,
+  ): Promise<RepoOidcPolicyResult> {
+    const row = await this.isRegistered(projectId, githubHost, githubRepoId);
+    return row ? decodeOidcPolicy(row) : { status: "not-found" };
+  }
+
+  /** Atomically replace a repository's complete GitHub Actions OIDC policy. */
+  async setOidcPolicy(
+    projectId: string,
+    githubHost: string,
+    githubRepoId: number,
+    policy: RepoOidcPolicy,
+  ): Promise<RepoOidcPolicyResult> {
+    const validated = RepoOidcPolicySchema.parse(policy);
+    const updated = await this.drizzle
+      .update(projectRepos)
+      .set({
+        oidc_enabled: validated.enabled ? 1 : 0,
+        oidc_max_permission: validated.max_permission,
+        oidc_subject_pattern: validated.subject_pattern,
+        oidc_allowed_events: JSON.stringify(validated.allowed_events),
+        oidc_allowed_refs: JSON.stringify(validated.allowed_refs),
+        oidc_allowed_environments: JSON.stringify(
+          validated.allowed_environments,
+        ),
+        oidc_allowed_workflows: JSON.stringify(validated.allowed_workflows),
+      })
+      .where(
+        and(
+          eq(projectRepos.project_id, projectId),
+          eq(projectRepos.github_host, githubHost),
+          eq(projectRepos.github_repo_id, githubRepoId),
+          eq(projectRepos.enabled, 1),
+        ),
+      )
+      .returning();
+
+    const row = updated[0] as RepoAllowlistRow | undefined;
+    return row ? decodeOidcPolicy(row) : { status: "not-found" };
+  }
+
+  /**
    * Register a repo in the allowlist (admin path).
    */
   async register(params: RegisterParams): Promise<void> {
@@ -91,6 +269,16 @@ export class RepoAllowlistStore {
         github_repo_id: params.githubRepoId,
         min_read_permission: params.minReadPermission ?? "write",
         min_write_permission: params.minWritePermission ?? "write",
+        max_permission: params.maxPermission ?? "write",
+        membership_enabled: params.membershipEnabled ? 1 : 0,
+        membership_role_cap: params.membershipRoleCap ?? "participant",
+        oidc_enabled: 0,
+        oidc_max_permission: "read",
+        oidc_subject_pattern: null,
+        oidc_allowed_events: "[]",
+        oidc_allowed_refs: "[]",
+        oidc_allowed_environments: "[]",
+        oidc_allowed_workflows: "[]",
         enabled: 1,
         created_at: Math.floor(Date.now() / 1000),
         created_by: params.createdBy,

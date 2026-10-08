@@ -1,3 +1,14 @@
+import {
+  eprintln,
+  exit,
+  formatExpiry,
+  formatTrust,
+  jsonArg,
+  outputText,
+  printJsonError,
+  printJsonSuccess,
+  renderTable,
+} from "../lib/output";
 /**
  * `tila instances` command group — WRITE/MGMT PATH (Task 7b, WI-L).
  *
@@ -22,15 +33,6 @@ import type { InstanceKey } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { globalFlagArgs } from "../lib/global-flags";
 import { buildAuthStore } from "../lib/instance-context";
-import {
-  eprintln,
-  formatExpiry,
-  formatTrust,
-  jsonArg,
-  printJsonError,
-  printJsonSuccess,
-  renderTable,
-} from "../lib/output";
 
 // ---------------------------------------------------------------------------
 // instances list
@@ -68,7 +70,7 @@ const listCmd = defineCommand({
     }
 
     if (instances.length === 0) {
-      console.log(
+      outputText(
         "No instances registered. Run `tila link <worker_url>` to register one.",
       );
       return;
@@ -133,7 +135,7 @@ const removeCmd = defineCommand({
         printJsonError(msg, "instance-not-found", undefined, 1);
       } else {
         eprintln(`Error: ${msg}`);
-        process.exit(1);
+        exit(1);
       }
       return;
     }
@@ -157,7 +159,7 @@ const removeCmd = defineCommand({
     if (args.json) {
       printJsonSuccess({ removed: key });
     } else {
-      console.log(`Removed instance "${key}".`);
+      outputText(`Removed instance "${key}".`);
     }
   },
 });
@@ -194,7 +196,7 @@ const forgetCmd = defineCommand({
         printJsonError(msg, "instance-not-found", undefined, 1);
       } else {
         eprintln(`Error: ${msg}`);
-        process.exit(1);
+        exit(1);
       }
       return;
     }
@@ -215,7 +217,7 @@ const forgetCmd = defineCommand({
     if (args.json) {
       printJsonSuccess({ removed: key });
     } else {
-      console.log(`Removed instance "${key}".`);
+      outputText(`Removed instance "${key}".`);
     }
   },
 });

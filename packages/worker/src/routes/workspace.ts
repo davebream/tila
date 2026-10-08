@@ -3,8 +3,15 @@ import {
   D1RateLimitStore,
   D1SessionStore,
   GitHubAppConfigStore,
+  ProjectMembershipStore,
   RepoAllowlistStore,
 } from "@tila/backend-d1";
+import {
+  type MembershipSource,
+  type ProjectRole,
+  type SessionPermission,
+  roleToPermission,
+} from "@tila/schemas";
 import { Hono } from "hono";
 import { z } from "zod";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
@@ -14,12 +21,13 @@ import {
   getInstallationAccessToken,
   mintAppJwt,
 } from "../lib/github-app";
-import {
-  PERMISSION_HIERARCHY,
-  normalizeGitHubPermission,
-} from "../lib/github-permission";
 import { hashToken } from "../lib/hash-token";
+import {
+  evaluateRepositoryAccess,
+  resolveRepositoryAccess,
+} from "../lib/repo-access-policy";
 import { invalidateSession } from "../lib/session-cache";
+import { principalIdFor } from "../middleware/request-identity";
 import type {
   CookieSessionTokenResult,
   Env,
@@ -38,10 +46,67 @@ const WorkspaceSelectRequestSchema = z.object({
   project_id: z.string().min(1).max(128),
 });
 
-function permissionToScope(perm: string): string {
-  return (PERMISSION_HIERARCHY[perm] ?? 0) >= PERMISSION_HIERARCHY.write
-    ? "full"
-    : "read";
+function permissionToScope(permission: SessionPermission): string {
+  return permission === "read" ? "read" : "full";
+}
+
+async function createSelectedSession(
+  c: import("hono").Context<AppEnv>,
+  wsSession: WorkspaceSessionTokenResult,
+  projectId: string,
+  role: ProjectRole,
+  sources: MembershipSource[],
+  sourceRepoId?: number,
+): Promise<Response> {
+  const sessionStore = new D1SessionStore(c.env.DB);
+  try {
+    await sessionStore.revoke(wsSession.sessionHash);
+  } catch {
+    // Non-fatal: proceed to create the project-scoped replacement.
+  }
+  invalidateSession(wsSession.sessionHash);
+
+  const newSessionToken = crypto.randomUUID();
+  const newSessionHash = await hashToken(newSessionToken, c.env.HASH_PEPPER);
+  const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
+  const permission = roleToPermission(role);
+  const scopes = permissionToScope(permission);
+  await sessionStore.create({
+    sessionHash: newSessionHash,
+    projectId,
+    tokenHash: "",
+    actorName: wsSession.githubLogin,
+    principalId: wsSession.principalId ?? "",
+    scopes,
+    permission,
+    role,
+    membershipSource: JSON.stringify(sources),
+    sourceRepoId,
+    expiresAt,
+    // Selecting a project replaces the session row; the authentication event
+    // itself is unchanged, so the step-up clock must not restart here.
+    authenticatedAt: wsSession.authenticatedAt,
+  });
+
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      projectId,
+      scopes,
+      role,
+      membership_sources: sources,
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Set-Cookie": buildSessionCookie(
+          newSessionToken,
+          isLocalhost(c.req.url),
+        ),
+      },
+    },
+  );
 }
 
 workspace.get("/projects", async (c) => {
@@ -52,6 +117,17 @@ workspace.get("/projects", async (c) => {
       : tokenResult.name;
 
   const registry = new D1ProjectRegistry(c.env.DB);
+  let principalId: string | undefined;
+  try {
+    principalId = principalIdFor(tokenResult);
+  } catch {
+    principalId = undefined;
+  }
+  const explicitProjects = principalId
+    ? await new ProjectMembershipStore(c.env.DB).listProjectsForPrincipal(
+        principalId,
+      )
+    : [];
 
   if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
     // SEC-4: With the GitHub App unconfigured there is no way to resolve
@@ -63,7 +139,13 @@ workspace.get("/projects", async (c) => {
     // a project yet.
     const scopedProjectId = tokenResult.projectId;
     if (!scopedProjectId) {
-      return c.json({ ok: true, projects: [] });
+      return c.json({
+        ok: true,
+        projects: explicitProjects.map((project) => ({
+          ...project,
+          repos: [],
+        })),
+      });
     }
     const meta = await registry.get(scopedProjectId);
     return c.json({
@@ -113,11 +195,12 @@ workspace.get("/projects", async (c) => {
           repo.github_repo,
           githubLogin,
         );
-        if (perm && perm !== "none") {
+        const access = evaluateRepositoryAccess(repo, perm);
+        if (access) {
           userRepos.push({
             owner: repo.github_owner,
             repo: repo.github_repo,
-            permission: perm,
+            permission: access.permission,
           });
         }
       }
@@ -184,6 +267,20 @@ workspace.post("/select", async (c) => {
   }
 
   const wsSession = tokenResult as WorkspaceSessionTokenResult;
+  if (!wsSession.principalId) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "session-expired",
+          message:
+            "Session predates canonical identity support; sign in again.",
+          retryable: false,
+        },
+      },
+      401,
+    );
+  }
 
   // Parse body
   let body: unknown;
@@ -219,6 +316,20 @@ workspace.post("/select", async (c) => {
   }
 
   const { project_id: projectId } = parsed.data;
+
+  const explicitMembership = await new ProjectMembershipStore(c.env.DB).resolve(
+    projectId,
+    wsSession.principalId,
+  );
+  if (explicitMembership) {
+    return createSelectedSession(
+      c,
+      wsSession,
+      projectId,
+      explicitMembership.role,
+      explicitMembership.sources,
+    );
+  }
 
   // Check GitHub App config
   if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
@@ -283,25 +394,16 @@ workspace.post("/select", async (c) => {
   const allowedRepos = await allowlistStore.listForProject(projectId);
 
   const login = wsSession.githubLogin;
-  let bestPermission = "none";
-
-  for (const repo of allowedRepos) {
-    const perm = await checkUserMembership(
+  const access = await resolveRepositoryAccess(allowedRepos, (repo) =>
+    checkUserMembership(
       installationToken,
       repo.github_owner,
       repo.github_repo,
       login,
-    );
-    if (
-      perm &&
-      (PERMISSION_HIERARCHY[perm] ?? 0) >
-        (PERMISSION_HIERARCHY[bestPermission] ?? 0)
-    ) {
-      bestPermission = perm;
-    }
-  }
+    ),
+  );
 
-  if (bestPermission === "none" || allowedRepos.length === 0) {
+  if (!access) {
     return c.json(
       {
         ok: false,
@@ -315,43 +417,20 @@ workspace.post("/select", async (c) => {
     );
   }
 
-  // Revoke workspace session and evict from cache
-  const sessionStore = new D1SessionStore(c.env.DB);
-  try {
-    await sessionStore.revoke(wsSession.sessionHash);
-  } catch {
-    // Non-fatal: proceed to create new session
-  }
-  invalidateSession(wsSession.sessionHash);
-
-  // Create project-scoped session
-  const newSessionToken = crypto.randomUUID();
-  const newSessionHash = await hashToken(newSessionToken, c.env.HASH_PEPPER);
-  const expiresAt = Date.now() + PROJECT_SESSION_TTL_MS;
-  const scopes = permissionToScope(bestPermission);
-
-  const permission = normalizeGitHubPermission(bestPermission);
-  await sessionStore.create({
-    sessionHash: newSessionHash,
+  const mirroredRole: ProjectRole =
+    access.permission === "read"
+      ? "viewer"
+      : access.permission === "write"
+        ? "participant"
+        : "maintainer";
+  return createSelectedSession(
+    c,
+    wsSession,
     projectId,
-    tokenHash: "",
-    actorName: login,
-    scopes,
-    permission,
-    expiresAt,
-  });
-
-  // Build session cookie
-  const localDev = isLocalhost(c.req.url);
-  const cookie = buildSessionCookie(newSessionToken, localDev);
-
-  return new Response(JSON.stringify({ ok: true, projectId, scopes }), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Set-Cookie": cookie,
-    },
-  });
+    mirroredRole,
+    ["github-mirrored"],
+    access.repo.github_repo_id,
+  );
 });
 
 const WORKSPACE_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
@@ -373,6 +452,20 @@ workspace.post("/deselect", async (c) => {
   }
 
   const session = tokenResult as CookieSessionTokenResult;
+  if (!session.principalId) {
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "session-expired",
+          message:
+            "Session predates canonical identity support; sign in again.",
+          retryable: false,
+        },
+      },
+      401,
+    );
+  }
   const sessionStore = new D1SessionStore(c.env.DB);
 
   try {
@@ -391,9 +484,11 @@ workspace.post("/deselect", async (c) => {
     projectId: "",
     tokenHash: "",
     actorName: session.name,
+    principalId: session.principalId,
     scopes: "",
     permission: "read",
     expiresAt,
+    authenticatedAt: session.authenticatedAt,
   });
 
   const localDev = isLocalhost(c.req.url);

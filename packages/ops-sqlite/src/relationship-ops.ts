@@ -7,6 +7,7 @@ import type {
 } from "@tila/schemas";
 import { type SQL, and, eq, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { artifactTrustByKeys } from "./artifact-review-ops";
 import * as schema from "./schema";
 
 // ---------------------------------------------------------------------------
@@ -199,7 +200,12 @@ export function listEntityArtifactReferences(
     .where(whereClause)
     .all();
 
+  const trust = artifactTrustByKeys(
+    db,
+    rows.map((r) => r.artifact_key),
+  );
   return rows.map((r) => ({
+    ...trust.get(r.artifact_key),
     entity_id: r.entity_id,
     artifact_key: r.artifact_key,
     slot: r.slot,

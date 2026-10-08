@@ -210,9 +210,16 @@ export function applySchema(
       .run();
 
     // Step 8: Emit journal event
+    const journalOrigin = origin ?? {
+      principalId: "system:schema",
+      participantId: "system:schema",
+      environment: {},
+      actor: appliedBy,
+    };
     appendJournal(tx, {
       kind: "schema.applied",
       resource: "schema",
+      ...journalOrigin,
       actor: appliedBy,
       fence: null,
       data: { version: newVersion, changes: changeSummary },

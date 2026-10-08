@@ -69,22 +69,35 @@ describe("AC-1: fence resets to 1 on project destroy + slug reuse", () => {
     const first = acquire(
       dbA,
       "task:T-1",
-      "machine-a",
-      "user-a",
+      {
+        principalId: "test:user-a",
+        participantId: "machine-a",
+        environment: { machine: "machine-a" },
+        actor: "machine-a/user-a",
+      },
       "exclusive",
       60_000,
     );
     expect(first.acquired).toBe(true);
     expect(first.fence).toBe(1);
 
-    release(dbA, "task:T-1", first.fence, { actor: "machine-a/user-a" });
+    release(dbA, "task:T-1", first.fence, {
+      principalId: "test:user-a",
+      participantId: "machine-a",
+      environment: { machine: "machine-a" },
+      actor: "machine-a/user-a",
+    });
 
     // A new holder on the same DB gets the next fence.
     const second = acquire(
       dbA,
       "task:T-1",
-      "machine-b",
-      "user-b",
+      {
+        principalId: "test:user-b",
+        participantId: "machine-b",
+        environment: { machine: "machine-b" },
+        actor: "machine-b/user-b",
+      },
       "exclusive",
       60_000,
     );
@@ -110,8 +123,12 @@ describe("AC-1: fence resets to 1 on project destroy + slug reuse", () => {
     const result = acquire(
       dbB,
       "task:T-1",
-      "machine-b",
-      "user-b",
+      {
+        principalId: "test:user-b",
+        participantId: "machine-b",
+        environment: { machine: "machine-b" },
+        actor: "machine-b/user-b",
+      },
       "exclusive",
       60_000,
     );
@@ -127,17 +144,30 @@ describe("AC-1: fence resets to 1 on project destroy + slug reuse", () => {
     const first = acquire(
       dbA,
       "task:T-1",
-      "machine-a",
-      "user-a",
+      {
+        principalId: "test:user-a",
+        participantId: "machine-a",
+        environment: { machine: "machine-a" },
+        actor: "machine-a/user-a",
+      },
       "exclusive",
       60_000,
     );
-    release(dbA, "task:T-1", first.fence, { actor: "machine-a/user-a" });
+    release(dbA, "task:T-1", first.fence, {
+      principalId: "test:user-a",
+      participantId: "machine-a",
+      environment: { machine: "machine-a" },
+      actor: "machine-a/user-a",
+    });
     const staleResult = acquire(
       dbA,
       "task:T-1",
-      "machine-b",
-      "user-b",
+      {
+        principalId: "test:user-b",
+        participantId: "machine-b",
+        environment: { machine: "machine-b" },
+        actor: "machine-b/user-b",
+      },
       "exclusive",
       60_000,
     );
@@ -149,8 +179,12 @@ describe("AC-1: fence resets to 1 on project destroy + slug reuse", () => {
     const freshResult = acquire(
       dbB,
       "task:T-1",
-      "machine-b",
-      "user-b",
+      {
+        principalId: "test:user-b",
+        participantId: "machine-b",
+        environment: { machine: "machine-b" },
+        actor: "machine-b/user-b",
+      },
       "exclusive",
       60_000,
     );

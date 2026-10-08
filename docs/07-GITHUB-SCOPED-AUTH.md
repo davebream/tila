@@ -2,18 +2,18 @@
 
 ## Status
 
-Production. This is the default auth model for tila. For implementation details, see [`docs/10-AUTH-IMPLEMENTATION.md`](10-AUTH-IMPLEMENTATION.md).
+Production. GitHub is an optional project-membership adapter, not the canonical project authority. For implementation details, see [`docs/10-AUTH-IMPLEMENTATION.md`](10-AUTH-IMPLEMENTATION.md).
 
 ## Problem
 
 The original v0.1 auth model used tila project API tokens stored as hashes in D1. That worked for small teams sharing a token through a secret manager, but it did not let GitHub repo access be the source of truth.
 
-The target model is:
+The current model is:
 
-- GitHub determines who may use a tila project.
+- D1-backed project membership determines who may use a tila project.
 - Cloudflare still hosts and bills the tila infrastructure.
 - A public Worker URL must not be enough to use a tila instance for arbitrary repositories.
-- A tila instance must only handle repositories explicitly registered for that instance.
+- A registered repository may optionally mirror GitHub permission into a capped project role.
 
 ## Decision Direction
 
@@ -22,10 +22,10 @@ Cloudflare and GitHub should remain separate planes:
 | Plane | Responsibility |
 |---|---|
 | Cloudflare account | Owns Worker, Durable Object namespace, D1, R2, billing, data residency, operational access |
-| GitHub repo/org/team | Determines runtime user access to tila |
-| tila project | Binds one Cloudflare-hosted state engine to one or more explicitly allowed GitHub repositories |
+| GitHub repo/org/team | Optional mirrored-admission signal |
+| tila project | Owns explicit members, policy mode, roles, and repository adapters |
 
-Do not try to map Cloudflare users to GitHub users. The Cloudflare account is the infrastructure owner. GitHub is the runtime authorization authority.
+Do not try to map Cloudflare users to GitHub users. The Cloudflare account is the infrastructure owner. Canonical project membership is the runtime authorization authority; GitHub can supply a live, capped admission signal in `github-mirrored` and `hybrid` modes.
 
 ## Recommended Runtime Flow
 
@@ -61,6 +61,8 @@ CREATE TABLE _project_repos (
   github_repo_id INTEGER NOT NULL,
   min_read_permission TEXT NOT NULL DEFAULT 'read',
   min_write_permission TEXT NOT NULL DEFAULT 'write',
+  max_permission TEXT NOT NULL DEFAULT 'write'
+    CHECK (max_permission IN ('read', 'write', 'admin')),
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   created_by TEXT NOT NULL,
@@ -123,10 +125,128 @@ Response:
 The Worker should call GitHub to:
 
 - identify the token holder
-- resolve the registered repository by stable id
-- verify the holder has the required permission
+- evaluate the holder's current permission on every registered repository
+- select the highest effective tila role, using the lowest repository ID to break ties
 
 If the GitHub token is valid but the repo is not in `_project_repos`, return `403`.
+
+## Repository Access Policy
+
+Each enabled repository link separates admission from authority with one complete policy:
+
+| Field | Meaning | Registration default |
+|---|---|---|
+| `min_read_permission` | Lowest GitHub permission admitted to the project | `write` |
+| `min_write_permission` | Lowest GitHub permission that may receive write authority | `write` |
+| `max_permission` | Maximum tila role this link may grant | `write` |
+
+The threshold fields accept GitHub's `read`, `triage`, `write`, `maintain`, and `admin`
+levels. `max_permission` accepts tila's `read`, `write`, and `admin` roles.
+`min_read_permission` must not be higher than `min_write_permission`.
+
+For each repository link, tila derives the effective permission as follows:
+
+```text
+actual < min_read       → no admission
+actual < min_write      → read
+otherwise               → min(mapped GitHub role, max_permission)
+```
+
+The GitHub mapping is `read`/`triage` → `read`, `write`/`maintain` → `write`, and
+`admin` → `admin`. Unknown GitHub permissions and malformed stored policies fail closed
+for that link. For projects with multiple links, tila evaluates all qualifying links,
+selects the highest effective role, and breaks equal-role ties with the lowest numeric
+GitHub repository ID. Session JWTs, browser cookies, workspace discovery, project
+selection, and live permission rechecks all use this same result.
+
+Examples:
+
+| GitHub permission | Policy (`min_read` / `min_write` / cap) | Result |
+|---|---|---|
+| `triage` | `read` / `write` / `admin` | `read` |
+| `maintain` | `triage` / `maintain` / `admin` | `write` |
+| `admin` | `read` / `write` / `write` | `write` |
+| `read` | `triage` / `write` / `admin` | denied |
+
+### Access-policy API
+
+Both endpoints require project-admin authorization and address a link by its numeric
+GitHub repository ID:
+
+```http
+GET /api/repos/:repoId/access-policy
+PUT /api/repos/:repoId/access-policy
+```
+
+`GET` returns the complete policy. `PUT` atomically replaces all three fields and does
+not accept partial updates:
+
+```json
+{
+  "min_read_permission": "triage",
+  "min_write_permission": "maintain",
+  "max_permission": "write"
+}
+```
+
+PAT and GitHub App exchanges authorize against the current policy before consulting the
+idempotency cache. Reservation keys include the selected repository ID and effective role,
+so tightening a policy cannot replay a broader cached session.
+
+### Migration 0025
+
+Migration `0025_repo_access_policy.sql` adds `max_permission` and backfills existing
+repository links to `write`. It also deletes existing project-scoped GitHub cookie sessions,
+forcing browser users to select a project again under the bounded policy. Signed bearer
+sessions are not bulk-revoked; live revalidation evaluates the selected link's current
+thresholds and cap, and requires re-exchange when that link no longer qualifies.
+
+Project backup/export includes all three policy fields. A legacy backup without
+`max_permission` restores with the database default of `write`.
+
+## Protected-operation permission checks
+
+All project mutations (`POST`, `PUT`, `PATCH`, `DELETE`) and administrative reads
+require current authority. The read-only `POST /projects/:projectId/schema/preview`
+endpoint is exempt from live revalidation. Ordinary reads retain their existing
+session and membership checks without a GitHub round-trip.
+
+Current D1 membership policy determines whether GitHub is needed. An explicit role
+that independently meets the route requirement authorizes the operation without
+GitHub. In hybrid mode, an explicit participant can write during a GitHub outage,
+but cannot use a mirrored maintainer role for administration until GitHub verifies
+that authority. OIDC service principals use Tila membership and revocation state.
+GitHub never grants project ownership.
+
+Bearer and browser sessions follow the same rule. Protected bearer operations
+require a `jti`, including operations authorized by explicit membership; legacy
+sessions must sign in again. Browser sessions use their persisted session hash and
+canonical principal, with their source repository and login for mirrored checks.
+
+The protected-operation guard runs after membership resolution and before
+maintenance checks, idempotency replay, and response caching. Route guards declare
+the required role so replay cannot bypass a stronger administrative requirement.
+
+| Verification result | HTTP response | Recovery |
+|---|---|---|
+| Collaborator absent, insufficient permission, or disabled repository adapter | `403 permission-revoked` | Restore qualifying access or use an independently authorized explicit membership |
+| App configuration invalid/missing, installation missing, or installation-token 404 | `503 permission-recheck-unavailable`, `retryable: false` | Repair App configuration or reinstall and link the App |
+| GitHub 5xx, rate limiting, network error, or timeout | `503 permission-recheck-unavailable`, `retryable: true` | Retry after the transient backoff |
+| D1 verification failure | Retryable `503 permission-recheck-unavailable` | Restore D1 availability; membership-resolution failures retain `membership-unavailable` |
+| Bearer session without `jti` | `401 unauthorized`, `retryable: false` | Sign in again |
+
+The per-isolate cache distinguishes verified grants, verified denials, unavailable
+verification, and transient failures. Settled entries expire after 60 seconds;
+transient failures back off for 10 seconds. Every protected mirrored check consults
+current installation and repository policy before accepting a cached GitHub
+observation. Credential, project, repository, installation, and App credential
+changes cannot share cached authority. Entries are bounded to 2,000 per isolate.
+
+External GitHub revocation or uninstall can take up to the remaining 60-second
+verified-cache lifetime to be observed. Once invalidated or expired, the next
+request must verify again and denies if verification is unavailable. Cached failures
+never grant authority, and an expired grant is never reused after a failed refresh.
+There is no positive cache for explicit Tila membership.
 
 ## CLI Behavior
 
@@ -195,6 +315,16 @@ The browser dashboard cannot use `gh auth token`. It needs a separate web login 
 - CLI-generated short browser session.
 
 The UI should use the same server-side repo allowlist and project/session checks as the CLI.
+
+The Settings page (#102) administers memberships and credentials from such a
+session. Its controls are gated by the `capabilities` block of
+`GET /auth/session/status`, which the Worker computes from explicit owner
+membership; a role mirrored from a GitHub repository is shown as a source of
+access but never unlocks management. Mutations require a sign-in newer than the
+step-up window (see `docs/10-AUTH-IMPLEMENTATION.md`, "Step-up Reauthentication").
+Mirrored collaborators are not materialized, so the page lists the linked
+repositories' `membership_enabled` / `membership_role_cap` policy instead of the
+collaborators themselves.
 
 ## Existing Token Mode
 
@@ -429,4 +559,3 @@ plane — addressing many deployments from one machine is a client-side concern,
 
 For the full multi-instance model — the four-tier credential store, the revocation SLA, the threat
 model, and the migration guide — see [`docs/13-MULTI-INSTANCE-AUTH.md`](13-MULTI-INSTANCE-AUTH.md).
-

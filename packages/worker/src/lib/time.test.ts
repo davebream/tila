@@ -87,9 +87,9 @@ describe("compile-time branded-type guard", () => {
     const tombstoneMs = asEpochMillis(1_700_000_000_000);
     const issuedAtSeconds = asEpochSeconds(1_700_000_000);
     // @ts-expect-error seconds value is not EpochMillis — this must remain a type error
-    isIssuedBeforeRevocation(issuedAtSeconds, tombstoneMs);
+    const result = isIssuedBeforeRevocation(issuedAtSeconds, tombstoneMs);
     // vitest must reach here to report the test as green (the runtime call succeeds — branded
     // types are erased at runtime; the guard is enforced by tsc/typecheck only)
-    expect(true).toBe(true);
+    expect(result).toBe(true);
   });
 });

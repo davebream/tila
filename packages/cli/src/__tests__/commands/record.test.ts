@@ -408,7 +408,7 @@ describe("tila record patch", () => {
     await runCmd(sub, {
       type: "service",
       key: "api",
-      json: '{"owner":"platform"}',
+      data: '{"owner":"platform"}',
       fence: "5",
     });
 
@@ -429,7 +429,7 @@ describe("tila record patch", () => {
     await runCmd(sub, {
       type: "service",
       key: "api",
-      json: '{"owner":"platform"}',
+      data: '{"owner":"platform"}',
       // fence intentionally omitted
     });
 
@@ -492,7 +492,7 @@ describe("tila record list", () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(output.ok).toBe(true);
-    expect(output.items).toEqual([]);
+    expect(output.result.items).toEqual([]);
     expect(output.meta).toBeDefined();
   });
 });
@@ -730,7 +730,7 @@ describe("tila record types", () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(output.ok).toBe(true);
-    expect(output.types).toEqual(["service"]);
+    expect(output.result.items).toEqual(["service"]);
   });
 
   // Regression: a declared-but-unused type must appear in the default (merged)
@@ -751,7 +751,7 @@ describe("tila record types", () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
     // declared_only is declared but unused -> still listed in merged view.
-    expect(output.types).toEqual(["declared_only", "service"]);
+    expect(output.result.items).toEqual(["declared_only", "service"]);
   });
 
   it("types --in-use -> EXCLUDES declared-but-unused types", async () => {
@@ -768,6 +768,6 @@ describe("tila record types", () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
     // Only types with active records -> declared_only is omitted.
-    expect(output.types).toEqual(["service"]);
+    expect(output.result.items).toEqual(["service"]);
   });
 });

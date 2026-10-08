@@ -7,7 +7,7 @@ import {
   upsertPointer,
 } from "../src/artifact-ops";
 import { acquire } from "../src/coordination-ops";
-import { createEntity, createTestDb } from "./helpers";
+import { createEntity, createTestDb, testOrigin } from "./helpers";
 
 // Finding #3: reconcile recovers R2 blobs that have no pointer row. If a pointer
 // was deliberately tombstoned and then hard-deleted (7-day grace) while its R2
@@ -19,7 +19,13 @@ describe("reconcile does not resurrect a previously-tombstoned blob", () => {
   it("refuses to recover an orphan whose r2_key was tombstoned, leaving no live pointer", () => {
     const { db } = createTestDb();
     createEntity(db, { id: "task-rt" });
-    const claim = acquire(db, "task:task-rt", "m1", "u1", "exclusive", 60_000);
+    const claim = acquire(
+      db,
+      "task:task-rt",
+      testOrigin("m1", "u1"),
+      "exclusive",
+      60_000,
+    );
 
     const r2Key = "produced/task-rt/recovered.txt";
     // Produce a real artifact pointer under the live claim.
@@ -37,11 +43,11 @@ describe("reconcile does not resurrect a previously-tombstoned blob", () => {
         produced_by: "m1/u1",
         expires_at: null,
       },
-      { actor: "m1/u1" },
+      testOrigin("m1/u1"),
     );
 
     // Tombstone it — records an artifact.tombstoned journal event keyed by r2_key.
-    tombstonePointer(db, r2Key, { actor: "sweep-cron" });
+    tombstonePointer(db, r2Key, testOrigin("sweep-cron"));
 
     // Simulate the 7-day hard-delete: the pointer ROW is gone, but the R2 blob
     // delete had failed, so the blob still exists as an orphan.
@@ -61,7 +67,7 @@ describe("reconcile does not resurrect a previously-tombstoned blob", () => {
     const result = reconcilePointers(
       db,
       [orphan],
-      { actor: "reconciler" },
+      testOrigin("reconciler"),
       true,
     );
 
@@ -74,7 +80,7 @@ describe("reconcile does not resurrect a previously-tombstoned blob", () => {
   it("still recovers a genuine orphan that was never tombstoned", () => {
     const { db } = createTestDb();
     createEntity(db, { id: "task-go" });
-    acquire(db, "task:task-go", "m1", "u1", "exclusive", 60_000);
+    acquire(db, "task:task-go", testOrigin("m1", "u1"), "exclusive", 60_000);
 
     const r2Key = "produced/task-go/genuine.txt";
     const orphan = {
@@ -90,7 +96,7 @@ describe("reconcile does not resurrect a previously-tombstoned blob", () => {
     const result = reconcilePointers(
       db,
       [orphan],
-      { actor: "reconciler" },
+      testOrigin("reconciler"),
       true,
     );
 

@@ -21,22 +21,10 @@ import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { relativeTime } from "@/lib/time";
+import { encodeArtifactKey, formatBytes, parseArtifactKey } from "@/lib/utils";
+import type { ArtifactReviewSummary } from "@tila/schemas";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-
-function parseArtifactKey(key: string): { entity: string; hash: string } {
-  const parts = key.split("/");
-  if (parts.length >= 3) {
-    return { entity: parts[1], hash: parts.slice(2).join("/") };
-  }
-  return { entity: "", hash: key };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 import DOMPurify from "dompurify";
 
@@ -254,6 +242,7 @@ function ArtifactList({
 }: {
   projectId: string | null;
   artifacts: Array<{
+    review?: ArtifactReviewSummary;
     r2_key: string;
     resource: string | null;
     kind: string;
@@ -286,7 +275,9 @@ function ArtifactList({
 
   const navigate = useNavigate();
   const { focusIdx, handleKeyDown } = useTableKeyNav(sorted.length, (idx) =>
-    navigate(`/p/${projectId}/artifacts/${sorted[idx].r2_key}`),
+    navigate(
+      `/p/${projectId}/artifacts/${encodeArtifactKey(sorted[idx].r2_key)}`,
+    ),
   );
 
   if (artifacts.length === 0) {
@@ -355,17 +346,20 @@ function ArtifactList({
                 <TableCell>
                   <span className="inline-flex items-center gap-1.5">
                     <Link
-                      to={`/p/${projectId}/artifacts/${a.r2_key}`}
+                      to={`/p/${projectId}/artifacts/${encodeArtifactKey(a.r2_key)}`}
                       className="rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
                       title={a.r2_key}
                     >
-                      {keyParts.entity || a.r2_key}
+                      {keyParts.label}
                     </Link>
                     <CopyButton value={a.r2_key} />
                   </span>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{a.kind}</Badge>
+                  <Badge variant="secondary">{a.kind}</Badge>{" "}
+                  <Badge variant="secondary">
+                    {a.review?.state ?? "unreviewed"}
+                  </Badge>
                 </TableCell>
                 <TableCell className="text-foreground">{a.mime_type}</TableCell>
                 <TableCell className="tila-num text-foreground">
@@ -401,6 +395,7 @@ function SearchResults({
   data:
     | {
         results: Array<{
+          review?: ArtifactReviewSummary;
           r2_key: string;
           kind: string;
           resource: string | null;
@@ -452,14 +447,17 @@ function SearchResults({
             <TableRow key={r.r2_key}>
               <TableCell>
                 <Link
-                  to={`/p/${projectId}/artifacts/${r.r2_key}`}
+                  to={`/p/${projectId}/artifacts/${encodeArtifactKey(r.r2_key)}`}
                   className="rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
                 >
                   {r.r2_key}
                 </Link>
               </TableCell>
               <TableCell>
-                <Badge variant="secondary">{r.kind}</Badge>
+                <Badge variant="secondary">{r.kind}</Badge>{" "}
+                <Badge variant="secondary">
+                  {r.review?.state ?? "unreviewed"}
+                </Badge>
               </TableCell>
               <TableCell className="text-foreground">
                 {r.resource ?? "—"}

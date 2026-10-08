@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 
 export const JournalEventKindSchema = z.enum([
+  "handoff.created",
   "entity.created",
   "entity.updated",
   "entity.archived",
@@ -9,6 +11,7 @@ export const JournalEventKindSchema = z.enum([
   "claim.released",
   "claim.expired",
   "artifact.produced",
+  "artifact.reviewed",
   "artifact.expired",
   "artifact.tombstoned",
   "artifact.reconciled",
@@ -34,12 +37,12 @@ export const JournalEventSchema = z.object({
   t: z.number().int(),
   kind: JournalEventKindSchema,
   resource: z.string(),
-  actor: z.string(),
+  principal_id: z.string(),
+  participant_id: ParticipantIdSchema,
+  environment: EnvironmentMetadataSchema,
   token_id: z.string().nullable().optional(),
   fence: z.number().int().nullable(),
   data: z.record(z.unknown()),
-  source: z.string().nullable().optional(),
-  source_version: z.string().nullable().optional(),
 });
 
 export type JournalEvent = z.infer<typeof JournalEventSchema>;

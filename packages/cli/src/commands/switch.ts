@@ -1,3 +1,11 @@
+import {
+  eprintln,
+  exit,
+  jsonArg,
+  outputText,
+  printJsonError,
+  printJsonSuccess,
+} from "../lib/output";
 /**
  * `tila switch <key>` — sole writer of current_context (Task 6, WI-L).
  *
@@ -20,12 +28,6 @@ import {
   maybePromoteLegacyAfterWrite,
   writeCurrentContext,
 } from "../lib/instance-context";
-import {
-  eprintln,
-  jsonArg,
-  printJsonError,
-  printJsonSuccess,
-} from "../lib/output";
 
 export default defineCommand({
   meta: {
@@ -54,7 +56,7 @@ export default defineCommand({
         printJsonError(msg, "instance-not-found", undefined, 1);
       } else {
         eprintln(`Error: ${msg}`);
-        process.exit(1);
+        exit(1);
       }
       return;
     }
@@ -69,7 +71,7 @@ export default defineCommand({
     if (args.json) {
       printJsonSuccess({ instance_key: key, worker_url: instance.worker_url });
     } else {
-      console.log(`Switched to instance "${key}" (${instance.worker_url})`);
+      outputText(`Switched to instance "${key}" (${instance.worker_url})`);
     }
   },
 });

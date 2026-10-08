@@ -8,9 +8,9 @@
 The in-repo build delivers:
 
 - **C1:** `compile:installers` copies `scripts/install.sh` and `scripts/install.ps1` into
-  `packages/cli/dist/binaries/` at compile time. The existing, unmodified `release.yml`
+  `packages/cli/dist/binaries/` at compile time. The `release.yml`
   upload glob (`files: packages/cli/dist/binaries/*`) then attaches them as release assets —
-  no workflow change required.
+  the workflow also packages and attests binaries as described below.
 - **C2:** `homebrew/Formula/tila.rb` is updated to the current version with real sha256
   checksums, and `scripts/bump-version.mjs` keeps the formula's `version` and URL tag in
   lockstep on future bumps (sha256s are refreshed per-release by `publish-tap.yml`).
@@ -180,3 +180,55 @@ Commit with: `docs(readme): mark install one-liners as available after first ver
 - Homebrew formula lockstep: `scripts/bump-version.mjs` rewrites the formula's `version`
   and URL tag. The sha256 values are left unchanged here and are refreshed by
   `publish-tap.yml` on every release.
+
+
+## Compressed assets, SBOMs and attestations (#178)
+
+The release retains all eight raw Bun binaries for npm, Homebrew and existing
+consumers, and adds a deterministic `.gz` asset for each one. Gzip uses level 9
+with no variable timestamp or filename header. `checksums.txt` contains exact
+SHA-256 entries for both binaries and archives. A local Bun 1.3.14 Darwin ARM build
+measured 67.9 MB raw / 24.8 MB compressed; runtime and source changes affect size.
+
+Both installers verify the archive's exact checksum **before extraction** and
+fall back to raw assets only on HTTP 404. Server errors, missing checksums,
+mismatches and invalid archives abort without replacing the installed binary.
+Raw assets remain the npm platform-package payload; npm retains OIDC provenance.
+
+`scripts/package-binaries.mjs` consumes each Bun metafile and the embedded Worker's
+esbuild metafile. It resolves actual bundled package manifests, including
+`@tila/client-lifecycle`, and includes the Bun runtime version. Each binary gets
+an SPDX 2.3 document (`<binary>.spdx.json`) with its digest and package CONTAINS
+relationships. The inventory describes bundled packages, not all development
+dependencies or Bun's internal native components individually. Missing compiler
+or sidecar metadata fails packaging.
+
+Pinned GitHub actions create build-provenance and SPDX attestations for all raw
+binary and archive digests. Both predicate types are verified for all 16 digests
+before publication; failure blocks upload. The per-binary SBOM also applies to
+the archive containing that binary.
+
+After a release runs the new workflow, verify downloaded assets:
+
+```sh
+# Replace with the actual released tag and desired target.
+tag=v0.3.0
+asset=tila-darwin-arm64.gz
+gh release download "$tag" --repo davebream/tila --pattern "$asset" --pattern checksums.txt
+# Check the exact asset entry using sha256sum or shasum -a 256.
+gh attestation verify "$asset" --repo davebream/tila
+gh attestation verify "$asset" --repo davebream/tila --predicate-type https://spdx.dev/Document/v2.3
+gzip -dc "$asset" > tila
+```
+
+Attestations prove build origin and inventory, not Apple notarization.
+**macOS Developer ID signing/notarization remains deferred (AC-6).** Unsigned-binary
+notices remain; this work does not claim Gatekeeper acceptance.
+
+Validation covers eight compiled targets, deterministic packaging, both installers'
+compressed/legacy/error paths, four-shell completion syntax and npm raw-binary
+handoff. Windows installer logic is fixture-tested in PowerShell on macOS;
+Windows/Linux native execution still requires corresponding runners. The downloaded
+v0.2.7 release has no binary attestation (verification returns 404). End-to-end
+verification of new published attestations requires the first tagged release
+running this workflow; the implementation PR does not publish a release.

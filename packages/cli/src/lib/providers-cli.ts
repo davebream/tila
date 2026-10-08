@@ -10,7 +10,6 @@
  */
 
 import { execFile } from "node:child_process";
-import * as p from "@clack/prompts";
 import {
   type Clock,
   type EnvProbe,
@@ -20,6 +19,7 @@ import {
   type RunCommandResult,
   processEnvProbe,
 } from "@tila/auth-store";
+import * as p from "./prompts";
 
 // ---------------------------------------------------------------------------
 // Real Clock

@@ -18,8 +18,8 @@ vi.mock("node:fs", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-// Mock @clack/prompts
-vi.mock("@clack/prompts", () => ({
+// Mock ../../lib/prompts
+vi.mock("../../lib/prompts", () => ({
   note: vi.fn(),
   cancel: vi.fn(),
   isCancel: vi.fn(() => false),
@@ -38,12 +38,12 @@ vi.mock("../../lib/github-oauth-device", () => ({
   resolveAppUserToken: vi.fn(),
 }));
 
-import * as p from "@clack/prompts";
 import {
   resolveGithubRepoToken,
   warnIfRemoteMismatch,
 } from "../../lib/github-exchange";
 import { resolveAppUserToken } from "../../lib/github-oauth-device";
+import * as p from "../../lib/prompts";
 
 const baseConfig = {
   project_id: "test-proj",
@@ -376,5 +376,45 @@ describe("warnIfRemoteMismatch", () => {
     warnIfRemoteMismatch({}, "/tmp/project");
 
     expect(execSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("workload DPoP binding", () => {
+  it("forwards the requested proof binding through GitHub Actions exchange and caches its thumbprint", async () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    mockFetch.mockReset();
+    vi.stubEnv(
+      "ACTIONS_ID_TOKEN_REQUEST_URL",
+      "https://actions.example/token?request=1",
+    );
+    vi.stubEnv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "upstream-request-token");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ value: "verified-assertion" }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        session_token: "opaque-workload",
+        expires_at: Date.now() / 1000 + 900,
+        project_id: "project",
+      }),
+    });
+    try {
+      expect(
+        await resolveGithubRepoToken(
+          { project_id: "project", worker_url: "https://worker.example" },
+          "/tmp/tila",
+          "a".repeat(43),
+        ),
+      ).toBe("opaque-workload");
+      expect(JSON.parse(mockFetch.mock.calls[1][1].body).jkt).toBe(
+        "a".repeat(43),
+      );
+      const cached = vi.mocked(writeFileSync).mock.calls.at(-1)?.[1];
+      expect(JSON.parse(String(cached)).jkt).toBe("a".repeat(43));
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

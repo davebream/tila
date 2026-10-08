@@ -1,5 +1,6 @@
 import { TilaSchemaTomlSchema } from "@tila/schemas";
 import { beforeEach, describe, expect, it } from "vitest";
+import { CredentialPolicyDenied } from "../src/credential-policy";
 import { applySchema } from "../src/schema-ops";
 import {
   TemplateInstantiateError,
@@ -41,6 +42,9 @@ type = "parent-child"
 `;
 
 const ORIGIN = {
+  principalId: "test-principal",
+  participantId: "test-participant",
+  environment: { client_name: "test" },
   actor: "test-actor",
   tokenId: null,
   source: null,
@@ -121,11 +125,21 @@ describe("templateOps.instantiateTemplate — happy path", () => {
     // journal event with the right payload.
     const journal = testDb.rawDb
       .prepare(
-        "SELECT resource, actor, data FROM journal WHERE kind = 'template.instantiated'",
+        "SELECT resource, principal_id, participant_id, environment, actor, data FROM journal WHERE kind = 'template.instantiated'",
       )
-      .get() as { resource: string; actor: string; data: string };
+      .get() as {
+      resource: string;
+      principal_id: string;
+      participant_id: string;
+      environment: string;
+      actor: string;
+      data: string;
+    };
     expect(journal.resource).toBe("sprint-1");
-    expect(journal.actor).toBe("test-actor");
+    expect(journal.principal_id).toBe("test-principal");
+    expect(journal.participant_id).toBe("test-participant");
+    expect(JSON.parse(journal.environment)).toEqual({ client_name: "test" });
+    expect(journal.actor).toBe("");
     const jdata = JSON.parse(journal.data);
     expect(jdata.template_name).toBe("sprint");
     expect(jdata.created_entity_ids).toEqual(["sprint-1", "sprint-1-child"]);
@@ -302,4 +316,31 @@ describe("templateOps.instantiateTemplate — atomicity (rollback proof)", () =>
     expect(countRelationships(testDb)).toBe(relsBefore);
     expect(countTemplateJournal(testDb)).toBe(journalBefore);
   });
+});
+
+it("authorizes every template task before writing any task, relationship, or journal entry", () => {
+  const fixture = createTestDb();
+  applySchema(fixture.db, SCHEMA_WITH_TEMPLATE, "test");
+  const before = fixture.rawDb
+    .prepare("SELECT count(*) AS n FROM journal")
+    .get();
+  expect(() =>
+    instantiateTemplate(fixture.db, {
+      templateName: "sprint",
+      rootId: "restricted",
+      vars: {},
+      origin: ORIGIN,
+      policy: {
+        role: "participant",
+        capabilities: ["templates:instantiate", "tasks:write"],
+        restrictions: { task_types: ["task"] },
+      },
+    }),
+  ).toThrow(CredentialPolicyDenied);
+  expect(countEntities(fixture)).toBe(0);
+  expect(countRelationships(fixture)).toBe(0);
+  expect(
+    fixture.rawDb.prepare("SELECT count(*) AS n FROM journal").get(),
+  ).toEqual(before);
+  fixture.rawDb.close();
 });

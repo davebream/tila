@@ -79,6 +79,32 @@ function fullCookieSession(): CookieSessionTokenResult {
 }
 
 describe("artifacts route permission guards", () => {
+  it("lets viewers read review history but rejects their review writes", async () => {
+    const stub = mockStub(200, { ok: true, items: [], next_revision: null });
+    const app = createApp(stub, readCookieSession());
+    const path = "http://localhost/artifacts/~/reviews/sources%2Freport.txt";
+    expect(
+      (await app.fetch(new Request(path), MOCK_ENV, MOCK_CTX)).status,
+    ).toBe(200);
+    expect(
+      (
+        await app.fetch(
+          new Request(path, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              decision: "trusted",
+              expected_review_revision: 0,
+            }),
+          }),
+          MOCK_ENV,
+          MOCK_CTX,
+        )
+      ).status,
+    ).toBe(403);
+    expect(stub.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects read-scope cookie-session on POST /artifacts/relationship with 403", async () => {
     const app = createApp(mockStub(), readCookieSession());
     const res = await app.fetch(

@@ -2,153 +2,347 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+  workflow_dispatch:
+
+# Duplicate attempts for a tag queue; an in-progress release is never cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+cache-mode: none
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+  validate-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      sha: ${{ steps.metadata.outputs.sha }}
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: '1.3.14'
-
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: '22'
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build workspace dependencies
-        run: pnpm build
-
-      - name: Compile binaries (all 8 targets)
-        working-directory: packages/cli
-        run: bun run compile
-
-      - name: Source-map leak guard
-        run: |
-          if find packages/cli/dist/binaries -name '*.map' | grep -q .; then
-            echo "ERROR: .map files found in binary output — source-map leak guard failed"
-            find packages/cli/dist/binaries -name '*.map'
-            exit 1
-          fi
-
-      - name: Generate checksums
-        working-directory: packages/cli/dist/binaries
-        run: |
-          sha256sum tila-darwin-arm64 tila-darwin-x64 tila-linux-x64 tila-linux-arm64 \
-            tila-linux-x64-musl tila-linux-arm64-musl tila-windows-x64.exe tila-windows-arm64.exe \
-            > checksums.txt
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          files: packages/cli/dist/binaries/*
-          generate_release_notes: true
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+      - name: Validate exact release commit
+        id: metadata
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload binaries for npm publish
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+        run: node scripts/release-validate.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/ci-run.mjs lint pnpm lint
+      - run: node scripts/ci-run.mjs typecheck node scripts/turbo.mjs run typecheck --summarize --cache-dir=.turbo/release-cache
+      - run: node scripts/ci-run.mjs tests node scripts/turbo.mjs run test --summarize --cache-dir=.turbo/release-cache
+      - run: node scripts/ci-run.mjs scripts pnpm test:scripts
+      - run: node scripts/ci-run.mjs runtime pnpm test:runtime
+      - run: node scripts/ci-run.mjs audit pnpm audit --audit-level=high
+      - run: node scripts/ci-run.mjs build node scripts/turbo.mjs run build --summarize --cache-dir=.turbo/release-cache
+      - name: Compile all eight targets with one Worker sidecar
+        run: node scripts/ci-run.mjs compile pnpm --filter tila-cli compile
+      - name: Pack the exact release payload
+        run: node scripts/ci-run.mjs pack node scripts/release-pack.mjs
+      - run: node scripts/release-verify.mjs
+        env:
+          RELEASE_SHA: ${{ steps.metadata.outputs.sha }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: compiled-binaries
-          path: packages/cli/dist/binaries/*
-          retention-days: 1
+          name: tested-release-inputs
+          path: .release/
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
+          path: .ci-reports/
+          include-hidden-files: true
+          retention-days: 7
 
-  npm-publish:
-    runs-on: ubuntu-latest
-    needs: build-and-release
+  consumers:
+    needs: validate-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    env:
+      RELEASE_SHA: ${{ needs.validate-build.outputs.sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ needs.validate-build.outputs.sha }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tested-release-inputs
+          path: .release
+      - run: node scripts/ci-run.mjs consumer node scripts/release-smoke.mjs .release consumer linux-x64
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
+          path: .ci-reports/
+          include-hidden-files: true
+          retention-days: 7
+
+  platforms:
+    needs: validate-build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { target: darwin-arm64, runner: macos-15 }
+          - { target: darwin-x64, runner: macos-15-intel }
+          - { target: windows-x64, runner: windows-2025 }
+          - { target: windows-arm64, runner: windows-11-arm }
+    env:
+      RELEASE_SHA: ${{ needs.validate-build.outputs.sha }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ needs.validate-build.outputs.sha }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tested-release-inputs
+          path: .release
+      - name: Execute binary and local installer fixture
+        shell: bash
+        run: node scripts/ci-run.mjs platform node scripts/release-smoke.mjs .release binary "$RELEASE_TARGET"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
+          path: .ci-reports/
+          include-hidden-files: true
+          retention-days: 7
+
+  musl:
+    needs: validate-build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64-musl, runner: ubuntu-24.04 }
+          - { target: linux-arm64-musl, runner: ubuntu-24.04-arm }
+    env:
+      RELEASE_SHA: ${{ needs.validate-build.outputs.sha }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ needs.validate-build.outputs.sha }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tested-release-inputs
+          path: .release
+      - name: Run in native-architecture Alpine
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work
+          -e RELEASE_SHA -e RELEASE_TARGET
+          node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
+          sh -c 'apk add --no-cache libstdc++ && node scripts/ci-run.mjs musl node scripts/release-smoke.mjs .release binary "$RELEASE_TARGET"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
+          path: .ci-reports/
+          include-hidden-files: true
+          retention-days: 7
+
+  attest:
+    needs: [validate-build, consumers, platforms, musl]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write # required for npm OIDC trusted publishing
-
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_SHA: ${{ needs.validate-build.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Upgrade npm for OIDC trusted publishing
-        run: npm install -g npm@latest # OIDC trusted publishing requires npm >= 11.5.1
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+          ref: ${{ needs.validate-build.outputs.sha }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build CLI package for publish
-        run: pnpm build
-
-      - name: Publish SDK and MCP server (OIDC)
-        run: |
-          pnpm --filter tila-sdk publish --no-git-checks --access public --provenance
-          pnpm --filter tila-mcp-server publish --no-git-checks --access public --provenance
-
-      - name: Download compiled binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+          node-version: '24'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: compiled-binaries
-          path: packages/cli/dist/binaries
+          name: tested-release-inputs
+          path: .release
+      - run: node scripts/release-verify.mjs
+      - name: Attest every tested file
+        uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
+        with:
+          subject-path: |
+            .release/binaries/*
+            .release/npm/*
+            .release/manifest.json
+            .release/checksums.txt
+      - name: Attest SBOM for linux-x64
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-linux-x64
+            .release/binaries/tila-linux-x64.gz
+          sbom-path: .release/binaries/tila-linux-x64.spdx.json
+      - name: Attest SBOM for linux-arm64
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-linux-arm64
+            .release/binaries/tila-linux-arm64.gz
+          sbom-path: .release/binaries/tila-linux-arm64.spdx.json
+      - name: Attest SBOM for linux-x64-musl
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-linux-x64-musl
+            .release/binaries/tila-linux-x64-musl.gz
+          sbom-path: .release/binaries/tila-linux-x64-musl.spdx.json
+      - name: Attest SBOM for linux-arm64-musl
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-linux-arm64-musl
+            .release/binaries/tila-linux-arm64-musl.gz
+          sbom-path: .release/binaries/tila-linux-arm64-musl.spdx.json
+      - name: Attest SBOM for darwin-arm64
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-darwin-arm64
+            .release/binaries/tila-darwin-arm64.gz
+          sbom-path: .release/binaries/tila-darwin-arm64.spdx.json
+      - name: Attest SBOM for darwin-x64
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-darwin-x64
+            .release/binaries/tila-darwin-x64.gz
+          sbom-path: .release/binaries/tila-darwin-x64.spdx.json
+      - name: Attest SBOM for windows-x64
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-windows-x64.exe
+            .release/binaries/tila-windows-x64.exe.gz
+          sbom-path: .release/binaries/tila-windows-x64.exe.spdx.json
+      - name: Attest SBOM for windows-arm64
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        with:
+          subject-path: |
+            .release/binaries/tila-windows-arm64.exe
+            .release/binaries/tila-windows-arm64.exe.gz
+          sbom-path: .release/binaries/tila-windows-arm64.exe.spdx.json
+      - run: node scripts/ci-run.mjs attestations node scripts/release-attestations.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
+          path: .ci-reports/
+          include-hidden-files: true
+          retention-days: 7
 
-      - name: Copy binaries to platform packages
-        run: |
-          cp packages/cli/dist/binaries/tila-darwin-arm64 packages/cli-darwin-arm64/bin/tila
-          cp packages/cli/dist/binaries/tila-darwin-x64 packages/cli-darwin-x64/bin/tila
-          cp packages/cli/dist/binaries/tila-linux-x64 packages/cli-linux-x64/bin/tila
-          cp packages/cli/dist/binaries/tila-linux-arm64 packages/cli-linux-arm64/bin/tila
-          cp packages/cli/dist/binaries/tila-linux-x64-musl packages/cli-linux-x64-musl/bin/tila
-          cp packages/cli/dist/binaries/tila-linux-arm64-musl packages/cli-linux-arm64-musl/bin/tila
-          cp packages/cli/dist/binaries/tila-windows-x64.exe packages/cli-windows-x64/bin/tila.exe
-          cp packages/cli/dist/binaries/tila-windows-arm64.exe packages/cli-windows-arm64/bin/tila.exe
-          chmod +x packages/cli-darwin-arm64/bin/tila
-          chmod +x packages/cli-darwin-x64/bin/tila
-          chmod +x packages/cli-linux-x64/bin/tila
-          chmod +x packages/cli-linux-arm64/bin/tila
-          chmod +x packages/cli-linux-x64-musl/bin/tila
-          chmod +x packages/cli-linux-arm64-musl/bin/tila
+  npm-publish:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    needs: [validate-build, attest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+    env:
+      RELEASE_SHA: ${{ needs.validate-build.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ needs.validate-build.outputs.sha }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tested-release-inputs
+          path: .release
+      - name: Pin npm with OIDC support
+        run: npm install --global npm@12.2.0
+      - run: node scripts/release-attestations.mjs
+      - name: Publish tested tarballs in dependency order
+        run: node scripts/ci-run.mjs publish node scripts/release-publish.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
+          path: .ci-reports/
+          include-hidden-files: true
+          retention-days: 7
 
-      - name: Publish platform packages (OIDC)
-        run: |
-          for pkg in cli-darwin-arm64 cli-darwin-x64 cli-linux-x64 cli-linux-arm64 cli-linux-x64-musl cli-linux-arm64-musl cli-windows-x64 cli-windows-arm64; do
-            echo "Publishing tila-$pkg..."
-            cd packages/$pkg
-            npm publish --access public --provenance
-            cd ../..
-          done
+  github-release:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    needs: [validate-build, npm-publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      RELEASE_SHA: ${{ needs.validate-build.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ needs.validate-build.outputs.sha }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tested-release-inputs
+          path: .release
+      - run: node scripts/release-attestations.mjs
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        with:
+          tag_name: ${{ needs.validate-build.outputs.tag }}
+          files: |
+            .release/binaries/*
+            .release/manifest.json
+          fail_on_unmatched_files: true
+          generate_release_notes: true
 
-      - name: Publish main CLI package (OIDC)
-        working-directory: packages/cli
-        run: npm publish --access public --provenance
+  homebrew:
+    if: ${{ github.event_name == 'push' && vars.ENABLE_HOMEBREW_PUBLISH == 'true' }}
+    needs: [validate-build, github-release]
+    uses: ./.github/workflows/publish-tap.yml
+    with:
+      tag: ${{ needs.validate-build.outputs.tag }}
+    secrets:
+      TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

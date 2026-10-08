@@ -10,7 +10,6 @@
  */
 import {
   _resetMiddlewareStateForTest,
-  backendD1MockFactory,
   createAuthTestApp,
   makeAuthEnv,
   resetBackendD1Mocks,
@@ -18,7 +17,12 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Per-file hoisted mock — vitest resolves this to the same module the worker source imports.
-vi.mock("@tila/backend-d1", () => backendD1MockFactory());
+vi.mock("@tila/backend-d1", async () => {
+  const { backendD1MockFactory } = await import(
+    "../../worker/src/test-support/backend-d1-mock"
+  );
+  return backendD1MockFactory();
+});
 
 const env = makeAuthEnv();
 
@@ -98,51 +102,38 @@ describe("Token management lifecycle", () => {
   // Placeholders — require pool-workers + D1 binding
   // ---------------------------------------------------------------------------
 
-  it("POST /api/tokens issues a token with tila_ prefix", async () => {
-    // Requires: authenticated request with valid bearer token
-    // Request body: { name: "test-ci", created_by: "cli" }
-    // Expected: 201, body.ok === true, body.token starts with "tila_",
-    //           body.token length === 69 (5 prefix + 64 hex),
-    //           body.name === "test-ci", body.created_at is integer
-    expect(true).toBe(true); // Placeholder until pool-workers configured
-  });
+  // Requires: authenticated request with valid bearer token
+  // Request body: { name: "test-ci", created_by: "cli" }
+  // Expected: 201, body.ok === true, body.token starts with "tila_",
+  //           body.token length === 69 (5 prefix + 64 hex),
+  //           body.name === "test-ci", body.created_at is integer
+  // Placeholder until pool-workers configured
+  it.todo("POST /api/tokens issues a token with tila_ prefix");
 
-  it("GET /api/tokens lists the issued token", async () => {
-    // After issuing "test-ci" token:
-    // Expected: 200, body.tokens array contains entry with name "test-ci",
-    //           revoked_at === null, scopes === "full"
-    // MUST NOT contain token_hash in any list entry
-    expect(true).toBe(true);
-  });
+  // After issuing "test-ci" token:
+  // Expected: 200, body.tokens array contains entry with name "test-ci",
+  //           revoked_at === null, scopes === "full"
+  // MUST NOT contain token_hash in any list entry
+  it.todo("GET /api/tokens lists the issued token");
 
-  it("POST /api/tokens with duplicate name returns 409", async () => {
-    // Issue another token with name "test-ci" (same as above, not revoked)
-    // Expected: 409, body.error.code === "token-name-conflict"
-    expect(true).toBe(true);
-  });
+  // Issue another token with name "test-ci" (same as above, not revoked)
+  // Expected: 409, body.error.code === "token-name-conflict"
+  it.todo("POST /api/tokens with duplicate name returns 409");
 
-  it("DELETE /api/tokens/:name revokes the token", async () => {
-    // DELETE /api/tokens/test-ci
-    // Expected: 200, body.ok === true, body.name === "test-ci",
-    //           body.revoked_at is integer
-    expect(true).toBe(true);
-  });
+  // DELETE /api/tokens/test-ci
+  // Expected: 200, body.ok === true, body.name === "test-ci",
+  //           body.revoked_at is integer
+  it.todo("DELETE /api/tokens/:name revokes the token");
 
-  it("GET /api/tokens shows revoked status after revocation", async () => {
-    // After revoking "test-ci":
-    // Expected: token entry has revoked_at !== null
-    expect(true).toBe(true);
-  });
+  // After revoking "test-ci":
+  // Expected: token entry has revoked_at !== null
+  it.todo("GET /api/tokens shows revoked status after revocation");
 
-  it("DELETE /api/tokens/:name for non-existent token returns 404", async () => {
-    // DELETE /api/tokens/nonexistent
-    // Expected: 404, body.error.code === "token-not-found"
-    expect(true).toBe(true);
-  });
+  // DELETE /api/tokens/nonexistent
+  // Expected: 404, body.error.code === "token-not-found"
+  it.todo("DELETE /api/tokens/:name for non-existent token returns 404");
 
-  it("POST /api/tokens with same name succeeds after revocation", async () => {
-    // After "test-ci" was revoked, issue a new "test-ci"
-    // Expected: 201 (partial unique index allows name reuse after revocation)
-    expect(true).toBe(true);
-  });
+  // After "test-ci" was revoked, issue a new "test-ci"
+  // Expected: 201 (partial unique index allows name reuse after revocation)
+  it.todo("POST /api/tokens with same name succeeds after revocation");
 });

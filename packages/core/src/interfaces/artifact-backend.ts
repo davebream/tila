@@ -1,4 +1,21 @@
-export interface ArtifactPointerRecord {
+import type {
+  ArtifactDeleteOptions,
+  ArtifactDestroyResponse,
+  ArtifactProvenance,
+  ArtifactReviewRequest,
+  ArtifactReviewResponse,
+  ArtifactReviewSummary,
+  ArtifactReviewsQuery,
+  ArtifactReviewsResponse,
+  ArtifactRevision,
+} from "@tila/schemas";
+
+export interface ArtifactTrust {
+  provenance?: ArtifactProvenance | null;
+  revision_creation?: ArtifactProvenance | null;
+  review?: ArtifactReviewSummary;
+}
+export interface ArtifactPointerRecord extends ArtifactTrust {
   r2_key: string;
   resource: string | null;
   kind: string;
@@ -19,14 +36,14 @@ export interface ArtifactRelationship {
   created_at: number;
 }
 
-export interface ArtifactSearchResultRecord {
+export interface ArtifactSearchResultRecord extends ArtifactTrust {
   r2_key: string;
   kind: string;
   title: string | null;
   snippet: string | null;
 }
 
-export interface ArtifactIndexEntry {
+export interface ArtifactIndexEntry extends ArtifactTrust {
   r2_key: string;
   resource: string | null;
   kind: string;
@@ -41,6 +58,10 @@ export interface ArtifactIndexEntry {
 }
 
 export interface ArtifactPutOptions {
+  lineageId?: string;
+  lineageFence?: number;
+  tags?: string[];
+  idempotencyKey?: string;
   key: string;
   body: ReadableStream | ArrayBuffer | string;
   sha256: string;
@@ -55,9 +76,33 @@ export interface ArtifactPutOptions {
   expiresAt?: number | null;
 }
 
-import type { ArtifactGrepResponse } from "@tila/schemas";
+import type {
+  ArtifactGrepResponse,
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactRestoreRequest,
+  ArtifactRevisionResponse,
+} from "@tila/schemas";
 
 export interface ArtifactBackend {
+  reviews?(
+    key: string,
+    query?: ArtifactReviewsQuery,
+  ): Promise<ArtifactReviewsResponse>;
+  review?(
+    key: string,
+    input: ArtifactReviewRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactReviewResponse>;
+  history?(
+    key: string,
+    options?: ArtifactHistoryQuery,
+  ): Promise<ArtifactHistoryResponse>;
+  meta?(key: string): Promise<ArtifactMetaResponse>;
+  restore?(
+    key: string,
+    options: ArtifactRestoreRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactRevisionResponse>;
   // `deduplicated` is true when the put was a no-op because a content-addressed
   // artifact with the same key already existed. Optional so older backends that
   // do not report it still satisfy the interface.
@@ -65,6 +110,7 @@ export interface ArtifactBackend {
     key: string;
     bytes: number;
     deduplicated?: boolean;
+    pointer?: ArtifactRevision;
   }>;
   get(key: string): Promise<{
     body: ReadableStream;
@@ -72,7 +118,14 @@ export interface ArtifactBackend {
     metadata: Record<string, string>;
   } | null>;
   list(prefix: string): Promise<{ key: string; size: number }[]>;
-  delete(key: string): Promise<void>;
+  delete(key: string, options?: ArtifactDeleteOptions): Promise<void>;
+  destroyLineage?(
+    lineageId: string,
+    options: ArtifactDeleteOptions & { fence: number },
+  ): Promise<ArtifactDestroyResponse>;
+  drainLifecycle?(
+    limit?: number,
+  ): Promise<{ deleted: number; errors: number; pending: boolean }>;
   listWithMetadata?(
     prefix: string,
   ): Promise<{ key: string; size: number; metadata: Record<string, string> }[]>;
@@ -111,7 +164,15 @@ export interface ArtifactBackend {
       mimeType?: string;
       resource?: string;
       fence?: number;
+      lineageId?: string;
+      lineageFence?: number;
+      tags?: string[];
+      idempotencyKey?: string;
     },
-  ): Promise<{ key: string; bytes: number }>;
-  readText?(key: string): Promise<{ content: string; mimeType: string } | null>;
+  ): Promise<{ key: string; bytes: number; pointer?: ArtifactRevision }>;
+  readText?(key: string): Promise<{
+    content: string;
+    mimeType: string;
+    pointer?: ArtifactRevision;
+  } | null>;
 }

@@ -16,6 +16,10 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { requirePermission } from "../middleware/permission";
 import type { D1TokenResult, Env, HonoVariables } from "../types";
+// Imported at module level so the route's module graph loads before the first
+// test starts; a dynamic import inside the test body counted against the
+// 5s per-test timeout and timed out on slow CI runners.
+import { artifacts } from "./artifacts";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -131,8 +135,6 @@ async function makeReconcileApp(opts: {
   doStub: DurableObjectStub;
   r2List?: R2ListFn;
 }) {
-  const { artifacts } = await import("./artifacts");
-
   const r2List =
     opts.r2List ?? (async () => ({ objects: [], truncated: false }));
 
@@ -165,6 +167,9 @@ async function makeReconcileApp(opts: {
     c.set("tokenResult", opts.tokenResult);
     c.set("doStub", opts.doStub);
     c.set("projectId", "proj-1");
+    c.set("principalId", "token:test-token");
+    c.set("participantId", "test-participant");
+    c.set("environment", { client_name: "test" });
     return next();
   });
   app.route("/artifacts", artifacts);
@@ -431,7 +436,19 @@ describe("POST /artifacts/reconcile — composite-cursor pagination (C1)", () =>
       scanned: number;
     };
     expect(b3.scanned).toBe(1);
-    expect(b3.nextCursor).toBeNull();
+    expect(decodeCursor(b3.nextCursor as string).prefix).toBe("versioned");
+    const res4 = await app.fetch(
+      new Request(
+        `http://localhost/artifacts/reconcile?limit=1&cursor=${encodeURIComponent(b3.nextCursor as string)}`,
+        { method: "POST" },
+      ),
+      env,
+      makeCtx(),
+    );
+    expect(res4.status).toBe(200);
+    expect(
+      ((await res4.json()) as { nextCursor: string | null }).nextCursor,
+    ).toBeNull();
   });
 
   it("clamps oversized limit to max 1000", async () => {

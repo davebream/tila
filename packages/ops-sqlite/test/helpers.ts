@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as entityOps from "../src/entity-ops";
+import type { RequestOrigin } from "../src/journal-ops";
 import {
   MIGRATIONS,
   MIGRATION_BOOTSTRAP,
@@ -9,6 +10,19 @@ import {
   type MigrationStorage,
 } from "../src/migrations-sql";
 import * as schema from "../src/schema";
+
+export function testOrigin(
+  participantId = "test-participant",
+  principalId = "test-principal",
+): RequestOrigin {
+  return {
+    principalId,
+    participantId,
+    environment: { machine: participantId, client_name: "test" },
+    actor: principalId,
+    source: "test",
+  };
+}
 
 // Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
 // Replace for testing (same pattern as backend-do test suite).
@@ -42,7 +56,7 @@ function createMigrationStorage(
   };
 }
 
-function runMigration(
+export function runMigration(
   rawDb: InstanceType<typeof Database>,
   migration: Migration,
 ) {

@@ -61,7 +61,10 @@ describe("artifact-lifecycle: put/get/list/delete round-trip", () => {
       const getResult = await backend.get(key);
       expect(getResult).not.toBeNull();
       expect(getResult?.contentType).toBe("text/plain");
-      expect(getResult?.metadata).toEqual({});
+      expect(getResult?.metadata).toEqual({
+        review_state: "unreviewed",
+        review_revision: "0",
+      });
 
       // Read the stream
       const reader = getResult?.body.getReader();

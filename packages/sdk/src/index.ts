@@ -8,7 +8,7 @@ export {
   exchangeGitHubToken,
   createTila,
 } from "./client";
-export type { ClientOptions, TilaFacade } from "./client";
+export type { ClientOptions, RequestOptions, TilaFacade } from "./client";
 
 // Retry helper
 export { withRetry } from "./retry";
@@ -28,6 +28,21 @@ export { createClaimMethods } from "./claims";
 export { createArtifactMethods } from "./artifacts";
 export type { ArtifactUploadOpts } from "./artifacts";
 export { createTokenMethods } from "./tokens";
+export {
+  createServiceAccountMethods,
+  type WorkloadBinding,
+} from "./service-accounts";
+export {
+  CREDENTIAL_PRESETS,
+  CredentialPolicySchema,
+  CapabilitySchema,
+  NamespaceRestrictionsSchema,
+  type CredentialPolicy,
+  type Capability,
+  type NamespaceRestrictions,
+  type ServiceAccount,
+  type WorkloadBindingRequest,
+} from "@tila/schemas";
 export { createJournalMethods } from "./journal";
 export { createPresenceMethods } from "./presence";
 export { createRecordMethods } from "./records";
@@ -75,6 +90,19 @@ export type {
   RenewSuccessResponse,
   ReleaseSuccessResponse,
   // Artifact types
+  ArtifactProvenance,
+  ArtifactReviewEvent,
+  ArtifactReviewSummary,
+  ArtifactReviewRequest,
+  ArtifactReviewResponse,
+  ArtifactReviewsQuery,
+  ArtifactReviewsResponse,
+  ArtifactRevision,
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactRestoreRequest,
+  ArtifactRevisionResponse,
   ArtifactPutResponse,
   ArtifactListResponse,
   ArtifactSearchResponse,
@@ -122,3 +150,25 @@ export type {
   UnifiedSearchResult,
   UnifiedSearchQuery,
 } from "@tila/schemas";
+
+export {
+  createHandoffMethods,
+  createReentryMethod,
+  type CreateHandoffOptions,
+} from "./continuity";
+
+// Refreshable credentials (in-memory, per-client coordination).
+export {
+  createServiceTokenProvider,
+  createExternalTokenProvider,
+  createOidcWorkloadTokenProvider,
+  TokenProviderError,
+} from "./token-provider";
+export type {
+  TokenProvider,
+  TokenProviderContext,
+  TokenCredential,
+  DpopBinding,
+  DpopProofContext,
+  OidcWorkloadTokenProviderOptions,
+} from "./token-provider";

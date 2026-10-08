@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Keep config tests hermetic: a developer's gitignored .env.local must not
+    // turn VITE_API_URL into a test-suite-wide implicit input.
+    env: { VITE_API_URL: "" },
     setupFiles: ["./test/setup.ts"],
     include: ["test/**/*.test.{ts,tsx}"],
     // jsdom renders of large journals (hundreds of rows) plus React Query state

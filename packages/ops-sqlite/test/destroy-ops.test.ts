@@ -40,13 +40,14 @@ describe("truncateAllDomainTables", () => {
       .run();
     testDb.rawDb
       .prepare(
-        `INSERT INTO claims(resource, holder, machine, user, mode, fence, acquired_at, expires_at, metadata)
-         VALUES('task:e-1', 'm/u', 'm', 'u', 'exclusive', 2, ${now}, ${now + 1000}, '{}')`,
+        `INSERT INTO claims(resource, principal_id, participant_id, environment, mode, fence, acquired_at, expires_at, metadata)
+         VALUES('task:e-1', 'u', 'm', '{}', 'exclusive', 2, ${now}, ${now + 1000}, '{}')`,
       )
       .run();
     testDb.rawDb
       .prepare(
-        `INSERT INTO presence(machine, last_seen, info) VALUES('m', ${now}, '{}')`,
+        `INSERT INTO presence(principal_id, participant_id, environment, last_seen, info)
+         VALUES('u', 'm', '{}', ${now}, '{}')`,
       )
       .run();
     // Seed a _schema_history row: destroy must also clear migration bookkeeping.

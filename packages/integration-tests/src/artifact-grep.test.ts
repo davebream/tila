@@ -72,6 +72,7 @@ function makeCookieSession(
     scopes,
     tokenId: "",
     sessionHash: "test-hash",
+    principalId: "github:github.com:42",
     expiresAt: Date.now() + 3_600_000,
     permission: resolvedPermission,
   };
@@ -169,7 +170,7 @@ describe("C10 — requirePermission cookie-session read scope", () => {
     };
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe("permission-denied");
-    expect(body.error.message).toBe("Requires write permission");
+    expect(body.error.message).toBe("Requires participant role");
     expect(body.error.retryable).toBe(false);
   });
 
@@ -224,10 +225,11 @@ describe("C10 — requirePermission cookie-session read scope", () => {
     expect(res.status).toBe(200);
   });
 
-  it("scopes:full cookie session → 200 on admin-level route (preserves full=admin behavior)", async () => {
+  it("explicit maintainer cookie session → 200 on admin-level route", async () => {
     const app = new Hono<AppEnv>();
     app.use("/*", async (c, next) => {
       c.set("tokenResult", makeCookieSession("full"));
+      c.set("explicitRole", "maintainer");
       return next();
     });
     app.use("/*", requirePermission("admin"));

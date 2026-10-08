@@ -11,9 +11,12 @@ import {
 } from "../src/coordination-ops";
 import { FenceNotFoundError } from "../src/fence-ops";
 import { createRecord, setRecord } from "../src/record-ops";
-import { type TestDb, createEntity, createTestDb } from "./helpers";
+import { type TestDb, createEntity, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
+const agentA = testOrigin("agent-a", "principal-a");
+const agentB = testOrigin("agent-b", "principal-b");
+const agentASecondParticipant = testOrigin("agent-a-2", "principal-a");
 
 beforeEach(() => {
   testDb = createTestDb();
@@ -27,14 +30,7 @@ describe("coordination ops regressions", () => {
   it("returns the live claim from state() when the caller uses a bare entity id", () => {
     createEntity(testDb.db, { id: "abc-123", type: "task" });
 
-    const claim = acquire(
-      testDb.db,
-      "abc-123",
-      "agent-a",
-      "agent-a",
-      "exclusive",
-      60_000,
-    );
+    const claim = acquire(testDb.db, "abc-123", agentA, "exclusive", 60_000);
 
     expect(claim.acquired).toBe(true);
     expect(state(testDb.db, "abc-123")?.resource).toBe("task:abc-123");
@@ -43,16 +39,9 @@ describe("coordination ops regressions", () => {
   it("releases a bare-id entity claim instead of leaving it in listClaims()", () => {
     createEntity(testDb.db, { id: "abc-123", type: "task" });
 
-    const claim = acquire(
-      testDb.db,
-      "abc-123",
-      "agent-a",
-      "agent-a",
-      "exclusive",
-      60_000,
-    );
+    const claim = acquire(testDb.db, "abc-123", agentA, "exclusive", 60_000);
 
-    release(testDb.db, "abc-123", claim.fence, { actor: "agent-a/agent-a" });
+    release(testDb.db, "abc-123", claim.fence, agentA);
 
     expect(listClaims(testDb.db)).toEqual([]);
   });
@@ -60,17 +49,10 @@ describe("coordination ops regressions", () => {
   it("renews a bare-id entity claim against the canonical stored row", () => {
     createEntity(testDb.db, { id: "abc-123", type: "task" });
 
-    const claim = acquire(
-      testDb.db,
-      "abc-123",
-      "agent-a",
-      "agent-a",
-      "exclusive",
-      60_000,
-    );
+    const claim = acquire(testDb.db, "abc-123", agentA, "exclusive", 60_000);
 
     expect(
-      renew(testDb.db, "abc-123", "agent-a", "agent-a", claim.fence, 120_000),
+      renew(testDb.db, "abc-123", agentA, claim.fence, 120_000),
     ).toMatchObject({ renewed: true });
   });
 
@@ -84,7 +66,7 @@ describe("coordination ops regressions", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      testOrigin(),
     );
 
     expect(created.fence).toBeGreaterThan(0);
@@ -103,7 +85,7 @@ describe("coordination ops regressions", () => {
           schema_version: 1,
           actor: "test-agent",
         },
-        { actor: "test-agent" },
+        testOrigin(),
       ),
     ).rejects.toThrow(FenceNotFoundError);
   });
@@ -112,8 +94,7 @@ describe("coordination ops regressions", () => {
     const first = acquire(
       testDb.db,
       "task:abc-123",
-      "agent-a",
-      "agent-a",
+      agentA,
       "exclusive",
       60_000,
     );
@@ -121,8 +102,7 @@ describe("coordination ops regressions", () => {
     const second = acquire(
       testDb.db,
       "task:abc-123",
-      "agent-a",
-      "agent-a",
+      agentA,
       "exclusive",
       60_000,
     );
@@ -137,15 +117,14 @@ describe("coordination ops regressions", () => {
     const claim = acquire(
       testDb.db,
       "task:abc-123",
-      "agent-a",
-      "agent-a",
+      agentA,
       "exclusive",
       60_000,
     );
 
     expect(() =>
       release(testDb.db, "task:abc-123", claim.fence, {
-        actor: "agent-b/agent-b",
+        ...agentB,
       }),
     ).toThrow();
     expect(listClaims(testDb.db)).toHaveLength(1);
@@ -155,15 +134,12 @@ describe("coordination ops regressions", () => {
     const claim = acquire(
       testDb.db,
       "task:abc-123",
-      "agent-a",
-      "agent-a",
+      agentA,
       "exclusive",
       60_000,
     );
     // The owner releases: claim deleted, one claim.released journal row.
-    release(testDb.db, "task:abc-123", claim.fence, {
-      actor: "agent-a/agent-a",
-    });
+    release(testDb.db, "task:abc-123", claim.fence, agentA);
 
     const countReleased = () =>
       (
@@ -177,9 +153,7 @@ describe("coordination ops regressions", () => {
     // gone -- must be an idempotent no-op: no throw and, crucially, no extra
     // claim.released journal row attributed to a non-holder.
     expect(() =>
-      release(testDb.db, "task:abc-123", claim.fence, {
-        actor: "agent-b/agent-b",
-      }),
+      release(testDb.db, "task:abc-123", claim.fence, agentB),
     ).not.toThrow();
     expect(countReleased()).toBe(1);
   });
@@ -188,8 +162,7 @@ describe("coordination ops regressions", () => {
     const claim = acquire(
       testDb.db,
       "task:abc-123",
-      "agent-a",
-      "agent-a",
+      agentA,
       "exclusive",
       60_000,
     );
@@ -197,21 +170,13 @@ describe("coordination ops regressions", () => {
     const reacquired = acquire(
       testDb.db,
       "task:abc-123",
-      "agent-a",
-      "agent-a",
+      agentA,
       "exclusive",
       60_000,
     );
 
     expect(
-      renew(
-        testDb.db,
-        "task:abc-123",
-        "agent-a",
-        "agent-a",
-        reacquired.fence,
-        120_000,
-      ),
+      renew(testDb.db, "task:abc-123", agentA, reacquired.fence, 120_000),
     ).toMatchObject({ renewed: true });
     expect(reacquired.fence).toBe(claim.fence);
   });
@@ -219,17 +184,67 @@ describe("coordination ops regressions", () => {
   it("keeps exact-match state() behavior for non-entity resources", () => {
     const resource = formatRecordResource("config", "main");
 
-    const claim = acquire(
+    const claim = acquire(testDb.db, resource, agentA, "exclusive", 60_000);
+
+    expect(claim.acquired).toBe(true);
+    expect(state(testDb.db, resource)?.resource).toBe(resource);
+  });
+
+  it("makes exclusive claims contend between participants of one principal", () => {
+    const first = acquire(
       testDb.db,
-      resource,
-      "agent-a",
-      "agent-a",
+      "task:exclusive",
+      agentA,
+      "exclusive",
+      60_000,
+    );
+    const second = acquire(
+      testDb.db,
+      "task:exclusive",
+      agentASecondParticipant,
       "exclusive",
       60_000,
     );
 
-    expect(claim.acquired).toBe(true);
-    expect(state(testDb.db, resource)?.resource).toBe(resource);
+    expect(first.acquired).toBe(true);
+    expect(second.acquired).toBe(false);
+    expect(state(testDb.db, "task:exclusive")?.participant_id).toBe(
+      agentA.participantId,
+    );
+  });
+
+  it("transfers owner claims between participants of one principal and fences out the old participant", () => {
+    const first = acquire(testDb.db, "task:owned", agentA, "owner", 60_000);
+    const transferred = acquire(
+      testDb.db,
+      "task:owned",
+      agentASecondParticipant,
+      "owner",
+      60_000,
+    );
+
+    expect(transferred).toMatchObject({
+      acquired: true,
+      participant_id: agentASecondParticipant.participantId,
+    });
+    expect(transferred.fence).toBeGreaterThan(first.fence);
+    expect(renew(testDb.db, "task:owned", agentA, first.fence, 60_000)).toEqual(
+      { renewed: false, expires_at: 0 },
+    );
+    expect(() =>
+      release(testDb.db, "task:owned", transferred.fence, agentA),
+    ).toThrow();
+    expect(() =>
+      release(testDb.db, "task:owned", first.fence, agentASecondParticipant),
+    ).toThrow();
+  });
+
+  it("rejects an owner acquire by another principal", () => {
+    acquire(testDb.db, "task:owned", agentA, "owner", 60_000);
+
+    expect(
+      acquire(testDb.db, "task:owned", agentB, "owner", 60_000),
+    ).toMatchObject({ acquired: false });
   });
 
   it.todo(
@@ -242,16 +257,21 @@ describe("listAllPresence", () => {
     const now = Date.now();
     const ttlMs = 60_000;
     // Fresh machine: last_seen = now (active)
-    heartbeat(testDb.db, "machine-fresh", { role: "worker" }, now);
+    heartbeat(testDb.db, testOrigin("fresh"), { role: "worker" }, now);
     // Stale machine: last_seen far in the past (inactive)
-    heartbeat(testDb.db, "machine-stale", { role: "old" }, now - ttlMs - 1000);
+    heartbeat(
+      testDb.db,
+      testOrigin("stale"),
+      { role: "old" },
+      now - ttlMs - 1000,
+    );
 
     const rows = listAllPresence(testDb.db, ttlMs, now);
 
     expect(rows).toHaveLength(2);
 
-    const fresh = rows.find((r) => r.machine === "machine-fresh");
-    const stale = rows.find((r) => r.machine === "machine-stale");
+    const fresh = rows.find((r) => r.participant_id === "fresh");
+    const stale = rows.find((r) => r.participant_id === "stale");
 
     expect(fresh).toBeDefined();
     expect(fresh?.active).toBe(true);

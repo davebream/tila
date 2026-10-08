@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import {
   type TrustDecision,
   createProvider,
@@ -8,6 +7,8 @@ import {
 import type { CredentialProviderConfig } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { findConfig, findTilaDir } from "../config";
+import { exit } from "../lib/output";
+import * as p from "../lib/prompts";
 
 /**
  * Resolve the credential provider config from the instance's trusted registry
@@ -70,7 +71,7 @@ export default defineCommand({
         "No project found. Run `tila project create` to create one, " +
           "or ask your admin to commit `.tila/config.toml`.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     p.log.info(`Project: ${config.project_id}`);
@@ -154,7 +155,7 @@ export default defineCommand({
 
     if (!providerConfig) {
       p.log.error("Could not determine credential provider.");
-      process.exit(1);
+      exit(1);
     }
 
     // Step 4: Exec trust gate (security-critical CI-1).
@@ -166,7 +167,7 @@ export default defineCommand({
         p.log.error(
           `exec credential provider requires a trusted instance. The instance must be explicitly trusted (run \`tila auth login\`) and must not be in a CI fail-closed environment. TrustDecision: ${instanceTrustDecision?.kind ?? "none"}`,
         );
-        process.exit(1);
+        exit(1);
       }
     }
 
@@ -185,7 +186,7 @@ export default defineCommand({
         p.log.error(
           "config.toml has no worker_url. Cannot join via GitHub auth.",
         );
-        process.exit(1);
+        exit(1);
       }
 
       // Validate [github] section
@@ -193,7 +194,7 @@ export default defineCommand({
         p.log.error(
           'Auth mode is "github-repo" but [github] section is missing from .tila/config.toml. Add [github] with owner and repo fields.',
         );
-        process.exit(1);
+        exit(1);
       }
 
       // Warn if --token flag was provided (ignored in github-repo mode)
@@ -217,7 +218,7 @@ export default defineCommand({
         p.log.error(
           `Worker unreachable at ${config.worker_url}/health: ${err instanceof Error ? err.message : String(err)}`,
         );
-        process.exit(1);
+        exit(1);
       }
 
       // Resolve GitHub token and exchange for session
@@ -239,7 +240,7 @@ export default defineCommand({
         } else {
           p.log.error(msg);
         }
-        process.exit(1);
+        exit(1);
       }
 
       p.log.success("Authenticated via GitHub.");
@@ -249,12 +250,12 @@ export default defineCommand({
       let token = args.token;
       if (!token) {
         const result = await p.password({ message: "API token:" });
-        if (p.isCancel(result)) process.exit(1);
+        if (p.isCancel(result)) exit(1);
         token = result;
       }
       if (!token || token.trim().length === 0) {
         p.log.error("No token provided. Aborting.");
-        process.exit(1);
+        exit(1);
       }
       token = token.trim();
 
@@ -290,18 +291,18 @@ export default defineCommand({
         p.log.error(
           `The ${providerConfig.kind} credential provider cannot be used under CI. Use an explicit project token (TILA_TOKEN) instead.`,
         );
-        process.exit(1);
+        exit(1);
       }
       if (!envProbe.isTTY) {
         p.log.error(
           `The ${providerConfig.kind} credential provider requires an interactive terminal. Set TILA_TOKEN for non-interactive environments.`,
         );
-        process.exit(1);
+        exit(1);
       }
 
       if (!config.worker_url) {
         p.log.error("config.toml has no worker_url.");
-        process.exit(1);
+        exit(1);
       }
 
       const { buildProviderPorts } = await import("../lib/providers-cli.js");
@@ -330,7 +331,7 @@ export default defineCommand({
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         p.log.error(`Credential acquisition failed: ${msg}`);
-        process.exit(1);
+        exit(1);
       }
 
       // Token acquired — signal success
@@ -343,7 +344,7 @@ export default defineCommand({
       p.log.error(
         `Unsupported credential provider kind: ${(providerConfig as { kind: string }).kind}`,
       );
-      process.exit(1);
+      exit(1);
     }
 
     // Step 6: Update .gitignore
