@@ -1,0 +1,20 @@
+merge_queue:
+  mode: serial
+  max_parallel_checks: 1
+
+queue_rules:
+  - name: default
+    batch_size: 1
+    merge_method: squash
+    update_method: merge
+    queue_conditions:
+      - base = main
+      - -draft
+      - label = merge-ready
+      - check-success = ci
+
+merge_protections_settings:
+  auto_merge_conditions:
+    - base = main
+    - -draft
+    - label = merge-ready
