@@ -4,6 +4,7 @@
  * tier that measures the full path (auth, D1, both DO hops, network).
  */
 import os from "node:os";
+import { StoreCountsResponseSchema } from "@tila/schemas";
 import { TilaClient } from "tila-sdk";
 import { probeRegion } from "../region";
 import { HARNESS_VERSION } from "../result-schema";
@@ -119,14 +120,14 @@ export function createHttpDriver(opts: HttpDriverOptions): Driver {
         throw new Error(
           `store-counts failed: HTTP ${res.status} (needs a full-scope token)`,
         );
-      const body = (await res.json()) as Record<string, unknown>;
-      const domain = (body.domain ?? body) as Record<string, unknown>;
-      const counts: Record<string, number> = {};
-      for (const [k, v] of Object.entries(domain))
-        if (typeof v === "number") counts[k] = v;
-      if (typeof body.schemaHistory === "number")
-        counts._schema_history = body.schemaHistory;
-      return { db_bytes: null, counts };
+      const body = StoreCountsResponseSchema.parse(await res.json());
+      return {
+        db_bytes: body.db_bytes,
+        counts: {
+          ...body.counts.domain,
+          _schema_history: body.counts.schemaHistory,
+        },
+      };
     },
     sweep: opts.sweepSecret
       ? async () => {
