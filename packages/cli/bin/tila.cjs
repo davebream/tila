@@ -71,16 +71,81 @@ if (!binaryPath || !fs.existsSync(binaryPath)) {
   process.exit(1);
 }
 
-const result = spawnSync(binaryPath, process.argv.slice(2), {
-  stdio: "inherit",
-  env: process.env,
-});
-
-if (result.error) {
-  process.stderr.write(
-    `tila: failed to execute binary: ${result.error.message}\n`,
-  );
-  process.exit(1);
+async function main() {
+  const root = path.dirname(__dirname);
+  const target = packageName.slice("tila-cli-".length);
+  const result = spawnSync(binaryPath, process.argv.slice(2), {
+    stdio: ["inherit", "inherit", "inherit", "pipe"],
+    maxBuffer: 64 * 1024,
+    env: { ...process.env, TILA_UPDATE_LAUNCHER: root, TILA_UPDATE_PIPE: "3" },
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0 || !result.output[3]?.length) {
+    process.exitCode = result.status ?? 1;
+    return;
+  }
+  let json = false;
+  try {
+    // Load only for updates, before a manager can replace this package on disk.
+    const updater = await import("./update.mjs");
+    const current = JSON.parse(
+      fs.readFileSync(path.join(root, "package.json"), "utf8"),
+    ).version;
+    const request = JSON.parse(result.output[3].toString());
+    json = request.json === true;
+    if (
+      request.version !== 1 ||
+      request.current !== current ||
+      request.target !== target ||
+      typeof request.json !== "boolean"
+    )
+      throw new Error("Invalid update handoff from native binary.");
+    const available = updater.stableVersion(request.discovery?.available);
+    if (updater.compareVersions(available, current) <= 0)
+      throw new Error("Update handoff attempted a downgrade or reinstall.");
+    // Re-establish ownership in the parent; never execute a command/path from IPC.
+    const installation = await updater.detectInstallation({
+      execPath: binaryPath,
+      target,
+      launcherRoot: root,
+    });
+    if (!["npm", "pnpm", "bun"].includes(installation.method))
+      throw new Error("Unexpected package manager in update handoff.");
+    const discovery = {
+      available,
+      latest: available,
+      notes: `https://github.com/davebream/tila/releases/tag/v${available}`,
+    };
+    const progress = (message) => {
+      if (!message) return;
+      process.stderr.write(
+        json
+          ? `${JSON.stringify({ type: "diagnostic", level: "info", message })}\n`
+          : `${message}\n`,
+      );
+    };
+    const updated = await updater.applyManagedUpdate(
+      installation,
+      current,
+      discovery,
+      { progress },
+    );
+    process.stdout.write(
+      json
+        ? `${JSON.stringify({ ok: true, result: updated })}\n`
+        : `${updater.resultText(updated)}\n`,
+    );
+  } catch (error) {
+    const code = error.code ?? "update-failed";
+    process.exitCode = code === "network-error" ? 2 : 1;
+    process.stderr.write(
+      json
+        ? `${JSON.stringify({ ok: false, error: { kind: code, message: error.message, retryable: false, ...(error.hint ? { hint: error.hint } : {}) } })}\n`
+        : `${error.message}\n`,
+    );
+  }
 }
-
-process.exit(result.status ?? 1);
+main().catch((error) => {
+  process.stderr.write(`tila: failed to execute binary: ${error.message}\n`);
+  process.exitCode = 1;
+});

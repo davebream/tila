@@ -71,6 +71,7 @@ const main = defineCommand({
     mcp: () => load(() => import("./commands/mcp")),
     open: () => load(() => import("./commands/open")),
     doctor: () => load(() => import("./commands/doctor")),
+    update: () => load(() => import("./commands/update")),
     index: () => load(() => import("./commands/index")),
     state: () => load(() => import("./commands/state")),
     presence: () => load(() => import("./commands/presence")),
