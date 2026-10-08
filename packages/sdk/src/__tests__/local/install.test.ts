@@ -6,9 +6,10 @@ import { describe, expect, it } from "vitest";
  * C8 — SDK /local runtime dependency classification.
  *
  * `@tila/backend-embedded`, `@tila/core`, and `@tila/ops-sqlite` are runtime
- * imports of `tila-sdk/local` (not just dev-time types). They must live in
- * `dependencies`, not `devDependencies`, so that consumers installing
- * `tila-sdk` from npm get these packages transitively.
+ * imports of `tila-sdk/local` (not just dev-time types). They are bundled into the published outputs, so they belong in
+ * `devDependencies`. Publishing them as dependencies would ask consumers to
+ * install private, unpublished packages. Clean-tarball release smoke tests
+ * verify the bundled local backend still works.
  */
 describe("SDK /local runtime dependency classification", () => {
   const pkgJson = JSON.parse(
@@ -28,15 +29,15 @@ describe("SDK /local runtime dependency classification", () => {
   ];
 
   for (const pkg of RUNTIME_DEPS) {
-    it(`${pkg} is in dependencies (not devDependencies)`, () => {
+    it(`${pkg} is bundled instead of required from npm`, () => {
       expect(
         deps[pkg],
-        `${pkg} must be in dependencies — it is a runtime import of tila-sdk/local`,
-      ).toBeDefined();
+        `${pkg} must not be an unpublished runtime dependency`,
+      ).toBeUndefined();
       expect(
         devDeps[pkg],
-        `${pkg} must NOT be in devDependencies`,
-      ).toBeUndefined();
+        `${pkg} must be available to the bundler`,
+      ).toBeDefined();
     });
   }
 });
