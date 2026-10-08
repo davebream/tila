@@ -11,7 +11,7 @@ export async function probeRegion(
 ): Promise<RegionInfo | undefined> {
   const info: RegionInfo = {};
   try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/health`, {
       signal: AbortSignal.timeout(10_000),
     });
     const ray = res.headers.get("cf-ray");
@@ -20,7 +20,7 @@ export async function probeRegion(
     const placement = res.headers.get("cf-placement");
     if (placement) info.cf_placement = placement;
   } catch {
-    // Unreachable /health is reported by the run itself.
+    // Unreachable /api/health is reported by the run itself.
   }
   if (user) info.user = user;
   return Object.keys(info).length > 0 ? info : undefined;
