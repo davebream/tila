@@ -189,6 +189,14 @@ Monospace list items at 13px, 8px 12px padding, separated by Wire Border. Hover 
 
 Centered Muted Gray text at default size, 48px vertical padding. No icons, no illustrations, no call-to-action buttons. States the absence plainly.
 
+### Confirmation Dialogs
+
+The one permitted modal. Used only before an irreversible destructive action (revoking a membership or credential, widening a membership policy). Centered on Slate Surface with Wire Border, a Space Grotesk title, muted description, and a ghost Cancel beside a destructive Confirm. When the target has a name, the user types it to enable Confirm. Errors from the server render inside the dialog as Status Red text. Everything else in the administration panel stays inline.
+
+### Capability-gated Controls
+
+Controls that require a server-granted capability are absent, not disabled, when the capability is missing. A short muted sentence explains what the viewer cannot manage. When the server reports the capability store as unavailable, the page shows one Status Red line, a muted explanation and a Retry button, and hides every control.
+
 ## 6. Do's and Don'ts
 
 ### Do:

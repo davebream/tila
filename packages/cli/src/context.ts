@@ -28,6 +28,7 @@ import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";
 import { getGlobalFlags, resolveParticipantId } from "./lib/global-flags";
+import { outputText } from "./lib/output";
 import { deriveOrg, resolveCfApiToken } from "./lib/provisioning";
 import { checkAccountMatch, verifyCloudflareAuth } from "./lib/wrangler";
 import { VERSION as CLI_VERSION } from "./version";
@@ -93,6 +94,7 @@ export function resolveCliIdentity(): {
       worktree: gitMetadata("rev-parse", "--show-toplevel"),
       branch: gitMetadata("branch", "--show-current"),
       commit: gitMetadata("rev-parse", "HEAD"),
+      ...participant.environment,
     },
   };
 }
@@ -157,6 +159,7 @@ export async function runStartupChecks(
       config.project_id,
       undefined,
       identity,
+      config.local.artifacts_path,
     );
     const localArtifact = new LocalArtifactBackend(
       localProject.getDb(),
@@ -201,7 +204,7 @@ export async function runStartupChecks(
         checkAccountMatch(config.cloudflare.account_id, whoami);
       }
     } else {
-      console.log(
+      outputText(
         "  Skipping Cloudflare account verification (CLOUDFLARE_API_TOKEN not set).",
       );
     }

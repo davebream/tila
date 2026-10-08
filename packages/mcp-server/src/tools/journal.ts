@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerJournalTools(
   server: McpServer,
@@ -10,7 +11,8 @@ export function registerJournalTools(
 ): void {
   const journal = facade.journal;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_journal_list",
     "Query the project event journal. Returns journal entries in chronological order. Use to inspect execution history for coordination decisions.",
     {

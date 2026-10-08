@@ -46,6 +46,8 @@ export type { Migration, MigrationStorage } from "./migrations-sql";
 export * as entityOps from "./entity-ops";
 export * as coordinationOps from "./coordination-ops";
 export * as artifactOps from "./artifact-ops";
+export * as artifactVersionOps from "./artifact-version-ops";
+export { ArtifactVersionError } from "./artifact-version-ops";
 export * as journalOps from "./journal-ops";
 export * as journalArchiveOps from "./journal-archive-ops";
 export * as schemaOps from "./schema-ops";
@@ -136,3 +138,11 @@ export type {
   InstantiateTemplateParams,
   InstantiateTemplateResult,
 } from "./template-ops";
+
+export * from "./credential-policy";
+export * as continuityOps from "./continuity-ops";
+export * as summaryOps from "./summary-ops";
+
+export * as artifactLifecycleOps from "./artifact-lifecycle-ops";
+export * as artifactReviewOps from "./artifact-review-ops";
+export { ArtifactReviewError } from "./artifact-review-ops";

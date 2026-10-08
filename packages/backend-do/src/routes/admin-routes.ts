@@ -7,6 +7,8 @@ export function createAdminRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.post("/admin/restart", (c) => {
     const response = c.json({ ok: true });
+    // This reason is the internal restart acknowledgement: forwardToDO matches
+    // the remote exception because Cloudflare aborts before flushing response.
     deps.ctx.abort("admin restart requested");
     return response;
   });

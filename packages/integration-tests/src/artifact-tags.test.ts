@@ -117,7 +117,5 @@ describe.skipIf(!BASE_URL || !TOKEN)(
 
 // Non-live guard: verify the test file is correctly structured
 describe("artifact tags - static checks", () => {
-  it("test file is loaded correctly", () => {
-    expect(true).toBe(true);
-  });
+  it.todo("test file is loaded correctly");
 });

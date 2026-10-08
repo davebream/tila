@@ -63,8 +63,17 @@ export {
 export {
   SignalKindSchema,
   type SignalKind,
+  SignalTargetSchema,
+  type SignalTarget,
+  SignalIdentitySchema,
+  type SignalIdentity,
+  SignalDeliverySchema,
+  type SignalDelivery,
   SignalSchema,
   type Signal,
+  SignalGroupIdSchema,
+  SignalGroupSchema,
+  type SignalGroup,
 } from "./signal";
 
 // --- DO SQLite: schema history ---
@@ -261,6 +270,14 @@ export {
   type InstantiateTemplateRequest,
   InstantiateTemplateResponseSchema,
   type InstantiateTemplateResponse,
+  GitHubRepositoryPermissionSchema,
+  type GitHubRepositoryPermission,
+  RepoAccessPolicySchema,
+  type RepoAccessPolicy,
+  RepoAccessPolicyRequestSchema,
+  type RepoAccessPolicyRequest,
+  RepoAccessPolicyResponseSchema,
+  type RepoAccessPolicyResponse,
   RepoOidcPolicySchema,
   type RepoOidcPolicy,
   RepoOidcPolicyRequestSchema,
@@ -335,8 +352,16 @@ export {
   type SendSignalResponse,
   InboxResponseSchema,
   type InboxResponse,
+  SignalHistoryResponseSchema,
+  type SignalHistoryResponse,
   AckSignalResponseSchema,
   type AckSignalResponse,
+  SetSignalGroupRequestSchema,
+  type SetSignalGroupRequest,
+  SignalGroupResponseSchema,
+  type SignalGroupResponse,
+  SignalGroupsResponseSchema,
+  type SignalGroupsResponse,
 } from "./signal";
 
 // --- Search schemas ---
@@ -361,6 +386,8 @@ export {
   type GitHubAppExchangeRequest,
   GitHubAppInfoResponseSchema,
   type GitHubAppInfoResponse,
+  OidcExchangeResponseSchema,
+  type OidcExchangeResponse,
   OidcExchangeRequestSchema,
   type OidcExchangeRequest,
 } from "./session";
@@ -371,6 +398,8 @@ export {
   type SessionExchangeRequest,
   SessionExchangeResponseSchema,
   type SessionExchangeResponse,
+  SessionCapabilitiesSchema,
+  type SessionCapabilities,
   SessionStatusResponseSchema,
   type SessionStatusResponse,
 } from "./session-cookie";
@@ -405,8 +434,34 @@ export { TagSchema, type Tag, TagsSchema, type Tags } from "./tags";
 // --- GitHub validation constants ---
 export { GITHUB_LOGIN_REGEX } from "./github";
 
+// --- Canonical project membership ---
+export {
+  MembershipGrantRequestSchema,
+  type MembershipGrantRequest,
+  MembershipPolicyRequestSchema,
+  type MembershipPolicyRequest,
+  MembershipPrincipalSchema,
+  type MembershipPrincipal,
+  PrincipalRevocationRequestSchema,
+  type PrincipalRevocationRequest,
+  MembershipRoleUpdateRequestSchema,
+  type MembershipRoleUpdateRequest,
+  MembershipSourceSchema,
+  type MembershipSource,
+  MembershipSubjectKindSchema,
+  type MembershipSubjectKind,
+  PROJECT_ROLE_RANK,
+  ProjectMembershipModeSchema,
+  type ProjectMembershipMode,
+  ProjectMembershipSchema,
+  type ProjectMembership,
+  ProjectRoleSchema,
+  type ProjectRole,
+  roleToPermission,
+} from "./membership";
+
 // --- DPoP shared helpers ---
-export { canonicalizeHtu, DPOP_TYP, DPOP_ALG } from "./dpop";
+export { canonicalizeHtu, accessTokenHash, DPOP_TYP, DPOP_ALG } from "./dpop";
 
 // --- Record schemas ---
 export {
@@ -423,3 +478,14 @@ export {
   canonicalJson,
   canonicalJsonSha256,
 } from "./record";
+
+export * from "./capability";
+export * from "./continuity";
+export * from "./artifact-version";
+export * from "./artifact-lifecycle";
+export * from "./lifecycle";
+export * from "./artifact-review";
+
+export * from "./mcp-workflow";
+export * from "./mcp-results";
+export * from "./cli-output";

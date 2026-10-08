@@ -10,6 +10,10 @@ vi.mock("@tila/ops-sqlite", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tila/ops-sqlite")>();
   return {
     ...actual,
+    artifactLifecycleOps: {
+      ...actual.artifactLifecycleOps,
+      hasLifecycleWork: vi.fn().mockReturnValue(false),
+    },
     searchReindexOps: {
       ...actual.searchReindexOps,
       reindexBatch: reindexBatchMock,
@@ -42,6 +46,7 @@ describe("ProjectDO.alarm", () => {
     await ProjectDO.prototype.alarm.call({
       ctx: { storage },
       db: {},
+      env: {},
     });
 
     expect(storage.delete).toHaveBeenCalledWith("_reindex_state");

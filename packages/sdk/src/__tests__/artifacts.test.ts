@@ -14,6 +14,66 @@ describe("createArtifactMethods", () => {
     vi.unstubAllGlobals();
   });
 
+  it("encodes version keys and forwards history options and restore idempotency", async () => {
+    mockFetch.mockImplementation(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const methods = createArtifactMethods(
+      new TilaClient({ baseUrl: "https://api.test", token: "t" }),
+      "p1",
+    );
+    const key = "versioned/p1/report/1/abc.txt";
+    await methods.history(key, { limit: 2, cursor: "next+page" });
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      `https://api.test/projects/p1/artifacts/~/history/${encodeURIComponent(key)}?limit=2&cursor=next%2Bpage`,
+    );
+    await methods.meta(key);
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      `https://api.test/projects/p1/artifacts/${encodeURIComponent(key)}/meta`,
+    );
+    await methods.restore(key, {
+      fence: 7,
+      tags: [],
+      idempotencyKey: "retry-key",
+    });
+    expect(mockFetch.mock.calls[2][1].headers["Idempotency-Key"]).toBe(
+      "retry-key",
+    );
+    expect(JSON.parse(mockFetch.mock.calls[2][1].body)).toEqual({
+      fence: 7,
+      tags: [],
+    });
+  });
+
+  it("passes deletion fences and group destruction idempotency through the SDK", async () => {
+    mockFetch.mockImplementation(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 202 }),
+    );
+    const methods = createArtifactMethods(
+      new TilaClient({ baseUrl: "https://api.test", token: "t" }),
+      "p1",
+    );
+    const key = "versioned/p1/report/1/hash.txt";
+    await methods.delete(key, { fence: 7, idempotencyKey: "delete" });
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      `https://api.test/projects/p1/artifacts/${encodeURIComponent(key)}?fence=7`,
+    );
+    expect(mockFetch.mock.calls[0][1].headers["Idempotency-Key"]).toBe(
+      "delete",
+    );
+    await methods.destroyLineage("report", {
+      fence: 7,
+      idempotencyKey: "destroy",
+    });
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      "https://api.test/projects/p1/artifacts/~/destroy/report",
+    );
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toEqual({ fence: 7 });
+    expect(mockFetch.mock.calls[1][1].headers["Idempotency-Key"]).toBe(
+      "destroy",
+    );
+  });
+
   it("throws TypeError synchronously when mimeType absent and file.type is empty", () => {
     const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
     const artifacts = createArtifactMethods(client, "proj-1");

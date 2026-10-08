@@ -76,7 +76,8 @@ const mockD1TokenValidate = vi.fn().mockResolvedValue(null);
 const mockD1TokenUpdateLastUsedAt = vi.fn().mockResolvedValue(undefined);
 const mockD1SessionCreate = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("@tila/backend-d1", async () => ({
+  ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1DeploymentMetaStore: vi.fn().mockImplementation(
     class {
       ensure = vi.fn().mockResolvedValue("test-deployment-instance-id");
@@ -123,6 +124,25 @@ vi.mock("@tila/backend-d1", () => ({
       create = mockD1SessionCreate;
     } as unknown as () => unknown,
   ),
+  ProjectMembershipStore: vi.fn().mockImplementation(
+    class {
+      resolve = vi.fn(
+        async (
+          _projectId: string,
+          _principalId: string,
+          mirrored: { role: string; githubRepoId: number } | null,
+        ) => (mirrored ? { ...mirrored, sources: ["github-mirrored"] } : null),
+      );
+      recordMirroredAdmission = vi.fn().mockResolvedValue(undefined);
+    } as unknown as () => unknown,
+  ),
+  canonicalMembershipPrincipal: vi.fn((principal: { user_id: number }) => ({
+    principalId: `github:github.com:${principal.user_id}`,
+    provider: "github",
+    identityHost: "github.com",
+    subjectId: String(principal.user_id),
+    displayName: null,
+  })),
 }));
 
 // Import after mocks are set up
@@ -167,6 +187,12 @@ const testEnv = {
 
 function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    Object.defineProperty(c, "executionCtx", {
+      value: { waitUntil: () => {}, passThroughOnException: () => {} },
+    });
+    await next();
+  });
   app.route("/api/auth/github", authGithub);
   return app;
 }
@@ -179,6 +205,9 @@ const MOCK_REPO = {
   github_repo_id: 99999,
   min_read_permission: "read",
   min_write_permission: "write",
+  max_permission: "admin",
+  membership_enabled: 1,
+  membership_role_cap: "maintainer",
   enabled: 1,
   created_at: 1000000,
   created_by: "admin",
@@ -379,6 +408,120 @@ describe("POST /api/auth/github/exchange", () => {
     expect(body.expires_at).toBeGreaterThan(Date.now() / 1000);
   });
 
+  it("admits a collaborator as read when the write threshold is not met", async () => {
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "reader", id: 12 });
+    mockListForProject.mockResolvedValue([
+      {
+        ...MOCK_REPO,
+        min_read_permission: "read",
+        min_write_permission: "maintain",
+        max_permission: "admin",
+      },
+    ]);
+    mockGetRepoPermission.mockResolvedValue("write");
+
+    const res = await createApp().request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          github_token: "ghp_threshold",
+        }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { permission: string };
+    expect(body.permission).toBe("read");
+  });
+
+  it("selects the strongest bounded repository independent of row order", async () => {
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "multi", id: 13 });
+    const readRepo = {
+      ...MOCK_REPO,
+      github_repo: "read-source",
+      github_repo_id: 30,
+      max_permission: "read",
+    };
+    const writeRepo = {
+      ...MOCK_REPO,
+      github_repo: "write-source",
+      github_repo_id: 40,
+      max_permission: "write",
+    };
+    mockGetRepoPermission.mockResolvedValue("admin");
+    mockListForProject
+      .mockResolvedValueOnce([readRepo, writeRepo])
+      .mockResolvedValueOnce([writeRepo, readRepo]);
+
+    const request = () =>
+      createApp().request(
+        "/api/auth/github/exchange",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: "test-project",
+            github_token: crypto.randomUUID(),
+          }),
+        },
+        testEnv,
+      );
+    const first = await request();
+    const second = await request();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      github_repo_id: 40,
+      permission: "write",
+    });
+    await expect(second.json()).resolves.toMatchObject({
+      github_repo_id: 40,
+      permission: "write",
+    });
+  });
+
+  it("scopes idempotency reservations by selected repository and effective role", async () => {
+    mockGetAuthenticatedUser.mockResolvedValue({
+      login: "policy-user",
+      id: 14,
+    });
+    mockGetRepoPermission.mockResolvedValue("admin");
+    mockListForProject
+      .mockResolvedValueOnce([
+        { ...MOCK_REPO, github_repo_id: 20, max_permission: "write" },
+      ])
+      .mockResolvedValueOnce([
+        { ...MOCK_REPO, github_repo_id: 10, max_permission: "read" },
+      ]);
+
+    const request = () =>
+      createApp().request(
+        "/api/auth/github/exchange",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: "test-project",
+            github_token: "ghp_same_token",
+          }),
+        },
+        testEnv,
+      );
+
+    expect((await request()).status).toBe(200);
+    expect((await request()).status).toBe(200);
+    const firstKey = (mockIdempotencyReserve.mock.calls[0] as [string])[0];
+    const secondKey = (mockIdempotencyReserve.mock.calls[1] as [string])[0];
+    expect(firstKey).toContain(":20:participant");
+    expect(secondKey).toContain(":10:viewer");
+    expect(firstKey).not.toBe(secondKey);
+  });
+
   // WI-I: atomic claim-row reservation around /exchange.
   it("WI-I: /exchange returns 409 (no mint) when the reservation is in-flight", async () => {
     const app = createApp();
@@ -406,8 +549,9 @@ describe("POST /api/auth/github/exchange", () => {
     };
     expect(body.error.code).toBe("exchange-in-progress");
     expect(body.error.retryable).toBe(true);
-    // No GitHub round-trip and no mint for the loser.
-    expect(mockGetAuthenticatedUser).not.toHaveBeenCalled();
+    // Authorization must precede replay/reservation so tightened policies cannot
+    // reuse an in-flight key. The loser still does not mint.
+    expect(mockGetAuthenticatedUser).toHaveBeenCalledTimes(1);
     expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
   });
 
@@ -421,6 +565,9 @@ describe("POST /api/auth/github/exchange", () => {
       permission: "read",
       expires_at: Math.floor(Date.now() / 1000) + 3600,
     };
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "testuser", id: 1 });
+    mockListForProject.mockResolvedValue([MOCK_REPO]);
+    mockGetRepoPermission.mockResolvedValue("read");
     mockIdempotencyReserve.mockResolvedValueOnce({
       state: "finalized",
       statusCode: 200,
@@ -447,12 +594,13 @@ describe("POST /api/auth/github/exchange", () => {
     };
     expect(body.session_token).toBe("tila_s.cached-token");
     expect(body.github_login).toBe("cacheduser");
-    // Winner already minted; this caller must not re-run the exchange.
-    expect(mockGetAuthenticatedUser).not.toHaveBeenCalled();
+    // The caller is re-authorized against the current policy, but does not mint.
+    expect(mockGetAuthenticatedUser).toHaveBeenCalledTimes(1);
+    expect(mockEnsureDeploymentInstanceId).not.toHaveBeenCalled();
     expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
   });
 
-  it("WI-I: /exchange releases the reservation on GitHub auth failure (no finalize)", async () => {
+  it("WI-I: /exchange does not reserve on GitHub auth failure", async () => {
     const app = createApp();
     mockGetAuthenticatedUser.mockRejectedValueOnce(new Error("bad token"));
 
@@ -470,9 +618,9 @@ describe("POST /api/auth/github/exchange", () => {
     );
 
     expect(res.status).toBe(403);
-    // Reservation released so a legitimate retry is never permanently blocked;
-    // the key was never finalized.
-    expect(mockIdempotencyRelease).toHaveBeenCalledTimes(1);
+    // Authorization happens before idempotency, so there is no claim to release.
+    expect(mockIdempotencyReserve).not.toHaveBeenCalled();
+    expect(mockIdempotencyRelease).not.toHaveBeenCalled();
     expect(mockIdempotencyFinalize).not.toHaveBeenCalled();
   });
 
@@ -644,6 +792,42 @@ describe("POST /api/auth/github/exchange (App path)", () => {
       MOCK_REPO.github_repo,
       "appuser",
     );
+  });
+
+  it("caps App-derived admin permission at the repository maximum", async () => {
+    const envWithApp = {
+      ...testEnv,
+      GITHUB_APP_ID: TEST_APP_ID,
+      GITHUB_APP_PRIVATE_KEY: TEST_APP_PRIVATE_KEY,
+    } as unknown as Env;
+    mockGetAuthenticatedUser.mockResolvedValue({ login: "appadmin", id: 7 });
+    mockGitHubAppConfigGetInstallation.mockResolvedValue({
+      project_id: "test-project",
+      installation_id: 12345,
+      created_at: 1000000,
+      created_by: "admin",
+    });
+    mockListForProject.mockResolvedValue([
+      { ...MOCK_REPO, max_permission: "write" },
+    ]);
+    mockCheckUserMembership.mockResolvedValue("admin");
+
+    const res = await createApp().request(
+      "/api/auth/github/exchange",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: "test-project",
+          user_token: "ghu_admin",
+          auth_method: "user_token",
+        }),
+      },
+      envWithApp,
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ permission: "write" });
   });
 
   it("returns 500 when GITHUB_APP_ID is missing", async () => {
@@ -1087,7 +1271,8 @@ describe("GET /api/auth/github/app-info", () => {
 });
 
 describe("POST /api/auth/github/app-config", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    (await import("../middleware/auth"))._resetMiddlewareStateForTest();
     vi.clearAllMocks();
     mockD1TokenValidate.mockResolvedValue(null);
     mockRateLimitCheck.mockResolvedValue(false);
@@ -1149,7 +1334,7 @@ describe("POST /api/auth/github/app-config", () => {
       error: { code: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("forbidden");
+    expect(body.error.code).toBe("token-authz-denied");
   });
 
   it("returns 400 on invalid body", async () => {
@@ -1318,7 +1503,7 @@ describe("POST /api/auth/github/app-config", () => {
     expect(body.error.code).toBe("unauthorized");
     // The failure must be recorded against the IP (mirrors /exchange).
     expect(mockRateLimitRecordFailure).toHaveBeenCalledWith(
-      "exchange:9.8.7.6",
+      "9.8.7.6",
       RATE_LIMIT_WINDOW_MS,
     );
   });

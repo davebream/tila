@@ -162,7 +162,7 @@ vi.mock("node:os", async (importOriginal) => {
   };
 });
 
-// @clack/prompts mock
+// ../../lib/prompts mock
 const mockClackSpinnerStart = vi.fn();
 const mockClackSpinnerStop = vi.fn();
 const mockText = vi.fn();
@@ -174,7 +174,7 @@ const mockIsCancel = vi.fn();
 const mockLogInfo = vi.fn();
 const mockLogWarn = vi.fn();
 const mockLogError = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   text: (...args: unknown[]) => mockText(...args),
   password: (...args: unknown[]) => mockPassword(...args),
   confirm: (...args: unknown[]) => mockConfirm(...args),
@@ -489,7 +489,9 @@ describe("tila project create (cloudflare)", () => {
     // printJson calls console.log(JSON.stringify(data, null, 2))
     const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("");
     const parsed = JSON.parse(output) as Record<string, unknown>;
-    expect(parsed.first_admin_seeded).toBe(true);
+    expect((parsed.result as Record<string, unknown>).first_admin_seeded).toBe(
+      true,
+    );
 
     consoleSpy.mockRestore();
   });
@@ -512,7 +514,7 @@ describe("tila project create (cloudflare)", () => {
     });
 
     const consoleSpy = vi
-      .spyOn(console, "log")
+      .spyOn(console, "error")
       .mockImplementation((...args: unknown[]) => {
         void args;
       });
@@ -525,10 +527,22 @@ describe("tila project create (cloudflare)", () => {
       }),
     ).rejects.toThrow("process.exit(1)");
 
-    // printJson is called before process.exit(1) on failure
+    // A partial mutation is reported on stderr and is never retryable.
     const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("");
     const parsed = JSON.parse(output) as Record<string, unknown>;
-    expect(parsed.first_admin_seeded).toBe(false);
+    expect(parsed).toMatchObject({
+      ok: false,
+      error: {
+        kind: "partial-failure",
+        retryable: false,
+        details: {
+          partial_result: {
+            first_admin_seeded: false,
+            project_id: "test-project",
+          },
+        },
+      },
+    });
 
     consoleSpy.mockRestore();
   });
@@ -975,9 +989,7 @@ describe("tila project destroy", () => {
 
   // (e) --json emits structured output
   it("--json flag outputs structured result", async () => {
-    const consoleSpy = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => true);
 
     await invokeProjectDestroy({ json: true });
 
@@ -985,9 +997,12 @@ describe("tila project destroy", () => {
     const writes = consoleSpy.mock.calls
       .map((call) => String(call[0]))
       .join("");
-    const parsed = JSON.parse(writes) as { ok: boolean; stores: unknown };
+    const parsed = JSON.parse(writes) as {
+      ok: boolean;
+      result: { stores: unknown };
+    };
     expect(parsed.ok).toBe(true);
-    expect(parsed.stores).toBeDefined();
+    expect(parsed.result.stores).toBeDefined();
 
     consoleSpy.mockRestore();
   });

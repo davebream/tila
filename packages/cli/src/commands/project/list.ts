@@ -1,9 +1,10 @@
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
 import { queryD1 } from "../../lib/cloudflare-resources";
 import { loadInfraConfig } from "../../lib/infra-config";
+import { exit } from "../../lib/output";
+import * as p from "../../lib/prompts";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 
 export default defineCommand({
@@ -19,7 +20,7 @@ export default defineCommand({
       infraConfig = loadInfraConfig(homeDir);
     } catch {
       p.cancel("No infrastructure found. Run `tila infra provision` first.");
-      process.exit(1);
+      exit(1);
     }
 
     // Step 2: Resolve CF token
@@ -28,7 +29,7 @@ export default defineCommand({
       p.cancel(
         "CLOUDFLARE_API_TOKEN not found. Set it in ~/.tila/.env or export it.",
       );
-      process.exit(1);
+      exit(1);
     }
 
     // Step 3: Query D1

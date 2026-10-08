@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerSchemaTools(
   server: McpServer,
@@ -10,7 +11,8 @@ export function registerSchemaTools(
 ): void {
   const schema = facade.schema;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_schema_update",
     "Apply a new schema definition to the project. Pass the full TOML schema string. Returns the new version and a list of changes applied.",
     {

@@ -1,5 +1,10 @@
 import type { TokenResult } from "@tila/backend-d1";
-import type { EnvironmentMetadata } from "@tila/schemas";
+import type { CredentialPolicy } from "@tila/schemas";
+import type {
+  EnvironmentMetadata,
+  MembershipSource,
+  ProjectRole,
+} from "@tila/schemas";
 
 export interface Env {
   DB: D1Database;
@@ -22,12 +27,24 @@ export interface Env {
   // accepts a matching bearer to operate on ANY project by slug (no per-project
   // token). When unset, those endpoints return 404 (invisible). See routes/infra.ts.
   INFRA_ADMIN_TOKEN?: string;
+  // Optional override (seconds) for the step-up reauthentication window applied
+  // to high-impact membership/credential mutations from cookie sessions. See
+  // STEP_UP_MAX_AGE_SECONDS_DEFAULT in config.ts and middleware/protected-operation.ts.
+  STEP_UP_MAX_AGE_SECONDS?: string;
 }
 
 // Re-export for convenience
 export type { TokenResult };
 
-export interface D1TokenResult {
+export interface ScopedAuth {
+  principalId?: string;
+  credentialId?: string;
+  policy?: CredentialPolicy;
+  expiresAt?: number | null;
+  cnfJkt?: string | null;
+}
+
+export interface D1TokenResult extends ScopedAuth {
   kind: "d1-token";
   projectId: string;
   name: string;
@@ -55,9 +72,12 @@ export interface SessionTokenResult {
   // WI-C subject-revocation gate. Optional so existing test factories that don't
   // set a jti stay valid.
   jti?: string;
+  role?: ProjectRole;
+  membershipSources?: MembershipSource[];
 }
 
-export interface CookieSessionTokenResult {
+export interface CookieSessionTokenResult
+  extends Omit<ScopedAuth, "expiresAt"> {
   kind: "cookie-session";
   projectId: string;
   name: string;
@@ -67,6 +87,13 @@ export interface CookieSessionTokenResult {
   expiresAt: number;
   permission: string;
   principalId?: string;
+  role?: ProjectRole;
+  membershipSources?: MembershipSource[];
+  sourceRepoId?: number;
+  /** Unix ms of the last interactive authentication (step-up reauth, #102). */
+  authenticatedAt?: number;
+  /** How the holder authenticated: GitHub OAuth or a presented project token. */
+  authMethod?: "github" | "token";
 }
 
 export interface WorkspaceSessionTokenResult {
@@ -79,6 +106,8 @@ export interface WorkspaceSessionTokenResult {
   githubLogin: string; // derived from name/actorName
   expiresAt: number; // milliseconds
   principalId?: string;
+  /** Unix ms of the last interactive authentication (carried into the project session). */
+  authenticatedAt?: number;
 }
 
 /**
@@ -97,6 +126,9 @@ export interface OidcSessionTokenResult {
   expiresAt: number;
   oidcIssuer: string;
   oidcSubject: string;
+  jti?: string;
+  role?: ProjectRole;
+  membershipSources?: MembershipSource[];
 }
 
 export type UnifiedTokenResult =
@@ -117,6 +149,14 @@ export interface HonoVariables {
   principalId?: string;
   participantId?: string;
   environment?: EnvironmentMetadata;
+  effectiveRole?: ProjectRole;
+  explicitRole?: ProjectRole;
+  protectedRoleChecked?: ProjectRole;
+
+  credentialPolicy?: CredentialPolicy;
+  authorizationChecked?: boolean;
+  membershipSources?: MembershipSource[];
+  membershipRepoId?: number;
   // Caller-scoped idempotency key + request-body hash, computed by the
   // idempotency middleware and forwarded to the DO so it can dedup the
   // fence-mutating write inside its own transaction (audit B1). Present only

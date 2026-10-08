@@ -2,6 +2,28 @@
 
 > The technical specification. Detailed enough that an autopilot can implement against it without inventing things. Reads top to bottom; subsections reference each other but each section is meaningful on its own.
 
+## Direction and implementation status — 2026-09-20
+
+The existing sections describe the implemented coordination engine and historical
+plans. [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20) and
+[the active roadmap](03-ROADMAP.md) take precedence for new work.
+
+The target adds a management service in the same repo, with tasks distinct from
+attempts and replaceable provider sessions. One orchestrator coordinates workers
+first. Cloudflare owns shared state; a Mac/Linux host integration owns execution.
+Evaluate Herdr's runtime before writing a new supervisor. Native clients are later
+API consumers, not a requirement for workers to stay alive.
+
+Keys bound to native principals and explicit memberships will replace GitHub auth.
+The membership foundation from #184 / #218 is implemented; key-only onboarding,
+auth retirement and standalone local-mode retirement are not. Preserve current
+compatibility until migration/export and access tests cover each removal.
+
+For development, Wrangler, Bun and tsx use the root source path mappings; Vite reads
+schemas from source. Production package exports, declaration builds and packaging
+tests remain separate. Deployed hosts must use identifiable immutable revisions.
+Client/server API compatibility must be negotiated independently of release versions.
+
 ---
 
 ## Section 0: Implementation stack
@@ -13,7 +35,7 @@ The languages, frameworks, and libraries this is built with. Decisions are made;
 - **Language:** TypeScript throughout. CLI, Worker, shared schemas, UI bundle. One language eliminates client-server type drift and maximizes Claude Code's effectiveness during AI-assisted implementation.
 - **CLI runtime:** Bun (>=1.2). Source is TypeScript; distribution is a static binary per platform via `bun build --compile`. Cold start ~20-30ms vs Node's 200-500ms. Bun's test runner is acceptable for v0.1; Vitest is the fallback for tests that need `@cloudflare/vitest-pool-workers` (the Worker tests specifically).
 - **Worker runtime:** Cloudflare Workers (workerd). Same TypeScript source as the CLI; bundled via Wrangler.
-- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun is used only to compile the CLI binary (`bun build --compile`), not for workspace management.
+- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun runs the source CLI and compiles its release binary (`bun build --compile`); pnpm owns workspace management.
 - **Monorepo tooling:** Turborepo for task orchestration across packages (matching the maintainer's existing setup).
 - **ORM / DB access:** Drizzle for SQL access. In the Worker, `drizzle-orm/durable-sqlite` for the per-project DO (the primary persistence layer) and `drizzle-orm/d1` for the global D1 instance (auth tokens, idempotency). The EntityBackend interface preserves the option for v0.2+ alternatives (GitHub Issues, Linear, Upstash, self-hosted Postgres).
 - **HTTP framework in the Worker:** Hono. Route handlers, middleware, error handling.
@@ -208,7 +230,7 @@ Beyond the four data shapes, tila ships five coordination primitives that operat
 
 - **Claims.** First-writer-wins coordination with fencing tokens against any resource name. Used for work-unit claims (`task:T-142`), file-edit locks (`file:src/auth.rb`), record mutations (`record:service/api`), and any other resource the consumer wants to serialize.
 - **Gates.** Approval and quality gates that govern work-unit transitions. A work unit cannot leave a state without all required gates being satisfied. Gates emit journal events on satisfaction.
-- **Signals.** Lightweight notifications distinct from journal events. Used for cross-machine coordination of non-state-changing events ("agent A finished its review, agent B may proceed"). Signals do not modify durable state beyond their own emission record.
+- **Signals.** Lightweight notifications distinct from journal events. Targets are canonical participants, principals, principal-based groups, or the active broadcast audience. Each send snapshots immutable participant deliveries; inboxes and acknowledgements are authorized by the caller's exact principal/participant pair. Display names and environment fields are retained only as audit metadata. Acknowledged deliveries remain through expiry, when the signal and all deliveries are swept together.
 - **Presence.** TTL'd machine activity for "who's online and on what."
 - **Search.** Lexical full-text search (FTS5) across indexed artifact content. Searchable kinds are declared in `tila.schema.toml`.
 
@@ -231,7 +253,7 @@ Three concepts, three relationship tables:
 | Artifact-to-artifact relationships | DO SQLite | `artifact_relationships` table |
 | Records (typed mutable JSON state) | DO SQLite | `records` table keyed by `(type, key)`, plus `record_tags` and `record_revisions`. See [`docs/08-RECORDS.md`](08-RECORDS.md) for full schema. |
 | Gates (approval and quality gates on work-unit transitions) | DO SQLite | Gate definitions and satisfaction state per work unit |
-| Signals (lightweight notifications) | DO SQLite | Append-only signal emission record |
+| Signals (lightweight notifications) | DO SQLite | Signal emissions, immutable participant deliveries, and principal-based groups |
 | Journal events | DO SQLite | Append-only `journal` table |
 | Schema history (every schema definition ever applied) | DO SQLite | `_schema_history` table |
 | Live claims and leases | DO SQLite | `claims` table — same transaction scope as entities |
@@ -262,7 +284,7 @@ On the local path (`tila project create --local`), all per-project DO SQLite sta
 7. Worker returns JSON to CLI.
 8. CLI renders.
 
-Total Worker → response latency: ~5-15ms when DO is warm (Smart Placement co-locates them). Cold DO adds ~50ms one-time startup.
+Total Worker → response latency was estimated at ~5-15ms when the DO is warm (Smart Placement co-locates them), with a cold DO adding ~50ms one-time startup. Measured values for the deployed path (`claims-uncontended`, `cold-start` scenarios) and for the DO-only cost (`inproc` tier) are in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md); the step costs above remain the model, not measurements.
 
 **Write path** (e.g., `tila task claim T-142`):
 1. CLI makes HTTPS POST to `<worker>/acquire`.
@@ -312,7 +334,7 @@ The Cloudflare path serializes writes via the Durable Object's single-threaded e
 
 1. `PRAGMA journal_mode=WAL` -- enables concurrent readers while a writer holds the write lock. Without WAL, readers block writers and vice versa. WAL separates read and write paths so agents reading state do not block agents writing claims.
 
-2. `PRAGMA busy_timeout=5000` -- SQLite waits up to 5 seconds for a write lock before returning `SQLITE_BUSY`. Eliminates the need for application-layer polling in most contention scenarios. The 5-second window covers typical tila write transactions (sub-millisecond).
+2. `PRAGMA busy_timeout=5000` -- SQLite waits up to 5 seconds for a write lock before returning `SQLITE_BUSY`. Eliminates the need for application-layer polling in most contention scenarios. The 5-second window covers typical tila write transactions, which the `embedded` benchmark tier measures at well under a millisecond per op ([docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)).
 
 3. `PRAGMA foreign_keys=ON` -- enforces referential integrity. Disabled by default in SQLite; must be set per connection.
 
@@ -623,7 +645,7 @@ Internal routing inside the DO:
 
 **Journal is the durability anchor.** Every meaningful state change emits a journal row in the same transaction that produced it. If the DO is ever restored from a backup, replaying the journal from a snapshot point produces consistent state. The journal is also how cross-backend operations (Worker → R2 → DO) are made recoverable: if the R2 write succeeds but the DO write fails, the next `tila doctor --reconcile` walks R2 against journal and emits a synthesizing journal event to recover.
 
-**DO eviction is safe.** DO instances evict when idle (typical: minutes). SQLite storage persists. In-memory state (cached schema, prepared statements) rebuilds on next fetch via `blockConcurrencyWhile`. No state loss; just a cold start of ~50ms on the next request.
+**DO eviction is safe.** DO instances evict when idle (typical: minutes). SQLite storage persists. In-memory state (cached schema, prepared statements) rebuilds on next fetch via `blockConcurrencyWhile`. No state loss; just a cold start on the next request. The `cold-start` benchmark scenario measures it on the deployed Worker (`cold_first_request` vs `warm_after_restart` in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)).
 
 **`blockConcurrencyWhile` for migrations.** On DO startup, the init function runs DDL migrations idempotently (compare current schema version against the bundled migration set, apply missing). All requests block until migrations complete. This is how new tila Worker versions safely evolve the DO schema.
 
@@ -662,6 +684,11 @@ The external API surface that the CLI calls. All requests are JSON over HTTPS. A
 | GET | `/state` | query: `resource` | `{ claim?, owners: [], presence: [] }` |
 | GET | `/presence` | — | `{ participants: [] }` |
 | POST | `/presence` | `{ info? }` + participant/environment headers | `{ ok }` |
+| POST | `/signals/send` | `{ target: participant \| principal \| group \| broadcast, kind, resource?, payload?, ttl_ms? }` + participant/environment headers | `{ ok, id, recipient_count }` |
+| GET | `/signals` | participant/environment headers | Current participant's unacknowledged inbox |
+| POST | `/signals/:id/ack` | participant/environment headers | `{ ok }` or 403 for an unrelated participant |
+| GET | `/signals/history` | query: `limit`, `cursor`; admin only | Paginated signal and delivery audit history |
+| GET/PUT/DELETE | `/signals/groups[/:id]` | group reads require project read; mutations require admin | Principal-based signal groups |
 | PUT | `/artifacts/:key` | binary body, metadata in headers | `{ ok, key, deduplicated? }` |
 | GET | `/artifacts/:key` | — | binary body with metadata headers |
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
@@ -710,9 +737,9 @@ Standard codes: `unauthorized`, `not-found`, `stale-fence`, `already-held`, `rat
 
 ### 3a.5 Rate limiting and backpressure
 
-- Worker enforces 100 req/sec per token (token-bucket). Excess returns 429.
+- The Worker does not enforce a per-token throughput limit. The only limiter is on failed authentication: 20 failures per client IP per 60 seconds (`RATE_LIMIT_MAX_FAILURES` / `RATE_LIMIT_WINDOW_MS` in `packages/worker/src/config.ts`), checked against D1 before authentication.
 - D1 / DO / R2 rate-limit responses propagate as 429 with `Retry-After` header.
-- CLI implements exponential backoff (100ms, 200ms, 400ms, …) up to 5 retries on 429.
+- The SDK ships an opt-in `withRetry` helper (3 retries, 200 ms base with full jitter, honours `retryable`); `TilaClient` itself never retries except for one credential refresh on 401. The benchmark harness does not use `withRetry`, so its percentiles contain no backoff time.
 
 ### 3a.6 Cross-backend operation ordering
 
@@ -980,7 +1007,7 @@ interface EntityBackendCapabilities {
 ```
 
 v0.1 implementations:
-- `do-sqlite` — full capabilities, ~1ms reads (DO-local SQLite), co-located with coordination state in the same DO
+- `do-sqlite` — full capabilities, sub-millisecond reads inside the DO (measured by the `inproc` benchmark tier, see [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), co-located with coordination state in the same DO
 - `local-sqlite` -- full capabilities (same as do-sqlite), <1ms reads (bun:sqlite, process-local), same SQLite storage as coordination state in the same DB file. Requires single-machine deployment; not suitable for multi-machine teams.
 
 Test fixtures (not shipped as backends):
@@ -1018,7 +1045,7 @@ type AcquireResult =
 ```
 
 v0.1 implementations:
-- `do-sqlite` — strong consistency via DO single-thread serialization, ~1ms p50 from same DO, same SQLite storage as entities (one transaction can claim and update an entity atomically)
+- `do-sqlite` — strong consistency via DO single-thread serialization, sub-millisecond p50 for acquire/renew/release inside the DO (`inproc` tier in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), same SQLite storage as entities (one transaction can claim and update an entity atomically)
 - `local-sqlite` -- strong consistency via SQLite `BEGIN IMMEDIATE` serialization, <1ms p50 (bun:sqlite, process-local), same SQLite storage as entities (one transaction can claim and update an entity atomically)
 
 Test fixtures: a Map-backed in-memory fake CoordinationBackend in `packages/core/test/fixtures/` for unit testing.
@@ -2077,13 +2104,13 @@ The Worker-driven sweep should keep these in sync, but if a manual R2 delete hap
 The artifact upload sequence guarantees that if R2 succeeds and the DO write fails, the R2 blob is orphaned but recoverable. `tila doctor --reconcile` walks R2 prefixes, finds blobs without pointer rows, synthesizes pointer rows from R2 object metadata (the metadata carries `x-amz-meta-tila-resource`, `-fence`, `-kind`, etc.), and emits `artifact.reconciled` journal events. Worst-case window: ~24h until the next reconcile cron run, configurable. The CLI returns an error to the caller in real time so they know not to assume success.
 
 ### 10.46 Worker Smart Placement disabled or unsupported
-Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region. `tila doctor` reports the placement mode and Worker→DO latency from a `/health` probe.
+Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region (Cloudflare's figures; tila does not measure the hop in isolation). `tila doctor` reports the placement mode and Worker→DO latency from a `/health` probe; the benchmark harness records the serving colo and `cf-placement` header with every deployed run.
 
 ### 10.47 D1 token validation cache hit/miss
 The Worker caches token validation results in a per-isolate Map for 60 seconds after first validation. Cache miss = D1 lookup; cache hit = ~1ms. When `DELETE /api/tokens/:name` is called, D1 is updated immediately and the calling Worker isolate's in-memory cache entry is invalidated synchronously via `invalidate(tokenHash)`. Other isolates that have the token positively cached will continue accepting it until their cache entry expires (max 60 seconds TTL). The `tila token revoke` CLI output notes this propagation delay. Cross-isolate immediate invalidation (via a revocation marker or broadcast mechanism) is deferred to v0.2.
 
 ### 10.48 Journal table growth over time
-The `journal` table grows with every operation. For a busy autopilot project, expect ~1-5MB/day. DO SQLite's 10GB limit means roughly 5-10 years of journal at typical rates before pressure. Long before that becomes a concern, v0.2+ adds journal archival: events older than N days are cold-stored to R2 under `journal/<year>/<month>.jsonl.gz` and pruned from DO SQLite. v0.1 does not implement this; the assumption is that a project's actual lifetime is shorter than the practical limit. `tila doctor` reports journal size and projected fill date as part of `tila status`.
+The `journal` table grows with every operation. The earlier estimate was ~1-5MB/day for a busy autopilot project; the benchmark harness's soak mode (`--soak`, see `docs/benchmarks/README.md`) measures journal rows and database bytes per minute for a given workload, and sweep behaviour, so size this from a soak run rather than the estimate. DO SQLite's 10GB limit means roughly 5-10 years of journal at typical rates before pressure. Long before that becomes a concern, v0.2+ adds journal archival: events older than N days are cold-stored to R2 under `journal/<year>/<month>.jsonl.gz` and pruned from DO SQLite. v0.1 does not implement this; the assumption is that a project's actual lifetime is shorter than the practical limit. `tila doctor` reports journal size and projected fill date as part of `tila status`.
 
 ### 10.49 Observability: tail Workers and metrics
 v0.1 provides three observability surfaces:
@@ -2357,6 +2384,98 @@ Bun resolves these to local paths; in publishing, they get rewritten to actual v
 
 ---
 
+## Artifact revisions (#174–#177)
+
+The revision core and API shipped in [#228](https://github.com/davebream/tila/pull/228)
+and [#230](https://github.com/davebream/tila/pull/230). Version-aware retention and
+recovery shipped in [#231](https://github.com/davebream/tila/pull/231), satisfying
+the prerequisite for public API documentation. The read-only history drawer
+shipped in [#237](https://github.com/davebream/tila/pull/237). These are merged
+implementation milestones; deployment status depends on the installation.
+
+Versioning is explicit: clients supply a lineage ID and a live fence for
+`artifact:<lineage_id>`. Ordinary artifact uploads retain their existing keys,
+deduplication and supersedes behavior. A lineage fixes its kind and resource;
+numbered revisions identify events while SHA-256 identifies bytes. Restore always
+appends a new revision, including when its bytes equal the current head.
+
+Migration 27 adds nullable pointer fields and the lineage/operation tables to the
+shared DO/embedded migration registry. Existing artifacts are not backfilled from
+supersedes links. Explicit adoption copies a selected legacy artifact into revision
+1 of a new lineage and records its original key; the old artifact stays unchanged.
+This replaces #174's originally proposed inferred historical backfill.
+
+The write protocol reserves an ordinal, persists an immutable revision blob,
+revalidates the fence, accepts the commit transactionally with its journal event,
+and publishes an immutable recovery record before exposing the pointer. Accepted
+operations form a durable outbox. DO alarms share scheduling with reindexing;
+embedded consumers resume the outbox on subsequent writes. Metadata and history
+reads never access the blob store. Replays of an accepted
+operation remain valid after lease expiry. New operations require a current live
+claim. Pending publication blocks later writes to that lineage but leaves the
+previously published head readable.
+
+R2 keys use the project-scoped `versioned/` prefix, outside the legacy `produced/`
+backstop. Every revision has separate bytes and a `.commit.json` recovery record.
+Recovery accepts records from the private project prefix, validates their identity,
+and preserves revision numbers, timestamps, producer identity, tags and restore
+provenance. A blob without an accepted recovery record is never a recoverable
+revision. Gaps from failed reservations are permitted. Project backup/destroy also
+includes lineage and operation state.
+
+History uses a lineage-bound cursor with a fixed initial revision ceiling and an
+exclusive next-page boundary. Metadata never includes inline or blob content.
+Tags are set on write/restore; omitted restore tags inherit the source and an
+empty list clears tags only on the new revision. The MCP addition is read-only
+history.
+
+### Version-aware retention and deletion
+
+Migration 28 separates permanent revision metadata (`artifact_revisions`) from
+live/disposable `artifact_pointers`. History and metadata use the ledger, including
+revision tags and deletion timestamps. Tombstoned pointers still require a
+confirmed blob deletion. Migration 29 retains pointer rows as provenance and review audit records after cleanup.
+The ledger and immutable recovery records remain until project destruction.
+
+Retention is opt-in per kind (`retention_days = 0` means keep forever). New writes
+and restores snapshot the current policy at reservation. Existing revisions are
+assigned retention in bounded batches against one persisted project policy
+snapshot. Expiry is production time plus the configured days, so enabling this
+migration can immediately expire old non-head content. Later schema changes do
+not rewrite assigned expiry. A live lineage head is never automatically swept;
+deleting it selects the newest remaining live revision without cascading.
+
+Lifecycle operations persist retention assignments, tombstones, deletion
+confirmations, and lineage retirement as immutable JSON records beside revision
+commit records under the project-scoped `versioned/` prefix. Deletion intent must
+be durable before deleting bytes; the confirmation timestamp is persisted before
+publishing its record so retries write identical content. A durable SQLite queue
+retries failed work with capped exponential backoff. DO alarms and the daily
+sweep drain it; embedded consumers expose `drainLifecycle()` and also drain on
+subsequent writes. Metadata reads do not touch blob storage.
+
+Individual versioned DELETE requests require a live `artifact:<lineage_id>` fence
+via the `fence` query parameter. Ordinary artifact deletion is unchanged.
+`POST /artifacts/~/destroy/:lineageId` accepts `{ fence }` plus an idempotency key
+and returns 202 after permanent retirement is durable. This operation cascades
+blob deletion, preserves history, and rejects all future writes/restores into
+that lineage. SDK and embedded clients expose `destroyLineage()`; no destructive
+MCP tool is provided. Conflicts with pending revision publication return a
+retryable lineage-busy error. Accepted operation retries survive lease expiry.
+
+History/meta remain 200 for deleted revisions; downloads/restores return 410
+`artifact-unavailable`. Recovery applies lifecycle records before publishing
+recovered pointers, preventing deleted content or retired lineages from becoming
+live. Reconciliation also imports standalone retirement records for lineages that
+never published a revision. Backup includes the ledger, lifecycle queue, policy
+snapshot, and immutable recovery records even after pointer cleanup. Project
+destruction removes the entire private versioned prefix as well as SQLite state.
+
+The 365-day R2 backstop remains scoped to `produced/`. No object expiration rule
+may cover `versioned/`; multipart-upload abortion remains bucket-wide.
+
+---
+
 ## Section 13: Versioning and release
 
 - **Semantic versioning** for tila packages and the `tila` CLI.
@@ -2368,3 +2487,63 @@ Bun resolves these to local paths; in publishing, they get rewritten to actual v
 ---
 
 This is the technical spine. It's not exhaustive — implementation will surface details not captured here — but it's complete enough that an AI agent or engineer working from it can build the v1 without inventing the architecture.
+
+
+### Artifact provenance and review decisions (#188)
+
+Each artifact key has immutable `provenance` identifying its original producer and
+`revision_creation` identifying the actor creating that revision. Both contain
+principal, participant, timestamp, client name/version, and environment metadata.
+Cloud principals come from authentication. Participant and environment values are
+client-supplied; local identities are local assertions. Unknown legacy provenance
+is `null`, never inferred from a display name. Missing client versions are `null`.
+Deduplicated uploads retain the first accepted attribution. Restores preserve the
+original producer, record the restoring actor separately, and start unreviewed.
+Private revision commit records preserve provenance during recovery, but never
+carry mutable reviews. Old non-deduplicated publication records can recover a
+producer; a restore or deduplicated request alone cannot establish that identity.
+
+Any project writer may record a review, including self-review and replacement of
+another writer's decision. `trusted`, `rejected`, `superseded`, and `revoked` events
+are append-only. The latest event determines state; revocation yields `unreviewed`
+and does not reactivate an older approval. New revisions and `supersedes`
+relationships never implicitly change a review. A hash verifies byte integrity,
+not truth or safety. Reviews are explicit assertions, not automated evaluations.
+
+| Interface | Contract |
+|---|---|
+| GET `/projects/:projectId/artifacts/~/reviews/:key` | History newest first; `limit` 1–100 (default 50), exclusive `before_revision`; `next_revision` supplies the next cursor |
+| POST at the same path | `{decision, expected_review_revision, reason?}`; initial expected revision is 0; supports `Idempotency-Key` |
+| SDK | `artifacts.reviews(key, query)` and `artifacts.review(key, request)`; `idempotencyKey` is optional |
+| CLI | `tila artifact reviews KEY`; `tila artifact review KEY --decision trusted --expected-review-revision 0 --reason 'Checked source'` |
+| MCP | `tila_artifact_reviews`, `tila_artifact_review`; text reads separate structured metadata from artifact content |
+
+A review write atomically appends its event and journal entry. A stale expected
+revision returns `409 review-conflict`; reusing an idempotency key with different
+input returns `422 idempotency-key-conflict`. Identical retries return the original
+decision, while metadata reads always return the current state. Permissions use
+existing project membership and `artifacts:read` / `artifacts:write` capabilities;
+namespace-restricted credentials retain the existing artifact access restrictions.
+
+Artifact responses expose producer and review metadata by default. Raw downloads
+preserve their bytes and add `X-Tila-Artifact-Review-State` and
+`X-Tila-Artifact-Review-Revision`; full identity is available from artifact metadata.
+The web UI displays current decisions, provenance, and paginated review history,
+including for unavailable content. It does not submit review decisions.
+
+A work-unit reference slot can set `require_trusted_for_statuses = ["done"]`.
+Entering a selected status requires at least one reference in that slot and all
+its artifacts to be trusted, unexpired, and not tombstoned or confirmed deleted.
+Checks run within the task transaction, including direct and template creation.
+Failure returns `422 artifact-review-required` with failing slots and states.
+Absent rules preserve existing behavior. Later review changes do not undo a task
+transition; ordinary reads remain available. Backup restoration does not replay
+workflow checks. Tila does not execute agents or automatically assess content.
+
+Migration 29 adds immutable identity columns and append-only reviews to both DO
+and embedded stores. Backups require `artifact-review-v1`; older backups remain
+readable with unknown identity and no reviews where evidence is missing. Lifecycle
+cleanup removes blob/inline content but retains metadata, tags, and review history
+for audit. Full project destruction and authorized backup replacement remain
+explicit exceptions. Review loss during blob-only recovery yields unreviewed
+state, never an inferred approval.

@@ -1,4 +1,9 @@
 import {
+  type ContinuityBackend,
+  type JournalArchiveReader,
+  completeReplay,
+} from "@tila/core";
+import {
   type AcquireResult,
   type AddArtifactRefInput,
   type ApplySchemaInput,
@@ -37,6 +42,7 @@ import {
   type SummaryBackend,
   applyRecordLegacyDefaults,
 } from "@tila/core";
+import { continuityOps, summaryOps } from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   SchemaCorruptError,
@@ -56,6 +62,13 @@ import {
   templateOps,
   validateRecordValue,
 } from "@tila/ops-sqlite";
+import type {
+  HandoffCreateRequest,
+  HandoffListRequest,
+  JournalReplayRequest,
+  ReentryRequest,
+  ReentryResponse,
+} from "@tila/schemas";
 import type { TilaSchemaToml } from "@tila/schemas";
 
 import {
@@ -120,6 +133,7 @@ export type EmbeddedDb = BaseSQLiteDatabase<"sync", void, typeof schema>;
 export class EmbeddedProject
   implements
     EntityBackend,
+    ContinuityBackend,
     CoordinationBackend,
     JournalBackend,
     GateBackend,
@@ -128,6 +142,7 @@ export class EmbeddedProject
     SummaryBackend,
     RecordBackend
 {
+  private readonly archives?: JournalArchiveReader;
   private readonly db: EmbeddedDb;
   private readonly sleepSync: SleepSync;
   private readonly _close: () => void;
@@ -139,6 +154,7 @@ export class EmbeddedProject
   // never needs them — so they are intentionally not stored.
   constructor(opts: {
     db: EmbeddedDb;
+    archives?: JournalArchiveReader;
     org: string;
     project: string;
     identity?: IdentityContext;
@@ -146,6 +162,7 @@ export class EmbeddedProject
     close: () => void;
   }) {
     this.db = opts.db;
+    this.archives = opts.archives;
     this.sleepSync = opts.sleepSync;
     this._close = opts.close;
     this.identity = IdentityContextSchema.parse(
@@ -626,8 +643,7 @@ export class EmbeddedProject
 
   async sendSignal(
     input: SendSignalInput,
-    createdBy: string,
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string; recipient_count: number }> {
     return this.retry(() =>
       signalOps.send(this.db, {
         target: input.target,
@@ -635,31 +651,58 @@ export class EmbeddedProject
         resource: input.resource,
         payload: input.payload,
         ttl_ms: input.ttl_ms,
-        created_by: createdBy,
+        sender: {
+          principal_id: this.identity.principal_id,
+          participant_id: this.identity.participant_id,
+          display_name: this.identity.environment.client_name ?? null,
+          environment: this.identity.environment,
+        },
       }),
     );
   }
 
-  async listSignals(tokenName: string): Promise<SignalRecord[]> {
-    const rows = signalOps.inbox(this.db, tokenName);
-    return rows.map((row) => ({
-      id: row.id,
-      target: row.target,
-      kind: row.kind,
-      resource: row.resource,
-      payload: row.payload,
-      created_by: row.created_by,
-      created_at: row.created_at,
-      expires_at: row.expires_at,
-      acked_at: row.acked_at,
-    }));
+  async listSignals(): Promise<SignalRecord[]> {
+    return signalOps.inbox(this.db, this.identity);
   }
 
-  async ackSignal(
-    signalId: string,
-    acker: string,
-  ): Promise<{ found: boolean; authorized: boolean }> {
-    return this.retry(() => signalOps.ack(this.db, signalId, acker));
+  async historySignals(options: { limit?: number; cursor?: string } = {}) {
+    return signalOps.history(this.db, options);
+  }
+
+  async ackSignal(signalId: string) {
+    return this.retry(() =>
+      signalOps.ack(this.db, signalId, {
+        principal_id: this.identity.principal_id,
+        participant_id: this.identity.participant_id,
+        display_name: this.identity.environment.client_name ?? null,
+        environment: this.identity.environment,
+      }),
+    );
+  }
+
+  async listSignalGroups() {
+    return signalOps.listGroups(this.db);
+  }
+
+  async getSignalGroup(groupId: string) {
+    return signalOps.getGroup(this.db, groupId);
+  }
+
+  async setSignalGroup(
+    groupId: string,
+    input: { name: string; principal_ids: string[] },
+  ) {
+    return signalOps.setGroup(
+      this.db,
+      groupId,
+      input.name,
+      input.principal_ids,
+      this.identity,
+    );
+  }
+
+  async deleteSignalGroup(groupId: string) {
+    return signalOps.deleteGroup(this.db, groupId);
   }
 
   // ---------- SchemaBackend ----------
@@ -710,42 +753,48 @@ export class EmbeddedProject
   // ---------- SummaryBackend ----------
 
   async getSummary(): Promise<ProjectSummary> {
-    const { entities } = entityOps.list(this.db, { archived: 0 });
-    const claims = coordinationOps.listClaims(this.db);
-    const readyEntities = readyOps.computeReadyEntities(this.db);
-    const recentEvents = journalOps.listJournal(this.db, { limit: 10 });
-    const presenceList = coordinationOps.listPresence(this.db);
+    return this.db.transaction((tx) => summaryOps.getSummary(tx));
+  }
 
-    const entityCounts: Record<string, number> = {};
-    const statusCounts: Record<string, number> = {};
-    for (const e of entities) {
-      entityCounts[e.type] = (entityCounts[e.type] ?? 0) + 1;
-      const status = (e.data as Record<string, unknown>)?.status;
-      if (typeof status === "string") {
-        statusCounts[status] = (statusCounts[status] ?? 0) + 1;
-      }
-    }
+  async replayJournal(input: JournalReplayRequest) {
+    const snapshot = this.db.transaction((tx) =>
+      continuityOps.replaySnapshot(tx, input),
+    );
+    return completeReplay(snapshot, this.archives);
+  }
 
-    const payload: ProjectSummary = {
-      entity_count: entities.length,
-      entity_counts: entityCounts,
-      status_counts: statusCounts,
-      active_claims: claims.length,
-      ready_count: readyEntities.length,
-      online_participants: presenceList.map((p) => p.participant_id),
-      token_estimate: 0,
-      recent_events: recentEvents.map((ev) => ({
-        seq: ev.seq,
-        t: ev.t,
-        kind: ev.kind,
-        resource: ev.resource,
-        principal_id: ev.principal_id,
-        participant_id: ev.participant_id,
-        environment: ev.environment,
-      })),
-    };
-    payload.token_estimate = Math.ceil(JSON.stringify(payload).length / 4);
-    return payload;
+  async getJournalCursor() {
+    return continuityOps.getCursor(this.db, this.identity);
+  }
+
+  async acknowledgeJournal(input: { seq: number }) {
+    return this.retry(() =>
+      continuityOps.acknowledge(this.db, this.identity, input),
+    );
+  }
+
+  async createHandoff(input: HandoffCreateRequest) {
+    return this.retry(() =>
+      continuityOps.createHandoff(this.db, this.identity, input),
+    );
+  }
+
+  async getHandoff(id: string) {
+    return continuityOps.getHandoff(this.db, id);
+  }
+
+  async listHandoffs(input: HandoffListRequest = {}) {
+    return continuityOps.listHandoffs(this.db, this.identity, input);
+  }
+
+  async reentry(input: ReentryRequest = {}): Promise<ReentryResponse> {
+    const { replay, ...state } = continuityOps.reentrySnapshot(
+      this.db,
+      this.identity,
+      input,
+    );
+    const changes = await completeReplay(replay, this.archives);
+    return { ok: true, ...state, changes };
   }
 
   // ---------- RecordBackend ----------

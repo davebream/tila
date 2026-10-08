@@ -131,7 +131,7 @@ describe("entity command --json (deprecated alias for task)", () => {
     await runCmd(sub, { title: "Test Epic", json: true });
     const output = JSON.parse(consoleSpy.mock.calls[0][0] as string);
     expect(output.ok).toBe(true);
-    expect(output.id).toBeDefined();
+    expect(output.result.id).toBeDefined();
   });
 
   it("entity list --json outputs entities array", async () => {
@@ -140,7 +140,7 @@ describe("entity command --json (deprecated alias for task)", () => {
     const sub = getSubCommand(cmd, "list");
     await runCmd(sub, { json: true });
     const output = JSON.parse(consoleSpy.mock.calls[0][0] as string);
-    expect(output.entities).toEqual([]);
+    expect(output.result.items).toEqual([]);
   });
 
   it("entity show --json outputs entity", async () => {
@@ -159,6 +159,6 @@ describe("entity command --json (deprecated alias for task)", () => {
     const sub = getSubCommand(cmd, "show");
     await runCmd(sub, { id: "T-1", json: true });
     const output = JSON.parse(consoleSpy.mock.calls[0][0] as string);
-    expect(output.id).toBe("T-1");
+    expect(output.result.id).toBe("T-1");
   });
 });

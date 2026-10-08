@@ -53,6 +53,121 @@ const updated = await tila.tasks.update("task-1", {
 await tila.tasks.archive("task-1");
 ```
 
+### Refreshable credentials
+
+`TilaClient`, `TilaClient.fromConfig`, and the remote branch of `createTila`
+accept either a static token string or an async `TokenProvider`. Static strings
+and the legacy two-argument `dpopSigner` remain supported throughout the current
+`0.x` transition; removal requires a separately announced breaking release.
+
+```typescript
+import { TilaClient, createExternalTokenProvider } from "tila-sdk";
+
+const client = new TilaClient({
+  baseUrl: process.env.TILA_URL!,
+  token: createExternalTokenProvider(async (context) => {
+    // Application code owns login, storage, and customer selection.
+    const credential = await customerCredentials.load({
+      signal: context.signal,
+      forceRefresh: context.reason === "authentication",
+      previous: context.previousCredential?.refreshMetadata,
+    });
+    return {
+      token: credential.accessToken, // A Tila credential, not an upstream ID token.
+      tokenType: "Bearer",
+      expiresAt: credential.expiresAt, // Unix seconds, not milliseconds.
+      refreshMetadata: credential.refreshState,
+    };
+  }),
+  expirySkewMs: 30_000,
+  timeoutMs: 30_000,
+});
+
+await client.get("/projects/my-project/tasks", { signal: abortController.signal });
+```
+
+The application objects `customerCredentials` and `abortController` in this
+example are supplied by the caller. `createServiceTokenProvider` accepts a static
+string, a `TokenCredential`, or a callback with the same contract. The external
+adapter accepts a callback. Neither helper issues or rotates service keys, stores
+secrets, or runs a customer OAuth flow.
+
+| Behavior | Contract |
+|---|---|
+| Provider context | Request `method` and absolute `url`, acquisition `signal`, `reason`, optional `previousCredential` and `authenticationError`. |
+| Refresh reason | `initial`, `expiry`, `request` (unknown expiry), or `authentication`. The initiating request supplies context for shared acquisition. |
+| Cache | Per client, reusable until `expiresAt` minus `expirySkewMs` (default 30 seconds). No cross-client/customer cache. |
+| Unknown/near expiry | No expiry means acquire again on the next request. A newly acquired token inside the skew window serves current waiters but is not reused for later requests. Already expired tokens are rejected. |
+| Concurrency | Concurrent acquisition/refresh shares one provider call. A late 401 cannot invalidate a newer credential generation. |
+
+Use one client per customer/credential identity; providers must not select a
+different customer based on the request URL. Do not mutate returned credentials
+or their refresh metadata after returning them. Only `Bearer` is supported as
+`tokenType`; DPoP-bound Tila credentials also use this scheme.
+
+Every low-level client method accepts `signal`. The request deadline starts before
+credential acquisition and covers signing, HTTP, one authentication retry, and
+JSON body consumption. A caller can stop waiting even if its provider ignores
+cancellation. Cancelling one waiter leaves other waiters running; when all leave,
+the shared acquisition is aborted and late results are discarded. Raw-response
+streams returned by `requestRaw` are caller-owned after headers arrive.
+
+Provider clients retry once for HTTP 401 with `unauthorized` or `session-expired`,
+using refreshed credentials and the same body and idempotency key. Other auth
+errors, network failures, and static credentials do not trigger this retry.
+`withRetry` is a separate, opt-in retry policy; it honors non-retryable
+`TokenProviderError`/`TilaApiError` and supports a cancellation `signal` for attempts
+and backoff. Pass the same signal to requests when using a custom abort reason.
+
+Application-thrown errors retain their identity and fields. SDK provider failures
+use `TokenProviderError` (`code`, `retryable`, optional `cause`); exchange API
+failures use `TilaApiError` (`status`, typed `code`, `retryable`). The SDK does not
+log credentials, proofs, assertions, or refresh metadata. Application errors and
+causes may contain application-supplied secrets: select safe fields when logging.
+
+### OIDC workload credentials
+
+Configure a scoped `oidc` workload binding to a Tila service principal first.
+The deployment must already have its OIDC issuer/audience configured. The helper
+uses the existing generic exchange endpoint and rejects legacy human-session
+responses, missing service lineage, and mismatched projects.
+
+```typescript
+import { createTila, createOidcWorkloadTokenProvider } from "tila-sdk";
+
+const provider = createOidcWorkloadTokenProvider({
+  baseUrl: process.env.TILA_URL!,
+  projectId: "my-project",
+  // Your workload platform supplies a fresh assertion for every call.
+  getAssertion: ({ signal }) => workloadIdentity.getFreshAssertion({ signal }),
+});
+const tila = await createTila(config, provider);
+```
+
+`workloadIdentity` and `config` are application-owned. Each assertion exchanges
+once; renewal needs a new assertion. Exchange is never automatically replayed,
+including after ambiguous network failure. `workload-already-exchanged` and
+`workload-revoked` remain typed API errors. Credentials and exchange requests are
+restricted to the configured deployment origin, and automatic HTTP redirects are
+disabled so proofs remain bound to the intended request.
+
+### DPoP with providers
+
+A provider credential can include `dpop: { jkt, signProof }`. The workload helper
+accepts the same binding and sends `jkt` during exchange. `signProof` receives
+`{ htm, htu, accessToken, ath, signal }`. Use the supplied values in a fresh ES256
+JWT, with a public JWK header, `typ: "dpop+jwt"`, current Unix-second `iat`, and a
+new `jti`. The `htu` is canonicalized without query/fragment; `ath` is the
+base64url SHA-256 of the exact token sent in `Authorization`.
+
+The SDK checks the returned proof's request/token/key binding before sending it.
+The Worker verifies its signature and checks `ath` when present, while accepting
+existing proofs without `ath` during the compatibility transition. This is a
+compatibility profile, not mandatory RFC 9449 enforcement for legacy clients.
+Provider credentials must carry their own signer; combining a provider with the
+legacy top-level `dpopSigner` is rejected. Generated `Authorization` and `DPoP`
+headers take precedence over all case variants in `extraHeaders`.
+
 ### `createTila` — one facade, local or remote
 
 `createTila(config, token?)` returns a uniform facade exposing the same resource
@@ -184,10 +299,13 @@ HTTP backend. These are intentional and called out so consumers are not surprise
 |--------|----------------|-----|
 | `schema.history` | Returns `[]` | Dead on **both** sides — the Worker exposes no schema-history route either, so the cloudflare branch would 404. (The data exists in `_schema_history`; it is simply not surfaced.) |
 | `presence.listAll` | Returns only **active** participants (every row `active: true`) | The embedded backend's `listPresence()` already filters to active participants by TTL; remote additionally includes stale participants as `active: false`. |
-| `artifacts.writeText` | Returns `deduplicated: false` and drops `tags` | The embedded artifacts table has no `tags` column, and the local write path does not report dedup. |
 | `tasks.list` | Ignores `compact`, emits no pagination cursor | `compact` is an HTTP-only projection; the local list is non-paginated (no `next_cursor`/`total`). |
 | `templates.list` | `variables` derived from `{{placeholders}}` | Local derives variables by scanning each template's entity data for `{{name}}` placeholders (`/\{\{(\w+)\}\}/`). |
-| `idempotency_key` (e.g. on `claims.acquire`) | Accepted but **not honored** | Remote dedups retries via D1; local relies on primary-key-level dedup instead — a retried create of an existing id fails rather than duplicating. Full idempotency is single-machine-low-risk and remote-only. (The embedded `_idempotency` table + `check/storeIdempotency` exist but are intentionally unwired.) |
+| Generic `idempotency_key` (e.g. on `claims.acquire`) | Accepted but **not honored** | Generic local request deduplication is not wired; a retried entity create can fail on its existing primary key. This does not apply to versioned artifact operations, which persist their own retry receipts using `idempotencyKey`. |
+
+Local `artifacts.writeText()` preserves tags and reports content deduplication.
+Explicit artifact revisions share history, metadata, restore, and operation-retry
+semantics with the remote backend. See [Revision history and restore](#revision-history-and-restore).
 
 ### Constructor Options
 
@@ -321,6 +439,102 @@ await Bun.write(file, body);
 const text = await new Response(body).text();
 ```
 
+### Revision history and restore
+
+Versioning is opt-in. Supply `lineageId` and a live `lineageFence` when writing;
+claim the canonical resource `artifact:<lineageId>`. A lineage keeps one kind and
+resource for its lifetime. Writes without lineage options keep their existing
+content-addressed behavior. If a versioned write also names an entity `resource`,
+acquire that entity's claim separately and pass its `fence` as well.
+
+This example assumes the project exists, the token has write access, and the
+project schema permits the `report` artifact kind. It writes two revisions,
+pages through their metadata, then restores the first revision as a new head:
+
+```typescript
+import { TilaClient, createArtifactMethods, withClaim } from "tila-sdk";
+
+const client = new TilaClient({
+  baseUrl: process.env.TILA_URL!,
+  token: process.env.TILA_TOKEN!,
+});
+const projectId = "my-project";
+const lineageId = "release-report";
+const artifacts = createArtifactMethods(client, projectId);
+const operationId = crypto.randomUUID(); // Persist this if retries span restarts.
+
+await withClaim(client, projectId, `artifact:${lineageId}`, "exclusive", 60_000, async (claim) => {
+  const heartbeat = claim.startHeartbeat(60_000);
+  try {
+    const writeOptions = {
+      kind: "report",
+      lineageId,
+      lineageFence: claim.fence,
+    };
+    const first = await artifacts.writeText("# Initial report", {
+      ...writeOptions,
+      tags: ["draft"],
+      idempotencyKey: `${operationId}:first`,
+    });
+    await artifacts.writeText("# Updated report", {
+      ...writeOptions,
+      tags: ["reviewed"],
+      idempotencyKey: `${operationId}:second`,
+    });
+
+    let page = await artifacts.history(first.key, { limit: 1 });
+    for (;;) {
+      console.log(page.items); // Newest first; metadata only.
+      if (page.meta.next_cursor === null) break;
+      page = await artifacts.history(first.key, {
+        limit: 1,
+        cursor: page.meta.next_cursor,
+      });
+    }
+
+    const restored = await artifacts.restore(first.key, {
+      fence: claim.fence,
+      idempotencyKey: `${operationId}:restore`,
+    });
+    const { pointer } = await artifacts.meta(restored.key);
+    console.log(pointer.revision, pointer.restored_from, pointer.tags);
+    console.log((await artifacts.readText(restored.key)).content);
+  } finally {
+    heartbeat.stop();
+  }
+}); // withClaim releases the lineage claim even if the callback throws.
+```
+
+| Operation | Contract |
+|---|---|
+| `history(key, { limit?, cursor? })` | Accepts any revision key in the lineage. Returns `items` and `meta` (`total`, `limit`, `next_cursor`). Default limit is 20, clamped to 1–200. Cursors are lineage-bound and retain the initial revision ceiling, so new writes do not shift later pages. Restart without a cursor to see newer writes. |
+| `meta(key)` | Returns `{ ok: true, pointer }` without reading blob contents. The pointer includes lineage, revision, tags, restore origin, and deletion state. |
+| `restore(key, { fence, lineage_id?, tags?, idempotencyKey? })` | Appends a new revision with its own key, even when the bytes match the current head. `restored_from` records the source key. Omitted tags inherit the source; `tags: []` clears tags only on the new revision. |
+| Reading a specific version | Use a history item's `r2_key` with `download()` or `readText()`. Ordinary identical-content uploads may deduplicate to an earlier revision without moving the head; use `restore()` to record a head change. |
+
+Tags on versioned artifacts are assigned at write/restore time; there is no
+revision tag-edit endpoint. Restoring a legacy artifact requires a new explicit
+`lineage_id`; it creates revision 1 without rewriting the source or inferring
+history from old supersedes links.
+
+Use a distinct `idempotencyKey` per logical write or restore, and reuse that key
+with the same request when retrying an uncertain response. Reusing it with
+different input is rejected. An accepted operation can finish publication after
+its lease expires; a new operation needs a live claim. Persist both the retry key
+and request if recovery must survive a client restart. These revision receipts
+also work in the Node/Bun embedded backends; they do not imply generic local
+request idempotency.
+
+Retention is opt-in per artifact kind; zero or omitted `retention_days` keeps
+content indefinitely. Each restore gets its own production time and current
+retention policy, and the live head is protected from automatic sweep. Deleted
+revisions remain available through history/meta with `tombstoned_at` and
+`blob_deleted_at` state; remote downloads/restores return HTTP 410
+`artifact-unavailable` once content is unavailable. Embedded operations report
+the same error code. An unknown key returns not-found instead. See the
+[lifecycle operations guide](../../docs/05-OPERATIONS.md#versioned-artifact-lifecycle)
+for deletion and recovery details.
+
 ## Error Handling
 
 ### Typed Catch Pattern
@@ -418,13 +632,15 @@ const result = await withRetry(
 |---------|----------------|-------------|
 | `createEntityMethods(client, projectId)` | `create`, `get`, `list`, `update`, `archive`, `addRelationship`, `addArtifactRef`, `listArtifactRefs` | Entity CRUD and relationships |
 | `createClaimMethods(client, projectId)` | `acquire`, `renew`, `release`, `list`, `get` | Low-level claim management |
-| `createArtifactMethods(client, projectId)` | `upload`, `download`, `list`, `search`, `addRelationship`, `listRelationships` | Artifact storage and search |
+| `createArtifactMethods(client, projectId)` | `upload`, `writeText`, `download`, `readText`, `list`, `search`, `history`, `meta`, `restore`, `addRelationship`, `listRelationships` | Artifact storage, search, and revision history |
 | `createPresenceMethods(client, projectId)` | `heartbeat`, `list`, `listAll` | Machine presence tracking |
 | `createSignalMethods(client, projectId)` | `inbox`, `send`, `ack` | Inter-machine signaling |
 | `createGateMethods(client, projectId)` | `list`, `create`, `resolve`, `remove` | Coordination gates |
 | `createTemplateMethods(client, projectId)` | `instantiate` | Entity template instantiation |
 | `createSummaryMethods(client, projectId)` | `get` | Project summary |
-| `createJournalMethods(client, projectId)` | `query` | Event journal queries |
+| `createJournalMethods(client, projectId)` | `query`, `replay`, `getCursor`, `acknowledge` | Journal queries and durable replay |
+| `createHandoffMethods(client, projectId)` | `create`, `get`, `list` | Immutable session handoffs |
+| `createReentryMethod(client, projectId)` | callable | Recover project context in one workflow |
 | `createSchemaMethods(client, projectId)` | `get`, `apply`, `history` | Schema-as-config management |
 | `createTokenMethods(client)` | `issue`, `revoke`, `list` | API token management (no `projectId`) |
 
@@ -453,3 +669,58 @@ const client = new TilaClient({
 ## License
 
 See the repository root for license information.
+
+
+### Durable cursors and handoffs
+
+Cloud and local facades expose `reentry`, `handoffs`, and journal continuity methods.
+Configure the same authenticated principal and stable participant ID to resume a
+cursor on another runtime. A different participant can consume a handoff without
+inheriting its creator's cursor or claims.
+
+```ts
+const state = await tila.reentry({ resource: "task:T-1", limit: 100 });
+// Process state.summary, state.active_claims, state.pending_signals,
+// state.handoff, and state.changes.events before acknowledging.
+await tila.journal.acknowledge({ seq: state.changes.next_after_seq });
+let page = state.changes;
+while (page.has_more) {
+  page = await tila.journal.replay({
+    after_seq: page.next_after_seq,
+    through_seq: page.through_seq,
+  });
+  // Process page.events before acknowledging.
+  await tila.journal.acknowledge({ seq: page.next_after_seq });
+}
+const handoff = await tila.handoffs.create({
+  id: crypto.randomUUID(), // Persist and reuse this ID if retrying after a crash.
+  summary: "Implementation ready for verification",
+  current_state: { phase: "verification" },
+  findings: ["Cloud and local schemas match"],
+  unresolved_questions: [],
+  based_on_seq: page.through_seq,
+  references: [{ type: "task", id: "T-1" }],
+});
+```
+
+Replay is oldest-first with a fixed `through_seq`, a default page size of 100,
+and a maximum of 200. `journal.query()` retains its existing behavior. Replay
+includes archived history; missing or unreadable history fails explicitly.
+`getCursor()` and `acknowledge()` return `{ ok, cursor: { seq, updated_at } }`.
+Acknowledgements never move backwards, reject future positions, and survive
+presence expiry. Reads do not automatically acknowledge signals or journal events.
+
+Re-entry chooses its starting sequence from explicit `after_seq`, then an existing
+saved cursor (including zero), then the selected handoff's `based_on_seq`, then zero.
+Select a handoff with `handoff_id` or `resource`, never both. Without a selector,
+the caller participant's latest handoff is used. A resource searches across project
+participants using `task:<id>`, `record:<type>:<key>`, `artifact:<key>`, or a claim's
+exact resource; it does not filter replay events. Handoff lists are newest-first,
+with `next_before_seq` passed as `before_seq` for the next page.
+
+Handoffs are immutable; save a new handoff with `supersedes_id` for corrections.
+The SDK generates an ID if omitted, but supply and persist an ID for retries across
+process restarts. Creation returns `{ ok, handoff }`; repeating the same ID, creator,
+and content returns the original snapshot. Referenced objects are not pinned, and
+historical claim snapshots never grant current write authority. Continuity state has
+no automatic expiry and is included in project backups.

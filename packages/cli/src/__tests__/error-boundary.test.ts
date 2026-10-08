@@ -82,7 +82,7 @@ describe("withErrorBoundary", () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
-    expect(payload.code).toBe("stale-fence");
+    expect(payload.error.kind).toBe("stale-fence");
   });
 
   it("passes through a successful run untouched", async () => {

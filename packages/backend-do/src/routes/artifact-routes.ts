@@ -1,4 +1,9 @@
 import {
+  artifactLifecycleOps,
+  artifactReviewOps,
+  artifactVersionOps,
+} from "@tila/ops-sqlite";
+import {
   type RequestOrigin,
   artifactOps,
   constraintOps,
@@ -11,6 +16,8 @@ import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import type { ReindexState } from "../project-do";
+import { scheduleArtifactPublication } from "./artifact-alarm";
+import { lifecycleStore } from "./artifact-lifecycle-routes";
 import { originFromBody } from "./origin";
 import { jsonError, jsonOkRows } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
@@ -103,7 +110,11 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
       autoSupersedes,
       body.tags,
     );
-    return jsonOkRows(c, {}, 1);
+    return jsonOkRows(
+      c,
+      { pointer: artifactVersionOps.getArtifactMeta(db, body.r2_key) },
+      1,
+    );
   });
 
   app.get("/artifact/pointer-meta", (c) => {
@@ -120,6 +131,19 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
     }>(
       sql`SELECT r2_key, mime_type, content_inline, tombstoned FROM artifact_pointers WHERE r2_key = ${key} LIMIT 1`,
     );
+    const revision = artifactLifecycleOps.revisionMetadata(db, key);
+    if (revision && (revision.tombstoned || revision.blob_deleted_at != null))
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "artifact-unavailable",
+            message: "Revision content is unavailable",
+            retryable: false,
+          },
+        },
+        410,
+      );
     if (!row || row.tombstoned === 1) {
       return jsonError(c, 404, "not-found", `Artifact ${key} not found`);
     }
@@ -129,6 +153,7 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
         r2_key: row.r2_key,
         mime_type: row.mime_type,
         content_inline: row.content_inline,
+        ...artifactReviewOps.artifactTrustByKeys(db, [key]).get(key),
       },
     });
   });
@@ -275,6 +300,29 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
         ? ("artifact.expired" as const)
         : undefined;
     const tombstoneOrigin = originFromBody(body as Record<string, unknown>);
+    if (artifactLifecycleOps.revisionMetadata(db, body.r2_key)) {
+      await scheduleArtifactPublication(deps);
+      const id = artifactLifecycleOps.acceptDeletion(
+        db,
+        body.r2_key,
+        {},
+        tombstoneOrigin,
+        journalKind === "artifact.expired" ? "expired" : "destroy",
+      );
+      if (!id)
+        return jsonError(
+          c,
+          409,
+          "artifact-not-expired",
+          "Revision is not eligible for expiry",
+        );
+      await artifactLifecycleOps.publishLifecycleRecord(
+        db,
+        lifecycleStore(deps),
+        id,
+      );
+      return jsonOkRows(c, {}, 1);
+    }
     artifactOps.tombstonePointer(db, body.r2_key, tombstoneOrigin, journalKind);
     return jsonOkRows(c, {}, 1);
   });

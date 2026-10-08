@@ -1,4 +1,20 @@
 import type {
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactReviewSummary,
+  ArtifactReviewsResponse,
+} from "@tila/schemas";
+import type {
+  MembershipGrantRequest,
+  ProjectMembership,
+  ProjectMembershipMode,
+  ProjectRole,
+  SessionCapabilities,
+  TokenListItem,
+  WhoamiResponse,
+} from "@tila/schemas";
+import type {
   ArtifactSearchResponse,
   EntityArtifactReferenceListResponse,
   EntityDetailResponse,
@@ -9,9 +25,12 @@ import type {
   RecordGetResponse,
   RecordHistoryResponse,
   RecordListResponse,
+  SignalGroupsResponse,
+  SignalHistoryResponse,
   StateListResponse,
 } from "@tila/schemas";
 import { API_BASE_URL } from "./config";
+import { encodeArtifactKey } from "./utils";
 
 export type { ArtifactSearchResponse };
 
@@ -26,6 +45,8 @@ export class ApiError extends Error {
   constructor(
     public readonly code: string,
     message: string,
+    /** Structured `error.details` from the server, when present. */
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -34,6 +55,95 @@ export class ApiError extends Error {
 
 function projectPath(projectId: string, path: string): string {
   return `/projects/${projectId}${path}`;
+}
+
+function absoluteUrl(path: string): URL {
+  return new URL(path, API_BASE_URL || window.location.origin);
+}
+
+/** Map a non-2xx response to an ApiError carrying the server's error envelope. */
+async function parseErrorResponse(response: Response): Promise<ApiError> {
+  let code = `http-${response.status}`;
+  let message = `HTTP ${response.status}`;
+  let details: unknown;
+  try {
+    const body = (await response.json()) as {
+      error?: { code?: string; message?: string; details?: unknown };
+    };
+    if (body.error?.code) code = body.error.code;
+    if (body.error?.message) message = body.error.message;
+    details = body.error?.details;
+  } catch {
+    /* ignore parse errors */
+  }
+  if (response.status === 429) code = "rate-limited";
+  if (response.status === 401) code = "not-configured";
+  return new ApiError(code, message, details);
+}
+
+const PARTICIPANT_KEY = "tila.participantId";
+
+/**
+ * Stable participant id for this browser profile. Project mutations require
+ * `X-Tila-Participant-Id` (journal attribution); the dashboard mints one per
+ * browser and keeps it in localStorage so audit rows stay correlated.
+ */
+export function dashboardParticipantId(): string {
+  try {
+    const existing = window.localStorage.getItem(PARTICIPANT_KEY);
+    if (existing) return existing;
+    const fresh = `dashboard-${crypto.randomUUID()}`;
+    window.localStorage.setItem(PARTICIPANT_KEY, fresh);
+    return fresh;
+  } catch {
+    return "dashboard";
+  }
+}
+
+/**
+ * Send a write request with the session cookie. Project mutations carry the
+ * participant id the Worker requires; the Worker's CSRF guard relies on the
+ * browser-supplied `Origin` header, so no CSRF token is needed.
+ */
+export async function mutate<T>(
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (path.startsWith("/projects/")) {
+    headers["X-Tila-Participant-Id"] = dashboardParticipantId();
+    headers["X-Tila-Client-Name"] = "dashboard";
+  }
+  let response: Response;
+  try {
+    response = await fetch(absoluteUrl(path).toString(), {
+      method,
+      credentials: "include",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError("network-error", "Network error: check connection");
+  }
+  if (!response.ok) throw await parseErrorResponse(response);
+  return response.json() as Promise<T>;
+}
+
+/** GET an absolute (non-project) API path with the session cookie. */
+async function requestAbsolute<T>(path: string): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(absoluteUrl(path).toString(), {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    throw new ApiError("network-error", "Network error: check connection");
+  }
+  if (!response.ok) throw await parseErrorResponse(response);
+  return response.json() as Promise<T>;
 }
 
 async function request<T>(
@@ -59,22 +169,7 @@ async function request<T>(
   } catch {
     throw new ApiError("network-error", "Network error: check connection");
   }
-  if (!response.ok) {
-    let code = `http-${response.status}`;
-    let message = `HTTP ${response.status}`;
-    try {
-      const body = (await response.json()) as {
-        error?: { code?: string; message?: string };
-      };
-      if (body.error?.code) code = body.error.code;
-      if (body.error?.message) message = body.error.message;
-    } catch {
-      /* ignore parse errors */
-    }
-    if (response.status === 429) code = "rate-limited";
-    if (response.status === 401) code = "not-configured";
-    throw new ApiError(code, message);
-  }
+  if (!response.ok) throw await parseErrorResponse(response);
   return response.json() as Promise<T>;
 }
 
@@ -101,15 +196,28 @@ export async function sessionExchange(
   }
 }
 
-export async function sessionStatus(): Promise<{ projectId: string } | null> {
+export type SessionStatus = {
+  projectId: string;
+  /** Server-computed management flags; null when the server did not send them. */
+  capabilities: SessionCapabilities | null;
+};
+
+export async function sessionStatus(): Promise<SessionStatus | null> {
   try {
     const res = await fetch(`${API_BASE_URL}/auth/session/status`, {
       credentials: "include",
       headers: { Accept: "application/json" },
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { ok: boolean; projectId: string };
-    return { projectId: data.projectId };
+    const data = (await res.json()) as {
+      ok: boolean;
+      projectId: string;
+      capabilities?: SessionCapabilities;
+    };
+    return {
+      projectId: data.projectId,
+      capabilities: data.capabilities ?? null,
+    };
   } catch {
     return null;
   }
@@ -210,6 +318,22 @@ export async function listPresenceAll(
   return request<PresenceAllListResponse>(projectId, "/presence/all");
 }
 
+export async function listSignalHistory(
+  projectId: string,
+  params?: { cursor?: string; limit?: number },
+): Promise<SignalHistoryResponse> {
+  return request<SignalHistoryResponse>(projectId, "/signals/history", {
+    cursor: params?.cursor,
+    limit: params?.limit === undefined ? undefined : String(params.limit),
+  });
+}
+
+export async function listSignalGroups(
+  projectId: string,
+): Promise<SignalGroupsResponse> {
+  return request<SignalGroupsResponse>(projectId, "/signals/groups");
+}
+
 export async function listTaskArtifactRefs(
   projectId: string,
   taskId: string,
@@ -224,6 +348,7 @@ export async function listTaskArtifactRefs(
 export type ArtifactListResponse = {
   ok: true;
   artifacts: Array<{
+    review?: ArtifactReviewSummary;
     r2_key: string;
     resource: string | null;
     kind: string;
@@ -423,7 +548,7 @@ export async function getArtifactBlob(
   key: string,
 ): Promise<Response> {
   const url = new URL(
-    projectPath(projectId, `/artifacts/${key}`),
+    projectPath(projectId, `/artifacts/${encodeArtifactKey(key)}`),
     API_BASE_URL || window.location.origin,
   );
   let response: Response;
@@ -436,4 +561,206 @@ export async function getArtifactBlob(
     throw new ApiError(`http-${response.status}`, `HTTP ${response.status}`);
   }
   return response;
+}
+
+export function getArtifactMeta(
+  projectId: string,
+  key: string,
+): Promise<ArtifactMetaResponse> {
+  return request(projectId, `/artifacts/${encodeURIComponent(key)}/meta`);
+}
+
+export function getArtifactHistory(
+  projectId: string,
+  key: string,
+  params?: ArtifactHistoryQuery,
+): Promise<ArtifactHistoryResponse> {
+  return request(projectId, `/artifacts/~/history/${encodeURIComponent(key)}`, {
+    limit: params?.limit === undefined ? undefined : String(params.limit),
+    cursor: params?.cursor,
+  });
+}
+export function getArtifactReviews(
+  projectId: string,
+  key: string,
+  beforeRevision?: number,
+): Promise<ArtifactReviewsResponse> {
+  return request(
+    projectId,
+    `/artifacts/~/reviews/${encodeURIComponent(key)}`,
+    beforeRevision === undefined
+      ? undefined
+      : { before_revision: String(beforeRevision) },
+  );
+}
+
+// --- Project administration (#102) ---
+//
+// Every function here is gated in the UI by `SessionCapabilities` from
+// `/auth/session/status`; the server enforces the same owner checks and may
+// additionally answer 403 `step-up-required` for mutations from a stale session.
+
+export type MembershipEvent = {
+  event_id: string;
+  project_id: string;
+  principal_id: string;
+  actor_principal_id: string;
+  action: "grant" | "role-change" | "revoke" | "policy-change" | string;
+  source: string;
+  role: ProjectRole | null;
+  github_repo_id: number | null;
+  details: Record<string, unknown>;
+  occurred_at: number;
+};
+
+export type MembershipRepo = {
+  github_host: string;
+  github_repo_id: number;
+  owner: string;
+  repo: string;
+  membership_enabled: boolean;
+  membership_role_cap: Exclude<ProjectRole, "owner">;
+};
+
+export type ServiceAccount = {
+  principal_id: string;
+  project_id: string;
+  name: string;
+  display_name: string;
+  created_at: number;
+  created_by: string;
+  revoked_at: number | null;
+};
+
+export function getMembershipPolicy(
+  projectId: string,
+): Promise<{ ok: true; mode: ProjectMembershipMode }> {
+  return request(projectId, "/membership-policy");
+}
+
+export function setMembershipPolicy(
+  projectId: string,
+  mode: ProjectMembershipMode,
+): Promise<{ ok: true; mode: ProjectMembershipMode }> {
+  return mutate("PUT", projectPath(projectId, "/membership-policy"), { mode });
+}
+
+export function listMemberships(
+  projectId: string,
+  params?: { includeRevoked?: boolean },
+): Promise<{ ok: true; memberships: ProjectMembership[] }> {
+  return request(projectId, "/memberships", {
+    include_revoked: params?.includeRevoked ? "true" : undefined,
+  });
+}
+
+export function grantMembership(
+  projectId: string,
+  body: MembershipGrantRequest,
+): Promise<{ ok: true; membership: ProjectMembership; created: boolean }> {
+  return mutate("POST", projectPath(projectId, "/memberships"), body);
+}
+
+export function updateMembershipRole(
+  projectId: string,
+  membershipId: string,
+  role: ProjectRole,
+): Promise<{ ok: true; membership: ProjectMembership }> {
+  return mutate(
+    "PATCH",
+    projectPath(projectId, `/memberships/${encodeURIComponent(membershipId)}`),
+    { role },
+  );
+}
+
+export function revokeMembership(
+  projectId: string,
+  membershipId: string,
+): Promise<{
+  ok: true;
+  membership: ProjectMembership;
+  revokedSessions: number;
+}> {
+  return mutate(
+    "DELETE",
+    projectPath(projectId, `/memberships/${encodeURIComponent(membershipId)}`),
+  );
+}
+
+export function listMembershipEvents(
+  projectId: string,
+  params?: { cursor?: number | null; limit?: number },
+): Promise<{
+  ok: true;
+  events: MembershipEvent[];
+  next_cursor: number | null;
+}> {
+  return request(projectId, "/membership-events", {
+    cursor:
+      params?.cursor === undefined || params.cursor === null
+        ? undefined
+        : String(params.cursor),
+    limit: params?.limit === undefined ? undefined : String(params.limit),
+  });
+}
+
+export function listMembershipRepos(
+  projectId: string,
+): Promise<{ ok: true; repos: MembershipRepo[] }> {
+  return request(projectId, "/membership-repos");
+}
+
+export function listServiceAccounts(
+  projectId: string,
+): Promise<{ ok: true; service_accounts: ServiceAccount[] }> {
+  return request(projectId, "/service-accounts");
+}
+
+/** Credentials of the active session's project. Never returns secret material. */
+export function listTokens(): Promise<{ ok: true; tokens: TokenListItem[] }> {
+  return requestAbsolute("/api/tokens");
+}
+
+export function revokeToken(
+  name: string,
+): Promise<{ ok: true; name: string; revoked_at: number }> {
+  return mutate("DELETE", `/api/tokens/${encodeURIComponent(name)}`);
+}
+
+export function whoami(): Promise<WhoamiResponse> {
+  return requestAbsolute("/api/whoami");
+}
+
+/**
+ * Resolve a GitHub login to its numeric user id from the browser, using
+ * GitHub's public CORS-enabled endpoint. This keeps explicit-membership
+ * projects administrable without a GitHub App. Unauthenticated calls are
+ * limited to 60 per hour per client IP; callers offer a manual id fallback.
+ */
+export async function githubUserLookup(
+  login: string,
+): Promise<{ id: number; login: string }> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.github.com/users/${encodeURIComponent(login)}`,
+      { headers: { Accept: "application/vnd.github+json" } },
+    );
+  } catch {
+    throw new ApiError("github-lookup-failed", "Could not reach GitHub");
+  }
+  if (response.status === 404)
+    throw new ApiError("github-user-not-found", `No GitHub user "${login}"`);
+  if (response.status === 403 || response.status === 429)
+    throw new ApiError(
+      "github-rate-limited",
+      "GitHub lookup rate limit reached; enter the numeric user id instead",
+    );
+  if (!response.ok)
+    throw new ApiError(
+      "github-lookup-failed",
+      `GitHub lookup failed (${response.status})`,
+    );
+  const data = (await response.json()) as { id: number; login: string };
+  return { id: data.id, login: data.login };
 }

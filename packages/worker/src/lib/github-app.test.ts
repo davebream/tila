@@ -573,3 +573,43 @@ describe("GitHubAppTokenError", () => {
     expect((err as GitHubAppTokenError).status).toBe(500);
   });
 });
+
+describe("GitHub request deadlines", () => {
+  it("cancels both installation and membership requests when their deadline expires", async () => {
+    const { GITHUB_API_TIMEOUT_MS } = await import("../config");
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal;
+          signals.push(signal);
+          signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    try {
+      const installation = getInstallationAccessToken("jwt", 42).catch(
+        (error) => error,
+      );
+      const membership = checkUserMembershipStatus(
+        "token",
+        "org",
+        "repo",
+        "alice",
+      );
+      await vi.advanceTimersByTimeAsync(GITHUB_API_TIMEOUT_MS);
+      expect(await installation).toMatchObject({ name: "AbortError" });
+      expect(await membership).toEqual({ kind: "error" });
+      expect(signals).toHaveLength(2);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});

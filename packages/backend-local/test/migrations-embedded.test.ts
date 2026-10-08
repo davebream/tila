@@ -326,6 +326,9 @@ describe("real-driver schema parity: shared ops write `target` (Step 4d)", () =>
 
   it("upsertPointer(autoSupersedes) writes a `target`-bearing supersedes row and insertArtifactRelationship round-trips", () => {
     const origin = {
+      principalId: "local:test",
+      participantId: "test-session",
+      environment: {},
       actor: "local",
       tokenId: null,
       source: null,

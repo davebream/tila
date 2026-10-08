@@ -22,7 +22,7 @@
  *     runtimes yields identical line matches.
  */
 
-import { type SpawnSyncReturns, spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, execFile, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -391,7 +391,7 @@ async function runMcpRoundtrip(cwd: string): Promise<{
   const { spawn } = await import("node:child_process");
   const child = spawn("node", [MCP_DIST], {
     cwd,
-    env: { ...process.env },
+    env: { ...process.env, TILA_MCP_TOOLS: "all" },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -770,5 +770,95 @@ describe("cross-runtime grep parity (multi-chunk streaming + UTF-8 boundary flus
         .sort()
         .join("\n");
     expect(norm(nodeLines)).toBe(norm(bunLines));
+  });
+});
+
+describe("cross-runtime session continuity", () => {
+  it("keeps acknowledgements monotonic across concurrent database writers", async () => {
+    const root = makeTmp();
+    const DB = join(root, "concurrent-cursors.db");
+    const ARTIFACTS = join(root, "artifacts");
+    const local = await createTilaLocal({
+      dbPath: DB,
+      artifactsPath: ARTIFACTS,
+      org: ORG,
+      project: PROJECT,
+      identity: {
+        principal_id: "local:x-org",
+        participant_id: "bun-session",
+        environment: {},
+      },
+      skipFilesystemCheck: true,
+    });
+    try {
+      for (let i = 0; i < 12; i++)
+        await local.project.createHandoff({
+          id: crypto.randomUUID(),
+          summary: `Handoff ${i}`,
+          based_on_seq: i,
+        });
+      const acknowledge = (positions: string) =>
+        new Promise<void>((resolve, reject) => {
+          execFile(
+            "bun",
+            ["run", BUN_FIXTURE],
+            {
+              cwd: PKG_ROOT,
+              env: {
+                ...process.env,
+                OP: "ack-cursor",
+                DB,
+                ARTIFACTS,
+                POSITIONS: positions,
+              },
+            },
+            (error) => (error ? reject(error) : resolve()),
+          );
+        });
+      await Promise.all([acknowledge("1,12,3"), acknowledge("4,8,2")]);
+      expect((await local.project.getJournalCursor()).seq).toBe(12);
+    } finally {
+      local.close();
+    }
+  });
+
+  it("consumes Bun handoffs in Node and Node handoffs in Bun without transferring cursors", async () => {
+    const root = makeTmp();
+    const DB = join(root, "continuity.db");
+    const ARTIFACTS = join(root, "artifacts");
+    const written = runBun("write-handoff", { DB, ARTIFACTS });
+    const local = await createTilaLocal({
+      dbPath: DB,
+      artifactsPath: ARTIFACTS,
+      org: ORG,
+      project: PROJECT,
+      identity: {
+        principal_id: "local:x-org",
+        participant_id: "node-session",
+        environment: { client_name: "node" },
+      },
+      skipFilesystemCheck: true,
+    });
+    let nextId: string;
+    try {
+      const resumed = await local.project.reentry({ resource: "task:work" });
+      expect(resumed.handoff).toEqual(written.json.handoff);
+      expect((await local.project.getJournalCursor()).seq).toBe(0);
+      const next = await local.project.createHandoff({
+        id: crypto.randomUUID(),
+        summary: "Node findings",
+        based_on_seq: resumed.changes.through_seq,
+        references: [{ type: "task", id: "work" }],
+        supersedes_id: resumed.handoff?.id,
+      });
+      nextId = next.id;
+    } finally {
+      local.close();
+    }
+    const read = runBun("read-handoff", { DB, ARTIFACTS });
+    expect(read.json).toMatchObject({
+      result: { handoff: { id: nextId, summary: "Node findings" } },
+      cursor: { seq: 1 },
+    });
   });
 });

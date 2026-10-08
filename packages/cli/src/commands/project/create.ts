@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import * as p from "@clack/prompts";
 import { RepoRegisterResponseSchema } from "@tila/schemas";
 import type { TilaProjectConfig } from "@tila/schemas";
 import { defineCommand } from "citty";
@@ -19,7 +18,9 @@ import {
 } from "../../lib/github-app-setup";
 import { loadInfraConfig } from "../../lib/infra-config";
 import { runMcpInitPrompt } from "../../lib/mcp-targets";
-import { printJson, printJsonError } from "../../lib/output";
+import { exit, printJson, printJsonError } from "../../lib/output";
+
+import * as p from "../../lib/prompts";
 import {
   deriveOrg,
   deriveRepo,
@@ -108,7 +109,7 @@ async function runCloudflareProvisioning(
     p.cancel(
       `No infrastructure found. Run \`tila infra provision\` first.\n\n${msg}`,
     );
-    process.exit(1);
+    exit(1);
   }
 
   const accountId = infraConfig.account_id;
@@ -120,7 +121,7 @@ async function runCloudflareProvisioning(
     p.cancel(
       "No worker_url in infra.toml. Run `tila infra provision` to deploy the shared Worker first.",
     );
-    process.exit(1);
+    exit(1);
   }
 
   // Step 3: Validate github-app.json exists if github_app configured in infra.toml
@@ -132,7 +133,7 @@ async function runCloudflareProvisioning(
         "GitHub App is configured in infra.toml but ~/.tila/github-app.json is missing or invalid.\n\n" +
           "Re-run `tila infra provision --force-github-app` to recreate it, or use --skip-github.",
       );
-      process.exit(1);
+      exit(1);
     }
   }
 
@@ -168,7 +169,7 @@ async function runCloudflareProvisioning(
       "No CLOUDFLARE_API_TOKEN found in environment or ~/.tila/.env.\n\n" +
         "Set the token via `export CLOUDFLARE_API_TOKEN=...` or in ~/.tila/.env before running project create.",
     );
-    process.exit(1);
+    exit(1);
   }
 
   // Step 7: Create CF client (needed for D1 insert)
@@ -228,11 +229,17 @@ async function runCloudflareProvisioning(
     if (decision.exitCode !== 0) {
       // Failure is fatal — emit error and exit non-zero BEFORE the success printJson
       if (json) {
-        printJson({ ...decision.json });
+        printJsonError(
+          "Project created, but first admin setup failed",
+          "partial-failure",
+          decision.message,
+          1,
+          { partial_result: { project_id: slug, ...decision.json } },
+        );
       } else {
         p.cancel(decision.message ?? "Failed to seed first admin.");
       }
-      process.exit(1);
+      exit(1);
     }
   }
 
@@ -370,7 +377,7 @@ async function runLocalProvisioning(
       "This project is already initialized (.tila/config.toml exists).\n\n" +
         "To re-initialize, remove .tila/config.toml first.",
     );
-    process.exit(1);
+    exit(1);
   }
 
   // Step 1b: Guard --admin-github-user + --local: warn and ignore (no D1 for local backend)
@@ -421,7 +428,7 @@ async function runLocalProvisioning(
     } else {
       p.cancel(`Failed to initialize local database at ${dbPath}:\n${message}`);
     }
-    process.exit(1);
+    exit(1);
   }
 
   // Step 6: Artifact directory creation
@@ -436,7 +443,7 @@ async function runLocalProvisioning(
     p.cancel(
       `Failed to create artifact directory at ${artifactsPath}:\n${message}`,
     );
-    process.exit(1);
+    exit(1);
   }
 
   // Step 7: Config write

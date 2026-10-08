@@ -42,6 +42,24 @@ import type {
   SignalRecord,
   SummaryBackend,
 } from "@tila/core";
+import { ArtifactRevisionSchema } from "@tila/schemas";
+import type {
+  ArtifactReviewRequest,
+  ArtifactReviewResponse,
+  ArtifactReviewsQuery,
+  ArtifactReviewsResponse,
+} from "@tila/schemas";
+import type {
+  ArtifactDeleteOptions,
+  ArtifactDestroyResponse,
+} from "@tila/schemas";
+import type {
+  ArtifactHistoryQuery,
+  ArtifactHistoryResponse,
+  ArtifactMetaResponse,
+  ArtifactRestoreRequest,
+  ArtifactRevisionResponse,
+} from "@tila/schemas";
 import type {
   ArtifactGrepResponse,
   Claim,
@@ -82,10 +100,14 @@ import {
   ReleaseSuccessResponseSchema,
   RenewSuccessResponseSchema,
   SendSignalResponseSchema,
+  SignalGroupResponseSchema,
+  SignalGroupsResponseSchema,
+  SignalHistoryResponseSchema,
   StateResponseSchema,
   SummaryResponseSchema,
 } from "@tila/schemas";
 import { z } from "zod";
+import { createArtifactMethods } from "../artifacts";
 import { TilaApiError, type TilaClient } from "../client";
 
 // Internal schemas for artifact endpoints not exported from @tila/schemas.
@@ -669,8 +691,7 @@ export class RemoteBackend
 
   async sendSignal(
     input: SendSignalInput,
-    _createdBy: string,
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string; recipient_count: number }> {
     const body: Record<string, unknown> = {
       target: input.target,
       kind: input.kind,
@@ -683,40 +704,81 @@ export class RemoteBackend
       body,
       { schema: SendSignalResponseSchema, validate: true },
     );
-    return { id: result.id };
+    return { id: result.id, recipient_count: result.recipient_count };
   }
 
-  async listSignals(_tokenName: string): Promise<SignalRecord[]> {
-    const result = await this.client.get(
-      `/projects/${this.projectId}/signals`,
-      { schema: InboxResponseSchema, validate: true },
+  async listSignals(): Promise<SignalRecord[]> {
+    const raw = await this.client.get(`/projects/${this.projectId}/signals`, {
+      schema: InboxResponseSchema,
+      validate: true,
+    });
+    const result = InboxResponseSchema.parse(raw);
+    return result.signals;
+  }
+
+  async historySignals(
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<{ signals: SignalRecord[]; next_cursor: string | null }> {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.cursor) query.set("cursor", options.cursor);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    const raw = await this.client.get(
+      `/projects/${this.projectId}/signals/history${suffix}`,
+      { schema: SignalHistoryResponseSchema, validate: true },
     );
-    return result.signals.map((s) => ({
-      id: s.id,
-      target: s.target,
-      kind: s.kind,
-      resource: s.resource ?? null,
-      payload: s.payload,
-      created_by: s.created_by,
-      created_at: s.created_at,
-      expires_at: s.expires_at,
-      acked_at: s.acked_at,
-    }));
+    const result = SignalHistoryResponseSchema.parse(raw);
+    return { signals: result.signals, next_cursor: result.next_cursor };
   }
 
-  async ackSignal(
-    signalId: string,
-    _acker: string,
-  ): Promise<{ found: boolean; authorized: boolean }> {
-    // The Worker derives the acker from the bearer token identity (the `_acker`
-    // arg is ignored here so a client cannot spoof it); an unauthorized ack
-    // returns 403 and surfaces as a thrown error from `post`.
+  async ackSignal(signalId: string) {
     await this.client.post(
       `/projects/${this.projectId}/signals/${signalId}/ack`,
       {},
       { schema: AckSignalResponseSchema, validate: true },
     );
-    return { found: true, authorized: true };
+    return { found: true, authorized: true, expired: false };
+  }
+
+  async listSignalGroups() {
+    const result = await this.client.get(
+      `/projects/${this.projectId}/signals/groups`,
+      { schema: SignalGroupsResponseSchema, validate: true },
+    );
+    return result.groups;
+  }
+
+  async getSignalGroup(groupId: string) {
+    try {
+      const result = await this.client.get(
+        `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
+        { schema: SignalGroupResponseSchema, validate: true },
+      );
+      return result.group;
+    } catch (err) {
+      if (err instanceof TilaApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async setSignalGroup(
+    groupId: string,
+    input: { name: string; principal_ids: string[] },
+  ) {
+    const result = await this.client.put(
+      `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
+      input,
+      { schema: SignalGroupResponseSchema, validate: true },
+    );
+    return result.group;
+  }
+
+  async deleteSignalGroup(groupId: string) {
+    await this.client.delete(
+      `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
+      { schema: OkSchema, validate: true },
+    );
+    return true;
   }
 
   // --- SchemaBackend ---
@@ -776,10 +838,63 @@ export class RemoteArtifactBackend implements ArtifactBackend {
   ) {}
 
   // --- ArtifactBackend ---
+  reviews(
+    key: string,
+    query: ArtifactReviewsQuery = {},
+  ): Promise<ArtifactReviewsResponse> {
+    return createArtifactMethods(this.client, this.projectId).reviews(
+      key,
+      query,
+    );
+  }
+  review(
+    key: string,
+    input: ArtifactReviewRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactReviewResponse> {
+    return createArtifactMethods(this.client, this.projectId).review(
+      key,
+      input,
+    );
+  }
 
-  async put(
-    options: ArtifactPutOptions,
-  ): Promise<{ key: string; bytes: number; deduplicated: boolean }> {
+  history(
+    key: string,
+    options: ArtifactHistoryQuery = {},
+  ): Promise<ArtifactHistoryResponse> {
+    return this.client.get(
+      `/projects/${this.projectId}/artifacts/~/history/${encodeURIComponent(key)}`,
+      {
+        query: {
+          limit:
+            options.limit === undefined ? undefined : String(options.limit),
+          cursor: options.cursor,
+        },
+      },
+    );
+  }
+  meta(key: string): Promise<ArtifactMetaResponse> {
+    return this.client.get(
+      `/projects/${this.projectId}/artifacts/${encodeURIComponent(key)}/meta`,
+    );
+  }
+  restore(
+    key: string,
+    options: ArtifactRestoreRequest & { idempotencyKey?: string },
+  ): Promise<ArtifactRevisionResponse> {
+    const { idempotencyKey, ...body } = options;
+    return this.client.post(
+      `/projects/${this.projectId}/artifacts/~/restore/${encodeURIComponent(key)}`,
+      body,
+      { idempotencyKey: idempotencyKey ?? crypto.randomUUID() },
+    );
+  }
+
+  async put(options: ArtifactPutOptions): Promise<{
+    key: string;
+    bytes: number;
+    deduplicated: boolean;
+    pointer?: import("@tila/schemas").ArtifactRevision;
+  }> {
     // Convert body to Blob for FormData
     let bodyBlob: Blob;
     if (typeof options.body === "string") {
@@ -799,16 +914,30 @@ export class RemoteArtifactBackend implements ArtifactBackend {
     if (options.fence !== undefined)
       formData.append("fence", String(options.fence));
     if (options.flavor) formData.append("flavor", options.flavor);
+    if (options.lineageId !== undefined)
+      formData.append("lineage_id", options.lineageId);
+    if (options.lineageFence !== undefined)
+      formData.append("lineage_fence", String(options.lineageFence));
+    if (options.tags !== undefined)
+      formData.append("tags", JSON.stringify(options.tags));
 
     const result = await this.client.postFormData(
       `/projects/${this.projectId}/artifacts`,
       formData,
-      { schema: ArtifactPutResponseSchema, validate: true },
+      {
+        schema: ArtifactPutResponseSchema,
+        validate: true,
+        idempotencyKey: options.idempotencyKey,
+      },
     );
     return {
       key: result.key,
       bytes: result.bytes,
       deduplicated: result.deduplicated,
+      pointer:
+        result.pointer === undefined
+          ? undefined
+          : ArtifactRevisionSchema.parse(result.pointer),
     };
   }
 
@@ -842,7 +971,12 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       body: response.body as ReadableStream,
       contentType:
         response.headers.get("Content-Type") ?? "application/octet-stream",
-      metadata: {},
+      metadata: {
+        review_state:
+          response.headers.get("X-Tila-Artifact-Review-State") ?? "unreviewed",
+        review_revision:
+          response.headers.get("X-Tila-Artifact-Review-Revision") ?? "0",
+      },
     };
   }
 
@@ -864,10 +998,29 @@ export class RemoteArtifactBackend implements ArtifactBackend {
     }));
   }
 
-  async delete(key: string): Promise<void> {
+  async destroyLineage(
+    lineageId: string,
+    options: ArtifactDeleteOptions & { fence: number },
+  ): Promise<ArtifactDestroyResponse> {
+    return this.client.post(
+      `/projects/${this.projectId}/artifacts/~/destroy/${encodeURIComponent(lineageId)}`,
+      { fence: options.fence },
+      { idempotencyKey: options.idempotencyKey ?? crypto.randomUUID() },
+    );
+  }
+
+  async delete(
+    key: string,
+    options: ArtifactDeleteOptions = {},
+  ): Promise<void> {
     await this.client.delete(
       `/projects/${this.projectId}/artifacts/${encodeURIComponent(key)}`,
       {
+        query: {
+          fence:
+            options.fence === undefined ? undefined : String(options.fence),
+        },
+        idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
         schema: OkSchema,
         validate: true,
       },
@@ -1014,8 +1167,16 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       mimeType?: string;
       resource?: string;
       fence?: number;
+      lineageId?: string;
+      lineageFence?: number;
+      tags?: string[];
+      idempotencyKey?: string;
     },
-  ): Promise<{ key: string; bytes: number }> {
+  ): Promise<{
+    key: string;
+    bytes: number;
+    pointer?: import("@tila/schemas").ArtifactRevision;
+  }> {
     const result = await this.client.post(
       `/projects/${this.projectId}/artifacts/text`,
       {
@@ -1024,15 +1185,31 @@ export class RemoteArtifactBackend implements ArtifactBackend {
         mime_type: opts.mimeType ?? "text/markdown",
         resource: opts.resource,
         fence: opts.fence,
+        lineage_id: opts.lineageId,
+        lineage_fence: opts.lineageFence,
+        tags: opts.tags,
       },
-      { schema: ArtifactPutResponseSchema, validate: true },
+      {
+        schema: ArtifactPutResponseSchema,
+        validate: true,
+        idempotencyKey: opts.idempotencyKey,
+      },
     );
-    return { key: result.key, bytes: result.bytes };
+    return {
+      key: result.key,
+      bytes: result.bytes,
+      pointer:
+        result.pointer === undefined
+          ? undefined
+          : ArtifactRevisionSchema.parse(result.pointer),
+    };
   }
 
-  async readText(
-    key: string,
-  ): Promise<{ content: string; mimeType: string } | null> {
+  async readText(key: string): Promise<{
+    content: string;
+    mimeType: string;
+    pointer?: import("@tila/schemas").ArtifactRevision;
+  } | null> {
     let response: Response;
     try {
       response = await this.client.requestRaw(
@@ -1054,7 +1231,11 @@ export class RemoteArtifactBackend implements ArtifactBackend {
       );
     }
     const text = await response.text();
-    return { content: text, mimeType: contentType };
+    return {
+      content: text,
+      mimeType: contentType,
+      pointer: (await this.meta(key)).pointer,
+    };
   }
 }
 

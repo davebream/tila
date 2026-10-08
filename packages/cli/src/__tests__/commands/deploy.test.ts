@@ -12,9 +12,11 @@ vi.mock("../../lib/deploy", async (importActual) => {
   };
 });
 
+const mockApplyD1Migrations = vi.fn();
 const mockSetWorkerSecrets = vi.fn();
 vi.mock("../../lib/cloudflare-resources", () => ({
   setWorkerSecrets: (...args: unknown[]) => mockSetWorkerSecrets(...args),
+  applyD1Migrations: (...args: unknown[]) => mockApplyD1Migrations(...args),
 }));
 
 vi.mock("../../lib/github-app-setup", () => ({
@@ -39,6 +41,7 @@ const mockResolveCfApiToken = vi.fn();
 vi.mock("../../lib/provisioning", () => ({
   resolveCfApiToken: (...args: unknown[]) => mockResolveCfApiToken(...args),
   tilaHome: () => "/mock/.tila",
+  resolveMigrationsDir: () => "/mock/migrations",
 }));
 
 const mockPrintJson = vi.fn();
@@ -46,6 +49,7 @@ const mockPrintJsonError = vi.fn((..._args: unknown[]): void => {
   throw new Error("printJsonError");
 });
 vi.mock("../../lib/output", () => ({
+  exit: (code: number) => process.exit(code),
   printJson: (...args: unknown[]) => mockPrintJson(...args),
   printJsonError: (...args: unknown[]) => mockPrintJsonError(...args),
   jsonArg: {
@@ -62,9 +66,10 @@ const mockSpinnerStop = vi.fn();
 const mockNote = vi.fn();
 const mockCancel = vi.fn();
 const mockLogWarn = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   spinner: vi.fn(() => ({
     start: mockSpinnerStart,
+    message: vi.fn(),
     stop: mockSpinnerStop,
   })),
   note: (...args: unknown[]) => mockNote(...args),
@@ -83,7 +88,7 @@ let exitSpy: any;
 
 async function invokeDeploy(
   skipUi = false,
-  extra: { json?: boolean } = {},
+  extra: { json?: boolean; migrate?: boolean } = {},
 ): Promise<void> {
   const mod = await import("../../commands/deploy");
   const cmd = mod.default;
@@ -92,6 +97,7 @@ async function invokeDeploy(
     args: {
       "skip-ui": skipUi,
       json: extra.json ?? false,
+      migrate: extra.migrate ?? true,
     },
   });
 }
@@ -115,6 +121,12 @@ describe("deploy command", () => {
     });
     mockResolveCfApiToken.mockReturnValue("cf-token-abc");
     mockCreateCloudflareClient.mockReturnValue({});
+    mockApplyD1Migrations.mockResolvedValue({
+      applied: 1,
+      skipped: 27,
+      appliedNames: ["0028_session_authenticated_at.sql"],
+      watermark: "0028_session_authenticated_at.sql",
+    });
     mockDeployWorkerWithAssets.mockResolvedValue({
       workerUrl: "https://tila.workers.dev",
       ui: { kind: "deployed", url: "https://tila.workers.dev" },
@@ -239,6 +251,102 @@ describe("deploy command", () => {
     expect(mockNote).toHaveBeenCalledWith(
       expect.stringContaining("tila.workers.dev"),
       "Deploy complete",
+    );
+  });
+  it("finishes migrations against the configured database before uploading the Worker", async () => {
+    mockApplyD1Migrations.mockImplementationOnce(async () => {
+      expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+      return {
+        applied: 1,
+        skipped: 27,
+        appliedNames: ["0028_session_authenticated_at.sql"],
+        watermark: "0028_session_authenticated_at.sql",
+      };
+    });
+    await invokeDeploy();
+    expect(mockApplyD1Migrations).toHaveBeenCalledWith(
+      {},
+      "acc-123",
+      "d1-456",
+      "/mock/migrations",
+      { migrate: true, quiet: false },
+    );
+    expect(mockDeployWorkerWithAssets).toHaveBeenCalledOnce();
+    expect(mockNote).toHaveBeenCalledWith(
+      expect.stringContaining("0028_session_authenticated_at.sql"),
+      "Deploy complete",
+    );
+  });
+
+  it.each([false, true])(
+    "blocks Worker and secret writes if migrations fail (json=%s)",
+    async (json) => {
+      mockApplyD1Migrations.mockRejectedValueOnce(
+        new Error("migration query failed"),
+      );
+      await expect(invokeDeploy(false, { json })).rejects.toThrow();
+      expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+      expect(mockSetWorkerSecrets).not.toHaveBeenCalled();
+      if (json)
+        expect(mockPrintJsonError).toHaveBeenCalledWith(
+          expect.stringContaining("migration query failed"),
+          "DEPLOY_FAILED",
+        );
+      else
+        expect(mockCancel).toHaveBeenCalledWith(
+          expect.stringContaining("migration query failed"),
+        );
+    },
+  );
+
+  it("uses a read-only migration check for --no-migrate and blocks pending files", async () => {
+    mockApplyD1Migrations.mockRejectedValueOnce(
+      new Error("Pending D1 migrations: 0028_session_authenticated_at.sql"),
+    );
+    await expect(invokeDeploy(false, { migrate: false })).rejects.toThrow(
+      "process.exit(1)",
+    );
+    expect(mockApplyD1Migrations).toHaveBeenCalledWith(
+      {},
+      "acc-123",
+      "d1-456",
+      "/mock/migrations",
+      { migrate: false, quiet: false },
+    );
+    expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledWith(
+      expect.stringContaining("0028_session_authenticated_at.sql"),
+    );
+  });
+
+  it("deploys with --no-migrate when current and includes the watermark in JSON", async () => {
+    await invokeDeploy(false, { migrate: false, json: true });
+    expect(mockApplyD1Migrations).toHaveBeenCalledWith(
+      {},
+      "acc-123",
+      "d1-456",
+      "/mock/migrations",
+      { migrate: false, quiet: true },
+    );
+    expect(mockDeployWorkerWithAssets).toHaveBeenCalledOnce();
+    expect(mockPrintJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        migrations: expect.objectContaining({
+          watermark: "0028_session_authenticated_at.sql",
+        }),
+      }),
+    );
+  });
+  it("parses --no-migrate through the CLI argument parser", async () => {
+    const { runCommand } = await import("citty");
+    const { default: command } = await import("../../commands/deploy");
+    await runCommand(command, { rawArgs: ["--no-migrate", "--json"] });
+    expect(mockApplyD1Migrations).toHaveBeenCalledWith(
+      {},
+      "acc-123",
+      "d1-456",
+      "/mock/migrations",
+      { migrate: false, quiet: true },
     );
   });
 });

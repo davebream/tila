@@ -5,6 +5,18 @@
 
 ## 1. Overview
 
+Project authorization follows this pipeline:
+
+```text
+authenticate → canonical principal → resolve current D1 membership → effective role → route permission
+```
+
+Bearer and browser sessions carry `role`, `membership_sources`, and the legacy `permission` field,
+but the role snapshot is informational. Project middleware re-resolves the current policy on every
+request, so revocation or demotion takes effect without waiting for session expiry. Repository links
+participate only when `membership_enabled` is true; their mapped role is bounded by
+`membership_role_cap` and can never become `owner`.
+
 tila implements a unified authentication system with three distinct auth paths, all converging to a discriminated union type `UnifiedTokenResult` (defined in `packages/worker/src/types.ts` lines 16-49).
 
 ### Three Auth Paths
@@ -516,9 +528,82 @@ export function buildSessionCookie(value: string, isLocalDev: boolean): string {
 ### Session Status
 
 **Route:** `GET /auth/session/status`  
-**File:** `packages/worker/src/routes/auth-session.ts` lines 231-234
+**File:** `packages/worker/src/routes/auth-session.ts`
 
-Returns the current session's `projectId` (useful for UI to detect active session).
+Returns the current session's `projectId` plus a server-computed `capabilities`
+block (`packages/worker/src/middleware/session-capabilities.ts`):
+
+```json
+{
+  "ok": true,
+  "projectId": "proj_xyz",
+  "permission": "admin",
+  "canManageTokens": true,
+  "capabilities": {
+    "memberships_manage": true,
+    "credentials_manage": true,
+    "membership_available": true,
+    "auth_method": "github",
+    "authenticated_at": 1760000000000,
+    "step_up_max_age_seconds": 600
+  }
+}
+```
+
+`permission` and `canManageTokens` are legacy snapshots kept for compatibility.
+The browser gates management controls on `capabilities` only. The flags apply the
+same rules as `requireProjectOwner` and `credentialManagementGuard`: explicit owner
+membership (a GitHub-mirrored role never grants ownership), the capability in a
+scoped credential's policy, and a full D1 bootstrap token. If membership resolution
+throws, both flags are false and `membership_available` is false (fail closed).
+
+### Step-up Reauthentication
+
+**File:** `packages/worker/src/middleware/protected-operation.ts`
+(`requireFreshAuthentication`, `stepUpGuard`, `STEP_UP_PROTECTED`)
+
+High-impact membership and credential mutations made from an interactive cookie
+session require a recent authentication:
+
+| Route family | Guard order |
+|---|---|
+| `POST/PATCH/DELETE /projects/:id/memberships*`, `PUT /membership-policy` | `requireProjectOwner` → `stepUpGuard` |
+| `POST/DELETE /projects/:id/admins*` | `requireProjectOwner` → `stepUpGuard` |
+| `/projects/:id/service-accounts/**` mutations | `requireProjectOwner` → `stepUpGuard` |
+| `POST /api/tokens`, `DELETE /api/tokens/:name`, `POST /api/tokens/:name/rotate` | `credentialManagementGuard` → `requireFreshAuthentication` |
+
+The owner/capability check always runs first so a non-owner never learns the
+window. A cookie session whose `authenticatedAt` is older than
+`STEP_UP_MAX_AGE_SECONDS` (default `STEP_UP_MAX_AGE_SECONDS_DEFAULT = 600` in
+`config.ts`; optional secret override) receives:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "step-up-required",
+    "message": "Re-authenticate to continue",
+    "retryable": false,
+    "details": { "max_age_seconds": 600, "authenticated_at": 1760000000000 }
+  }
+}
+```
+
+`authenticated_at` is stored in `_sessions.authenticated_at` (migration 0028). It
+is set when the GitHub OAuth callback or `POST /auth/session` creates a session and
+is **carried unchanged** when `POST /api/workspace/select` or `/deselect` replaces
+the session row, so selecting a project does not restart the clock. Rows created
+before the migration fall back to `created_at`; a cookie session with no value at
+all is treated as stale.
+
+Exempt: D1 bearer tokens, scoped credentials (including cookie sessions exchanged
+from one, which carry `policy`), and GitHub/OIDC JWT sessions. They cannot
+re-authenticate interactively; their protection is the explicit-owner/capability
+gate. GET requests are never gated.
+
+The UI (`StepUpBanner`, `StepUpResume`, `DefaultRedirect`) stashes the project and
+return path in `sessionStorage`, sends the user through sign-in, reselects the
+project and navigates back. The rejected mutation is never replayed.
 
 ### CookieSessionTokenResult
 
@@ -794,10 +879,16 @@ GitHub session tokens are only issued if the user has sufficient permission on a
   "repo": "backend",
   "github_host": "github.com",
   "github_token": "ghp_abc123...",  // Used for repo metadata lookup only
-  "min_read_permission": "read",
-  "min_write_permission": "write"
+  "min_read_permission": "triage",
+  "min_write_permission": "maintain",
+  "max_permission": "write"
 }
 ```
+
+All three policy fields are optional during registration and default to `write`. The two
+thresholds accept `read`, `triage`, `write`, `maintain`, and `admin`; the maximum tila role
+accepts `read`, `write`, or `admin`. Validation requires the read threshold to be no higher
+than the write threshold.
 
 **Flow:**
 
@@ -807,27 +898,35 @@ GitHub session tokens are only issued if the user has sufficient permission on a
 3. Store in D1 via `RepoAllowlistStore.register()` (lines 154-164)
 4. Return `{ok: true, github_repo_id, full_name, registered_at}`
 
-### Permission Hierarchy
+### Permission Evaluation
 
-Allowlist entries include `min_read_permission` and `min_write_permission` (though `min_write_permission` is not currently enforced during exchange).
+Every PAT exchange, GitHub App exchange, browser project lookup/selection, and live
+revalidation uses the same repository evaluator:
 
-During exchange (lines 238-249 in `auth-github.ts`):
+```text
+actual < min_read       → no admission
+actual < min_write      → read
+otherwise               → min(mapped GitHub role, max_permission)
+```
 
-1. Fetch user's actual permission from GitHub API
-2. Compare to `min_read_permission` using `permissionMeetsMinimum()` (lines 28-32)
-3. If user's permission >= minimum, grant access
+Unknown permissions and malformed stored policies fail closed for the affected link. The
+evaluator checks every enabled project link, selects the highest effective tila role, and
+uses the lowest repository ID as the deterministic tie-breaker. Minted JWTs and cookie
+sessions carry that effective role and the selected repository scope.
 
-**Example:** If `min_read_permission` is "write", user must have `write`, `maintain`, or `admin` on the repo.
+### Access-policy management
 
-### Per-Request Re-Verification (NOT Implemented)
+`GET /api/repos/:repoId/access-policy` returns the complete three-field policy.
+`PUT /api/repos/:repoId/access-policy` validates and atomically replaces it; partial updates
+are rejected. Both routes use the same project-admin authorization as repository
+registration and removal.
 
-The current implementation performs repo permission checks **only at exchange time**. Once a session token is minted, it remains valid until expiry (1 hour) even if:
-
-- The user loses repo access mid-session
-- The repo is removed from the allowlist
-- The repo is disabled (`enabled = 0`)
-
-**Future work:** T5/T6 could add per-request repo permission re-checks (hit GitHub API on every request). This was deferred from v0.1 due to latency and rate-limit concerns.
+Live bearer revalidation reevaluates the session's selected repository against its current
+thresholds and cap. Its cache stores the effective permission, not a route-specific allow
+boolean, so one cached result can safely answer different read/write/admin requirements.
+Removing or disabling the selected link, dropping below its read threshold, or tightening
+its cap below the requested operation denies the request until the client re-exchanges.
+Transient GitHub failure behavior remains unchanged.
 
 ### Removal
 
@@ -842,7 +941,8 @@ The current implementation performs repo permission checks **only at exchange ti
 2. Hard-delete from D1 via `RepoAllowlistStore.remove()` (line 201)
 3. Return `{ok: true, github_repo_id, removed_at}`
 
-**Note:** Removal does not revoke existing session tokens. They remain valid until expiry.
+**Note:** Removal immediately blocks live-revalidated repository sessions bound to that
+link. Clients must re-exchange to select another qualifying link.
 
 ## 9. CLI Auth
 

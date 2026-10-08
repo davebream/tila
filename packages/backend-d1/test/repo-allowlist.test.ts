@@ -11,6 +11,9 @@ const CREATE_PROJECT_REPOS = `
     github_repo_id        INTEGER NOT NULL,
     min_read_permission   TEXT    NOT NULL DEFAULT 'read',
     min_write_permission  TEXT    NOT NULL DEFAULT 'write',
+    max_permission        TEXT    NOT NULL DEFAULT 'write',
+    membership_enabled   INTEGER NOT NULL DEFAULT 0,
+    membership_role_cap  TEXT    NOT NULL DEFAULT 'participant',
     enabled               INTEGER NOT NULL DEFAULT 1,
     created_at            INTEGER NOT NULL,
     created_by            TEXT    NOT NULL,
@@ -101,6 +104,7 @@ describe("RepoAllowlistStore", () => {
       expect(r.github_repo_id).toBe(12345);
       expect(r.min_read_permission).toBe("write");
       expect(r.min_write_permission).toBe("write");
+      expect(r.max_permission).toBe("write");
       expect(r.enabled).toBe(1);
       expect(r.created_by).toBe("admin-user");
       expect(r.oidc_enabled).toBe(0);
@@ -152,6 +156,84 @@ describe("RepoAllowlistStore", () => {
         )
         .get(12345) as { cnt: number };
       expect(count.cnt).toBe(1);
+    });
+  });
+
+  describe("human access policy", () => {
+    it("lists every enabled repository policy and skips malformed rows", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      await store.register({
+        ...BASE_PARAMS,
+        githubRepo: "gadgets",
+        githubRepoId: 67890,
+        membershipEnabled: true,
+        membershipRoleCap: "maintainer",
+      });
+      await store.register({
+        ...BASE_PARAMS,
+        githubRepo: "broken",
+        githubRepoId: 11111,
+      });
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET min_read_permission = 'admin', min_write_permission = 'write' WHERE github_repo_id = 11111",
+        )
+        .run();
+
+      const listed = await store.listAccessPolicies("proj-1");
+      expect(listed.map((entry) => entry.repo.github_repo_id).sort()).toEqual([
+        12345, 67890,
+      ]);
+      const gadgets = listed.find(
+        (entry) => entry.repo.github_repo_id === 67890,
+      );
+      expect(gadgets?.repo.github_owner).toBe("acme");
+      expect(gadgets?.policy.membership_enabled).toBe(true);
+      expect(gadgets?.policy.membership_role_cap).toBe("maintainer");
+      await expect(store.listAccessPolicies("other")).resolves.toEqual([]);
+    });
+
+    it("reads and atomically replaces a valid policy", async () => {
+      const { store } = createTestStore();
+      await store.register(BASE_PARAMS);
+
+      const updated = await store.setAccessPolicy(
+        "proj-1",
+        "github.com",
+        12345,
+        {
+          min_read_permission: "read",
+          min_write_permission: "maintain",
+          max_permission: "admin",
+        },
+      );
+
+      expect(updated).toMatchObject({
+        status: "ok",
+        policy: {
+          min_read_permission: "read",
+          min_write_permission: "maintain",
+          max_permission: "admin",
+        },
+      });
+      await expect(
+        store.getAccessPolicy("proj-1", "github.com", 12345),
+      ).resolves.toMatchObject(updated);
+    });
+
+    it("fails closed when stored policy is malformed", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET min_read_permission = 'admin', min_write_permission = 'write'",
+        )
+        .run();
+
+      await expect(
+        store.getAccessPolicy("proj-1", "github.com", 12345),
+      ).resolves.toEqual({ status: "invalid-policy" });
     });
   });
 

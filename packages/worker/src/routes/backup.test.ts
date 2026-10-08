@@ -127,7 +127,7 @@ describe("backup operator routes", () => {
       env,
     );
     expect(response.status).toBe(200);
-    expect(sql).toHaveBeenCalledTimes(5);
+    expect(sql).toHaveBeenCalledTimes(10);
     for (const [statement] of sql.mock.calls) {
       expect(statement).not.toContain("SELECT *");
       expect(statement).not.toContain("token_hash");
@@ -137,6 +137,7 @@ describe("backup operator routes", () => {
       statement.includes("FROM _project_repos"),
     )?.[0];
     expect(repoExport).toContain("oidc_enabled");
+    expect(repoExport).toContain("max_permission");
     expect(repoExport).toContain("oidc_max_permission");
     expect(repoExport).toContain("oidc_subject_pattern");
     expect(repoExport).toContain("oidc_allowed_events");

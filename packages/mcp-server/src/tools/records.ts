@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerRecordTools(
   server: McpServer,
@@ -10,7 +11,8 @@ export function registerRecordTools(
 ): void {
   const records = facade.records;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_get",
     "Get a record by type and key. Returns the full record value, metadata, tags, and fencing token needed for subsequent mutations.",
     {
@@ -29,7 +31,8 @@ export function registerRecordTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_set",
     "Set (full replace) a record's value. Requires a fencing token from tila_record_get. Returns the new fencing token.",
     {
@@ -55,7 +58,8 @@ export function registerRecordTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_put",
     "Fenceless create-or-replace of a record's value -- creates the record if the key is missing, otherwise fully replaces its value. Does NOT require a fencing token. Intended for single-writer canonical writes where one agent owns the key. Contrast with tila_record_set, which REQUIRES a fence (from tila_record_get) and is collaborative-safe under concurrent writers. WARNING: tila_record_put is last-writer-wins and silently clobbers concurrent updates -- do NOT use it on a key that another writer mutates via tila_record_set or tila_record_patch.",
     {
@@ -83,7 +87,8 @@ export function registerRecordTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_patch",
     "Apply a JSON Merge Patch (RFC 7396) to a record's value. Requires a fencing token from tila_record_get. Returns the new fencing token.",
     {
@@ -111,7 +116,8 @@ export function registerRecordTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_list",
     "List records of a given type. Returns metadata only (type, key, revision, updated_at, updated_by, archived, tags) -- no value field. Use tila_record_get to read individual record values.",
     {
@@ -151,7 +157,8 @@ export function registerRecordTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_archive",
     "Archive a record. Requires a fencing token from tila_record_get. Returns the new fencing token.",
     {
@@ -176,7 +183,8 @@ export function registerRecordTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_unarchive",
     "Unarchive a previously archived record. Requires a fencing token from tila_record_get. Returns the new fencing token.",
     {
@@ -201,7 +209,8 @@ export function registerRecordTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_record_history",
     "Get revision history for a record. Returns newest-first list of revisions with operation, timestamp, and actor.",
     {

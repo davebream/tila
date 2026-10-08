@@ -1,8 +1,11 @@
 import { createPrivateKey } from "node:crypto";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { createCloudflareClient } from "../lib/cloudflare-client";
-import { setWorkerSecrets } from "../lib/cloudflare-resources";
+import {
+  applyD1Migrations,
+  setWorkerSecrets,
+} from "../lib/cloudflare-resources";
+import type { MigrationResult } from "../lib/d1-migrations";
 import {
   type DeployResult,
   deployWorkerWithAssets,
@@ -10,8 +13,14 @@ import {
 } from "../lib/deploy";
 import { loadGithubAppCredentials } from "../lib/github-app-setup";
 import { getInfraSlug, loadInfraConfig } from "../lib/infra-config";
-import { jsonArg, printJson, printJsonError } from "../lib/output";
-import { resolveCfApiToken, tilaHome } from "../lib/provisioning";
+import { exit, jsonArg, printJson, printJsonError } from "../lib/output";
+
+import * as p from "../lib/prompts";
+import {
+  resolveCfApiToken,
+  resolveMigrationsDir,
+  tilaHome,
+} from "../lib/provisioning";
 import { R2_BUCKET_NAME } from "../lib/resource-names";
 
 export default defineCommand({
@@ -27,6 +36,12 @@ export default defineCommand({
         "Skip UI deployment (deploy Worker code only, no [assets] block)",
       default: false,
     },
+    migrate: {
+      type: "boolean",
+      description:
+        "Apply pending D1 migrations before deployment (--no-migrate checks only and refuses pending files)",
+      default: true,
+    },
     ...jsonArg,
   },
   async run({ args }) {
@@ -36,7 +51,7 @@ export default defineCommand({
     function fatal(message: string, code: string): never {
       if (json) printJsonError(message, code);
       p.cancel(message);
-      process.exit(1);
+      exit(1);
     }
 
     let infraConfig: ReturnType<typeof loadInfraConfig>;
@@ -63,10 +78,19 @@ export default defineCommand({
     const r2BucketName = infraConfig.r2_bucket_name ?? R2_BUCKET_NAME;
 
     const s = json ? null : p.spinner();
-    s?.start("Deploying...");
+    s?.start("Checking D1 migrations...");
 
     let result: DeployResult;
+    let migrations: MigrationResult;
     try {
+      migrations = await applyD1Migrations(
+        cf,
+        infraConfig.account_id,
+        infraConfig.d1_database_id,
+        resolveMigrationsDir(),
+        { migrate: args.migrate !== false, quiet: json },
+      );
+      s?.message("Deploying Worker and UI...");
       result = await deployWorkerWithAssets({
         cf,
         accountId: infraConfig.account_id,
@@ -100,16 +124,19 @@ export default defineCommand({
       if (json) printJsonError(`Deploy failed: ${msg}`, "DEPLOY_FAILED");
       s?.stop("Deploy failed.");
       p.cancel(`Deploy failed: ${msg}`);
-      process.exit(1);
+      exit(1);
     }
 
     if (json) {
-      printJson({ workerUrl: result.workerUrl, ui: result.ui });
+      printJson({ workerUrl: result.workerUrl, ui: result.ui, migrations });
       return;
     }
 
     const { spinnerMessage, uiLine } = describeUiOutcome(result.ui);
     s?.stop(spinnerMessage);
-    p.note(`Worker:  ${result.workerUrl}\n${uiLine}`, "Deploy complete");
+    p.note(
+      `Worker:  ${result.workerUrl}\n${uiLine}\nD1:      ${migrations.watermark ?? "none"} (${migrations.applied} applied)`,
+      "Deploy complete",
+    );
   },
 });

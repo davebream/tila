@@ -14,8 +14,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   deleteTombstonedPointers,
   listPointers,
+  reconcilePointers,
   upsertPointer,
 } from "../src/artifact-ops";
+import { listJournal } from "../src/journal-ops";
+import { entities } from "../src/schema";
 import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
@@ -269,11 +272,11 @@ describe("listPointers tag filter", () => {
 // deleteTombstonedPointers: CRITICAL no-orphan test (FK-OFF)
 // -------------------------------------------------------------------------
 describe("deleteTombstonedPointers: no orphan artifact_tags (FK-OFF)", () => {
-  it("removes artifact_tags for deleted pointers even when FK enforcement is OFF", () => {
+  it("preserves audit metadata and tags even when FK enforcement is OFF", () => {
     const now = Date.now();
     const cutoff = now - 7 * 24 * 60 * 60 * 1000;
 
-    // Insert a pointer with tags that will be hard-deleted
+    // Insert a pointer with tags whose blob will be deleted
     const r2KeyOld = "artifacts/gc1/old.bin";
     upsertPointer(
       testDb.db,
@@ -286,7 +289,7 @@ describe("deleteTombstonedPointers: no orphan artifact_tags (FK-OFF)", () => {
     );
 
     // Manually set tombstoned=1 + tombstoned_at past the cutoff, with the blob
-    // deletion confirmed (blob_deleted_at) so the row is eligible for hard-delete.
+    // deletion confirmed (blob_deleted_at); metadata must still survive.
     testDb.rawDb
       .prepare(
         "UPDATE artifact_pointers SET tombstoned = 1, tombstoned_at = ?, blob_deleted_at = ? WHERE r2_key = ?",
@@ -307,23 +310,23 @@ describe("deleteTombstonedPointers: no orphan artifact_tags (FK-OFF)", () => {
 
     // CRITICAL: turn FK enforcement OFF to replicate DO production reality.
     // With FK ON, ON DELETE CASCADE would fire and give a FALSE GREEN.
-    // This asserts the EXPLICIT delete in deleteTombstonedPointers, not cascade.
+    // Metadata retention must not depend on FK enforcement.
     testDb.rawDb.pragma("foreign_keys = OFF");
 
     const deleted = deleteTombstonedPointers(testDb.db, cutoff);
-    expect(deleted).toBe(1);
+    expect(deleted).toBe(0);
 
-    // Verify the pointer row is gone
+    // Verify the pointer audit record remains
     const pointerRow = testDb.rawDb
       .prepare("SELECT r2_key FROM artifact_pointers WHERE r2_key = ?")
       .get(r2KeyOld);
-    expect(pointerRow).toBeUndefined();
+    expect(pointerRow).toBeDefined();
 
-    // CRITICAL: verify NO orphan artifact_tags rows remain for the deleted key
+    // Tags remain attached to the retained audit record
     const orphanTags = testDb.rawDb
       .prepare("SELECT COUNT(*) AS n FROM artifact_tags WHERE artifact_key = ?")
       .get(r2KeyOld) as { n: number };
-    expect(orphanTags.n).toBe(0);
+    expect(orphanTags.n).toBe(2);
 
     // Restore FK ON and verify live pointer's tags are intact
     testDb.rawDb.pragma("foreign_keys = ON");
@@ -492,6 +495,77 @@ describe("listPointers tagFilter (multi-tag AND)", () => {
   });
 });
 
+describe("artifact journal payload", () => {
+  beforeEach(() => {
+    testDb.db
+      .insert(entities)
+      .values({
+        id: "report",
+        type: "task",
+        schema_version: 1,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        created_by: origin.actor,
+      })
+      .run();
+  });
+
+  it.each([
+    { key: "produced/report/abc123.txt", resource: "report" },
+    { key: "sources/abc123.txt", resource: null },
+  ])("identifies the blob for $key", ({ key, resource }) => {
+    const pointer = makePointer(key, { resource });
+    upsertPointer(testDb.db, pointer, origin);
+
+    expect(listJournal(testDb.db, {})).toEqual([
+      expect.objectContaining({
+        kind: "artifact.produced",
+        resource: resource ?? "source",
+        principal_id: origin.principalId,
+        participant_id: origin.participantId,
+        environment: origin.environment,
+        fence: pointer.fence,
+        data: { r2_key: key, sha256: pointer.sha256 },
+      }),
+    ]);
+  });
+
+  it("identifies a recovered blob without changing the reconciliation event kind", () => {
+    const key = "produced/report/recovered.txt";
+    const sha256 = "recovered-sha256";
+    const result = reconcilePointers(
+      testDb.db,
+      [
+        {
+          key,
+          size: 100,
+          metadata: {
+            "tila-kind": "output",
+            "tila-sha256": sha256,
+            "tila-task": "report",
+            "tila-fence": "7",
+          },
+        },
+      ],
+      origin,
+      true,
+    );
+
+    expect(result.orphans_recovered).toBe(1);
+    expect(listJournal(testDb.db, {})).toEqual([
+      expect.objectContaining({
+        kind: "artifact.reconciled",
+        resource: "report",
+        principal_id: origin.principalId,
+        participant_id: origin.participantId,
+        environment: origin.environment,
+        fence: 7,
+        data: { r2_key: key, sha256 },
+      }),
+    ]);
+  });
+});
+
 describe("upsertPointer deduplication signal", () => {
   function countProducedEvents(): number {
     const rows = testDb.rawDb
@@ -513,11 +587,33 @@ describe("upsertPointer deduplication signal", () => {
     const ptr = makePointer("artifacts/dedup/abc123.txt");
     upsertPointer(testDb.db, ptr, origin);
     expect(countProducedEvents()).toBe(1);
+    const originalEvents = listJournal(testDb.db, {});
 
     // Second identical content-addressed put: same r2_key/sha256.
     const res = upsertPointer(testDb.db, ptr, origin);
     expect(res).toEqual({ deduplicated: true });
     // The deduplicated put must not emit a duplicate artifact.produced event.
     expect(countProducedEvents()).toBe(1);
+    expect(listJournal(testDb.db, {})).toEqual(originalEvents);
+  });
+
+  it("preserves the original event when a duplicate put updates tags", () => {
+    const ptr = makePointer("artifacts/dedup/tagged.txt");
+    upsertPointer(testDb.db, ptr, origin);
+    const originalEvents = listJournal(testDb.db, {});
+
+    const res = upsertPointer(
+      testDb.db,
+      ptr,
+      testOrigin("another-participant"),
+      undefined,
+      undefined,
+      false,
+      ["reviewed"],
+    );
+
+    expect(res).toEqual({ deduplicated: true });
+    expect(getPointerByKey(ptr.r2_key)?.tags).toEqual(["reviewed"]);
+    expect(listJournal(testDb.db, {})).toEqual(originalEvents);
   });
 });

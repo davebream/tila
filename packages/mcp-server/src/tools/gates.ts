@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerGateTools(
   server: McpServer,
@@ -10,7 +11,8 @@ export function registerGateTools(
 ): void {
   const gates = facade.gates;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_gate_create",
     "Create a coordination gate that blocks work on an entity until an external event occurs (CI pass, PR merge, human approval, timer, webhook). Requires a valid fencing token from tila_claim_acquire.",
     {
@@ -54,7 +56,8 @@ export function registerGateTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_gate_resolve",
     "Resolve a pending gate, unblocking work on the associated entity. The entity becomes eligible for the ready set again. Requires write permission — no fencing token needed; any agent with project write access can resolve a gate, not only the original gate creator (see decision §21).",
     {
@@ -76,7 +79,8 @@ export function registerGateTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_gate_cancel",
     "Cancel (delete) a pending gate, removing the coordination constraint. The entity becomes eligible for the ready set again if no other gates remain. Requires write permission — no fencing token needed; any agent with project write access can cancel a gate (see decision §21).",
     {

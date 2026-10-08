@@ -2,6 +2,7 @@ import type {
   EmbeddedArtifactBackend,
   EmbeddedProject,
 } from "@tila/backend-embedded";
+import { ContinuityError } from "@tila/core";
 /**
  * Local resource adapters — present the SAME public method surface the HTTP
  * resource-method factories expose (`createTaskMethods`, `createRecordMethods`,
@@ -36,6 +37,19 @@ import {
   type PresenceWithStatus,
   parseTilaSchemaToml,
 } from "@tila/core";
+import { signalOps } from "@tila/ops-sqlite";
+import type { ArtifactDeleteOptions } from "@tila/schemas";
+import type {
+  ArtifactReviewRequest,
+  ArtifactReviewsQuery,
+} from "@tila/schemas";
+import type {
+  ArtifactHistoryQuery,
+  ArtifactRestoreRequest,
+  HandoffListRequest,
+  JournalReplayRequest,
+  ReentryRequest,
+} from "@tila/schemas";
 import type {
   AckSignalResponse,
   AcquireSuccessResponse,
@@ -82,14 +96,23 @@ import type {
   SendSignalRequest,
   SendSignalResponse,
   Signal,
+  SignalGroupResponse,
+  SignalGroupsResponse,
+  SignalHistoryResponse,
   StateListResponse,
   StateResponse,
   SummaryResponse,
   UnifiedSearchResponse,
 } from "@tila/schemas";
-import { okEnvelope } from "@tila/schemas";
+import {
+  SendSignalRequestSchema,
+  SetSignalGroupRequestSchema,
+  SignalGroupIdSchema,
+  okEnvelope,
+} from "@tila/schemas";
 import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
+import type { CreateHandoffOptions } from "../continuity";
 
 /**
  * Thrown when a consumer calls a facade method that has no local equivalent
@@ -512,6 +535,40 @@ function createLocalClaimMethods(project: EmbeddedProject) {
  */
 function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
   return {
+    async delete(
+      key: string,
+      options?: ArtifactDeleteOptions,
+    ): Promise<{ ok: true }> {
+      await artifacts.delete(key, options);
+      return { ok: true };
+    },
+    destroyLineage(
+      lineageId: string,
+      options: ArtifactDeleteOptions & { fence: number },
+    ) {
+      return artifacts.destroyLineage(lineageId, options);
+    },
+    reviews(key: string, query: ArtifactReviewsQuery = {}) {
+      return artifacts.reviews(key, query);
+    },
+    review(
+      key: string,
+      input: ArtifactReviewRequest & { idempotencyKey?: string },
+    ) {
+      return artifacts.review(key, input);
+    },
+    history(key: string, options?: ArtifactHistoryQuery) {
+      return artifacts.history(key, options);
+    },
+    meta(key: string) {
+      return artifacts.meta(key);
+    },
+    restore(
+      key: string,
+      options: ArtifactRestoreRequest & { idempotencyKey?: string },
+    ) {
+      return artifacts.restore(key, options);
+    },
     // These stubs carry the SAME EXPLICIT parameter shape as the HTTP facade's
     // `upload`/`download` (the overloaded `upload` signature + the `download(key)`
     // signature, written out so they MUST line up with the facade). A zero-param
@@ -538,23 +595,20 @@ function createLocalArtifactMethods(artifacts: EmbeddedArtifactBackend) {
         resource?: string;
         fence?: number;
         tags?: string[];
+        lineageId?: string;
+        lineageFence?: number;
+        idempotencyKey?: string;
       },
     ): Promise<ArtifactPutResponse> {
-      // Local DIVERGENCE (Task 14): the embedded artifact backend's writeText /
-      // put / upsertPointer chain carries no `tags` column, so artifact tags are
-      // not persisted locally. The opt is accepted (to keep the surface aligned
-      // with the HTTP factory) but is a no-op here.
-      const { tags: _tags, ...writeOpts } = opts;
-      const { key, bytes } = await artifacts.writeText(content, writeOpts);
-      // The embedded backend's put is INSERT-OR-IGNORE on the content-addressed
-      // key, so it does not surface a dedup flag; report false (the response
-      // contract requires the field).
-      return { ok: true, key, bytes, deduplicated: false };
+      const result = await artifacts.writeText(content, opts);
+      return { ok: true, ...result };
     },
 
-    async readText(
-      key: string,
-    ): Promise<{ content: string; mimeType: string }> {
+    async readText(key: string): Promise<{
+      content: string;
+      mimeType: string;
+      pointer?: import("@tila/schemas").ArtifactRevision;
+    }> {
       const result = await artifacts.readText(key);
       if (!result) throw new Error(`Artifact not found: ${key}`);
       return result;
@@ -733,41 +787,105 @@ function createLocalGateMethods(project: EmbeddedProject) {
 function createLocalSignalMethods(project: EmbeddedProject) {
   return {
     async inbox(): Promise<InboxResponse> {
-      const signals = await project.listSignals("local");
-      // SignalRecord.kind is widened to `string`; the wire Signal.kind is the
-      // SignalKind enum. The stored kinds ARE valid members (written via the
-      // same enum on send), so narrow with a typed assertion per row.
-      return {
-        ok: true,
-        signals: signals.map((s) => ({
-          ...s,
-          kind: s.kind as Signal["kind"],
-        })),
-      };
+      return { ok: true, signals: await project.listSignals() };
     },
 
     async send(req: SendSignalRequest): Promise<SendSignalResponse> {
-      const { id } = await project.sendSignal(
-        {
-          target: req.target,
-          kind: req.kind,
-          resource: req.resource,
-          payload: req.payload,
-          ttl_ms: req.ttl_ms,
-        },
-        "local",
-      );
-      return { ok: true, id };
+      const input = SendSignalRequestSchema.parse(req);
+      try {
+        const result = await project.sendSignal(input);
+        return { ok: true, ...result };
+      } catch (error) {
+        if (error instanceof signalOps.SignalGroupNotFoundError) {
+          throw new TilaApiError(
+            404,
+            "signal-group-not-found",
+            "Signal group not found",
+            false,
+          );
+        }
+        if (error instanceof signalOps.NoActiveRecipientsError) {
+          throw new TilaApiError(
+            409,
+            "no-active-recipients",
+            "Signal target has no active recipients",
+            false,
+          );
+        }
+        throw error;
+      }
     },
 
-    async ack(_signalId: string): Promise<AckSignalResponse> {
-      // The wire AckSignalResponse is just `{ ok: true }`; the embedded ack's
-      // `found`/`authorized` flags are not part of the wire shape, so they are
-      // intentionally dropped (the HTTP factory's `ack` also returns only
-      // `{ ok: true }`). Local mode is single-machine: the acker is "local",
-      // matching the inbox identity used in `listSignals("local")`.
-      await project.ackSignal(_signalId, "local");
+    async ack(signalId: string): Promise<AckSignalResponse> {
+      const result = await project.ackSignal(signalId);
+      if (!result.found) {
+        throw new TilaApiError(404, "not-found", "Signal not found", false);
+      }
+      if (result.expired) {
+        throw new TilaApiError(
+          410,
+          "signal-expired",
+          "Signal has expired",
+          false,
+        );
+      }
+      if (!result.authorized) {
+        throw new TilaApiError(
+          403,
+          "forbidden",
+          "Only this signal delivery's participant may acknowledge it",
+          false,
+        );
+      }
       return { ok: true };
+    },
+
+    async history(
+      options: { limit?: number; cursor?: string } = {},
+    ): Promise<SignalHistoryResponse> {
+      return { ok: true, ...(await project.historySignals(options)) };
+    },
+
+    groups: {
+      async list(): Promise<SignalGroupsResponse> {
+        return { ok: true, groups: await project.listSignalGroups() };
+      },
+      async get(groupId: string): Promise<SignalGroupResponse> {
+        const id = SignalGroupIdSchema.parse(groupId);
+        const group = await project.getSignalGroup(id);
+        if (!group) {
+          throw new TilaApiError(
+            404,
+            "signal-group-not-found",
+            "Signal group not found",
+            false,
+          );
+        }
+        return { ok: true, group };
+      },
+      async set(
+        groupId: string,
+        input: { name: string; principal_ids: string[] },
+      ): Promise<SignalGroupResponse> {
+        const id = SignalGroupIdSchema.parse(groupId);
+        const body = SetSignalGroupRequestSchema.parse(input);
+        return {
+          ok: true,
+          group: await project.setSignalGroup(id, body),
+        };
+      },
+      async delete(groupId: string) {
+        const id = SignalGroupIdSchema.parse(groupId);
+        if (!(await project.deleteSignalGroup(id))) {
+          throw new TilaApiError(
+            404,
+            "signal-group-not-found",
+            "Signal group not found",
+            false,
+          );
+        }
+        return { ok: true } as const;
+      },
     },
   };
 }
@@ -775,6 +893,15 @@ function createLocalSignalMethods(project: EmbeddedProject) {
 /** Journal methods (mirrors `createJournalMethods` in `journal.ts`). */
 function createLocalJournalMethods(project: EmbeddedProject) {
   return {
+    replay: (input: JournalReplayRequest) => project.replayJournal(input),
+    getCursor: async () => ({
+      ok: true as const,
+      cursor: await project.getJournalCursor(),
+    }),
+    acknowledge: async (input: { seq: number }) => ({
+      ok: true as const,
+      cursor: await project.acknowledgeJournal(input),
+    }),
     async query(opts?: {
       resource?: string;
       kind?: string;
@@ -978,6 +1105,11 @@ function createLocalTemplateMethods(project: EmbeddedProject) {
  */
 function createLocalTokenMethods() {
   return {
+    async rotate(
+      ..._args: Parameters<TilaFacade["tokens"]["rotate"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("tokens.rotate");
+    },
     // `issue`/`revoke` carry the HTTP facade's explicit parameter shape (derived
     // from `TilaFacade["tokens"]` so they cannot drift) — a zero-param stub would
     // make `_assertLocalSurfaceMatchesFacade` pass vacuously for them. `list` is
@@ -1033,6 +1165,59 @@ function createLocalIndexMethods() {
  * `EmbeddedArtifactBackend`. The returned object's keys + method shapes mirror
  * the HTTP facade so `createTila`'s two branches are interchangeable.
  */
+function createLocalServiceAccountMethods() {
+  return {
+    async list(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["list"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.list");
+    },
+    async create(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["create"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.create");
+    },
+    async update(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["update"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.update");
+    },
+    async revoke(
+      ..._args: Parameters<TilaFacade["serviceAccounts"]["revoke"]>
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.revoke");
+    },
+    async listWorkloadBindings(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["listWorkloadBindings"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.listWorkloadBindings");
+    },
+    async createWorkloadBinding(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["createWorkloadBinding"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.createWorkloadBinding");
+    },
+    async updateWorkloadBinding(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["updateWorkloadBinding"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.updateWorkloadBinding");
+    },
+    async revokeWorkloadBinding(
+      ..._args: Parameters<
+        TilaFacade["serviceAccounts"]["revokeWorkloadBinding"]
+      >
+    ): Promise<never> {
+      throw new LocalUnsupportedError("serviceAccounts.revokeWorkloadBinding");
+    },
+  };
+}
+
 export function buildLocalResources(
   project: EmbeddedProject,
   artifacts: EmbeddedArtifactBackend,
@@ -1045,12 +1230,34 @@ export function buildLocalResources(
     gates: createLocalGateMethods(project),
     signals: createLocalSignalMethods(project),
     journal: createLocalJournalMethods(project),
+    reentry: (input: ReentryRequest = {}) => project.reentry(input),
+    handoffs: {
+      create: async (input: CreateHandoffOptions) => ({
+        ok: true as const,
+        handoff: await project.createHandoff({
+          ...input,
+          id: input.id ?? crypto.randomUUID(),
+        }),
+      }),
+      get: async (id: string) => {
+        const handoff = await project.getHandoff(id);
+        if (!handoff)
+          throw new ContinuityError(
+            "handoff-not-found",
+            "Handoff does not exist",
+            404,
+          );
+        return { ok: true as const, handoff };
+      },
+      list: (input: HandoffListRequest = {}) => project.listHandoffs(input),
+    },
     presence: createLocalPresenceMethods(project),
     schema: createLocalSchemaMethods(project),
     summary: createLocalSummaryMethods(project),
     search: createLocalSearchMethods(project),
     templates: createLocalTemplateMethods(project),
     tokens: createLocalTokenMethods(),
+    serviceAccounts: createLocalServiceAccountMethods(),
     indexes: createLocalIndexMethods(),
   };
 }
@@ -1088,12 +1295,15 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   gates: true,
   signals: true,
   journal: true,
+  handoffs: true,
+  reentry: true,
   presence: true,
   schema: true,
   summary: true,
   search: true,
   templates: true,
   tokens: true,
+  serviceAccounts: true,
   indexes: true,
 };
 void _assertLocalSurfaceMatchesFacade;

@@ -255,8 +255,8 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     await runCmd(getSubCommand(cmd, "list"), { compact: true, json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.count).toBe(1);
-    const e = out.entities[0];
+    expect(out.meta.count).toBe(1);
+    const e = out.result.items[0];
     // Same columns/fields as the old remote ?compact=true payload.
     expect(e).toMatchObject({
       id: "T-1",
@@ -279,9 +279,9 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     // Non-compact --parent: only the two children.
     await runCmd(getSubCommand(cmd, "list"), { parent: "P", json: true });
     const nonCompact = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(nonCompact.entities.map((e: { id: string }) => e.id).sort()).toEqual(
-      ["C1", "C2"],
-    );
+    expect(
+      nonCompact.result.items.map((e: { id: string }) => e.id).sort(),
+    ).toEqual(["C1", "C2"]);
 
     // Compact --parent: same two children.
     logSpy.mockClear();
@@ -291,10 +291,9 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
       json: true,
     });
     const compact = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(compact.entities.map((e: { id: string }) => e.id).sort()).toEqual([
-      "C1",
-      "C2",
-    ]);
+    expect(
+      compact.result.items.map((e: { id: string }) => e.id).sort(),
+    ).toEqual(["C1", "C2"]);
   });
 
   it("ready returns unblocked tasks from the local backend", async () => {
@@ -311,7 +310,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     await runCmd(getSubCommand(cmd, "ready"), { json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    const ids = out.entities.map((e: { id: string }) => e.id).sort();
+    const ids = out.result.items.map((e: { id: string }) => e.id).sort();
     expect(ids).toEqual(["blocker", "free"]);
   });
 
@@ -328,9 +327,9 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     await runCmd(getSubCommand(cmd, "tree"), { json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.count).toBe(2);
+    expect(out.result.count).toBe(2);
     expect(
-      out.relationships.some(
+      out.result.relationships.some(
         (r: { from_id: string; to_id: string; type: string }) =>
           r.from_id === "root" &&
           r.to_id === "child" &&
@@ -473,8 +472,8 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
-    expect(payload.code).toBe("stale-fence");
-    expect(typeof payload.message).toBe("string");
+    expect(payload.error.kind).toBe("stale-fence");
+    expect(typeof payload.error.message).toBe("string");
   });
 
   it("artifact-ref add -> list round-trips against the local backend", async () => {
@@ -503,8 +502,8 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
       json: true,
     });
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.references).toHaveLength(1);
-    expect(out.references[0]).toMatchObject({
+    expect(out.result.references).toHaveLength(1);
+    expect(out.result.references[0]).toMatchObject({
       entity_id: "T-ref",
       artifact_key: "plans/T-ref/abc.md",
       slot: "plan",

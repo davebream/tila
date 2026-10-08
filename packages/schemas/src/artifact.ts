@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { ArtifactTrustFieldsSchema } from "./artifact-review";
 
 // --- Artifact Pointers (DO SQLite: artifact_pointers) ---
 
-export const ArtifactPointerSchema = z.object({
+export const ArtifactPointerSchema = ArtifactTrustFieldsSchema.extend({
   r2_key: z.string(),
   resource: z.string().nullable(),
   kind: z.string(), // open set, config-defined per tila.schema.toml
@@ -21,7 +22,7 @@ export type ArtifactPointer = z.infer<typeof ArtifactPointerSchema>;
 
 // --- Entity-Artifact References (DO SQLite: entity_artifact_references) ---
 
-export const EntityArtifactReferenceSchema = z.object({
+export const EntityArtifactReferenceSchema = ArtifactTrustFieldsSchema.extend({
   entity_id: z.string(),
   artifact_key: z.string(),
   slot: z.string(),
@@ -60,7 +61,7 @@ export type ArtifactRelationship = z.infer<typeof ArtifactRelationshipSchema>;
 
 // --- Artifact Search Results (DO SQLite: artifact_search_docs + FTS5) ---
 
-export const ArtifactSearchResultSchema = z.object({
+export const ArtifactSearchResultSchema = ArtifactTrustFieldsSchema.extend({
   r2_key: z.string(),
   kind: z.string(),
   resource: z.string().nullable(),

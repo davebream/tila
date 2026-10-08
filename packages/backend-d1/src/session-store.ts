@@ -9,7 +9,12 @@ export interface SessionResult {
   principalId: string;
   scopes: string;
   permission: string;
+  role?: string | null;
+  membershipSource?: string | null;
+  sourceRepoId?: number | null;
   expiresAt: number;
+  /** Unix ms of the last interactive authentication (falls back to created_at). */
+  authenticatedAt: number;
 }
 
 export class D1SessionStore {
@@ -27,8 +32,14 @@ export class D1SessionStore {
     principalId: string;
     scopes: string;
     permission: string;
+    role?: string;
+    membershipSource?: string;
+    sourceRepoId?: number;
     expiresAt: number;
+    /** Defaults to now; pass the original value when replacing a session. */
+    authenticatedAt?: number;
   }): Promise<void> {
+    const createdAt = Date.now();
     await this.db.insert(sessions).values({
       session_hash: params.sessionHash,
       project_id: params.projectId,
@@ -37,8 +48,12 @@ export class D1SessionStore {
       principal_id: params.principalId,
       scopes: params.scopes,
       permission: params.permission,
-      created_at: Date.now(),
+      role: params.role ?? null,
+      membership_source: params.membershipSource ?? null,
+      source_repo_id: params.sourceRepoId ?? null,
+      created_at: createdAt,
       expires_at: params.expiresAt,
+      authenticated_at: params.authenticatedAt ?? createdAt,
     });
   }
 
@@ -61,7 +76,11 @@ export class D1SessionStore {
       principalId: row.principal_id,
       scopes: row.scopes,
       permission: row.permission,
+      role: row.role,
+      membershipSource: row.membership_source,
+      sourceRepoId: row.source_repo_id,
       expiresAt: row.expires_at,
+      authenticatedAt: row.authenticated_at ?? row.created_at,
     };
   }
 

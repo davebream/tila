@@ -69,7 +69,14 @@ New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
 
 try {
     Write-Host "Downloading $BinaryFilename ($ReleaseTag)..."
-    Invoke-WebRequest -Uri $BinaryUrl -OutFile (Join-Path $TmpDir $BinaryFilename) -UseBasicParsing
+    $AssetFilename = "$BinaryFilename.gz"
+    try {
+        Invoke-WebRequest -Uri "$BinaryUrl.gz" -OutFile (Join-Path $TmpDir $AssetFilename) -UseBasicParsing
+    } catch {
+        if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) { throw }
+        $AssetFilename = $BinaryFilename
+        Invoke-WebRequest -Uri $BinaryUrl -OutFile (Join-Path $TmpDir $AssetFilename) -UseBasicParsing
+    }
 
     Write-Host "Downloading checksums..."
     Invoke-WebRequest -Uri $ChecksumUrl -OutFile (Join-Path $TmpDir "checksums.txt") -UseBasicParsing
@@ -77,14 +84,15 @@ try {
     # --- Hash verification ---
     Write-Host "Verifying SHA-256 checksum..."
     $checksumContent = Get-Content (Join-Path $TmpDir "checksums.txt")
-    $expectedLine = $checksumContent | Select-String -Pattern $BinaryFilename
+    $expectedLine = @($checksumContent | Where-Object { ($_ -split '\s+')[1] -ceq $AssetFilename })
+    if ($expectedLine.Count -ne 1) { throw "Expected exactly one checksum for $AssetFilename" }
     if (-not $expectedLine) {
         Write-Error "Binary $BinaryFilename not found in checksums.txt"
         exit 1
     }
-    $expectedHash = ($expectedLine -split '\s+')[0]
+    $expectedHash = ($expectedLine[0] -split '\s+')[0]
 
-    $actualHash = (Get-FileHash (Join-Path $TmpDir $BinaryFilename) -Algorithm SHA256).Hash.ToLower()
+    $actualHash = (Get-FileHash (Join-Path $TmpDir $AssetFilename) -Algorithm SHA256).Hash.ToLower()
 
     if ($actualHash -ne $expectedHash) {
         Write-Error @"
@@ -96,6 +104,17 @@ Download may be corrupt or tampered. Aborting.
         exit 1
     }
     Write-Host "Checksum verified." -ForegroundColor Green
+
+    if ($AssetFilename -ne $BinaryFilename) {
+        $source = [IO.File]::OpenRead((Join-Path $TmpDir $AssetFilename))
+        try {
+            $gzip = New-Object IO.Compression.GZipStream($source, [IO.Compression.CompressionMode]::Decompress)
+            try {
+                $destination = [IO.File]::Create((Join-Path $TmpDir $BinaryFilename))
+                try { $gzip.CopyTo($destination) } finally { $destination.Dispose() }
+            } finally { $gzip.Dispose() }
+        } finally { $source.Dispose() }
+    }
 
     # --- Install ---
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null

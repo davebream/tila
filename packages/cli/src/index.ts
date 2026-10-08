@@ -1,6 +1,7 @@
-import { type CommandDef, defineCommand, runMain } from "citty";
+import { type CommandDef, defineCommand } from "citty";
 import { withErrorBoundary } from "./lib/error-boundary";
-import { parseGlobalFlags, setGlobalFlags } from "./lib/global-flags";
+import { flushOutput } from "./lib/output";
+import { runCli } from "./lib/run-cli";
 import { VERSION as version } from "./version";
 
 // Wrap each lazily-loaded command tree so an uncaught backend error (e.g. a
@@ -17,7 +18,6 @@ const load = (loader: () => Promise<CommandModule>): Promise<CommandDef> =>
 // Pre-dispatch: parse global flags before citty processes argv.
 // Citty 0.2.2 has NO arg inheritance, so global context flags must be
 // extracted here and stored in the singleton for commands to read via getGlobalFlags().
-setGlobalFlags(parseGlobalFlags(process.argv.slice(2)));
 
 const main = defineCommand({
   meta: {
@@ -44,6 +44,22 @@ const main = defineCommand({
     },
   },
   subCommands: {
+    complete: defineCommand({
+      meta: {
+        name: "complete",
+        description:
+          "Generate bash, zsh, fish or powershell completion scripts",
+      },
+      args: {
+        shell: {
+          type: "positional",
+          required: true,
+          description: "bash | zsh | fish | powershell",
+        },
+      },
+      run() {},
+    }),
+    lifecycle: () => load(() => import("./commands/lifecycle")),
     task: () => load(() => import("./commands/task")),
     // @deprecated -- both "entity" and "work-unit" are deprecated aliases; use "task"
     entity: () => load(() => import("./commands/entity")),
@@ -66,6 +82,7 @@ const main = defineCommand({
     deploy: () => load(() => import("./commands/deploy")),
     reset: () => load(() => import("./commands/reset")),
     token: () => load(() => import("./commands/token")),
+    "service-account": () => load(() => import("./commands/service-account")),
     repos: () => load(() => import("./commands/repos")),
     admin: () => load(() => import("./commands/admin")),
     auth: () => load(() => import("./commands/auth")),
@@ -82,4 +99,6 @@ const main = defineCommand({
   },
 });
 
-runMain(main);
+await runCli(main as unknown as CommandDef, process.argv.slice(2), version);
+
+await flushOutput();

@@ -16,77 +16,70 @@ import { describe, expect, it } from "vitest";
  */
 
 describe("addArtifactRelationship", () => {
-  it("should write bidirectional rows for entry-of type", () => {
-    // Stub: requires in-process DO SQLite mock
-    // Expected behavior:
-    // 1. Call addArtifactRelationship(db, entryKey, indexKey, "entry-of", {}, "test-actor")
-    // 2. Query artifact_relationships for from_key = entryKey, type = "entry-of"
-    //    -> row exists with to_key = indexKey
-    // 3. Query artifact_relationships for from_key = indexKey, type = "index-of"
-    //    -> row exists with to_key = entryKey
-    expect(true).toBe(true); // placeholder — AC1
-  });
+  // Stub: requires in-process DO SQLite mock
+  // Expected behavior:
+  // 1. Call addArtifactRelationship(db, entryKey, indexKey, "entry-of", {}, "test-actor")
+  // 2. Query artifact_relationships for from_key = entryKey, type = "entry-of"
+  //    -> row exists with to_key = indexKey
+  // 3. Query artifact_relationships for from_key = indexKey, type = "index-of"
+  //    -> row exists with to_key = entryKey
+  // placeholder — AC1
+  it.todo("should write bidirectional rows for entry-of type");
 
-  it("should write single row for non-entry-of types", () => {
-    // Stub: requires in-process DO SQLite mock
-    // Expected behavior:
-    // 1. Call addArtifactRelationship(db, keyA, keyB, "references", {}, "test-actor")
-    // 2. Query artifact_relationships for from_key = keyA, type = "references"
-    //    -> row exists with to_key = keyB
-    // 3. Query artifact_relationships for from_key = keyB, type = "index-of"
-    //    -> NO row exists (no bidirectional write for non-entry-of types)
-    expect(true).toBe(true); // placeholder
-  });
+  // Stub: requires in-process DO SQLite mock
+  // Expected behavior:
+  // 1. Call addArtifactRelationship(db, keyA, keyB, "references", {}, "test-actor")
+  // 2. Query artifact_relationships for from_key = keyA, type = "references"
+  //    -> row exists with to_key = keyB
+  // 3. Query artifact_relationships for from_key = keyB, type = "index-of"
+  //    -> NO row exists (no bidirectional write for non-entry-of types)
+  // placeholder
+  it.todo("should write single row for non-entry-of types");
 
-  it("should be idempotent on duplicate calls", () => {
-    // Stub: requires in-process DO SQLite mock
-    // Expected behavior:
-    // 1. Call addArtifactRelationship twice with same args
-    // 2. INSERT OR IGNORE means second call is no-op
-    // 3. Query artifact_relationships -> exactly one row per direction
-    expect(true).toBe(true); // placeholder
-  });
+  // Stub: requires in-process DO SQLite mock
+  // Expected behavior:
+  // 1. Call addArtifactRelationship twice with same args
+  // 2. INSERT OR IGNORE means second call is no-op
+  // 3. Query artifact_relationships -> exactly one row per direction
+  // placeholder
+  it.todo("should be idempotent on duplicate calls");
 
-  it("should append artifact.relationship.added journal event", () => {
-    // Stub: requires in-process DO SQLite mock
-    // Expected behavior:
-    // 1. Call addArtifactRelationship(db, fromKey, toKey, "entry-of", {}, "actor")
-    // 2. Query journal for kind = "artifact.relationship.added"
-    //    -> row exists with resource = fromKey, actor = "actor"
-    //    -> data contains { type: "entry-of", to_key: toKey }
-    expect(true).toBe(true); // placeholder — AC4
-  });
+  // Stub: requires in-process DO SQLite mock
+  // Expected behavior:
+  // 1. Call addArtifactRelationship(db, fromKey, toKey, "entry-of", {}, "actor")
+  // 2. Query journal for kind = "artifact.relationship.added"
+  //    -> row exists with resource = fromKey, actor = "actor"
+  //    -> data contains { type: "entry-of", to_key: toKey }
+  // placeholder — AC4
+  it.todo("should append artifact.relationship.added journal event");
 });
 
 describe("listIndexEntries", () => {
-  it("should return entries ordered by produced_at DESC", () => {
-    // Stub: requires in-process DO SQLite mock
-    // Expected behavior:
-    // 1. Seed artifact_pointers with two entries (produced_at: 1000, 2000)
-    // 2. Seed artifact_relationships with entry-of edges to index
-    // 3. Call listIndexEntries(db, indexKey)
-    // 4. First entry has produced_at: 2000 (most recent first)
-    expect(true).toBe(true); // placeholder — AC2
-  });
+  // Stub: requires in-process DO SQLite mock
+  // Expected behavior:
+  // 1. Seed artifact_pointers with two entries (produced_at: 1000, 2000)
+  // 2. Seed artifact_relationships with entry-of edges to index
+  // 3. Call listIndexEntries(db, indexKey)
+  // 4. First entry has produced_at: 2000 (most recent first)
+  // placeholder — AC2
+  it.todo("should return entries ordered by produced_at DESC");
 
-  it("should include tombstoned entries with exists: false", () => {
-    // Stub: requires in-process DO SQLite mock
-    // Expected behavior:
-    // 1. Seed artifact_pointers with one live entry and one tombstoned entry
-    // 2. Seed artifact_relationships with entry-of edges for both
-    // 3. Call listIndexEntries(db, indexKey)
-    // 4. Tombstoned entry appears with exists: false
-    // 5. Live entry appears with exists: true
-    expect(true).toBe(true); // placeholder — AC5
-  });
+  // Stub: requires in-process DO SQLite mock
+  // Expected behavior:
+  // 1. Seed artifact_pointers with one live entry and one tombstoned entry
+  // 2. Seed artifact_relationships with entry-of edges for both
+  // 3. Call listIndexEntries(db, indexKey)
+  // 4. Tombstoned entry appears with exists: false
+  // 5. Live entry appears with exists: true
+  // placeholder — AC5
+  it.todo("should include tombstoned entries with exists: false");
 
-  it("should return empty array for unknown index key", () => {
-    // Stub: requires in-process DO SQLite mock
-    // Expected behavior:
-    // 1. Call listIndexEntries(db, "nonexistent-key")
-    // 2. Returns []
-    expect(true).toBe(true); // placeholder
-  });
+  // Stub: requires in-process DO SQLite mock
+  // Expected behavior:
+  // 1. Call listIndexEntries(db, "nonexistent-key")
+  // 2. Returns []
+  // placeholder
+  it.todo("should return empty array for unknown index key");
 });
 
 describe("Worker routes (stubs -- awaiting pool-workers)", () => {

@@ -1,4 +1,5 @@
 import { assertFence } from "@tila/core";
+import type { NamespaceRestrictions } from "@tila/schemas";
 import {
   type RecordDefinition,
   type RecordHistoryItem,
@@ -12,6 +13,7 @@ import {
 import { type SQL, and, desc, eq, or, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { SearchQueryError, validateFtsQuery } from "./artifact-ops";
+import { recordRestrictionCondition } from "./credential-policy";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
@@ -1356,6 +1358,7 @@ export function listRecords(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   filter: {
     type: string;
+    restrictions?: NamespaceRestrictions;
     includeArchived?: boolean;
     tag?: string;
     tagFilter?: string[];
@@ -1377,6 +1380,8 @@ export function listRecords(
   }
 
   const conditions: SQL[] = [eq(schema.records.type, filter.type)];
+  const restricted = recordRestrictionCondition(filter.restrictions);
+  if (restricted) conditions.push(restricted);
 
   if (!filter.includeArchived) {
     conditions.push(eq(schema.records.archived, 0));
@@ -1539,11 +1544,17 @@ export function listRecordHistory(
 
 export function listRecordTypesInUse(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  restrictions?: NamespaceRestrictions,
 ): string[] {
   const rows = db
     .selectDistinct({ type: schema.records.type })
     .from(schema.records)
-    .where(eq(schema.records.archived, 0))
+    .where(
+      and(
+        eq(schema.records.archived, 0),
+        recordRestrictionCondition(restrictions),
+      ),
+    )
     .all();
   return rows.map((r) => r.type).sort();
 }

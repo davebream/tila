@@ -1,3 +1,4 @@
+import type { ArtifactProvenance, ArtifactReviewSummary } from "@tila/schemas";
 /**
  * artifact-service.ts
  *
@@ -40,6 +41,9 @@ export type CompensationResult = {
 };
 
 export interface GrepCandidate {
+  provenance?: ArtifactProvenance | null;
+  revision_creation?: ArtifactProvenance | null;
+  review?: ArtifactReviewSummary;
   r2_key: string;
   kind: string;
   resource: string | null;
@@ -49,6 +53,9 @@ export interface GrepCandidate {
 }
 
 export type GrepResult = {
+  provenance?: ArtifactProvenance | null;
+  revision_creation?: ArtifactProvenance | null;
+  review?: ArtifactReviewSummary;
   key: string;
   kind: string;
   resource: string | null;
@@ -351,6 +358,9 @@ export async function scanR2Candidate(
 
     if (acc.lines.length > 0) {
       const result: GrepResult = {
+        provenance: candidate.provenance,
+        revision_creation: candidate.revision_creation,
+        review: candidate.review,
         key: candidate.r2_key,
         kind: candidate.kind,
         resource: candidate.resource,

@@ -1,0 +1,7 @@
+{
+  "name": "tila-gunshi-parity",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "bun test" },
+  "dependencies": { "citty": "^0.2.2", "gunshi": "0.37.3" }
+}

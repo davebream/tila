@@ -4,19 +4,44 @@
 
 ---
 
-## 0. Name and scope
+## 0. Name and scope — amended 2026-09-20
 
-**`tila`** — Finnish for "state, space, condition, mode." A state-and-coordination engine for multi-machine agentic work. Generic, unopinionated, reusable. Includes the Cloudflare Worker, all backends (D1, DO, R2), and the `tila` CLI.
+**tila is one development-management product with a reusable coordination core.**
+Keep product workflows, service contracts, host integration and future native clients
+in this repository. Reusing external runtimes does not require a second product repo.
 
-**What tila is:** the primitives a higher-level framework needs to coordinate work across machines. CRUD on entities (tasks, issues, epics, or any user-defined type), first-writer-wins claims with fencing tokens, append-only journal, content-addressed artifact storage with lifecycle, schema-as-config.
+| Layer | Responsibility |
+|---|---|
+| Coordination core | Typed state, memberships, claims/fences, durable journal and artifacts |
+| Management service | Tasks, run attempts, assignments, questions, decisions and orchestration policy |
+| Host integration | Bind assignments to local processes/provider sessions; reuse a runtime where possible |
+| Clients | CLI, MCP, web and later Mac/iPhone views over the same service contracts |
 
-**What tila is not:** a workflow orchestrator, an opinion about how AI agents should plan or review work, a bundled set of agent prompts, or a pipeline runner. Those things belong in a framework that consumes tila — and a framework is exactly the kind of thing tila is designed to support, but it is not itself part of tila.
+The first topology is one orchestrator plus workers. Roles belong to a run; they are
+not permanent agent types. A task can have several attempts, and an attempt can
+outlive a provider session. Authenticated principals, runtime participants and
+provider session IDs remain distinct.
 
-**The test for any feature:** would this make sense for non-software-development agentic work — content moderation, research, automation pipelines, anything where multiple workers coordinate over a shared state? If yes, it belongs in tila. If no, it belongs in a framework on top.
+Cloudflare is the target authoritative shared backend. Local probes, tests, caches,
+execution and sandboxes remain useful. Standalone local persistence is shipped
+compatibility to retire through an explicit migration, not a new parity target.
+Do not delete shared `ops-sqlite` when retiring its local consumer.
 
-**CLI surface:** `tila` is the only binary. Short verbs, single-purpose, fast. `tila task claim T-142`, `tila artifact put plan.md`, `tila presence`, `tila state`. No workflow commands.
+The target auth path uses project API keys bound to stable native principals and
+explicit memberships. Keep #184 / #218's membership model. Full bootstrap tokens
+currently grant owner access; they are not suitable ordinary worker credentials.
+GitHub App/session paths remain implemented until key-only onboarding and migration
+are complete; removing them is a separate change with revocation/access tests.
 
-**The hypothetical framework consumer.** Throughout this document, an imagined framework named "sisu" is sometimes mentioned to clarify *what tila must support*. Sisu is not a thing tila ships. It's a thought-experiment consumer — a stand-in for any future framework that will run on top of tila — used to validate that tila's primitives are generic enough to support workflow orchestration without being workflow-specific.
+Evaluate Herdr before building a custom process supervisor. A host runtime owns
+processes and terminals; tila owns durable assignment and decision semantics.
+cmux remains inspiration, not a cross-platform runtime dependency. The integration
+must work from Mac cmux/tmux and Linux VPS tmux. No native terminal renderer,
+Iroh transport or sandbox scheduler is required for the first workflow.
+
+This amendment supersedes earlier engine-only exclusions and future-version sketches
+below. Existing persistence and correctness guarantees still apply. The active
+sequence and researched runtime tradeoffs are in [the roadmap](03-ROADMAP.md).
 
 ---
 
@@ -33,7 +58,7 @@ The settled persistence model. Each layer exists because it has a distinct write
 **Why DO SQLite for project state, not D1.** When this design started in 2024, D1 was the obvious choice for entity storage and the DO held only ephemeral coordination state. In 2026 — with DO SQLite GA, 10GB per DO, point-in-time recovery, and sub-millisecond reads — the cleaner architecture is to put *all* per-project state inside a single DO. Three reasons:
 
 1. **Coordination and entity writes commit in one transaction.** Claiming a task and updating its status used to require touching two backends (D1 for the entity, DO for the claim); writes had to be journal-first-then-DO to be recoverable. In the DO-centric model, both happen in one SQLite transaction. The two-write problem dissolves.
-2. **Hot-path latency drops 5-10x.** D1 reads from a Worker are ~30ms; DO SQLite reads from inside the DO are <1ms. The latency budget for a `tila task show` collapses from "Worker → D1 → reply" (~40ms) to "Worker → DO → reply" (~10ms).
+2. **Hot-path latency drops 5-10x.** D1 reads from a Worker are ~30ms; DO SQLite reads from inside the DO are <1ms. The latency budget for a `tila task show` collapses from "Worker → D1 → reply" (~40ms) to "Worker → DO → reply" (~10ms). These were design estimates; the DO-side cost is now measured by the `inproc` and `embedded` tiers and the end-to-end cost by the `http` tier in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md).
 3. **The single-DO serialization is the actual correctness mechanism.** The DO already serializes all writes for coordination. Co-locating entities means the same serialization protects entity invariants for free. No additional locking, no cross-backend transactions.
 
 **Why D1 still exists.** Two narrow uses: API token storage (must be readable before the DO is contacted, to authenticate the request) and idempotency keys (cross-project scope by design). Both are tiny tables with light access patterns. D1's free tier handles these comfortably.
@@ -67,7 +92,7 @@ Every authenticated client session has a canonical identity context: `principal_
 
 This applies uniformly: tasks, issues, epics, artifacts, file reservations. The semantics differ (exclusive vs. owner mode, short vs. long TTL), but the fencing-token discipline is the same everywhere.
 
-**Cadence target.** The coordination layer must support claim/renew/release operations at ~500ms cadence across 3–6 machines without rate-limit pain or correctness loss. This is the design target that selected Cloudflare DOs over Workers KV, GitHub Issues, IPNS, and DNS-as-KV. v0.1 must meet this in real use.
+**Cadence target.** The coordination layer must support claim/renew/release operations at ~500ms cadence across 3–6 machines without rate-limit pain or correctness loss. This is the design target that selected Cloudflare DOs over Workers KV, GitHub Issues, IPNS, and DNS-as-KV. v0.1 must meet this in real use. It is checked by `claims-uncontended --cadence 500ms` in the benchmark harness, which reports missed deadlines per run (see [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md) and `docs/benchmarks/README.md`).
 
 **File reservations are first-class.** `file:src/auth.rb` is as legitimate a resource as `task:T-142`. Two autopilots editing the same file simultaneously is a real failure mode the engine prevents via the same claim/fence mechanism. Framework consumers take file reservations before destructive edits.
 
@@ -125,13 +150,13 @@ Stated explicitly because it shapes everything that follows. The unfilled gap in
 
 These two failure modes from earlier approaches are retired, not iterated forward:
 
-**Mode 1 (everything in the project repo)** is replaced by tila running on Cloudflare. D1 holds entities and the journal; DO holds live coordination; R2 holds artifacts. The project repo only contains `.tila/config.toml` (committed) and `.tila/.env` (gitignored). No autopilot exhaust touches git.
+**Mode 1 (everything in the project repo)** is replaced by tila running on Cloudflare. DO SQLite holds entities, the journal and coordination; D1 holds global auth/registry state; R2 holds artifacts. The project repo only contains `.tila/config.toml` (committed) and `.tila/.env` (gitignored). No autopilot exhaust touches git.
 
 Do NOT add a "local-only" or "git-synced" mode as a feature. Multi-machine sync via local files is exactly the failure mode being escaped from.
 
-**Amendment (v0.2 era) — DELIVERED.** A single-machine local SQLite backend is distinct from this prohibition and is now a **shipped feature** across CLI, SDK, and MCP. It targets co-located agents on one machine (laptop, VPS) using a runtime-agnostic embedded SQLite core (`@tila/backend-embedded`) with WAL mode + `busy_timeout` + application-layer busy-retry -- the same first-writer-wins correctness model as the DO, serialized via SQLite locking instead of DO single-threading. Two host wrappers consume the embedded core: `@tila/backend-local` (Bun, `bun:sqlite`) for the CLI, and `tila-sdk/local` (plain Node, `better-sqlite3` + `node:fs`) for the SDK (`createTila({ backend: "local" })`) and the MCP server — so local mode now runs under plain Node, not just Bun. No multi-machine sync; no files in the project repo; no git coordination. The backend interfaces explicitly anticipate this (see Decision 1: "allow alternative implementations to be added in future versions"). `tila project create` remains the default for multi-machine teams; `tila project create --local` is the zero-setup path for solo agents on a single machine. See `docs/02-ARCHITECTURE.md` §1.6a (Embedded local persistence) for the full description, including the documented divergences (idempotency accepted-but-not-honored locally, pre-feature DB upgrade limitation).
+**Historical implementation (v0.2 era) — DELIVERED; retirement planned under §0.** A single-machine local SQLite backend is distinct from this prohibition and is now a **shipped feature** across CLI, SDK, and MCP. It targets co-located agents on one machine (laptop, VPS) using a runtime-agnostic embedded SQLite core (`@tila/backend-embedded`) with WAL mode + `busy_timeout` + application-layer busy-retry -- the same first-writer-wins correctness model as the DO, serialized via SQLite locking instead of DO single-threading. Two host wrappers consume the embedded core: `@tila/backend-local` (Bun, `bun:sqlite`) for the CLI, and `tila-sdk/local` (plain Node, `better-sqlite3` + `node:fs`) for the SDK (`createTila({ backend: "local" })`) and the MCP server — so local mode now runs under plain Node, not just Bun. No multi-machine sync; no files in the project repo; no git coordination. The backend interfaces explicitly anticipate this (see Decision 1: "allow alternative implementations to be added in future versions"). `tila project create` remains the default for multi-machine teams; `tila project create --local` is the zero-setup path for solo agents on a single machine. See `docs/02-ARCHITECTURE.md` §1.6a (Embedded local persistence) for the full description, including the documented divergences (idempotency accepted-but-not-honored locally, pre-feature DB upgrade limitation).
 
-**Mode 2 (GitHub Issues + milestones)** is replaced by tila on Cloudflare as the primary coordination layer. A GitHub adapter (v0.2) optionally mirrors entity state to Issues for human visibility. One-way mirror, D1 is the source of truth. The autopilot does not wait on PR merges for state changes.
+**Mode 2 (GitHub Issues + milestones)** is replaced by tila on Cloudflare as the primary coordination layer. A GitHub adapter (v0.2) optionally mirrors entity state to Issues for human visibility. One-way mirror, DO SQLite is the project-state source of truth. The autopilot does not wait on PR merges for state changes.
 
 ---
 
@@ -186,12 +211,12 @@ These were considered and rejected. If they come back up, point to this section.
 - **No IPNS, DNS TXT, DHT, Discord/Slack/Matrix pins, chat-as-DB.** Each fails either correctness (no CAS) or latency (propagation in seconds-to-minutes).
 - **No GitHub Contents API as primary entity backend.** Rate limits at 5K req/hr per user kill it for 6 active machines. Available as an *adapter* for users who want it; not the default.
 - **No Linear or GitHub Issues as primary entity backend.** Both available as adapters; neither shapes the default.
-- **No competitor comparisons in the README or docs.** Describe what tila does and why. Comparisons invite users to make decisions on the wrong axes.
+- **Describe shipped behavior in the README.** Technical dependency evaluations belong in the roadmap or research docs, with dated sources and explicit limits.
 - **No competing with Beads.** Beads owns the "agent memory via git-native task graph" position. tila addresses an adjacent problem (real-time multi-machine coordination with artifact lifecycle), not a directly competing one.
 - **No bundling of Dolt.** Beads' Dolt dependency is correct for its use case; tila's D1 + JSON-data column achieves the schema flexibility we need with less infrastructure.
 - **No defensive coordination against multi-version installs.** Version mismatch is detected at startup and refuses to proceed; we do not try to make incompatible versions interop.
 - **No automatic migrations across destructive schema changes.** User must supply a strategy. Silent invalidation of existing data is unacceptable.
-- **No built-in lessons-learned feature in tila.** Lessons learned is a workflow shape, not a primitive. tila provides artifact kinds, cross-references, indexes, and journal events; any framework on top of tila composes them into a retrospective workflow. Same principle for retro, post-mortem, knowledge-base, decision-log features: they belong in the framework, not the engine.
+- **Retrospectives and knowledge workflows are deferred.** They may become product features, composed from core primitives; they are not prerequisites for the first orchestrator/worker flow.
 
 ---
 
@@ -203,7 +228,7 @@ These are not problems; they are deliberate consequences of decisions made above
 - **One person per project pays the Cloudflare setup friction.** Team members join via `tila init` with no Cloudflare account of their own.
 - **R2 has no native object versioning.** Acceptable because artifacts are content-addressed and write-once; "rollback" is "link to a different artifact" at the pointer level.
 - **Workers binding API for conditional puts has reported bugs.** Use the S3 API path via `aws4fetch` from the Worker, not the Workers binding. Documented.
-- **Single DO is a throughput ceiling and single point of project failure.** A single DO handles ~1000 req/s sustained, ~10K burst. At 500ms claim cadence per machine, that's room for 40+ active machines per project before saturation. The throughput ceiling isn't the practical concern; failure isolation is — if the DO has a problem, the project is briefly unavailable. The tradeoff is taken deliberately: single-DO simplicity beats sharded complexity for tila's audience (small teams). Projects that need sharding can migrate in v0.2+ via a documented path.
+- **Single DO is a throughput ceiling and single point of project failure.** Cloudflare's platform figure is ~1000 req/s sustained per DO, ~10K burst; tila's own measured single-project throughput under contention is in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md) (`claims-contended`). At 500ms claim cadence per machine, that's room for 40+ active machines per project before saturation. The throughput ceiling isn't the practical concern; failure isolation is — if the DO has a problem, the project is briefly unavailable. The tradeoff is taken deliberately: single-DO simplicity beats sharded complexity for tila's audience (small teams). Projects that need sharding can migrate in v0.2+ via a documented path.
 - **DO SQLite limits.** 10GB per DO, sufficient for hundreds of thousands of entities and millions of journal events. When approaching the limit, the migration path is journal archival (cold-store older events to R2) before sharding the DO itself.
 - **No real-time event stream in v1.** Webhooks fire on meaningful state changes; websocket presence/event streaming is a v0.3+ feature.
 - **Free tier has real limits.** 100K DO requests/day, 5M D1 reads/day, 1M R2 Class A ops/month. At realistic team sizes these are not hit, but billing alerts should be set. The DO-first architecture is *more* friendly to free tier than the previous D1-heavy design because entity reads no longer hit D1.
@@ -220,7 +245,7 @@ A few principles to apply when decisions get ambiguous in the future:
 
 **"Does this serve me on a real project today?"** Build for the actual current use case, not the hypothetical future audience. The version of tila that works perfectly for one real user (the maintainer) is more likely to find its audience than the version optimized for hypothetical other users.
 
-**"Is this the engine's responsibility or the framework's?"** When in doubt about which layer something belongs in: primitives → tila; opinions and workflows → out of scope, belongs in a consuming framework. If the answer would be the same for a content-moderation use case as for software development, it belongs in tila.
+**Which layer owns this?** Reusable invariants belong in the core; workflow policy belongs in the management service; provider/terminal mechanics belong behind host adapters. All can live in tila. See the §0 amendment.
 
 **Opinionated by default; configurable for power users.** Most users should get a working setup without configuration. Power users should be able to customize. Avoid the trap of making everything configurable and shipping no defaults.
 
@@ -249,7 +274,7 @@ Specific platform capabilities the architecture depends on or benefits from. Nam
 
 **Required (in v0.1):**
 - **DO SQLite storage.** GA. 10GB per DO, transactional, point-in-time recovery. The primary persistence layer.
-- **Smart Placement.** Enabled in `wrangler.toml` (`placement = { mode = "smart" }`). Auto-places the Worker close to its DO. Single biggest free latency win; drops Worker→DO RTT from cross-region (~50ms) to co-located (~5ms).
+- **Smart Placement.** Enabled in `wrangler.toml` (`placement = { mode = "smart" }`). Auto-places the Worker close to its DO. Single biggest free latency win; drops Worker→DO RTT from cross-region (~50ms) to co-located (~5ms) per Cloudflare's documentation. tila does not measure the Worker→DO hop in isolation; the deployed end-to-end numbers and the DO cold-start cost are in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md).
 - **`@cloudflare/vitest-pool-workers`.** The supported test harness for Workers and DOs. v0.1 integration tests run here.
 - **`wrangler` CLI for provisioning.** Single source of truth for resource creation; tila shells out rather than re-implementing the Cloudflare API.
 
@@ -280,7 +305,7 @@ Specific platform capabilities the architecture depends on or benefits from. Nam
 
 ---
 
-## 16. The growth path, named
+## 16. Historical growth sketch — superseded by the roadmap
 
 To prevent feature creep on the wrong axis, here is what growth looks like over the next ~year:
 
@@ -496,3 +521,85 @@ full model and the code-anchored detail live in
 **Code references:** `packages/auth-store/src/resolver.ts`, `trust.ts`, `ci-policy.ts` (client
 resolution + trust); `packages/worker/src/middleware/auth.ts` (instance-binding + subject-revocation
 checks); `packages/worker/migrations/global/0017_deployment_meta.sql`, `0019_revoked_subjects.sql`.
+
+## 24. Project authority uses canonical membership policies
+
+**Decision:** Authentication establishes a canonical GitHub or OIDC principal; it does not itself
+grant project access. Every project request resolves that principal through the current D1-backed
+membership policy before route permissions are evaluated. The supported modes are `explicit`,
+`github-mirrored`, `hybrid`, and `service-only`.
+
+Roles map to the existing route tiers as `viewer → read`, `participant → write`, and
+`maintainer → admin`. `owner` adds membership and admission-policy governance but does not grant
+token management, archive, destroy, or infrastructure-secret authority. Full-scope D1 tokens remain
+the bootstrap authority. GitHub adapters can grant at most `maintainer`, are individually enabled
+and capped, and never create owners.
+
+Existing projects migrate to `hybrid`; new projects default to `explicit`. Legacy admin grants and
+OIDC allowlist entries are retained as history but are no longer authorization inputs. Membership
+revocation, its audit event, the subject tombstone, and project-cookie deletion commit in one D1
+batch. There is no positive membership cache in v1.
+
+**Code references:** `packages/backend-d1/src/project-memberships.ts`,
+`packages/worker/src/middleware/membership.ts`, and
+`packages/worker/migrations/global/0026_project_memberships.sql`.
+
+## 25. CLI invocation contract and parser evaluation (#178)
+
+**Decision (7 October 2026): retain Citty in production.** An invocation-scoped
+output module owns results, errors, diagnostics, progress and explicit protocol
+bypasses. Shared Zod contracts live in `@tila/schemas`. The registry derives
+arguments and canonical paths from command definitions and adds conservative
+mutation markers, aliases, output descriptions and common errors. Unknown commands
+are considered mutating until reviewed; these markers never add confirmation
+prompts. Only known transient failures of read-only invocations are retryable.
+
+Discovery and completion are offline and do not resolve credentials or session
+identity. Native-session identity and explicit participant overrides retain the
+existing lifecycle resolver. Hooks keep their protocol payloads and advisory exits;
+workers stay silent. Artifact provenance, revision creation and review decisions
+survive normalization. A matching content hash establishes integrity, not trust.
+
+### Selected CLI Spec v0.2 behaviors
+
+The same **clispec auditor 0.2.0** scored the downloaded v0.2.7 Darwin ARM release
+**3/25** and the candidate native executable **7/25**. The issue's historical
+24-point score is not directly comparable. Reproduce with
+`clispec --json score <executable>` after compiling the candidate.
+
+| Behavior | Decision / deviation |
+| --- | --- |
+| Output | Explicit global `--json`; human output remains the default when piped. `--output` remains a destination filename. |
+| Introspection | `tila schema` returns the document under the standard envelope's `result`. The auditor expects root-level `commands` and consequently misses several implemented behaviors. Project-schema subcommands retain their meanings. |
+| Streams | Success data goes to stdout; errors and diagnostics go to stderr. JSON diagnostics are newline-delimited objects with `type: diagnostic`. Raw bytes, tokens, hooks and completion scripts have explicit exceptions. |
+| Bounds | Existing bounded defaults and caps are retained; otherwise default to 100. Metadata distinguishes proven truncation from unknown completeness. Only supported continuations are exposed. |
+| Interaction | JSON, CI, non-TTY stdin and `--non-interactive` prohibit prompts. Existing confirmation requirements remain. No universal `--yes`, mandatory dry-run, field projection or auto-JSON policy is added. |
+
+This is partial adoption, not full conformance. Subprocess contracts test behaviors
+the auditor cannot discover through the envelope. The README documents the breaking
+JSON migration. No storage migration or server API change accompanies this work.
+
+### Gunshi signal pilot
+
+The development-only `experiments/gunshi-parity` compares Gunshi 0.37.3 with Citty
+0.2.2 across all eight signal operations using shared production handlers and an
+in-memory backend. Separate native entrypoints enable adapter size comparisons.
+The existing Incur experiment and dependencies remain unchanged.
+
+| Gate | Evidence / recommendation |
+| --- | --- |
+| Parsing and output | All eight operations match. Required-input and stale-fence failures retain structured errors and exit status. |
+| Identity and context | Explicit project/participant values stay separate across invocations. Production lifecycle tests cover native-session isolation and overrides; the pilot does not independently implement native lifecycle integration. |
+| Global flags | **Blocker:** `--project project-one group list --json` fails before dispatch. Flags after the command work. Simpler global-option handling is not demonstrated. |
+| Completion | Citty's `@bomb.sh/tab` adapter supports all four shells. Gunshi's official plugin covers bash/zsh/fish; PowerShell parity remains unproven. |
+| Bun compilation | Both native Darwin ARM64 entrypoints compile and run. With Bun 1.4.2: Citty 64,175,346 bytes; Gunshi 64,224,882 bytes (+49,536). |
+| Startup | 25 interleaved, warmed native `inbox --json` runs: median 61.75/64.09 ms and p95 64.71/66.56 ms for Citty/Gunshi. Local warm-cache measurements are illustrative, not guarantees. |
+
+The pilot borrows Incur's context, identity and structured-error checks. Green
+negative assertions record blockers, not migration approval. Reconsider migration
+only with correctness parity, simpler global flags and four-shell completion.
+
+Distribution adds deterministic gzip assets, bundle-derived SPDX SBOMs and
+attestation verification before publication. Raw assets and npm OIDC provenance
+remain supported. **Apple signing/notarization (AC-6) is deferred; this delivery
+must not close #178.** The distribution runbook records the first-release boundary.

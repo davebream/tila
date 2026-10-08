@@ -5,11 +5,17 @@ import { forwardToDO } from "./lib/do-forward";
 import { runSweep } from "./lib/sweep";
 import { createAuthMiddleware } from "./middleware/auth";
 import { createCacheMiddleware } from "./middleware/cache";
+import {
+  auxiliaryCapabilityMiddleware,
+  capabilityMiddleware,
+} from "./middleware/capability";
 import { createCorsMiddleware } from "./middleware/cors";
 import { csrfGuard } from "./middleware/csrf";
 import { errorHandler } from "./middleware/error";
 import { createIdempotencyMiddleware } from "./middleware/idempotency";
+import { projectMembershipMiddleware } from "./middleware/membership";
 import { projectMiddleware } from "./middleware/project";
+import { protectedOperationMiddleware } from "./middleware/protected-operation";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { requestIdentityMiddleware } from "./middleware/request-identity";
 import { sourceResolution } from "./middleware/source-resolution";
@@ -26,17 +32,20 @@ import {
 } from "./routes/auth-session";
 import { backup } from "./routes/backup";
 import { claims } from "./routes/claims";
+import { continuity } from "./routes/continuity";
 import { doctor } from "./routes/doctor";
 import { entities } from "./routes/entities";
 import { gates } from "./routes/gates";
 import { health } from "./routes/health";
 import { infra } from "./routes/infra";
 import { journal } from "./routes/journal";
+import { memberships } from "./routes/memberships";
 import { presence } from "./routes/presence";
 import { records } from "./routes/records";
 import { repos } from "./routes/repos";
 import { schemaRoutes } from "./routes/schema";
 import { search } from "./routes/search";
+import { serviceAccountRoutes } from "./routes/service-accounts";
 import { signals } from "./routes/signals";
 import { summary as summaryRoute } from "./routes/summary";
 import { templates } from "./routes/templates";
@@ -127,6 +136,7 @@ app.route("/", authSessionRoutes);
 const tokenRoutes = new Hono<AppEnv>();
 tokenRoutes.use("/*", createAuthMiddleware());
 tokenRoutes.use("/*", csrfGuard);
+tokenRoutes.use("/*", auxiliaryCapabilityMiddleware);
 tokenRoutes.route("/api/tokens", tokens);
 tokenRoutes.route("/api/repos", repos);
 tokenRoutes.route("/api", whoami);
@@ -137,6 +147,7 @@ app.route("/", tokenRoutes);
 const workspaceRoutes = new Hono<AppEnv>();
 workspaceRoutes.use("/*", createAuthMiddleware());
 workspaceRoutes.use("/*", csrfGuard);
+workspaceRoutes.use("/*", auxiliaryCapabilityMiddleware);
 workspaceRoutes.route("/", workspace);
 app.route("/api/workspace", workspaceRoutes);
 
@@ -182,6 +193,9 @@ projectRoutes.use("/*", csrfGuard);
 projectRoutes.use("/*", sourceResolution());
 projectRoutes.use("/*", requestIdentityMiddleware());
 projectRoutes.use("/*", projectMiddleware);
+projectRoutes.use("/*", projectMembershipMiddleware());
+projectRoutes.use("/*", capabilityMiddleware());
+projectRoutes.use("/*", protectedOperationMiddleware());
 projectRoutes.use("/*", async (c, next) => {
   if (
     c.req.method === "GET" ||
@@ -216,12 +230,14 @@ projectRoutes.use("/*", async (c, next) => {
 });
 projectRoutes.use("/*", createIdempotencyMiddleware());
 projectRoutes.use("/*", createCacheMiddleware());
+projectRoutes.route("/service-accounts", serviceAccountRoutes);
 projectRoutes.route("/tasks", entities); // canonical
 // @deprecated -- use /tasks going forward; kept for backward compatibility
 projectRoutes.route("/entities", entities); // @deprecated
 projectRoutes.route("/work-units", entities); // @deprecated
 projectRoutes.route("/claims", claims);
 projectRoutes.route("/artifacts", artifacts);
+projectRoutes.route("/", continuity);
 projectRoutes.route("/journal", journal);
 projectRoutes.route("/presence", presence);
 projectRoutes.route("/signals", signals);
@@ -234,6 +250,7 @@ projectRoutes.route("/search", search);
 projectRoutes.route("/admin/backup", backup);
 projectRoutes.route("/admin", admin);
 projectRoutes.route("/admins", adminRoster);
+projectRoutes.route("/", memberships);
 projectRoutes.route("/", doctor);
 
 app.route("/projects/:projectId", projectRoutes);

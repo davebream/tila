@@ -340,8 +340,10 @@ describe("tila schema diff", () => {
       changes: { kind: string; unitType?: string; fieldName?: string }[];
       autoApplicable: boolean;
     };
-    expect(out.autoApplicable).toBe(true);
-    expect(out.changes).toEqual([
+    expect(
+      (out as unknown as { result: typeof out }).result.autoApplicable,
+    ).toBe(true);
+    expect((out as unknown as { result: typeof out }).result.changes).toEqual([
       expect.objectContaining({
         kind: "field-added",
         unitType: "task",
@@ -430,7 +432,7 @@ describe("tila schema status", () => {
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     // JSON output should reflect declared_version = 3
-    expect(spyOutput(logSpy)).toContain('"declared_version": 3');
+    expect(spyOutput(logSpy)).toContain('"declared_version":3');
   });
 
   it("(c2) SCHEMA_PARSE_ERROR → swallows error, declared version null, no throw", async () => {
@@ -446,7 +448,7 @@ describe("tila schema status", () => {
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     // declared_version should be null (swallowed)
-    expect(spyOutput(logSpy)).toContain('"declared_version": null');
+    expect(spyOutput(logSpy)).toContain('"declared_version":null');
   });
 
   it("FILE_NOT_FOUND → keeps 'no local file is fine' behavior (declared version null)", async () => {
@@ -461,6 +463,6 @@ describe("tila schema status", () => {
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     // declared_version should be null
-    expect(spyOutput(logSpy)).toContain('"declared_version": null');
+    expect(spyOutput(logSpy)).toContain('"declared_version":null');
   });
 });

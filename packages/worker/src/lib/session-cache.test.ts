@@ -18,6 +18,7 @@ const makeSessionResult = (
   scopes: "full",
   permission: "read",
   expiresAt: Date.now() + 3_600_000, // 1 hour
+  authenticatedAt: Date.now(),
   ...overrides,
 });
 

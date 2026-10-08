@@ -4,19 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-tila — a state-and-coordination engine for multi-machine agentic work. Cloudflare-native (Worker + DO SQLite + D1 + R2).
+tila is evolving into one self-hosted development-management product, with a reusable state-and-coordination core. Cloudflare (Worker, DO SQLite, D1, R2) is the authoritative shared backend. The first workflow is one orchestrator coordinating workers across macOS and Linux hosts; native Mac/iPhone clients and other interaction topologies come later.
+
+This is the target direction, not a claim that orchestration, native clients, key-only auth, or local-mode retirement have shipped. Preserve current compatibility until the corresponding migration is implemented. Keep the canonical project memberships delivered by #184 / #218. Evaluate existing host runtimes before building a terminal/process supervisor; Herdr is the first candidate, not an adopted dependency. See `docs/03-ROADMAP.md` for acceptance criteria and backlog drafts.
 
 ## Commands
 
 ```bash
-pnpm dev              # Start development (Worker via wrangler dev)
+pnpm dev              # Source development: Worker :8787 + Vite UI :5173
+pnpm dev:cli --help   # Run the CLI from this checkout
+pnpm dev:mcp          # Run the MCP server from this checkout
 pnpm build            # Production build (turbo, all packages)
-pnpm test             # Run all tests (turbo)
+pnpm test             # Run all Node/Bun package and root-script tests (turbo)
+pnpm test:runtime     # Required local Cloudflare runtime tests (DO SQLite, D1, R2)
 pnpm lint             # Biome check (read-only, CI-safe)
 pnpm run check        # Biome check --write (auto-fixes formatting + imports)
 pnpm run typecheck    # TypeScript type checking (turbo)
 pnpm version:check    # Verify public release version lockstep
 pnpm version:test     # Test version policy scripts
+pnpm bench -- --tier inproc --scenario all   # Coordination benchmarks (see docs/benchmarks/README.md)
+pnpm bench:report -- --in packages/bench/results --out docs/benchmarks/BASELINE.md
 ```
 
 ### Single-package commands
@@ -27,7 +34,7 @@ pnpm --filter @tila/backend-do test -- --run artifact-ops  # Single test file (s
 pnpm --filter @tila/worker typecheck         # Typecheck one package
 ```
 
-Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. The `backend-do` tests are in `test/` (not `src/`). Integration tests use `@cloudflare/vitest-pool-workers`.
+Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. The `backend-do` tests are in `test/` (not `src/`). Integration tests are either env-gated live HTTP tests (`TILA_BASE_URL`/`TILA_TOKEN`, skipped in CI) or in-process tests that mount the Worker route modules over the real DO router and better-sqlite3 (`packages/integration-tests/src/artifact-versions.test.ts` is the pattern). The benchmark smoke suite in `packages/bench/test` uses the same in-process pattern.
 
 ### Local development setup
 
@@ -37,11 +44,10 @@ One-time setup (generates dev config, applies D1 migrations, seeds test data):
 pnpm dev:setup
 ```
 
-Then start both services:
+Then start both services from source:
 
 ```bash
-pnpm dev                          # Worker on :8787
-pnpm --filter @tila/ui dev        # UI on :5173
+pnpm dev                          # Worker :8787 and UI :5173
 ```
 
 Login with the printed credentials (default: project `dev-project`, token `tila_dev_token_localonly`).
@@ -114,7 +120,8 @@ Turborepo monorepo under `packages/`:
 | `@tila/auth-store` | Client-side auth persistence — instance registry, credential store, keychain seam. Consumed by `tila-cli` |
 | `tila-cli` | `tila` CLI binary (Citty framework, Bun-compiled for multi-platform distribution) |
 | `tila-cli-{platform}` | Platform-specific binary packages for npm distribution |
-| `@tila/integration-tests` | E2E tests via `@cloudflare/vitest-pool-workers` |
+| `@tila/integration-tests` | E2E tests: env-gated live HTTP tests plus in-process Worker-route + DO-router tests |
+| `@tila/bench` | Coordination benchmark harness: `inproc` (CI smoke), `embedded`, `http` (wrangler dev or deployed) tiers; methodology and baselines in `docs/benchmarks/` |
 
 ### Naming: tasks vs entities
 
@@ -133,7 +140,7 @@ schemas → core → ops-sqlite → backend-do        → worker
          core → backend-r2                → worker
 schemas → sdk → mcp-server
                                     worker ← ui
-cli (standalone, imports schemas only)
+cli -> schemas, core, auth-store, backend-local, sdk
 ```
 
 `schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by `backend-local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK + MCP server), not just Bun. The DB file is portable between the CLI and a Node SDK/MCP consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
@@ -146,7 +153,7 @@ The `ProjectDO` class in `backend-do/src/project-do.ts` is thin: it constructs D
 
 ### Auth model
 
-Two auth paths unified in `middleware/auth.ts`:
+Current compatibility paths in `middleware/auth.ts` (key-only auth is planned):
 1. **GitHub session tokens** — short-lived, repo-scoped, default auth path (see `docs/07-GITHUB-SCOPED-AUTH.md`)
 2. **D1 API tokens** — hashed, stored in D1, admin/bootstrap credential
 
@@ -171,7 +178,7 @@ Defined in `packages/worker/wrangler.toml`: `PROJECT` (DO), `DB` (D1), `ARTIFACT
 - DON'T: Create circular dependencies between workspace packages
 - DON'T: Import Cloudflare Workers types in packages that don't run on Workers (schemas, core, ops-sqlite, cli, sdk)
 - DON'T: Store business logic in Worker route handlers — extract to backend packages
-- DON'T: Modify `.github/workflows/` — CI configuration is managed by the scaffold tool
+- Maintain `.github/workflows/` directly. Preserve the required `ci` gate and validate workflow changes.
 - DO: Deploy via `tila infra provision --force-redeploy` or `tila deploy` — both route through `deployWorkerWithAssets`, which generates a per-deploy `wrangler.<slug>.toml` and shells out to `wrangler deploy`. `wrangler deploy` **preserves Worker secrets** (secrets are never deleted by a deployment); plain `[vars]` absent from the generated config ARE removed (`keep_vars=false` by default — intentional, since `CORS_ALLOWED_ORIGINS` is dropped under same-origin deployment). Do NOT run `wrangler deploy` manually; let the CLI manage config generation and secret injection. `wrangler dev` for local development is fine.
 - DON'T: Poll a DO to check if it restarted — each request resets the 70-140s idle eviction timer, preventing the restart you're waiting for
 
@@ -189,29 +196,54 @@ First-writer-wins with fencing tokens. Every claim returns a monotonic fence. Ev
 
 - `docs/01-DECISIONS.md` — settled decisions (the constitution)
 - `docs/02-ARCHITECTURE.md` — technical specification
-- `docs/03-ROADMAP.md` — v0.1 scope, success criteria, build order
+- `docs/03-ROADMAP.md` — current milestone, runtime evaluation, and backlog drafts
 - `docs/04-PERSISTENCE-SCHEMA.md` — ER diagram and cross-store boundaries
 - `docs/05-OPERATIONS.md` — production procedures, observability, troubleshooting
-- `docs/07-GITHUB-SCOPED-AUTH.md` — GitHub-scoped auth — default auth model
+- `docs/07-GITHUB-SCOPED-AUTH.md` — GitHub-scoped auth — current compatibility implementation
 - `docs/08-RECORDS.md` — typed mutable records design (implemented)
 - `DESIGN.md` — UI design system (colors, typography, components)
 
 ### Contributor dev MCP server
 
-MCP config templates are provided as `.example` files. Copy them to create your local configs:
+Copy the applicable `.mcp.json.example`, `.cursor/mcp.json.example`, or
+`.vscode/mcp.json.example` to the same filename without `.example`. The templates
+run `pnpm --silent dev:mcp` from the workspace root, using source and the local
+Worker credentials printed by `pnpm dev:setup`. Local configs remain gitignored.
 
-```bash
-cp .mcp.json.example .mcp.json
-cp .cursor/mcp.json.example .cursor/mcp.json
-cp .vscode/mcp.json.example .vscode/mcp.json
-```
+The root `tsconfig.json` maps workspace imports to source for Wrangler, Bun and tsx.
+Package builds/typechecks keep their own configs and public exports. `pnpm test`
+still builds packages to cover distribution and CJS/ESM interoperability.
 
-Then start the local Worker:
+## graphify
 
-```bash
-pnpm install   # ensures tsx is available for npx resolution
-pnpm dev       # starts the Worker locally via wrangler dev
-```
+A local knowledge graph of the code lives in `graphify-out/` (gitignored). It maps files, symbols, imports and calls across all packages. Query it to orient before reading files, when planning a change, and when investigating a bug. One query usually replaces a round of searching and file reads.
 
-Set `TILA_PROJECT_ID` to your project ID before using MCP tools.
-The actual config files (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`) are gitignored.
+If `graphify-out/graph.json` is missing (fresh clone, new worktree), build it with `graphify update .`. That parses code locally with no API key and finishes in under a minute. If the `graphify` CLI is not installed (`uv tool install graphifyy`), skip this section and work from source.
+
+| Task | Command |
+|---|---|
+| Investigate a symbol: where it lives, what touches it | `graphify explain "<symbol>"` |
+| Gather context for a feature or bug | `graphify query "<names from the code>"` |
+| Plan a change: what depends on X | `graphify affected "<symbol>" --depth 2` |
+| Trace how two parts connect | `graphify path "<A>" "<B>" --undirected` |
+| Find the hubs before a refactor | `graphify god-nodes` |
+| Survey the whole codebase | `graphify-out/GRAPH_REPORT.md` |
+
+Rules:
+
+- Query with names from the code (`assertFence`, `EmbeddedProject`, `record-ops`), not prose. Matching is by keyword: "how are fencing tokens validated" lands on the API-token routes, not the fence logic.
+- Treat results as pointers. Each node carries a file and line. Read the source there before you rely on it or edit it.
+- The graph is code-only (see `.graphifyignore`). For rationale, read `docs/01-DECISIONS.md` and `docs/02-ARCHITECTURE.md`.
+- Imports made by workspace package name (`@tila/core`) are not resolved to the imported symbol, so `affected` misses consumers in other packages. Confirm cross-package impact by searching for the symbol name.
+- Functions that share a name within one file, such as the `run` handlers in CLI commands, collapse into one node.
+- After changing code, run `graphify update .` so later queries see the change. Checkouts where `graphify hook install` was run rebuild after each commit, except in linked worktrees.
+- Give these rules to any subagent that explores code.
+
+## Release validation
+
+CI and release workflows are maintained directly in this repository. Manual
+Release dispatch is a non-publishing rehearsal. Tag publication validates the
+commit, tests packed artifacts on native runners, verifies attestations, then
+publishes the tested tarballs and binaries without rebuilding. Homebrew remains
+opt-in and disabled by default. See `docs/05-OPERATIONS.md` for commands and the
+manual live-infrastructure pre-tag gates.

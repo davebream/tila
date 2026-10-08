@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { findConfig, findTilaDir } from "./config";
 import { resolveGithubRepoToken } from "./lib/github-exchange";
 
+import { getGlobalFlags } from "./lib/global-flags";
+
 const TOKEN_ENV_VAR = "TILA_API_TOKEN";
 const ENV_FILENAME = ".env";
 
@@ -19,6 +21,8 @@ const ENV_FILENAME = ".env";
  * Returns the token string or null if not found.
  */
 export function resolveToken(): string | null {
+  const inline = getGlobalFlags().token;
+  if (inline !== undefined) return inline;
   const config = findConfig();
   const authMode = config?.auth?.mode ?? "tila-token";
 
@@ -86,6 +90,8 @@ export function writeTokenFile(rawToken: string, dir = ".tila"): void {
  *   directing user to use requireTokenAsync or ensure session cache is fresh.
  */
 export function requireToken(): string {
+  const inline = getGlobalFlags().token;
+  if (inline !== undefined) return inline;
   const config = findConfig();
   const authMode = config?.auth?.mode ?? "tila-token";
 
@@ -128,6 +134,8 @@ export function requireToken(): string {
  * Supports both sync (tila-token) and async (github-repo) modes.
  */
 export async function requireTokenAsync(): Promise<string> {
+  const inline = getGlobalFlags().token;
+  if (inline !== undefined) return inline;
   const config = findConfig();
   const tilaDir = findTilaDir();
 

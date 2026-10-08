@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { registerArtifactTools } from "./artifacts";
 import { registerClaimTools } from "./claims";
+import { registerContinuityTools } from "./continuity";
 import { registerEntityTools } from "./entities";
 import { registerGateTools } from "./gates";
 import { registerJournalTools } from "./journal";
@@ -11,6 +12,7 @@ import { registerSchemaTools } from "./schema";
 import { registerSignalTools } from "./signals";
 import { registerSummaryTool } from "./summary";
 import { registerTemplateTools } from "./templates";
+import { registerWorkflowTools } from "./workflow";
 
 export type RegisterFn = (
   server: McpServer,
@@ -23,6 +25,7 @@ export type RegisterFn = (
  * Each group name maps to the corresponding registration function.
  */
 export const GROUP_MAP: Record<string, RegisterFn> = {
+  workflow: registerWorkflowTools,
   tasks: registerEntityTools,
   claims: registerClaimTools,
   gates: registerGateTools,
@@ -31,6 +34,7 @@ export const GROUP_MAP: Record<string, RegisterFn> = {
   records: registerRecordTools,
   presence: registerPresenceTools,
   journal: registerJournalTools,
+  continuity: registerContinuityTools,
   schema: registerSchemaTools,
   templates: registerTemplateTools,
   summary: registerSummaryTool,
@@ -38,7 +42,7 @@ export const GROUP_MAP: Record<string, RegisterFn> = {
 
 /**
  * `core` is a convenience alias that expands to a coordination-focused subset.
- * tasks(8) + claims(3) + gates(3) + signals(3) + summary(1) + presence(1) + journal(1) = 20
+ * tasks(8) + claims(3) + gates(3) + signals(8) + summary(1) + presence(1) + journal(1) + continuity(7) = 32
  */
 const CORE_GROUPS = [
   "tasks",
@@ -48,13 +52,14 @@ const CORE_GROUPS = [
   "summary",
   "presence",
   "journal",
+  "continuity",
 ] as const;
 
-const VALID_GROUPS = [...Object.keys(GROUP_MAP), "core"] as const;
+const VALID_GROUPS = [...Object.keys(GROUP_MAP), "core", "all"] as const;
 
 /**
  * Parse the TILA_MCP_TOOLS env var into a list of group names.
- * Returns undefined when unset or empty (meaning: all groups).
+ * Returns undefined when unset or empty (meaning: workflow).
  */
 export function parseToolGroups(env?: string): string[] | undefined {
   if (!env || env.trim() === "") return undefined;
@@ -72,7 +77,13 @@ export function parseToolGroups(env?: string): string[] | undefined {
 export function resolveGroups(groups: string[]): RegisterFn[] {
   const expanded: string[] = [];
   for (const g of groups) {
-    if (g === "core") {
+    if (g === "all") {
+      for (const name of Object.keys(GROUP_MAP).filter(
+        (name) => name !== "workflow",
+      )) {
+        if (!expanded.includes(name)) expanded.push(name);
+      }
+    } else if (g === "core") {
       for (const name of CORE_GROUPS) {
         if (!expanded.includes(name)) expanded.push(name);
       }
@@ -100,4 +111,10 @@ export function resolveGroups(groups: string[]): RegisterFn[] {
     }
   }
   return result;
+}
+
+export function hasWorkflowTools(): boolean {
+  return resolveGroups(
+    parseToolGroups(process.env.TILA_MCP_TOOLS) ?? ["workflow"],
+  ).includes(registerWorkflowTools);
 }

@@ -468,12 +468,16 @@ kinds = ["document"]
 
   describe("SignalBackend", () => {
     it("sendSignal + inbox + ack", async () => {
-      const result = await project.sendSignal(
-        { target: "*", kind: "info" },
-        "local",
-      );
+      const result = await project.sendSignal({
+        target: {
+          type: "participant",
+          principal_id: "local:test-org",
+          participant_id: "test-participant",
+        },
+        kind: "info",
+      });
       expect(result.id).toMatch(/^sig_/);
-      const signals = await project.listSignals("local");
+      const signals = await project.listSignals();
       expect(signals.some((s) => s.id === result.id)).toBe(true);
       expect((await project.ackSignal(result.id)).found).toBe(true);
       expect((await project.ackSignal("sig_nope")).found).toBe(false);
