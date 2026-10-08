@@ -7,7 +7,7 @@ import {
   mutate,
   revokeMembership,
 } from "@/lib/api";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw/http";
 import { server } from "../mocks/server";
 
 describe("listTasks URL params", () => {
@@ -58,7 +58,9 @@ describe("listTasks URL params", () => {
 });
 
 describe("artifact history requests", () => {
+  afterEach(() => vi.restoreAllMocks());
   test("encodes keys and pagination without altering their values", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
     const key = "versioned/project/report/2/a #?%.txt";
     const cursor = "next+/==";
     const response = {
@@ -82,7 +84,9 @@ describe("artifact history requests", () => {
     );
     expect(url.searchParams.get("limit")).toBe("20");
     expect(url.searchParams.get("cursor")).toBe(cursor);
-    expect(captured?.credentials).toBe("include");
+    // MSW 3 reconstructs the intercepted Request without fetch credentials.
+    // Assert cookie inclusion at the caller boundary before interception.
+    expect(fetchSpy.mock.calls[0]?.[1]?.credentials).toBe("include");
     await getArtifactHistory("test-project", key);
     expect(new URL(captured?.url ?? "").search).toBe("");
     await getArtifactBlob("test-project", key);

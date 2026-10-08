@@ -2,7 +2,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw/http";
 import { MemoryRouter } from "react-router";
 import { server } from "./mocks/server";
 

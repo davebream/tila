@@ -3,7 +3,7 @@ import {
   TaskDetailPage,
   claimResourceMatchesEntity,
 } from "@/pages/task-detail";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw/http";
 import { Route, Routes } from "react-router";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor, within } from "../test-utils";

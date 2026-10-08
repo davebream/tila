@@ -1,4 +1,4 @@
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw/http";
 
 export const NOW = Date.now();
 export const OWNER_ID = "github:github.com:1";

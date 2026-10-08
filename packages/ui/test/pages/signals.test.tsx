@@ -1,5 +1,6 @@
 import { SignalsPage } from "@/pages/signals";
-import { http, HttpResponse, delay } from "msw";
+import { http, HttpResponse } from "msw/http";
+import { delay } from "msw/utils/delay";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor } from "../test-utils";
 
