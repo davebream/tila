@@ -2,6 +2,11 @@ merge_queue:
   mode: serial
   max_parallel_checks: 1
 
+# CI computes scopes from Turbo's affected packages, including dependents.
+scopes:
+  source:
+    manual:
+
 queue_rules:
   - name: default
     # Validate up to three PRs together, with only one batch running at a time.
