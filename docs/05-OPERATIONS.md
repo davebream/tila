@@ -1612,8 +1612,11 @@ commit timestamp, target inventory, tarball integrity and every file checksum.
 
 Clean-directory consumers install the tarballs and check SDK ESM/CommonJS local
 SQLite persistence, MCP stdio initialization/tool discovery, and the npm CLI.
-Native Linux, macOS and Windows x64/arm64 runners execute the binaries and local
-installer fixtures; both musl binaries run in native-architecture Alpine containers.
+Node 22/24 consumers exercise both SQLite 12.10.0 and 13.0.3. Each SDK/MCP package
+must resolve the selected driver; the smoke test opens a native database and loads
+the MCP keyring addon without accessing credentials.
+Native Linux, macOS and Windows x64/arm64 runners also test packed SDK/MCP consumers
+with SQLite 13.0.3, execute the binaries and run local installer fixtures; both musl binaries run in native-architecture Alpine containers.
 The POSIX installer detects musl and selects that target. SDK private implementation
 packages are bundled build dependencies, never unpublished npm runtime dependencies.
 

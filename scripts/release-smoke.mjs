@@ -21,6 +21,12 @@ const target =
   process.argv[4] ||
   `${process.platform === "win32" ? "windows" : process.platform}-${process.arch}`;
 assert.ok(targets.includes(target), `Unsupported target ${target}`);
+const sqliteVersion = process.env.RELEASE_SQLITE_VERSION || "13.0.3";
+assert.match(
+  sqliteVersion,
+  /^\d+\.\d+\.\d+$/,
+  "Expected an exact SQLite version",
+);
 const manifest = verifyRelease(directory, process.env.RELEASE_SHA);
 const temporary = mkdtempSync(join(tmpdir(), "tila-release-smoke-"));
 const cleanEnv = {
@@ -214,7 +220,7 @@ try {
         "--no-fund",
         "--package-lock=false",
         ...packages.map((pkg) => join(directory, pkg.file)),
-        "better-sqlite3@12.10.0",
+        `better-sqlite3@${sqliteVersion}`,
       ],
       { cwd, env: cleanEnv, timeout: 300_000 },
     );
@@ -230,6 +236,19 @@ try {
         manifest.version,
       );
     }
+    // Resolve through each shipped package so an incompatible nested driver
+    // cannot silently escape coverage. Loading keyring checks the native binary
+    // without reading or writing the runner's credential store.
+    const nativeSmoke = join(cwd, "native-smoke.mjs");
+    writeFileSync(
+      nativeSmoke,
+      `import assert from 'node:assert/strict'; import {createRequire} from 'node:module'; const require=createRequire(import.meta.url); for(const name of ['tila-sdk','tila-mcp-server']) { const consumer=createRequire(require.resolve(name)); assert.equal(consumer('better-sqlite3/package.json').version,${JSON.stringify(sqliteVersion)},name+' SQLite version'); const db=new (consumer('better-sqlite3'))(':memory:'); assert.equal(db.prepare('select 42 as value').get().value,42); db.close(); if(name==='tila-mcp-server') assert.equal(typeof consumer('@napi-rs/keyring').Entry,'function'); }\n`,
+    );
+    run(process.execPath, [nativeSmoke], {
+      cwd,
+      env: cleanEnv,
+      timeout: 60_000,
+    });
     const smoke = join(cwd, "sdk-smoke.mjs");
     writeFileSync(
       smoke,
@@ -242,7 +261,7 @@ try {
     ]);
   }
   console.log(
-    `Passed ${mode} smoke tests: ${target}, Node ${process.version}, ${manifest.revision}`,
+    `Passed ${mode} smoke tests: ${target}, Node ${process.version}${mode === "consumer" ? `, SQLite ${sqliteVersion}` : ""}, ${manifest.revision}`,
   );
 } finally {
   rmSync(temporary, { recursive: true, force: true });
