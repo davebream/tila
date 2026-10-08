@@ -1,20 +1,14 @@
+# Renovate owns routine version updates; Dependabot owns immediate security fixes.
+# A zero limit disables version PRs without disabling security updates or alerts.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-major"
+    open-pull-requests-limit: 0
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-major"
+    open-pull-requests-limit: 0
