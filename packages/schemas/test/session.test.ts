@@ -14,6 +14,7 @@ import {
 
 const validGitHubPayload = {
   sub_type: "github" as const,
+  authorization_version: 2 as const,
   project_id: "proj-1",
   github_host: "github.com",
   github_repo_id: 99999,
@@ -204,6 +205,7 @@ describe("SessionPayloadSchema discriminated union", () => {
     // sub_type:"github" demands github_host, github_repo_id, github_login, github_user_id
     const result = SessionPayloadSchema.safeParse({
       sub_type: "github",
+      authorization_version: 2,
       project_id: "proj-1",
       oidc_issuer: "https://idp.example.com",
       oidc_subject: "user:alice",

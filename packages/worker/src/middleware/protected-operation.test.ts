@@ -202,7 +202,11 @@ beforeEach(() => {
   });
   mocks.policy.mockResolvedValue({
     status: "ok",
-    policy: { membership_enabled: true, membership_role_cap: "maintainer" },
+    policy: {
+      membership_enabled: true,
+      membership_role_cap: "maintainer",
+      max_permission: "admin",
+    },
   });
   upstream = vi.fn(
     async (url: string) =>

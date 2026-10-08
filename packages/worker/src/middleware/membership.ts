@@ -1,3 +1,4 @@
+import { resolveActionsMembership } from "@tila/backend-d1";
 import {
   type MirroredMembershipCandidate,
   ProjectMembershipStore,
@@ -48,7 +49,17 @@ export async function mirroredCandidateForToken(
     repoId,
   );
   if (result.status !== "ok" || !result.policy.membership_enabled) return null;
-  const role = cappedRole(token.permission, result.policy.membership_role_cap);
+  const membershipCap = cappedRole(
+    token.permission,
+    result.policy.membership_role_cap,
+  );
+  const maximum = PERMISSION_ROLE[result.policy.max_permission];
+  const role =
+    membershipCap && maximum
+      ? PROJECT_ROLE_RANK[membershipCap] <= PROJECT_ROLE_RANK[maximum]
+        ? membershipCap
+        : maximum
+      : null;
   return role ? { role, githubRepoId: repoId } : null;
 }
 
@@ -62,6 +73,8 @@ export async function resolveTokenMembership(
   sources: MembershipSource[];
   mirroredRepoId?: number;
 } | null> {
+  if (token.kind === "github-actions-session")
+    return resolveActionsMembership(db, projectId, token.workload, token.role);
   if (
     (token.kind === "d1-token" || token.kind === "cookie-session") &&
     token.policy &&

@@ -35,7 +35,8 @@ whoami.get("/whoami", async (c) => {
       | "session"
       | "cookie-session"
       | "workspace-session"
-      | "oidc-session";
+      | "oidc-session"
+      | "github-actions-session";
     github_login?: string;
     permission?: string;
     expires_at?: number | null;
@@ -89,6 +90,7 @@ whoami.get("/whoami", async (c) => {
   } else if (
     token.kind === "cookie-session" ||
     token.kind === "oidc-session" ||
+    token.kind === "github-actions-session" ||
     (token.kind === "d1-token" && token.policy)
   ) {
     response.expires_at = token.expiresAt;

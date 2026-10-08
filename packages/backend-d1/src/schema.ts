@@ -328,6 +328,7 @@ export const credentials = sqliteTable("_credentials", {
   revoked_at: integer("revoked_at"),
   revoked_by: text("revoked_by"),
   workload_binding_id: text("workload_binding_id"),
+  workload_context_json: text("workload_context_json"),
 });
 export const credentialVersions = sqliteTable("_credential_versions", {
   token_id: text("token_id").primaryKey(),

@@ -79,6 +79,7 @@ async function mintSessionToken(
 ): Promise<string> {
   const payload = {
     project_id: "proj-1",
+    authorization_version: 2,
     github_host: "github.com",
     github_repo_id: 99999,
     github_login: "testuser",
@@ -654,6 +655,7 @@ describe("auth middleware", () => {
     it("surfaces githubUserId and githubHost from the verified payload on the session tokenResult", async () => {
       const token = await mintSessionToken({
         github_user_id: 778899,
+        authorization_version: 2,
         github_host: "github.com",
       });
       const app = createTestApp();
@@ -787,6 +789,7 @@ describe("auth middleware", () => {
       // Mint using the same jose path that auth-github.ts now uses
       const payload = {
         project_id: "round-trip-proj",
+        authorization_version: 2,
         github_host: "github.com",
         github_repo_id: 55555,
         github_login: "roundtripuser",

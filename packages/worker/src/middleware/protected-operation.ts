@@ -34,7 +34,9 @@ export function isProtectedMutation(method: string, path: string): boolean {
 export function requireRevocableSession(c: Context<AppEnv>): Response | null {
   const token = c.get("tokenResult");
   if (
-    ((token.kind === "session" || token.kind === "oidc-session") &&
+    ((token.kind === "session" ||
+      token.kind === "oidc-session" ||
+      token.kind === "github-actions-session") &&
       !token.jti) ||
     (token.kind === "cookie-session" &&
       (!token.sessionHash || !token.principalId))
@@ -73,7 +75,9 @@ export async function authorizeProtectedOperation(
       403,
     );
   if (
-    (token.kind === "d1-token" || token.kind === "cookie-session") &&
+    (token.kind === "d1-token" ||
+      token.kind === "cookie-session" ||
+      token.kind === "github-actions-session") &&
     token.policy &&
     c.get("credentialPolicy")
   ) {

@@ -36,8 +36,11 @@ type AdminEnv = { Bindings: Env; Variables: HonoVariables };
  */
 export const requireD1Token: MiddlewareHandler<AdminEnv> = async (c, next) => {
   const tokenResult = c.get("tokenResult");
-  if (c.get("authorizationChecked")) return next();
-  if (tokenResult.kind !== "d1-token" || tokenResult.scopes !== "full") {
+  if (
+    tokenResult.kind !== "d1-token" ||
+    tokenResult.scopes !== "full" ||
+    tokenResult.policy
+  ) {
     return c.json(
       {
         ok: false,

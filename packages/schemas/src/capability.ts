@@ -62,6 +62,36 @@ export const CAPABILITIES = [
 ] as const;
 export const CapabilitySchema = z.enum(CAPABILITIES);
 export type Capability = z.infer<typeof CapabilitySchema>;
+/** Operations reserved to full D1 bearer credentials or infra authority. */
+export const ROOT_CAPABILITIES: ReadonlySet<Capability> = new Set([
+  "journal:archive",
+  "project:export",
+  "project:import",
+  "project:archive",
+  "project:destroy",
+  "project:sessions-revoke",
+]);
+export function hasRootCapabilities(policy: CredentialPolicy): boolean {
+  return policy.capabilities.some((cap) => ROOT_CAPABILITIES.has(cap));
+}
+export function delegablePolicy(policy: CredentialPolicy): CredentialPolicy {
+  return {
+    ...policy,
+    capabilities: policy.capabilities.filter(
+      (cap) => !ROOT_CAPABILITIES.has(cap),
+    ),
+  };
+}
+export function permissionToRole(
+  permission: "read" | "write" | "admin",
+): Exclude<ProjectRole, "owner"> {
+  return permission === "read"
+    ? "viewer"
+    : permission === "write"
+      ? "participant"
+      : "maintainer";
+}
+
 export const NamespaceRestrictionsSchema = z
   .object({
     task_types: z.array(z.string().min(1)).max(100).optional(),

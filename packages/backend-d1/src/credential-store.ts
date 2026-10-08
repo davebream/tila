@@ -1,9 +1,14 @@
 import {
   type CredentialPolicy,
   CredentialPolicySchema,
+  GITHUB_ACTIONS_ISSUER,
+  type GitHubActionsContext,
+  GitHubActionsContextSchema,
   type ProjectRole,
   type WorkloadBindingRequest,
+  delegablePolicy,
   effectiveCredentialPolicy,
+  hasRootCapabilities,
   intersectCredentialPolicies,
 } from "@tila/schemas";
 import {
@@ -30,6 +35,7 @@ import {
   tokens,
   workloadBindings,
 } from "./schema";
+import { resolveActionsPolicy } from "./workload-policy";
 
 export interface CredentialActor {
   principalId: string;
@@ -300,11 +306,14 @@ export class CredentialStore {
       expiresAt?: number | null;
       cnfJkt?: string | null;
       workloadBindingId?: string;
+      workloadContext?: GitHubActionsContext;
     },
     actor: CredentialActor,
   ) {
     const now = Math.floor(Date.now() / 1000);
     let policy = CredentialPolicySchema.parse(params.policy);
+    if (hasRootCapabilities(policy))
+      throw new CredentialDenied("Root capabilities are not delegable");
     const service = await this.db
       .select()
       .from(serviceAccounts)
@@ -341,6 +350,11 @@ export class CredentialStore {
         created_at: now,
         created_by: actor.principalId,
         workload_binding_id: params.workloadBindingId ?? null,
+        workload_context_json: params.workloadContext
+          ? JSON.stringify(
+              GitHubActionsContextSchema.parse(params.workloadContext),
+            )
+          : null,
       }),
       this.db.insert(tokens).values({
         token_hash: params.tokenHash,
@@ -427,6 +441,24 @@ export class CredentialStore {
         binding.principal_id !== row.credential.principal_id
       )
         return null;
+      if (binding.provider === "github-actions") {
+        const parsed = GitHubActionsContextSchema.safeParse(
+          JSON.parse(row.credential.workload_context_json ?? "null"),
+        );
+        if (
+          !parsed.success ||
+          binding.issuer !== GITHUB_ACTIONS_ISSUER ||
+          binding.subject !== parsed.data.sub
+        )
+          return null;
+        const current = await resolveActionsPolicy(
+          this.binding,
+          row.credential.project_id,
+          parsed.data,
+        );
+        if (!current) return null;
+        policy = effectiveCredentialPolicy(policy, current.role);
+      }
       policy = intersectCredentialPolicies(
         policy,
         CredentialPolicySchema.parse(JSON.parse(binding.policy_json)),
@@ -436,7 +468,9 @@ export class CredentialStore {
       principalId: row.credential.principal_id,
       credentialId: row.credential.credential_id,
       name: row.credential.name,
-      policy: effectiveCredentialPolicy(policy, membership.role),
+      policy: delegablePolicy(
+        effectiveCredentialPolicy(policy, membership.role),
+      ),
       expiresAt: row.version.expires_at,
       retireAt: row.version.retire_at,
       membership,
@@ -743,6 +777,8 @@ export class CredentialStore {
     );
     if (!membership)
       throw new CredentialDenied("Active service membership required");
+    if (hasRootCapabilities(input.policy))
+      throw new CredentialDenied("Root capabilities are not delegable");
     const policy = effectiveCredentialPolicy(input.policy, membership.role);
     const row = {
       binding_id: crypto.randomUUID(),
@@ -779,6 +815,8 @@ export class CredentialStore {
     );
     if (!membership)
       throw new CredentialDenied("Active service membership required");
+    if (hasRootCapabilities(requestedPolicy))
+      throw new CredentialDenied("Root capabilities are not delegable");
     const policy = effectiveCredentialPolicy(
       CredentialPolicySchema.parse(requestedPolicy),
       membership.role,

@@ -56,7 +56,15 @@ vi.mock("@tila/backend-d1", () => ({
   ProjectMembershipStore: vi.fn().mockImplementation(
     class {
       listProjectsForPrincipal = vi.fn().mockResolvedValue([]);
-      resolve = vi.fn().mockResolvedValue(null);
+      getMode = vi.fn().mockResolvedValue("hybrid");
+      recordMirroredAdmission = vi.fn().mockResolvedValue(undefined);
+      resolve = vi.fn(
+        async (
+          _project: string,
+          _principal: string,
+          mirrored?: { role: string },
+        ) => (mirrored ? { ...mirrored, sources: ["github-mirrored"] } : null),
+      );
     } as unknown as () => unknown,
   ),
 }));
@@ -250,7 +258,7 @@ describe("GET /api/workspace/projects", () => {
     expect(body.ok).toBe(true);
     expect(body.projects).toHaveLength(0);
     // No need to mint JWT when there are no projects to check
-    expect(mockMintAppJwt).toHaveBeenCalledOnce();
+    expect(mockMintAppJwt).not.toHaveBeenCalled();
   });
 
   it("does not leak the full registry when GitHub App is not configured (workspace session)", async () => {
@@ -716,10 +724,10 @@ describe("POST /api/workspace/select", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("forbidden");
+    expect(body.error.code).toBe("membership-required");
   });
 
-  it("returns 404 when project has no GitHub App installation", async () => {
+  it("returns 403 when project has no GitHub App installation", async () => {
     mockConfigGetInstallation.mockResolvedValue(null);
 
     const app = createApp();
@@ -733,10 +741,10 @@ describe("POST /api/workspace/select", () => {
       testEnv,
     );
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { ok: boolean; error: { code: string } };
     expect(body.ok).toBe(false);
-    expect(body.error.code).toBe("not-found");
+    expect(body.error.code).toBe("membership-required");
   });
 
   it("checks rate limit with correct key", async () => {

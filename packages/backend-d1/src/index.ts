@@ -59,3 +59,8 @@ export {
   SCOPED_TOKEN_MARKER,
   type CredentialActor,
 } from "./credential-store";
+
+export {
+  resolveActionsPolicy,
+  resolveActionsMembership,
+} from "./workload-policy";

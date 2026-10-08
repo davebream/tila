@@ -17,7 +17,7 @@ it("enforces real D1 memberships, project scope, permission and revocation", asy
     ),
     (character) => character.charCodeAt(0),
   );
-  const token = `tila_s.${await new SignJWT({ project_id: "runtime-project", github_host: "github.com", github_repo_id: 42, github_login: "runtime", github_user_id: 12345, permission: "write", issued_at: now, expires_at: now + 3600, iss: "tila", aud: "tila" }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).sign(key)}`;
+  const token = `tila_s.${await new SignJWT({ authorization_version: 2, project_id: "runtime-project", github_host: "github.com", github_repo_id: 42, github_login: "runtime", github_user_id: 12345, permission: "write", issued_at: now, expires_at: now + 3600, iss: "tila", aud: "tila" }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).sign(key)}`;
   const headers = {
     Authorization: `Bearer ${token}`,
     "X-Tila-Participant-Id": "runtime-worker",

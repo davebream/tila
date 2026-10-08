@@ -222,6 +222,7 @@ authSessionProtected.post("/logout", async (c) => {
   const tokenResult = c.get("tokenResult");
 
   switch (tokenResult.kind) {
+    case "github-actions-session":
     case "session": {
       // Bearer session JWT — revoke its jti so the verifier denies it (C9).
       if (tokenResult.jti) {
@@ -322,6 +323,7 @@ function effectivePermission(
     case "session":
     case "cookie-session":
     case "oidc-session":
+    case "github-actions-session":
       return tokenResult.permission as "read" | "write" | "admin";
     case "d1-token":
       return tokenResult.scopes === "full" ? "admin" : "read";
