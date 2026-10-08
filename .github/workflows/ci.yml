@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # gitleaks-action lists PR commits via the GitHub API on pull_request events;
 # without these it gets 403 "Resource not accessible by integration".
@@ -13,8 +20,11 @@ permissions:
   pull-requests: read
 
 jobs:
-  ci:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TURBO_FORCE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout
@@ -38,7 +48,7 @@ jobs:
       - name: Get pnpm store directory
         shell: bash
         run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+          echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
 
       - name: Setup pnpm cache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -51,19 +61,58 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Initialize timing summary
+        run: |
+          echo '| Check | Duration | Result |' >> "$GITHUB_STEP_SUMMARY"
+          echo '| --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint and version checks
+        run: node scripts/ci-run.mjs lint pnpm lint
+
       - name: Typecheck
-        run: pnpm run typecheck
+        run: node scripts/ci-run.mjs typecheck pnpm exec turbo run typecheck --summarize
 
-      - name: Lint and format check
-        run: pnpm run check
+      - name: Package tests
+        run: node scripts/ci-run.mjs tests pnpm exec turbo run test --summarize
 
-      - name: Test
-        run: pnpm test
+      - name: Root script tests
+        run: node scripts/ci-run.mjs scripts pnpm run test:scripts
 
       - name: Dependency audit
-        run: pnpm audit --audit-level=high
+        run: node scripts/ci-run.mjs audit pnpm audit --audit-level=high
 
+      - name: Upload diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-diagnostics-${{ github.run_attempt }}
+          path: |
+            .ci-reports/
+            .turbo/runs/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
       - name: Secret detection (gitleaks)
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ci:
+    if: ${{ always() }}
+    needs: [verify, secrets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Require every check to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash scripts/ci-gate.sh

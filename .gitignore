@@ -1,4 +1,5 @@
 node_modules/
+.ci-reports/
 dist/
 .env
 .env.local
