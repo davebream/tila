@@ -71,7 +71,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.5",
     "ansis": "^4.4.0",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "citty": "^0.2.2",
     "cloudflare": "^7.3.0",
     "console-table-printer": "^2.16.1",

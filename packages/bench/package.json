@@ -20,7 +20,7 @@
     "@tila/worker": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.5",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
     "tila-sdk": "workspace:*",
