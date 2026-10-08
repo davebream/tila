@@ -9,6 +9,7 @@ import { gzipSync } from "node:zlib";
 
 for (const scenario of [
   "compressed",
+  "musl",
   "legacy",
   "checksum",
   "corrupt",
@@ -23,7 +24,17 @@ for (const scenario of [
       const assets = join(root, "assets");
       await mkdir(bin);
       await mkdir(assets);
-      const name = `tila-${process.platform === "darwin" ? "darwin" : "linux"}-${process.arch === "arm64" ? "arm64" : "x64"}`;
+      const name = `tila-${scenario === "musl" ? "linux" : process.platform === "darwin" ? "darwin" : "linux"}-${process.arch === "arm64" ? "arm64" : "x64"}${scenario === "musl" ? "-musl" : ""}`;
+      if (scenario === "musl") {
+        await writeFile(
+          join(bin, "uname"),
+          `#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo ${process.arch === "arm64" ? "aarch64" : "x86_64"};; esac\n`,
+          { mode: 0o755 },
+        );
+        await writeFile(join(bin, "ldd"), "#!/bin/sh\necho musl\n", {
+          mode: 0o755,
+        });
+      }
       const bytes = Buffer.from("#!/bin/sh\necho 0.0.0-test\n");
       const compressed =
         scenario === "corrupt" ? Buffer.from("not gzip") : gzipSync(bytes);
@@ -54,7 +65,7 @@ for (const scenario of [
           TILA_TEST_SCENARIO: scenario,
         },
       });
-      if (["compressed", "legacy"].includes(scenario)) {
+      if (["compressed", "legacy", "musl"].includes(scenario)) {
         assert.equal(result.status, 0, result.stderr);
         assert.deepEqual(await readFile(join(root, ".tila/bin/tila")), bytes);
       } else {

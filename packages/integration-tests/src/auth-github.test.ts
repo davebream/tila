@@ -107,50 +107,52 @@ describe("GitHub auth exchange flow", () => {
   // Placeholders — require pool-workers + D1 + GitHub API mock
   // ---------------------------------------------------------------------------
 
-  it("valid GitHub token for unregistered repo returns 403 repo-not-allowed", () => {
-    // Scenario: GitHub token is valid but repo not in _project_repos allowlist.
-    // Precondition:
-    //   - GitHub API mock: GET /user returns { login: "testuser" }
-    //   - GitHub API mock: GET /repos/.../permission returns { permission: "write" }
-    //   - D1 _project_repos table: NO row for this project_id + github_repo_id
-    // Expected: 403, error.code === "repo-not-allowed"
-    expect(true).toBe(true); // Placeholder until pool-workers configured
-  });
+  // Scenario: GitHub token is valid but repo not in _project_repos allowlist.
+  // Precondition:
+  //   - GitHub API mock: GET /user returns { login: "testuser" }
+  //   - GitHub API mock: GET /repos/.../permission returns { permission: "write" }
+  //   - D1 _project_repos table: NO row for this project_id + github_repo_id
+  // Expected: 403, error.code === "repo-not-allowed"
+  // Placeholder until pool-workers configured
+  it.todo(
+    "valid GitHub token for unregistered repo returns 403 repo-not-allowed",
+  );
 
-  it("valid GitHub token for registered repo mints session token", () => {
-    // Scenario: Happy path — valid token, registered repo, sufficient permission.
-    // Expected: 200, body.ok === true, body.session_token starts with "tila_s."
-    // Token format: tila_s.<jwtHeader>.<jwtPayload>.<jwtSignature>
-    expect(true).toBe(true); // Placeholder until pool-workers configured
-  });
+  // Scenario: Happy path — valid token, registered repo, sufficient permission.
+  // Expected: 200, body.ok === true, body.session_token starts with "tila_s."
+  // Token format: tila_s.<jwtHeader>.<jwtPayload>.<jwtSignature>
+  // Placeholder until pool-workers configured
+  it.todo("valid GitHub token for registered repo mints session token");
 
-  it("read-permission session on write route returns 403 permission-denied", () => {
-    // Scenario: Insufficient permission for write-level route.
-    // A valid session with permission="read" used on a write route.
-    // Expected: 403, error.code === "permission-denied"
-    expect(true).toBe(true); // Placeholder until pool-workers configured
-  });
+  // Scenario: Insufficient permission for write-level route.
+  // A valid session with permission="read" used on a write route.
+  // Expected: 403, error.code === "permission-denied"
+  // Placeholder until pool-workers configured
+  it.todo(
+    "read-permission session on write route returns 403 permission-denied",
+  );
 
-  it("exchange for repo removed from allowlist returns 403 repo-not-allowed", () => {
-    // Scenario: Allowlist revocation blocks new token exchanges.
-    // Removal blocks NEW exchanges but does NOT invalidate already-minted session tokens.
-    // Expected: 403, error.code === "repo-not-allowed"
-    expect(true).toBe(true); // Placeholder until pool-workers configured
-  });
+  // Scenario: Allowlist revocation blocks new token exchanges.
+  // Removal blocks NEW exchanges but does NOT invalidate already-minted session tokens.
+  // Expected: 403, error.code === "repo-not-allowed"
+  // Placeholder until pool-workers configured
+  it.todo(
+    "exchange for repo removed from allowlist returns 403 repo-not-allowed",
+  );
 
-  it("10+ consecutive auth failures from same IP returns 429 rate-limited", () => {
-    // Scenario: Rate limiting after repeated failures.
-    // RATE_LIMIT_MAX_FAILURES = 10 (auth-github.ts:16); counter increments only on failures.
-    // Expected: 429, error.code === "rate-limited"
-    expect(true).toBe(true); // Placeholder until pool-workers configured
-  });
+  // Scenario: Rate limiting after repeated failures.
+  // RATE_LIMIT_MAX_FAILURES = 10 (auth-github.ts:16); counter increments only on failures.
+  // Expected: 429, error.code === "rate-limited"
+  // Placeholder until pool-workers configured
+  it.todo(
+    "10+ consecutive auth failures from same IP returns 429 rate-limited",
+  );
 
-  it("expired session token returns 401 unauthorized", () => {
-    // Scenario: Session token past its TTL (expires_at <= now).
-    // The token must have a valid HMAC signature — HMAC runs before expiry check.
-    // Expected: 401, error.code === "unauthorized"
-    expect(true).toBe(true); // Placeholder until pool-workers configured
-  });
+  // Scenario: Session token past its TTL (expires_at <= now).
+  // The token must have a valid HMAC signature — HMAC runs before expiry check.
+  // Expected: 401, error.code === "unauthorized"
+  // Placeholder until pool-workers configured
+  it.todo("expired session token returns 401 unauthorized");
 });
 
 // ---------------------------------------------------------------------------

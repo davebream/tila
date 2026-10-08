@@ -20,6 +20,7 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
   const h = harness(root);
   const store = new SessionStore(join(root, "client-lifecycle"));
   const clients: ChildProcess[] = [];
+  const serverErrors: string[] = [];
   const server = createServer(async (request, response) => {
     try {
       const state = store
@@ -59,6 +60,7 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
       response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify(result));
     } catch (error) {
+      serverErrors.push(String(error));
       response.statusCode = 500;
       response.end(JSON.stringify({ error: String(error) }));
     }
@@ -72,6 +74,9 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
     }
   };
   try {
+    // Prepare the fixture before accepting concurrent requests. Real services
+    // initialize storage before serving; this test targets hooks, not cold DDL.
+    await h.facade({ participantId: "fixture-setup", environment: {} });
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const address = server.address();
@@ -139,7 +144,10 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
       const context = JSON.parse(
         JSON.parse(String(output)).hookSpecificOutput.additionalContext,
       );
-      expect(context.degraded).toBeUndefined();
+      expect(
+        context.degraded,
+        JSON.stringify({ stderr, serverErrors }),
+      ).toBeUndefined();
       return child;
     };
     const [one, two] = await Promise.all([launch("one"), launch("two")]);

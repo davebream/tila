@@ -10,7 +10,9 @@ import { Lifecycle, SessionStore } from "../src/index";
 export function harness(root: string) {
   const connections: TilaLocal[] = [];
   const store = new SessionStore(join(root, "sessions"));
-  const facade = async (state: LifecycleState) => {
+  const facade = async (
+    state: Pick<LifecycleState, "participantId" | "environment">,
+  ) => {
     const local = await createTilaLocal({
       dbPath: join(root, "project.db"),
       artifactsPath: join(root, "artifacts"),

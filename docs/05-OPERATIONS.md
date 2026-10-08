@@ -1526,3 +1526,76 @@ Manual CI dispatch with `benchmark=true` runs the baseline and Turbo concurrency
 2/4 × Vitest workers 1/2, three times each on one revision. It does not tune CI
 automatically. Select the lowest median with no failures and at most 10% extra
 runner time; retain the baseline if none qualifies. Reports last seven days.
+
+### Local Cloudflare runtime validation
+
+`pnpm test:runtime` runs the required Workers suite with local DO SQLite, D1 and
+R2. It uses the production compatibility date/flags and real migration sources,
+resets data between tests, and rejects unexpected outbound fetches. The suite
+checks exclusive claims/fences, stale writes, migration upgrades and transaction
+rollback, eviction/reconstruction, D1 authorization/revocation, and recovery of
+interrupted artifact commit publication without duplicates. JSON reports reject
+skipped, TODO, failed or empty runtime results. Placeholder-only tests in the
+older integration suite are explicitly TODO; meaningful assertions are retained.
+
+Primary CI uses Node 24. Node 22 SDK/MCP compatibility remains a full-run check
+on the daily schedule, manual full validation, and release validation. Bun and
+pnpm remain pinned. Runtime tests run in parallel with verification and secret
+scanning and are required by `ci`. They do **not** prove production PITR or
+remote latency/performance: keep the existing manual live-infrastructure release
+gates above.
+
+### Release artifacts and rehearsals
+
+The Release workflow validates the exact checkout before packaging. A publish tag
+must equal `v<product version>` and point to a commit reachable from main. Run the
+manual pre-tag live-infrastructure gates above before creating a release tag;
+local runtime validation does not replace them.
+
+The pipeline runs full lint/version, typecheck, Node/Bun package tests, root script
+tests, local runtime tests and audit. It builds a fresh workspace with no restored
+Turbo output, generates one Worker sidecar, compiles eight binaries and packs all
+eleven public npm packages. `manifest.json` records the revision, version, compiler,
+commit timestamp, target inventory, tarball integrity and every file checksum.
+
+Clean-directory consumers install the tarballs and check SDK ESM/CommonJS local
+SQLite persistence, MCP stdio initialization/tool discovery, and the npm CLI.
+Native Linux, macOS and Windows x64/arm64 runners execute the binaries and local
+installer fixtures; both musl binaries run in native-architecture Alpine containers.
+The POSIX installer detects musl and selects that target. SDK private implementation
+packages are bundled build dependencies, never unpublished npm runtime dependencies.
+
+Only after all smoke checks pass are provenance/SBOM attestations generated and
+verified against this repository, release workflow and source revision. Publishing
+jobs download the same payload, reverify it, and never rebuild. SDK/platform
+packages publish before MCP/the main CLI; the GitHub release follows successful
+npm publication. A retry skips an existing npm version only if registry integrity
+matches the tested tarball. Retry failed jobs while their seven-day artifacts remain
+available; a complete rebuild may produce different binary bytes and must not be
+silently substituted for a partly published release.
+
+Use Actions → Release → Run workflow, selecting the desired branch, for a rehearsal.
+It performs validation, packing, platform/consumer smoke tests and attestation
+verification, but cannot publish npm packages, a GitHub release or Homebrew changes.
+Locally, after `pnpm build`, `pnpm --filter tila-cli compile` builds all targets;
+standalone `compile:<target>` commands remain supported. `node scripts/release-pack.mjs`
+requires a fresh `.release` output directory. `node scripts/release-smoke.mjs .release
+consumer` installs into a temporary directory and tests the local platform.
+
+Homebrew updating is a downstream reusable workflow, no longer a release-event
+listener. It remains disabled unless a maintainer explicitly enables the workflow,
+sets `ENABLE_HOMEBREW_PUBLISH=true`, and supplies the tap credential. A rehearsal
+never calls it. No release versions, production settings or schemas change here.
+
+### CI rollout measurements
+
+The initial observed median was about four minutes. Stage-one hosted verification
+completed in 3m35s on its final run. Stage-two's first cache-cold PR verification
+completed in 4m56s; successful main validation then seeded the trusted cache. The
+Node-24 runtime stage passed hosted verification in 3m16s with a 34s parallel
+runtime job. These are individual observations, not comparable cold/warm medians.
+Use the saved step timings and Turbo summaries for comparison; the concurrency
+benchmark runs fifteen samples on one fixed revision. Keep the baseline until a
+candidate meets the speed, zero-failure and runner-time criteria. Affected-only
+execution remains disabled pending ten paired PR observations. The under-two-minute
+warm-PR target is not yet demonstrated.
