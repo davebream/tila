@@ -212,6 +212,8 @@ export {
   type WhoamiResponse,
   DOHealthResponseSchema,
   type DOHealthResponse,
+  StoreCountsResponseSchema,
+  type StoreCountsResponse,
   DoctorProbeResponseSchema,
   type DoctorProbeResponse,
   SqliteColumnInfoSchema,

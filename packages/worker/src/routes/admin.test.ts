@@ -234,13 +234,15 @@ describe("project admin routes", () => {
         domain: { entities: 0, fences: 0 },
         schemaHistory: 0,
       };
-      forwardToDOMock.mockResolvedValueOnce(Response.json({ counts }));
+      forwardToDOMock.mockResolvedValueOnce(
+        Response.json({ counts, db_bytes: 8192 }),
+      );
 
       const app = createApp("full", "d1-token");
       const res = await req(app, "/admin/store-counts", "GET");
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ counts });
+      expect(await res.json()).toEqual({ counts, db_bytes: 8192 });
       expect(forwardToDOMock).toHaveBeenCalledWith(
         expect.anything(),
         "/admin/store-counts",
