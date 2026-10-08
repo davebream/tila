@@ -202,8 +202,13 @@ export function CredentialsTable({
                         ? relativeTime(epochToMs(token.last_used_at))
                         : "never"}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      <div className="font-mono">{token.created_by}</div>
+                    <TableCell className="max-w-[18ch] text-xs text-muted-foreground">
+                      <div
+                        className="truncate font-mono"
+                        title={token.created_by}
+                      >
+                        {token.created_by}
+                      </div>
                       <div className="tila-num">
                         {relativeTime(epochToMs(token.created_at))}
                       </div>

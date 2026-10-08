@@ -183,8 +183,10 @@ export function MembersTable({
                           : "explicit"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      <div className="font-mono">{m.granted_by}</div>
+                    <TableCell className="max-w-[18ch] text-xs text-muted-foreground">
+                      <div className="truncate font-mono" title={m.granted_by}>
+                        {m.granted_by}
+                      </div>
                       <div
                         className="tila-num"
                         title={formatDateTime(m.granted_at)}
