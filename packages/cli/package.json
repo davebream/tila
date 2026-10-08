@@ -80,7 +80,7 @@
     "esbuild": "^0.28.1",
     "jose": "^6.2.3",
     "object-treeify": "^5.0.1",
-    "smol-toml": "^1.8.0",
+    "smol-toml": "^1.9.0",
     "tila-sdk": "workspace:*",
     "tsx": "^4.22.4",
     "typescript": "^5.7.0",
