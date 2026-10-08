@@ -238,3 +238,12 @@ Rules:
 - Functions that share a name within one file, such as the `run` handlers in CLI commands, collapse into one node.
 - After changing code, run `graphify update .` so later queries see the change. Checkouts where `graphify hook install` was run rebuild after each commit, except in linked worktrees.
 - Give these rules to any subagent that explores code.
+
+## Release validation
+
+CI and release workflows are maintained directly in this repository. Manual
+Release dispatch is a non-publishing rehearsal. Tag publication validates the
+commit, tests packed artifacts on native runners, verifies attestations, then
+publishes the tested tarballs and binaries without rebuilding. Homebrew remains
+opt-in and disabled by default. See `docs/05-OPERATIONS.md` for commands and the
+manual live-infrastructure pre-tag gates.
