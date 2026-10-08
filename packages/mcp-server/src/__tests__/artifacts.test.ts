@@ -3,6 +3,7 @@ import { registerArtifactTools } from "../tools/artifacts";
 import {
   type MockFacade,
   type MockServer,
+  TEST_ARTIFACT,
   asFacade,
   asServer,
   createMockFacade,
@@ -26,11 +27,14 @@ describe("registerArtifactTools", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers 9 tools with correct names", () => {
-    expect(server.tool).toHaveBeenCalledTimes(9);
+  it("registers 12 tools with correct names", () => {
+    expect(server.tool).toHaveBeenCalledTimes(12);
 
     const toolNames = server.tool.mock.calls.map((call: unknown[]) => call[0]);
     expect(toolNames).toEqual([
+      "tila_artifact_reviews",
+      "tila_artifact_review",
+      "tila_artifact_history",
       "tila_artifact_put",
       "tila_artifact_search",
       "tila_artifact_write_text",
@@ -44,6 +48,67 @@ describe("registerArtifactTools", () => {
   });
 
   const findHandler = (name: string) => findToolHandler(server, name);
+
+  it("forwards review concurrency, idempotency, and history pagination", async () => {
+    const response = {
+      ok: true,
+      review: { state: "unreviewed", review_revision: 3, latest: null },
+    };
+    facade.artifacts.review.mockResolvedValue(response);
+    const result = await findHandler("tila_artifact_review")({
+      key: "sources/evidence.txt",
+      decision: "revoked",
+      expected_review_revision: 2,
+      reason: "Evidence changed",
+      idempotency_key: "once",
+    });
+    expect(facade.artifacts.review).toHaveBeenCalledWith(
+      "sources/evidence.txt",
+      {
+        decision: "revoked",
+        expected_review_revision: 2,
+        reason: "Evidence changed",
+        idempotencyKey: "once",
+      },
+    );
+    expect(JSON.parse(result.content[0].text)).toEqual(response);
+    facade.artifacts.reviews.mockResolvedValue({
+      ok: true,
+      items: [],
+      next_revision: null,
+    });
+    await findHandler("tila_artifact_reviews")({
+      key: "sources/evidence.txt",
+      limit: 2,
+      before_revision: 3,
+    });
+    expect(facade.artifacts.reviews).toHaveBeenCalledWith(
+      "sources/evidence.txt",
+      { limit: 2, before_revision: 3 },
+    );
+  });
+
+  it("forwards history pagination and exposes no restore tool", async () => {
+    const response = {
+      ok: true,
+      items: [],
+      meta: { total: 0, limit: 20, next_cursor: null },
+    };
+    facade.artifacts.history.mockResolvedValue(response);
+    const result = await findHandler("tila_artifact_history")({
+      key: "versioned/p/report/1/abc.txt",
+      limit: 2,
+      cursor: "next",
+    });
+    expect(facade.artifacts.history).toHaveBeenCalledWith(
+      "versioned/p/report/1/abc.txt",
+      { limit: 2, cursor: "next" },
+    );
+    expect(JSON.parse(result.content[0].text)).toEqual(response);
+    expect(server.tool.mock.calls.map((call) => call[0])).not.toContain(
+      "tila_artifact_restore",
+    );
+  });
 
   describe("tila_artifact_put", () => {
     it("calls artifacts.upload with a Blob and upload opts", async () => {
@@ -121,6 +186,7 @@ describe("registerArtifactTools", () => {
         ok: true,
         key: "sources/abc.md",
         bytes: 12,
+        deduplicated: false,
       });
 
       const handler = findHandler("tila_artifact_write_text");
@@ -153,7 +219,7 @@ describe("registerArtifactTools", () => {
       const result = await handler({ key: "sources/abc.md" });
 
       expect(facade.artifacts.readText).toHaveBeenCalledWith("sources/abc.md");
-      expect(result.content[0].text).toBe("# Hello");
+      expect(result.content[1].text).toBe("# Hello");
     });
 
     it("throws McpError for non-text content types", async () => {
@@ -163,9 +229,12 @@ describe("registerArtifactTools", () => {
       });
 
       const handler = findHandler("tila_artifact_read_text");
-      await expect(handler({ key: "sources/img.png" })).rejects.toThrow(
-        /only supports text/,
-      );
+      await expect(handler({ key: "sources/img.png" })).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching(/only supports text/) },
+        },
+      });
     });
 
     it("truncates text over max_chars and appends marker with char/byte counts", async () => {
@@ -178,7 +247,10 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/big.txt", max_chars: 100 });
 
-      const text = result.content[0].text;
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        artifact_metadata: { review: { state: "unreviewed" } },
+      });
+      const text = result.content[1].text;
       expect(text).toHaveLength(
         100 +
           "\n\n...[truncated: returned 100 chars of 20000 bytes total]".length,
@@ -201,7 +273,7 @@ describe("registerArtifactTools", () => {
         max_chars: 10000,
       });
 
-      expect(result.content[0].text).toBe("short content");
+      expect(result.content[1].text).toBe("short content");
     });
 
     it("uses default max_chars of 10000 when not specified", async () => {
@@ -213,7 +285,10 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/big.txt" });
 
-      const text = result.content[0].text;
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        artifact_metadata: { review: { state: "unreviewed" } },
+      });
+      const text = result.content[1].text;
       expect(text.startsWith("x".repeat(10000))).toBe(true);
       expect(text).toContain(
         "...[truncated: returned 10000 chars of 15000 bytes total]",
@@ -232,7 +307,10 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_read_text");
       const result = await handler({ key: "sources/emoji.txt", max_chars: 50 });
 
-      const text = result.content[0].text;
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        artifact_metadata: { review: { state: "unreviewed" } },
+      });
+      const text = result.content[1].text;
       expect(text).toContain(
         "...[truncated: returned 50 chars of 800 bytes total]",
       );
@@ -254,14 +332,14 @@ describe("registerArtifactTools", () => {
 
   describe("tila_artifact_get_latest", () => {
     it("calls artifacts.getLatest and wraps the pointer in an envelope", async () => {
-      facade.artifacts.getLatest.mockResolvedValue({ r2_key: "abc.md" });
+      facade.artifacts.getLatest.mockResolvedValue(TEST_ARTIFACT);
 
       const handler = findHandler("tila_artifact_get_latest");
       const result = await handler({ kind: "plan", resource: "T-1" });
 
       expect(facade.artifacts.getLatest).toHaveBeenCalledWith("plan", "T-1");
       const parsed = JSON.parse(result.content[0].text);
-      expect(parsed).toEqual({ ok: true, pointer: { r2_key: "abc.md" } });
+      expect(parsed).toEqual({ ok: true, pointer: TEST_ARTIFACT });
     });
 
     it("returns ok:true with a null pointer when none exists", async () => {
@@ -314,7 +392,12 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_relationships_add");
       await expect(
         handler({ from_key: "sources/a.md", type: "derived-from" }),
-      ).rejects.toThrow(/to_key or to_uri/);
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching(/to_key or to_uri/) },
+        },
+      });
     });
   });
 
@@ -341,7 +424,12 @@ describe("registerArtifactTools", () => {
       const handler = findHandler("tila_artifact_write_text");
       await expect(
         handler({ content: "x", kind: "log", mime_type: "text/plain" }),
-      ).rejects.toThrow("server down");
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching("server down") },
+        },
+      });
     });
   });
 

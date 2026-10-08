@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerJournalTools(
   server: McpServer,
@@ -10,7 +11,8 @@ export function registerJournalTools(
 ): void {
   const journal = facade.journal;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_journal_list",
     "Query the project event journal. Returns journal entries in chronological order. Use to inspect execution history for coordination decisions.",
     {
@@ -21,6 +23,10 @@ export function registerJournalTools(
         .describe(
           "Filter by event kind (e.g. 'entity.update', 'gate.resolve')",
         ),
+      client_name: z
+        .string()
+        .optional()
+        .describe("Filter by environment client name"),
       after_seq: z
         .number()
         .int()
@@ -34,11 +40,12 @@ export function registerJournalTools(
         .default(20)
         .describe("Maximum events to return"),
     },
-    async ({ resource, kind, after_seq, limit }) => {
+    async ({ resource, kind, client_name, after_seq, limit }) => {
       try {
         const result = await journal.query({
           resource,
           kind,
+          client_name,
           after_seq: after_seq !== undefined ? String(after_seq) : undefined,
           limit: String(limit),
         });

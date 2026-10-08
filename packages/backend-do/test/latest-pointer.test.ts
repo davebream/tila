@@ -46,7 +46,12 @@ describe("getLatestPointer", () => {
 
   it("returns the only pointer when there is one and no chain", () => {
     const ptr = makePointer();
-    upsertPointer(db, ptr, { actor: "agent" });
+    upsertPointer(db, ptr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
 
     const result = getLatestPointer(db, "plan", "task-1");
     expect(result).not.toBeNull();
@@ -58,9 +63,24 @@ describe("getLatestPointer", () => {
     const ptr2 = makePointer(); // produced_at = 2000
     const ptr3 = makePointer(); // produced_at = 3000
 
-    upsertPointer(db, ptr1, { actor: "agent" });
-    upsertPointer(db, ptr2, { actor: "agent" });
-    upsertPointer(db, ptr3, { actor: "agent" });
+    upsertPointer(db, ptr1, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(db, ptr2, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(db, ptr3, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
 
     const result = getLatestPointer(db, "plan", "task-1");
     // No supersedes chain — falls back to produced_at DESC
@@ -72,9 +92,38 @@ describe("getLatestPointer", () => {
     const ptr2 = makePointer(); // v2 — supersedes v1
     const ptr3 = makePointer(); // v3 — supersedes v2
 
-    upsertPointer(db, ptr1, { actor: "agent" });
-    upsertPointer(db, ptr2, { actor: "agent" }, undefined, null, true); // auto-supersedes ptr1
-    upsertPointer(db, ptr3, { actor: "agent" }, undefined, null, true); // auto-supersedes ptr1 and ptr2
+    upsertPointer(db, ptr1, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      ptr2,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    ); // auto-supersedes ptr1
+    upsertPointer(
+      db,
+      ptr3,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    ); // auto-supersedes ptr1 and ptr2
 
     // ptr3 is the head: not superseded by anything
     const result = getLatestPointer(db, "plan", "task-1");
@@ -85,8 +134,18 @@ describe("getLatestPointer", () => {
     const ptr1 = makePointer({ r2_key: "keys/live.md" });
     const ptr2 = makePointer({ r2_key: "keys/tombstoned.md" });
 
-    upsertPointer(db, ptr1, { actor: "agent" });
-    upsertPointer(db, ptr2, { actor: "agent" });
+    upsertPointer(db, ptr1, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(db, ptr2, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
 
     // Tombstone ptr2 (the more recent one)
     rawDb
@@ -100,7 +159,12 @@ describe("getLatestPointer", () => {
 
   it("returns null when all pointers are tombstoned", () => {
     const ptr = makePointer();
-    upsertPointer(db, ptr, { actor: "agent" });
+    upsertPointer(db, ptr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
     rawDb
       .prepare("UPDATE artifact_pointers SET tombstoned = 1 WHERE r2_key = ?")
       .run(ptr.r2_key);
@@ -111,7 +175,12 @@ describe("getLatestPointer", () => {
 
   it("returns null for non-matching kind", () => {
     const ptr = makePointer({ kind: "design" });
-    upsertPointer(db, ptr, { actor: "agent" });
+    upsertPointer(db, ptr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
 
     const result = getLatestPointer(db, "plan", "task-1"); // different kind
     expect(result).toBeNull();
@@ -119,7 +188,12 @@ describe("getLatestPointer", () => {
 
   it("returns null for non-matching resource", () => {
     const ptr = makePointer({ resource: "task-2" });
-    upsertPointer(db, ptr, { actor: "agent" });
+    upsertPointer(db, ptr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
 
     const result = getLatestPointer(db, "plan", "task-1"); // different resource
     expect(result).toBeNull();
@@ -134,10 +208,44 @@ describe("getLatestPointer", () => {
     const ptr3 = makePointer({ r2_key: "keys/chain-b-v1.md" }); // produced_at = 3000
     const ptr4 = makePointer({ r2_key: "keys/chain-b-v2.md" }); // produced_at = 4000
 
-    upsertPointer(db, ptr1, { actor: "agent" });
-    upsertPointer(db, ptr2, { actor: "agent" }, undefined, null, true);
-    upsertPointer(db, ptr3, { actor: "agent" });
-    upsertPointer(db, ptr4, { actor: "agent" }, undefined, null, true);
+    upsertPointer(db, ptr1, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      ptr2,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
+    upsertPointer(db, ptr3, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
+    upsertPointer(
+      db,
+      ptr4,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      true,
+    );
 
     // Both ptr2 and ptr4 are chain heads; ptr4 has the higher produced_at
     const result = getLatestPointer(db, "plan", "task-1");
@@ -146,10 +254,20 @@ describe("getLatestPointer", () => {
 
   it("returns tags written via upsertPointer", () => {
     const ptr = makePointer();
-    upsertPointer(db, ptr, { actor: "agent" }, undefined, null, false, [
-      "team:eng",
-      "env:prod",
-    ]);
+    upsertPointer(
+      db,
+      ptr,
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+      undefined,
+      null,
+      false,
+      ["team:eng", "env:prod"],
+    );
     const result = getLatestPointer(db, "plan", "task-1");
     expect(result?.tags?.slice().sort()).toEqual(
       ["env:prod", "team:eng"].sort(),
@@ -158,7 +276,12 @@ describe("getLatestPointer", () => {
 
   it("returns empty tags array when none were written", () => {
     const ptr = makePointer();
-    upsertPointer(db, ptr, { actor: "agent" });
+    upsertPointer(db, ptr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
     const result = getLatestPointer(db, "plan", "task-1");
     expect(result?.tags).toEqual([]);
   });

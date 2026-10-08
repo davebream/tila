@@ -186,8 +186,8 @@ describe("task relationship commands", () => {
       ).rejects.toThrow("process.exit(1)");
       // printJsonError writes { ok:false, code, message } to stderr via console.error
       const output = JSON.parse(errorSpy.mock.calls[0][0] as string);
-      expect(output.code).toBe("validation-error");
-      expect(output.message).toContain("invalid-type");
+      expect(output.error.kind).toBe("validation-error");
+      expect(output.error.message).toContain("invalid-type");
       expect(mockAddRelationship).not.toHaveBeenCalled();
     });
 
@@ -262,10 +262,7 @@ describe("task relationship commands", () => {
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
       expect(output).toEqual({
         ok: true,
-        from: "A",
-        to: "B",
-        type: "blocks",
-        created: true,
+        result: { from: "A", to: "B", type: "blocks", created: true },
       });
     });
 
@@ -277,10 +274,7 @@ describe("task relationship commands", () => {
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
       expect(output).toEqual({
         ok: true,
-        from: "A",
-        to: "B",
-        type: "blocks",
-        created: false,
+        result: { from: "A", to: "B", type: "blocks", created: false },
       });
     });
 
@@ -313,7 +307,11 @@ describe("task relationship commands", () => {
       const listCmd = getSubCommand(cmd, "relationship", "list");
       await runCmd(listCmd, { json: true });
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(output).toEqual({ relationships: [], count: 0 });
+      expect(output).toEqual({
+        ok: true,
+        result: { items: [] },
+        meta: { count: 0, limit: 100 },
+      });
     });
 
     it("renders table for populated list (human mode)", async () => {
@@ -351,11 +349,11 @@ describe("task relationship commands", () => {
       const listCmd = getSubCommand(cmd, "relationship", "list");
       await runCmd(listCmd, { json: true });
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(output.count).toBe(1);
-      expect(output.relationships).toHaveLength(1);
-      expect(output.relationships[0].from_id).toBe("A");
+      expect(output.meta.count).toBe(1);
+      expect(output.result.items).toHaveLength(1);
+      expect(output.result.items[0].from_id).toBe("A");
       // created_at should be ISO string (tsToIso applied)
-      expect(typeof output.relationships[0].created_at).toBe("string");
+      expect(typeof output.result.items[0].created_at).toBe("string");
     });
 
     it("passes from/to/type filters to backend", async () => {
@@ -435,10 +433,7 @@ describe("task relationship commands", () => {
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
       expect(output).toEqual({
         ok: true,
-        from: "A",
-        to: "B",
-        type: "blocks",
-        removed: true,
+        result: { from: "A", to: "B", type: "blocks", removed: true },
       });
     });
 
@@ -455,10 +450,7 @@ describe("task relationship commands", () => {
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
       expect(output).toEqual({
         ok: true,
-        from: "A",
-        to: "B",
-        type: "blocks",
-        removed: false,
+        result: { from: "A", to: "B", type: "blocks", removed: false },
       });
     });
 
@@ -517,9 +509,9 @@ describe("task relationship commands", () => {
       );
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
       expect(output.ok).toBe(true);
-      expect(output.id).toBe("epic.x");
-      expect(output.type).toBe("epic");
-      expect(output.title).toBe("My Epic");
+      expect(output.result.id).toBe("epic.x");
+      expect(output.result.type).toBe("epic");
+      expect(output.result.title).toBe("My Epic");
     });
 
     it("uses auto-generated T-<base36> id when --id omitted", async () => {
@@ -540,8 +532,8 @@ describe("task relationship commands", () => {
         "link-parent": false,
       });
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(output.id).toMatch(/^T-/);
-      expect(output.type).toBe("task");
+      expect(output.result.id).toMatch(/^T-/);
+      expect(output.result.type).toBe("task");
     });
 
     it("defaults type to 'task' when --type omitted", async () => {
@@ -634,8 +626,8 @@ describe("task relationship commands", () => {
       ).rejects.toThrow("process.exit(1)");
       // printJsonError writes { ok:false, code, message } to stderr via console.error
       const output = JSON.parse(errorSpy.mock.calls[0][0] as string);
-      expect(output.code).toBe("already-exists");
-      expect(output.message).toContain("epic.x");
+      expect(output.error.kind).toBe("already-exists");
+      expect(output.error.message).toContain("epic.x");
     });
 
     it("plain success --json shape is {ok,id,type,title} (no parent)", async () => {
@@ -658,8 +650,8 @@ describe("task relationship commands", () => {
         "link-parent": false,
       });
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(Object.keys(output).sort()).toEqual(
-        ["id", "ok", "title", "type"].sort(),
+      expect(Object.keys(output.result).sort()).toEqual(
+        ["id", "title", "type"].sort(),
       );
     });
 
@@ -684,7 +676,7 @@ describe("task relationship commands", () => {
         "link-parent": false,
       });
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(output.parent).toBe("epic.x");
+      expect(output.result.parent).toBe("epic.x");
     });
   });
 
@@ -736,11 +728,13 @@ describe("task relationship commands", () => {
       const output = JSON.parse(logSpy.mock.calls[0][0] as string);
       expect(output).toMatchObject({
         ok: true,
-        id: "child.1",
-        type: "task",
-        title: "Child",
-        parent: "epic.x",
-        linked: true,
+        result: {
+          id: "child.1",
+          type: "task",
+          title: "Child",
+          parent: "epic.x",
+          linked: true,
+        },
       });
     });
 
@@ -778,19 +772,17 @@ describe("task relationship commands", () => {
 
       // Task was created
       expect(mockCreate).toHaveBeenCalled();
-      // Stderr got the partial JSON
-      const stderrOutput = stderrSpy.mock.calls[0][0] as string;
-      const parsed = JSON.parse(stderrOutput.trim());
-      // Verify exact key set
-      expect(Object.keys(parsed).sort()).toEqual(
-        ["error", "id", "linked", "ok", "parent", "title", "type"].sort(),
-      );
+      const parsed = JSON.parse(String(errorSpy.mock.calls[0][0]));
       expect(parsed.ok).toBe(false);
-      expect(parsed.linked).toBe(false);
-      expect(parsed.id).toBe("child.1");
-      expect(parsed.parent).toBe("epic.x");
-      expect(parsed.error.code).toBe("leaf-rejection");
-      expect(parsed.error.message).toBeTruthy();
+      expect(parsed.error.kind).toBe("leaf-rejection");
+      expect(parsed.error.retryable).toBe(false);
+      expect(parsed.error.details.partial_result).toEqual({
+        id: "child.1",
+        type: "task",
+        title: "Child",
+        parent: "epic.x",
+        linked: false,
+      });
     });
 
     it("--link-parent partial failure human output mentions re-link hint", async () => {

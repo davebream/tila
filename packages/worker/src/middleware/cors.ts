@@ -29,8 +29,19 @@ export function createCorsMiddleware(): MiddlewareHandler<AppEnv> {
       origin: allowedOrigins,
       credentials: true,
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Authorization", "Content-Type"],
-      exposeHeaders: ["X-Tila-Token-Estimate"],
+      // The dashboard sends participant/client headers on project mutations
+      // (#102); production is same-origin, this list only matters for local dev.
+      allowHeaders: [
+        "Authorization",
+        "Content-Type",
+        "X-Tila-Participant-Id",
+        "X-Tila-Client-Name",
+      ],
+      exposeHeaders: [
+        "X-Tila-Token-Estimate",
+        "X-Tila-Artifact-Review-State",
+        "X-Tila-Artifact-Review-Revision",
+      ],
       maxAge: 86400,
     });
 

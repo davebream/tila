@@ -1,3 +1,4 @@
+import { ArtifactCommitRecordSchema, artifactRevisionKey } from "@tila/schemas";
 /**
  * Bootstrap migration: creates the _migrations tracking table.
  * Uses CREATE TABLE IF NOT EXISTS so it is safe to run on every cold start
@@ -44,6 +45,17 @@ export function columnExists(
     name: string;
   }[];
   return cols.some((c) => c.name === column);
+}
+
+function tableExists(storage: MigrationStorage, table: string): boolean {
+  assertIdentifier(table);
+  const rows = storage.sql
+    .exec(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+      table,
+    )
+    .toArray();
+  return rows.length > 0;
 }
 
 /**
@@ -373,6 +385,10 @@ UPDATE claims SET machine = holder, user = holder WHERE machine = '';
 `;
 
 export function runMigration0010(storage: MigrationStorage): void {
+  // A v23 database may replay this migration if the bookkeeping table was
+  // lost. Its canonical claim table intentionally has no legacy holder column.
+  if (columnExists(storage, "claims", "principal_id")) return;
+
   storage.sql.exec(`
 CREATE TABLE IF NOT EXISTS claims (
   resource TEXT PRIMARY KEY,
@@ -667,10 +683,506 @@ CREATE INDEX IF NOT EXISTS idx_entities_archived ON entities(id) WHERE archived 
 `;
 
 /**
+ * Split authenticated principal, independent participant, and untrusted
+ * environment identity. Active legacy claims and presence cannot be assigned a
+ * truthful participant, so they are intentionally discarded. Fence rows are
+ * untouched and therefore remain monotonic.
+ */
+export function runMigration0023(storage: MigrationStorage): void {
+  storage.sql.exec("DROP TABLE IF EXISTS claims");
+  storage.sql.exec(`
+    CREATE TABLE claims (
+      resource TEXT PRIMARY KEY,
+      principal_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT '{}',
+      mode TEXT NOT NULL CHECK(mode IN ('exclusive', 'owner', 'presence')),
+      fence INTEGER NOT NULL,
+      acquired_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      metadata TEXT DEFAULT '{}'
+    )
+  `);
+  storage.sql.exec(
+    "CREATE INDEX IF NOT EXISTS idx_claims_expires ON claims(expires_at)",
+  );
+
+  storage.sql.exec("DROP TABLE IF EXISTS presence");
+  storage.sql.exec(`
+    CREATE TABLE presence (
+      principal_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT '{}',
+      last_seen INTEGER NOT NULL,
+      info TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY (principal_id, participant_id)
+    )
+  `);
+  storage.sql.exec(
+    "CREATE INDEX IF NOT EXISTS idx_presence_last_seen ON presence(last_seen)",
+  );
+
+  if (tableExists(storage, "journal")) {
+    if (!columnExists(storage, "journal", "principal_id")) {
+      storage.sql.exec("ALTER TABLE journal ADD COLUMN principal_id TEXT");
+    }
+    if (!columnExists(storage, "journal", "participant_id")) {
+      storage.sql.exec("ALTER TABLE journal ADD COLUMN participant_id TEXT");
+    }
+    if (!columnExists(storage, "journal", "environment")) {
+      storage.sql.exec("ALTER TABLE journal ADD COLUMN environment TEXT");
+    }
+    storage.sql.exec(`
+      UPDATE journal
+         SET principal_id = COALESCE(principal_id, 'legacy-principal:' || actor),
+             participant_id = COALESCE(participant_id, 'legacy-event:' || seq),
+             environment = COALESCE(
+               environment,
+               CASE
+                 WHEN source IS NULL THEN '{}'
+                 WHEN source_version IS NULL THEN json_object('client_name', source)
+                 ELSE json_object('client_name', source, 'client_version', source_version)
+               END
+             )
+    `);
+    storage.sql.exec(
+      "CREATE INDEX IF NOT EXISTS idx_journal_participant ON journal(participant_id)",
+    );
+    storage.sql.exec(
+      "CREATE INDEX IF NOT EXISTS idx_journal_client_name ON journal(json_extract(environment, '$.client_name'))",
+    );
+  }
+}
+
+/**
+ * Singleton project transfer lock plus idempotent accepted-chunk ledger.
+ * Export sessions carry a renewable expiry. Import and rollback sessions store
+ * NULL in expires_at and therefore fail closed until explicitly completed.
+ */
+export const MIGRATION_0024 = `
+CREATE TABLE IF NOT EXISTS _project_transfer_state (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  session_id TEXT NOT NULL UNIQUE,
+  mode TEXT NOT NULL CHECK(mode IN ('export', 'import', 'rollback')),
+  owner TEXT NOT NULL,
+  archive_digest TEXT,
+  safety_archive TEXT,
+  started_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  applying INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS _project_transfer_chunks (
+  session_id TEXT NOT NULL,
+  section TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  accepted_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, section, chunk_index)
+);
+`;
+
+const TRANSFER_GUARDED_TABLES = [
+  "entities",
+  "entity_relationships",
+  "artifact_pointers",
+  "entity_artifact_references",
+  "artifact_relationships",
+  "journal",
+  "_journal_archive_watermark",
+  "claims",
+  "fences",
+  "presence",
+  "_schema_history",
+  "artifact_search_docs",
+  "entity_search_docs",
+  "gates",
+  "signal_groups",
+  "signal_group_members",
+  "signals",
+  "signal_deliveries",
+  "records",
+  "entity_tags",
+  "artifact_tags",
+  "record_tags",
+  "record_revisions",
+  "record_search_docs",
+] as const;
+
+export function runMigration0024(storage: MigrationStorage): void {
+  storage.sql.exec(MIGRATION_0024);
+  for (const table of TRANSFER_GUARDED_TABLES) {
+    const exists =
+      storage.sql
+        .exec(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+          table,
+        )
+        .toArray().length > 0;
+    if (!exists) continue;
+    for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
+      storage.sql.exec(`
+        CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
+        BEFORE ${operation} ON ${table}
+        WHEN EXISTS (
+          SELECT 1 FROM _project_transfer_state
+          WHERE singleton = 1 AND applying = 0
+            AND (expires_at IS NULL OR expires_at > (unixepoch('subsec') * 1000))
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'project-maintenance');
+        END;
+      `);
+    }
+  }
+}
+
+/**
+ * Replace display-name-addressed signals with participant-scoped deliveries.
+ * Legacy rows cannot be mapped to canonical identities safely, so this
+ * migration intentionally purges them by rebuilding the signals table.
+ */
+export function runMigration0025(storage: MigrationStorage): void {
+  storage.sql.exec("DROP TABLE IF EXISTS signal_deliveries");
+  storage.sql.exec("DROP TABLE IF EXISTS signals");
+  storage.sql.exec("DROP TABLE IF EXISTS signal_group_members");
+  storage.sql.exec("DROP TABLE IF EXISTS signal_groups");
+  storage.sql.exec(`
+    CREATE TABLE signal_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      created_by_principal_id TEXT NOT NULL,
+      created_by_participant_id TEXT NOT NULL,
+      updated_by_principal_id TEXT NOT NULL,
+      updated_by_participant_id TEXT NOT NULL
+    );
+
+    CREATE TABLE signal_group_members (
+      group_id TEXT NOT NULL REFERENCES signal_groups(id) ON DELETE CASCADE,
+      principal_id TEXT NOT NULL,
+      added_at INTEGER NOT NULL,
+      added_by_principal_id TEXT NOT NULL,
+      added_by_participant_id TEXT NOT NULL,
+      PRIMARY KEY (group_id, principal_id)
+    );
+    CREATE INDEX idx_signal_group_members_principal
+      ON signal_group_members(principal_id);
+
+    CREATE TABLE signals (
+      id TEXT PRIMARY KEY,
+      target TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      resource TEXT,
+      payload TEXT NOT NULL DEFAULT '{}',
+      sender_principal_id TEXT NOT NULL,
+      sender_participant_id TEXT NOT NULL,
+      sender_display_name TEXT,
+      sender_environment TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_signals_expires ON signals(expires_at);
+
+    CREATE TABLE signal_deliveries (
+      signal_id TEXT NOT NULL REFERENCES signals(id) ON DELETE CASCADE,
+      recipient_principal_id TEXT NOT NULL,
+      recipient_participant_id TEXT NOT NULL,
+      recipient_display_name TEXT,
+      recipient_environment TEXT NOT NULL DEFAULT '{}',
+      acknowledged_at INTEGER,
+      acknowledged_by_principal_id TEXT,
+      acknowledged_by_participant_id TEXT,
+      acknowledged_by_display_name TEXT,
+      acknowledged_by_environment TEXT,
+      PRIMARY KEY (
+        signal_id,
+        recipient_principal_id,
+        recipient_participant_id
+      )
+    );
+    CREATE INDEX idx_signal_deliveries_inbox ON signal_deliveries(
+      recipient_principal_id,
+      recipient_participant_id,
+      acknowledged_at
+    );
+  `);
+
+  installTransferGuards(storage, [
+    "signal_groups",
+    "signal_group_members",
+    "signals",
+    "signal_deliveries",
+  ]);
+}
+
+function installTransferGuards(
+  storage: MigrationStorage,
+  tables: string[],
+): void {
+  for (const table of tables) {
+    for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
+      storage.sql.exec(`
+        CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
+        BEFORE ${operation} ON ${table}
+        WHEN EXISTS (
+          SELECT 1 FROM _project_transfer_state
+          WHERE singleton = 1 AND applying = 0
+            AND (expires_at IS NULL OR expires_at > (unixepoch('subsec') * 1000))
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'project-maintenance');
+        END;
+      `);
+    }
+  }
+}
+
+export function runMigration0027(storage: MigrationStorage): void {
+  for (const [name, type] of [
+    ["lineage_id", "TEXT"],
+    ["revision", "INTEGER"],
+    ["restored_from", "TEXT"],
+  ]) {
+    if (!columnExists(storage, "artifact_pointers", name)) {
+      storage.sql.exec(
+        `ALTER TABLE artifact_pointers ADD COLUMN ${name} ${type}`,
+      );
+    }
+  }
+  storage.sql.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_revision ON artifact_pointers(lineage_id, revision);
+    CREATE TABLE IF NOT EXISTS artifact_lineages (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, kind TEXT NOT NULL,
+      resource TEXT, next_revision INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS artifact_revision_operations (
+      id TEXT PRIMARY KEY, lineage_id TEXT NOT NULL, request_hash TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('reserved','accepted','published','aborted')),
+      record TEXT NOT NULL, search_text TEXT, created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifact_operations_lineage ON artifact_revision_operations(lineage_id, state);
+  `);
+  for (const table of ["artifact_lineages", "artifact_revision_operations"]) {
+    for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
+      storage.sql.exec(`
+        CREATE TRIGGER IF NOT EXISTS transfer_guard_${table}_${operation.toLowerCase()}
+        BEFORE ${operation} ON ${table}
+        WHEN EXISTS (SELECT 1 FROM _project_transfer_state WHERE singleton = 1 AND applying = 0
+          AND (expires_at IS NULL OR expires_at > (unixepoch('subsec') * 1000)))
+        BEGIN SELECT RAISE(ABORT, 'project-maintenance'); END;
+      `);
+    }
+  }
+}
+
+/**
  * Ordered migration registry. Each entry maps a version number to SQL or a
  * guarded function.
  * The runner executes only versions not yet recorded in _migrations.
  */
+export const MIGRATION_0026 = `
+CREATE TABLE IF NOT EXISTS journal_cursors (
+  principal_id TEXT NOT NULL, participant_id TEXT NOT NULL,
+  seq INTEGER NOT NULL CHECK(seq >= 0), updated_at INTEGER NOT NULL,
+  PRIMARY KEY (principal_id, participant_id)
+);
+CREATE TABLE IF NOT EXISTS handoffs (
+  id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, participant_id TEXT NOT NULL,
+  created_seq INTEGER NOT NULL UNIQUE, request_json TEXT NOT NULL, snapshot TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_handoffs_creator ON handoffs(principal_id, participant_id, created_seq);
+CREATE TABLE IF NOT EXISTS handoff_references (
+  handoff_id TEXT NOT NULL, resource TEXT NOT NULL, PRIMARY KEY(handoff_id, resource)
+);
+CREATE INDEX IF NOT EXISTS idx_handoff_resource ON handoff_references(resource);
+`;
+
+export function runMigration0026(storage: MigrationStorage): void {
+  storage.sql.exec(MIGRATION_0026);
+  installTransferGuards(storage, [
+    "journal_cursors",
+    "handoffs",
+    "handoff_references",
+  ]);
+}
+
+export function runMigration0028(storage: MigrationStorage): void {
+  // Older embedded databases may predate artifact tags. Preserve their existing
+  // migration compatibility without inventing tags that were never stored.
+  const hasTags =
+    storage.sql
+      .exec(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'artifact_tags'",
+      )
+      .toArray().length > 0;
+  const tags = hasTags
+    ? "json((SELECT json_group_array(tag) FROM artifact_tags WHERE artifact_key = r2_key))"
+    : "json('[]')";
+  const lineageColumns = storage.sql
+    .exec("PRAGMA table_info(artifact_lineages)")
+    .toArray() as Array<{ name: string }>;
+  if (!lineageColumns.some((column) => column.name === "destroyed_at"))
+    storage.sql.exec(
+      "ALTER TABLE artifact_lineages ADD COLUMN destroyed_at INTEGER",
+    );
+  const pointerColumns = new Set(
+    (
+      storage.sql
+        .exec("PRAGMA table_info(artifact_pointers)")
+        .toArray() as Array<{ name: string }>
+    ).map((column) => column.name),
+  );
+  const tombstonedAt = pointerColumns.has("tombstoned_at")
+    ? "tombstoned_at"
+    : "NULL";
+  const blobDeletedAt = pointerColumns.has("blob_deleted_at")
+    ? "blob_deleted_at"
+    : "NULL";
+  storage.sql.exec(`
+    CREATE TABLE IF NOT EXISTS artifact_revisions (
+      r2_key TEXT PRIMARY KEY, lineage_id TEXT NOT NULL, revision INTEGER NOT NULL,
+      metadata TEXT NOT NULL, retention_assigned INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_revision_identity ON artifact_revisions(lineage_id, revision);
+    CREATE TABLE IF NOT EXISTS artifact_lifecycle_operations (
+      id TEXT PRIMARY KEY, lineage_id TEXT NOT NULL, record TEXT NOT NULL, request_id TEXT,
+      state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      retry_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_lifecycle_due ON artifact_lifecycle_operations(state, retry_at);
+    CREATE TABLE IF NOT EXISTS artifact_retention_state (
+      id INTEGER PRIMARY KEY, policy TEXT NOT NULL, cursor TEXT, complete INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO artifact_revisions(r2_key, lineage_id, revision, metadata)
+      SELECT r2_key, lineage_id, revision, json_object(
+        'r2_key', r2_key, 'lineage_id', lineage_id, 'revision', revision,
+        'restored_from', restored_from, 'resource', resource, 'kind', kind, 'sha256', sha256,
+        'bytes', bytes, 'fence', fence, 'mime_type', mime_type, 'produced_at', produced_at,
+        'produced_by', produced_by, 'expires_at', expires_at, 'tombstoned', tombstoned,
+        'tombstoned_at', ${tombstonedAt}, 'blob_deleted_at', ${blobDeletedAt},
+        'tags', ${tags}
+      ) FROM artifact_pointers WHERE lineage_id IS NOT NULL;
+    INSERT OR IGNORE INTO artifact_revisions(r2_key, lineage_id, revision, metadata)
+      SELECT json_extract(record, '$.pointer.r2_key'), lineage_id,
+        json_extract(record, '$.pointer.revision'),
+        json_set(json_extract(record, '$.pointer'), '$.tombstoned', 1, '$.tombstoned_at', created_at)
+      FROM artifact_revision_operations WHERE state = 'published' AND json_valid(record);
+  `);
+  installTransferGuards(storage, [
+    "artifact_revisions",
+    "artifact_lifecycle_operations",
+    "artifact_retention_state",
+  ]);
+}
+
+export function runMigration0029(storage: MigrationStorage): void {
+  const columns = new Set(
+    (
+      storage.sql.exec("PRAGMA table_info(artifact_pointers)").toArray() as {
+        name: string;
+      }[]
+    ).map((c) => c.name),
+  );
+  for (const column of ["provenance", "revision_creation"]) {
+    if (!columns.has(column))
+      storage.sql.exec(
+        `ALTER TABLE artifact_pointers ADD COLUMN ${column} TEXT`,
+      );
+  }
+  // Only a published, non-deduplicated commit identifies this revision's creator.
+  // Never guess a principal from a display name or the actor of a deduplicated put.
+  for (const row of storage.sql
+    .exec(
+      "SELECT record FROM artifact_revision_operations WHERE state = 'published'",
+    )
+    .toArray() as { record: string }[]) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(row.record);
+    } catch {
+      continue;
+    }
+    const parsed = ArtifactCommitRecordSchema.safeParse(raw);
+    if (
+      !parsed.success ||
+      parsed.data.deduplicated ||
+      !parsed.data.origin.principalId ||
+      !parsed.data.origin.participantId
+    )
+      continue;
+    const record = parsed.data;
+    const p = record.pointer;
+    if (
+      p.r2_key !==
+      artifactRevisionKey(
+        record.project_id,
+        p.lineage_id,
+        p.revision,
+        p.sha256,
+        p.mime_type,
+      )
+    )
+      continue;
+    const creator = {
+      principal_id: record.origin.principalId,
+      participant_id: record.origin.participantId,
+      created_at: p.produced_at,
+      environment: record.origin.environment,
+      client_name:
+        record.origin.environment.client_name ?? record.origin.source ?? null,
+      client_version:
+        record.origin.environment.client_version ??
+        record.origin.sourceVersion ??
+        null,
+    };
+    const provenance =
+      p.provenance === undefined
+        ? p.restored_from
+          ? null
+          : creator
+        : p.provenance;
+    storage.sql.exec(
+      "UPDATE artifact_pointers SET provenance = ?, revision_creation = ? WHERE r2_key = ? AND provenance IS NULL AND revision_creation IS NULL",
+      provenance === null ? null : JSON.stringify(provenance),
+      JSON.stringify(p.revision_creation ?? creator),
+      p.r2_key,
+    );
+  }
+  storage.sql.exec(`
+    UPDATE artifact_revisions SET metadata = json_set(metadata,
+      '$.provenance', json((SELECT provenance FROM artifact_pointers WHERE r2_key = artifact_revisions.r2_key)),
+      '$.revision_creation', json((SELECT revision_creation FROM artifact_pointers WHERE r2_key = artifact_revisions.r2_key)))
+      WHERE EXISTS (SELECT 1 FROM artifact_pointers WHERE r2_key = artifact_revisions.r2_key AND revision_creation IS NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS artifact_revision_provenance_immutable BEFORE UPDATE OF metadata ON artifact_revisions
+      WHEN json_extract(NEW.metadata, '$.provenance') IS NOT json_extract(OLD.metadata, '$.provenance')
+        OR json_extract(NEW.metadata, '$.revision_creation') IS NOT json_extract(OLD.metadata, '$.revision_creation')
+      BEGIN SELECT RAISE(ABORT, 'artifact-provenance-immutable'); END;
+    CREATE TABLE IF NOT EXISTS artifact_reviews (
+      artifact_key TEXT NOT NULL,
+      review_revision INTEGER NOT NULL CHECK(review_revision > 0),
+      principal_id TEXT NOT NULL, participant_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      decision TEXT NOT NULL CHECK(decision IN ('trusted','rejected','superseded','revoked')),
+      reason TEXT, operation_id TEXT NOT NULL, request_json TEXT NOT NULL,
+      PRIMARY KEY(artifact_key, review_revision)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_reviews_operation ON artifact_reviews(operation_id);
+    CREATE TRIGGER IF NOT EXISTS artifact_provenance_immutable BEFORE UPDATE OF provenance, revision_creation ON artifact_pointers
+      WHEN NEW.provenance IS NOT OLD.provenance OR NEW.revision_creation IS NOT OLD.revision_creation
+      BEGIN SELECT RAISE(ABORT, 'artifact-provenance-immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS artifact_reviews_immutable BEFORE UPDATE ON artifact_reviews
+      BEGIN SELECT RAISE(ABORT, 'artifact-review-immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS artifact_reviews_no_delete BEFORE DELETE ON artifact_reviews
+      WHEN (EXISTS (SELECT 1 FROM artifact_pointers WHERE r2_key = OLD.artifact_key) OR EXISTS (SELECT 1 FROM artifact_revisions WHERE r2_key = OLD.artifact_key)) AND NOT EXISTS (SELECT 1 FROM _project_transfer_state WHERE singleton = 1 AND applying = 1)
+      BEGIN SELECT RAISE(ABORT, 'artifact-review-immutable'); END;
+  `);
+  installTransferGuards(storage, ["artifact_reviews"]);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -694,4 +1206,11 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 20, run: runMigration0020 },
   { version: 21, sql: MIGRATION_0021 },
   { version: 22, sql: MIGRATION_0022 },
+  { version: 23, run: runMigration0023 },
+  { version: 24, run: runMigration0024 },
+  { version: 25, run: runMigration0025 },
+  { version: 26, run: runMigration0026 },
+  { version: 27, run: runMigration0027 },
+  { version: 28, run: runMigration0028 },
+  { version: 29, run: runMigration0029 },
 ];

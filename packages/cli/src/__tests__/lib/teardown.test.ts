@@ -426,6 +426,7 @@ describe("wipeProjectViaWorker", () => {
       "https://worker.example.com",
       "secret-token",
       "my-project",
+      "participant-test",
     );
 
     expect(result.ok).toBe(true);
@@ -443,6 +444,9 @@ describe("wipeProjectViaWorker", () => {
     const authHeader = (callArgs.headers as Record<string, string>)
       .Authorization;
     expect(authHeader).toBe("Bearer secret-token");
+    expect(
+      (callArgs.headers as Record<string, string>)["X-Tila-Participant-Id"],
+    ).toBe("participant-test");
   });
 
   it("does not include the token in error messages (non-2xx)", async () => {
@@ -458,6 +462,7 @@ describe("wipeProjectViaWorker", () => {
       "https://worker.example.com",
       "super-secret-token",
       "my-project",
+      "participant-test",
     );
 
     expect(result.ok).toBe(false);
@@ -482,6 +487,7 @@ describe("wipeProjectViaWorker", () => {
       "https://worker.example.com",
       "token-xyz",
       "my-project",
+      "participant-test",
     );
 
     expect(result.ok).toBe(false);
@@ -502,6 +508,7 @@ describe("wipeProjectViaWorker", () => {
       "https://worker.example.com",
       "my-token",
       "my-project",
+      "participant-test",
     );
 
     expect(result.ok).toBe(false);
@@ -532,6 +539,7 @@ describe("wipeProjectViaWorker", () => {
       "https://worker.example.com",
       "token",
       "my-project",
+      "participant-test",
     );
 
     expect(result.ok).toBe(true);

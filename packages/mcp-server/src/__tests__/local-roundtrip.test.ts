@@ -48,12 +48,43 @@ describe("MCP tools — local backend round-trip (real tila-sdk/local under node
 
     server = createMockServer();
     const guarded = guardRemoteOnlyTools(asServer(server), "local");
-    registerAllTools(guarded, facade, PROJECT_ID);
+    registerAllTools(guarded, facade, PROJECT_ID, ["all"]);
   });
 
   afterAll(() => {
     facade?.close();
     if (tmp) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("saves a handoff, re-enters, and explicitly acknowledges through MCP", async () => {
+    const id = crypto.randomUUID();
+    const create = findToolHandler(server, "tila_handoff_create");
+    await create({
+      id,
+      summary: "Continue from this handoff",
+      based_on_seq: 0,
+    });
+    const result = await findToolHandler(
+      server,
+      "tila_reentry",
+    )({ handoff_id: id });
+    const body = JSON.parse(result.content[0].text);
+    expect(body.handoff.id).toBe(id);
+    expect(
+      body.changes.events.some(
+        (event: { kind: string }) => event.kind === "handoff.created",
+      ),
+    ).toBe(true);
+    const before = await findToolHandler(server, "tila_journal_cursor_get")({});
+    expect(JSON.parse(before.content[0].text).cursor.seq).toBe(0);
+    await findToolHandler(
+      server,
+      "tila_journal_acknowledge",
+    )({ seq: body.changes.next_after_seq });
+    const after = await findToolHandler(server, "tila_journal_cursor_get")({});
+    expect(JSON.parse(after.content[0].text).cursor.seq).toBe(
+      body.changes.next_after_seq,
+    );
   });
 
   it("creates a task then lists it through the local store (no HTTP)", async () => {
@@ -79,7 +110,12 @@ describe("MCP tools — local backend round-trip (real tila-sdk/local under node
     const handler = findToolHandler(server, "tila_artifact_put");
     await expect(
       handler({ content: "aGVsbG8=", kind: "log", mime_type: "text/plain" }),
-    ).rejects.toThrow(/requires a remote backend/i);
+    ).resolves.toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: { message: expect.stringMatching(/requires a remote backend/i) },
+      },
+    });
   });
 
   it("write/read text artifact works locally (a local-capable artifact path)", async () => {
@@ -95,6 +131,6 @@ describe("MCP tools — local backend round-trip (real tila-sdk/local under node
 
     const readHandler = findToolHandler(server, "tila_artifact_read_text");
     const read = await readHandler({ key: wroteParsed.key });
-    expect(read.content[0].text).toContain("hello local");
+    expect(read.content[1].text).toContain("hello local");
   });
 });

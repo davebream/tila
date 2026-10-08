@@ -26,6 +26,32 @@ const DDL = `
   );
   CREATE UNIQUE INDEX idx_revoked_subjects_principal
     ON _revoked_subjects (project_id, identity_host, subject_id);
+  CREATE TABLE _project_memberships (
+    membership_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    identity_host TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'viewer',
+    revoked_at INTEGER,
+    revoked_by TEXT
+  );
+  CREATE TABLE _sessions (
+    session_hash TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL
+  );
+  CREATE TABLE _membership_events (
+    event_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    principal_id TEXT,
+    actor_principal_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    source TEXT NOT NULL,
+    role TEXT,
+    details_json TEXT NOT NULL,
+    occurred_at INTEGER NOT NULL
+  );
   CREATE TABLE _tokens (
     token_hash TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,

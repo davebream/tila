@@ -13,6 +13,13 @@ Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
 </div>
 
+**Direction:** tila is evolving into one development-management product around this
+coordination core: an orchestrator with workers across Mac/Linux hosts, then native
+Mac/iPhone clients. Cloudflare will be the shared backend and project keys the
+supported auth path. These are planned changes; the current release still includes
+local persistence and GitHub auth. See [the roadmap](docs/03-ROADMAP.md) for the
+first milestone and runtime evaluation.
+
 **For:** framework authors, AI autopilot builders, and small teams (3 to 6 engineers) whose agents need shared state across multiple machines.
 
 ---
@@ -75,7 +82,7 @@ $ tila record set service api ./api.yaml
 $ tila record get service api
 # => { "version": "2.3.1", "owner": "platform", "deploy_target": "prod-us" }
 
-$ tila record patch service api --json '{"owner":"infra"}' --fence=1
+$ tila record patch service api --data '{"owner":"infra"}' --fence=1
 # => Updated record service:api  revision=2  fence=2
 
 $ tila record history service api
@@ -276,8 +283,9 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 ```bash
 pnpm install
 pnpm dev:setup                  # Generates dev config, applies D1 migrations, seeds project + token
-pnpm dev                        # Start Worker on :8787
-pnpm --filter @tila/ui dev      # Start UI on :5173 (separate terminal)
+pnpm dev                        # Source Worker :8787 + Vite UI :5173
+pnpm dev:cli --help              # CLI from this checkout
+pnpm dev:mcp                    # MCP from this checkout
 bash scripts/dev-seed.sh        # Populate with sample data (entities, claims, presence, artifacts)
 pnpm test                       # Run test suite
 pnpm typecheck                  # TypeScript type checking
@@ -285,9 +293,97 @@ pnpm check                      # Biome lint and format check
 pnpm build                      # Production build
 ```
 
-`dev:setup` is idempotent: re-running clears local state and reapplies from scratch. `dev-seed.sh` requires the Worker to be running.
+`dev:setup` clears existing local D1/DO state and recreates fixtures. The development
+Worker has no built UI assets; use Vite on :5173. Source commands need no package
+build or published release. Full tests/typechecks still build dependencies, including
+the SDK distribution checks. Source CLI execution uses Bun for `bun:sqlite`; MCP uses Node/tsx.
+Bun 1.4.2 can print a nonfatal `directory mismatch` diagnostic with
+`--tsconfig-override` ([upstream report](https://github.com/oven-sh/bun/issues/28605));
+the source CLI smoke check exits successfully. Production deployments and published
+packages still require their normal build steps. `dev-seed.sh` requires the Worker to be running.
+
+## Project backups
+
+Create a complete, portable backup with an absolute output path:
+
+```bash
+tila project export --output /backups/my-project.tila-backup
+```
+
+The uncompressed `.tila-backup` tar stream includes canonical DO/local SQLite rows, approved D1 project and ACL metadata, artifact pointers, confirmed journal archives, and deduplicated blobs. Every entry and the overall content root are SHA-256 checked. Tokens, token hashes, sessions, rate-limit/idempotency state, revocation material, and deployment-global metadata are never exported.
+
+Restore into a new local project or replace the current project:
+
+```bash
+tila project import /backups/my-project.tila-backup --local
+tila project import /backups/my-project.tila-backup --replace
+tila project import /backups/my-project.tila-backup --resume
+tila project import /backups/my-project.tila-backup --rollback
+```
+
+Project IDs cannot be renamed during restore. Existing-project restore creates an adjacent timestamped safety archive first. Cloud export freezes writes while reads remain available; restore keeps the destination hidden and write-locked until verification, resume, or rollback completes. See [Operations](docs/05-OPERATIONS.md#backup-and-recovery) for the recovery drill and compatibility rules.
 
 ---
+
+## CLI automation and JSON migration
+
+The next release changes CLI JSON output. Success emits
+`{"ok":true,"result":...,"meta":...}` on stdout; failure emits
+`{"ok":false,"error":{"kind":"...","message":"...","retryable":false}}` on stderr.
+Errors may include `hint` and `details`; partial writes include recovery information
+in `details` (such as `partial_result`) and must not be retried automatically.
+JSON diagnostics are separate stderr lines with `type: diagnostic`, `level` and
+`message`. Parse stdout for results and the final error object on stderr for failures.
+Exit codes remain 0/1/2; `doctor` retains its separate pass/warn/fail health meaning.
+
+| Previously | Now |
+| --- | --- |
+| Command-specific top-level fields | Fields under `result` |
+| `entities`, `signals`, other list arrays | `result.items` |
+| List count, limit, totals and continuations | `meta.count`, `meta.limit`, `meta.total` when known, and supported continuation fields |
+| Top-level error text/code | `error.message`, `error.kind`, `error.retryable` |
+| `record patch --json '{...}'` payload | Prefer `--data '{...}'`; the old object/array payload spelling still works. Standalone `--json` selects output. |
+
+```sh
+tila --json task list --limit 25 --offset 25
+tila task list --json
+tila record patch service api --data '{"owner":"infra"}' --fence 1 --json
+tila schema --command "task list"        # offline CLI introspection
+tila schema show                        # existing project schema
+```
+
+Lists retain existing bounded defaults (search/history pages of 20, signal history
+and reviews of 50, record lists of 200); otherwise default to 100. Limits must be
+positive integers up to 1000, with lower backend caps applied. `meta.truncated`
+means more rows are known to exist. `meta.has_more_unknown` means a full page lacks
+enough metadata to establish completeness. Neither is a cursor. Artifact reviews
+use `--before-revision` with `meta.next_revision`; record lists without resumable
+cursors expose truncation without inventing one.
+
+Human output remains the default. JSON, CI, non-TTY stdin and `--non-interactive`
+never prompt. Supply required inputs and existing confirmation flags explicitly.
+Interactive shells reject these modes before spawning. Global flags respect `--`
+and option values; use `--option=--value` for values starting with dashes.
+
+External protocols stay distinct: hooks keep `hookSpecificOutput`/`systemMessage`,
+silent paths and advisory exits; background workers stay silent. `auth token`
+without JSON emits only the token. Raw `artifact get` preserves stdout bytes and
+sends trust metadata to stderr. JSON artifact downloads require `--output <file>`
+and return metadata. Provenance, revision creation and review state are preserved;
+a matching hash never implies trust.
+
+Generate completions without changing shell profiles:
+
+```sh
+tila complete bash > tila.bash
+tila complete zsh > _tila
+tila complete fish > tila.fish
+tila complete powershell > tila.ps1
+```
+
+Load the generated script using your shell's completion configuration. Root help
+groups canonical commands. Deprecated `entity`/`work-unit` aliases remain functional
+but hidden. Typo suggestions never execute the suggested command.
 
 ## Contributing
 
@@ -330,13 +426,13 @@ Beads is a Dolt-powered distributed issue tracker with agent memory, dependency 
 <details>
 <summary><b>Why full-text search and not a vector database?</b></summary>
 
-tila's search is keyword retrieval: "find the auth migration plan," not "find documents conceptually related to authentication." FTS5 handles this inside DO SQLite with BM25 ranking, phrase and prefix queries, sub-millisecond latency, and transactional consistency with artifact writes, all with zero additional infrastructure. Vector search is the right tool when you need semantic similarity over large corpora with unpredictable terminology, but it requires an embedding model, a vector store, and an embedding pipeline. Those are three new dependencies that conflict with tila's zero-ops design. If your workflow needs semantic search over tila artifacts, a consuming framework can maintain its own vector index via the artifact API.
+tila's search is keyword retrieval: "find the auth migration plan," not "find documents conceptually related to authentication." FTS5 handles this inside DO SQLite with BM25 ranking, phrase and prefix queries, and transactional consistency with artifact writes, all with zero additional infrastructure. Vector search is the right tool when you need semantic similarity over large corpora with unpredictable terminology, but it requires an embedding model, a vector store, and an embedding pipeline. Those are three new dependencies that conflict with tila's zero-ops design. If your workflow needs semantic search over tila artifacts, a consuming framework can maintain its own vector index via the artifact API.
 </details>
 
 <details>
 <summary><b>What happens if I lose my Cloudflare account?</b></summary>
 
-Your Cloudflare account holds the durable state. Backups are your responsibility. Durable Object SQLite supports point-in-time recovery; R2 supports lifecycle rules. The v0.2 roadmap adds explicit export and backup commands.
+Your Cloudflare account holds the durable state. Backups are your responsibility: run `tila project export --output <absolute-path>` and retain the verified `.tila-backup` outside the account. Durable Object SQLite point-in-time recovery remains an additional infrastructure safeguard.
 </details>
 
 <details>

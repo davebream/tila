@@ -7,9 +7,9 @@
  *
  * Gate requirements:
  * - TILA_BASE_URL — live worker URL (e.g. https://your-worker.workers.dev)
- * - TILA_TOKEN    — an **admin-scoped** token (POST /admin/restart requires
- *                   requirePermission("admin")); a 403 response means the token
- *                   is not admin-scoped — use `tila token create --scope admin`
+ * - TILA_TOKEN    — a full-scope D1 token for the project, accepted by
+ *                   requireProjectAdmin; a 403 means the credential cannot
+ *                   administer this project
  *
  * Optional:
  * - TILA_PROJECT_ID — defaults to "dev-project"
@@ -36,7 +36,10 @@ const COLD_START_BUDGET_MS = 5_000;
 /** Number of read attempts for best-of-N latency check. */
 const LATENCY_SAMPLE_COUNT = 3;
 
-const auth = { Authorization: `Bearer ${TOKEN}` } as Record<string, string>;
+const auth = {
+  Authorization: `Bearer ${TOKEN}`,
+  "X-Tila-Participant-Id": "do-eviction-test",
+} as Record<string, string>;
 const stamp = Date.now();
 const evictionTaskId = `T-do-eviction-${stamp}`;
 
@@ -74,7 +77,7 @@ describe.skipIf(!BASE_URL || !TOKEN)(
       }
     });
 
-    it("POST /admin/restart returns 200 (admin-scoped token required)", async () => {
+    it("POST /admin/restart returns 200 with an acknowledgement", async () => {
       const res = await fetch(
         `${BASE_URL}/projects/${PROJECT_ID}/admin/restart`,
         { method: "POST", headers: auth },
@@ -82,13 +85,14 @@ describe.skipIf(!BASE_URL || !TOKEN)(
 
       if (res.status === 403) {
         throw new Error(
-          "POST /admin/restart returned 403 — TILA_TOKEN must be admin-scoped.\n" +
-            "Create an admin token with: tila token create --scope admin\n" +
+          "POST /admin/restart returned 403 — TILA_TOKEN must be allowed to administer this project.\n" +
+            "Use a full-scope D1 token for TILA_PROJECT_ID.\n" +
             "Then set TILA_TOKEN to that value and re-run.",
         );
       }
 
       expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
     });
 
     it("task data survives DO eviction+restart (hard assert — state must be persisted)", async () => {

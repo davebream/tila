@@ -30,6 +30,11 @@ function createApp(
 let testDb: TestDb;
 let db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 let app: Hono;
+const IDENTITY_BODY = {
+  principal_id: "test:test",
+  participant_id: "participant-1",
+  environment: {},
+};
 
 beforeEach(() => {
   testDb = createTestDb();
@@ -62,6 +67,7 @@ async function createEntity(id: string, type = "task"): Promise<Response> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      ...IDENTITY_BODY,
       id,
       type,
       data: { title: id },

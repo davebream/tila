@@ -110,8 +110,8 @@ describe("tila journal tail --json", () => {
     });
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(output.events).toHaveLength(1);
-    expect(output.events[0].t).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(output.result.items).toHaveLength(1);
+    expect(output.result.items[0].t).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(mockListJournal).toHaveBeenCalledWith({
       resource: undefined,
       kind: undefined,

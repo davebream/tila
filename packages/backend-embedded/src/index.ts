@@ -28,3 +28,5 @@ export {
 } from "./pre-feature-check";
 export type { SleepSync } from "./retry";
 export { withBusyRetry } from "./retry";
+
+export * from "./journal-archive-reader";

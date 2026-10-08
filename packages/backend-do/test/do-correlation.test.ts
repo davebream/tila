@@ -14,10 +14,27 @@ import { installProjectErrorHandlers } from "../src/routes/errors";
 import type { RouterDeps } from "../src/routes/types";
 import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
-function makeDeps(db: TestDb["db"]): RouterDeps {
+function makeDeps(testDb: TestDb): RouterDeps {
   return {
-    ctx: {} as DurableObjectState,
-    db: db as RouterDeps["db"],
+    ctx: {
+      storage: {
+        sql: {
+          exec(statement: string, ...bindings: unknown[]) {
+            if (/^\s*(SELECT|PRAGMA)\b/i.test(statement)) {
+              return {
+                toArray: () =>
+                  testDb.sqlite.prepare(statement).all(...bindings),
+              };
+            }
+            if (bindings.length > 0)
+              testDb.sqlite.prepare(statement).run(...bindings);
+            else testDb.sqlite.exec(statement);
+            return { toArray: () => [] };
+          },
+        },
+      },
+    } as unknown as DurableObjectState,
+    db: testDb.db as RouterDeps["db"],
     enrichOpts: vi.fn().mockReturnValue(undefined),
   };
 }
@@ -27,7 +44,7 @@ let app: Hono;
 
 beforeEach(() => {
   testDb = createTestDb();
-  app = createProjectRouter(makeDeps(testDb.db));
+  app = createProjectRouter(makeDeps(testDb));
 });
 
 afterEach(() => {

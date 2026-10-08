@@ -1,4 +1,9 @@
 import {
+  type ContinuityBackend,
+  type JournalArchiveReader,
+  completeReplay,
+} from "@tila/core";
+import {
   type AcquireResult,
   type AddArtifactRefInput,
   type ApplySchemaInput,
@@ -37,6 +42,7 @@ import {
   type SummaryBackend,
   applyRecordLegacyDefaults,
 } from "@tila/core";
+import { continuityOps, summaryOps } from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   SchemaCorruptError,
@@ -56,18 +62,27 @@ import {
   templateOps,
   validateRecordValue,
 } from "@tila/ops-sqlite";
+import type {
+  HandoffCreateRequest,
+  HandoffListRequest,
+  JournalReplayRequest,
+  ReentryRequest,
+  ReentryResponse,
+} from "@tila/schemas";
 import type { TilaSchemaToml } from "@tila/schemas";
 
-import type {
-  Claim,
-  CompactEntity,
-  Entity,
-  EntityArtifactReference,
-  EntityRelationship,
-  Presence,
-  RecordHistoryItem,
-  RecordListItem,
-  RecordRow,
+import {
+  type Claim,
+  type CompactEntity,
+  type Entity,
+  type EntityArtifactReference,
+  type EntityRelationship,
+  type IdentityContext,
+  IdentityContextSchema,
+  type Presence,
+  type RecordHistoryItem,
+  type RecordListItem,
+  type RecordRow,
 } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -118,6 +133,7 @@ export type EmbeddedDb = BaseSQLiteDatabase<"sync", void, typeof schema>;
 export class EmbeddedProject
   implements
     EntityBackend,
+    ContinuityBackend,
     CoordinationBackend,
     JournalBackend,
     GateBackend,
@@ -126,9 +142,11 @@ export class EmbeddedProject
     SummaryBackend,
     RecordBackend
 {
+  private readonly archives?: JournalArchiveReader;
   private readonly db: EmbeddedDb;
   private readonly sleepSync: SleepSync;
   private readonly _close: () => void;
+  private readonly identity: IdentityContext;
 
   // `org`/`project` are accepted in the constructor opts for symmetry with the
   // wrapper API (and with EmbeddedArtifactBackend, which DOES use them for key
@@ -136,14 +154,24 @@ export class EmbeddedProject
   // never needs them — so they are intentionally not stored.
   constructor(opts: {
     db: EmbeddedDb;
+    archives?: JournalArchiveReader;
     org: string;
     project: string;
+    identity?: IdentityContext;
     sleepSync: SleepSync;
     close: () => void;
   }) {
     this.db = opts.db;
+    this.archives = opts.archives;
     this.sleepSync = opts.sleepSync;
     this._close = opts.close;
+    this.identity = IdentityContextSchema.parse(
+      opts.identity ?? {
+        principal_id: `local:${opts.org}`,
+        participant_id: crypto.randomUUID(),
+        environment: { client_name: "embedded" },
+      },
+    );
   }
 
   /** Run `fn` with SQLITE_BUSY retry, using the injected blocking sleep. */
@@ -178,7 +206,7 @@ export class EmbeddedProject
           tags: input.tags,
         },
         schemaVersion,
-        { actor: input.created_by },
+        { ...this.localOrigin(), actor: input.created_by },
       );
     });
   }
@@ -199,8 +227,7 @@ export class EmbeddedProject
       coordinationOps.acquire(
         this.db,
         resource,
-        "local",
-        "local",
+        this.localOrigin(),
         "exclusive",
         30_000,
       ),
@@ -211,15 +238,18 @@ export class EmbeddedProject
         id,
         data as Record<string, unknown>,
         acquired.fence,
-        { actor: "local" },
+        this.localOrigin(),
       ),
     );
     // Best-effort release -- archive() deletes claim inside its transaction, so this may be a no-op
     try {
       this.retry(() =>
-        coordinationOps.release(this.db, resource, acquired.fence, {
-          actor: "local/local",
-        }),
+        coordinationOps.release(
+          this.db,
+          resource,
+          acquired.fence,
+          this.localOrigin(),
+        ),
       );
     } catch {
       // Idempotent -- claim may have been deleted inside archive transaction
@@ -235,14 +265,13 @@ export class EmbeddedProject
       coordinationOps.acquire(
         this.db,
         resource,
-        "local",
-        "local",
+        this.localOrigin(),
         "exclusive",
         30_000,
       ),
     );
     this.retry(() =>
-      entityOps.archive(this.db, id, acquired.fence, { actor: "local" }),
+      entityOps.archive(this.db, id, acquired.fence, this.localOrigin()),
     );
     // No explicit release needed -- archive() deletes the claim row inside its transaction
   }
@@ -337,12 +366,13 @@ export class EmbeddedProject
     fence: number,
   ): Promise<Entity> {
     return this.retry(() =>
-      entityOps.update(this.db, id, data as Record<string, unknown>, fence, {
-        actor: "local",
-        tokenId: null,
-        source: null,
-        sourceVersion: null,
-      }),
+      entityOps.update(
+        this.db,
+        id,
+        data as Record<string, unknown>,
+        fence,
+        this.localOrigin(),
+      ),
     );
   }
 
@@ -357,12 +387,7 @@ export class EmbeddedProject
    */
   async archiveWithFence(id: string, fence: number): Promise<void> {
     return this.retry(() =>
-      entityOps.archive(this.db, id, fence, {
-        actor: "local",
-        tokenId: null,
-        source: null,
-        sourceVersion: null,
-      }),
+      entityOps.archive(this.db, id, fence, this.localOrigin()),
     );
   }
 
@@ -444,19 +469,26 @@ export class EmbeddedProject
 
   async acquire(
     resource: string,
-    machine: string,
-    user: string,
     mode: "exclusive" | "owner" | "presence",
     ttlMs: number,
   ): Promise<AcquireResult> {
+    if (mode === "presence") {
+      const now = Date.now();
+      await this.heartbeat();
+      return {
+        acquired: true,
+        fence: 0,
+        expires_at: now + ttlMs,
+        participant_id: this.identity.participant_id,
+      };
+    }
     const canonicalResource =
       resolveEntityResource(this.db, resource) ?? resource;
     return this.retry(() =>
       coordinationOps.acquire(
         this.db,
         canonicalResource,
-        machine,
-        user,
+        this.localOrigin(),
         mode,
         ttlMs,
       ),
@@ -465,13 +497,11 @@ export class EmbeddedProject
 
   async renew(
     resource: string,
-    machine: string,
-    user: string,
     fence: number,
     ttlMs: number,
   ): Promise<RenewResult> {
     // Return the FULL result (not a bare boolean): `renewed` distinguishes
-    // loss-of-claim (missing / expired / holder mismatch) from success, and
+    // loss-of-claim (missing / expired / participant mismatch) from success, and
     // `expires_at` is the REAL stored expiry — callers must not recompute it.
     // Mirrors the DO `/coord/renew` contract (409 `renew-failed` on !renewed).
     const canonicalResource =
@@ -480,8 +510,7 @@ export class EmbeddedProject
       coordinationOps.renew(
         this.db,
         canonicalResource,
-        machine,
-        user,
+        this.localOrigin(),
         fence,
         ttlMs,
       ),
@@ -491,13 +520,13 @@ export class EmbeddedProject
   async release(resource: string, fence: number): Promise<void> {
     const canonicalResource =
       resolveEntityResource(this.db, resource) ?? resource;
-    const claim = coordinationOps.state(this.db, canonicalResource);
-    const actor = claim ? `${claim.machine}/${claim.user}` : "local/local";
-
     this.retry(() =>
-      coordinationOps.release(this.db, canonicalResource, fence, {
-        actor,
-      }),
+      coordinationOps.release(
+        this.db,
+        canonicalResource,
+        fence,
+        this.localOrigin(),
+      ),
     );
   }
 
@@ -507,11 +536,10 @@ export class EmbeddedProject
     return coordinationOps.state(this.db, canonicalResource);
   }
 
-  async heartbeat(
-    machine: string,
-    info?: Record<string, unknown>,
-  ): Promise<void> {
-    this.retry(() => coordinationOps.heartbeat(this.db, machine, info));
+  async heartbeat(info?: Record<string, unknown>): Promise<void> {
+    this.retry(() =>
+      coordinationOps.heartbeat(this.db, this.localOrigin(), info),
+    );
   }
 
   async listPresence(): Promise<Presence[]> {
@@ -538,8 +566,12 @@ export class EmbeddedProject
       t: row.t,
       kind: row.kind,
       resource: row.resource,
-      actor: row.actor,
+      principal_id: row.principal_id,
+      participant_id: row.participant_id,
+      environment: row.environment,
+      token_id: row.token_id,
       fence: row.fence,
+      data: row.data,
     }));
   }
 
@@ -562,7 +594,7 @@ export class EmbeddedProject
           fence,
           timeout_at: timeoutAt,
         },
-        { actor: "local" },
+        this.localOrigin(),
       );
       return {
         id: row.id,
@@ -599,20 +631,19 @@ export class EmbeddedProject
 
   async resolveGate(gateId: string, resolution?: string): Promise<void> {
     this.retry(() =>
-      gateOps.resolveGate(this.db, gateId, resolution, { actor: "local" }),
+      gateOps.resolveGate(this.db, gateId, resolution, this.localOrigin()),
     );
   }
 
   async cancelGate(gateId: string): Promise<void> {
-    this.retry(() => gateOps.cancelGate(this.db, gateId, { actor: "local" }));
+    this.retry(() => gateOps.cancelGate(this.db, gateId, this.localOrigin()));
   }
 
   // ---------- SignalBackend ----------
 
   async sendSignal(
     input: SendSignalInput,
-    createdBy: string,
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string; recipient_count: number }> {
     return this.retry(() =>
       signalOps.send(this.db, {
         target: input.target,
@@ -620,31 +651,58 @@ export class EmbeddedProject
         resource: input.resource,
         payload: input.payload,
         ttl_ms: input.ttl_ms,
-        created_by: createdBy,
+        sender: {
+          principal_id: this.identity.principal_id,
+          participant_id: this.identity.participant_id,
+          display_name: this.identity.environment.client_name ?? null,
+          environment: this.identity.environment,
+        },
       }),
     );
   }
 
-  async listSignals(tokenName: string): Promise<SignalRecord[]> {
-    const rows = signalOps.inbox(this.db, tokenName);
-    return rows.map((row) => ({
-      id: row.id,
-      target: row.target,
-      kind: row.kind,
-      resource: row.resource,
-      payload: row.payload,
-      created_by: row.created_by,
-      created_at: row.created_at,
-      expires_at: row.expires_at,
-      acked_at: row.acked_at,
-    }));
+  async listSignals(): Promise<SignalRecord[]> {
+    return signalOps.inbox(this.db, this.identity);
   }
 
-  async ackSignal(
-    signalId: string,
-    acker: string,
-  ): Promise<{ found: boolean; authorized: boolean }> {
-    return this.retry(() => signalOps.ack(this.db, signalId, acker));
+  async historySignals(options: { limit?: number; cursor?: string } = {}) {
+    return signalOps.history(this.db, options);
+  }
+
+  async ackSignal(signalId: string) {
+    return this.retry(() =>
+      signalOps.ack(this.db, signalId, {
+        principal_id: this.identity.principal_id,
+        participant_id: this.identity.participant_id,
+        display_name: this.identity.environment.client_name ?? null,
+        environment: this.identity.environment,
+      }),
+    );
+  }
+
+  async listSignalGroups() {
+    return signalOps.listGroups(this.db);
+  }
+
+  async getSignalGroup(groupId: string) {
+    return signalOps.getGroup(this.db, groupId);
+  }
+
+  async setSignalGroup(
+    groupId: string,
+    input: { name: string; principal_ids: string[] },
+  ) {
+    return signalOps.setGroup(
+      this.db,
+      groupId,
+      input.name,
+      input.principal_ids,
+      this.identity,
+    );
+  }
+
+  async deleteSignalGroup(groupId: string) {
+    return signalOps.deleteGroup(this.db, groupId);
   }
 
   // ---------- SchemaBackend ----------
@@ -695,40 +753,48 @@ export class EmbeddedProject
   // ---------- SummaryBackend ----------
 
   async getSummary(): Promise<ProjectSummary> {
-    const { entities } = entityOps.list(this.db, { archived: 0 });
-    const claims = coordinationOps.listClaims(this.db);
-    const readyEntities = readyOps.computeReadyEntities(this.db);
-    const recentEvents = journalOps.listJournal(this.db, { limit: 10 });
-    const presenceList = coordinationOps.listPresence(this.db);
+    return this.db.transaction((tx) => summaryOps.getSummary(tx));
+  }
 
-    const entityCounts: Record<string, number> = {};
-    const statusCounts: Record<string, number> = {};
-    for (const e of entities) {
-      entityCounts[e.type] = (entityCounts[e.type] ?? 0) + 1;
-      const status = (e.data as Record<string, unknown>)?.status;
-      if (typeof status === "string") {
-        statusCounts[status] = (statusCounts[status] ?? 0) + 1;
-      }
-    }
+  async replayJournal(input: JournalReplayRequest) {
+    const snapshot = this.db.transaction((tx) =>
+      continuityOps.replaySnapshot(tx, input),
+    );
+    return completeReplay(snapshot, this.archives);
+  }
 
-    const payload: ProjectSummary = {
-      entity_count: entities.length,
-      entity_counts: entityCounts,
-      status_counts: statusCounts,
-      active_claims: claims.length,
-      ready_count: readyEntities.length,
-      online_machines: presenceList.map((p) => p.machine),
-      token_estimate: 0,
-      recent_events: recentEvents.map((ev) => ({
-        seq: ev.seq,
-        t: ev.t,
-        kind: ev.kind,
-        resource: ev.resource,
-        actor: ev.actor,
-      })),
-    };
-    payload.token_estimate = Math.ceil(JSON.stringify(payload).length / 4);
-    return payload;
+  async getJournalCursor() {
+    return continuityOps.getCursor(this.db, this.identity);
+  }
+
+  async acknowledgeJournal(input: { seq: number }) {
+    return this.retry(() =>
+      continuityOps.acknowledge(this.db, this.identity, input),
+    );
+  }
+
+  async createHandoff(input: HandoffCreateRequest) {
+    return this.retry(() =>
+      continuityOps.createHandoff(this.db, this.identity, input),
+    );
+  }
+
+  async getHandoff(id: string) {
+    return continuityOps.getHandoff(this.db, id);
+  }
+
+  async listHandoffs(input: HandoffListRequest = {}) {
+    return continuityOps.listHandoffs(this.db, this.identity, input);
+  }
+
+  async reentry(input: ReentryRequest = {}): Promise<ReentryResponse> {
+    const { replay, ...state } = continuityOps.reentrySnapshot(
+      this.db,
+      this.identity,
+      input,
+    );
+    const changes = await completeReplay(replay, this.archives);
+    return { ok: true, ...state, changes };
   }
 
   // ---------- RecordBackend ----------
@@ -798,10 +864,13 @@ export class EmbeddedProject
 
   private localOrigin(): RequestOrigin {
     return {
-      actor: "local",
+      principalId: this.identity.principal_id,
+      participantId: this.identity.participant_id,
+      environment: this.identity.environment,
+      actor: this.identity.principal_id,
       tokenId: null,
-      source: null,
-      sourceVersion: null,
+      source: this.identity.environment.client_name ?? null,
+      sourceVersion: this.identity.environment.client_version ?? null,
     };
   }
 
@@ -1153,10 +1222,8 @@ export class EmbeddedProject
           rootId: input.root_id,
           vars: input.vars ?? {},
           origin: {
-            actor: input.actor ?? "local",
-            tokenId: null,
-            source: null,
-            sourceVersion: null,
+            ...this.localOrigin(),
+            actor: input.actor ?? this.identity.principal_id,
           },
         }),
       );

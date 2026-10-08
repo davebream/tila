@@ -1,10 +1,65 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaimHandle, withClaim } from "../claim-handle";
+import { createClaimMethods } from "../claims";
 import { TilaApiError, TilaClient } from "../client";
 
 function makeClient() {
   return new TilaClient({ baseUrl: "https://api.test", token: "t" });
 }
+
+describe("createClaimMethods.get", () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["task:T-1", "task%3AT-1"],
+    ["task:folder/T 1?#%", "task%3Afolder%2FT%201%3F%23%25"],
+  ])("gets %s from the Worker state route", async (resource, encoded) => {
+    const response = {
+      ok: true,
+      claim: {
+        resource,
+        principal_id: "principal-1",
+        participant_id: "participant-1",
+        mode: "exclusive",
+        fence: 7,
+        expires_at: Date.now() + 30_000,
+        metadata: {},
+      },
+    };
+    mockFetch.mockResolvedValueOnce(Response.json(response));
+
+    const result = await createClaimMethods(makeClient(), "proj-1").get(
+      resource,
+    );
+
+    expect(mockFetch).toHaveBeenCalledExactlyOnceWith(
+      `https://api.test/projects/proj-1/claims/state/${encoded}`,
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(result).toEqual(response);
+  });
+
+  it("returns a null claim for an unclaimed resource", async () => {
+    mockFetch.mockResolvedValueOnce(Response.json({ ok: true, claim: null }));
+
+    await expect(
+      createClaimMethods(makeClient(), "proj-1").get("task:missing"),
+    ).resolves.toEqual({ ok: true, claim: null });
+    expect(mockFetch).toHaveBeenCalledExactlyOnceWith(
+      "https://api.test/projects/proj-1/claims/state/task%3Amissing",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+});
 
 describe("withClaim", () => {
   const mockFetch = vi.fn();

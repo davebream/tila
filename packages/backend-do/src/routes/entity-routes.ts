@@ -1,4 +1,11 @@
 import { validatedWrite } from "@tila/core";
+import { summaryOps } from "@tila/ops-sqlite";
+import {
+  CredentialPolicyDenied,
+  assertResourceAccess,
+  filterRelationships,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   artifactOps,
@@ -20,6 +27,7 @@ import { eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import { filterFields } from "./entity-response";
+import { originFromBody } from "./origin";
 import {
   formatZodIssues,
   idempotencyFrom,
@@ -71,12 +79,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       }
     }
 
-    const origin: RequestOrigin = {
-      actor: body.created_by,
-      tokenId: body.actor_token_id ?? null,
-      source: body.source ?? null,
-      sourceVersion: body.source_version ?? null,
-    };
+    const origin = originFromBody(body as Record<string, unknown>);
     entityOps.create(
       db,
       {
@@ -130,7 +133,15 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         ),
       )
       .all();
-    return c.json({ ok: true, entity, relationships });
+    return c.json({
+      ok: true,
+      entity,
+      relationships: filterRelationships(
+        db,
+        readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
+        relationships,
+      ),
+    });
   });
 
   app.get("/entity/list", (c) => {
@@ -189,6 +200,9 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     const { entities, total } = entityOps.list(
       db,
       {
+        restrictions: readCredentialPolicy(
+          c.req.header("X-Tila-Credential-Policy"),
+        )?.restrictions,
         type,
         archived,
         ...(Object.keys(dataFilter).length > 0 ? { dataFilter } : {}),
@@ -275,14 +289,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         formatZodIssues(parsed.error.issues),
       );
     }
-    const origin: RequestOrigin = {
-      actor: (body as { actor?: string }).actor ?? "unknown",
-      tokenId:
-        (body as { actor_token_id?: string | null }).actor_token_id ?? null,
-      source: (body as { source?: string | null }).source ?? null,
-      sourceVersion:
-        (body as { source_version?: string | null }).source_version ?? null,
-    };
+    const origin = originFromBody(body as Record<string, unknown>);
     const entity = entityOps.update(
       db,
       id,
@@ -308,14 +315,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         formatZodIssues(parsed.error.issues),
       );
     }
-    const origin: RequestOrigin = {
-      actor: (body as { actor?: string }).actor ?? "unknown",
-      tokenId:
-        (body as { actor_token_id?: string | null }).actor_token_id ?? null,
-      source: (body as { source?: string | null }).source ?? null,
-      sourceVersion:
-        (body as { source_version?: string | null }).source_version ?? null,
-    };
+    const origin = originFromBody(body as Record<string, unknown>);
     entityOps.archive(db, id, parsed.data.fence, origin, idempotencyFrom(c));
     return jsonOkRows(c, {}, 1);
   });
@@ -382,7 +382,14 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       to_id,
       type,
     });
-    return c.json({ ok: true, relationships });
+    return c.json({
+      ok: true,
+      relationships: filterRelationships(
+        db,
+        readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
+        relationships,
+      ),
+    });
   });
 
   app.post("/entity/relationship/delete", async (c) => {
@@ -411,58 +418,12 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     return jsonOkRows(c, { removed }, removed ? 1 : 0);
   });
 
-  app.get("/summary", (c) => {
-    const { db } = deps;
-
-    const typeCounts = db.all<{ type: string; cnt: number }>(sql`
-      SELECT type, COUNT(*) as cnt FROM entities WHERE archived = 0 GROUP BY type
-    `);
-    const entity_counts: Record<string, number> = {};
-    let entity_count = 0;
-    for (const row of typeCounts) {
-      entity_counts[row.type] = row.cnt;
-      entity_count += row.cnt;
-    }
-
-    const statusRows = db.all<{ status: string | null; cnt: number }>(sql`
-      SELECT json_extract(data, '$.status') as status, COUNT(*) as cnt
-      FROM entities WHERE archived = 0 GROUP BY json_extract(data, '$.status')
-    `);
-    const status_counts: Record<string, number> = {};
-    for (const row of statusRows) {
-      const key = row.status ?? "null";
-      status_counts[key] = row.cnt;
-    }
-
-    const activeClaims = coordinationOps.listClaims(db);
-    const active_claims = activeClaims.length;
-    const ready_count = readyOps.computeReadyEntities(db).length;
-    const journalRows = journalOps.listJournal(db, { limit: 10 });
-    const recent_events = journalRows.map((e) => ({
-      seq: e.seq,
-      t: e.t,
-      kind: e.kind,
-      resource: e.resource,
-      actor: e.actor,
-    }));
-    const presenceRows = coordinationOps.listPresence(db);
-    const online_machines = presenceRows.map((p) => p.machine);
-
-    const payload = {
-      entity_count,
-      entity_counts,
-      status_counts,
-      active_claims,
-      ready_count,
-      online_machines,
-      token_estimate: 0,
-      recent_events,
-    };
-    const token_estimate = Math.ceil(JSON.stringify(payload).length / 4);
-    payload.token_estimate = token_estimate;
-
-    return c.json({ ok: true, project: payload });
-  });
+  app.get("/summary", (c) =>
+    c.json({
+      ok: true,
+      project: deps.db.transaction((tx) => summaryOps.getSummary(tx)),
+    }),
+  );
 
   app.get("/entity/search", (c) => {
     const { db } = deps;

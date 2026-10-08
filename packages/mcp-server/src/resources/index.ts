@@ -76,7 +76,7 @@ export async function registerAllResources(
     "tila://project/summary",
     {
       description:
-        "Project summary: entity counts, status breakdown, active claims, ready count, online machines",
+        "Project summary: entity counts, status breakdown, active claims, ready count, online participants",
       mimeType: "application/json",
     },
     async (uri) => {
@@ -128,7 +128,7 @@ export async function registerAllResources(
     "tila://project/presence",
     {
       description:
-        "Machines known to the project, each tagged `active` (seen recently) or not. The list includes inactive machines; filter on `active` for currently-online agents.",
+        "Participants known to the project, each tagged `active` (seen recently) or not. The list includes inactive participants; filter on `active` for currently-online clients.",
       mimeType: "application/json",
     },
     async (uri) => {

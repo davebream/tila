@@ -1,4 +1,5 @@
 node_modules/
+.ci-reports/
 dist/
 .env
 .env.local
@@ -53,3 +54,15 @@ packages/cli-*/bin/tila.exe
 
 # kombajn build-loop checkpoint (orchestration artifact, never committed)
 .build-checkpoint.json
+
+# graphify knowledge graph: generated locally, rebuild with `graphify update .`
+graphify-out/
+
+# Benchmark raw results (summaries are committed under docs/benchmarks/)
+packages/bench/results/*
+!packages/bench/results/.gitkeep
+
+# Explicit version-generation task outputs
+/packages/cli/src/version.ts
+/packages/sdk/src/version.ts
+/packages/backend-do/src/version.ts

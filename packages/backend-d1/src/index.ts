@@ -14,7 +14,9 @@ export {
 } from "./rate-limit-store";
 export {
   RepoAllowlistStore,
+  type RepoAccessPolicyResult,
   type RepoAllowlistRow,
+  type RepoOidcPolicyResult,
 } from "./repo-allowlist";
 export {
   OidcPrincipalsStore,
@@ -39,6 +41,21 @@ export {
   type GrantParams,
 } from "./admin-grants";
 export {
+  canonicalMembershipPrincipal,
+  type EffectiveMembership,
+  type MembershipEventRow,
+  type MirroredMembershipCandidate,
+  ProjectMembershipStore,
+} from "./project-memberships";
+export {
   D1DeploymentMetaStore,
   DeploymentIdUnavailable,
 } from "./deployment-meta";
+
+export {
+  CredentialStore,
+  CredentialConflict,
+  CredentialDenied,
+  SCOPED_TOKEN_MARKER,
+  type CredentialActor,
+} from "./credential-store";

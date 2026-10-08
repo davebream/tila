@@ -1,10 +1,13 @@
+import { type CredentialPolicy, permitsTask } from "@tila/schemas";
 import type { TemplateDefinition, TilaSchemaToml } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { assertArtifactReviewPolicy } from "./artifact-review-ops";
 import {
   checkEntityTypeDeclared,
   resolveCurrentSchema,
 } from "./constraint-ops";
+import { CredentialPolicyDenied, assertTaskAccess } from "./credential-policy";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 import { getCurrentSchema } from "./schema-ops";
@@ -40,6 +43,7 @@ export class TemplateInstantiateError extends Error {
 }
 
 export interface InstantiateTemplateParams {
+  policy?: CredentialPolicy;
   /** Template name to look up in the current schema's `[templates.*]`. */
   templateName: string;
   /** Root entity ID; each template entity's id_suffix is appended to it. */
@@ -191,6 +195,29 @@ export function instantiateTemplate(
   const now = Date.now();
 
   return db.transaction((tx) => {
+    if (
+      params.policy &&
+      (!params.policy.capabilities.includes("tasks:write") ||
+        Object.values(templateDef.entities).some(
+          (entity) => !permitsTask(params.policy?.restrictions, entity.type),
+        ))
+    )
+      throw new CredentialPolicyDenied();
+    if (params.policy) {
+      const generated = new Set(
+        Object.values(templateDef.entities).map(
+          (entity) => rootId + entity.id_suffix,
+        ),
+      );
+      for (const entity of Object.values(templateDef.entities)) {
+        const data = applyVarsToData(
+          entity.data as Record<string, unknown>,
+          vars,
+        );
+        if (data.parent_id && !generated.has(String(data.parent_id)))
+          assertTaskAccess(tx, params.policy, data.parent_id);
+      }
+    }
     const entityIds: string[] = [];
     let relCount = 0;
 
@@ -200,6 +227,7 @@ export function instantiateTemplate(
         entity.data as Record<string, unknown>,
         vars,
       );
+      assertArtifactReviewPolicy(tx, entityId, entity.type, data.status);
       tx.insert(schema.entities)
         .values({
           id: entityId,
@@ -230,7 +258,7 @@ export function instantiateTemplate(
     appendJournal(tx, {
       kind: "template.instantiated",
       resource: rootId,
-      actor: origin.actor,
+      ...origin,
       tokenId: origin.tokenId,
       source: origin.source,
       sourceVersion: origin.sourceVersion,

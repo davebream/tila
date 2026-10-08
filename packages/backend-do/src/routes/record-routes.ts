@@ -1,5 +1,11 @@
 import { applyRecordLegacyDefaults } from "@tila/core";
 import {
+  CredentialPolicyDenied,
+  assertResourceAccess,
+  filterRelationships,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
+import {
   type RequestOrigin,
   artifactOps,
   constraintOps,
@@ -20,6 +26,7 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { ZodError } from "zod";
+import { originFromBody } from "./origin";
 import { idempotencyFrom, jsonError, jsonOkRows } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
@@ -47,7 +54,7 @@ function upsertCanonicalSnapshot(
   key: string,
   canonicalArtifactKey: string,
   valueSha256: string,
-  actor: string,
+  origin: RequestOrigin,
 ): void {
   const resource = formatRecordResource(type, key);
   artifactOps.upsertPointer(
@@ -61,10 +68,10 @@ function upsertCanonicalSnapshot(
       fence: null,
       mime_type: "application/json",
       produced_at: Date.now(),
-      produced_by: actor,
+      produced_by: origin.principalId,
       expires_at: null,
     },
-    { actor },
+    origin,
     "artifact.produced",
   );
 }
@@ -135,13 +142,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       (rawBody.actor as string | undefined) ??
       c.req.header("x-actor") ??
       "anonymous";
-    const provenance: RequestOrigin = {
-      actor,
-      tokenId: (rawBody.actor_token_id as string | null | undefined) ?? null,
-      source: (rawBody.source as string | null | undefined) ?? null,
-      sourceVersion:
-        (rawBody.source_version as string | null | undefined) ?? null,
-    };
+    const provenance = originFromBody(rawBody);
 
     const validation = validateRecordWrite(deps, type, body.value);
     if (!validation.ok) {
@@ -182,7 +183,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         body.key,
         canonicalArtifactKey,
         result.value_sha256,
-        actor,
+        provenance,
       );
     }
 
@@ -206,13 +207,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       (rawSetBody.actor as string | undefined) ??
       c.req.header("x-actor") ??
       "anonymous";
-    const setProvenance: RequestOrigin = {
-      actor,
-      tokenId: (rawSetBody.actor_token_id as string | null | undefined) ?? null,
-      source: (rawSetBody.source as string | null | undefined) ?? null,
-      sourceVersion:
-        (rawSetBody.source_version as string | null | undefined) ?? null,
-    };
+    const setProvenance = originFromBody(rawSetBody);
 
     const validation = validateRecordWrite(deps, type, body.value);
     if (!validation.ok) {
@@ -255,7 +250,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         key,
         canonicalArtifactKey,
         result.value_sha256,
-        actor,
+        setProvenance,
       );
     }
 
@@ -294,13 +289,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       (rawPutBody.actor as string | undefined) ??
       c.req.header("x-actor") ??
       "anonymous";
-    const putProvenance: RequestOrigin = {
-      actor,
-      tokenId: (rawPutBody.actor_token_id as string | null | undefined) ?? null,
-      source: (rawPutBody.source as string | null | undefined) ?? null,
-      sourceVersion:
-        (rawPutBody.source_version as string | null | undefined) ?? null,
-    };
+    const putProvenance = originFromBody(rawPutBody);
 
     const validation = validateRecordWrite(deps, type, body.value);
     if (!validation.ok) {
@@ -337,7 +326,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         key,
         canonicalArtifactKey,
         result.value_sha256,
-        actor,
+        putProvenance,
       );
     }
 
@@ -360,14 +349,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       (rawPatchBody.actor as string | undefined) ??
       c.req.header("x-actor") ??
       "anonymous";
-    const patchProvenance: RequestOrigin = {
-      actor,
-      tokenId:
-        (rawPatchBody.actor_token_id as string | null | undefined) ?? null,
-      source: (rawPatchBody.source as string | null | undefined) ?? null,
-      sourceVersion:
-        (rawPatchBody.source_version as string | null | undefined) ?? null,
-    };
+    const patchProvenance = originFromBody(rawPatchBody);
 
     const currentSchema = resolveCurrentSchema(deps.db);
     const schemaVersion = currentSchema
@@ -415,14 +397,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       (rawArchiveBody.actor as string | undefined) ??
       c.req.header("x-actor") ??
       "anonymous";
-    const archiveProvenance: RequestOrigin = {
-      actor,
-      tokenId:
-        (rawArchiveBody.actor_token_id as string | null | undefined) ?? null,
-      source: (rawArchiveBody.source as string | null | undefined) ?? null,
-      sourceVersion:
-        (rawArchiveBody.source_version as string | null | undefined) ?? null,
-    };
+    const archiveProvenance = originFromBody(rawArchiveBody);
 
     const currentSchema = resolveCurrentSchema(deps.db);
     const schemaVersion = currentSchema
@@ -469,14 +444,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       (rawUnarchiveBody.actor as string | undefined) ??
       c.req.header("x-actor") ??
       "anonymous";
-    const unarchiveProvenance: RequestOrigin = {
-      actor,
-      tokenId:
-        (rawUnarchiveBody.actor_token_id as string | null | undefined) ?? null,
-      source: (rawUnarchiveBody.source as string | null | undefined) ?? null,
-      sourceVersion:
-        (rawUnarchiveBody.source_version as string | null | undefined) ?? null,
-    };
+    const unarchiveProvenance = originFromBody(rawUnarchiveBody);
 
     const currentSchema = resolveCurrentSchema(deps.db);
     const schemaVersion = currentSchema
@@ -540,6 +508,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
     }
 
     const actor = body.actor ?? c.req.header("x-actor") ?? "anonymous";
+    const stampOrigin = originFromBody(body as Record<string, unknown>);
 
     recordOps.stampArtifacts(deps.db, {
       type,
@@ -564,7 +533,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
         produced_by: actor,
         expires_at: null,
       },
-      { actor },
+      stampOrigin,
       "artifact.produced",
     );
 
@@ -572,7 +541,11 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
   });
 
   app.get("/record/types-in-use", (c) => {
-    const types = recordOps.listRecordTypesInUse(deps.db);
+    const types = recordOps.listRecordTypesInUse(
+      deps.db,
+      readCredentialPolicy(c.req.header("X-Tila-Credential-Policy"))
+        ?.restrictions,
+    );
     return c.json({ ok: true, types });
   });
 
@@ -615,6 +588,9 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
 
     try {
       const result = recordOps.listRecords(deps.db, {
+        restrictions: readCredentialPolicy(
+          c.req.header("X-Tila-Credential-Policy"),
+        )?.restrictions,
         type,
         includeArchived,
         tag: tag ?? undefined,

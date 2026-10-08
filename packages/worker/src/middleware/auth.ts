@@ -1,3 +1,4 @@
+import { CredentialStore, SCOPED_TOKEN_MARKER } from "@tila/backend-d1";
 import {
   D1RateLimitStore,
   D1RevokedJtiStore,
@@ -234,7 +235,7 @@ function subjectCacheKey(
   identityHost: string,
   subjectId: string,
 ): string {
-  return `${projectId} ${identityHost} ${subjectId}`;
+  return `${projectId}\0${identityHost}\0${subjectId}`;
 }
 
 /**
@@ -276,23 +277,6 @@ export function revokeSubjectInCache(
   });
 }
 
-/**
- * Check the per-isolate subject-revocation cache.
- * Returns the cached `{ revokedBefore }` entry if present and not stale.
- * Returns `null` (cache miss or stale) if the caller should query D1.
- */
-function getSubjectRevFromCache(
-  key: string,
-): { revokedBefore: number | null } | null {
-  const entry = subjectRevCache.get(key);
-  if (!entry) return null;
-  if (nowMs() - entry.cachedAt > SUBJECT_REVCHECK_TTL_MS) {
-    subjectRevCache.delete(key);
-    return null;
-  }
-  return { revokedBefore: entry.revokedBefore };
-}
-
 function isExpectedAudience(aud: unknown, expected: string): boolean {
   // Fail closed: an absent aud is not an expected audience. The session-token
   // call site already guards `aud === undefined` separately, so this is
@@ -321,9 +305,15 @@ function buildSessionTokenResult(
   cached: {
     projectId: string;
     name: string;
+    principalId?: string;
     scopes: string;
     expiresAt: number;
     permission?: string;
+    role?: string | null;
+    membershipSource?: string | null;
+    sourceRepoId?: number | null;
+    tokenHash?: string;
+    authenticatedAt?: number;
   },
 ): {
   tokenResult: WorkspaceSessionTokenResult | CookieSessionTokenResult;
@@ -339,7 +329,9 @@ function buildSessionTokenResult(
         tokenId: "",
         sessionHash,
         githubLogin: cached.name,
+        principalId: cached.principalId,
         expiresAt: cached.expiresAt,
+        authenticatedAt: cached.authenticatedAt,
       } satisfies WorkspaceSessionTokenResult,
       authKind: "workspace",
     };
@@ -354,6 +346,34 @@ function buildSessionTokenResult(
       sessionHash,
       expiresAt: cached.expiresAt,
       permission: cached.permission ?? "read",
+      principalId: cached.principalId,
+      role:
+        cached.role === "viewer" ||
+        cached.role === "participant" ||
+        cached.role === "maintainer" ||
+        cached.role === "owner"
+          ? cached.role
+          : undefined,
+      membershipSources: (() => {
+        try {
+          const parsed = JSON.parse(cached.membershipSource ?? "[]");
+          return Array.isArray(parsed)
+            ? parsed.filter(
+                (
+                  source,
+                ): source is "explicit" | "github-mirrored" | "bootstrap" =>
+                  source === "explicit" ||
+                  source === "github-mirrored" ||
+                  source === "bootstrap",
+              )
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      })(),
+      sourceRepoId: cached.sourceRepoId ?? undefined,
+      authenticatedAt: cached.authenticatedAt,
+      authMethod: cached.tokenHash ? "token" : "github",
     } satisfies CookieSessionTokenResult,
     authKind: "cookie",
   };
@@ -394,6 +414,7 @@ const DPOP_GENERIC_INVALID_MESSAGE =
 async function enforceDpop(
   c: Context,
   expectedJkt: string,
+  accessToken: string,
 ): Promise<Response | null> {
   const proofJwt = c.req.header("DPoP");
 
@@ -418,6 +439,7 @@ async function enforceDpop(
   const result = await verifyDpopProof({
     proofJwt,
     expectedJkt,
+    accessToken,
     htm,
     htu,
     nowMs: nowMs(),
@@ -533,49 +555,25 @@ export function createAuthMiddleware(
     );
     if (sessionCookie) {
       const sessionHash = await hashToken(sessionCookie, c.env.HASH_PEPPER);
-      const cached = getSessionFromCache(sessionHash);
-
-      if (cached === false) {
-        // Negative cache hit — deny without hitting D1 or recording rate-limit
+      // Session existence and source-credential state are authoritative on every
+      // request, including a request served by another warm Worker isolate.
+      const sessionStore = new D1SessionStore(c.env.DB);
+      let sessionResult: Awaited<ReturnType<D1SessionStore["validate"]>>;
+      try {
+        sessionResult = await sessionStore.validate(sessionHash);
+      } catch {
         return c.json(
           {
             ok: false,
             error: {
-              code: "session-expired",
-              message: "Session cookie is invalid or expired",
-              retryable: false,
+              code: "auth-unavailable",
+              message: "Authentication temporarily unavailable",
+              retryable: true,
             },
           },
-          401,
+          503,
         );
       }
-
-      let sessionResult: Awaited<ReturnType<D1SessionStore["validate"]>>;
-
-      if (cached !== undefined) {
-        // Positive cache hit — check expiresAt
-        if (cached.expiresAt < nowMs()) {
-          // Expired in cache — evict and fall through to D1
-          invalidateSession(sessionHash);
-          sessionResult = null;
-        } else {
-          // Valid cache hit — build result and proceed
-          const { tokenResult, authKind } = buildSessionTokenResult(
-            sessionHash,
-            cached,
-          );
-          c.set("tokenResult", tokenResult);
-          c.set("authKind", authKind);
-          return next();
-        }
-      } else {
-        sessionResult = null; // will be filled by D1 below
-      }
-
-      // Cache miss (or expired positive hit) — hit D1
-      const sessionStore = new D1SessionStore(c.env.DB);
-      sessionResult = await sessionStore.validate(sessionHash);
-
       if (!sessionResult) {
         // Record rate-limit failure and cache negative result
         if (ip) {
@@ -613,6 +611,61 @@ export function createAuthMiddleware(
       setSessionInCache(sessionHash, sessionResult);
       const { tokenResult: sessionTokenResult, authKind: sessionAuthKind } =
         buildSessionTokenResult(sessionHash, sessionResult);
+      if (sessionResult.tokenHash && sessionResult.projectId) {
+        try {
+          const source = await new D1TokenStore(c.env.DB).validate(
+            sessionResult.tokenHash,
+          );
+          if (!source || source.cnfJkt)
+            return c.json(
+              {
+                ok: false,
+                error: {
+                  code: "session-expired",
+                  message: "Source credential is no longer valid",
+                  retryable: false,
+                },
+              },
+              401,
+            );
+          if (source.scopes === SCOPED_TOKEN_MARKER) {
+            const scoped = await new CredentialStore(c.env.DB).resolve(
+              source.tokenId,
+            );
+            if (!scoped)
+              return c.json(
+                {
+                  ok: false,
+                  error: {
+                    code: "session-expired",
+                    message: "Source credential is no longer valid",
+                    retryable: false,
+                  },
+                },
+                401,
+              );
+            Object.assign(sessionTokenResult, {
+              principalId: scoped.principalId,
+              credentialId: scoped.credentialId,
+              policy: scoped.policy,
+              tokenId: source.tokenId,
+              name: scoped.name,
+            });
+          }
+        } catch {
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "auth-unavailable",
+                message: "Authentication temporarily unavailable",
+                retryable: true,
+              },
+            },
+            503,
+          );
+        }
+      }
       c.set("tokenResult", sessionTokenResult);
       c.set("authKind", sessionAuthKind);
       return next();
@@ -779,7 +832,7 @@ export function createAuthMiddleware(
         const jti = payload.jti;
 
         // 1. Consult the per-isolate cache first (avoids D1 on every request)
-        const cached = getJtiFromCache(jti);
+        const cached = getJtiFromCache(jti) === true ? true : null;
         if (cached === true) {
           // Cached as revoked — deny immediately
           return c.json(
@@ -928,43 +981,38 @@ export function createAuthMiddleware(
         );
 
         let revokedBefore: number | null;
-        const cachedSubject = getSubjectRevFromCache(cacheKey);
-        if (cachedSubject !== null) {
-          revokedBefore = cachedSubject.revokedBefore;
-        } else {
-          // Cache miss or stale — query D1 (fail-closed on error, like the jti path)
-          try {
-            const revokedSubjectsStore = new D1RevokedSubjectsStore(c.env.DB);
-            // Use the same identity axes that canonicalizePrincipal consumed
-            // above so the cache-key and the D1 lookup stay consistent.
-            const [hostArg, subjectArg] =
-              payload.sub_type === "oidc"
-                ? ([payload.oidc_issuer, payload.oidc_subject] as const)
-                : ([payload.github_host, payload.github_user_id] as const);
-            revokedBefore = await revokedSubjectsStore.getRevokedBefore(
-              payload.project_id,
-              hostArg,
-              subjectArg,
-            );
-            setSubjectRevInCache(cacheKey, {
-              revokedBefore,
-              cachedAt: nowMs(),
-            });
-          } catch {
-            // D1 lookup error — DENY (fail-closed per design C7). The cache is
-            // NOT consulted as a fallback in the error path.
-            return c.json(
-              {
-                ok: false,
-                error: {
-                  code: "unauthorized",
-                  message: "Session token verification failed",
-                  retryable: true,
-                },
+        // Positive cache state never establishes continuing validity.
+        try {
+          const revokedSubjectsStore = new D1RevokedSubjectsStore(c.env.DB);
+          // Use the same identity axes that canonicalizePrincipal consumed
+          // above so the cache-key and the D1 lookup stay consistent.
+          const [hostArg, subjectArg] =
+            payload.sub_type === "oidc"
+              ? ([payload.oidc_issuer, payload.oidc_subject] as const)
+              : ([payload.github_host, payload.github_user_id] as const);
+          revokedBefore = await revokedSubjectsStore.getRevokedBefore(
+            payload.project_id,
+            hostArg,
+            subjectArg,
+          );
+          setSubjectRevInCache(cacheKey, {
+            revokedBefore,
+            cachedAt: nowMs(),
+          });
+        } catch {
+          // D1 lookup error — DENY (fail-closed per design C7). The cache is
+          // NOT consulted as a fallback in the error path.
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "unauthorized",
+                message: "Session token verification failed",
+                retryable: true,
               },
-              401,
-            );
-          }
+            },
+            401,
+          );
         }
 
         if (
@@ -1005,7 +1053,7 @@ export function createAuthMiddleware(
       // OIDC sessions never carry `cnf` (binding is out of scope for the CI
       // runner profile), so this is structurally a no-op on the OIDC branch.
       if (payload.cnf?.jkt) {
-        const dpopResult = await enforceDpop(c, payload.cnf.jkt);
+        const dpopResult = await enforceDpop(c, payload.cnf.jkt, rawToken);
         if (dpopResult !== null) return dpopResult;
       }
 
@@ -1025,6 +1073,9 @@ export function createAuthMiddleware(
           expiresAt: payload.expires_at,
           oidcIssuer: payload.oidc_issuer,
           oidcSubject: payload.oidc_subject,
+          jti: payload.jti,
+          role: payload.role,
+          membershipSources: payload.membership_sources,
         };
         tokenKindResult = oidcResult;
       } else {
@@ -1041,6 +1092,8 @@ export function createAuthMiddleware(
           githubUserId: payload.github_user_id,
           githubHost: payload.github_host,
           jti: payload.jti,
+          role: payload.role,
+          membershipSources: payload.membership_sources,
         };
         tokenKindResult = sessionResult;
       }
@@ -1104,64 +1157,67 @@ export function createAuthMiddleware(
     // 3. Hash
     const tokenHash = await hashToken(rawToken, c.env.HASH_PEPPER);
 
-    // 4. Cache lookup
-    const cached = getFromCache(tokenHash);
-    if (cached === null) {
-      // Negative cache hit -- invalid/revoked token
+    // Never let positive caches keep a revoked credential alive.
+    let claims: TokenClaims | null;
+    const lookupStart = performance.now();
+    try {
+      claims = await new D1TokenStore(c.env.DB).validate(tokenHash);
+      if (claims?.scopes === SCOPED_TOKEN_MARKER) {
+        const scoped = await new CredentialStore(c.env.DB).resolve(
+          claims.tokenId,
+        );
+        claims = scoped
+          ? {
+              ...claims,
+              principalId: scoped.principalId,
+              credentialId: scoped.credentialId,
+              policy: scoped.policy,
+              name: scoped.name,
+              expiresAt: scoped.expiresAt,
+            }
+          : null;
+      }
+    } catch {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "auth-unavailable",
+            message: "Authentication temporarily unavailable",
+            retryable: true,
+          },
+        },
+        503,
+      );
+    }
+    try {
+      c.env.ANALYTICS?.writeDataPoint({
+        blobs: ["auth", "lookup"],
+        doubles: [performance.now() - lookupStart],
+      });
+    } catch {
+      /* Telemetry is best effort. */
+    }
+    if (!claims) {
       await recordRateLimitFailure();
       return c.json(
         {
           ok: false,
           error: {
             code: "unauthorized",
-            message: "Invalid or revoked token",
+            message: "Invalid, expired or revoked token",
             retryable: false,
           },
         },
         401,
       );
     }
-
-    let claims: TokenClaims | null;
-
-    if (cached !== undefined) {
-      // Positive cache hit
-      claims = cached;
-    } else {
-      // 5. Cache miss -- D1 lookup
-      const tokenStore = new D1TokenStore(c.env.DB);
-      const result = await tokenStore.validate(tokenHash);
-      if (!result) {
-        setInCache(tokenHash, null); // negative cache
-        await recordRateLimitFailure();
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "unauthorized",
-              message: "Invalid or revoked token",
-              retryable: false,
-            },
-          },
-          401,
-        );
-      }
-      claims = result;
-      setInCache(tokenHash, claims); // positive cache
-    }
-
     // 5.5. DPoP enforcement for bound D1 tokens (WI-G)
     // If the token carries a JWK thumbprint binding (cnfJkt), enforce a DPoP
     // proof for this request. Absent binding ⇒ skip (legacy/unbound accept).
     //
-    // Cache-warmup pinning: the positive cache entry DOES carry cnfJkt (set in
-    // step 5 below). A pre-deploy warm entry populated WITHOUT cnfJkt (e.g. from
-    // a running pre-WI-G worker) would be served here as cnfJkt=undefined, meaning
-    // DPoP is NOT enforced during the warm window. This is the documented bounded
-    // fail-open window — after eviction/expiry (60s), the entry is re-read from
-    // D1 and enforcement resumes. See Task 7 tests for the pinned regression guard.
     if (claims?.cnfJkt) {
-      const dpopResult = await enforceDpop(c, claims.cnfJkt);
+      const dpopResult = await enforceDpop(c, claims.cnfJkt, rawToken);
       if (dpopResult !== null) return dpopResult;
     }
 
@@ -1180,15 +1236,13 @@ export function createAuthMiddleware(
       const tokenStore = new D1TokenStore(c.env.DB);
       c.executionCtx.waitUntil(
         tokenStore.updateLastUsedAt(tokenHash).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(
-            `[auth] updateLastUsedAt failed: token=${tokenHash.slice(0, 8)} err=${msg}`,
-          );
+          const msg = err instanceof Error ? err.name : "Error";
+          console.warn(`[auth] updateLastUsedAt failed: ${msg}`);
           try {
             c.env.ANALYTICS.writeDataPoint({
               blobs: ["auth", "updateLastUsedAt_failure", msg],
               doubles: [1],
-              indexes: [tokenHash.slice(0, 8)],
+              indexes: ["auth"],
             });
           } catch {
             // Analytics emission is never load-bearing
@@ -1198,6 +1252,7 @@ export function createAuthMiddleware(
     }
 
     // 7. Set context with d1-token discriminant
+    if (claims.policy) c.header("Cache-Control", "no-store");
     c.set("tokenResult", { ...claims, kind: "d1-token" } as D1TokenResult);
     c.set("authKind", "bearer");
     return next();

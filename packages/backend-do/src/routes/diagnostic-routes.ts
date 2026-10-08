@@ -5,6 +5,9 @@ import type { ProjectSubRouter, RouterDeps } from "./types";
 const DIAGNOSTIC_TABLES = [
   "claims",
   "journal",
+  "journal_cursors",
+  "handoffs",
+  "handoff_references",
   "_schema_history",
   "artifact_search_docs",
   "entity_search_docs",

@@ -18,13 +18,13 @@ vi.mock("node:fs", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-// Mock @clack/prompts
+// Mock ../../lib/prompts
 const mockNote = vi.fn();
 const mockLogInfo = vi.fn();
 const mockLogWarn = vi.fn();
 const mockLogError = vi.fn();
 const mockCancel = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   note: (...args: unknown[]) => mockNote(...args),
   cancel: (...args: unknown[]) => mockCancel(...args),

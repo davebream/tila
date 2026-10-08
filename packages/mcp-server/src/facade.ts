@@ -1,5 +1,12 @@
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import type { TilaProjectConfig } from "@tila/schemas";
+import { hostname } from "node:os";
+import {
+  type EnvironmentMetadata,
+  ParticipantIdSchema,
+  type TilaProjectConfig,
+} from "@tila/schemas";
 import { type TilaFacade, createTila } from "tila-sdk";
 import type { McpServerConfig } from "./config";
 
@@ -9,6 +16,34 @@ const require = createRequire(import.meta.url);
 export const MCP_VERSION: string = (
   require("../package.json") as { version: string }
 ).version;
+
+const MCP_PARTICIPANT_ID = ParticipantIdSchema.parse(
+  process.env.TILA_PARTICIPANT_ID?.trim() || randomUUID(),
+);
+
+function gitMetadata(...args: string[]): string | undefined {
+  try {
+    return (
+      execFileSync("git", args, {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() || undefined
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+const MCP_ENVIRONMENT: EnvironmentMetadata = {
+  machine: hostname(),
+  repository: gitMetadata("config", "--get", "remote.origin.url"),
+  worktree: gitMetadata("rev-parse", "--show-toplevel"),
+  branch: gitMetadata("branch", "--show-current"),
+  commit: gitMetadata("rev-parse", "HEAD"),
+  client_name: "mcp-server",
+  client_version: MCP_VERSION,
+};
 
 /**
  * Build the uniform {@link TilaFacade} data layer from a resolved server config.
@@ -28,6 +63,7 @@ export const MCP_VERSION: string = (
  */
 export async function buildFacade(
   config: McpServerConfig,
+  identity?: { participantId: string; environment: EnvironmentMetadata },
 ): Promise<TilaFacade> {
   if (config.mode === "local") {
     const tilaConfig: TilaProjectConfig = {
@@ -42,7 +78,10 @@ export async function buildFacade(
       tila_version: MCP_VERSION,
       created_at: new Date(0).toISOString(),
     };
-    return createTila(tilaConfig);
+    return createTila(tilaConfig, undefined, {
+      participantId: identity?.participantId ?? MCP_PARTICIPANT_ID,
+      environment: identity?.environment ?? MCP_ENVIRONMENT,
+    });
   }
 
   const token = await config.getToken();
@@ -60,5 +99,7 @@ export async function buildFacade(
   // on the remote path. Local mode makes no HTTP requests, so no header applies.
   return createTila(tilaConfig, token, {
     extraHeaders: { "X-Tila-Source": `mcp-server/${MCP_VERSION}` },
+    participantId: identity?.participantId ?? MCP_PARTICIPANT_ID,
+    environment: identity?.environment ?? MCP_ENVIRONMENT,
   });
 }

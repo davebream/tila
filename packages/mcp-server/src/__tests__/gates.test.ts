@@ -3,6 +3,7 @@ import { registerGateTools } from "../tools/gates";
 import {
   type MockFacade,
   type MockServer,
+  TEST_GATE,
   asFacade,
   asServer,
   createMockFacade,
@@ -41,7 +42,7 @@ describe("registerGateTools", () => {
     it("calls gates.create with all required and optional fields", async () => {
       facade.gates.create.mockResolvedValue({
         ok: true,
-        gate: { id: "gate-1", status: "pending" },
+        gate: { ...TEST_GATE, id: "gate-1", status: "pending" },
       });
 
       const handler = findToolHandler(server, "tila_gate_create");
@@ -67,7 +68,7 @@ describe("registerGateTools", () => {
     it("calls gates.create with only required fields (timeout_at and data omitted)", async () => {
       facade.gates.create.mockResolvedValue({
         ok: true,
-        gate: { id: "gate-2" },
+        gate: { ...TEST_GATE, id: "gate-2" },
       });
 
       const handler = findToolHandler(server, "tila_gate_create");
@@ -89,7 +90,10 @@ describe("registerGateTools", () => {
 
   describe("tila_gate_resolve", () => {
     it("calls gates.resolve with gate id and resolution", async () => {
-      facade.gates.resolve.mockResolvedValue({ ok: true });
+      facade.gates.resolve.mockResolvedValue({
+        ok: true,
+        gate: { ...TEST_GATE, status: "resolved" },
+      });
 
       const handler = findToolHandler(server, "tila_gate_resolve");
       const result = await handler({
@@ -104,7 +108,10 @@ describe("registerGateTools", () => {
     });
 
     it("calls gates.resolve with undefined resolution when omitted", async () => {
-      facade.gates.resolve.mockResolvedValue({ ok: true });
+      facade.gates.resolve.mockResolvedValue({
+        ok: true,
+        gate: { ...TEST_GATE, status: "resolved" },
+      });
 
       const handler = findToolHandler(server, "tila_gate_resolve");
       await handler({ gate_id: "gate-5" });
@@ -134,16 +141,24 @@ describe("registerGateTools", () => {
       const handler = findToolHandler(server, "tila_gate_create");
       await expect(
         handler({ resource: "T-1", await_type: "ci", fence: 1 }),
-      ).rejects.toThrow("timeout");
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching("timeout") },
+        },
+      });
     });
 
     it("wraps errors via toMcpError for gate_cancel", async () => {
       facade.gates.remove.mockRejectedValue(new Error("not found"));
 
       const handler = findToolHandler(server, "tila_gate_cancel");
-      await expect(handler({ gate_id: "gate-999" })).rejects.toThrow(
-        "not found",
-      );
+      await expect(handler({ gate_id: "gate-999" })).resolves.toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { message: expect.stringMatching("not found") },
+        },
+      });
     });
   });
 
@@ -151,7 +166,7 @@ describe("registerGateTools", () => {
     it("returns JSON-stringified response in text content array", async () => {
       const responseData = {
         ok: true,
-        gate: { id: "gate-7", status: "resolved" },
+        gate: { ...TEST_GATE, id: "gate-7", status: "resolved" },
       };
       facade.gates.resolve.mockResolvedValue(responseData);
 

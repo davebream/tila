@@ -54,7 +54,7 @@ export function createClaimMethods(client: TilaClient, projectId: string) {
 
     async get(resource: string): Promise<StateResponse> {
       return client.get<StateResponse>(
-        `${base}/${encodeURIComponent(resource)}`,
+        `${base}/state/${encodeURIComponent(resource)}`,
       );
     },
   };

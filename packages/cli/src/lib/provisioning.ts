@@ -10,8 +10,9 @@ import {
 import os from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as p from "@clack/prompts";
 import * as dotenv from "dotenv";
+import { diagnostic, exit } from "./output";
+import * as p from "./prompts";
 
 /**
  * Resolve the tila home directory.
@@ -196,7 +197,7 @@ export async function resolveProjectName(
     const err = validateSlug(nameFlag);
     if (err) {
       p.cancel(`Invalid project name "${nameFlag}": ${err}`);
-      process.exit(1);
+      exit(1);
     }
     return nameFlag;
   }
@@ -214,7 +215,7 @@ export async function resolveProjectName(
   });
   if (p.isCancel(result)) {
     p.cancel("Operation cancelled.");
-    process.exit(1);
+    exit(1);
   }
   return result;
 }
@@ -248,11 +249,11 @@ export function ensureGitignored(
     try {
       appendFileSync(gitignorePath, `\n# tila\n${toAdd.join("\n")}\n`);
     } catch (err) {
-      console.error(`Failed to update .gitignore: ${err}`);
-      console.error(
+      diagnostic(`Failed to update .gitignore: ${err}`);
+      diagnostic(
         "This is a hard error -- .tila/.env must be in .gitignore to prevent accidental token commit.",
       );
-      process.exit(1);
+      exit(1);
     }
   }
 }

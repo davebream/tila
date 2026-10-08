@@ -49,52 +49,69 @@ function ack(id: string, body: Record<string, unknown>) {
   });
 }
 
+const sender = {
+  principal_id: "principal-a",
+  participant_id: "participant-a",
+  display_name: "Alice",
+  environment: { client_name: "test" },
+};
+
+const recipient = {
+  principal_id: "principal-b",
+  participant_id: "participant-b",
+  display_name: "Bob",
+  environment: { client_name: "test" },
+};
+
+function sendDirect(kind: "info" | "conflict" = "info") {
+  return signalOps.send(db, {
+    target: {
+      type: "participant",
+      principal_id: recipient.principal_id,
+      participant_id: recipient.participant_id,
+    },
+    kind,
+    sender,
+  });
+}
+
 describe("POST /signal/:id/ack", () => {
   it("lets the addressee ack and consumes the signal", async () => {
-    const { id } = signalOps.send(db, {
-      target: "machine-B",
-      kind: "info",
-      created_by: "machine-A",
-    });
+    const { id } = sendDirect();
 
-    const res = await ack(id, { acker: "machine-B" });
+    const res = await ack(id, recipient);
 
     expect(res.status).toBe(200);
-    expect(signalOps.inbox(db, "machine-B")).toHaveLength(0);
+    expect(signalOps.inbox(db, recipient)).toHaveLength(0);
   });
 
   it("returns 403 forbidden when a non-addressee tries to ack, and leaves the signal in the inbox", async () => {
-    const { id } = signalOps.send(db, {
-      target: "machine-B",
-      kind: "conflict",
-      created_by: "machine-A",
-    });
+    const { id } = sendDirect("conflict");
 
-    const res = await ack(id, { acker: "machine-C" });
+    const res = await ack(id, {
+      ...recipient,
+      participant_id: "participant-c",
+    });
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("forbidden");
     // The real recipient still receives it.
-    expect(signalOps.inbox(db, "machine-B")).toHaveLength(1);
+    expect(signalOps.inbox(db, recipient)).toHaveLength(1);
   });
 
   it("returns 400 validation-error when acker is missing", async () => {
-    const { id } = signalOps.send(db, {
-      target: "machine-B",
-      kind: "info",
-      created_by: "machine-A",
-    });
+    const { id } = sendDirect();
 
     const res = await ack(id, {});
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("validation-error");
+    expect(body.error.code).toBe("participant-required");
   });
 
   it("returns 404 not-found for an unknown signal id", async () => {
-    const res = await ack("sig_nonexistent", { acker: "machine-B" });
+    const res = await ack("sig_nonexistent", recipient);
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("not-found");
