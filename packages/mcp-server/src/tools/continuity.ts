@@ -28,7 +28,7 @@ export function registerContinuityTools(
   registerPrimitiveTool(
     server,
     "tila_reentry",
-    "Recover project context, journal changes, live claims, pending signals and a handoff. Read-only: acknowledge events separately. Use an explicit handoff_id or resource when changing participants.",
+    "Recover project context, journal changes, live claims, pending signals and the newest work handoff, falling back to the newest shutdown snapshot. An explicit handoff_id selects that exact snapshot. Read-only: acknowledge events separately. Use an explicit handoff_id or resource when changing participants.",
     ReentryRequestSchema.innerType().shape,
     (input) => result(() => facade.reentry(ReentryRequestSchema.parse(input))),
   );
@@ -56,7 +56,7 @@ export function registerContinuityTools(
   registerPrimitiveTool(
     server,
     "tila_handoff_create",
-    "Save an immutable factual handoff. Reuse the same UUID and content on retries. Claims are historical context, not transferred authority. Do not store private reasoning.",
+    "Save an immutable factual handoff. Omit kind or use work for authored context; shutdown is for automatic coordination snapshots. Reuse the same UUID and content on retries. Claims are historical context, not transferred authority. Do not store private reasoning.",
     HandoffCreateRequestSchema.shape,
     (input) => result(() => facade.handoffs.create(input)),
   );

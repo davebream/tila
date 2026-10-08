@@ -269,6 +269,27 @@ export function listHandoffs(
   };
 }
 
+function selectReentryHandoff(
+  db: Db,
+  identity: IdentityContext,
+  resource: string | undefined,
+): Handoff | null {
+  let newest: Handoff | null = null;
+  let before_seq: number | undefined;
+  do {
+    const page = listHandoffs(db, identity, {
+      resource,
+      before_seq,
+      limit: 100,
+    });
+    newest ??= page.handoffs[0] ?? null;
+    const work = page.handoffs.find((handoff) => handoff.kind !== "shutdown");
+    if (work) return work;
+    before_seq = page.next_before_seq ?? undefined;
+  } while (before_seq !== undefined);
+  return newest;
+}
+
 export function reentrySnapshot(
   db: Db,
   identity: IdentityContext,
@@ -279,8 +300,7 @@ export function reentrySnapshot(
     const now = Date.now();
     const handoff = query.handoff_id
       ? getHandoff(tx, query.handoff_id)
-      : (listHandoffs(tx, identity, { resource: query.resource, limit: 1 })
-          .handoffs[0] ?? null);
+      : selectReentryHandoff(tx, identity, query.resource);
     if (query.handoff_id && !handoff)
       throw new ContinuityError(
         "handoff-not-found",

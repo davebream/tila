@@ -202,6 +202,7 @@ export class Lifecycle {
       // Persist immutable intent BEFORE sending. The exact UUID/body survives ambiguous delivery.
       state.pendingHandoff = {
         id: randomUUID(),
+        kind: "shutdown",
         summary: `${state.client} session ended; coordination snapshot only.`,
         current_state: {
           environment: state.environment,

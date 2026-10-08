@@ -32,34 +32,47 @@ describe("HTTP continuity facade", () => {
     await expect(journal.acknowledge({ seq: -1 })).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(1);
   });
-  it("sends a stable caller-supplied handoff ID and canonical request defaults", async () => {
-    const id = crypto.randomUUID();
-    const handoff = {
-      id,
-      summary: "Saved",
-      based_on_seq: 0,
-      current_state: {},
-      findings: [],
-      unresolved_questions: [],
-      references: [],
-      creator: { principal_id: "p", participant_id: "s", environment: {} },
-      created_at: 1,
-      created_seq: 1,
-      active_claims: [],
-    };
-    const fetch = vi
-      .fn()
-      .mockImplementation(() =>
-        Promise.resolve(Response.json({ ok: true, handoff })),
+  it.each([undefined, "shutdown", "work"] as const)(
+    "preserves kind %s and stable handoff retry bodies",
+    async (kind) => {
+      const id = crypto.randomUUID();
+      const handoff = {
+        id,
+        ...(kind === undefined ? {} : { kind }),
+        summary: "Saved",
+        based_on_seq: 0,
+        current_state: {},
+        findings: [],
+        unresolved_questions: [],
+        references: [],
+        creator: { principal_id: "p", participant_id: "s", environment: {} },
+        created_at: 1,
+        created_seq: 1,
+        active_claims: [],
+      };
+      const fetch = vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(Response.json({ ok: true, handoff })),
+        );
+      vi.stubGlobal("fetch", fetch);
+      const methods = createHandoffMethods(
+        new TilaClient({ baseUrl: "https://tila.test", token: "token" }),
+        "project",
       );
-    vi.stubGlobal("fetch", fetch);
-    const methods = createHandoffMethods(
-      new TilaClient({ baseUrl: "https://tila.test", token: "token" }),
-      "project",
-    );
-    await methods.create({ id, summary: "Saved", based_on_seq: 0 });
-    await methods.create({ id, summary: "Saved", based_on_seq: 0 });
-    expect(JSON.parse(fetch.mock.calls[0][1].body).id).toBe(id);
-    expect(fetch.mock.calls[0][1].body).toEqual(fetch.mock.calls[1][1].body);
-  });
+      const input = {
+        id,
+        summary: "Saved",
+        based_on_seq: 0,
+        ...(kind === undefined ? {} : { kind }),
+      };
+      expect((await methods.create(input)).handoff).toEqual(handoff);
+      await methods.create(input);
+      expect(JSON.parse(fetch.mock.calls[0][1].body).id).toBe(id);
+      const sent = JSON.parse(fetch.mock.calls[0][1].body);
+      if (kind === undefined) expect(sent).not.toHaveProperty("kind");
+      else expect(sent.kind).toBe(kind);
+      expect(fetch.mock.calls[0][1].body).toEqual(fetch.mock.calls[1][1].body);
+    },
+  );
 });

@@ -5,6 +5,45 @@ import {
   ArtifactGrepResponseSchema,
   ArtifactGrepResultSchema,
 } from "../src/api";
+import { HandoffCreateRequestSchema, HandoffSchema } from "../src/continuity";
+
+describe("handoff classification compatibility", () => {
+  const request = {
+    id: "00000000-0000-4000-8000-000000000001",
+    summary: "Continue",
+    based_on_seq: 0,
+  };
+  it("keeps omitted kinds out of requests and stored snapshots", () => {
+    expect(HandoffCreateRequestSchema.parse(request)).not.toHaveProperty(
+      "kind",
+    );
+    expect(
+      HandoffSchema.parse({
+        ...request,
+        creator: { principal_id: "p", participant_id: "s", environment: {} },
+        created_at: 1,
+        created_seq: 1,
+        active_claims: [],
+      }),
+    ).not.toHaveProperty("kind");
+  });
+  it.each(["work", "shutdown"])(
+    "accepts explicit %s classification",
+    (kind) => {
+      expect(HandoffCreateRequestSchema.parse({ ...request, kind }).kind).toBe(
+        kind,
+      );
+    },
+  );
+  it.each(["automatic", "", null])(
+    "rejects invalid classification %s",
+    (kind) => {
+      expect(
+        HandoffCreateRequestSchema.safeParse({ ...request, kind }).success,
+      ).toBe(false);
+    },
+  );
+});
 
 describe("ArtifactGrepQuerySchema", () => {
   describe("regex coercion", () => {
