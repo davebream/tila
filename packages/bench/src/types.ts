@@ -1,4 +1,5 @@
 import type { TilaFacade } from "tila-sdk";
+import type { HttpTimingSample } from "./server-timing";
 
 export type Tier = "inproc" | "embedded" | "http";
 
@@ -9,6 +10,8 @@ export interface OpOutcome {
   op: string;
   cls: OutcomeClass;
   latencyMs: number;
+  startedAt?: number;
+  httpTimings?: HttpTimingSample[];
   status?: number;
   code?: string;
   message?: string;

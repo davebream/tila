@@ -9,6 +9,7 @@ import {
   type ProjectRole,
 } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
+import { measurePhase } from "../lib/server-timing";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 import { principalIdFor } from "./request-identity";
 
@@ -94,10 +95,8 @@ export function projectMembershipMiddleware(): MiddlewareHandler<{
   return async (c, next) => {
     const projectId = c.get("projectId");
     try {
-      const membership = await resolveTokenMembership(
-        c.env.DB,
-        c.get("tokenResult"),
-        projectId,
+      const membership = await measurePhase(c, "membership", () =>
+        resolveTokenMembership(c.env.DB, c.get("tokenResult"), projectId),
       );
       if (!membership) {
         return c.json(

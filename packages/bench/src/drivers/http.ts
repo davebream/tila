@@ -8,6 +8,7 @@ import { StoreCountsResponseSchema } from "@tila/schemas";
 import { TilaClient } from "tila-sdk";
 import { probeRegion } from "../region";
 import { HARNESS_VERSION } from "../result-schema";
+import { captureHttpTiming } from "../server-timing";
 import type { Driver, Participant, RegionInfo } from "../types";
 import { facadeFromClient } from "./facade";
 
@@ -53,17 +54,23 @@ export function createHttpDriver(opts: HttpDriverOptions): Driver {
   }
 
   function rawFetch(token: string, participantId: string) {
-    return (path: string, init?: RequestInit) =>
-      fetch(`${baseUrl}${path.startsWith("/") ? path : `/${path}`}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Tila-Participant-Id": participantId,
-          "X-Tila-Source": `tila-bench/${HARNESS_VERSION}`,
-          ...(init?.headers as Record<string, string> | undefined),
+    return async (path: string, init?: RequestInit) => {
+      const response = await fetch(
+        `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`,
+        {
+          ...init,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-Tila-Participant-Id": participantId,
+            "X-Tila-Source": `tila-bench/${HARNESS_VERSION}`,
+            ...(init?.headers as Record<string, string> | undefined),
+          },
+          signal: init?.signal ?? AbortSignal.timeout(opts.timeoutMs ?? 30_000),
         },
-        signal: init?.signal ?? AbortSignal.timeout(opts.timeoutMs ?? 30_000),
-      });
+      );
+      captureHttpTiming(response);
+      return response;
+    };
   }
 
   const adminFetch = () => rawFetch(opts.token, `bench-${opts.runId}-admin`);
@@ -93,6 +100,19 @@ export function createHttpDriver(opts: HttpDriverOptions): Driver {
         const client = new TilaClient({
           baseUrl,
           token,
+          fetch: async (input, init) => {
+            const response = await fetch(input, init);
+            captureHttpTiming(response);
+            const colo = response.headers.get("cf-ray")?.split("-").at(-1);
+            const placement = response.headers.get("cf-placement");
+            if (colo || placement)
+              region = {
+                ...region,
+                ...(colo ? { cf_colo: colo } : {}),
+                ...(placement ? { cf_placement: placement } : {}),
+              };
+            return response;
+          },
           participantId,
           environment: {
             client_name: "tila-bench",

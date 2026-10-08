@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { emitRequestDatapoint, emitSweepErrorDatapoint } from "./lib/analytics";
 import { constantTimeSecretMatch } from "./lib/constant-time-compare";
 import { forwardToDO } from "./lib/do-forward";
+import { serverTimingMiddleware } from "./lib/server-timing";
 import { runSweep } from "./lib/sweep";
 import { createAuthMiddleware } from "./middleware/auth";
 import { createCacheMiddleware } from "./middleware/cache";
@@ -62,6 +63,7 @@ const app = new Hono<AppEnv>();
 
 // Request ID: assign or preserve correlation ID for tracing
 app.use("*", requestIdMiddleware);
+app.use("*", serverTimingMiddleware);
 
 // Analytics: emit request-level datapoints (fire-and-forget)
 app.use("*", async (c, next) => {
@@ -209,6 +211,14 @@ projectRoutes.use("/*", async (c, next) => {
     c.get("doStub"),
     "/admin/transfer/status",
     "GET",
+    undefined,
+    undefined,
+    {
+      analytics: c.env.ANALYTICS,
+      ctx: c.executionCtx,
+      projectId: c.get("projectId"),
+      timing: c.get("requestTiming"),
+    },
   );
   if (!status.ok) return status;
   const body = (await status.json()) as {
