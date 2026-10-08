@@ -35,3 +35,24 @@ test("CI gate rejects missing, failed, cancelled and skipped dependencies", () =
     0,
   );
 });
+
+test("scope uploads must succeed when required, but can be skipped on unprivileged events", () => {
+  const needs = {
+    verify: { result: "success" },
+    secrets: { result: "success" },
+  };
+  for (const result of ["failure", "cancelled", "skipped", undefined])
+    assert.notEqual(
+      gate({ ...needs, scopes: { result } }, ["verify", "secrets", "scopes"]),
+      0,
+    );
+  assert.equal(
+    gate({ ...needs, scopes: { result: "success" } }, [
+      "verify",
+      "secrets",
+      "scopes",
+    ]),
+    0,
+  );
+  assert.equal(gate({ ...needs, scopes: { result: "skipped" } }), 0);
+});
