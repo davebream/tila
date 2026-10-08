@@ -352,11 +352,6 @@ describe("init provider selection", () => {
 });
 
 describe("doctor oidc-generic issuer-trust hint", () => {
-  it("is covered by the doctor command — see doctor.test.ts for the full check suite", () => {
-    // The oidc-generic issuer-trust hint in doctor.ts is a lightweight addCheck()
-    // call for instances whose credential_provider.kind === "oidc-generic".
-    // Full behavioral test lives in the doctor test suite.
-    // This stub documents the expected behavior for the builder.
-    expect(true).toBe(true);
-  });
+  // Full behavioral coverage lives in doctor.test.ts.
+  it.todo("doctor oidc-generic issuer-trust hint (covered by doctor.test.ts)");
 });

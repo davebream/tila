@@ -34,6 +34,9 @@ detect_platform() {
   esac
 
   BINARY_FILENAME="tila-${PLATFORM_OS}-${PLATFORM_ARCH}"
+  if [ "${PLATFORM_OS}" = "linux" ] && ldd --version 2>&1 | grep -qi musl; then
+    BINARY_FILENAME="${BINARY_FILENAME}-musl"
+  fi
 }
 
 # --- Version resolution ---
