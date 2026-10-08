@@ -1492,3 +1492,16 @@ installation/removal and interleaved MCP metadata.
 Upstream client behavior is represented by protocol fixtures; a real-client smoke
 check remains advisable when upgrading either client. The separate Incur trial in
 `experiments/incur-parity` documents why this integration retains existing frameworks.
+
+## Repository CI
+
+Pull requests and main pushes run read-only lint/version checks, typechecking,
+package tests, root script tests, and a high-severity dependency audit. Secret
+scanning runs independently. The required `ci` check succeeds only when every
+required job succeeds, including after failures, cancellations, or skips.
+
+New pushes cancel superseded runs for the same PR. Main and release runs are not
+cancelled by this policy. Full validation is also available through the CI
+workflow's manual dispatch and runs daily at 04:17 UTC; those runs bypass Turbo
+result reuse. Diagnostic artifacts retain command logs (including test counts),
+step timings, and Turbo run summaries for seven days, including on failures.

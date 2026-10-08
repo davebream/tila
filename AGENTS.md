@@ -103,7 +103,7 @@ HTTP -> Worker (Hono) -> auth middleware -> project middleware -> route handler
 - Add new ops modules to `@tila/ops-sqlite`, not to `backend-do` directly.
 - Do not create circular dependencies between workspace packages.
 - Do not store business logic in Worker route handlers; move it into backend packages.
-- Do not modify `.github/workflows/`; CI configuration is managed by the scaffold tool.
+- Maintain `.github/workflows/` directly. Preserve the required `ci` gate and validate workflow changes.
 
 ## Git Workflow
 
