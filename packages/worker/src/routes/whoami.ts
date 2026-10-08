@@ -41,7 +41,9 @@ whoami.get("/whoami", async (c) => {
     expires_at?: number | null;
     instance_id?: string;
     role?: ProjectRole;
+    explicit_role?: ProjectRole;
     membership_sources?: MembershipSource[];
+    mirrored_repo_id?: number;
     principal_id?: string;
     credential_id?: string;
     policy?: import("@tila/schemas").CredentialPolicy;
@@ -69,6 +71,10 @@ whoami.get("/whoami", async (c) => {
       if (membership) {
         response.role = membership.role;
         response.membership_sources = membership.sources;
+        if (membership.explicitRole)
+          response.explicit_role = membership.explicitRole;
+        if (membership.mirroredRepoId !== undefined)
+          response.mirrored_repo_id = membership.mirroredRepoId;
       }
     } catch {
       // Best-effort identity inspection; guarded project routes still fail closed.
