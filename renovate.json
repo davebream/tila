@@ -103,9 +103,9 @@
     {
       "description": "Node 22 is the public consumer compatibility floor, not the build runtime.",
       "matchManagers": ["github-actions"],
-      "matchPackageNames": ["node"],
-      "matchCurrentVersion": "22",
-      "allowedVersions": "22.x"
+      "allowedVersions": "22.x",
+      "matchCurrentValue": "/^22(?:\\.|$)/",
+      "matchDepNames": ["node"]
     },
     {
       "description": "Match Node types to the supported Node 22 public API.",
