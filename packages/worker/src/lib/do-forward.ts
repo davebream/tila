@@ -84,6 +84,22 @@ export async function forwardToDO(
   try {
     res = await stub.fetch(new Request(url, init));
     return res;
+  } catch (error) {
+    // ctx.abort() resets the DO before its response can cross the RPC boundary.
+    // Its reason reaches the Worker as a remote exception, so acknowledge only
+    // this deliberate restart. Never retry it or hide other transport failures.
+    if (
+      path === "/admin/restart" &&
+      method === "POST" &&
+      error instanceof Error &&
+      "remote" in error &&
+      error.remote === true &&
+      error.message === "admin restart requested"
+    ) {
+      res = Response.json({ ok: true });
+      return res;
+    }
+    throw error;
   } finally {
     if (analyticsCtx) {
       emitDoOperationDatapoint(analyticsCtx.analytics, analyticsCtx.ctx, {
