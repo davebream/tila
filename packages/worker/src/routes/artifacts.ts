@@ -1347,7 +1347,9 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
     analyticsCtxFrom(c),
   );
   if (!metaRes.ok) {
-    if (metaRes.status === 410) return metaRes;
+    // forwardTypedDO has consumed the service-binding body. Recreate the
+    // envelope so the runtime can send it rather than failing with a 500.
+    if (metaRes.status === 410) return c.json(meta, 410);
     return c.json(
       {
         ok: false,
