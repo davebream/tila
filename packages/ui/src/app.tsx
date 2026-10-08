@@ -1,3 +1,4 @@
+import { StepUpResume } from "@/components/admin/step-up-resume";
 import { Layout } from "@/components/layout";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { ArtifactsPage } from "@/pages/artifacts";
@@ -6,6 +7,7 @@ import { JournalPage } from "@/pages/journal";
 import { LoginPage } from "@/pages/login";
 import { PresencePage } from "@/pages/presence";
 import { RecordsPage } from "@/pages/records";
+import { SettingsPage } from "@/pages/settings";
 import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
 import { WorkspacePage } from "@/pages/workspace";
@@ -96,6 +98,7 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route path="journal" element={<JournalPage />} />
       <Route path="presence" element={<PresencePage />} />
       <Route path="signals" element={<SignalsPage />} />
+      <Route path="settings" element={<SettingsPage />} />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />
       </Route>
@@ -137,49 +140,55 @@ export function AuthGate() {
 
   if (!projectId) {
     return (
-      <Routes>
-        <Route path="*" element={<WorkspacePage />} />
-      </Routes>
+      <>
+        <StepUpResume />
+        <Routes>
+          <Route path="*" element={<WorkspacePage />} />
+        </Routes>
+      </>
     );
   }
 
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-      />
-      <Route path="/p/:projectId/*">{ProjectRoutes({ projectId })}</Route>
-      {/* Legacy flat routes redirect to project-scoped */}
-      <Route
-        path="/entities"
-        element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-      />
-      <Route
-        path="/entities/:id"
-        element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-      />
-      <Route
-        path="/journal"
-        element={<Navigate to={`/p/${projectId}/journal`} replace />}
-      />
-      <Route
-        path="/presence"
-        element={<Navigate to={`/p/${projectId}/presence`} replace />}
-      />
-      <Route
-        path="/records"
-        element={<Navigate to={`/p/${projectId}/records`} replace />}
-      />
-      <Route
-        path="/artifacts"
-        element={<Navigate to={`/p/${projectId}/artifacts`} replace />}
-      />
-      <Route
-        path="*"
-        element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-      />
-    </Routes>
+    <>
+      <StepUpResume />
+      <Routes>
+        <Route
+          path="/"
+          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
+        />
+        <Route path="/p/:projectId/*">{ProjectRoutes({ projectId })}</Route>
+        {/* Legacy flat routes redirect to project-scoped */}
+        <Route
+          path="/entities"
+          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
+        />
+        <Route
+          path="/entities/:id"
+          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
+        />
+        <Route
+          path="/journal"
+          element={<Navigate to={`/p/${projectId}/journal`} replace />}
+        />
+        <Route
+          path="/presence"
+          element={<Navigate to={`/p/${projectId}/presence`} replace />}
+        />
+        <Route
+          path="/records"
+          element={<Navigate to={`/p/${projectId}/records`} replace />}
+        />
+        <Route
+          path="/artifacts"
+          element={<Navigate to={`/p/${projectId}/artifacts`} replace />}
+        />
+        <Route
+          path="*"
+          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
+        />
+      </Routes>
+    </>
   );
 }
 
