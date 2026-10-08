@@ -79,7 +79,8 @@ export async function applyD1Migrations(
   accountId: string,
   databaseId: string,
   migrationsDir: string,
-): Promise<void> {
+  options: { migrate?: boolean; quiet?: boolean } = {},
+): Promise<MigrationResult> {
   const queryFn = async (
     sql: string,
     params?: (string | number | null)[],
@@ -95,13 +96,20 @@ export async function applyD1Migrations(
     return [];
   };
 
-  const result = await runMigrations({ queryFn, migrationsDir });
+  const result = await runMigrations({
+    queryFn,
+    migrationsDir,
+    migrate: options.migrate,
+  });
 
-  if (result.applied > 0) {
+  if (!options.quiet && result.applied > 0) {
     p.log.info(`  Applied ${result.applied} migration(s).`);
   }
 
-  if (result.appliedNames.includes("0024_repo_oidc_policy.sql")) {
+  if (
+    !options.quiet &&
+    result.appliedNames.includes("0024_repo_oidc_policy.sql")
+  ) {
     const rows = (await queryFn(
       "SELECT COUNT(*) AS count FROM _project_repos",
     )) as Array<{ count?: number | string }>;
@@ -112,6 +120,7 @@ export async function applyD1Migrations(
       );
     }
   }
+  return result;
 }
 
 /**

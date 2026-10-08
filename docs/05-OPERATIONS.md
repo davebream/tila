@@ -837,6 +837,24 @@ D1 (the global database) has its own migration files at `packages/worker/migrati
 
 D1 migrations must be applied **before** deploying a new Worker version when the update includes schema changes to the global D1 tables (tokens, projects, sessions, repos). For example, `0028_session_authenticated_at.sql` adds the column that session creation writes; a Worker deployed ahead of it cannot create browser sessions.
 
+### CLI deployment
+
+`tila deploy` applies pending bundled D1 migrations before uploading the Worker
+and UI. A migration error stops deployment. The completion summary includes the
+latest applied migration filename; `--json` includes it in
+`migrations.watermark`, alongside the applied/skipped counts and applied names.
+
+For pipelines that apply migrations separately, use `tila deploy --no-migrate`.
+It reads both tila's `_d1_migrations` tracker and Wrangler's `d1_migrations`
+tracker without changing the database. If any bundled migrations are pending,
+it lists their filenames and refuses to deploy. Query failures also block deployment.
+
+The CLI records a migration only after every statement succeeds. Its statements
+are not wrapped in a file-wide transaction, so failures can leave partial changes.
+After resolving the cause, rerunning skips existing tables, indexes, triggers and
+columns. For the interrupted `0027_scoped_credentials.sql` trigger failure,
+rerunning with the fixed CLI completes the migration and records it.
+
 ### Manual application
 
 ```bash
