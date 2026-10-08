@@ -127,6 +127,7 @@ const TEST_HMAC_KEY = btoa("test-hmac-key-this-is-32-bytes!!")
 async function mintTestToken(instanceId?: string): Promise<string> {
   const payload: Record<string, unknown> = {
     project_id: "proj-instance-test",
+    authorization_version: 2,
     github_host: "github.com",
     github_repo_id: 12345,
     github_login: "test-user",

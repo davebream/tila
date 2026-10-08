@@ -3,6 +3,7 @@ import {
   CAPABILITIES,
   CREDENTIAL_PRESETS,
   CredentialPolicySchema,
+  ROOT_CAPABILITIES,
   effectiveCredentialPolicy,
   permitsRecord,
   policyContains,
@@ -116,16 +117,20 @@ describe("route capability inventory", () => {
               {} as Env,
             );
             expect(response.status).toBe(
-              grant &&
-                !(
-                  route.method === "PUT" &&
-                  path === "/journal/cursor" &&
-                  role === "viewer"
-                ) &&
-                PROJECT_ROLE_RANK[role] >=
-                  PROJECT_ROLE_RANK[capabilityRole(required)]
-                ? 200
-                : 403,
+              ROOT_CAPABILITIES.has(required) ||
+                path.startsWith("/admin/backup") ||
+                path === "/admin/store-counts"
+                ? 403
+                : grant &&
+                    !(
+                      route.method === "PUT" &&
+                      path === "/journal/cursor" &&
+                      role === "viewer"
+                    ) &&
+                    PROJECT_ROLE_RANK[role] >=
+                      PROJECT_ROLE_RANK[capabilityRole(required)]
+                  ? 200
+                  : 403,
             );
           }
         }

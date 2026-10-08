@@ -105,6 +105,7 @@ describe("SessionPayloadSchema — instance_id field", () => {
   // supply sub_type explicitly to reflect the new contract.
   const basePayload = {
     sub_type: "github" as const,
+    authorization_version: 2 as const,
     project_id: "proj-abc",
     github_host: "github.com",
     github_repo_id: 12345,
