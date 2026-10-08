@@ -4,14 +4,59 @@
  * CI hardware varies; the point is that the harness and the coordination
  * semantics it measures stay correct.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createInprocDriver } from "../src/drivers/inproc";
 import { type RunOptionsInput, defaultOptions } from "../src/options";
 import { renderResult } from "../src/report";
 import { type BenchResult, BenchResultSchema } from "../src/result-schema";
 import { runBenchmark } from "../src/runner";
+import { coldStart } from "../src/scenarios/cold-start";
+import type { Participant, ScenarioContext } from "../src/types";
 
 const ITERATIONS = 20;
+
+describe("cold-start restart contract", () => {
+  it.each([
+    [200, { ok: true }, true],
+    [200, { ok: false }, false],
+    [200, {}, false],
+    [202, { ok: true }, false],
+    [401, { ok: false }, false],
+    [403, { ok: false }, false],
+    [404, { ok: false }, false],
+    [500, { ok: false }, false],
+    [503, { ok: false }, false],
+  ] as const)(
+    "validates the restart acknowledgement: HTTP %s %j",
+    async (status, body, acknowledged) => {
+      vi.useFakeTimers();
+      try {
+        const ctx = {
+          extra: {},
+          signal: new AbortController().signal,
+        } as ScenarioContext;
+        const read = vi.fn().mockResolvedValue({});
+        const participant = {
+          index: 0,
+          projectId: "restart-probe",
+          rawFetch: vi.fn().mockResolvedValue(Response.json(body, { status })),
+          tila: { summary: { get: read } },
+        } as unknown as Participant;
+        await coldStart.setup(ctx);
+        const pending = coldStart.op(ctx, participant);
+        await vi.runAllTimersAsync();
+        const outcomes = await pending;
+
+        expect(outcomes[0].cls).toBe(acknowledged ? "ok" : "error");
+        expect(ctx.extra.restarts).toBe(acknowledged ? 1 : 0);
+        expect(ctx.extra.restart_failures).toBe(acknowledged ? 0 : 1);
+        expect(read).toHaveBeenCalledTimes(acknowledged ? 4 : 0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+});
 
 async function run(partial: RunOptionsInput): Promise<BenchResult> {
   const opts = defaultOptions({

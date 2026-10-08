@@ -19,22 +19,22 @@ export const coldStart: Scenario = {
   async setup(ctx) {
     ctx.extra.restarts = 0;
     ctx.extra.restart_failures = 0;
-    ctx.extra.restart_aborted_responses = 0;
   },
   async op(ctx, p) {
     if (p.index !== 0 || !p.rawFetch) return [];
     const out: OpOutcome[] = [];
-    // The DO route calls ctx.abort() before its response is flushed, so on
-    // Cloudflare the Worker usually reports 5xx even though the eviction
-    // happened. Treat 2xx or 5xx as "triggered"; only auth/routing failures
-    // (401/403/404) are errors. The cold read below proves the DO came back.
+    // The Worker acknowledges the deliberate DO abort with 200 { ok: true }.
+    // A server error is a failed trigger, not evidence that eviction occurred.
     const restart = await timed("restart", async () => {
       const res = await p.rawFetch?.(`/projects/${p.projectId}/admin/restart`, {
         method: "POST",
       });
       if (!res) throw new Error("restart: no response");
-      if (res.status >= 500) ctx.extra.restart_aborted_responses++;
-      if (res.ok || res.status >= 500) return res.status;
+      if (
+        res.status === 200 &&
+        ((await res.json()) as { ok?: boolean }).ok === true
+      )
+        return res.status;
       throw Object.assign(new Error(`restart HTTP ${res.status}`), {
         status: res.status,
       });
