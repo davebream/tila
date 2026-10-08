@@ -122,7 +122,7 @@ export function createHttpDriver(opts: HttpDriverOptions): Driver {
         );
       const body = StoreCountsResponseSchema.parse(await res.json());
       return {
-        db_bytes: null,
+        db_bytes: body.db_bytes,
         counts: {
           ...body.counts.domain,
           _schema_history: body.counts.schemaHistory,
