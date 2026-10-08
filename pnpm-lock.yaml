@@ -606,15 +606,6 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@tila/backend-embedded':
-        specifier: workspace:*
-        version: link:../backend-embedded
-      '@tila/core':
-        specifier: workspace:*
-        version: link:../core
-      '@tila/ops-sqlite':
-        specifier: workspace:*
-        version: link:../ops-sqlite
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260602.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(bun-types@1.4.2)
@@ -625,6 +616,15 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@tila/backend-embedded':
+        specifier: workspace:*
+        version: link:../backend-embedded
+      '@tila/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tila/ops-sqlite':
+        specifier: workspace:*
+        version: link:../ops-sqlite
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
