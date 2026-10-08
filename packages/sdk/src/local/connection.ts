@@ -5,6 +5,7 @@ import {
   warnIfStalePreFeatureSchema,
 } from "@tila/backend-embedded";
 import { schema } from "@tila/ops-sqlite";
+import type { ProjectSqlStorage } from "@tila/ops-sqlite";
 
 import { assertLocalFilesystem } from "./filesystem-guard";
 
@@ -50,6 +51,8 @@ export class LocalDatabaseOpenError extends Error {
 export interface NodeConnection {
   /** Runtime-neutral Drizzle handle accepted by the embedded backends. */
   db: EmbeddedDb;
+  /** Raw SQL seam used by the backup entry for deterministic snapshots. */
+  sql: ProjectSqlStorage;
   /** Close the underlying better-sqlite3 Database. */
   close: () => void;
 }
@@ -124,6 +127,7 @@ export async function createNodeConnection(
   //    try/catch above already ran, so a MissingNativeDriverError cannot reach
   //    here; only genuine open/init failures are wrapped.
   let rawDb: RawDatabase | undefined;
+  let migrationStorage: MigrationStorage;
   try {
     // 3. Open the raw better-sqlite3 Database (lazy — see above).
     rawDb = new DatabaseCtor(dbPath, { readonly: opts?.readonly ?? false });
@@ -139,7 +143,7 @@ export async function createNodeConnection(
     // 5. Run the shared embedded migration set against the raw Database (before
     //    Drizzle wrapping). The runner is storage-agnostic; we supply a
     //    better-sqlite3-backed MigrationStorage shim.
-    const migrationStorage = createNodeMigrationStorage(rawDb);
+    migrationStorage = createNodeMigrationStorage(rawDb);
     runEmbeddedMigrations(migrationStorage);
 
     // 5b. One-time, best-effort warning if this is a pre-feature DB that did not
@@ -165,7 +169,11 @@ export async function createNodeConnection(
   //    harness which casts via `as unknown` for the same reason.
   const db = drizzle(rawDb, { schema });
 
-  return { db, close: () => rawDb.close() };
+  return {
+    db,
+    sql: migrationStorage.sql as ProjectSqlStorage,
+    close: () => rawDb.close(),
+  };
 }
 
 /**

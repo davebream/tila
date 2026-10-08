@@ -14,7 +14,12 @@ describe("entity_search_docs transaction coupling", () => {
         created_by: "actor",
       },
       1,
-      { actor: "actor" },
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: {},
+        actor: "actor",
+      },
     );
     const row = sqlite
       .prepare("SELECT * FROM entity_search_docs WHERE entity_id = ?")
@@ -35,17 +40,29 @@ describe("entity_search_docs transaction coupling", () => {
         created_by: "actor",
       },
       1,
-      { actor: "actor" },
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: {},
+        actor: "actor",
+      },
     );
     const acquired = coordinationOps.acquire(
       db,
       "e2",
-      "actor",
-      "actor",
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: { machine: "actor" },
+        actor: "actor/actor",
+      },
       "exclusive",
       60_000,
     );
     entityOps.update(db, "e2", { name: "Updated" }, acquired.fence, {
+      principalId: "test:actor",
+      participantId: "actor",
+      environment: {},
       actor: "actor",
     });
     const row = sqlite
@@ -66,17 +83,31 @@ describe("entity_search_docs transaction coupling", () => {
         created_by: "actor",
       },
       1,
-      { actor: "actor" },
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: {},
+        actor: "actor",
+      },
     );
     const acquired = coordinationOps.acquire(
       db,
       "e3",
-      "actor",
-      "actor",
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: { machine: "actor" },
+        actor: "actor/actor",
+      },
       "exclusive",
       60_000,
     );
-    entityOps.archive(db, "e3", acquired.fence, { actor: "actor" });
+    entityOps.archive(db, "e3", acquired.fence, {
+      principalId: "test:actor",
+      participantId: "actor",
+      environment: {},
+      actor: "actor",
+    });
     const row = sqlite
       .prepare("SELECT * FROM entity_search_docs WHERE entity_id = ?")
       .get("e3");
@@ -94,7 +125,12 @@ describe("entity_search_docs transaction coupling", () => {
         created_by: "actor",
       },
       1,
-      { actor: "actor" },
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: {},
+        actor: "actor",
+      },
     );
     const ftsRow = sqlite
       .prepare(
@@ -115,17 +151,31 @@ describe("entity_search_docs transaction coupling", () => {
         created_by: "actor",
       },
       1,
-      { actor: "actor" },
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: {},
+        actor: "actor",
+      },
     );
     const acquired = coordinationOps.acquire(
       db,
       "e5",
-      "actor",
-      "actor",
+      {
+        principalId: "test:actor",
+        participantId: "actor",
+        environment: { machine: "actor" },
+        actor: "actor/actor",
+      },
       "exclusive",
       60_000,
     );
-    entityOps.archive(db, "e5", acquired.fence, { actor: "actor" });
+    entityOps.archive(db, "e5", acquired.fence, {
+      principalId: "test:actor",
+      participantId: "actor",
+      environment: {},
+      actor: "actor",
+    });
     const ftsRows = sqlite
       .prepare(
         "SELECT * FROM entity_search_docs_fts WHERE entity_search_docs_fts MATCH ?",

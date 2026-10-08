@@ -1,6 +1,14 @@
+import {
+  CredentialPolicyDenied,
+  assertCredentialRequest,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
+import { projectTransferOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
 import { createAdminRoutes } from "./routes/admin-routes";
 import { createArtifactRoutes } from "./routes/artifact-routes";
+import { createArtifactVersionRoutes } from "./routes/artifact-version-routes";
+import { createContinuityRoutes } from "./routes/continuity-routes";
 import { createCoordinationRoutes } from "./routes/coordination-routes";
 import { createDiagnosticRoutes } from "./routes/diagnostic-routes";
 import { createEntityRoutes } from "./routes/entity-routes";
@@ -11,6 +19,7 @@ import { createRecordRoutes } from "./routes/record-routes";
 import { createSchemaRoutes } from "./routes/schema-routes";
 import { createSignalRoutes } from "./routes/signal-routes";
 import { createSweepRoutes } from "./routes/sweep-routes";
+import { createTransferRoutes } from "./routes/transfer-routes";
 import { CORRELATION_ID_KEY } from "./routes/types";
 import type { RouterDeps } from "./routes/types";
 
@@ -20,6 +29,47 @@ export function createProjectRouter(deps: RouterDeps) {
   const app = new Hono();
 
   installProjectErrorHandlers(app);
+  app.use("*", async (c, next) => {
+    const raw = c.req.header("X-Tila-Credential-Policy");
+    if (raw !== undefined) {
+      try {
+        const policy = readCredentialPolicy(raw);
+        const body =
+          c.req.method === "GET" || c.req.method === "HEAD"
+            ? {}
+            : await c.req.raw
+                .clone()
+                .json()
+                .catch(() => ({}));
+        if (policy)
+          assertCredentialRequest(
+            deps.db,
+            policy,
+            c.req.method,
+            c.req.path,
+            new URL(c.req.url).searchParams,
+            body && typeof body === "object" && !Array.isArray(body)
+              ? (body as Record<string, unknown>)
+              : {},
+          );
+      } catch (error) {
+        if (error instanceof CredentialPolicyDenied)
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "permission-denied",
+                message: error.message,
+                retryable: false,
+              },
+            },
+            403,
+          );
+        throw error;
+      }
+    }
+    await next();
+  });
 
   // Correlation middleware: read X-Request-ID, sanitize (strip control chars,
   // cap at 128 chars), stash on context, and echo on every response.
@@ -34,10 +84,34 @@ export function createProjectRouter(deps: RouterDeps) {
     }
   });
 
+  app.use("*", async (c, next) => {
+    const state = projectTransferOps.getTransferState(deps.ctx.storage.sql);
+    if (!state) return next();
+    const transferRoute = c.req.path.startsWith("/admin/transfer/");
+    const readOnly =
+      c.req.method === "GET" ||
+      c.req.method === "HEAD" ||
+      c.req.method === "OPTIONS";
+    if (transferRoute || (state.mode === "export" && readOnly)) return next();
+    return c.json(
+      {
+        error: {
+          code: "project-maintenance",
+          message: `Project is locked for ${state.mode}`,
+          session_id: state.session_id,
+        },
+      },
+      423,
+    );
+  });
+
+  app.route("/", createTransferRoutes(deps));
   app.route("/", createAdminRoutes(deps));
   app.route("/", createEntityRoutes(deps));
   app.route("/", createArtifactRoutes(deps));
+  app.route("/", createArtifactVersionRoutes(deps));
   app.route("/", createCoordinationRoutes(deps));
+  app.route("/", createContinuityRoutes(deps));
   app.route("/", createGateRoutes(deps));
   app.route("/", createSignalRoutes(deps));
   app.route("/", createSchemaRoutes(deps));

@@ -1,4 +1,6 @@
 import { defineCommand } from "citty";
+import { diagnostic, warning } from "../lib/output";
+
 import taskCommand from "./task";
 
 // @deprecated — use `tila task` instead. This alias will be removed in a future release.
@@ -12,7 +14,7 @@ export default defineCommand({
     // Citty's setup() runs before args are parsed, so we check process.argv directly.
     // This prevents the deprecation warning from interleaving with structured JSON output.
     if (!process.argv.includes("--json")) {
-      console.warn(
+      warning(
         "Warning: `tila work-unit` is deprecated. Use `tila task` instead.",
       );
     }

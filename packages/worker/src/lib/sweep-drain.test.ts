@@ -63,6 +63,7 @@ interface JournalEvent {
 }
 
 interface ProjectScript {
+  lifecycle?: { deleted: number; errors: number; pending: boolean };
   /** Expired R2 keys still live (drains as /artifact/tombstone calls arrive). */
   expiredKeys: string[];
   /** Journal events returned by /journal/archive (consumed on confirm). */
@@ -150,7 +151,11 @@ function makeWorld(scripts: Record<string, ProjectScript>) {
           ) as { batch_size?: number };
           const batchSize = body.batch_size ?? 100;
           const keys = script.expiredKeys.slice(0, batchSize);
-          return Response.json({ ok: true, expiredKeys: keys });
+          return Response.json({
+            ok: true,
+            expiredKeys: keys,
+            lifecycle: script.lifecycle,
+          });
         }
 
         if (path === "/artifact/tombstone") {
@@ -383,6 +388,29 @@ describe("runSweep — journal-archive key uniqueness", () => {
 // ---------------------------------------------------------------------------
 
 describe("runSweep — per-project status and isolation", () => {
+  it("reports lifecycle failures and pending cleanup while continuing other projects", async () => {
+    const { env } = makeWorld({
+      p1: {
+        expiredKeys: [],
+        lifecycle: { deleted: 2, errors: 1, pending: true },
+      },
+      p2: { expiredKeys: [] },
+    });
+    const summary = await runSweep(env, {
+      projects: [{ projectId: "p1" }, { projectId: "p2" }],
+    });
+    expect(summary.artifactsExpired).toBe(2);
+    expect(summary.r2DeleteErrors).toBe(1);
+    expect(summary.projectStatuses[0]).toMatchObject({
+      status: "degraded",
+      sweep: "error",
+      remaining: 1,
+    });
+    expect(summary.projectStatuses[1]).toMatchObject({
+      status: "ok",
+      remaining: 0,
+    });
+  });
   it("marks a project degraded when its archive step fails", async () => {
     const { env } = makeWorld({
       p1: { expiredKeys: ["produced/p1/a.bin"], failOn: "archive" },

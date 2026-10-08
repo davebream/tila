@@ -36,7 +36,12 @@ describe("createRecord", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
 
     expect(result.type).toBe("config");
@@ -60,7 +65,12 @@ describe("createRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // Verify canonical JSON in DB
@@ -81,7 +91,12 @@ describe("createRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(result.tags).toEqual(["env:prod", "team:platform"]);
@@ -105,7 +120,12 @@ describe("createRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     await expect(
@@ -118,7 +138,12 @@ describe("createRecord", () => {
           schema_version: 1,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).rejects.toThrow(RecordAlreadyExistsError);
   });
@@ -134,7 +159,12 @@ describe("createRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const rev = rawDb
@@ -157,17 +187,30 @@ describe("createRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const events = rawDb
       .prepare(
-        "SELECT kind, resource, actor FROM journal ORDER BY seq DESC LIMIT 1",
+        "SELECT kind, resource, principal_id, participant_id, actor FROM journal ORDER BY seq DESC LIMIT 1",
       )
-      .get() as { kind: string; resource: string; actor: string };
+      .get() as {
+      kind: string;
+      resource: string;
+      principal_id: string;
+      participant_id: string;
+      actor: string;
+    };
     expect(events.kind).toBe("record.created");
     expect(events.resource).toBe("record:config/main");
-    expect(events.actor).toBe("test");
+    expect(events.principal_id).toBe("test:test");
+    expect(events.participant_id).toBe("test");
+    expect(events.actor).toBe("");
   });
 });
 
@@ -182,7 +225,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const updated = await recordOps.setRecord(
@@ -195,7 +243,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "updater",
       },
-      { actor: "updater" },
+      {
+        principalId: "test:updater",
+        participantId: "updater",
+        environment: {},
+        actor: "updater",
+      },
     );
 
     expect(updated.revision).toBe(2);
@@ -216,7 +269,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const updated = await recordOps.setRecord(
@@ -230,7 +288,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(updated.tags).toEqual(["new-tag-1", "new-tag-2"]);
@@ -247,7 +310,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const updated = await recordOps.setRecord(
@@ -260,7 +328,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(updated.tags).toEqual(["keep-me"]);
@@ -277,7 +350,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const updated = await recordOps.setRecord(
@@ -291,7 +369,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(updated.tags).toEqual([]);
@@ -309,7 +392,12 @@ describe("setRecord", () => {
           schema_version: 1,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).rejects.toThrow(RecordNotFoundError);
   });
@@ -324,7 +412,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     await expect(
@@ -338,7 +431,12 @@ describe("setRecord", () => {
           schema_version: 1,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).rejects.toThrow(FenceError);
   });
@@ -353,7 +451,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     await recordOps.setRecord(
@@ -367,7 +470,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "updater",
       },
-      { actor: "updater" },
+      {
+        principalId: "test:updater",
+        participantId: "updater",
+        environment: {},
+        actor: "updater",
+      },
     );
 
     const rev = rawDb
@@ -390,7 +498,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     await recordOps.setRecord(
@@ -403,7 +516,12 @@ describe("setRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const events = rawDb
@@ -426,7 +544,12 @@ describe("getRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.getRecord(db, "config", "main");
@@ -455,7 +578,12 @@ describe("getRecord", () => {
         schema_version: 1,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     await recordOps.setRecord(
@@ -469,7 +597,12 @@ describe("getRecord", () => {
         schema_version: 1,
         actor: "updater",
       },
-      { actor: "updater" },
+      {
+        principalId: "test:updater",
+        participantId: "updater",
+        environment: {},
+        actor: "updater",
+      },
     );
 
     const result = recordOps.getRecord(db, "config", "main");
@@ -538,7 +671,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const patched = await recordOps.patchRecord(
@@ -551,7 +689,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(patched.value).toEqual({
@@ -574,7 +717,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const patched = await recordOps.patchRecord(
@@ -587,7 +735,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(patched.value).toEqual({ name: "tila" });
@@ -604,7 +757,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const patched = await recordOps.patchRecord(
@@ -617,7 +775,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(patched.value).toEqual({ tags: ["x"] });
@@ -633,7 +796,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const patched = await recordOps.patchRecord(
@@ -646,7 +814,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(patched.value).toEqual({
@@ -664,7 +837,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     await recordOps.patchRecord(
@@ -677,7 +855,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "patcher",
       },
-      { actor: "patcher" },
+      {
+        principalId: "test:patcher",
+        participantId: "patcher",
+        environment: {},
+        actor: "patcher",
+      },
     );
 
     const revisions = db
@@ -711,7 +894,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     await expect(
@@ -725,7 +913,12 @@ describe("patchRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).rejects.toThrow(FenceError);
   });
@@ -742,7 +935,12 @@ describe("patchRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).rejects.toThrow(RecordNotFoundError);
   });
@@ -757,7 +955,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     recordOps.archiveRecord(
       db,
@@ -768,7 +971,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const archived = recordOps.getRecord(db, "config", "app");
 
@@ -783,7 +991,12 @@ describe("patchRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).rejects.toThrow(RecordInvalidStateError);
   });
@@ -799,7 +1012,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const patched = await recordOps.patchRecord(
@@ -812,7 +1030,12 @@ describe("patchRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(patched.tags.sort()).toEqual(["primary", "prod"]);
@@ -830,7 +1053,12 @@ describe("archiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.archiveRecord(
@@ -842,7 +1070,12 @@ describe("archiveRecord", () => {
         schema_version: 0,
         actor: "archiver",
       },
-      { actor: "archiver" },
+      {
+        principalId: "test:archiver",
+        participantId: "archiver",
+        environment: {},
+        actor: "archiver",
+      },
     );
 
     expect(result.archived).toBe(1);
@@ -860,7 +1093,12 @@ describe("archiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     recordOps.archiveRecord(
@@ -872,7 +1110,12 @@ describe("archiveRecord", () => {
         schema_version: 0,
         actor: "archiver",
       },
-      { actor: "archiver" },
+      {
+        principalId: "test:archiver",
+        participantId: "archiver",
+        environment: {},
+        actor: "archiver",
+      },
     );
 
     const revisions = db
@@ -906,7 +1149,12 @@ describe("archiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const archived = recordOps.archiveRecord(
       db,
@@ -917,7 +1165,12 @@ describe("archiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(() =>
@@ -930,7 +1183,12 @@ describe("archiveRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).toThrow(RecordInvalidStateError);
   });
@@ -946,7 +1204,12 @@ describe("archiveRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).toThrow(RecordNotFoundError);
   });
@@ -961,7 +1224,12 @@ describe("archiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(() =>
@@ -974,7 +1242,12 @@ describe("archiveRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).toThrow(FenceError);
   });
@@ -991,7 +1264,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const archived = recordOps.archiveRecord(
       db,
@@ -1002,7 +1280,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.unarchiveRecord(
@@ -1014,7 +1297,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "restorer",
       },
-      { actor: "restorer" },
+      {
+        principalId: "test:restorer",
+        participantId: "restorer",
+        environment: {},
+        actor: "restorer",
+      },
     );
 
     expect(result.archived).toBe(0);
@@ -1032,7 +1320,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const archived = recordOps.archiveRecord(
       db,
@@ -1043,7 +1336,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     recordOps.unarchiveRecord(
       db,
@@ -1054,7 +1352,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "restorer",
       },
-      { actor: "restorer" },
+      {
+        principalId: "test:restorer",
+        participantId: "restorer",
+        environment: {},
+        actor: "restorer",
+      },
     );
 
     const revisions = db
@@ -1088,7 +1391,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(() =>
@@ -1101,7 +1409,12 @@ describe("unarchiveRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).toThrow(RecordInvalidStateError);
   });
@@ -1116,7 +1429,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const archived = recordOps.archiveRecord(
       db,
@@ -1127,7 +1445,12 @@ describe("unarchiveRecord", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     expect(() =>
@@ -1140,7 +1463,12 @@ describe("unarchiveRecord", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       ),
     ).toThrow(FenceError);
   });
@@ -1157,7 +1485,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const created2 = await recordOps.createRecord(
       db,
@@ -1168,7 +1501,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     recordOps.archiveRecord(
       db,
@@ -1179,7 +1517,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecords(db, { type: "svc" });
@@ -1199,7 +1542,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     const created2 = await recordOps.createRecord(
       db,
@@ -1210,7 +1558,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     recordOps.archiveRecord(
       db,
@@ -1221,7 +1574,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecords(db, {
@@ -1243,7 +1601,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -1255,7 +1618,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecords(db, { type: "svc", tag: "prod" });
@@ -1273,7 +1641,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -1284,7 +1657,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecords(db, {
@@ -1314,7 +1692,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecords(db, { type: "svc" });
@@ -1336,7 +1719,12 @@ describe("listRecords", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecords(db, { type: "svc" });
@@ -1354,7 +1742,12 @@ describe("listRecords", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       );
     }
 
@@ -1376,7 +1769,12 @@ describe("listRecordHistory", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     await recordOps.setRecord(
       db,
@@ -1388,7 +1786,12 @@ describe("listRecordHistory", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecordHistory(db, "config", "app");
@@ -1409,7 +1812,12 @@ describe("listRecordHistory", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const result = recordOps.listRecordHistory(db, "config", "app", {
@@ -1428,7 +1836,12 @@ describe("listRecordHistory", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     let fence = created.fence;
     for (let i = 2; i <= 5; i++) {
@@ -1442,7 +1855,12 @@ describe("listRecordHistory", () => {
           schema_version: 0,
           actor: "test",
         },
-        { actor: "test" },
+        {
+          principalId: "test:test",
+          participantId: "test",
+          environment: {},
+          actor: "test",
+        },
       );
       fence = updated.fence;
     }
@@ -1467,7 +1885,12 @@ describe("listRecordTypesInUse", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -1478,7 +1901,12 @@ describe("listRecordTypesInUse", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -1489,7 +1917,12 @@ describe("listRecordTypesInUse", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const types = recordOps.listRecordTypesInUse(db);
@@ -1506,7 +1939,12 @@ describe("listRecordTypesInUse", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     recordOps.archiveRecord(
       db,
@@ -1517,7 +1955,12 @@ describe("listRecordTypesInUse", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -1528,7 +1971,12 @@ describe("listRecordTypesInUse", () => {
         schema_version: 0,
         actor: "test",
       },
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const types = recordOps.listRecordTypesInUse(db);
@@ -1554,7 +2002,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
     expect(result.revision).toBe(1);
 
@@ -1584,7 +2037,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
     const result = await recordOps.setRecord(
       db,
@@ -1597,7 +2055,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
     expect(result.revision).toBe(2);
 
@@ -1627,7 +2090,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
 
     const rev = db
@@ -1654,7 +2122,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
     const patched = await recordOps.patchRecord(
       db,
@@ -1666,7 +2139,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
     expect(patched.revision).toBe(2);
 
@@ -1705,7 +2183,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
 
     expect(() =>
@@ -1729,7 +2212,12 @@ describe("snapshot artifact flows", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
 
     expect(() =>

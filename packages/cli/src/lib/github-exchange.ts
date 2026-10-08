@@ -1,11 +1,12 @@
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { TILA_ERRORS } from "tila-sdk";
 import { resolveAppUserToken } from "./github-oauth-device";
+import * as p from "./prompts";
 
 interface SessionCache {
+  jkt?: string;
   session_token: string;
   expires_at: number;
   project_id: string;
@@ -100,6 +101,7 @@ export function warnIfRemoteMismatch(
 async function resolveOidcToken(
   config: { project_id: string; worker_url: string },
   tilaDir: string,
+  jkt?: string,
 ): Promise<string> {
   // 1. Request OIDC token from GitHub's token endpoint
   const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
@@ -138,6 +140,7 @@ async function resolveOidcToken(
     body: JSON.stringify({
       project_id: config.project_id,
       oidc_token: oidcToken,
+      ...(jkt ? { jkt } : {}),
     }),
   });
 
@@ -163,6 +166,7 @@ async function resolveOidcToken(
     session_token: body.session_token,
     expires_at: body.expires_at,
     project_id: body.project_id,
+    ...(jkt ? { jkt } : {}),
   });
 
   return body.session_token;
@@ -193,7 +197,7 @@ export async function resolveGithubRepoToken(
 ): Promise<string> {
   // 1. Check cache
   const cached = readSessionCache(tilaDir);
-  if (cached && cached.project_id === config.project_id) {
+  if (cached && cached.project_id === config.project_id && cached.jkt === jkt) {
     return cached.session_token;
   }
 
@@ -202,7 +206,7 @@ export async function resolveGithubRepoToken(
     process.env.ACTIONS_ID_TOKEN_REQUEST_URL &&
     process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
   ) {
-    return resolveOidcToken(config, tilaDir);
+    return resolveOidcToken(config, tilaDir, jkt);
   }
 
   // 2b. Resolve GitHub user token via App OAuth device flow
@@ -266,6 +270,7 @@ export async function resolveGithubRepoToken(
     session_token: body.session_token,
     expires_at: body.expires_at,
     project_id: body.project_id,
+    ...(jkt ? { jkt } : {}),
   };
   writeSessionCache(tilaDir, session);
 

@@ -3,6 +3,7 @@ import {
   ApiError,
   type ArtifactListResponse,
   type RecordTypesResponse,
+  getArtifactHistory,
   getRecord,
   getRecordHistory,
   getTaskDetail,
@@ -12,6 +13,8 @@ import {
   listPresenceAll,
   listRecordTypes,
   listRecords,
+  listSignalGroups,
+  listSignalHistory,
   listTaskArtifactRefs,
   listTasks,
   searchArtifacts,
@@ -121,6 +124,27 @@ export function usePresence() {
   });
 }
 
+export function useSignalHistory() {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["signal-history", projectId],
+    queryFn: () =>
+      listSignalHistory(requireProjectId(projectId), { limit: 100 }),
+    enabled: Boolean(projectId),
+    refetchInterval: 5000,
+  });
+}
+
+export function useSignalGroups() {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["signal-groups", projectId],
+    queryFn: () => listSignalGroups(requireProjectId(projectId)),
+    enabled: Boolean(projectId),
+    refetchInterval: 10000,
+  });
+}
+
 export function useArtifacts(params?: {
   resource?: string;
   kind?: string | string[];
@@ -132,6 +156,19 @@ export function useArtifacts(params?: {
     queryFn: () => listArtifacts(requireProjectId(projectId), params),
     enabled: Boolean(projectId),
     refetchInterval: 10000,
+  });
+}
+
+export function useArtifactHistory(artifactKey: string, cursor?: string) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["artifact-history", projectId, artifactKey, cursor],
+    queryFn: () =>
+      getArtifactHistory(requireProjectId(projectId), artifactKey, {
+        limit: 20,
+        cursor,
+      }),
+    enabled: Boolean(projectId) && Boolean(artifactKey),
   });
 }
 

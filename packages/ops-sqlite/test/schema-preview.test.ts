@@ -6,7 +6,7 @@ import {
   applySchema,
   previewSchema,
 } from "../src/schema-ops";
-import { type TestDb, createTestDb } from "./helpers";
+import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
 
@@ -101,10 +101,6 @@ function applyInitialSchema(toml: string) {
   applySchema(testDb.db, toml, "test-actor");
 }
 
-function testOrigin(actor: string) {
-  return { actor };
-}
-
 describe("previewSchema", () => {
   describe("work-unit-removed with entity counts", () => {
     it("returns entityCount=3 when 3 bug entities exist and bug type is removed", () => {
@@ -121,7 +117,7 @@ describe("previewSchema", () => {
             created_by: "test-actor",
           },
           1,
-          { actor: "test-actor" },
+          testOrigin("test-actor"),
         );
       }
       for (let i = 0; i < 3; i++) {
@@ -134,7 +130,7 @@ describe("previewSchema", () => {
             created_by: "test-actor",
           },
           1,
-          { actor: "test-actor" },
+          testOrigin("test-actor"),
         );
       }
 
@@ -167,7 +163,7 @@ describe("previewSchema", () => {
             created_by: "test-actor",
           },
           1,
-          { actor: "test-actor" },
+          testOrigin("test-actor"),
         );
       }
 
@@ -194,7 +190,7 @@ describe("previewSchema", () => {
             created_by: "test-actor",
           },
           1,
-          { actor: "test-actor" },
+          testOrigin("test-actor"),
         );
       }
 
@@ -230,7 +226,7 @@ describe("previewSchema", () => {
             created_by: "test-actor",
           },
           1,
-          { actor: "test-actor" },
+          testOrigin("test-actor"),
         );
       }
       // Create a task without status field
@@ -243,7 +239,7 @@ describe("previewSchema", () => {
           created_by: "test-actor",
         },
         1,
-        { actor: "test-actor" },
+        testOrigin("test-actor"),
       );
 
       const result = previewSchema(testDb.db, SCHEMA_WITHOUT_STATUS_FIELD_TOML);

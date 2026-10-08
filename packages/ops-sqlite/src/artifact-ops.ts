@@ -4,20 +4,25 @@ import type {
   ArtifactSearchResult,
   JournalEventKind,
 } from "@tila/schemas";
-import { TagsSchema } from "@tila/schemas";
+import { ArtifactPointerSchema, TagsSchema } from "@tila/schemas";
 import {
   type SQL,
   and,
+  desc,
   eq,
   gt,
   inArray,
   isNotNull,
   isNull,
   lte,
+  notExists,
   or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import * as lifecycle from "./artifact-lifecycle-ops";
+import { enrichArtifacts, provenanceFromOrigin } from "./artifact-review-ops";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
@@ -90,10 +95,18 @@ export function upsertPointer(
     );
     const deduplicated = existing.length > 0;
 
-    // INSERT OR IGNORE -- idempotent for content-addressed artifacts
-    tx.run(
-      sql`INSERT OR IGNORE INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, expires_at, tombstoned, content_inline) VALUES(${pointer.r2_key}, ${pointer.resource}, ${pointer.kind}, ${pointer.sha256}, ${pointer.bytes}, ${pointer.fence}, ${pointer.mime_type}, ${pointer.produced_at}, ${pointer.produced_by}, ${pointer.expires_at}, 0, ${pointer.content_inline ?? null})`,
-    );
+    const provenance = skipFenceValidation
+      ? null
+      : provenanceFromOrigin(origin, pointer.produced_at);
+    tx.insert(schema.artifactPointers)
+      .values({
+        ...pointer,
+        tombstoned: 0,
+        provenance,
+        revision_creation: provenance,
+      })
+      .onConflictDoNothing()
+      .run();
 
     // Tags: on re-upsert of an existing r2_key (content-addressed; INSERT OR IGNORE
     // is a no-op), delete-all-then-reinsert ONLY when tags provided; preserve when undefined.
@@ -149,8 +162,9 @@ export function upsertPointer(
       appendJournal(tx, {
         kind: journalKind ?? "artifact.produced",
         resource: pointer.resource ?? "source",
-        actor: origin.actor,
+        ...origin,
         fence: pointer.fence,
+        data: { r2_key: pointer.r2_key, sha256: pointer.sha256 },
         tokenId: origin.tokenId,
         source: origin.source,
         sourceVersion: origin.sourceVersion,
@@ -179,64 +193,75 @@ export function getLatestPointer(
   kind: string,
   resource: string,
 ): ArtifactPointer | null {
-  // NOTE: use `db.all(...)[0]` rather than `db.get(...)`. Under
-  // `drizzle-orm/bun-sqlite`, `db.get(sql\`raw\`)` returns a POSITIONAL array
-  // (not a column-keyed object), so `row.r2_key` would be undefined in the
-  // embedded backend. `db.all(...)` returns column-keyed objects across every
-  // sync driver (DO cf-workers, bun:sqlite, better-sqlite3). `LIMIT 1` keeps it
-  // single-row.
-  const rows = db.all<{
-    r2_key: string;
-    resource: string | null;
-    kind: string;
-    sha256: string;
-    bytes: number;
-    fence: number | null;
-    mime_type: string;
-    produced_at: number;
-    produced_by: string;
-    expires_at: number | null;
-    tombstoned: number;
-  }>(
-    sql`SELECT p.r2_key, p.resource, p.kind, p.sha256, p.bytes, p.fence, p.mime_type, p.produced_at, p.produced_by, p.expires_at, p.tombstoned
-        FROM artifact_pointers p
-        WHERE p.kind = ${kind} AND p.resource = ${resource} AND p.tombstoned = 0
-        AND p.r2_key NOT IN (
-          SELECT r.to_key FROM artifact_relationships r
-          WHERE r.type = 'supersedes'
-          AND r.to_key IN (
-            SELECT p2.r2_key FROM artifact_pointers p2
-            WHERE p2.kind = ${kind} AND p2.resource = ${resource} AND p2.tombstoned = 0
-          )
-        )
-        ORDER BY p.produced_at DESC
-        LIMIT 1`,
-  );
-
-  const row = rows[0];
+  const newer = alias(schema.artifactPointers, "newer_revision");
+  const old = alias(schema.artifactPointers, "legacy_target");
+  const row = db
+    .select()
+    .from(schema.artifactPointers)
+    .where(
+      and(
+        eq(schema.artifactPointers.kind, kind),
+        eq(schema.artifactPointers.resource, resource),
+        eq(schema.artifactPointers.tombstoned, 0),
+        or(
+          and(
+            isNotNull(schema.artifactPointers.lineage_id),
+            notExists(
+              db
+                .select({ key: newer.r2_key })
+                .from(newer)
+                .where(
+                  and(
+                    eq(newer.lineage_id, schema.artifactPointers.lineage_id),
+                    gt(newer.revision, schema.artifactPointers.revision),
+                    eq(newer.tombstoned, 0),
+                  ),
+                ),
+            ),
+          ),
+          and(
+            isNull(schema.artifactPointers.lineage_id),
+            notExists(
+              db
+                .select({ key: schema.artifactRelationships.to_key })
+                .from(schema.artifactRelationships)
+                .innerJoin(
+                  old,
+                  eq(old.r2_key, schema.artifactRelationships.to_key),
+                )
+                .where(
+                  and(
+                    eq(schema.artifactRelationships.type, "supersedes"),
+                    eq(
+                      schema.artifactRelationships.to_key,
+                      schema.artifactPointers.r2_key,
+                    ),
+                    eq(old.kind, kind),
+                    eq(old.resource, resource),
+                    eq(old.tombstoned, 0),
+                  ),
+                ),
+            ),
+          ),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(schema.artifactPointers.produced_at),
+      desc(schema.artifactPointers.revision),
+      desc(schema.artifactPointers.r2_key),
+    )
+    .get();
   if (!row) return null;
-
-  // Read tags for this pointer (single query)
-  const tagRows = db
+  const tags = db
     .select()
     .from(schema.artifactTags)
     .where(eq(schema.artifactTags.artifact_key, row.r2_key))
     .all();
-
-  return {
-    r2_key: row.r2_key,
-    resource: row.resource,
-    kind: row.kind,
-    sha256: row.sha256,
-    bytes: row.bytes,
-    fence: row.fence,
-    mime_type: row.mime_type,
-    produced_at: row.produced_at,
-    produced_by: row.produced_by,
-    expires_at: row.expires_at,
-    tombstoned: row.tombstoned,
-    tags: tagRows.map((t) => t.tag),
-  };
+  return ArtifactPointerSchema.parse({
+    ...enrichArtifacts(db, [row])[0],
+    tags: tags.map((t) => t.tag),
+  });
 }
 
 export function listPointers(
@@ -305,7 +330,10 @@ export function listPointers(
     arr.push(t.tag);
   }
 
-  return rows.map((row) => ({
+  return enrichArtifacts(db, rows).map((row) => ({
+    provenance: row.provenance,
+    revision_creation: row.revision_creation,
+    review: row.review,
     r2_key: row.r2_key,
     resource: row.resource,
     kind: row.kind,
@@ -400,7 +428,7 @@ export function listGrepCandidates(
   // are preserved so the Worker fetches them from R2 instead).
   let cumulativeInlineBytes = 0;
 
-  return rows.map((row) => {
+  return enrichArtifacts(db, rows).map((row) => {
     let inline = row.content_inline;
     if (inline !== null) {
       const byteLen = Buffer.byteLength(inline, "utf8");
@@ -416,6 +444,9 @@ export function listGrepCandidates(
       mime_type: row.mime_type,
       bytes: row.bytes,
       content_inline: inline,
+      provenance: row.provenance,
+      revision_creation: row.revision_creation,
+      review: row.review,
     };
   });
 }
@@ -431,6 +462,7 @@ export function listExpiredPointers(
     .where(
       and(
         isNotNull(schema.artifactPointers.expires_at),
+        isNull(schema.artifactPointers.lineage_id),
         lte(schema.artifactPointers.expires_at, now),
         eq(schema.artifactPointers.tombstoned, 0),
       ),
@@ -438,7 +470,10 @@ export function listExpiredPointers(
     .limit(limit)
     .all();
 
-  return rows.map((row) => ({
+  return enrichArtifacts(db, rows).map((row) => ({
+    provenance: row.provenance,
+    revision_creation: row.revision_creation,
+    review: row.review,
     r2_key: row.r2_key,
     resource: row.resource,
     kind: row.kind,
@@ -467,6 +502,8 @@ export function tombstonePointer(
       .where(eq(schema.artifactPointers.r2_key, r2Key))
       .run();
 
+    lifecycle.syncPointerLifecycle(tx, r2Key);
+
     // Delete search doc if one exists. No-op when the artifact was never indexed
     // (non-searchable kind, unsupported MIME, or uploaded before T5).
     // The asd_ad trigger (MIGRATION_0003) fires automatically on this DELETE,
@@ -476,7 +513,7 @@ export function tombstonePointer(
     appendJournal(tx, {
       kind: journalKind ?? "artifact.tombstoned",
       resource: r2Key,
-      actor: origin.actor,
+      ...origin,
       fence: null,
       tokenId: origin.tokenId,
       source: origin.source,
@@ -486,11 +523,9 @@ export function tombstonePointer(
 }
 
 /**
- * Records confirmation that a tombstoned pointer's R2 blob has been deleted,
- * stamping `blob_deleted_at`. Called by the sweep after a SUCCESSFUL R2 blob
- * delete. Only confirmed rows are eligible for `deleteTombstonedPointers` —
- * this is what prevents a failed blob delete from stranding an orphan blob
- * (Finding #2). Idempotent and a no-op when the r2_key is unknown.
+ * Records successful blob deletion and releases inline content. Metadata and
+ * review history remain available for audit. Failed deletions stay eligible for
+ * retry. Idempotent and a no-op when the r2_key is unknown.
  */
 export function confirmBlobDeleted(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
@@ -498,55 +533,20 @@ export function confirmBlobDeleted(
   now: number = Date.now(),
 ): void {
   db.run(
-    sql`UPDATE artifact_pointers SET blob_deleted_at = ${now} WHERE r2_key = ${r2Key}`,
+    sql`UPDATE artifact_pointers SET blob_deleted_at = ${now}, content_inline = NULL WHERE r2_key = ${r2Key}`,
   );
+  lifecycle.syncPointerLifecycle(db, r2Key);
 }
 
-/**
- * Hard-deletes artifact pointer rows that have been tombstoned past the grace window.
- *
- * Rows are only deleted when:
- *   - tombstoned = 1 (marker set)
- *   - tombstoned_at IS NOT NULL (stamped by tombstonePointer after migration 0016)
- *   - tombstoned_at < cutoff (past the grace window)
- *
- * Rows tombstoned before the migration have tombstoned_at = NULL and remain inert
- * until re-tombstoned (acceptable: they hold no live R2 blob).
- *
- * Returns the number of rows deleted.
- */
+/** Compatibility hook: sweeps retain metadata as a permanent provenance/review audit. */
 export function deleteTombstonedPointers(
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  cutoff: number,
+  _db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  _cutoff: number,
 ): number {
-  return db.transaction((tx) => {
-    // Explicitly delete artifact_tags BEFORE the pointer delete, using the
-    // same predicate subquery. ON DELETE CASCADE is inert in the DO (FK enforcement
-    // is off in production), so this explicit delete is required to prevent orphans.
-    tx.run(
-      sql`DELETE FROM artifact_tags
-          WHERE artifact_key IN (
-            SELECT r2_key FROM artifact_pointers
-            WHERE tombstoned = 1
-              AND tombstoned_at IS NOT NULL
-              AND tombstoned_at < ${cutoff}
-              AND blob_deleted_at IS NOT NULL
-          )`,
-    );
-
-    // blob_deleted_at IS NOT NULL gates the hard-delete on a CONFIRMED R2 blob
-    // deletion. A tombstoned pointer whose blob delete permanently failed keeps
-    // blob_deleted_at NULL and is retained, so the orphan blob stays
-    // reconcilable rather than being silently stranded (Finding #2).
-    tx.run(
-      sql`DELETE FROM artifact_pointers
-          WHERE tombstoned = 1
-            AND tombstoned_at IS NOT NULL
-            AND tombstoned_at < ${cutoff}
-            AND blob_deleted_at IS NOT NULL`,
-    );
-    return tx.get<{ n: number }>(sql`SELECT changes() AS n`)?.n ?? 0;
-  });
+  // Artifact metadata is an audit record. Blob lifecycle cleanup must not erase
+  // provenance, review history, or restore links, including for legacy artifacts.
+  // Keep this compatibility entry point for existing sweep callers.
+  return 0;
 }
 
 export function addArtifactRelationship(
@@ -576,7 +576,7 @@ export function addArtifactRelationship(
     appendJournal(tx, {
       kind: "artifact.relationship.added",
       resource: fromKey,
-      actor: origin.actor,
+      ...origin,
       fence: null,
       data: { type, to_key: toKey },
       tokenId: origin.tokenId,
@@ -623,7 +623,7 @@ export function listIndexEntries(
         ORDER BY p.produced_at DESC`,
   );
 
-  return rows.map((row) => ({
+  return enrichArtifacts(db, rows).map((row) => ({
     ...row,
     exists: row.tombstoned !== 1,
   }));
@@ -781,7 +781,7 @@ export function searchArtifacts(
       LIMIT ${limit}
     `);
 
-    return rows;
+    return enrichArtifacts(db, rows);
   } catch (err: unknown) {
     if (err instanceof Error) {
       const msg = err.message;
@@ -1070,7 +1070,7 @@ export function rebuildSearchDocs(
           appendJournal(tx, {
             kind: "artifact.search.rebuilt",
             resource: candidate.resource ?? candidate.artifact_key,
-            actor: origin.actor,
+            ...origin,
             fence: null,
             tokenId: origin.tokenId,
             source: origin.source,
@@ -1137,7 +1137,7 @@ export function rebuildSearchDocs(
       appendJournal(tx, {
         kind: "artifact.search.rebuilt",
         resource: candidate.resource ?? candidate.artifact_key,
-        actor: origin.actor,
+        ...origin,
         fence: null,
         tokenId: origin.tokenId,
         source: origin.source,

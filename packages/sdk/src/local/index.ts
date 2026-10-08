@@ -1,7 +1,9 @@
+import { createBlobJournalArchiveReader } from "@tila/backend-embedded";
 import {
   EmbeddedArtifactBackend,
   EmbeddedProject,
 } from "@tila/backend-embedded";
+import type { IdentityContext } from "@tila/schemas";
 
 import { createNodeConnection } from "./connection";
 import { NodeBlobStore } from "./node-blob-store";
@@ -26,6 +28,8 @@ export interface CreateTilaLocalOptions {
   project: string;
   /** Skip the NFS/SMB network-mount filesystem check (tests/temp dirs). */
   skipFilesystemCheck?: boolean;
+  /** Canonical identity bound to this local client instance. */
+  identity?: IdentityContext;
 }
 
 /** The backend bundle returned by {@link createTilaLocal}. */
@@ -76,24 +80,33 @@ export async function createTilaLocal(
 ): Promise<TilaLocal> {
   const org = opts.org ?? "local";
   const { project } = opts;
+  const identity = opts.identity ?? {
+    principal_id: `local:${org}`,
+    participant_id: crypto.randomUUID(),
+    environment: { client_name: "sdk" },
+  };
 
   const { db, close } = await createNodeConnection(opts.dbPath, {
     skipFilesystemCheck: opts.skipFilesystemCheck,
   });
 
+  const blobs = new NodeBlobStore(opts.artifactsPath);
   const projectBackend = new EmbeddedProject({
+    archives: createBlobJournalArchiveReader(blobs, project),
     db,
     org,
     project,
+    identity,
     sleepSync: nodeSleepSync,
     close,
   });
 
   const artifacts = new EmbeddedArtifactBackend({
     db,
-    blobs: new NodeBlobStore(opts.artifactsPath),
+    blobs,
     org,
     project,
+    identity,
     sleepSync: nodeSleepSync,
   });
 

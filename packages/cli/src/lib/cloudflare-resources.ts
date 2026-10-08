@@ -1,11 +1,12 @@
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { GITHUB_LOGIN_REGEX } from "@tila/schemas";
 import type { Cloudflare } from "./cloudflare-client";
 import {
   type MigrationResult,
   applyD1Migrations as runMigrations,
 } from "./d1-migrations";
+import { exit } from "./output";
+import * as p from "./prompts";
 import { D1_DATABASE_NAME } from "./resource-names";
 
 /**
@@ -68,7 +69,7 @@ export async function ensureD1Database(
   });
   if (!created.uuid) {
     p.cancel("Failed to create D1 database: no UUID in response");
-    process.exit(1);
+    exit(1);
   }
   return created.uuid;
 }
@@ -78,7 +79,8 @@ export async function applyD1Migrations(
   accountId: string,
   databaseId: string,
   migrationsDir: string,
-): Promise<void> {
+  options: { migrate?: boolean; quiet?: boolean } = {},
+): Promise<MigrationResult> {
   const queryFn = async (
     sql: string,
     params?: (string | number | null)[],
@@ -94,11 +96,31 @@ export async function applyD1Migrations(
     return [];
   };
 
-  const result = await runMigrations({ queryFn, migrationsDir });
+  const result = await runMigrations({
+    queryFn,
+    migrationsDir,
+    migrate: options.migrate,
+  });
 
-  if (result.applied > 0) {
+  if (!options.quiet && result.applied > 0) {
     p.log.info(`  Applied ${result.applied} migration(s).`);
   }
+
+  if (
+    !options.quiet &&
+    result.appliedNames.includes("0024_repo_oidc_policy.sql")
+  ) {
+    const rows = (await queryFn(
+      "SELECT COUNT(*) AS count FROM _project_repos",
+    )) as Array<{ count?: number | string }>;
+    const affected = Number(rows[0]?.count ?? 0);
+    if (Number.isSafeInteger(affected) && affected > 0) {
+      p.log.warn(
+        `${affected} existing repository link(s) had GitHub Actions OIDC exchange disabled by the security migration. Configure each link with PUT /api/repos/:repoId/oidc-policy before re-enabling Actions access.`,
+      );
+    }
+  }
+  return result;
 }
 
 /**
@@ -120,7 +142,7 @@ export async function ensureR2Bucket(
       return;
     }
     p.cancel(`Failed to create R2 bucket: ${msg}`);
-    process.exit(1);
+    exit(1);
   }
 }
 
@@ -137,6 +159,8 @@ export async function applyR2Lifecycle(
       account_id: accountId,
       rules: [
         {
+          // Versioned revisions and their recovery records are intentionally
+          // outside this prefix; only tila may expire their content.
           id: "backstop-produced-1y",
           conditions: { prefix: "produced/" },
           enabled: true,

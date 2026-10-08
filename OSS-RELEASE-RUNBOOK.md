@@ -431,3 +431,14 @@ pnpm run typecheck && pnpm test
 ```
 
 Both must pass green before tagging. `pnpm test` includes `pnpm run test:scripts` (the `scripts/*.test.mjs` suite) in addition to the Vitest/bun test packages.
+
+### 7.4 Coordination benchmarks
+
+Run the deployed benchmark matrix against a throwaway project (`tila project create --name tila-bench-<date> --skip-github`), regenerate `docs/benchmarks/BASELINE.md`, and compare with the previous baseline. Invariant failures or a non-zero error rate block the tag; latency regressions are advisory. Commands, flags, comparison rules and cleanup are in `docs/05-OPERATIONS.md` (Pre-Tag Gates, Gate 4) and `docs/benchmarks/README.md`.
+
+```bash
+TILA_BENCH_ALLOW_REMOTE=1 TILA_BASE_URL=https://your-worker.workers.dev \
+TILA_TOKEN=<throwaway project token> TILA_PROJECT_ID=tila-bench-<date> \
+pnpm bench -- --tier http --scenario all --participants 8 --duration 30s --warmup 5s --md
+pnpm bench:report -- --in packages/bench/results --out docs/benchmarks/BASELINE.md
+```

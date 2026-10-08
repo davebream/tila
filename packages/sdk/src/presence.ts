@@ -10,17 +10,11 @@ export function createPresenceMethods(client: TilaClient, projectId: string) {
 
   return {
     async heartbeat(
-      machine: string,
       info?: Record<string, unknown>,
     ): Promise<PresenceHeartbeatSuccessResponse> {
-      // Worker route is POST /presence/heartbeat (NOT /presence, which is the
-      // GET list). The Worker derives the machine from the token and reads
-      // `info` from the body; `machine` is sent for parity but the server may
-      // override it from the bearer-token identity.
       return client.post<PresenceHeartbeatSuccessResponse>(
         `${base}/heartbeat`,
         {
-          machine,
           info: info ?? {},
         },
       );
@@ -31,7 +25,7 @@ export function createPresenceMethods(client: TilaClient, projectId: string) {
     },
 
     /**
-     * List all presence records across all machines, including whether each is active.
+     * List all participant presence records, including whether each is active.
      * Hits GET /projects/:projectId/presence/all
      */
     async listAll(): Promise<PresenceAllListResponse> {

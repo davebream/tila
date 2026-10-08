@@ -7,7 +7,15 @@ import {
 import { defineCommand } from "citty";
 import { parse as parseTOML } from "smol-toml";
 import { requireClient, resolveContext } from "../context";
-import { jsonArg, printJson, printJsonError } from "../lib/output";
+import {
+  boundedItems,
+  diagnostic,
+  exit,
+  jsonArg,
+  outputText,
+  printJson,
+  printJsonError,
+} from "../lib/output";
 
 /** Fetch and parse the current schema TOML from the backend. */
 async function fetchSchemaToml(
@@ -44,10 +52,8 @@ export default defineCommand({
           if (args.json) {
             printJsonError("No schema applied or failed to fetch", "NO_SCHEMA");
           }
-          console.error(
-            "No schema applied to this project or failed to fetch.",
-          );
-          process.exit(1);
+          diagnostic("No schema applied to this project or failed to fetch.");
+          exit(1);
         }
         const templateMap = schema.templates ?? {};
         const entries = Object.entries(templateMap).map(([name, def]) => ({
@@ -60,12 +66,12 @@ export default defineCommand({
           return;
         }
         if (entries.length === 0) {
-          console.log("No templates defined in schema.");
+          outputText("No templates defined in schema.");
           return;
         }
-        for (const t of entries) {
+        for (const t of boundedItems(entries)) {
           const desc = t.description ? ` -- ${t.description}` : "";
-          console.log(`  ${t.name} (${t.entity_count} entities)${desc}`);
+          outputText(`  ${t.name} (${t.entity_count} entities)${desc}`);
         }
       },
     }),
@@ -86,10 +92,8 @@ export default defineCommand({
           if (args.json) {
             printJsonError("No schema applied or failed to fetch", "NO_SCHEMA");
           }
-          console.error(
-            "No schema applied to this project or failed to fetch.",
-          );
-          process.exit(1);
+          diagnostic("No schema applied to this project or failed to fetch.");
+          exit(1);
         }
         const templateMap = schema.templates ?? {};
         const name = args.name as string;
@@ -98,31 +102,31 @@ export default defineCommand({
           if (args.json) {
             printJsonError(`Template "${name}" not found`, "NOT_FOUND");
           }
-          console.error(`Template "${name}" not found in schema.`);
-          process.exit(1);
+          diagnostic(`Template "${name}" not found in schema.`);
+          exit(1);
         }
         if (args.json) {
           printJson({ name, template: templateDef });
           return;
         }
-        console.log(`Template: ${name}`);
+        outputText(`Template: ${name}`);
         if (templateDef.description) {
-          console.log(`Description: ${templateDef.description}`);
+          outputText(`Description: ${templateDef.description}`);
         }
-        console.log("\nEntities:");
+        outputText("\nEntities:");
         for (const [key, ent] of Object.entries(templateDef.entities)) {
           const suffix = ent.id_suffix
             ? ` (suffix: "${ent.id_suffix}")`
             : " (root)";
-          console.log(`  ${key}: type=${ent.type}${suffix}`);
+          outputText(`  ${key}: type=${ent.type}${suffix}`);
           if (Object.keys(ent.data).length > 0) {
-            console.log(`    data: ${JSON.stringify(ent.data)}`);
+            outputText(`    data: ${JSON.stringify(ent.data)}`);
           }
         }
         if (templateDef.relationships.length > 0) {
-          console.log("\nRelationships:");
+          outputText("\nRelationships:");
           for (const rel of templateDef.relationships) {
-            console.log(`  ${rel.from} --[${rel.type}]--> ${rel.to}`);
+            outputText(`  ${rel.from} --[${rel.type}]--> ${rel.to}`);
           }
         }
       },
@@ -166,10 +170,10 @@ export default defineCommand({
                   "INVALID_VAR",
                 );
               }
-              console.error(
+              diagnostic(
                 `Invalid --var format: "${entry}". Expected key=value`,
               );
-              process.exit(1);
+              exit(1);
             }
             const key = entry.slice(0, eqIdx);
             const value = entry.slice(eqIdx + 1);
@@ -201,10 +205,10 @@ export default defineCommand({
             };
           };
           if (typeof local.instantiateTemplate !== "function") {
-            console.error(
+            diagnostic(
               "Error: template instantiate requires local backend with template support",
             );
-            process.exit(1);
+            exit(1);
             return;
           }
           try {
@@ -226,9 +230,9 @@ export default defineCommand({
             if (args.json) {
               printJsonError(message, code);
             } else {
-              console.error(`Error: ${message}`);
+              diagnostic(`Error: ${message}`);
             }
-            process.exit(1);
+            exit(1);
             return;
           }
         } else {
@@ -249,11 +253,11 @@ export default defineCommand({
           return;
         }
 
-        console.log(
+        outputText(
           `Instantiated template "${args.name}" -- created ${result.created_entities.length} entities, ${result.created_relationships} relationships`,
         );
-        console.log(`Entities: ${result.created_entities.join(", ")}`);
-        console.log(`Journal seq: ${result.journal_seq}`);
+        outputText(`Entities: ${result.created_entities.join(", ")}`);
+        outputText(`Journal seq: ${result.journal_seq}`);
       },
     }),
   },

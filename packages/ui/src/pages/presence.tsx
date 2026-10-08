@@ -24,11 +24,14 @@ function deriveStatus(active: boolean): "active" | "idle" | "lost" {
 
 function parseSortPresence(
   raw: string | null,
-): { key: "machine" | "last_seen"; dir: "asc" | "desc" } | null {
+): { key: "participant_id" | "last_seen"; dir: "asc" | "desc" } | null {
   if (!raw) return null;
   const [k, d] = raw.split(":");
-  if (["machine", "last_seen"].includes(k) && (d === "asc" || d === "desc")) {
-    return { key: k as "machine" | "last_seen", dir: d };
+  if (
+    ["participant_id", "last_seen"].includes(k) &&
+    (d === "asc" || d === "desc")
+  ) {
+    return { key: k as "participant_id" | "last_seen", dir: d };
   }
   return null;
 }
@@ -37,9 +40,9 @@ export function PresencePage() {
   useTimeTick();
   const { data, isLoading, isError, error, refetch, dataUpdatedAt } =
     usePresence();
-  const machines = data?.machines ?? [];
+  const participants = data?.participants ?? [];
   const [searchParams, setSearchParams] = useSearchParams();
-  const [sort, toggleSort] = useSort<"machine" | "last_seen">(
+  const [sort, toggleSort] = useSort<"participant_id" | "last_seen">(
     parseSortPresence(searchParams.get("sort")) ?? {
       key: "last_seen",
       dir: "desc",
@@ -53,7 +56,7 @@ export function PresencePage() {
   }, [sort, setSearchParams]);
 
   const sorted = useMemo(() => {
-    const base = [...machines];
+    const base = [...participants];
     if (!sort) {
       return base.sort((a, b) => {
         if (a.active !== b.active) return a.active ? -1 : 1;
@@ -64,15 +67,15 @@ export function PresencePage() {
     return base.sort((a, b) => {
       if (a.active !== b.active) return a.active ? -1 : 1;
       switch (sort.key) {
-        case "machine":
-          return a.machine.localeCompare(b.machine) * dir;
+        case "participant_id":
+          return a.participant_id.localeCompare(b.participant_id) * dir;
         case "last_seen":
           return (a.last_seen - b.last_seen) * dir;
         default:
           return 0;
       }
     });
-  }, [machines, sort]);
+  }, [participants, sort]);
 
   const { focusIdx, handleKeyDown: handleTableKeyDown } = useTableKeyNav(
     sorted.length,
@@ -100,19 +103,20 @@ export function PresencePage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[26px]" />
-                <TableHead>Machine</TableHead>
+                <TableHead>Participant</TableHead>
+                <TableHead>Principal</TableHead>
                 <TableHead className="text-right">Last Seen</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableSkeleton rows={3} columns={3} />
+              <TableSkeleton rows={3} columns={4} />
             </TableBody>
           </Table>
         </div>
       ) : sorted.length === 0 ? (
         <p className="py-12 text-center text-muted-foreground">
-          No machines registered. Machines appear when agents send heartbeats
-          via the CLI.
+          No participants registered. Participants appear when clients send
+          heartbeats.
         </p>
       ) : (
         <div
@@ -128,32 +132,33 @@ export function PresencePage() {
               <TableRow>
                 <TableHead className="w-[26px]" />
                 <SortableHead
-                  sortKey="machine"
-                  active={sort?.key === "machine"}
-                  dir={sort?.key === "machine" ? sort.dir : null}
-                  onSort={() => toggleSort("machine")}
-                  title="Machine identifier from agent heartbeat"
+                  sortKey="participant_id"
+                  active={sort?.key === "participant_id"}
+                  dir={sort?.key === "participant_id" ? sort.dir : null}
+                  onSort={() => toggleSort("participant_id")}
+                  title="Independent client session identifier"
                 >
-                  Machine
+                  Participant
                 </SortableHead>
+                <TableHead>Principal</TableHead>
                 <SortableHead
                   sortKey="last_seen"
                   active={sort?.key === "last_seen"}
                   dir={sort?.key === "last_seen" ? sort.dir : null}
                   onSort={() => toggleSort("last_seen")}
                   className="text-right"
-                  title="Most recent heartbeat from this machine"
+                  title="Most recent heartbeat from this participant"
                 >
                   Last Seen
                 </SortableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sorted.map((m, idx) => {
-                const status = deriveStatus(m.active);
+              {sorted.map((participant, idx) => {
+                const status = deriveStatus(participant.active);
                 return (
                   <TableRow
-                    key={m.machine}
+                    key={`${participant.principal_id}:${participant.participant_id}`}
                     className={
                       idx === focusIdx ? "bg-[var(--color-row-hover)]" : ""
                     }
@@ -162,10 +167,20 @@ export function PresencePage() {
                       <PresenceDot status={status} />
                     </TableCell>
                     <TableCell className="text-fg-strong">
-                      {m.machine}
+                      <div className="font-mono text-xs">
+                        {participant.participant_id}
+                      </div>
+                      {participant.environment.machine && (
+                        <div className="text-xs text-muted-foreground">
+                          {participant.environment.machine}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-fg-strong">
+                      {participant.principal_id}
                     </TableCell>
                     <TableCell className="tila-num text-right text-muted-foreground">
-                      {relativeTime(m.last_seen)}
+                      {relativeTime(participant.last_seen)}
                     </TableCell>
                   </TableRow>
                 );

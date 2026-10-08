@@ -6,6 +6,7 @@ export type RouterDeps = {
   ctx: DurableObjectState;
   db: DrizzleSqliteDODatabase<typeof schema>;
   enrichOpts: () => EnrichOpts;
+  artifacts?: R2Bucket;
 };
 
 export type ProjectSubRouter = Hono;

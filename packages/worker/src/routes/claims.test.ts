@@ -25,6 +25,7 @@ function makeSessionToken(
 ): SessionTokenResult {
   return {
     kind: "session",
+    jti: "route-test-jti",
     projectId: "proj-1",
     name,
     scopes: permission,
@@ -33,6 +34,8 @@ function makeSessionToken(
     githubLogin: name,
     permission,
     expiresAt: Date.now() + 3600_000,
+    githubUserId: 1,
+    githubHost: "github.com",
   };
 }
 
@@ -40,8 +43,20 @@ function createApp(tokenResult: SessionTokenResult): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("/*", async (c, next) => {
     c.set("tokenResult", tokenResult);
+    if (tokenResult.kind === "session")
+      c.set(
+        "explicitRole",
+        tokenResult.permission === "admin"
+          ? "maintainer"
+          : tokenResult.permission === "write"
+            ? "participant"
+            : "viewer",
+      );
     c.set("doStub", {} as DurableObjectStub);
     c.set("projectId", "proj-1");
+    c.set("principalId", "github:github.com:1");
+    c.set("participantId", tokenResult.name);
+    c.set("environment", {});
     await next();
   });
   app.route("/", claims);
@@ -59,14 +74,20 @@ describe("claims routes", () => {
   beforeEach(() => {
     forwardToDOMock.mockReset();
     forwardToDOMock.mockImplementation(
-      (_stub, path: string, _method: string, body?: { actor?: string }) => {
-        if (path === "/coord/release" && body?.actor === "other/other") {
+      (
+        _stub,
+        path: string,
+        _method: string,
+        body?: { participant_id?: string },
+      ) => {
+        if (path === "/coord/release" && body?.participant_id === "other") {
           return jsonResponse(
             {
               ok: false,
               error: {
                 code: "release-ownership-denied",
-                message: "Only the current holder may release claim task:1",
+                message:
+                  "Only the acquiring participant may release claim task:1",
                 retryable: false,
               },
             },
@@ -93,7 +114,10 @@ describe("claims routes", () => {
       expect.anything(),
       "/coord/release",
       "POST",
-      expect.objectContaining({ actor: "holder/holder" }),
+      expect.objectContaining({
+        principal_id: "github:github.com:1",
+        participant_id: "holder",
+      }),
       undefined,
       undefined,
       // idempotencyHeaders(c) — undefined when no Idempotency-Key (mocked above).

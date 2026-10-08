@@ -45,6 +45,8 @@ vi.mock("@tila/backend-d1", () => ({
 
 // revokeJtiInCache is a side-effect call inside the revoke handler.
 vi.mock("../middleware/auth", () => ({
+  createAuthMiddleware: () => async (_c: unknown, next: () => Promise<void>) =>
+    next(),
   revokeJtiInCache: vi.fn(),
 }));
 
@@ -65,6 +67,7 @@ const mockEnv: Partial<Env> = {
 function rosterBearer(): UnifiedTokenResult {
   return {
     kind: "session",
+    jti: "route-test-jti",
     projectId: "proj-target",
     name: "roster-user",
     scopes: "admin",
@@ -84,6 +87,15 @@ function createApp(tokenResult: UnifiedTokenResult): Hono<AppEnv> {
     c.set("doStub", {} as DurableObjectStub);
     c.set("projectId", "proj-target");
     c.set("tokenResult", tokenResult);
+    if (tokenResult.kind === "session")
+      c.set(
+        "explicitRole",
+        tokenResult.permission === "admin"
+          ? "maintainer"
+          : tokenResult.permission === "write"
+            ? "participant"
+            : "viewer",
+      );
     await next();
   });
   app.route("/admin", admin);

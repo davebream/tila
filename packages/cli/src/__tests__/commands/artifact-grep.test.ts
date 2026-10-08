@@ -202,8 +202,8 @@ describe("tila artifact grep", () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(output.ok).toBe(true);
-    expect(output.results).toHaveLength(1);
-    expect(output.results[0].key).toBe("produced/T-1/abc.md");
+    expect(output.result.items).toHaveLength(1);
+    expect(output.result.items[0].key).toBe("produced/T-1/abc.md");
   });
 
   it("exits with error when backend lacks grepArtifacts capability", async () => {

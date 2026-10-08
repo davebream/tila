@@ -15,8 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-// @clack/prompts — silence UI output
-vi.mock("@clack/prompts", () => ({
+// ../../lib/prompts — silence UI output
+vi.mock("../../lib/prompts", () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   log: {
@@ -120,7 +120,7 @@ describe("tila auth recover — headless / CI lockout", () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("process.exit");
     });
-    const p = await import("@clack/prompts");
+    const p = await import("../../lib/prompts");
 
     await expect(runSubCommand("recover", { headless: true })).rejects.toThrow(
       "process.exit",
@@ -143,7 +143,7 @@ describe("tila auth recover — headless / CI lockout", () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("process.exit");
     });
-    const p = await import("@clack/prompts");
+    const p = await import("../../lib/prompts");
 
     await expect(runSubCommand("recover")).rejects.toThrow("process.exit");
 
@@ -157,7 +157,7 @@ describe("tila auth recover — headless / CI lockout", () => {
     vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("process.exit");
     });
-    const p = await import("@clack/prompts");
+    const p = await import("../../lib/prompts");
 
     await expect(
       runSubCommand("recover", { headless: true }),

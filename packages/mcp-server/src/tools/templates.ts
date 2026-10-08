@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerTemplateTools(
   server: McpServer,
@@ -10,7 +11,8 @@ export function registerTemplateTools(
 ): void {
   const templates = facade.templates;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_template_list",
     "List available entity templates from the project schema. Templates define reusable entity archetypes with preset fields and relationships.",
     {},
@@ -26,7 +28,8 @@ export function registerTemplateTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_template_instantiate",
     "Create new entities from a template. The template defines entity types, default fields, and relationships; variables are substituted at instantiation time.",
     {

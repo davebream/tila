@@ -74,6 +74,12 @@ run_worker_first = ["/api/*", "/auth/*", "/projects/*", "/_internal/*"]
 #   Managed by the CLI: `tila infra provision` sets it; `tila infra provision --rotate-admin-token` rotates it.
 #   Set manually: wrangler secret put INFRA_ADMIN_TOKEN
 #
+# STEP_UP_MAX_AGE_SECONDS — optional step-up reauthentication window (#102)
+#   Browser (cookie) sessions older than this must sign in again before high-impact
+#   membership/credential mutations. Defaults to 600 in the Worker when unset. Kept as a
+#   secret rather than a [vars] entry because the CLI-generated deploy config emits no vars.
+#   Set: wrangler secret put STEP_UP_MAX_AGE_SECONDS
+#
 # SWEEP_SECRET — bearer secret for the /_internal/sweep endpoint (X-Sweep-Secret header)
 #   Protects the daily cron sweep trigger from unauthorized callers. When unset, the sweep
 #   endpoint rejects all requests with 403. Generate a random value and store as a secret:
