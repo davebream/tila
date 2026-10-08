@@ -41,7 +41,7 @@ describe("MCP README tool-table parity", () => {
   beforeEach(() => {
     savedCompatAliases = process.env.TILA_MCP_COMPAT_ALIASES;
     savedToolGroups = process.env.TILA_MCP_TOOLS;
-    // Clear both env vars so registerAllTools uses canonical default (40 tools)
+    // Clear both env vars so registerAllTools uses the canonical default.
     process.env.TILA_MCP_COMPAT_ALIASES = "";
     process.env.TILA_MCP_TOOLS = "";
   });
@@ -51,13 +51,14 @@ describe("MCP README tool-table parity", () => {
     process.env.TILA_MCP_TOOLS = savedToolGroups;
   });
 
-  it("README tool table lists exactly the 40 registered tools (no phantom, no missing)", async () => {
+  it("README lists all default and opt-in tools", async () => {
     // 1. Enumerate registered tools via the real seam
     const server = createMockServer();
     registerAllTools(
       asServer(server),
       asFacade(createMockFacade()),
       PROJECT_ID,
+      ["workflow", "all"],
     );
 
     const registeredNames: string[] = server.tool.mock.calls.map(
@@ -65,15 +66,15 @@ describe("MCP README tool-table parity", () => {
     );
     const registeredSet = new Set(registeredNames);
 
-    expect(registeredNames.length).toBe(40);
+    expect(registeredNames.length).toBe(61);
 
     // 2. Parse README
     const readme = await readFile(README_PATH, "utf8");
     const readmeNames = parseReadmeToolNames(readme);
     const readmeCount = parseReadmeToolCount(readme);
 
-    // 3. Stated count must equal registered count
-    expect(readmeCount).toBe(40);
+    // 3. Stated count covers publicly documented tools
+    expect(readmeCount).toBe(61);
 
     // 4. No phantom tools in README (tools listed that aren't registered)
     const phantoms = [...readmeNames].filter((n) => !registeredSet.has(n));
@@ -86,7 +87,7 @@ describe("MCP README tool-table parity", () => {
     const missing = [...registeredSet].filter((n) => !readmeNames.has(n));
     expect(
       missing,
-      `Missing tools from README (registered but not documented): ${missing.join(", ")}`,
-    ).toHaveLength(0);
+      "All released default and primitive tools must be documented",
+    ).toEqual([]);
   });
 });

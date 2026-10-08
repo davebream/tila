@@ -32,22 +32,24 @@ describe("CliErrorEnvelope", () => {
   it("has ok:false with code and message fields", () => {
     const envelope: CliErrorEnvelope = {
       ok: false,
-      code: "not-found",
-      message: "Task not found",
+      error: { kind: "not-found", message: "Task not found", retryable: false },
     };
     expect(envelope.ok).toBe(false);
-    expect(envelope.code).toBe("not-found");
-    expect(envelope.message).toBe("Task not found");
+    expect(envelope.error.kind).toBe("not-found");
+    expect(envelope.error.message).toBe("Task not found");
   });
 
   it("optionally has a hint field", () => {
     const envelope: CliErrorEnvelope = {
       ok: false,
-      code: "do-unreachable",
-      message: "Cannot reach service",
-      hint: "Check network and retry",
+      error: {
+        kind: "do-unreachable",
+        message: "Cannot reach service",
+        hint: "Check network and retry",
+        retryable: false,
+      },
     };
-    expect(envelope.hint).toBe("Check network and retry");
+    expect(envelope.error.hint).toBe("Check network and retry");
   });
 });
 
@@ -123,7 +125,7 @@ describe("failWithCliError exit code routing", () => {
     failWithCliError(err, true);
     const output = JSON.parse(String(errorSpy.mock.calls[0][0]));
     expect(output.ok).toBe(false);
-    expect(output.code).toBeDefined();
-    expect(output.message).toBeDefined();
+    expect(output.error.kind).toBeDefined();
+    expect(output.error.message).toBeDefined();
   });
 });

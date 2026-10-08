@@ -21,9 +21,7 @@ describe.skipIf(!BASE_URL || !TOKEN)("tila state", () => {
   const projectPath = `/projects/${PROJECT_ID}`;
   const resource1 = `state-test-res1-${Date.now()}`;
   const resource2 = `state-test-res2-${Date.now()}`;
-  const holder = "state-test-holder";
-
-  // AC-1: tila state <resource> with active claim shows machine, user, mode, fence, TTL
+  // AC-1: tila state <resource> with active claim shows canonical identity, mode, fence, TTL
   it("should show claim details for a resource with an active claim", async () => {
     const acquireRes = await client.post<AcquireSuccessResponse>(
       `${projectPath}/claims/acquire`,
@@ -47,8 +45,9 @@ describe.skipIf(!BASE_URL || !TOKEN)("tila state", () => {
     expect(stateRes.ok).toBe(true);
     expect(stateRes.claim).not.toBeNull();
     expect(stateRes.claim?.resource).toBe(resource1);
-    expect(stateRes.claim?.machine).toBeTruthy();
-    expect(stateRes.claim?.user).toBeTruthy();
+    expect(stateRes.claim?.principal_id).toBeTruthy();
+    expect(stateRes.claim?.participant_id).toBe(acquireRes.participant_id);
+    expect(stateRes.claim?.environment).toBeDefined();
     expect(stateRes.claim?.mode).toBe("exclusive");
     expect(stateRes.claim?.fence).toBe(acquireRes.fence);
     expect(stateRes.claim?.expires_at).toBe(acquireRes.expires_at);
@@ -96,8 +95,9 @@ describe.skipIf(!BASE_URL || !TOKEN)("tila state", () => {
     expect(ourClaims.length).toBe(2);
 
     for (const claim of ourClaims) {
-      expect(claim.machine).toBeTruthy();
-      expect(claim.user).toBeTruthy();
+      expect(claim.principal_id).toBeTruthy();
+      expect(claim.participant_id).toBeTruthy();
+      expect(claim.environment).toBeDefined();
       expect(claim.mode).toBe("exclusive");
       expect(claim.fence).toBeGreaterThan(0);
       expect(claim.expires_at).toBeGreaterThan(Date.now());
@@ -116,8 +116,9 @@ describe.skipIf(!BASE_URL || !TOKEN)("tila state", () => {
     // Verify the claim object has all expected fields when present
     if (res.claim) {
       expect(typeof res.claim.resource).toBe("string");
-      expect(typeof res.claim.machine).toBe("string");
-      expect(typeof res.claim.user).toBe("string");
+      expect(typeof res.claim.principal_id).toBe("string");
+      expect(typeof res.claim.participant_id).toBe("string");
+      expect(typeof res.claim.environment).toBe("object");
       expect(typeof res.claim.mode).toBe("string");
       expect(typeof res.claim.fence).toBe("number");
       expect(typeof res.claim.acquired_at).toBe("number");

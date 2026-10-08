@@ -1,4 +1,4 @@
-// packages/core/src/interfaces/summary-backend.ts
+import type { EnvironmentMetadata } from "@tila/schemas";
 
 export interface ProjectSummary {
   entity_count: number;
@@ -6,14 +6,16 @@ export interface ProjectSummary {
   status_counts: Record<string, number>;
   active_claims: number;
   ready_count: number;
-  online_machines: string[];
+  online_participants: string[];
   token_estimate: number;
   recent_events: Array<{
     seq: number;
     t: number;
     kind: string;
     resource: string;
-    actor: string;
+    principal_id: string;
+    participant_id: string;
+    environment: EnvironmentMetadata;
   }>;
 }
 

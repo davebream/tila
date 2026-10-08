@@ -64,9 +64,17 @@ export function sweep(
       appendJournal(tx, {
         kind: "claim.expired",
         resource: claim.resource,
-        actor: claim.holder,
+        actor: "system:sweep",
+        principalId: "system:sweep",
+        participantId: "system:sweep",
+        environment: {},
         fence: claim.fence,
-        data: { mode: claim.mode, expired_at: claim.expires_at },
+        data: {
+          mode: claim.mode,
+          expired_at: claim.expires_at,
+          principal_id: claim.principal_id,
+          participant_id: claim.participant_id,
+        },
       });
     }
 
@@ -79,13 +87,15 @@ export function sweep(
       .run();
     const presenceDeleted = readChanges(tx);
 
-    // Delete expired signals
+    // Acknowledged deliveries remain auditable until the parent signal expires.
+    // Delete children explicitly because DO SQLite does not guarantee FK
+    // enforcement is enabled for every existing project database.
+    tx.run(sql`DELETE FROM signal_deliveries
+      WHERE signal_id IN (
+        SELECT id FROM signals WHERE expires_at <= ${now}
+      )`);
     tx.delete(schema.signals).where(lte(schema.signals.expires_at, now)).run();
     const expiredDeleted = readChanges(tx);
-
-    // Delete acked signals (those not already deleted by the expired pass)
-    tx.run(sql`DELETE FROM signals WHERE acked_at IS NOT NULL`);
-    const ackedDeleted = readChanges(tx);
 
     // Prune stale DO idempotency dedup rows older than the TTL.
     // readChanges(tx) must immediately follow this DELETE with no intervening DML.
@@ -97,7 +107,7 @@ export function sweep(
     return {
       claimsDeleted,
       presenceDeleted,
-      signalsDeleted: expiredDeleted + ackedDeleted,
+      signalsDeleted: expiredDeleted,
       tombstonedPointersDeleted,
       doIdempotencyDeleted,
     };

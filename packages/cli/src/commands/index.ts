@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { printJson, tsToIso } from "../lib/output";
+import {
+  diagnostic,
+  exit,
+  outputText,
+  printJson,
+  tsToIso,
+} from "../lib/output";
 
 export default defineCommand({
   meta: { name: "index", description: "Manage index artifacts" },
@@ -53,7 +59,7 @@ export default defineCommand({
           printJson({ ok: true, key: result.key, bytes: result.bytes });
           return;
         }
-        console.log(
+        outputText(
           `Created index artifact: ${result.key} (${result.bytes} bytes)`,
         );
       },
@@ -83,10 +89,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.addRelationship) {
-          console.error(
+          diagnostic(
             "Error: index add-entry is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         await ctx.artifact.addRelationship(
           args.entryKey as string,
@@ -97,7 +103,7 @@ export default defineCommand({
           printJson({ ok: true });
           return;
         }
-        console.log(`Added entry: ${args.entryKey} -> ${args.indexKey}`);
+        outputText(`Added entry: ${args.entryKey} -> ${args.indexKey}`);
       },
     }),
     "list-entries": defineCommand({
@@ -120,10 +126,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.listIndexEntries) {
-          console.error(
+          diagnostic(
             "Error: index list-entries is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const entries = await ctx.artifact.listIndexEntries(
           args.indexKey as string,
@@ -141,14 +147,14 @@ export default defineCommand({
         }
 
         if (entries.length === 0) {
-          console.log("No entries found.");
+          outputText("No entries found.");
           return;
         }
 
         for (const entry of entries) {
           const status = entry.exists ? "" : " [expired]";
           const res = entry.resource ?? "(source)";
-          console.log(
+          outputText(
             `${entry.r2_key}  ${entry.kind}  ${res}  ${entry.sha256.slice(0, 12)}...  ${entry.produced_at}${status}`,
           );
         }

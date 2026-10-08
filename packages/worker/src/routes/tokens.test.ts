@@ -30,7 +30,8 @@ const mockIssue = vi.fn().mockResolvedValue(undefined);
 const mockList = vi.fn().mockResolvedValue([]);
 const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("@tila/backend-d1", async () => ({
+  ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {
       revoke = mockRevoke;

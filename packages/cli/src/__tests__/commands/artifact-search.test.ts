@@ -208,8 +208,8 @@ describe("tila artifact search", () => {
     });
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(output.results).toHaveLength(1);
-    expect(output.results[0].r2_key).toBe("produced/T-1/abc123.md");
+    expect(output.result.items).toHaveLength(1);
+    expect(output.result.items[0].r2_key).toBe("produced/T-1/abc123.md");
   });
 
   it("forwards --kind filter to searchArtifacts", async () => {

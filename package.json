@@ -7,23 +7,37 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev:setup": "bash scripts/dev-setup.sh",
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "test": "turbo test && pnpm run test:scripts",
+    "dev": "node scripts/turbo.mjs dev --filter=@tila/worker --filter=@tila/ui",
+    "build": "node scripts/turbo.mjs build",
+    "test": "node scripts/turbo.mjs test && pnpm run test:scripts",
     "test:scripts": "node --test \"scripts/*.test.mjs\"",
-    "lint": "biome check . && pnpm run version:check",
+    "lint": "biome check . && pnpm run version:check && node scripts/check-test-quality.mjs",
     "check": "biome check --write . && pnpm run version:check",
-    "typecheck": "turbo typecheck",
-    "clean": "turbo clean",
+    "typecheck": "node scripts/turbo.mjs typecheck",
+    "clean": "node scripts/turbo.mjs clean",
     "version:check": "node scripts/check-public-versions.mjs",
-    "version:test": "node --test scripts/version-policy.test.mjs"
+    "version:test": "node --test scripts/version-policy.test.mjs",
+    "dev:cli": "pnpm --filter tila-cli dev",
+    "dev:mcp": "node scripts/generate-version.mjs sdk && tsx --tsconfig tsconfig.json packages/mcp-server/src/index.ts",
+    "bench": "tsx --tsconfig tsconfig.json packages/bench/src/cli.ts",
+    "bench:report": "tsx --tsconfig tsconfig.json packages/bench/src/cli.ts report",
+    "test:runtime": "node scripts/generate-version.mjs backend-do && node scripts/check-test-quality.mjs && pnpm --filter @tila/integration-tests test:runtime && node scripts/check-runtime-report.mjs"
   },
   "pnpm": {
     "overrides": {
       "esbuild": ">=0.28.1",
+      "fast-uri": ">=3.1.6",
       "form-data": ">=4.0.6",
       "hono": ">=4.12.26",
-      "miniflare>undici": ">=7.28.0 <8.0.0",
+      "ip-address": ">=10.3.1",
+      "miniflare>undici": ">=7.29.1 <8.0.0",
+      "nanoid": ">=3.3.18",
+      "postcss": ">=8.5.23",
+      "proxy-addr": ">=2.0.8 <3.0.0",
+      "react-router": ">=7.18.2 <8.0.0",
+      "sharp": ">=0.35.5",
+      "source-map-js": ">=1.2.2 <2.0.0",
+      "undici": ">=7.29.1 <8.0.0",
       "wrangler": ">=4.59.1",
       "ws": ">=8.20.1"
     }
@@ -33,6 +47,7 @@
     "lefthook": "^1.7.0",
     "turbo": "^2.10.6",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "tsx": "^4.22.4"
   }
 }

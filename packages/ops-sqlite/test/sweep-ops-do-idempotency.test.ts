@@ -108,8 +108,8 @@ describe("sweep doIdempotencyDeleted field", () => {
     // One expired claim (claims.expires_at <= now → swept), count 1.
     testDb.rawDb
       .prepare(
-        `INSERT INTO claims(resource, holder, machine, user, mode, fence, acquired_at, expires_at, metadata)
-         VALUES('task:gc', 'm1/u1', 'm1', 'u1', 'exclusive', 1, ?, ?, '{}')`,
+        `INSERT INTO claims(resource, principal_id, participant_id, environment, mode, fence, acquired_at, expires_at, metadata)
+         VALUES('task:gc', 'u1', 'm1', '{}', 'exclusive', 1, ?, ?, '{}')`,
       )
       .run(now - 2_000, now - 1_000);
     // Two stale idempotency rows (count 2) + one fresh (retained).

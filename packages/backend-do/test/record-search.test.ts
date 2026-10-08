@@ -68,7 +68,12 @@ describe("createRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "test-agent",
       },
-      { actor: "test-agent" },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
     );
 
     const row = rawDb
@@ -93,7 +98,12 @@ describe("createRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const results = rawDb
@@ -121,7 +131,12 @@ describe("setRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     // Get fence
@@ -143,7 +158,12 @@ describe("setRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const row = rawDb
@@ -165,7 +185,12 @@ describe("setRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const before = rawDb
@@ -195,7 +220,12 @@ describe("setRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const after = rawDb
@@ -222,7 +252,12 @@ describe("patchRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const fence =
@@ -242,7 +277,12 @@ describe("patchRecord — FTS5 indexing", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const row = rawDb
@@ -269,7 +309,12 @@ describe("archiveRecord — FTS5 tombstone", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const fence =
@@ -288,7 +333,12 @@ describe("archiveRecord — FTS5 tombstone", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const row = rawDb
@@ -309,7 +359,12 @@ describe("archiveRecord — FTS5 tombstone", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     // Read fence after create (fence=1)
@@ -329,7 +384,12 @@ describe("archiveRecord — FTS5 tombstone", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     // Archive increments fence — re-read current fence for unarchive
@@ -349,7 +409,12 @@ describe("archiveRecord — FTS5 tombstone", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const row = rawDb
@@ -376,7 +441,12 @@ describe("searchRecords", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -387,7 +457,12 @@ describe("searchRecords", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const results = recordOps.searchRecords(db, { q: "elasticsearch" });
@@ -409,7 +484,12 @@ describe("searchRecords", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const results = recordOps.searchRecords(db, {
@@ -429,7 +509,12 @@ describe("searchRecords", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const fence =
@@ -448,7 +533,12 @@ describe("searchRecords", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const results = recordOps.searchRecords(db, {
@@ -468,7 +558,12 @@ describe("searchRecords", () => {
           schema_version: 1,
           actor: "agent",
         },
-        { actor: "agent" },
+        {
+          principalId: "test:agent",
+          participantId: "agent",
+          environment: {},
+          actor: "agent",
+        },
       );
     }
 
@@ -495,7 +590,12 @@ describe("searchRecords", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     const results = recordOps.searchRecords(db, { q: "pre*" });
@@ -523,7 +623,12 @@ describe("searchRecords — tagFilter", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -534,7 +639,12 @@ describe("searchRecords — tagFilter", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -545,7 +655,12 @@ describe("searchRecords — tagFilter", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     // rtag-1 has both tags, rtag-2 has only repo:a, rtag-3 has neither
@@ -579,7 +694,12 @@ describe("searchRecords — tagFilter", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
     await recordOps.createRecord(
       db,
@@ -590,7 +710,12 @@ describe("searchRecords — tagFilter", () => {
         schema_version: 1,
         actor: "agent",
       },
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
     );
 
     rawDb

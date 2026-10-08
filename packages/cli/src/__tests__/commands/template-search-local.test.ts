@@ -18,7 +18,6 @@ import {
 } from "@tila/ops-sqlite";
 import Database from "better-sqlite3";
 import type { CommandDef, SubCommandsDef } from "citty";
-import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -212,7 +211,7 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     const cmd = await loadTemplate();
     await runCmd(getSubCommand(cmd, "list"), { json: true });
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.templates).toEqual([
+    expect(out.result.items).toEqual([
       {
         name: "sprint",
         description: "A task with one subtask",
@@ -227,8 +226,11 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     const cmd = await loadTemplate();
     await runCmd(getSubCommand(cmd, "show"), { name: "sprint", json: true });
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.name).toBe("sprint");
-    expect(Object.keys(out.template.entities)).toEqual(["root", "child"]);
+    expect(out.result.name).toBe("sprint");
+    expect(Object.keys(out.result.template.entities)).toEqual([
+      "root",
+      "child",
+    ]);
   });
 
   it("template instantiate (apply) -> creates entities + relationships locally", async () => {
@@ -242,8 +244,8 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.created_entities).toEqual(["sprint-1", "sprint-1-child"]);
-    expect(out.created_relationships).toBe(1);
+    expect(out.result.created_entities).toEqual(["sprint-1", "sprint-1-child"]);
+    expect(out.result.created_relationships).toBe(1);
 
     // Entities exist in the local DB with vars substituted.
     const root = await project.get("sprint-1");
@@ -295,8 +297,8 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
     const payload = JSON.parse(stderr);
-    expect(payload.code).toBe("NO_SCHEMA");
-    expect(payload.message).toMatch(/no schema/i);
+    expect(payload.error.kind).toBe("NO_SCHEMA");
+    expect(payload.error.message).toMatch(/no schema/i);
     expect(stderr).not.toMatch(/at Object\.|node_modules/);
   });
 
@@ -315,7 +317,7 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     expect(project.searchAll({ q: "findable" }).length).toBeGreaterThan(0);
 
     // Clear ALL entity search docs out-of-band (simulating drift).
-    project.getDb().run(sql`DELETE FROM entity_search_docs`);
+    project.getDb().run("DELETE FROM entity_search_docs");
     expect(project.searchAll({ q: "findable" })).toHaveLength(0);
 
     const cmd = await loadSearch();
@@ -336,7 +338,7 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
       data: { title: "alpha widget" },
       created_by: "tester",
     });
-    project.getDb().run(sql`DELETE FROM entity_search_docs`);
+    project.getDb().run("DELETE FROM entity_search_docs");
     expect(project.searchAll({ q: "alpha" })).toHaveLength(0);
 
     const cmd = await loadSearch();
@@ -372,8 +374,8 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     await runCmd(getSubCommand(cmd, "diff"), { json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.autoApplicable).toBe(true);
-    expect(out.changes).toEqual([
+    expect(out.result.autoApplicable).toBe(true);
+    expect(out.result.changes).toEqual([
       expect.objectContaining({
         kind: "field-added",
         unitType: "task",

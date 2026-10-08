@@ -48,21 +48,21 @@ describe("printJson emits valid JSON to stdout", () => {
     printJson({ ok: true, entities });
     const out = JSON.parse(String(logSpy.mock.calls[0][0]));
     expect(out.ok).toBe(true);
-    expect(out.entities).toHaveLength(2);
+    expect(out.result.items).toHaveLength(2);
   });
 
   it("search results site: { results } via printJson", () => {
     const results = [{ type: "entity", entity_id: "e1" }];
     printJson({ results });
     const out = JSON.parse(String(logSpy.mock.calls[0][0]));
-    expect(out.results).toHaveLength(1);
+    expect(out.result.items).toHaveLength(1);
   });
 
   it("artifact grep site: response object via printJson", () => {
     const response = { truncated: false, results: [] };
     printJson(response);
     const out = JSON.parse(String(logSpy.mock.calls[0][0]));
-    expect(out.truncated).toBe(false);
+    expect(out.meta.truncated).toBe(false);
   });
 });
 
@@ -88,6 +88,6 @@ describe("printJsonSuccess wraps result in CliSuccessEnvelope", () => {
     printJsonSuccess([1, 2, 3]);
     const out = JSON.parse(String(logSpy.mock.calls[0][0]));
     expect(out.ok).toBe(true);
-    expect(out.result).toEqual([1, 2, 3]);
+    expect(out.result.items).toEqual([1, 2, 3]);
   });
 });

@@ -3,13 +3,19 @@ import {
   ArtifactSearchResultSchema,
   EntitySearchResultSchema,
 } from "./artifact";
+import { ArtifactTrustFieldsSchema } from "./artifact-review";
+import { ArtifactRevisionSchema } from "./artifact-version";
+import { CredentialPolicySchema } from "./capability";
 import { ClaimModeSchema } from "./claim";
+import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
+import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
 import { RecordKeySchema, RecordTagSchema, RecordTypeSchema } from "./record";
 import {
   EntityRelationshipSchema,
   EntityRelationshipTypeSchema,
 } from "./relationship";
+import { SessionPermissionSchema } from "./session";
 import { TagSchema, TagsSchema } from "./tags";
 
 // --- Error envelope ---
@@ -42,6 +48,7 @@ export const AcquireSuccessResponseSchema = z.object({
   ok: z.literal(true),
   fence: z.number().int(),
   expires_at: z.number().int(),
+  participant_id: ParticipantIdSchema,
 });
 
 export type AcquireSuccessResponse = z.infer<
@@ -85,8 +92,9 @@ export const StateResponseSchema = z.object({
   claim: z
     .object({
       resource: z.string(),
-      machine: z.string(),
-      user: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       mode: ClaimModeSchema,
       fence: z.number().int(),
       acquired_at: z.number().int(),
@@ -103,8 +111,9 @@ export const StateListResponseSchema = z.object({
   claims: z.array(
     z.object({
       resource: z.string(),
-      machine: z.string(),
-      user: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       mode: ClaimModeSchema,
       fence: z.number().int(),
       acquired_at: z.number().int(),
@@ -272,7 +281,7 @@ export const SummaryResponseSchema = z.object({
     status_counts: z.record(z.number().int()),
     active_claims: z.number().int(),
     ready_count: z.number().int(),
-    online_machines: z.array(z.string()),
+    online_participants: z.array(ParticipantIdSchema),
     token_estimate: z.number().int(),
     recent_events: z.array(
       z.object({
@@ -280,7 +289,9 @@ export const SummaryResponseSchema = z.object({
         t: z.number().int(),
         kind: z.string(),
         resource: z.string(),
-        actor: z.string(),
+        principal_id: z.string(),
+        participant_id: ParticipantIdSchema,
+        environment: EnvironmentMetadataSchema,
       }),
     ),
   }),
@@ -379,7 +390,7 @@ export type DeleteEntityRelationshipResponse = z.infer<
 export const JournalQuerySchema = z.object({
   resource: z.string().optional(),
   kind: JournalEventKindSchema.optional(),
-  source: z.string().optional(),
+  client_name: z.string().optional(),
   after_seq: z.number().int().optional(),
   limit: z.number().int().positive().default(100),
 });
@@ -394,12 +405,12 @@ export const JournalResponseSchema = z.object({
       t: z.number().int(),
       kind: z.string(),
       resource: z.string(),
-      actor: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       token_id: z.string().nullable(),
       fence: z.number().int().nullable(),
       data: z.record(z.unknown()),
-      source: z.string().nullable(),
-      source_version: z.string().nullable(),
     }),
   ),
 });
@@ -409,7 +420,6 @@ export type JournalResponse = z.infer<typeof JournalResponseSchema>;
 // --- Presence API ---
 
 export const PresenceHeartbeatRequestSchema = z.object({
-  machine: z.string(),
   info: z.record(z.unknown()).default({}),
 });
 
@@ -419,9 +429,11 @@ export type PresenceHeartbeatRequest = z.infer<
 
 export const PresenceListResponseSchema = z.object({
   ok: z.literal(true),
-  machines: z.array(
+  participants: z.array(
     z.object({
-      machine: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       last_seen: z.number().int(),
       info: z.record(z.unknown()),
     }),
@@ -432,9 +444,11 @@ export type PresenceListResponse = z.infer<typeof PresenceListResponseSchema>;
 
 export const PresenceAllListResponseSchema = z.object({
   ok: z.literal(true),
-  machines: z.array(
+  participants: z.array(
     z.object({
-      machine: z.string(),
+      principal_id: z.string(),
+      participant_id: ParticipantIdSchema,
+      environment: EnvironmentMetadataSchema,
       last_seen: z.number().int(),
       info: z.record(z.unknown()),
       active: z.boolean(),
@@ -473,10 +487,29 @@ export const WhoamiResponseSchema = z.object({
   project_id: z.string(),
   token_name: z.string(),
   scopes: z.string(),
-  auth_kind: z.enum(["d1-token", "session", "cookie-session"]).optional(),
+  auth_kind: z
+    .enum([
+      "d1-token",
+      "session",
+      "cookie-session",
+      "workspace-session",
+      "oidc-session",
+    ])
+    .optional(),
+  principal_id: z.string().optional(),
+  token_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  role: ProjectRoleSchema.optional(),
+  /** Role from the explicit membership row, when one exists. */
+  explicit_role: ProjectRoleSchema.optional(),
+  membership_sources: z.array(MembershipSourceSchema).optional(),
+  /** GitHub repository id the mirrored role was derived from, when applicable. */
+  mirrored_repo_id: z.number().int().optional(),
+  policy: CredentialPolicySchema.optional(),
+  legacy: z.boolean().optional(),
   github_login: z.string().optional(),
   permission: z.string().optional(),
-  expires_at: z.number().optional(),
+  expires_at: z.number().nullable().optional(),
 });
 
 export type WhoamiResponse = z.infer<typeof WhoamiResponseSchema>;
@@ -586,6 +619,12 @@ export type SearchDriftCheckName = z.infer<typeof SearchDriftCheckNameSchema>;
 // --- Token Management API ---
 
 export const TokenIssueRequestSchema = z.object({
+  principal_id: z
+    .string()
+    .regex(/^service:[0-9a-f-]{36}$/)
+    .optional(),
+  policy: CredentialPolicySchema.optional(),
+  expires_at: z.number().int().positive().nullable().optional(),
   name: z
     .string()
     .min(1)
@@ -608,6 +647,12 @@ export const TokenIssueRequestSchema = z.object({
 export type TokenIssueRequest = z.infer<typeof TokenIssueRequestSchema>;
 
 export const TokenIssueResponseSchema = z.object({
+  token_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  principal_id: z.string().optional(),
+  policy: CredentialPolicySchema.optional(),
+  expires_at: z.number().int().nullable().optional(),
+  legacy: z.boolean().optional(),
   ok: z.literal(true),
   token: z.string(),
   name: z.string(),
@@ -625,6 +670,24 @@ export const TokenRevokeResponseSchema = z.object({
 export type TokenRevokeResponse = z.infer<typeof TokenRevokeResponseSchema>;
 
 export const TokenListItemSchema = z.object({
+  token_id: z.string().optional(),
+  credential_id: z.string().optional(),
+  principal_id: z.string().optional(),
+  policy: CredentialPolicySchema.optional(),
+  effective_policy: CredentialPolicySchema.nullable().optional(),
+  status: z.enum(["active", "revoked", "expired", "disabled"]).optional(),
+  expires_at: z.number().int().nullable().optional(),
+  legacy: z.boolean().optional(),
+  versions: z
+    .array(
+      z.object({
+        token_id: z.string(),
+        expires_at: z.number().int().nullable(),
+        retire_at: z.number().int().nullable(),
+        revoked_at: z.number().int().nullable(),
+      }),
+    )
+    .optional(),
   name: z.string(),
   note: z.string().nullable(),
   scopes: z.string(),
@@ -701,7 +764,7 @@ export type AddEntityArtifactReferenceRequest = z.infer<
 export const EntityArtifactReferenceListResponseSchema = z.object({
   ok: z.literal(true),
   references: z.array(
-    z.object({
+    ArtifactTrustFieldsSchema.extend({
       entity_id: z.string(),
       artifact_key: z.string(),
       slot: z.string(),
@@ -829,7 +892,7 @@ export const ArtifactGrepLineSchema = z.object({
   col: z.number().int(), // 1-based column of first match in the line
 });
 
-export const ArtifactGrepResultSchema = z.object({
+export const ArtifactGrepResultSchema = ArtifactTrustFieldsSchema.extend({
   key: z.string(),
   kind: z.string(),
   resource: z.string().nullable(),
@@ -912,6 +975,7 @@ export type UnifiedSearchQuery = z.infer<typeof UnifiedSearchQuerySchema>;
 // --- Artifact response schemas (promoted from CLI) ---
 
 export const ArtifactTextWriteRequestSchema = z.object({
+  ...ArtifactVersionFieldsSchema.shape,
   content: z.string().min(1).max(1_000_000),
   kind: z.string().min(1),
   mime_type: z.string().default("text/markdown"),
@@ -924,6 +988,7 @@ export type ArtifactTextWriteRequest = z.infer<
 >;
 
 export const ArtifactPutResponseSchema = z.object({
+  pointer: ArtifactRevisionSchema.optional(),
   ok: z.literal(true),
   key: z.string(),
   bytes: z.number(),
@@ -999,14 +1064,138 @@ export type InstantiateTemplateResponse = z.infer<
 
 // --- Repo Allowlist API ---
 
-export const RepoRegisterRequestSchema = z.object({
-  owner: z.string().min(1).max(100),
-  repo: z.string().min(1).max(100),
-  github_host: z.string().optional().default("github.com"),
-  github_token: z.string().optional(),
-  min_read_permission: z.string().optional(),
-  min_write_permission: z.string().optional(),
+export const GitHubRepositoryPermissionSchema = z.enum([
+  "read",
+  "triage",
+  "write",
+  "maintain",
+  "admin",
+]);
+export type GitHubRepositoryPermission = z.infer<
+  typeof GitHubRepositoryPermissionSchema
+>;
+
+const GITHUB_REPOSITORY_PERMISSION_RANK: Record<
+  GitHubRepositoryPermission,
+  number
+> = {
+  read: 1,
+  triage: 2,
+  write: 3,
+  maintain: 4,
+  admin: 5,
+};
+
+function validateRepoAccessThresholds(
+  policy: {
+    min_read_permission: GitHubRepositoryPermission;
+    min_write_permission: GitHubRepositoryPermission;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (
+    GITHUB_REPOSITORY_PERMISSION_RANK[policy.min_read_permission] >
+    GITHUB_REPOSITORY_PERMISSION_RANK[policy.min_write_permission]
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "min_read_permission must not exceed min_write_permission",
+      path: ["min_write_permission"],
+    });
+  }
+}
+
+export const RepoAccessPolicySchema = z
+  .object({
+    min_read_permission: GitHubRepositoryPermissionSchema,
+    min_write_permission: GitHubRepositoryPermissionSchema,
+    max_permission: SessionPermissionSchema,
+    membership_enabled: z.boolean().default(true),
+    membership_role_cap: ProjectRoleSchema.exclude(["owner"]).default(
+      "participant",
+    ),
+  })
+  .superRefine(validateRepoAccessThresholds);
+export type RepoAccessPolicy = z.infer<typeof RepoAccessPolicySchema>;
+
+export const RepoAccessPolicyRequestSchema = z
+  .object({
+    min_read_permission: GitHubRepositoryPermissionSchema,
+    min_write_permission: GitHubRepositoryPermissionSchema,
+    max_permission: SessionPermissionSchema,
+    membership_enabled: z.boolean().optional(),
+    membership_role_cap: ProjectRoleSchema.exclude(["owner"]).optional(),
+  })
+  .superRefine(validateRepoAccessThresholds);
+export type RepoAccessPolicyRequest = z.infer<
+  typeof RepoAccessPolicyRequestSchema
+>;
+
+export const RepoAccessPolicyResponseSchema = z.object({
+  ok: z.literal(true),
+  github_repo_id: z.number().int().positive(),
+  policy: RepoAccessPolicySchema,
 });
+export type RepoAccessPolicyResponse = z.infer<
+  typeof RepoAccessPolicyResponseSchema
+>;
+
+const RepoOidcPolicyConditionSchema = z
+  .array(z.string().min(1).max(512))
+  .max(50)
+  .refine((values) => new Set(values).size === values.length, {
+    message: "Policy condition values must be unique",
+  });
+
+export const RepoOidcPolicySchema = z
+  .object({
+    enabled: z.boolean(),
+    max_permission: SessionPermissionSchema,
+    subject_pattern: z.string().min(1).max(512).nullable(),
+    allowed_events: RepoOidcPolicyConditionSchema,
+    allowed_refs: RepoOidcPolicyConditionSchema,
+    allowed_environments: RepoOidcPolicyConditionSchema,
+    allowed_workflows: RepoOidcPolicyConditionSchema,
+  })
+  .superRefine((policy, ctx) => {
+    if (policy.enabled && policy.allowed_events.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "An enabled OIDC policy must allow at least one event",
+        path: ["allowed_events"],
+      });
+    }
+  });
+export type RepoOidcPolicy = z.infer<typeof RepoOidcPolicySchema>;
+export const RepoOidcPolicyRequestSchema = RepoOidcPolicySchema;
+export type RepoOidcPolicyRequest = z.infer<typeof RepoOidcPolicyRequestSchema>;
+
+export const RepoOidcPolicyResponseSchema = z.object({
+  ok: z.literal(true),
+  github_repo_id: z.number().int().positive(),
+  policy: RepoOidcPolicySchema,
+});
+export type RepoOidcPolicyResponse = z.infer<
+  typeof RepoOidcPolicyResponseSchema
+>;
+
+export const RepoRegisterRequestSchema = z
+  .object({
+    owner: z.string().min(1).max(100),
+    repo: z.string().min(1).max(100),
+    github_host: z.string().optional().default("github.com"),
+    github_token: z.string().optional(),
+    min_read_permission:
+      GitHubRepositoryPermissionSchema.optional().default("write"),
+    min_write_permission:
+      GitHubRepositoryPermissionSchema.optional().default("write"),
+    max_permission: SessionPermissionSchema.optional().default("write"),
+    membership_enabled: z.boolean().optional().default(false),
+    membership_role_cap: ProjectRoleSchema.exclude(["owner"])
+      .optional()
+      .default("participant"),
+  })
+  .superRefine(validateRepoAccessThresholds);
 export type RepoRegisterRequest = z.infer<typeof RepoRegisterRequestSchema>;
 
 export const RepoRegisterResponseSchema = z.object({
@@ -1216,3 +1405,4 @@ export const RecordTypesResponseSchema = z.object({
 });
 
 export type RecordTypesResponse = z.infer<typeof RecordTypesResponseSchema>;
+import { ArtifactVersionFieldsSchema } from "./artifact-version";

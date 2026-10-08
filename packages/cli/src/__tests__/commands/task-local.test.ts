@@ -146,6 +146,11 @@ function makeLocalProject(): {
     db,
     org: "testorg",
     project: "test-proj",
+    identity: {
+      principal_id: "local:testorg",
+      participant_id: "participant-task-test",
+      environment: { machine: "test-machine", client_name: "tila-cli" },
+    },
     sleepSync: () => {},
     close: () => sqlite.close(),
   });
@@ -154,6 +159,11 @@ function makeLocalProject(): {
     blobs: new MemoryBlobStore(),
     org: "testorg",
     project: "test-proj",
+    identity: {
+      principal_id: "local:testorg",
+      participant_id: "participant-task-test",
+      environment: { machine: "test-machine", client_name: "tila-cli" },
+    },
     sleepSync: () => {},
   });
   return { project, artifacts, close: () => sqlite.close() };
@@ -239,21 +249,21 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
   it("list --compact projects id/status/title/claimed_by from the local backend", async () => {
     await seedTask("T-1", { status: "open", title: "First" });
     // Claim T-1 so claimed_by is populated.
-    await project.acquire("task:T-1", "m1", "u1", "exclusive", 60000);
+    await project.acquire("task:T-1", "exclusive", 60000);
 
     const cmd = await loadCommand();
     await runCmd(getSubCommand(cmd, "list"), { compact: true, json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.count).toBe(1);
-    const e = out.entities[0];
+    expect(out.meta.count).toBe(1);
+    const e = out.result.items[0];
     // Same columns/fields as the old remote ?compact=true payload.
     expect(e).toMatchObject({
       id: "T-1",
       type: "task",
       title: "First",
       status: "open",
-      claimed_by: "m1/u1",
+      claimed_by: "participant-task-test",
     });
     expect(errorSpy).not.toHaveBeenCalled();
   });
@@ -269,9 +279,9 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     // Non-compact --parent: only the two children.
     await runCmd(getSubCommand(cmd, "list"), { parent: "P", json: true });
     const nonCompact = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(nonCompact.entities.map((e: { id: string }) => e.id).sort()).toEqual(
-      ["C1", "C2"],
-    );
+    expect(
+      nonCompact.result.items.map((e: { id: string }) => e.id).sort(),
+    ).toEqual(["C1", "C2"]);
 
     // Compact --parent: same two children.
     logSpy.mockClear();
@@ -281,10 +291,9 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
       json: true,
     });
     const compact = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(compact.entities.map((e: { id: string }) => e.id).sort()).toEqual([
-      "C1",
-      "C2",
-    ]);
+    expect(
+      compact.result.items.map((e: { id: string }) => e.id).sort(),
+    ).toEqual(["C1", "C2"]);
   });
 
   it("ready returns unblocked tasks from the local backend", async () => {
@@ -301,7 +310,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     await runCmd(getSubCommand(cmd, "ready"), { json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    const ids = out.entities.map((e: { id: string }) => e.id).sort();
+    const ids = out.result.items.map((e: { id: string }) => e.id).sort();
     expect(ids).toEqual(["blocker", "free"]);
   });
 
@@ -318,9 +327,9 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     await runCmd(getSubCommand(cmd, "tree"), { json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.count).toBe(2);
+    expect(out.result.count).toBe(2);
     expect(
-      out.relationships.some(
+      out.result.relationships.some(
         (r: { from_id: string; to_id: string; type: string }) =>
           r.from_id === "root" &&
           r.to_id === "child" &&
@@ -406,13 +415,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
 
   it("update --fence rejects a stale fence with a clean one-line error (no stack trace)", async () => {
     await seedTask("T-fence", { status: "open", title: "Fenced" });
-    const acq = await project.acquire(
-      "task:T-fence",
-      "local",
-      "local",
-      "exclusive",
-      60000,
-    );
+    const acq = await project.acquire("task:T-fence", "exclusive", 60000);
 
     const cmd = await loadCommand();
 
@@ -454,13 +457,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
 
   it("update --fence (JSON mode) emits a structured stale-fence error, not a stack trace", async () => {
     await seedTask("T-fence-json", { status: "open", title: "Fenced" });
-    const acq = await project.acquire(
-      "task:T-fence-json",
-      "local",
-      "local",
-      "exclusive",
-      60000,
-    );
+    const acq = await project.acquire("task:T-fence-json", "exclusive", 60000);
 
     const cmd = await loadCommand();
     await expect(
@@ -475,8 +472,8 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
-    expect(payload.code).toBe("stale-fence");
-    expect(typeof payload.message).toBe("string");
+    expect(payload.error.kind).toBe("stale-fence");
+    expect(typeof payload.error.message).toBe("string");
   });
 
   it("artifact-ref add -> list round-trips against the local backend", async () => {
@@ -505,8 +502,8 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
       json: true,
     });
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out.references).toHaveLength(1);
-    expect(out.references[0]).toMatchObject({
+    expect(out.result.references).toHaveLength(1);
+    expect(out.result.references[0]).toMatchObject({
       entity_id: "T-ref",
       artifact_key: "plans/T-ref/abc.md",
       slot: "plan",

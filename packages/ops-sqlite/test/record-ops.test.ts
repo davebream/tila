@@ -14,7 +14,7 @@ import {
   setRecord,
   unarchiveRecord,
 } from "../src/record-ops";
-import { type TestDb, createTestDb } from "./helpers";
+import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
 
@@ -25,10 +25,6 @@ beforeEach(() => {
 afterEach(() => {
   testDb.rawDb.close();
 });
-
-function testOrigin(actor: string) {
-  return { actor };
-}
 
 describe("createRecord", () => {
   it("creates a record with revision 1 and fence 1", async () => {

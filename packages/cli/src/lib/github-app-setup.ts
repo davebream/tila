@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { RequestListener, Server } from "node:http";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { openInBrowser } from "./browser";
 import { buildManifest } from "./github-app-manifest";
+import * as p from "./prompts";
 
 /**
  * GitHub App credentials returned by manifest conversion.

@@ -21,11 +21,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mocks (hoisted — apply to all tests in this file)
 // ---------------------------------------------------------------------------
 
-// Mock @clack/prompts to avoid TTY rendering
+// Mock ../lib/prompts to avoid TTY rendering
 const mockSpinnerObj = { start: vi.fn(), stop: vi.fn() };
 const mockNote = vi.fn();
 const mockCancel = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../lib/prompts", () => ({
   spinner: vi.fn(() => mockSpinnerObj),
   note: mockNote,
   cancel: mockCancel,

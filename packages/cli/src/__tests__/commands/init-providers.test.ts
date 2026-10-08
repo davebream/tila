@@ -83,7 +83,7 @@ vi.mock("../../lib/mcp-targets", () => ({
   runMcpInitPrompt: (...args: unknown[]) => mockRunMcpInitPrompt(...args),
 }));
 
-// Mock @clack/prompts
+// Mock ../../lib/prompts
 const mockPassword = vi.fn();
 const mockIsCancel = vi.fn((_v?: unknown) => false);
 const mockLogInfo = vi.fn();
@@ -91,7 +91,7 @@ const mockLogWarn = vi.fn();
 const mockLogError = vi.fn();
 const mockLogSuccess = vi.fn();
 const mockNote = vi.fn();
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   password: (arg: unknown) => mockPassword(arg),
   isCancel: (arg: unknown) => mockIsCancel(arg),
   note: (msg: unknown, title?: unknown) => mockNote(msg, title),
@@ -352,11 +352,6 @@ describe("init provider selection", () => {
 });
 
 describe("doctor oidc-generic issuer-trust hint", () => {
-  it("is covered by the doctor command — see doctor.test.ts for the full check suite", () => {
-    // The oidc-generic issuer-trust hint in doctor.ts is a lightweight addCheck()
-    // call for instances whose credential_provider.kind === "oidc-generic".
-    // Full behavioral test lives in the doctor test suite.
-    // This stub documents the expected behavior for the builder.
-    expect(true).toBe(true);
-  });
+  // Full behavioral coverage lives in doctor.test.ts.
+  it.todo("doctor oidc-generic issuer-trust hint (covered by doctor.test.ts)");
 });

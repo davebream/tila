@@ -346,15 +346,24 @@ describe("compactEntity — claim lookup no regression", () => {
         created_by: "test",
       },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // Acquire under type:id (canonical form — what compactEntity matches)
     const result = acquire(
       db,
       "task:ent-compact-1",
-      "machine-a",
-      "user-a",
+      {
+        principalId: "test:user-a",
+        participantId: "machine-a",
+        environment: { machine: "machine-a" },
+        actor: "machine-a/user-a",
+      },
       "exclusive",
       60_000,
     );
@@ -363,17 +372,17 @@ describe("compactEntity — claim lookup no regression", () => {
     // List all active claims (simulates what compactEntity's caller does)
     const allClaims = rawDb
       .prepare(
-        "SELECT resource, machine, user FROM claims WHERE expires_at > ?",
+        "SELECT resource, principal_id, participant_id FROM claims WHERE expires_at > ?",
       )
       .all(Date.now() - 1_000) as {
       resource: string;
-      machine: string;
-      user: string;
+      principal_id: string;
+      participant_id: string;
     }[];
 
     const stats = getCompactEntityStats(db, [entity.id]);
     const compact = compactEntity(db, entity, allClaims, stats);
-    expect(compact.claimed_by).toBe("machine-a/user-a");
+    expect(compact.claimed_by).toBe("machine-a");
   });
 
   it("claimed_by is null when no active claim exists", () => {
@@ -388,7 +397,12 @@ describe("compactEntity — claim lookup no regression", () => {
         created_by: "test",
       },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     const stats = getCompactEntityStats(db, [entity.id]);
@@ -414,15 +428,24 @@ describe("entity-ops update/archive with bare-id acquire", () => {
         created_by: "test",
       },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // CLI-style: acquire with bare id
     const result = acquire(
       db,
       "ent-update-bare",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
     );
@@ -469,11 +492,27 @@ describe("acquire — entity resource write-path canonicalization", () => {
       db,
       { id: "ent-wr-1", type: "task", data: {}, created_by: "test" },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // Bare-id acquire (CLI / legacy style)
-    const result = acquire(db, "ent-wr-1", "m", "u", "exclusive", 60_000);
+    const result = acquire(
+      db,
+      "ent-wr-1",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
+      "exclusive",
+      60_000,
+    );
     expect(result.acquired).toBe(true);
 
     // Fence row should be stored under canonical key, not bare id
@@ -513,16 +552,37 @@ describe("acquire — entity resource write-path canonicalization", () => {
         created_by: "test",
       },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // Bare-id acquire
-    const result = acquire(db, "ent-nodiv", "m", "u", "exclusive", 60_000);
+    const result = acquire(
+      db,
+      "ent-nodiv",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
+      "exclusive",
+      60_000,
+    );
     expect(result.acquired).toBe(true);
 
     // update() uses bare id → assertResourceFence → canonical typed row
     expect(() =>
-      update(db, "ent-nodiv", { name: "y" }, result.fence, { actor: "test" }),
+      update(db, "ent-nodiv", { name: "y" }, result.fence, {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      }),
     ).not.toThrow();
 
     // After the whole round-trip exactly ONE fence row must exist
@@ -542,15 +602,24 @@ describe("acquire — entity resource write-path canonicalization", () => {
       db,
       { id: "ent-cbr", type: "task", data: {}, created_by: "test" },
       1,
-      { actor: "test" },
+      {
+        principalId: "test:test",
+        participantId: "test",
+        environment: {},
+        actor: "test",
+      },
     );
 
     // Bare-id acquire (what CLI remote.ts does)
     const result = acquire(
       db,
       "ent-cbr",
-      "machine-x",
-      "user-x",
+      {
+        principalId: "test:user-x",
+        participantId: "machine-x",
+        environment: { machine: "machine-x" },
+        actor: "machine-x/user-x",
+      },
       "exclusive",
       60_000,
     );
@@ -559,17 +628,17 @@ describe("acquire — entity resource write-path canonicalization", () => {
     // compactEntity matches claims by `${type}:${id}` — must find the canonical claim
     const allClaims = rawDb
       .prepare(
-        "SELECT resource, machine, user FROM claims WHERE expires_at > ?",
+        "SELECT resource, principal_id, participant_id FROM claims WHERE expires_at > ?",
       )
       .all(Date.now() - 1_000) as {
       resource: string;
-      machine: string;
-      user: string;
+      principal_id: string;
+      participant_id: string;
     }[];
 
     const stats = getCompactEntityStats(db, [entity.id]);
     const compact = compactEntity(db, entity, allClaims, stats);
-    expect(compact.claimed_by).toBe("machine-x/user-x");
+    expect(compact.claimed_by).toBe("machine-x");
   });
 
   it("record resource acquire is NOT canonicalized", () => {
@@ -578,8 +647,12 @@ describe("acquire — entity resource write-path canonicalization", () => {
     const result = acquire(
       db,
       "record:deploy-config/prod",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
     );
@@ -601,8 +674,12 @@ describe("acquire — entity resource write-path canonicalization", () => {
     const result = acquire(
       db,
       "pipeline:build-42",
-      "m",
-      "u",
+      {
+        principalId: "test:u",
+        participantId: "m",
+        environment: { machine: "m" },
+        actor: "m/u",
+      },
       "exclusive",
       60_000,
     );
