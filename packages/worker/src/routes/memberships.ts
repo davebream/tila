@@ -1,4 +1,4 @@
-import { ProjectMembershipStore } from "@tila/backend-d1";
+import { ProjectMembershipStore, RepoAllowlistStore } from "@tila/backend-d1";
 import {
   MembershipGrantRequestSchema,
   MembershipPolicyRequestSchema,
@@ -18,6 +18,7 @@ memberships.use("/membership-policy", requireProjectOwner, stepUpGuard);
 memberships.use("/memberships", requireProjectOwner, stepUpGuard);
 memberships.use("/memberships/*", requireProjectOwner, stepUpGuard);
 memberships.use("/membership-events", requireProjectOwner);
+memberships.use("/membership-repos", requireProjectOwner);
 
 function actor(c: import("hono").Context<AppEnv>): string {
   return c.get("principalId") ?? "bootstrap:unknown";
@@ -240,5 +241,26 @@ memberships.get("/membership-events", async (c) => {
     })),
     next_cursor:
       events.length === limitRaw ? (events.at(-1)?.occurred_at ?? null) : null,
+  });
+});
+
+// GET /membership-repos — linked repositories and their mirrored-membership
+// policy, so the administration UI can show the source policy and role cap of
+// a github-mirrored or hybrid project (#102). Mirrored members themselves are
+// evaluated per request and are not materialized, so they cannot be listed.
+memberships.get("/membership-repos", async (c) => {
+  const policies = await new RepoAllowlistStore(c.env.DB).listAccessPolicies(
+    c.get("projectId"),
+  );
+  return c.json({
+    ok: true,
+    repos: policies.map(({ repo, policy }) => ({
+      github_host: repo.github_host,
+      github_repo_id: repo.github_repo_id,
+      owner: repo.github_owner,
+      repo: repo.github_repo,
+      membership_enabled: policy.membership_enabled,
+      membership_role_cap: policy.membership_role_cap,
+    })),
   });
 });

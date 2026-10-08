@@ -160,6 +160,40 @@ describe("RepoAllowlistStore", () => {
   });
 
   describe("human access policy", () => {
+    it("lists every enabled repository policy and skips malformed rows", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      await store.register({
+        ...BASE_PARAMS,
+        githubRepo: "gadgets",
+        githubRepoId: 67890,
+        membershipEnabled: true,
+        membershipRoleCap: "maintainer",
+      });
+      await store.register({
+        ...BASE_PARAMS,
+        githubRepo: "broken",
+        githubRepoId: 11111,
+      });
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET min_read_permission = 'admin', min_write_permission = 'write' WHERE github_repo_id = 11111",
+        )
+        .run();
+
+      const listed = await store.listAccessPolicies("proj-1");
+      expect(listed.map((entry) => entry.repo.github_repo_id).sort()).toEqual([
+        12345, 67890,
+      ]);
+      const gadgets = listed.find(
+        (entry) => entry.repo.github_repo_id === 67890,
+      );
+      expect(gadgets?.repo.github_owner).toBe("acme");
+      expect(gadgets?.policy.membership_enabled).toBe(true);
+      expect(gadgets?.policy.membership_role_cap).toBe("maintainer");
+      await expect(store.listAccessPolicies("other")).resolves.toEqual([]);
+    });
+
     it("reads and atomically replaces a valid policy", async () => {
       const { store } = createTestStore();
       await store.register(BASE_PARAMS);
