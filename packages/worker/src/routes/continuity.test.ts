@@ -46,6 +46,23 @@ function setup(response: unknown = { ok: true }, scopes = "full") {
   return { request, forwarded, app };
 }
 describe("continuity authorization and forwarding", () => {
+  it("forwards shutdown classification without changing the handoff request", async () => {
+    const { request, forwarded } = setup();
+    const handoff = {
+      id: crypto.randomUUID(),
+      kind: "shutdown",
+      summary: "Session ended",
+      based_on_seq: 0,
+    };
+    const response = await request("/handoffs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(handoff),
+    });
+    expect(response.status).toBe(200);
+    expect(await forwarded[0].json()).toMatchObject({ input: handoff });
+  });
+
   it("uses authenticated identity, never query-supplied identity, and disables caching", async () => {
     const { request, forwarded } = setup({
       ok: true,

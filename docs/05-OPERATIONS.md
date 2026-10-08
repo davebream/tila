@@ -1349,6 +1349,23 @@ The continuity HTTP surface is project-scoped: `GET /journal/replay`,
 principal and `X-Tila-Participant-Id`. Reads require project read access; cursor and
 handoff writes require write access. These responses bypass shared caches.
 
+Handoffs accept an optional `kind`: `work` for authored context or `shutdown` for
+automatic coordination snapshots. Omission is treated as work during selection
+and remains omitted in storage and retry requests. Re-entry selects the newest
+work handoff in the participant or requested resource scope, falling back to the
+newest shutdown snapshot if no work handoff exists (or null if there are none).
+An explicit `handoff_id` selects that exact snapshot; listing still returns all
+handoffs newest first. Saved handoffs and their historical claims remain immutable.
+
+Only explicitly marked shutdown snapshots are skipped in favor of work. Older
+unmarked shutdown snapshots retain their existing selection behavior; no legacy
+message detection, record rewrite, or database migration is performed. Deploy
+backend support before updating lifecycle clients: older servers reject `kind`
+under strict request validation. Upgrade SDK/MCP readers before enabling new
+lifecycle writers too: older strict response schemas reject marked handoffs.
+Write failures remain visible as retryable, degraded shutdowns; clients do not
+drop the marker to bypass validation.
+
 Re-entry reads database state and the replay boundary in one transaction, then
 streams immutable archives. New archive objects retain canonical principal,
 participant, and environment fields, carry sequence-range metadata, and use keys
@@ -1467,12 +1484,13 @@ Codex subagent MCP calls use their parent session's identity. MCP resources and
 prompts retain their existing read-only connection identity.
 
 Startup/resume supplies a bounded re-entry page containing summary, changes,
-active claims, pending signals, and the latest handoff. Later hooks confirm the
-observed cursor. Presence updates run every 15 seconds while client liveness is
+active claims, pending signals, and the latest work handoff (or latest shutdown
+snapshot when no work handoff exists). Later hooks confirm the observed cursor.
+Presence updates run every 15 seconds while client liveness is
 verified. Claim leases are not automatically renewed.
 
-A clean SessionEnd queues a handoff containing coordination facts only, then
-acknowledges observed journal events and releases eligible claims. Owner claims
+A clean SessionEnd queues a `kind: "shutdown"` handoff containing coordination
+facts only, then acknowledges observed journal events and releases eligible claims. Owner claims
 are preserved; release always uses the captured fencing token. Cleanup can finish
 after the client exits. A crash sends no fabricated handoff or acknowledgment and
 lets leases expire. In default Codex mode, closing a frontend connection can leave

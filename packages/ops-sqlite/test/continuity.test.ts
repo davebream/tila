@@ -192,6 +192,75 @@ describe("journal continuity", () => {
 });
 
 describe("handoffs and re-entry", () => {
+  it("prefers the newest work handoff across shutdown pages within the selected scope", () => {
+    expect(continuity.reentrySnapshot(fixture.db, identity).handoff).toBeNull();
+    create();
+    const work = create({
+      kind: "work",
+      references: [{ type: "task", id: "shared" }],
+    });
+    let newest = work;
+    for (let i = 0; i < 105; i++) {
+      newest = create({
+        kind: "shutdown",
+        references: [{ type: "task", id: "shared" }],
+      });
+    }
+    expect(continuity.reentrySnapshot(fixture.db, identity).handoff).toEqual(
+      work,
+    );
+    expect(continuity.reentrySnapshot(fixture.db, other).handoff).toBeNull();
+    expect(
+      continuity.reentrySnapshot(fixture.db, {
+        ...identity,
+        principal_id: "elsewhere",
+      }).handoff,
+    ).toBeNull();
+    expect(
+      continuity.reentrySnapshot(fixture.db, other, { resource: "task:shared" })
+        .handoff,
+    ).toEqual(work);
+    expect(
+      continuity.reentrySnapshot(fixture.db, identity, {
+        resource: "task:missing",
+      }).handoff,
+    ).toBeNull();
+    expect(
+      continuity.reentrySnapshot(fixture.db, identity, {
+        handoff_id: newest.id,
+      }).handoff,
+    ).toEqual(newest);
+    expect(
+      continuity.listHandoffs(fixture.db, identity, { limit: 1 }).handoffs,
+    ).toEqual([newest]);
+    expect(continuity.getHandoff(fixture.db, work.id)).toEqual(work);
+  });
+
+  it("falls back to the newest shutdown snapshot after exhausting all pages", () => {
+    let newest = create({ kind: "shutdown" });
+    for (let i = 0; i < 100; i++) newest = create({ kind: "shutdown" });
+    expect(continuity.reentrySnapshot(fixture.db, identity).handoff).toEqual(
+      newest,
+    );
+  });
+
+  it("treats unmarked handoffs as work without guessing from legacy shutdown content", () => {
+    create({ kind: "work" });
+    const legacy = create({
+      summary: "codex session ended; coordination snapshot only.",
+      current_state: {
+        environment: {},
+        session_id: "legacy",
+        cleanup: "requested",
+      },
+    });
+    create({ kind: "shutdown" });
+    expect(continuity.reentrySnapshot(fixture.db, identity).handoff).toEqual(
+      legacy,
+    );
+    expect(legacy).not.toHaveProperty("kind");
+  });
+
   it("stores immutable retry-safe snapshots and a single journal event", () => {
     const input = {
       id: crypto.randomUUID(),
@@ -205,6 +274,11 @@ describe("handoffs and re-entry", () => {
       current_state: { a: 1, b: 2 },
     });
     expect(retry).toEqual(first);
+    expect(retry).not.toHaveProperty("kind");
+    const storedRequest = fixture.rawDb
+      .prepare("SELECT request_json FROM handoffs WHERE id = ?")
+      .get(input.id) as { request_json: string };
+    expect(JSON.parse(storedRequest.request_json)).not.toHaveProperty("kind");
     expect(continuity.highSequence(fixture.db)).toBe(1);
     expect(() => continuity.createHandoff(fixture.db, other, input)).toThrow(
       ContinuityError,
@@ -218,6 +292,27 @@ describe("handoffs and re-entry", () => {
     const replacement = create({ supersedes_id: first.id });
     expect(continuity.getHandoff(fixture.db, first.id)).toEqual(first);
     expect(replacement.supersedes_id).toBe(first.id);
+    expect(() =>
+      continuity.createHandoff(fixture.db, identity, {
+        ...input,
+        kind: "work",
+      }),
+    ).toThrow(ContinuityError);
+    const marked = {
+      ...input,
+      id: crypto.randomUUID(),
+      kind: "shutdown" as const,
+    };
+    const shutdown = continuity.createHandoff(fixture.db, identity, marked);
+    expect(continuity.createHandoff(fixture.db, identity, marked)).toEqual(
+      shutdown,
+    );
+    expect(() =>
+      continuity.createHandoff(fixture.db, identity, {
+        ...marked,
+        kind: "work",
+      }),
+    ).toThrow(ContinuityError);
   });
 
   it("selects across participants only with ID or resource, and paginates newest first", () => {
