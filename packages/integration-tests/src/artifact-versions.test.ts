@@ -1,4 +1,16 @@
+import { randomUUID } from "node:crypto";
+import { access, readFile, unlink, writeFile } from "node:fs/promises";
+import {
+  type ArtifactRevision,
+  CREDENTIAL_PRESETS,
+  type TokenIssueResponse,
+} from "@tila/schemas";
 import { Hono } from "hono";
+import {
+  TilaClient,
+  createArtifactMethods,
+  createClaimMethods,
+} from "tila-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createProjectRouter } from "../../backend-do/src/project-do-router";
 import { drainArtifactLifecycle } from "../../backend-do/src/routes/artifact-lifecycle-routes";
@@ -8,6 +20,9 @@ import {
   type TestDb,
   createTestDb,
 } from "../../backend-do/test/helpers/create-test-db";
+import { createCloudflareClient } from "../../cli/src/lib/cloudflare-client";
+import { loadInfraConfig } from "../../cli/src/lib/infra-config";
+import { hashToken } from "../../worker/src/lib/hash-token";
 import { errorHandler } from "../../worker/src/middleware/error";
 import { artifacts } from "../../worker/src/routes/artifacts";
 import type { Env, HonoVariables } from "../../worker/src/types";
@@ -790,3 +805,511 @@ describe("versioned deletion through Worker and DO", () => {
     ).toBe(1);
   });
 });
+
+// Never enable remote writes merely because another live suite has credentials.
+describe.skipIf(process.env.TILA_RUN_LIVE_ARTIFACT_TESTS !== "1")(
+  "live artifact revision verification",
+  () => {
+    it("verifies a new disposable project and confirms cleanup", async () => {
+      const baseUrl = process.env.TILA_BASE_URL;
+      if (!baseUrl) throw new Error("Live verification requires TILA_BASE_URL");
+      // These Node CLI helpers import interactive modules. Runtime loading
+      // keeps Workers' global fetch types out of their Node typecheck.
+      const resourcesPath = new URL(
+        "../../cli/src/lib/cloudflare-resources.ts",
+        import.meta.url,
+      ).href;
+      const { insertTokenAndProject, queryD1 } = (await import(
+        resourcesPath
+      )) as {
+        insertTokenAndProject: (opts: {
+          client: ReturnType<typeof createCloudflareClient>;
+          accountId: string;
+          databaseId: string;
+          tokenHash: string;
+          slug: string;
+        }) => Promise<void>;
+        queryD1: <T = Record<string, unknown>>(
+          client: ReturnType<typeof createCloudflareClient>,
+          accountId: string,
+          databaseId: string,
+          sql: string,
+          params?: string[],
+        ) => Promise<T[]>;
+      };
+      const provisioningPath = new URL(
+        "../../cli/src/lib/provisioning.ts",
+        import.meta.url,
+      ).href;
+      const { generateRawToken, resolveCfApiToken, tilaHome } = (await import(
+        provisioningPath
+      )) as {
+        generateRawToken: () => string;
+        resolveCfApiToken: () => string | null;
+        tilaHome: () => string;
+      };
+      const teardownPath = new URL(
+        "../../cli/src/lib/teardown.ts",
+        import.meta.url,
+      ).href;
+      const { cleanD1NonTokenRecords, deleteD1TokenRecord } = (await import(
+        teardownPath
+      )) as {
+        cleanD1NonTokenRecords: (
+          client: ReturnType<typeof createCloudflareClient>,
+          accountId: string,
+          databaseId: string,
+          slug: string,
+        ) => Promise<{ ok: boolean }>;
+        deleteD1TokenRecord: (
+          client: ReturnType<typeof createCloudflareClient>,
+          accountId: string,
+          databaseId: string,
+          slug: string,
+        ) => Promise<{ ok: boolean }>;
+      };
+      const infraConfig = loadInfraConfig(tilaHome());
+      if (
+        new URL(baseUrl).origin !== new URL(infraConfig.worker_url ?? "").origin
+      )
+        throw new Error("TILA_BASE_URL must match the configured Worker");
+      const cfToken = resolveCfApiToken();
+      if (!cfToken)
+        throw new Error("Live verification requires CLOUDFLARE_API_TOKEN");
+      const cf = createCloudflareClient(cfToken);
+      const accountId = infraConfig.account_id;
+      const databaseId = infraConfig.d1_database_id;
+      const projectId = `artifact-verify-${randomUUID()}`;
+      const participantId = `verify-${randomUUID()}`;
+      const token = generateRawToken();
+      const secrets = [token, cfToken];
+      const tokenHash = await hashToken(token, process.env.TILA_HASH_PEPPER);
+      const receipt = { projectId, tokenHash, startedAt: Date.now() };
+      const client = new TilaClient({
+        baseUrl,
+        token,
+        participantId,
+        timeoutMs: 15_000,
+      });
+      const remoteArtifacts = createArtifactMethods(client, projectId);
+      const remoteClaims = createClaimMethods(client, projectId);
+      const projectPath = `/projects/${projectId}`;
+      const registry = () =>
+        queryD1<{
+          project_id: string;
+          display_name: string;
+          created_at: number;
+          created_by: string;
+          cloudflare_account_id: string;
+        }>(
+          cf,
+          accountId,
+          databaseId,
+          "SELECT project_id, display_name, created_at, created_by, cloudflare_account_id FROM _projects WHERE project_id = ?",
+          [projectId],
+        );
+      expect(await registry(), "Refuse to reuse an existing project").toEqual(
+        [],
+      );
+      const lifecycle = await cf.r2.buckets.lifecycle.get(
+        infraConfig.r2_bucket_name ?? "tila-artifacts",
+        { account_id: accountId },
+      );
+      const expiration = (lifecycle.rules ?? []).filter(
+        (rule) => rule.enabled && rule.deleteObjectsTransition,
+      );
+      expect(expiration.length, "Missing legacy expiration backstop").toBe(1);
+      expect(expiration[0]).toMatchObject({
+        conditions: { prefix: "produced/" },
+        deleteObjectsTransition: {
+          condition: { type: "Age", maxAge: 365 * 86400 },
+        },
+      });
+
+      let provisionAttempted = false;
+      let projectTouched = false;
+      let uiReadyWritten = false;
+      const readyFile = process.env.TILA_LIVE_ARTIFACT_UI_READY_FILE;
+      const sanitizedError = (error: unknown) =>
+        new Error(
+          secrets.reduce(
+            (message, secret) => message.replaceAll(secret, "[redacted]"),
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
+      async function cleanupLiveProject() {
+        try {
+          if (provisionAttempted) {
+            // Independent guard: compare the in-memory creation receipt with
+            // fresh deployed registry state before any destructive action.
+            const rows = await registry();
+            if (rows.length > 0) {
+              expect(rows).toHaveLength(1);
+              expect(rows[0]).toMatchObject({
+                project_id: receipt.projectId,
+                display_name: receipt.projectId,
+                created_by: "tila-init",
+                cloudflare_account_id: accountId,
+              });
+              expect(Number(rows[0].created_at)).toBeGreaterThanOrEqual(
+                Math.floor(receipt.startedAt / 1000),
+              );
+              if (projectTouched) {
+                const wipe = await client.post<{
+                  doWiped: boolean;
+                  r2Failed: number;
+                  r2Kept: number;
+                  r2GcSkipped: boolean;
+                }>(
+                  `${projectPath}/admin/destroy`,
+                  {},
+                  { idempotencyKey: "cleanup" },
+                );
+                expect(wipe).toMatchObject({
+                  doWiped: true,
+                  r2Failed: 0,
+                  r2Kept: 0,
+                  r2GcSkipped: false,
+                });
+                const counts = await client.get<{
+                  counts: { domain: Record<string, number> };
+                }>(`${projectPath}/admin/store-counts`);
+                expect(
+                  Object.values(counts.counts.domain).every((n) => n === 0),
+                ).toBe(true);
+              }
+              const cleanup = await cleanD1NonTokenRecords(
+                cf,
+                accountId,
+                databaseId,
+                projectId,
+              );
+              if (!cleanup.ok)
+                throw new Error(`D1 cleanup failed for ${projectId}`);
+              // The optional browser credential uses canonical service membership.
+              // These newer tables are outside the legacy teardown helper.
+              await queryD1(
+                cf,
+                accountId,
+                databaseId,
+                "DELETE FROM _credential_versions WHERE credential_id IN (SELECT credential_id FROM _credentials WHERE project_id = ?)",
+                [projectId],
+              );
+              for (const table of [
+                "_credentials",
+                "_credential_events",
+                "_service_accounts",
+                "_project_memberships",
+                "_membership_events",
+              ]) {
+                await queryD1(
+                  cf,
+                  accountId,
+                  databaseId,
+                  `DELETE FROM ${table} WHERE project_id = ?`,
+                  [projectId],
+                );
+                expect(
+                  await queryD1(
+                    cf,
+                    accountId,
+                    databaseId,
+                    `SELECT count(*) AS remaining FROM ${table} WHERE project_id = ?`,
+                    [projectId],
+                  ),
+                ).toEqual([{ remaining: 0 }]);
+              }
+              const registrationCleanup = await deleteD1TokenRecord(
+                cf,
+                accountId,
+                databaseId,
+                projectId,
+              );
+              if (!registrationCleanup.ok)
+                throw new Error(
+                  `Token/registration cleanup failed for ${projectId}`,
+                );
+              expect(await registry()).toEqual([]);
+              expect(
+                await queryD1(
+                  cf,
+                  accountId,
+                  databaseId,
+                  "SELECT token_hash FROM _tokens WHERE project_id = ? OR token_hash = ?",
+                  [projectId, receipt.tokenHash],
+                ),
+              ).toEqual([]);
+              console.info(`Live artifact cleanup confirmed: ${projectId}`);
+            }
+          }
+        } catch (error) {
+          throw new Error(
+            `Live cleanup incomplete for ${projectId}: ${sanitizedError(error).message}. Inspect its project resources and credentials before retrying`,
+          );
+        } finally {
+          if (uiReadyWritten && readyFile) {
+            await unlink(readyFile);
+            await unlink(`${readyFile}.done`).catch(
+              (error: NodeJS.ErrnoException) => {
+                if (error.code !== "ENOENT") throw error;
+              },
+            );
+          }
+        }
+      }
+      const failures: Error[] = [];
+      try {
+        provisionAttempted = true;
+        await insertTokenAndProject({
+          client: cf,
+          accountId,
+          databaseId,
+          tokenHash,
+          slug: projectId,
+        });
+        // Authenticate against D1 before accessing any project DO. A pepper
+        // mismatch therefore leaves no blob/DO state to clean up.
+        await client.get("/api/tokens");
+        projectTouched = true;
+        await client.post(
+          `${projectPath}/schema`,
+          {
+            definition:
+              'schema_version = 1\n[artifacts.report]\nmime_types = ["text/plain"]\nretention_days = 0\n',
+          },
+          { idempotencyKey: "schema" },
+        );
+        const claim = await remoteClaims.acquire(
+          "artifact:report",
+          "exclusive",
+          600_000,
+          { idempotency_key: "lineage-claim" },
+        );
+        const writeOptions = {
+          kind: "report",
+          mimeType: "text/plain",
+          lineageId: "report",
+          lineageFence: claim.fence,
+          tags: ["verification", "first"],
+        };
+        const firstText = `${projectId}: first revision`;
+        const secondText = `${projectId}: second revision`;
+        const first = await remoteArtifacts.writeText(firstText, {
+          ...writeOptions,
+          idempotencyKey: "first",
+        });
+        const second = await remoteArtifacts.writeText(secondText, {
+          ...writeOptions,
+          tags: ["second"],
+          idempotencyKey: "second",
+        });
+        const restored = await remoteArtifacts.restore(first.key, {
+          fence: claim.fence,
+          idempotencyKey: "restore",
+        });
+        expect(restored.pointer.revision).toBe(3);
+        expect(restored.restored_from).toBe(first.key);
+        expect(restored.key).not.toBe(first.key);
+        expect(restored.pointer.tags).toEqual(writeOptions.tags);
+        expect(
+          await remoteArtifacts.restore(first.key, {
+            fence: claim.fence,
+            idempotencyKey: "restore",
+          }),
+        ).toEqual(restored);
+        const identical = await remoteArtifacts.restore(restored.key, {
+          fence: claim.fence,
+          tags: [],
+          idempotencyKey: "identical-restore",
+        });
+        expect(identical.pointer.revision).toBe(4);
+        expect(identical.pointer.sha256).toBe(restored.pointer.sha256);
+        expect(identical.pointer.tags).toEqual([]);
+        const firstPage = await remoteArtifacts.history(first.key, {
+          limit: 1,
+        });
+        expect(
+          firstPage.items.map((p: ArtifactRevision) => p.revision),
+        ).toEqual([4]);
+        expect(firstPage.meta.total).toBe(4);
+        expect(firstPage.meta.next_cursor).toBeTypeOf("string");
+        const nextPage = await remoteArtifacts.history(first.key, {
+          cursor: firstPage.meta.next_cursor ?? undefined,
+        });
+        expect(nextPage.items.map((p: ArtifactRevision) => p.revision)).toEqual(
+          [3, 2, 1],
+        );
+        expect((await remoteArtifacts.meta(restored.key)).pointer).toEqual(
+          restored.pointer,
+        );
+        expect((await remoteArtifacts.readText(restored.key)).content).toBe(
+          firstText,
+        );
+        expect(
+          await new Response(
+            (await remoteArtifacts.download(first.key)).body,
+          ).text(),
+        ).toBe(firstText);
+        expect(
+          await new Response(
+            (await remoteArtifacts.download(second.key)).body,
+          ).text(),
+        ).toBe(secondText);
+        expect(
+          await new Response(
+            (await remoteArtifacts.download(identical.key)).body,
+          ).text(),
+        ).toBe(firstText);
+        await client.post(
+          `${projectPath}/admin/restart`,
+          {},
+          { idempotencyKey: "restart" },
+        );
+        expect((await remoteArtifacts.history(first.key)).meta.total).toBe(4);
+        expect((await remoteArtifacts.readText(first.key)).content).toBe(
+          firstText,
+        );
+        // Start at the private versioned prefix. Scanning legacy bucket-wide
+        // prefixes could import another project's pointers into this fixture.
+        for (let pass = 0; pass < 2; pass++) {
+          let cursor: string | undefined = Buffer.from(
+            JSON.stringify({ prefix: "versioned" }),
+          ).toString("base64url");
+          for (let page = 0; ; page++) {
+            if (page >= 100)
+              throw new Error("Live reconciliation exceeded 100 pages");
+            const result = await client.post<{
+              nextCursor?: string | null;
+              repairErrors: number;
+            }>(
+              `${projectPath}/artifacts/reconcile`,
+              {},
+              {
+                query: { apply: "true", limit: "1000", cursor },
+                idempotencyKey: `reconcile-${pass}-${page}`,
+              },
+            );
+            expect(result.repairErrors).toBe(0);
+            cursor = result.nextCursor ?? undefined;
+            if (!cursor) break;
+          }
+          expect((await remoteArtifacts.history(first.key)).meta.total).toBe(4);
+          expect(
+            await new Response(
+              (await remoteArtifacts.download(second.key)).body,
+            ).text(),
+          ).toBe(secondText);
+        }
+
+        // Optional attended browser handoff. The caller chooses the private
+        // output path; no token is printed. Exact project acknowledgement is
+        // required, and failure/timeout still executes cleanup below.
+        if (readyFile) {
+          const service = await client.post<{
+            service_account: { principal_id: string };
+          }>(
+            `${projectPath}/service-accounts`,
+            {
+              name: "browser-verification",
+              display_name: "Artifact verification",
+              role: "viewer",
+            },
+            { idempotencyKey: "browser-service" },
+          );
+          const browserCredential = await client.post<TokenIssueResponse>(
+            "/api/tokens",
+            {
+              name: "browser-verification",
+              principal_id: service.service_account.principal_id,
+              policy: CREDENTIAL_PRESETS["read-only"],
+              expires_at: Math.floor(Date.now() / 1000) + 600,
+            },
+            { idempotencyKey: "browser-token" },
+          );
+          secrets.push(browserCredential.token);
+          await access(`${readyFile}.done`).then(
+            () => {
+              throw new Error("Refuse an existing UI acknowledgement");
+            },
+            (error: NodeJS.ErrnoException) => {
+              if (error.code !== "ENOENT") throw error;
+            },
+          );
+          await writeFile(
+            readyFile,
+            JSON.stringify({
+              projectId,
+              token: browserCredential.token,
+              firstKey: first.key,
+              latestKey: identical.key,
+              url: `${baseUrl}/p/${projectId}/artifacts/${encodeURIComponent(identical.key)}`,
+            }),
+            { mode: 0o600, flag: "wx" },
+          );
+          uiReadyWritten = true;
+          console.info(
+            `Live artifact browser verification ready: ${projectId}`,
+          );
+          const deadline = Date.now() + 180_000;
+          let acknowledged = false;
+          while (Date.now() < deadline) {
+            try {
+              acknowledged =
+                (await readFile(`${readyFile}.done`, "utf8")).trim() ===
+                projectId;
+              if (acknowledged) break;
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                throw error;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+          expect(
+            acknowledged,
+            "Browser verification was not acknowledged",
+          ).toBe(true);
+        }
+
+        await remoteArtifacts.delete(identical.key, {
+          fence: claim.fence,
+          idempotencyKey: "delete-head",
+        });
+        await expect(
+          remoteArtifacts.download(identical.key),
+          "Deleted revision download must return 410",
+        ).rejects.toMatchObject({ status: 410 });
+        await expect(
+          remoteArtifacts.restore(identical.key, {
+            fence: claim.fence,
+            idempotencyKey: "restore-deleted",
+          }),
+          "Deleted revision restore must return 410",
+        ).rejects.toMatchObject({ status: 410 });
+        const deleted = (await remoteArtifacts.meta(identical.key)).pointer;
+        expect(deleted.tombstoned).toBe(1);
+        expect((await remoteArtifacts.history(identical.key)).meta.total).toBe(
+          4,
+        );
+        expect((await remoteArtifacts.readText(restored.key)).content).toBe(
+          firstText,
+        );
+        expect((await remoteArtifacts.meta(second.key)).pointer.tags).toEqual([
+          "second",
+        ]);
+        console.info(`Live artifact API verification passed: ${projectId}`);
+      } catch (error) {
+        failures.push(sanitizedError(error));
+      }
+      try {
+        await cleanupLiveProject();
+      } catch (error) {
+        failures.push(sanitizedError(error));
+      }
+      if (failures.length)
+        throw new AggregateError(
+          failures,
+          `Live verification failed for ${projectId}: ${failures.map((error) => error.message).join("; ")}`,
+        );
+    }, 300_000);
+  },
+);
