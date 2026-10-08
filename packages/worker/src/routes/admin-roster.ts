@@ -1,6 +1,6 @@
 import { ProjectMembershipStore } from "@tila/backend-d1";
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, ExecutionContext } from "hono";
 import { applyAdminGrant } from "../lib/admin-grant";
 import {
   type AdminRosterOutcome,

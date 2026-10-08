@@ -4,7 +4,7 @@
  * See contracts.md section 3 and decisions.md section 14.
  */
 
-import type { Context } from "hono";
+import type { Context, ExecutionContext } from "hono";
 import type { Env, HonoVariables } from "../types";
 
 type AppContext = Context<{ Bindings: Env; Variables: HonoVariables }>;
