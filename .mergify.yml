@@ -4,7 +4,11 @@ merge_queue:
 
 queue_rules:
   - name: default
-    batch_size: 1
+    # Validate up to three PRs together, with only one batch running at a time.
+    # GitHub must require ci without requiring each original branch to be current:
+    # Mergify validates the combined changes against main on a temporary batch PR.
+    batch_size: 3
+    batch_max_wait_time: 30 seconds
     merge_method: squash
     update_method: merge
     queue_conditions:
