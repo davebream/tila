@@ -9,7 +9,7 @@ Coordination primitives that prevent races.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** [v0.2.7 released](https://github.com/davebream/tila/releases/latest). APIs are stable enough to build against; expect breaking changes before v1.0.
+> **Status:** v0.3.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Upgrading from v0.2.x requires coordinated client/Worker updates; read the [upgrade notes](CHANGELOG.md#030---2026-10-08) before deploying.
 
 </div>
 
@@ -194,11 +194,11 @@ Distribution channels:
 
 | Method | Command | Status |
 |--------|---------|--------|
-| npm | `npm install -g tila-cli` | ✅ Available (v0.2.7) |
-| Direct download | Grab `tila-<platform>` (+ `checksums.txt`) from the [latest release](https://github.com/davebream/tila/releases/latest) | ✅ Available (v0.2.7) |
-| curl (Unix) | `curl -fsSL https://github.com/davebream/tila/releases/latest/download/install.sh \| sh` | ✅ Available (v0.2.7) |
-| PowerShell (Windows) | `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 \| iex` | ✅ Available (v0.2.7) |
-| Homebrew | `brew install davebream/tap/tila` | ✅ Available (v0.2.7) |
+| npm | `npm install -g tila-cli` | ✅ Available |
+| Direct download | Grab `tila-<platform>` (+ `checksums.txt`) from the [latest release](https://github.com/davebream/tila/releases/latest) | ✅ Available |
+| curl (Unix) | `curl -fsSL https://github.com/davebream/tila/releases/latest/download/install.sh \| sh` | ✅ Available |
+| PowerShell (Windows) | `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 \| iex` | ✅ Available |
+| Homebrew | `brew install davebream/tap/tila` | ✅ Available; tap updates are published separately |
 
 Update an installed CLI with `tila update`, or preview with `tila update --check`.
 The command uses the existing Homebrew/npm/pnpm/Bun installation, or verifies and

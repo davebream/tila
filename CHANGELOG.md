@@ -7,17 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
+### Upgrade notes
+
+- **Upgrade clients and the Worker together.** Mutations now require a stable `X-Tila-Participant-Id`; older clients without it receive `400 participant-required`. Credentials identify the principal, while participant IDs distinguish concurrent sessions.
+- **Plan a low-activity migration window.** SQLite migration 23 clears legacy active claims and presence while preserving fence counters and historical journal entries. Reacquire claims after upgrading. The corresponding D1 migration clears browser sessions without immutable principals, requiring users to sign in again. Migration 25 discards pending legacy signals, whose display-name targets cannot be authorized safely. See [deployment guidance](docs/05-OPERATIONS.md#v23-canonical-identity-migration-deploy-guidance).
+- **MCP defaults to six workflow tools.** Set `TILA_MCP_TOOLS=all` to retain the primitive tool catalog, or select existing named groups. Update integrations that assume every primitive tool is advertised by default.
+- **Signals use canonical recipients and participant deliveries.** Update integrations that address or acknowledge signals by display name to use principal and participant identities.
+- **HTTP error codes use kebab-case.** Update comparisons such as `UNAUTHORIZED` → `unauthorized`, `RATE_LIMITED` → `rate-limited`, `VALIDATION_ERROR` → `validation-error`, `PROJECT_NOT_FOUND` → `not-found`, and `INTERNAL_ERROR` → `internal`. SDK error constants and types now match the wire values; HTTP status codes and `error.retryable` remain unchanged.
+
 ### Fixed
 
 - **Auth:** Privilege-escalation-by-transport gap closed. A GitHub *write* user's browser cookie no longer satisfies `requirePermission("admin")`; the cookie session now carries a normalized permission tier (`read`/`write`/`admin`) derived from the user's actual GitHub role, and the admin gate maps it through the same `PERMISSION_LEVELS` table that the bearer path uses.
+- **Authorization:** Fail closed when protected GitHub permissions cannot be verified; enforce bounded repository roles, workload admission, OIDC policies, sender-constrained sessions, and project capability checks.
+- **Persistence:** Harden daily sweep, archive safety, artifact deletion and stale-fence rejection; deduplicate fence-mutating writes within DO transactions and prune expired idempotency records.
+- **CLI and SDK:** Apply trigger-safe D1 migrations before deployment, use the correct claim-state route, preserve authored session handoffs through shutdown, and verify artifact downloads and revision drawer navigation.
+- **Dependencies:** Update vulnerable dependencies and validate packed SDK/MCP native addons with SQLite 12 and 13 across supported platforms.
 
 ### Added
 
 - **API:** `GET /auth/session/status` now returns two additional fields: `permission` (effective permission tier: `read`, `write`, `admin`, or `none`) and `canManageTokens` (boolean, true only when the effective permission is `admin`). The change is additive and backward-compatible; existing consumers that only read `ok` and `projectId` are unaffected.
+- **Access management:** Canonical project memberships, admin roster management, scoped service accounts and capability credentials, workload token exchange, principal revocation, and dashboard membership/credential controls.
+- **Artifacts and recovery:** Opt-in artifact revision storage, history and restore APIs, navigable dashboard history, provenance and explicit review state, and complete project export/restore.
+- **Session continuity:** Durable journal cursors, immutable handoffs, native coding-session lifecycle integration, and grouped MCP workflows.
+- **CLI, SDK and diagnostics:** Installation-aware `tila update`, automation output/exit-code contracts, multi-instance credential resolution, refreshable SDK token providers, reproducible coordination benchmarks, and deployed request timing attribution.
 
 ### Changed
 
-- **BREAKING — HTTP error codes are now uniformly kebab-case.** Worker auth/admin-plane error responses previously emitted SCREAMING_SNAKE `error.code` values (e.g. `UNAUTHORIZED`, `RATE_LIMITED`, `VALIDATION_ERROR`, `PROJECT_NOT_FOUND`) while the resource plane used kebab-case. All codes are now kebab-case (`^[a-z][a-z0-9-]*$`), and four cross-plane duplicates are collapsed onto the existing kebab spelling: `VALIDATION_ERROR`→`validation-error`, `NOT_FOUND` and `PROJECT_NOT_FOUND`→`not-found`, `INTERNAL_ERROR`→`internal`. OIDC verification codes (`OIDC_*`) are likewise kebab-cased. Consumers branching on `error.code` must migrate to the kebab values (SDK typed error-code union tracked in #75). `error.retryable` and HTTP status codes are unchanged.
+- **Release validation:** Validate the exact main-reachable tag commit, test packed consumers and all eight binaries on native runners, verify provenance/SBOM attestations, and publish the tested payload without rebuilding. Manual Release dispatch remains a non-publishing rehearsal; Homebrew publication remains opt-in.
+- **CI:** Require local Cloudflare runtime coverage, retain verification diagnostics, and use dependency-aware Mergify queue validation.
 
 ## [0.2.7] - 2026-06-19
 
@@ -126,7 +145,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/davebream/tila/compare/v0.2.7...v0.3.0
 [0.2.7]: https://github.com/davebream/tila/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/davebream/tila/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/davebream/tila/compare/v0.2.4...v0.2.5
