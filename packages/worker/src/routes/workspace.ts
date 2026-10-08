@@ -23,7 +23,7 @@ import {
 } from "../lib/github-app";
 import { hashToken } from "../lib/hash-token";
 import {
-  evaluateRepositoryAccess,
+  resolveGithubAdmission,
   resolveRepositoryAccess,
 } from "../lib/repo-access-policy";
 import { invalidateSession } from "../lib/session-cache";
@@ -109,116 +109,112 @@ async function createSelectedSession(
   );
 }
 
+async function workspaceAccess(env: Env, projectId: string, login: string) {
+  if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY) return null;
+  const installation = await new GitHubAppConfigStore(env.DB).getInstallation(
+    projectId,
+  );
+  if (!installation) return null;
+  const appJwt = await mintAppJwt(
+    Number(env.GITHUB_APP_ID),
+    env.GITHUB_APP_PRIVATE_KEY,
+  );
+  const installationToken = await getInstallationAccessToken(
+    appJwt,
+    installation.installation_id,
+  );
+  const repos = await new RepoAllowlistStore(env.DB).listForProject(projectId);
+  return resolveRepositoryAccess(repos, (repo) =>
+    checkUserMembership(
+      installationToken,
+      repo.github_owner,
+      repo.github_repo,
+      login,
+    ),
+  );
+}
+
 workspace.get("/projects", async (c) => {
-  const tokenResult = c.get("tokenResult");
-  const githubLogin =
-    tokenResult.kind === "workspace-session"
-      ? (tokenResult as WorkspaceSessionTokenResult).githubLogin
-      : tokenResult.name;
-
+  const token = c.get("tokenResult");
+  const principalId = principalIdFor(token);
+  const login =
+    token.kind === "workspace-session" ? token.githubLogin : token.name;
   const registry = new D1ProjectRegistry(c.env.DB);
-  let principalId: string | undefined;
-  try {
-    principalId = principalIdFor(tokenResult);
-  } catch {
-    principalId = undefined;
-  }
-  const explicitProjects = principalId
-    ? await new ProjectMembershipStore(c.env.DB).listProjectsForPrincipal(
-        principalId,
-      )
-    : [];
-
-  if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
-    // SEC-4: With the GitHub App unconfigured there is no way to resolve
-    // per-user repository membership, so we cannot enumerate the registry
-    // without leaking every project ID on the instance. Scope the response to
-    // exactly what the caller is already entitled to: the token-scoped project
-    // (D1/bootstrap token or bearer session that carries a projectId), or an
-    // empty list for a workspace session (projectId "") that has not selected
-    // a project yet.
-    const scopedProjectId = tokenResult.projectId;
-    if (!scopedProjectId) {
-      return c.json({
-        ok: true,
-        projects: explicitProjects.map((project) => ({
-          ...project,
-          repos: [],
-        })),
-      });
+  const explicit = await new ProjectMembershipStore(
+    c.env.DB,
+  ).listProjectsForPrincipal(principalId);
+  const accessible = new Map<
+    string,
+    {
+      projectId: string;
+      displayName: string;
+      role?: ProjectRole;
+      repos: { owner: string; repo: string; permission: string }[];
     }
-    const meta = await registry.get(scopedProjectId);
+  >(explicit.map((project) => [project.projectId, { ...project, repos: [] }]));
+  // Project credentials enumerate only their own project.
+  if (token.kind !== "workspace-session") {
+    const { resolveTokenMembership } = await import("../middleware/membership");
+    const membership = await resolveTokenMembership(
+      c.env.DB,
+      token,
+      token.projectId,
+    );
+    const meta = membership ? await registry.get(token.projectId) : null;
     return c.json({
       ok: true,
-      projects: [
-        {
-          projectId: scopedProjectId,
-          displayName: meta?.displayName ?? scopedProjectId,
-          repos: [],
-        },
-      ],
+      projects:
+        meta && membership
+          ? [
+              {
+                projectId: token.projectId,
+                displayName: meta.displayName ?? token.projectId,
+                role: membership.role,
+                repos: [],
+              },
+            ]
+          : [],
     });
   }
-
-  const allProjects = await registry.listAll();
-  const configStore = new GitHubAppConfigStore(c.env.DB);
-  const allowlistStore = new RepoAllowlistStore(c.env.DB);
-
-  const appJwt = await mintAppJwt(
-    Number(c.env.GITHUB_APP_ID),
-    c.env.GITHUB_APP_PRIVATE_KEY,
-  );
-  const startTime = Date.now();
-
-  const accessible = [];
-  for (const { projectId } of allProjects) {
-    if (Date.now() - startTime > WORKSPACE_DEADLINE_MS) break;
-
-    const installation = await configStore.getInstallation(projectId);
-    if (!installation) continue;
-
-    const allowedRepos = await allowlistStore.listForProject(projectId);
-    if (allowedRepos.length === 0) continue;
-
-    try {
-      const installationToken = await getInstallationAccessToken(
-        appJwt,
-        installation.installation_id,
-      );
-
-      const userRepos = [];
-      for (const repo of allowedRepos) {
-        if (Date.now() - startTime > WORKSPACE_DEADLINE_MS) break;
-        const perm = await checkUserMembership(
-          installationToken,
-          repo.github_owner,
-          repo.github_repo,
-          githubLogin,
+  if (c.env.GITHUB_APP_ID && c.env.GITHUB_APP_PRIVATE_KEY) {
+    const start = Date.now();
+    for (const project of await registry.listAll()) {
+      if (Date.now() - start > WORKSPACE_DEADLINE_MS) break;
+      try {
+        const { membership, access } = await resolveGithubAdmission(
+          c.env.DB,
+          project.projectId,
+          principalId,
+          () => workspaceAccess(c.env, project.projectId, login),
         );
-        const access = evaluateRepositoryAccess(repo, perm);
-        if (access) {
-          userRepos.push({
-            owner: repo.github_owner,
-            repo: repo.github_repo,
-            permission: access.permission,
-          });
-        }
-      }
-
-      if (userRepos.length > 0) {
-        const meta = await registry.get(projectId);
-        accessible.push({
-          projectId,
-          displayName: meta?.displayName ?? projectId,
-          repos: userRepos,
+        if (!membership) continue;
+        const meta = await registry.get(project.projectId);
+        if (!meta) continue;
+        accessible.set(project.projectId, {
+          projectId: project.projectId,
+          displayName: meta.displayName ?? project.projectId,
+          role: membership.role,
+          repos: access
+            ? [
+                {
+                  owner: access.repo.github_owner,
+                  repo: access.repo.github_repo,
+                  permission: access.permission,
+                },
+              ]
+            : [],
         });
+      } catch {
+        /* Unavailable mirrored access never establishes admission. */
       }
-    } catch (err) {
-      console.warn(`[workspace] skipping project ${projectId}:`, err);
     }
   }
-
-  return c.json({ ok: true, projects: accessible });
+  return c.json({
+    ok: true,
+    projects: [...accessible.values()].sort((a, b) =>
+      a.projectId.localeCompare(b.projectId),
+    ),
+  });
 });
 
 workspace.post("/select", async (c) => {
@@ -317,120 +313,47 @@ workspace.post("/select", async (c) => {
 
   const { project_id: projectId } = parsed.data;
 
-  const explicitMembership = await new ProjectMembershipStore(c.env.DB).resolve(
-    projectId,
-    wsSession.principalId,
-  );
-  if (explicitMembership) {
+  try {
+    const { membership, access } = await resolveGithubAdmission(
+      c.env.DB,
+      projectId,
+      wsSession.principalId,
+      () => workspaceAccess(c.env, projectId, wsSession.githubLogin),
+      true,
+    );
+    if (!membership)
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "membership-required",
+            message: "Principal is not a member of this project",
+            retryable: false,
+          },
+        },
+        403,
+      );
     return createSelectedSession(
       c,
       wsSession,
       projectId,
-      explicitMembership.role,
-      explicitMembership.sources,
+      membership.role,
+      membership.sources,
+      access?.repo.github_repo_id,
     );
-  }
-
-  // Check GitHub App config
-  if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
+  } catch {
     return c.json(
       {
         ok: false,
         error: {
-          code: "not-configured",
-          message: "GitHub App not configured",
-          retryable: false,
-        },
-      },
-      500,
-    );
-  }
-
-  // Load installation config for the project
-  const configStore = new GitHubAppConfigStore(c.env.DB);
-  const installation = await configStore.getInstallation(projectId);
-  if (!installation) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "not-found",
-          message: "Project not found or GitHub App not installed",
-          retryable: false,
-        },
-      },
-      404,
-    );
-  }
-
-  // Get installation access token
-  let installationToken: string;
-  try {
-    const appJwt = await mintAppJwt(
-      Number(c.env.GITHUB_APP_ID),
-      c.env.GITHUB_APP_PRIVATE_KEY,
-    );
-    installationToken = await getInstallationAccessToken(
-      appJwt,
-      installation.installation_id,
-    );
-  } catch (err) {
-    console.error("[workspace/select] Failed to get installation token:", err);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "github-api-error",
-          message: "Failed to obtain GitHub App installation token",
+          code: "membership-unavailable",
+          message: "Project membership temporarily unavailable",
           retryable: true,
         },
       },
-      502,
+      503,
     );
   }
-
-  // Filter against _project_repos allowlist
-  const allowlistStore = new RepoAllowlistStore(c.env.DB);
-  const allowedRepos = await allowlistStore.listForProject(projectId);
-
-  const login = wsSession.githubLogin;
-  const access = await resolveRepositoryAccess(allowedRepos, (repo) =>
-    checkUserMembership(
-      installationToken,
-      repo.github_owner,
-      repo.github_repo,
-      login,
-    ),
-  );
-
-  if (!access) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "forbidden",
-          message: "Insufficient repository permissions for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  const mirroredRole: ProjectRole =
-    access.permission === "read"
-      ? "viewer"
-      : access.permission === "write"
-        ? "participant"
-        : "maintainer";
-  return createSelectedSession(
-    c,
-    wsSession,
-    projectId,
-    mirroredRole,
-    ["github-mirrored"],
-    access.repo.github_repo_id,
-  );
 });
 
 const WORKSPACE_SESSION_TTL_MS = 8 * 60 * 60 * 1000;

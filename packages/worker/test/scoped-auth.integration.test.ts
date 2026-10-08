@@ -1,4 +1,8 @@
-import { CAPABILITIES, type CredentialPolicy } from "@tila/schemas";
+import {
+  CAPABILITIES,
+  type CredentialPolicy,
+  ROOT_CAPABILITIES,
+} from "@tila/schemas";
 import { Hono } from "hono";
 import {
   SignJWT,
@@ -188,7 +192,9 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
     ] as const) {
       const key = await issue({
         role: "owner",
-        capabilities: CAPABILITIES.filter((cap) => cap !== missing),
+        capabilities: CAPABILITIES.filter(
+          (cap) => cap !== missing && !ROOT_CAPABILITIES.has(cap),
+        ),
       });
       expect(
         (await request(server, "/projects/p/reentry", key.plaintext)).status,
@@ -212,7 +218,7 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
     }
     const restricted = await issue({
       role: "owner",
-      capabilities: [...CAPABILITIES],
+      capabilities: CAPABILITIES.filter((cap) => !ROOT_CAPABILITIES.has(cap)),
       restrictions: { task_types: ["task"] },
     });
     for (const path of [
@@ -491,7 +497,7 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
   it("lets an owner create, rotate, list and revoke a scoped credential without revealing hashes", async () => {
     const owner = await issue({
       role: "owner",
-      capabilities: [...CAPABILITIES],
+      capabilities: CAPABILITIES.filter((cap) => !ROOT_CAPABILITIES.has(cap)),
     });
     const server = app();
     const create = await request(
@@ -727,8 +733,17 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
   it("prevents scoped imports from minting full keys or restoring broader workload policies", async () => {
     const key = await issue({
       role: "owner",
-      capabilities: ["project:import"],
+      capabilities: ["schema:read"],
     });
+    // A credential persisted before the root-only cutover is denied too.
+    f.sqlite
+      .prepare(
+        "UPDATE _credentials SET policy_json = ? WHERE credential_id = ?",
+      )
+      .run(
+        JSON.stringify({ role: "owner", capabilities: ["project:import"] }),
+        key.credential_id,
+      );
     const server = app();
     const path = "/projects/p/admin/backup/d1/restore";
     const headers = { "X-Confirm-Slug": "p" };

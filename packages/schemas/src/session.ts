@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CredentialPolicySchema } from "./capability";
 import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
+import { AUTHORIZATION_VERSION, GitHubActionsContextSchema } from "./workload";
 
 export const SessionPermissionSchema = z.enum(["read", "write", "admin"]);
 export type SessionPermission = z.infer<typeof SessionPermissionSchema>;
@@ -55,6 +56,7 @@ const SessionBaseSchema = z.object({
  */
 export const GitHubSessionPayloadSchema = SessionBaseSchema.extend({
   sub_type: z.literal("github"),
+  authorization_version: z.literal(AUTHORIZATION_VERSION),
   github_host: z.string().min(1),
   github_repo_id: z.number().int(),
   github_login: z.string().min(1),
@@ -81,9 +83,20 @@ export const OidcSessionPayloadSchema = SessionBaseSchema.extend({
  * Discriminated union on `sub_type`. Callers that consume tokens minted before
  * this change must default-fill `sub_type: "github"` before parsing (auth.ts).
  */
+export const GitHubActionsSessionPayloadSchema = SessionBaseSchema.extend({
+  sub_type: z.literal("github-actions"),
+  authorization_version: z.literal(AUTHORIZATION_VERSION),
+  workload: GitHubActionsContextSchema,
+  actor_name: z.string().min(1).max(255),
+  actor_id: z.number().int().positive(),
+  role: ProjectRoleSchema,
+  jti: z.string().uuid(),
+});
+
 export const SessionPayloadSchema = z.discriminatedUnion("sub_type", [
   GitHubSessionPayloadSchema,
   OidcSessionPayloadSchema,
+  GitHubActionsSessionPayloadSchema,
 ]);
 export type SessionPayload = z.infer<typeof SessionPayloadSchema>;
 

@@ -2,7 +2,7 @@
  * authFixtures — credential builders for auth integration tests.
  *
  * Extracted verbatim (1-arg form) from packages/worker/src/middleware/auth.test.ts:45.
- * The mintSessionToken helper here is intentionally identical to the original — do
+ * The mintSessionToken helper here mirrors the current authenticated payload — do
  * not add a second argument for signature forgery. Wrong-key forgery is done by
  * calling app.fetch() with a wrong-key Env, mirroring fetchWithSessionEnv
  * (auth.test.ts:76).
@@ -36,6 +36,7 @@ export async function mintSessionToken(
 ): Promise<string> {
   const payload = {
     project_id: "proj-1",
+    authorization_version: 2,
     github_host: "github.com",
     github_repo_id: 99999,
     github_login: "testuser",

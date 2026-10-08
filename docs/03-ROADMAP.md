@@ -153,11 +153,11 @@ missing, and full bootstrap tokens still carry owner access.
 
 | Issue | Draft disposition |
 |---|---|
-| #191 | Rewrite for key-only deployment and GitHub auth retirement; mark #182/#183/#184 completed |
+| #191 | Complete the existing access-decoupling contract: separate Actions identity, enforce live credential ceilings, preserve bootstrap authority, and unify browser/bearer membership. Keep auth retirement separate. |
 | #185 | Scoped service identities, capability credentials, namespace restrictions, rotation, revocation and workload exchange |
-| #187 | Keep open until the reachable permission-revalidation path is fixed or actually removed |
+| #187 | Completed fail-closed permission revalidation; preserve these checks while current auth remains supported |
 | #186 | Refreshable SDK token providers, scoped OIDC workload exchange, and compatible token-bound DPoP verification |
-| #102 | Defer broad governance UI; eventual small owner credential/membership screen |
+| #102 | Completed owner membership/credential panel; preserve access for explicit owners without App installations |
 
 ### Artifact and distribution work
 
@@ -192,13 +192,22 @@ Start with one topology; allow future policies without inventing a generic topol
 language now. Depends on the runtime evaluation, #185, #180, #195 and #181.
 Acceptance is the five-condition matrix in §3, including Mac/VPS execution.
 
-### Replace #191 — project keys and GitHub auth retirement
+### #191 — complete the current authorization contract
 
-Keep #182/#183/#184 marked complete. Deliver #185's native principals and project
-keys, key-only provisioning/onboarding, then migrate existing GitHub/OIDC ownership
-and remove unsupported auth routes, secrets and UI. Preserve a recoverable owner
-and fail closed on revoked access. Full bootstrap keys remain administration-only.
-Close #187 only after its affected path is fixed or no longer reachable. Workload exchange is included in #185; the governance UI remains separate.
+The linked implementations (#182–#187, #95 and #102) are closed. The remaining
+composition fixes separate GitHub Actions from its triggering human, enforce
+repository policy on issued workload credentials, reserve root operations to
+bootstrap/infra credentials, and share canonical membership admission across
+browser and bearer access. Migration 0029 and the authorization-version cutover
+are documented in the GitHub auth guide. Close the epic only after regression
+and runtime validation, security review, and confirmed integration into main.
+
+### Future follow-up — project keys and GitHub auth retirement
+
+Key-only provisioning/onboarding and removal of GitHub/OIDC routes, secrets and
+UI are separate future work. Migrate existing ownership first, preserve a
+recoverable owner, and fail closed on revoked access. The current compatibility
+fixes do not retire any authentication method or delete canonical memberships.
 
 ### #185 — scoped service accounts and capability credentials
 

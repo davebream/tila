@@ -204,6 +204,70 @@ thresholds and cap, and requires re-exchange when that link no longer qualifies.
 Project backup/export includes all three policy fields. A legacy backup without
 `max_permission` restores with the database default of `write`.
 
+## Authorization identity cutover (migration 0029)
+
+Apply `0029_workload_authorization_context.sql` to D1 before deploying this Worker.
+It adds nullable `_credentials.workload_context_json`; existing memberships, tokens,
+and browser sessions are not deleted. The normal deployment path is `tila deploy`
+or `tila infra provision --force-redeploy`; use the deployment procedure in the
+operations guide rather than a manual Worker-only upload.
+
+New GitHub human JWTs carry `authorization_version: 2`. GitHub Actions JWTs use
+`sub_type: "github-actions"` and the same version. Their canonical principal is
+`oidc:https://token.actions.githubusercontent.com:<verified subject>`, not the
+triggering GitHub user. Actor name/ID remain signed attribution metadata. A bound
+workload uses its service principal instead. Responses keep the existing exchange
+fields, and roles determine reported permissions.
+
+Old GitHub-shaped bearer JWTs cannot distinguish humans from Actions. They now
+return HTTP 401 `session-reauth-required`: human bearer clients authenticate again;
+workflows exchange a fresh assertion. Exchange replay keys use a new namespace,
+so cached pre-cutover JWTs are not returned. There is no blanket browser-cookie
+reset. Generic OIDC sessions and full D1 bootstrap keys keep their existing paths.
+
+Unbound Actions exchange remains available. It requires the workload's own explicit
+membership or enabled mirrored admission in a compatible project mode. It never
+inherits the triggering human's explicit membership. Effective roles intersect
+issued authority, current membership, and the repository OIDC maximum
+(`read` → viewer, `write` → participant, `admin` → maintainer). Mirrored admission
+also applies the repository membership-role cap. JWT expiry never exceeds the
+upstream assertion expiry or the existing permission-tier lifetime.
+
+Scoped Actions credentials persist only the verified repository/subject/event/ref/
+environment/workflow context needed for subsequent checks, never the upstream
+assertion. Every authentication rechecks current repository policy, binding, and
+service membership, including cookie sessions and requests with cached responses.
+Policy changes can narrow an issued credential but cannot broaden its original
+grant. Disabled/unlinked repositories, mismatches, revoked bindings, and unavailable
+policy storage deny access. Pre-cutover scoped Actions credentials lacking context
+must be exchanged again; no context is guessed from a binding subject.
+
+Root operations remain available only through full D1 bearer credentials or the
+separate infra authority. Scoped tokens cannot receive destroy, archive, journal
+archive, backup/import/export, or session-revocation capabilities, even from a
+bootstrap caller. Existing scoped grants lose those effective capabilities, including
+after rotation or cookie exchange. Store counts also require the root credential
+guard; ordinary `project:inspect` diagnostics remain delegable. Use a bootstrap
+credential for automation that legitimately needs these root operations.
+
+Project listing, selection, and human bearer exchange use canonical membership.
+Explicit owners can access projects without App configuration or installation.
+Mirrored admission uses enabled links, permission thresholds, and role caps before
+choosing the strongest link; ties use repository ID. An explicit nonmember cannot
+see private project metadata or receive a project cookie merely through repository
+access. Independent explicit authority remains usable during GitHub outages.
+
+### Cutover validation
+
+After deploying, verify a fresh human sign-in, a bounded Actions exchange, and an
+explicit-owner project without an installation. Confirm an old JWT requests
+reauthentication and tightening/disabling Actions policy rejects previously issued
+access. Use disposable test projects and authorization probes for root-denial checks;
+do not destroy production resources to validate this boundary. Monitor
+`session-reauth-required`, `oidc-policy-denied`, and authentication-unavailable
+responses during cutover. Roll forward to repair deployment problems: an older
+Worker would accept ambiguous JWTs and omit the new authorization checks.
+
 ## Protected-operation permission checks
 
 All project mutations (`POST`, `PUT`, `PATCH`, `DELETE`) and administrative reads

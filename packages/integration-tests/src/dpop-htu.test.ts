@@ -218,6 +218,7 @@ async function mintSessionToken(
 ): Promise<string> {
   const payload = {
     project_id: "proj-htu-test",
+    authorization_version: 2,
     github_host: "github.com",
     github_repo_id: 77777,
     github_login: "dpop-test-user",

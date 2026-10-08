@@ -333,3 +333,36 @@ describe("scoped credential lifecycle against migrated SQLite", () => {
     ).toEqual({ n: 2 });
   });
 });
+
+it("migration 0029 preserves existing membership and credential rows without inventing workload context", () => {
+  const f = fixture(undefined, (sqlite) => {
+    sqlite.exec(`
+      INSERT INTO _project_memberships (membership_id, project_id, principal_id, provider, identity_host, subject_id, subject_kind, role, granted_by, granted_at)
+      VALUES ('membership', 'p', 'github:github.com:7', 'github', 'github.com', '7', 'human', 'owner', 'bootstrap', 1);
+      INSERT INTO _credentials (credential_id, project_id, principal_id, name, policy_json, current_token_id, created_at, created_by, workload_binding_id)
+      VALUES ('credential', 'p', 'service:old', 'old-workload', '{"role":"viewer","capabilities":["tasks:read"]}', 'token', 1, 'bootstrap', 'binding');
+    `);
+  });
+  try {
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT role, principal_id FROM _project_memberships WHERE membership_id='membership'",
+        )
+        .get(),
+    ).toEqual({ role: "owner", principal_id: "github:github.com:7" });
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT current_token_id, workload_binding_id, workload_context_json FROM _credentials WHERE credential_id='credential'",
+        )
+        .get(),
+    ).toEqual({
+      current_token_id: "token",
+      workload_binding_id: "binding",
+      workload_context_json: null,
+    });
+  } finally {
+    f.sqlite.close();
+  }
+});

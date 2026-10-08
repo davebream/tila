@@ -78,6 +78,21 @@ const mockD1SessionCreate = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@tila/backend-d1", async () => ({
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
+  resolveActionsMembership: vi.fn(async () => {
+    const { policy, repo } = await mockGetOidcPolicy();
+    const rank = { viewer: 1, participant: 2, maintainer: 3 };
+    const role =
+      policy.max_permission === "read"
+        ? "viewer"
+        : policy.max_permission === "write"
+          ? "participant"
+          : "maintainer";
+    const cap = repo.membership_role_cap as keyof typeof rank;
+    return {
+      role: rank[role] <= rank[cap] ? role : cap,
+      sources: ["github-mirrored"],
+    };
+  }),
   D1DeploymentMetaStore: vi.fn().mockImplementation(
     class {
       ensure = vi.fn().mockResolvedValue("test-deployment-instance-id");
@@ -126,6 +141,7 @@ vi.mock("@tila/backend-d1", async () => ({
   ),
   ProjectMembershipStore: vi.fn().mockImplementation(
     class {
+      getMode = vi.fn().mockResolvedValue("hybrid");
       resolve = vi.fn(
         async (
           _projectId: string,
@@ -830,7 +846,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
     await expect(res.json()).resolves.toMatchObject({ permission: "write" });
   });
 
-  it("returns 500 when GITHUB_APP_ID is missing", async () => {
+  it("returns 403 when GITHUB_APP_ID is missing", async () => {
     const app = createApp();
     const envWithoutAppId = {
       ...testEnv,
@@ -851,12 +867,12 @@ describe("POST /api/auth/github/exchange (App path)", () => {
       envWithoutAppId,
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("app-not-configured");
+    expect(body.error.code).toBe("repo-not-allowed");
   });
 
-  it("returns 500 when GITHUB_APP_PRIVATE_KEY is missing", async () => {
+  it("returns 403 when GITHUB_APP_PRIVATE_KEY is missing", async () => {
     const app = createApp();
     const envWithoutKey = {
       ...testEnv,
@@ -877,9 +893,9 @@ describe("POST /api/auth/github/exchange (App path)", () => {
       envWithoutKey,
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("app-not-configured");
+    expect(body.error.code).toBe("repo-not-allowed");
   });
 
   it("returns 403 when installation is not configured for project", async () => {
@@ -912,7 +928,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("app-not-configured");
+    expect(body.error.code).toBe("repo-not-allowed");
   });
 
   it("returns 403 when user token is invalid", async () => {
@@ -986,7 +1002,7 @@ describe("POST /api/auth/github/exchange (App path)", () => {
     expect(body.error.code).toBe("repo-not-allowed");
   });
 
-  it("returns 502 when mintAppJwt fails", async () => {
+  it("returns 503 when mintAppJwt fails", async () => {
     const app = createApp();
     const envWithApp = {
       ...testEnv,
@@ -1020,15 +1036,15 @@ describe("POST /api/auth/github/exchange (App path)", () => {
       envWithApp,
     );
 
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(503);
     const body = (await res.json()) as {
       error: { code: string; retryable: boolean };
     };
-    expect(body.error.code).toBe("github-api-error");
+    expect(body.error.code).toBe("auth-unavailable");
     expect(body.error.retryable).toBe(true);
   });
 
-  it("returns 502 when getInstallationAccessToken fails", async () => {
+  it("returns 503 when getInstallationAccessToken fails", async () => {
     const app = createApp();
     const envWithApp = {
       ...testEnv,
@@ -1064,11 +1080,11 @@ describe("POST /api/auth/github/exchange (App path)", () => {
       envWithApp,
     );
 
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(503);
     const body = (await res.json()) as {
       error: { code: string; retryable: boolean };
     };
-    expect(body.error.code).toBe("github-api-error");
+    expect(body.error.code).toBe("auth-unavailable");
     expect(body.error.retryable).toBe(true);
   });
 
@@ -2981,6 +2997,7 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
     const result = SessionPayloadSchema.safeParse({
       project_id: "proj-1",
       sub_type: "github",
+      authorization_version: 2,
       github_host: "github.com",
       github_repo_id: 123,
       github_login: "alice",
@@ -2998,6 +3015,7 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
     const result = SessionPayloadSchema.safeParse({
       project_id: "proj-1",
       sub_type: "github",
+      authorization_version: 2,
       github_host: "github.com",
       github_repo_id: 123,
       github_login: "alice",

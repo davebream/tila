@@ -5,6 +5,7 @@ import { D1TokenStore } from "../../src/token-store";
 
 export function createCredentialFixture(
   beforeScopedMigration?: (sqlite: Database.Database) => void,
+  beforeWorkloadMigration?: (sqlite: Database.Database) => void,
 ) {
   const sqlite = new Database(":memory:");
   const dir = new URL("../../../worker/migrations/global/", import.meta.url);
@@ -12,6 +13,7 @@ export function createCredentialFixture(
     .filter((name) => name.endsWith(".sql"))
     .sort()) {
     if (file.startsWith("0027_")) beforeScopedMigration?.(sqlite);
+    if (file.startsWith("0029_")) beforeWorkloadMigration?.(sqlite);
     sqlite.exec(readFileSync(new URL(file, dir), "utf8"));
   }
   sqlite

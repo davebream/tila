@@ -1,3 +1,4 @@
+import { resolveActionsMembership } from "@tila/backend-d1";
 import {
   D1IdempotencyStore,
   D1RateLimitStore,
@@ -8,6 +9,11 @@ import {
   RepoAllowlistStore,
   canonicalMembershipPrincipal,
 } from "@tila/backend-d1";
+import {
+  AUTHORIZATION_VERSION,
+  GITHUB_ACTIONS_ISSUER,
+  GitHubActionsContextSchema,
+} from "@tila/schemas";
 import {
   GitHubAppExchangeRequestSchema,
   GitHubAppInstallationConfigSchema,
@@ -48,7 +54,10 @@ import {
 import { hashToken } from "../lib/hash-token";
 import { OidcVerificationError, verifyOidcToken } from "../lib/oidc-verify";
 import { parseCookieHeader } from "../lib/parse-cookie";
-import { resolveRepositoryAccess } from "../lib/repo-access-policy";
+import {
+  resolveGithubAdmission,
+  resolveRepositoryAccess,
+} from "../lib/repo-access-policy";
 import { asEpochMillis, asEpochSeconds, nowMs, nowSeconds } from "../lib/time";
 import { exchangeScopedWorkload } from "../lib/workload-credential";
 import { createAuthMiddleware } from "../middleware/auth";
@@ -304,6 +313,7 @@ async function mintSession(opts: {
     // The auth middleware default-fills absent sub_type to "github" for
     // legacy tokens issued before this field existed (critic Finding 2).
     sub_type: "github",
+    authorization_version: AUTHORIZATION_VERSION,
     github_host: matchedRepo.github_host,
     github_repo_id: matchedRepo.github_repo_id,
     github_login: githubUser.login,
@@ -346,66 +356,6 @@ async function mintSession(opts: {
   };
 
   return { responseBody };
-}
-
-function mirroredRole(
-  permission: SessionPermission,
-  cap: string,
-): Exclude<ProjectRole, "owner"> {
-  const mapped: Exclude<ProjectRole, "owner"> =
-    permission === "read"
-      ? "viewer"
-      : permission === "write"
-        ? "participant"
-        : "maintainer";
-  const parsedCap: Exclude<ProjectRole, "owner"> =
-    cap === "viewer"
-      ? "viewer"
-      : cap === "maintainer"
-        ? "maintainer"
-        : "participant";
-  return PROJECT_ROLE_RANK[mapped] <= PROJECT_ROLE_RANK[parsedCap]
-    ? mapped
-    : parsedCap;
-}
-
-async function resolveGithubMembership(
-  db: D1Database,
-  projectId: string,
-  githubUser: { login: string; id: number },
-  access: Awaited<ReturnType<typeof resolveRepositoryAccess>>,
-) {
-  const store = new ProjectMembershipStore(db);
-  const canonical = canonicalMembershipPrincipal({
-    provider: "github",
-    host: "github.com",
-    user_id: githubUser.id,
-    login: githubUser.login,
-  });
-  const mirrored =
-    access && access.repo.membership_enabled !== 0
-      ? {
-          role: mirroredRole(
-            access.permission,
-            access.repo.membership_role_cap ?? "participant",
-          ),
-          githubRepoId: access.repo.github_repo_id,
-        }
-      : null;
-  const membership = await store.resolve(
-    projectId,
-    canonical.principalId,
-    mirrored,
-  );
-  if (membership?.sources.includes("github-mirrored") && mirrored) {
-    await store.recordMirroredAdmission({
-      projectId,
-      principalId: canonical.principalId,
-      role: membership.role,
-      githubRepoId: mirrored.githubRepoId,
-    });
-  }
-  return membership;
 }
 
 /**
@@ -470,21 +420,6 @@ async function handleAppExchange(
 ): Promise<Response> {
   const { project_id, user_token, jkt } = data;
 
-  if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) {
-    console.error("[exchange:app] GitHub App not configured");
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "app-not-configured",
-          message: "GitHub App is not configured on this server",
-          retryable: false,
-        },
-      },
-      500,
-    );
-  }
-
   if (!c.env.GITHUB_SESSION_HMAC_KEY) {
     console.error("[exchange:app] GITHUB_SESSION_HMAC_KEY not configured");
     return c.json(
@@ -518,65 +453,42 @@ async function handleAppExchange(
     );
   }
 
-  const installation = await new GitHubAppConfigStore(c.env.DB).getInstallation(
-    project_id,
-  );
-  if (!installation) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "app-not-configured",
-          message: "GitHub App installation not configured for this project",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-
-  let installationToken: string;
-  try {
-    const appJwt = await mintAppJwt(
-      Number(c.env.GITHUB_APP_ID),
-      c.env.GITHUB_APP_PRIVATE_KEY,
-    );
-    installationToken = await getInstallationAccessToken(
-      appJwt,
-      installation.installation_id,
-    );
-  } catch (err) {
-    console.error("[exchange:app] Failed to get installation token:", err);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "github-api-error",
-          message: "Failed to obtain GitHub App installation token",
-          retryable: true,
-        },
-      },
-      502,
-    );
-  }
-
-  const repos = (
-    await new RepoAllowlistStore(c.env.DB).listForProject(project_id)
-  ).filter((repo) => repo.membership_enabled !== 0);
-
-  const access = await resolveRepositoryAccess(repos, (repo) =>
-    checkUserMembership(
-      installationToken,
-      repo.github_owner,
-      repo.github_repo,
-      githubUser.login,
-    ),
-  );
-  const membership = await resolveGithubMembership(
+  const principal = canonicalMembershipPrincipal({
+    provider: "github",
+    host: "github.com",
+    user_id: githubUser.id,
+  });
+  const { membership, access } = await resolveGithubAdmission(
     c.env.DB,
     project_id,
-    githubUser,
-    access,
+    principal.principalId,
+    async () => {
+      if (!c.env.GITHUB_APP_ID || !c.env.GITHUB_APP_PRIVATE_KEY) return null;
+      const installation = await new GitHubAppConfigStore(
+        c.env.DB,
+      ).getInstallation(project_id);
+      if (!installation) return null;
+      const appJwt = await mintAppJwt(
+        Number(c.env.GITHUB_APP_ID),
+        c.env.GITHUB_APP_PRIVATE_KEY,
+      );
+      const installationToken = await getInstallationAccessToken(
+        appJwt,
+        installation.installation_id,
+      );
+      const repos = await new RepoAllowlistStore(c.env.DB).listForProject(
+        project_id,
+      );
+      return resolveRepositoryAccess(repos, (repo) =>
+        checkUserMembership(
+          installationToken,
+          repo.github_owner,
+          repo.github_repo,
+          githubUser.login,
+        ),
+      );
+    },
+    true,
   );
   if (!membership) {
     await recordExchangeFailure(c.env, ip);
@@ -598,7 +510,7 @@ async function handleAppExchange(
   const tokenHash = await hashToken(user_token, c.env.HASH_PEPPER);
   const effectivePermission = roleToPermission(membership.role);
   const idempotencyKey =
-    `exchange:${project_id}:${tokenHash}:${jkt ?? "nojkt"}:` +
+    `exchange-v2:${project_id}:${tokenHash}:${jkt ?? "nojkt"}:` +
     `${access?.repo.github_repo_id ?? 0}:${membership.role}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
@@ -763,24 +675,29 @@ authGithub.post("/exchange", async (c) => {
     );
   }
 
-  const repos = (
-    await new RepoAllowlistStore(c.env.DB).listForProject(project_id)
-  ).filter((repo) => repo.membership_enabled !== 0);
-
-  const access = await resolveRepositoryAccess(repos, (repo) =>
-    getRepoPermission(
-      github_token,
-      repo.github_owner,
-      repo.github_repo,
-      githubUser.login,
-    ),
-  );
-
-  const membership = await resolveGithubMembership(
+  const principal = canonicalMembershipPrincipal({
+    provider: "github",
+    host: "github.com",
+    user_id: githubUser.id,
+  });
+  const { membership, access } = await resolveGithubAdmission(
     c.env.DB,
     project_id,
-    githubUser,
-    access,
+    principal.principalId,
+    async () => {
+      const repos = await new RepoAllowlistStore(c.env.DB).listForProject(
+        project_id,
+      );
+      return resolveRepositoryAccess(repos, (repo) =>
+        getRepoPermission(
+          github_token,
+          repo.github_owner,
+          repo.github_repo,
+          githubUser.login,
+        ),
+      );
+    },
+    true,
   );
   if (!membership) {
     await recordExchangeFailure(c.env, ip);
@@ -800,7 +717,7 @@ authGithub.post("/exchange", async (c) => {
   const tokenHash = await hashToken(github_token, c.env.HASH_PEPPER);
   const effectivePermission = roleToPermission(membership.role);
   const idempotencyKey =
-    `exchange:${project_id}:${tokenHash}:${jkt ?? "nojkt"}:` +
+    `exchange-v2:${project_id}:${tokenHash}:${jkt ?? "nojkt"}:` +
     `${access?.repo.github_repo_id ?? 0}:${membership.role}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
@@ -1413,14 +1330,34 @@ authGithub.post("/exchange-oidc", async (c) => {
     subject: claims.sub,
     githubLogin: claims.actor,
     githubRepoId: claims.repository_id,
+    workloadContext: GitHubActionsContextSchema.parse(claims),
     assertionId: claims.jti,
     expiresAt: claims.exp,
     jkt: parsed.data.jkt,
   });
   if (scopedResponse) return scopedResponse;
 
+  const workload = GitHubActionsContextSchema.parse(claims);
+  const membership = await resolveActionsMembership(
+    c.env.DB,
+    project_id,
+    workload,
+  );
+  if (!membership)
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "oidc-policy-denied",
+          message: "Workload has no project membership",
+          retryable: false,
+        },
+      },
+      403,
+    );
+
   // Idempotency check (keyed by project_id + jti from verified claims)
-  const idempotencyKey = `oidc:${project_id}:${claims.jti}${parsed.data.jkt ? `:jkt:${parsed.data.jkt}` : ""}`;
+  const idempotencyKey = `oidc-v2:${project_id}:${claims.jti}:${membership.role}${parsed.data.jkt ? `:jkt:${parsed.data.jkt}` : ""}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedOidcBody = await checkIdempotentExchange(
@@ -1446,30 +1383,48 @@ authGithub.post("/exchange-oidc", async (c) => {
 
   let reservationFinalized = false;
   try {
-    // Route through mintSession for field-parity with other exchange flows.
-    // The OIDC "user" is the GitHub Actions actor; the matched "repo" mirrors the
-    // shape expected by mintSession.
     const instanceId = await ensureDeploymentInstanceId(c.env.DB);
-    const { responseBody } = await mintSession({
-      projectId: project_id,
-      matchedRepo: {
-        github_host: "github.com",
-        github_repo_id: claims.repository_id,
+    const permission = roleToPermission(membership.role);
+    const expiresAt = Math.min(
+      claims.exp,
+      nowSeconds() + SESSION_TTL_SECONDS_BY_TIER[permission],
+    );
+    const sessionToken = await mintSessionToken(
+      {
+        sub_type: "github-actions",
+        authorization_version: AUTHORIZATION_VERSION,
+        project_id,
+        workload,
+        actor_name: claims.actor,
+        actor_id: claims.actor_id,
+        permission,
+        role: membership.role,
+        membership_sources: membership.sources,
+        issued_at: nowSeconds(),
+        expires_at: expiresAt,
+        jti: crypto.randomUUID(),
+        instance_id: instanceId,
+        ...(parsed.data.jkt ? { cnf: { jkt: parsed.data.jkt } } : {}),
       },
-      githubUser: {
-        login: claims.actor,
-        id: claims.actor_id,
-      },
-      permission: policyResult.policy.max_permission,
-      role: mirroredRole(
-        policyResult.policy.max_permission,
-        policyResult.repo.membership_role_cap ?? "participant",
-      ),
-      membershipSources: ["github-mirrored"],
-      hmacKey: c.env.GITHUB_SESSION_HMAC_KEY,
-      instanceId,
-      jkt: parsed.data.jkt,
-    });
+      c.env.GITHUB_SESSION_HMAC_KEY,
+    );
+    const responseBody = {
+      ok: true,
+      session_token: sessionToken,
+      expires_at: expiresAt,
+      project_id,
+      github_login: claims.actor,
+      github_repo_id: claims.repository_id,
+      principal_id: canonicalMembershipPrincipal({
+        provider: "oidc",
+        issuer: GITHUB_ACTIONS_ISSUER,
+        subject: claims.sub,
+      }).principalId,
+      permission,
+      role: membership.role,
+      membership_sources: membership.sources,
+      instance_id: instanceId,
+    };
     // Finalize the reservation with the minted response. Non-fatal, mirroring the
     // pre-WI-I fail-soft idempotency write: a transient D1 error or a lost/stolen
     // placeholder (finalize → false, e.g. this exchange exceeded
@@ -1502,3 +1457,18 @@ authGithub.post("/exchange-oidc", async (c) => {
     }
   }
 });
+
+// Provider or authoritative storage outages must never mint or replay access.
+authGithub.onError((_error, c) =>
+  c.json(
+    {
+      ok: false,
+      error: {
+        code: "auth-unavailable",
+        message: "Authentication temporarily unavailable",
+        retryable: true,
+      },
+    },
+    503,
+  ),
+);
