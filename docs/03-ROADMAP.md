@@ -163,9 +163,11 @@ missing, and full bootstrap tokens still carry owner access.
 
 | Issue | Draft disposition |
 |---|---|
-| #173 | Keep the broader artifact revision epic scoped to the accepted foundation/API slices |
-| #174 / #175 | Reactivated: explicit lineages, numbered immutable revisions, commit-record recovery, history/meta/restore; public documentation waits for #176 |
-| #176 / #177 | Defer version-aware retention/UI; independently fix any verified current data-deletion bug |
+| #173 | All four implementation slices merged; parent epic tracking still awaits closure |
+| #174 | Implemented: journal enrichment ([#221](https://github.com/davebream/tila/pull/221)) and explicit lineages, numbered immutable revisions, and commit-record recovery ([#228](https://github.com/davebream/tila/pull/228)) |
+| #175 | Implemented: history/meta/restore across HTTP, SDK, CLI, and embedded backends, plus read-only MCP history ([#230](https://github.com/davebream/tila/pull/230)) |
+| #176 | Implemented: version-aware retention, protected live heads, durable deletion recovery, and exemption from the legacy R2 backstop ([#231](https://github.com/davebream/tila/pull/231)); the prerequisite for public version API documentation is satisfied |
+| #177 | Implemented: read-only, paginated version history and revision navigation in the artifact drawer ([#237](https://github.com/davebream/tila/pull/237)) |
 | #188 | Implement immutable producer provenance, explicit writer reviews, and opt-in trusted-reference task transitions; preserve the read-only UI |
 | #178 | Split useful CLI JSON contract from binary packaging/signing polish; defer the latter |
 
