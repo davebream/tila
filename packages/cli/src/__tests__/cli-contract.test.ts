@@ -47,6 +47,7 @@ const families = [
   "reset",
   "config",
   "doctor",
+  "update",
   "init",
   "link",
   "disconnect",
@@ -64,6 +65,24 @@ const families = [
   "search",
 ];
 describe("CLI invocation contract", () => {
+  it("exposes update in help, introspection and completion without backend access", () => {
+    expect(invoke(["--help"]).stdout).toMatch(/\bupdate\b/);
+    const result = invoke(["schema", "--command", "update"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).result.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "update", mutating: true }),
+      ]),
+    );
+    expect(invoke(["update", "--help"]).stdout).toContain("--check");
+    expect(invoke(["complete", "--", "up"]).stdout).toContain("update");
+    const source = invoke(["update", "--check", "--json", "--non-interactive"]);
+    expect(source.status).toBe(1);
+    expect(source.stdout).toBe("");
+    expect(JSON.parse(source.stderr).error.kind).toBe(
+      "unsupported-installation",
+    );
+  });
   it.each(families)(
     "%s help works offline with JSON before the command",
     (family) => {
