@@ -23,6 +23,7 @@ import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { hashToken } from "../lib/hash-token";
 import { _clearCacheForTest } from "../lib/token-cache";
 import type {
+  CookieSessionTokenResult,
   Env,
   HonoVariables,
   SessionTokenResult,
@@ -222,6 +223,7 @@ const VALID_SESSION: SessionResult = {
   scopes: "write",
   permission: "write",
   expiresAt: Date.now() + 60_000,
+  authenticatedAt: Date.now(),
 };
 
 const VALID_TOKEN = "test-fake-token-for-unit-tests";
@@ -949,6 +951,7 @@ describe("auth middleware", () => {
       const expiredSession: SessionResult = {
         ...VALID_SESSION,
         expiresAt: Date.now() - 1000, // already expired
+        authenticatedAt: Date.now(),
       };
       mockGetSessionFromCache.mockReturnValue(expiredSession);
       mockSessionValidate.mockResolvedValueOnce(VALID_SESSION);
@@ -1032,6 +1035,7 @@ describe("auth middleware", () => {
         scopes: "",
         permission: "read",
         expiresAt: Date.now() + 60_000,
+        authenticatedAt: Date.now(),
       };
       mockGetSessionFromCache.mockReturnValue(undefined);
       mockSessionValidate.mockResolvedValueOnce(workspaceSession);
@@ -1072,6 +1076,7 @@ describe("auth middleware", () => {
         scopes: "",
         permission: "read",
         expiresAt: Date.now() + 60_000,
+        authenticatedAt: Date.now(),
       };
       mockGetSessionFromCache.mockReturnValue(cachedWorkspace);
       mockSessionValidate.mockResolvedValueOnce(cachedWorkspace);
@@ -1102,6 +1107,38 @@ describe("auth middleware", () => {
       expect(body.authKind).toBe("workspace");
       // A cached entry never replaces the live lookup
       expect(mockSessionValidate).toHaveBeenCalledTimes(1);
+    });
+
+    it("GitHub cookie session → carries authenticatedAt and authMethod:github", async () => {
+      const authenticatedAt = Date.now() - 120_000;
+      const githubSession: SessionResult = {
+        projectId: "proj-1",
+        tokenHash: "",
+        name: "gh-carol",
+        principalId: "github:github.com:103",
+        scopes: "write",
+        permission: "write",
+        expiresAt: Date.now() + 60_000,
+        authenticatedAt,
+      };
+      mockSessionValidate.mockResolvedValueOnce(githubSession);
+
+      const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
+      app.use("/*", createAuthMiddleware());
+      app.get("/test", (c) =>
+        c.json({ ok: true, claims: c.get("tokenResult") }),
+      );
+
+      const res = await fetchWithCtx(
+        app,
+        makeReq("/test", { Cookie: "tila_session=github-cookie" }),
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { claims: CookieSessionTokenResult };
+      expect(body.claims.kind).toBe("cookie-session");
+      expect(body.claims.authenticatedAt).toBe(authenticatedAt);
+      expect(body.claims.authMethod).toBe("github");
     });
 
     it("normal D1 session (projectId='proj_x') → still produces CookieSessionTokenResult (regression)", async () => {
@@ -1142,6 +1179,7 @@ describe("auth middleware", () => {
         scopes: "full",
         permission: "admin",
         expiresAt: Date.now() + 60_000,
+        authenticatedAt: Date.now(),
       };
       mockGetSessionFromCache.mockReturnValue(undefined);
       mockSessionValidate.mockResolvedValueOnce(adminSession);
@@ -1174,6 +1212,7 @@ describe("auth middleware", () => {
         scopes: "full",
         permission: "write",
         expiresAt: Date.now() + 60_000,
+        authenticatedAt: Date.now(),
       };
       mockGetSessionFromCache.mockReturnValue(writeSession);
       mockSessionValidate.mockResolvedValueOnce(writeSession);

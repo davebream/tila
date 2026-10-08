@@ -114,6 +114,8 @@ export const sessions = sqliteTable(
     source_repo_id: integer("source_repo_id"),
     created_at: integer("created_at").notNull(), // Unix ms (EpochMillis)
     expires_at: integer("expires_at").notNull(), // Unix ms (EpochMillis)
+    // Unix ms of the last interactive authentication; NULL before migration 0028.
+    authenticated_at: integer("authenticated_at"),
   },
   (table) => [index("idx_sessions_expires").on(table.expires_at)],
 );

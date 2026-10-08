@@ -83,6 +83,9 @@ async function createSelectedSession(
     membershipSource: JSON.stringify(sources),
     sourceRepoId,
     expiresAt,
+    // Selecting a project replaces the session row; the authentication event
+    // itself is unchanged, so the step-up clock must not restart here.
+    authenticatedAt: wsSession.authenticatedAt,
   });
 
   return new Response(
@@ -485,6 +488,7 @@ workspace.post("/deselect", async (c) => {
     scopes: "",
     permission: "read",
     expiresAt,
+    authenticatedAt: session.authenticatedAt,
   });
 
   const localDev = isLocalhost(c.req.url);

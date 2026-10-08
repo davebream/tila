@@ -16,7 +16,8 @@ const CREATE_SESSIONS = `
     membership_source TEXT,
     source_repo_id INTEGER,
     created_at   INTEGER NOT NULL,
-    expires_at   INTEGER NOT NULL
+    expires_at   INTEGER NOT NULL,
+    authenticated_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON _sessions (expires_at);
 `;
@@ -108,6 +109,55 @@ describe("D1SessionStore", () => {
     expect(result?.scopes).toBe("full");
     expect(result?.permission).toBe("read");
     expect(result?.expiresAt).toBeGreaterThan(now);
+  });
+
+  it("authenticatedAt defaults to the creation time", async () => {
+    const { store } = createTestStore();
+    const before = Date.now();
+    await store.create({
+      sessionHash: "fresh",
+      projectId: "proj-1",
+      tokenHash: "",
+      actorName: "octocat",
+      principalId: "github:github.com:1",
+      scopes: "full",
+      permission: "read",
+      expiresAt: before + 3_600_000,
+    });
+    const result = await store.validate("fresh");
+    expect(result?.authenticatedAt).toBeGreaterThanOrEqual(before);
+    expect(result?.authenticatedAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("authenticatedAt is preserved when passed explicitly", async () => {
+    const { store } = createTestStore();
+    const authenticatedAt = Date.now() - 600_000;
+    await store.create({
+      sessionHash: "carried",
+      projectId: "proj-1",
+      tokenHash: "",
+      actorName: "octocat",
+      principalId: "github:github.com:1",
+      scopes: "full",
+      permission: "read",
+      expiresAt: Date.now() + 3_600_000,
+      authenticatedAt,
+    });
+    const result = await store.validate("carried");
+    expect(result?.authenticatedAt).toBe(authenticatedAt);
+  });
+
+  it("authenticatedAt falls back to created_at for pre-migration rows", async () => {
+    const { store, sqlite } = createTestStore();
+    const createdAt = Date.now() - 1_000;
+    sqlite
+      .prepare(
+        `INSERT INTO _sessions (session_hash, project_id, token_hash, actor_name, principal_id, scopes, permission, created_at, expires_at)
+         VALUES ('legacy', 'proj-1', '', 'octocat', 'github:github.com:1', 'full', 'read', ?, ?)`,
+      )
+      .run(createdAt, Date.now() + 3_600_000);
+    const result = await store.validate("legacy");
+    expect(result?.authenticatedAt).toBe(createdAt);
   });
 
   it("validate returns null for expired session", async () => {

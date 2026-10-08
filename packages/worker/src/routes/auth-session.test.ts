@@ -14,9 +14,23 @@ const mockTokenRevoke = vi
   .fn()
   .mockResolvedValue({ revoked: true, tokenHash: "tok-hash" });
 const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
+// ProjectMembershipStore.resolve — drives the capability block on /status
+const mockMembershipResolve = vi.fn().mockResolvedValue(null);
+const mockRepoAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 
 vi.mock("@tila/backend-d1", async () => ({
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
+  ProjectMembershipStore: vi.fn().mockImplementation(
+    class {
+      resolve = mockMembershipResolve;
+      async revokeProjectCredentials() {}
+    } as unknown as () => unknown,
+  ),
+  RepoAllowlistStore: vi.fn().mockImplementation(
+    class {
+      getAccessPolicy = mockRepoAccessPolicy;
+    } as unknown as () => unknown,
+  ),
   D1RateLimitStore: vi.fn().mockImplementation(
     class {
       check = mockRateLimitCheck;
@@ -100,6 +114,8 @@ function makeProtectedApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockMembershipResolve.mockResolvedValue(null);
+  mockRepoAccessPolicy.mockResolvedValue({ status: "not-found" });
   mockTokenValidate.mockResolvedValue({
     projectId: "test-project",
     name: "test-token",
@@ -580,5 +596,151 @@ describe("GET /auth/session/status", () => {
     };
     expect(body.permission).toBe("write");
     expect(body.canManageTokens).toBe(false);
+  });
+});
+
+describe("GET /auth/session/status capabilities (#102)", () => {
+  type StatusBody = {
+    capabilities: {
+      memberships_manage: boolean;
+      credentials_manage: boolean;
+      membership_available: boolean;
+      auth_method?: string;
+      authenticated_at?: number;
+      step_up_max_age_seconds: number;
+    };
+  };
+  let cookieSeq = 0;
+  const githubSession = (overrides: Record<string, unknown> = {}) => ({
+    projectId: "test-project",
+    tokenHash: "",
+    name: "octocat",
+    principalId: "github:github.com:1",
+    scopes: "admin",
+    expiresAt: Date.now() + 3_600_000,
+    permission: "admin",
+    role: "owner",
+    membershipSource: JSON.stringify(["explicit"]),
+    authenticatedAt: Date.now() - 1_000,
+    ...overrides,
+  });
+  async function status(headers: Record<string, string>) {
+    const res = await makeProtectedApp().request(
+      "/auth/session/status",
+      { headers },
+      testEnv,
+      mockCtx,
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as StatusBody).capabilities;
+  }
+  const cookie = () => ({ Cookie: `tila_session=cap-${++cookieSeq}` });
+
+  it("explicit owner cookie session → both flags true with auth metadata", async () => {
+    const session = githubSession();
+    mockSessionValidate.mockResolvedValue(session);
+    mockMembershipResolve.mockResolvedValue({
+      role: "owner",
+      explicitRole: "owner",
+      sources: ["explicit"],
+      explicitMembershipId: "m-1",
+    });
+    const caps = await status(cookie());
+    expect(caps.memberships_manage).toBe(true);
+    expect(caps.credentials_manage).toBe(true);
+    expect(caps.membership_available).toBe(true);
+    expect(caps.auth_method).toBe("github");
+    expect(caps.authenticated_at).toBe(session.authenticatedAt);
+    expect(caps.step_up_max_age_seconds).toBe(600);
+  });
+
+  it("maintainer cookie session → both flags false", async () => {
+    mockSessionValidate.mockResolvedValue(
+      githubSession({ role: "maintainer" }),
+    );
+    mockMembershipResolve.mockResolvedValue({
+      role: "maintainer",
+      explicitRole: "maintainer",
+      sources: ["explicit"],
+    });
+    const caps = await status(cookie());
+    expect(caps.memberships_manage).toBe(false);
+    expect(caps.credentials_manage).toBe(false);
+    expect(caps.membership_available).toBe(true);
+  });
+
+  it("legacy admin cookie session without explicit owner row → false (never inferred from permission)", async () => {
+    mockSessionValidate.mockResolvedValue(
+      githubSession({ scopes: "full", permission: "admin", role: null }),
+    );
+    mockMembershipResolve.mockResolvedValue(null);
+    const caps = await status(cookie());
+    expect(caps.memberships_manage).toBe(false);
+    expect(caps.credentials_manage).toBe(false);
+  });
+
+  it("owner role mirrored from GitHub only → false (GitHub cannot grant ownership)", async () => {
+    mockSessionValidate.mockResolvedValue(githubSession({ sourceRepoId: 42 }));
+    mockMembershipResolve.mockResolvedValue({
+      role: "owner",
+      sources: ["github-mirrored"],
+      mirroredRepoId: 42,
+    });
+    const caps = await status(cookie());
+    expect(caps.memberships_manage).toBe(false);
+    expect(caps.credentials_manage).toBe(false);
+  });
+
+  it("workspace session (no project) → both false and no store lookup", async () => {
+    mockSessionValidate.mockResolvedValue(
+      githubSession({
+        projectId: "",
+        scopes: "",
+        permission: "read",
+        role: null,
+      }),
+    );
+    const caps = await status(cookie());
+    expect(caps.memberships_manage).toBe(false);
+    expect(caps.credentials_manage).toBe(false);
+    expect(caps.membership_available).toBe(true);
+    expect(mockMembershipResolve).not.toHaveBeenCalled();
+  });
+
+  it("membership store failure → both false and membership_available=false", async () => {
+    mockSessionValidate.mockResolvedValue(githubSession());
+    mockMembershipResolve.mockRejectedValue(new Error("D1 down"));
+    const caps = await status(cookie());
+    expect(caps.memberships_manage).toBe(false);
+    expect(caps.credentials_manage).toBe(false);
+    expect(caps.membership_available).toBe(false);
+  });
+
+  it("full D1 bearer token → both true, no auth metadata", async () => {
+    mockSessionValidate.mockResolvedValue(null);
+    mockTokenValidate.mockResolvedValue({
+      projectId: "test-project",
+      name: "bootstrap",
+      scopes: "full",
+      tokenId: "uuid-123",
+    });
+    const caps = await status({ Authorization: "Bearer tila_full_token" });
+    expect(caps.memberships_manage).toBe(true);
+    expect(caps.credentials_manage).toBe(true);
+    expect(caps.auth_method).toBeUndefined();
+    expect(caps.authenticated_at).toBeUndefined();
+  });
+
+  it("read-scoped D1 bearer token → both false", async () => {
+    mockSessionValidate.mockResolvedValue(null);
+    mockTokenValidate.mockResolvedValue({
+      projectId: "test-project",
+      name: "reader",
+      scopes: "read",
+      tokenId: "uuid-456",
+    });
+    const caps = await status({ Authorization: "Bearer tila_read_token" });
+    expect(caps.memberships_manage).toBe(false);
+    expect(caps.credentials_manage).toBe(false);
   });
 });

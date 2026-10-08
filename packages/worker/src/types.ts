@@ -27,6 +27,10 @@ export interface Env {
   // accepts a matching bearer to operate on ANY project by slug (no per-project
   // token). When unset, those endpoints return 404 (invisible). See routes/infra.ts.
   INFRA_ADMIN_TOKEN?: string;
+  // Optional override (seconds) for the step-up reauthentication window applied
+  // to high-impact membership/credential mutations from cookie sessions. See
+  // STEP_UP_MAX_AGE_SECONDS_DEFAULT in config.ts and middleware/protected-operation.ts.
+  STEP_UP_MAX_AGE_SECONDS?: string;
 }
 
 // Re-export for convenience
@@ -86,6 +90,10 @@ export interface CookieSessionTokenResult
   role?: ProjectRole;
   membershipSources?: MembershipSource[];
   sourceRepoId?: number;
+  /** Unix ms of the last interactive authentication (step-up reauth, #102). */
+  authenticatedAt?: number;
+  /** How the holder authenticated: GitHub OAuth or a presented project token. */
+  authMethod?: "github" | "token";
 }
 
 export interface WorkspaceSessionTokenResult {
@@ -98,6 +106,8 @@ export interface WorkspaceSessionTokenResult {
   githubLogin: string; // derived from name/actorName
   expiresAt: number; // milliseconds
   principalId?: string;
+  /** Unix ms of the last interactive authentication (carried into the project session). */
+  authenticatedAt?: number;
 }
 
 /**

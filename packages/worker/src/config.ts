@@ -262,3 +262,13 @@ export const DPOP_PROOF_MAX_AGE_MS = 60_000; // 60 seconds
  * accommodating minor client clock drift without widening the replay window.
  */
 export const DPOP_CLOCK_SKEW_MS = 5_000; // 5 seconds
+
+/**
+ * Step-up reauthentication window for high-impact membership and credential
+ * mutations made from an interactive cookie session (#102). A session whose
+ * last authentication is older than this must sign in again before the
+ * mutation is accepted. Override per deployment with the optional
+ * STEP_UP_MAX_AGE_SECONDS secret; bearer credentials are exempt because they
+ * cannot re-authenticate interactively.
+ */
+export const STEP_UP_MAX_AGE_SECONDS_DEFAULT = 600;

@@ -312,6 +312,8 @@ function buildSessionTokenResult(
     role?: string | null;
     membershipSource?: string | null;
     sourceRepoId?: number | null;
+    tokenHash?: string;
+    authenticatedAt?: number;
   },
 ): {
   tokenResult: WorkspaceSessionTokenResult | CookieSessionTokenResult;
@@ -329,6 +331,7 @@ function buildSessionTokenResult(
         githubLogin: cached.name,
         principalId: cached.principalId,
         expiresAt: cached.expiresAt,
+        authenticatedAt: cached.authenticatedAt,
       } satisfies WorkspaceSessionTokenResult,
       authKind: "workspace",
     };
@@ -369,6 +372,8 @@ function buildSessionTokenResult(
         }
       })(),
       sourceRepoId: cached.sourceRepoId ?? undefined,
+      authenticatedAt: cached.authenticatedAt,
+      authMethod: cached.tokenHash ? "token" : "github",
     } satisfies CookieSessionTokenResult,
     authKind: "cookie",
   };

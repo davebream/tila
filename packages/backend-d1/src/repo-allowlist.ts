@@ -141,6 +141,25 @@ export class RepoAllowlistStore {
     return rows as RepoAllowlistRow[];
   }
 
+  /**
+   * Human access policy for every enabled repository of a project, for the
+   * membership administration surface (#102). Rows with an invalid stored
+   * policy are skipped rather than failing the whole listing.
+   */
+  async listAccessPolicies(
+    projectId: string,
+  ): Promise<Array<{ repo: RepoAllowlistRow; policy: RepoAccessPolicy }>> {
+    const rows = await this.listForProject(projectId);
+    const result: Array<{ repo: RepoAllowlistRow; policy: RepoAccessPolicy }> =
+      [];
+    for (const row of rows) {
+      const decoded = decodeAccessPolicy(row);
+      if (decoded.status === "ok")
+        result.push({ repo: decoded.repo, policy: decoded.policy });
+    }
+    return result;
+  }
+
   /** Read and validate a repository's complete human access policy. */
   async getAccessPolicy(
     projectId: string,

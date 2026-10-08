@@ -528,9 +528,82 @@ export function buildSessionCookie(value: string, isLocalDev: boolean): string {
 ### Session Status
 
 **Route:** `GET /auth/session/status`  
-**File:** `packages/worker/src/routes/auth-session.ts` lines 231-234
+**File:** `packages/worker/src/routes/auth-session.ts`
 
-Returns the current session's `projectId` (useful for UI to detect active session).
+Returns the current session's `projectId` plus a server-computed `capabilities`
+block (`packages/worker/src/middleware/session-capabilities.ts`):
+
+```json
+{
+  "ok": true,
+  "projectId": "proj_xyz",
+  "permission": "admin",
+  "canManageTokens": true,
+  "capabilities": {
+    "memberships_manage": true,
+    "credentials_manage": true,
+    "membership_available": true,
+    "auth_method": "github",
+    "authenticated_at": 1760000000000,
+    "step_up_max_age_seconds": 600
+  }
+}
+```
+
+`permission` and `canManageTokens` are legacy snapshots kept for compatibility.
+The browser gates management controls on `capabilities` only. The flags apply the
+same rules as `requireProjectOwner` and `credentialManagementGuard`: explicit owner
+membership (a GitHub-mirrored role never grants ownership), the capability in a
+scoped credential's policy, and a full D1 bootstrap token. If membership resolution
+throws, both flags are false and `membership_available` is false (fail closed).
+
+### Step-up Reauthentication
+
+**File:** `packages/worker/src/middleware/protected-operation.ts`
+(`requireFreshAuthentication`, `stepUpGuard`, `STEP_UP_PROTECTED`)
+
+High-impact membership and credential mutations made from an interactive cookie
+session require a recent authentication:
+
+| Route family | Guard order |
+|---|---|
+| `POST/PATCH/DELETE /projects/:id/memberships*`, `PUT /membership-policy` | `requireProjectOwner` → `stepUpGuard` |
+| `POST/DELETE /projects/:id/admins*` | `requireProjectOwner` → `stepUpGuard` |
+| `/projects/:id/service-accounts/**` mutations | `requireProjectOwner` → `stepUpGuard` |
+| `POST /api/tokens`, `DELETE /api/tokens/:name`, `POST /api/tokens/:name/rotate` | `credentialManagementGuard` → `requireFreshAuthentication` |
+
+The owner/capability check always runs first so a non-owner never learns the
+window. A cookie session whose `authenticatedAt` is older than
+`STEP_UP_MAX_AGE_SECONDS` (default `STEP_UP_MAX_AGE_SECONDS_DEFAULT = 600` in
+`config.ts`; optional secret override) receives:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "step-up-required",
+    "message": "Re-authenticate to continue",
+    "retryable": false,
+    "details": { "max_age_seconds": 600, "authenticated_at": 1760000000000 }
+  }
+}
+```
+
+`authenticated_at` is stored in `_sessions.authenticated_at` (migration 0028). It
+is set when the GitHub OAuth callback or `POST /auth/session` creates a session and
+is **carried unchanged** when `POST /api/workspace/select` or `/deselect` replaces
+the session row, so selecting a project does not restart the clock. Rows created
+before the migration fall back to `created_at`; a cookie session with no value at
+all is treated as stale.
+
+Exempt: D1 bearer tokens, scoped credentials (including cookie sessions exchanged
+from one, which carry `policy`), and GitHub/OIDC JWT sessions. They cannot
+re-authenticate interactively; their protection is the explicit-owner/capability
+gate. GET requests are never gated.
+
+The UI (`StepUpBanner`, `StepUpResume`, `DefaultRedirect`) stashes the project and
+return path in `sessionStorage`, sends the user through sign-in, reselects the
+project and navigates back. The rejected mutation is never replayed.
 
 ### CookieSessionTokenResult
 

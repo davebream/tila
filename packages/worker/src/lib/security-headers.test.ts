@@ -48,6 +48,15 @@ describe("addSecurityHeaders", () => {
     expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
   });
 
+  it("allows browser calls to the GitHub public API for user lookup", () => {
+    const headers = new Headers();
+    addSecurityHeaders(headers);
+
+    expect(headers.get("Content-Security-Policy")).toContain(
+      "connect-src 'self' https://api.github.com",
+    );
+  });
+
   it("includes upgrade-insecure-requests directive", () => {
     const headers = new Headers();
     addSecurityHeaders(headers);
