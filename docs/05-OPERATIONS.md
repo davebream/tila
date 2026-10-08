@@ -1505,3 +1505,24 @@ cancelled by this policy. Full validation is also available through the CI
 workflow's manual dispatch and runs daily at 04:17 UTC; those runs bypass Turbo
 result reuse. Diagnostic artifacts retain command logs (including test counts),
 step timings, and Turbo run summaries for seven days, including on failures.
+
+### Cache correctness and affected-selection rollout
+
+Root Turbo commands resolve the checked-out revision and runtime/platform identity
+before computing task hashes. CLI/SDK/DO version modules are generated, ignored
+outputs; run the documented root commands or the package version generators before
+invoking compilers directly. Worker dry-run output is explicit and cacheable.
+
+PRs restore caches only. Successful main verification saves download and Turbo
+caches keyed by toolchain, lockfile and commit. Release output must be built fresh.
+Environment-gated integration tests are not cached. CI still runs the full suite:
+the affected task list is recorded in `selection.json` for observation only.
+Enable selective execution in a follow-up change only after ten paired PR runs
+prove selection includes required tests for schema, SQLite, migration, SDK, UI,
+installer, root-config and lockfile changes. Missing Git history falls back to full
+execution. Revert to full selection immediately if any dependency is missed.
+
+Manual CI dispatch with `benchmark=true` runs the baseline and Turbo concurrency
+2/4 × Vitest workers 1/2, three times each on one revision. It does not tune CI
+automatically. Select the lowest median with no failures and at most 10% extra
+runner time; retain the baseline if none qualifies. Reports last seven days.

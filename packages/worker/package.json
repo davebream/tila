@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @tila/backend-do prebuild && wrangler dev --local -c wrangler.dev.toml --tsconfig ../../tsconfig.json",
-    "build": "wrangler deploy --dry-run",
+    "build": "wrangler deploy --dry-run --outdir dist",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .wrangler"
