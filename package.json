@@ -18,7 +18,9 @@
     "version:check": "node scripts/check-public-versions.mjs",
     "version:test": "node --test scripts/version-policy.test.mjs",
     "dev:cli": "pnpm --filter tila-cli dev",
-    "dev:mcp": "tsx --tsconfig tsconfig.json packages/mcp-server/src/index.ts"
+    "dev:mcp": "tsx --tsconfig tsconfig.json packages/mcp-server/src/index.ts",
+    "bench": "tsx --tsconfig tsconfig.json packages/bench/src/cli.ts",
+    "bench:report": "tsx --tsconfig tsconfig.json packages/bench/src/cli.ts report"
   },
   "pnpm": {
     "overrides": {
