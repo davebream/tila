@@ -1,4 +1,7 @@
-import { StepUpResume } from "@/components/admin/step-up-resume";
+import {
+  DefaultRedirect,
+  StepUpResume,
+} from "@/components/admin/step-up-resume";
 import { Layout } from "@/components/layout";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { ArtifactsPage } from "@/pages/artifacts";
@@ -150,45 +153,36 @@ export function AuthGate() {
   }
 
   return (
-    <>
-      <StepUpResume />
-      <Routes>
-        <Route
-          path="/"
-          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-        />
-        <Route path="/p/:projectId/*">{ProjectRoutes({ projectId })}</Route>
-        {/* Legacy flat routes redirect to project-scoped */}
-        <Route
-          path="/entities"
-          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-        />
-        <Route
-          path="/entities/:id"
-          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-        />
-        <Route
-          path="/journal"
-          element={<Navigate to={`/p/${projectId}/journal`} replace />}
-        />
-        <Route
-          path="/presence"
-          element={<Navigate to={`/p/${projectId}/presence`} replace />}
-        />
-        <Route
-          path="/records"
-          element={<Navigate to={`/p/${projectId}/records`} replace />}
-        />
-        <Route
-          path="/artifacts"
-          element={<Navigate to={`/p/${projectId}/artifacts`} replace />}
-        />
-        <Route
-          path="*"
-          element={<Navigate to={`/p/${projectId}/tasks`} replace />}
-        />
-      </Routes>
-    </>
+    <Routes>
+      <Route path="/" element={<DefaultRedirect projectId={projectId} />} />
+      <Route path="/p/:projectId/*">{ProjectRoutes({ projectId })}</Route>
+      {/* Legacy flat routes redirect to project-scoped */}
+      <Route
+        path="/entities"
+        element={<Navigate to={`/p/${projectId}/tasks`} replace />}
+      />
+      <Route
+        path="/entities/:id"
+        element={<Navigate to={`/p/${projectId}/tasks`} replace />}
+      />
+      <Route
+        path="/journal"
+        element={<Navigate to={`/p/${projectId}/journal`} replace />}
+      />
+      <Route
+        path="/presence"
+        element={<Navigate to={`/p/${projectId}/presence`} replace />}
+      />
+      <Route
+        path="/records"
+        element={<Navigate to={`/p/${projectId}/records`} replace />}
+      />
+      <Route
+        path="/artifacts"
+        element={<Navigate to={`/p/${projectId}/artifacts`} replace />}
+      />
+      <Route path="*" element={<DefaultRedirect projectId={projectId} />} />
+    </Routes>
   );
 }
 

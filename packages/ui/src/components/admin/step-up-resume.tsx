@@ -2,49 +2,52 @@ import { useAuth } from "@/hooks/use-auth";
 import { workspaceSelect } from "@/lib/api";
 import { peekStepUpResume, takeStepUpResume } from "@/lib/step-up";
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router";
+import { Navigate } from "react-router";
 
 /**
- * After a step-up sign-in the app lands on `/`. If a resume stash exists,
- * reselect the project (GitHub sign-in yields a workspace session) and return
- * to the settings page. Rendered inside the auth gate once the session is
- * known. Mutations are never replayed automatically.
+ * Step-up resume, part 1 (#102). GitHub sign-in lands on `/` with a
+ * workspace session and no selected project. When a resume stash exists,
+ * reselect the project; `DefaultRedirect` then consumes the stash and
+ * returns to the settings page. Rendered only while no project is active.
+ * Mutations are never replayed automatically.
  */
 export function StepUpResume() {
   const { isAuthenticated, isLoading, projectId, selectProject } = useAuth();
-  const navigate = useNavigate();
   const running = useRef(false);
 
   useEffect(() => {
-    if (isLoading || !isAuthenticated || running.current) return;
-    const pending = peekStepUpResume();
-    if (!pending) return;
+    if (isLoading || !isAuthenticated || projectId || running.current) return;
+    const stash = peekStepUpResume();
+    if (!stash) return;
     running.current = true;
-    const stash = takeStepUpResume();
-    if (!stash) {
-      running.current = false;
-      return;
-    }
     (async () => {
       try {
-        if (projectId === stash.projectId) {
-          navigate(stash.returnTo, { replace: true });
-          return;
-        }
-        if (!projectId) {
-          await workspaceSelect(stash.projectId);
-          selectProject(stash.projectId);
-          navigate(stash.returnTo, { replace: true });
-        }
-        // A different project is active: leave the user where they are.
+        await workspaceSelect(stash.projectId);
+        selectProject(stash.projectId);
       } catch {
-        // Selection failed (membership revoked, project gone): fall through
-        // to the workspace page, which lists what the user can still open.
+        // Selection failed (membership revoked, project gone): drop the
+        // stash and leave the user on the workspace page.
+        takeStepUpResume();
       } finally {
         running.current = false;
       }
     })();
-  }, [isAuthenticated, isLoading, projectId, selectProject, navigate]);
+  }, [isAuthenticated, isLoading, projectId, selectProject]);
 
   return null;
+}
+
+/**
+ * Step-up resume, part 2. Used for `/` and unknown paths once a project is
+ * active: if a resume stash targets this project, go back to where the user
+ * was; otherwise go to the default page.
+ */
+export function DefaultRedirect({ projectId }: { projectId: string }) {
+  const stash = peekStepUpResume();
+  if (stash && stash.projectId === projectId) {
+    takeStepUpResume();
+    return <Navigate to={stash.returnTo} replace />;
+  }
+  if (stash) takeStepUpResume();
+  return <Navigate to={`/p/${projectId}/tasks`} replace />;
 }
