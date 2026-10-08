@@ -61,6 +61,12 @@ export interface ClientOptions {
    * are unaffected (backward-compatible).
    */
   dpopSigner?: (htm: string, htu: string) => Promise<string>;
+  /**
+   * Custom transport. Defaults to the global `fetch`. Lets callers route
+   * requests through an in-process handler (tests, benchmarks) without
+   * patching globals. Called as a plain function, never bound to the client.
+   */
+  fetch?: typeof globalThis.fetch;
 }
 
 export class TilaClient {
@@ -71,6 +77,7 @@ export class TilaClient {
   private timeoutMs: number;
   private extraHeaders: Record<string, string>;
   private dpopSigner?: (htm: string, htu: string) => Promise<string>;
+  private fetchImpl?: typeof globalThis.fetch;
   readonly participantId: string;
   readonly environment: EnvironmentMetadata;
 
@@ -122,6 +129,7 @@ export class TilaClient {
         : {}),
     };
     this.dpopSigner = opts.dpopSigner;
+    this.fetchImpl = opts.fetch;
   }
 
   static fromConfig(
@@ -244,8 +252,11 @@ export class TilaClient {
         signal.throwIfAborted();
         let response: Response;
         try {
+          // Resolve the global lazily so test-time `vi.stubGlobal("fetch")`
+          // still intercepts clients constructed before the stub.
+          const doFetch = this.fetchImpl ?? globalThis.fetch;
           response = await abortable(
-            fetch(url.toString(), {
+            doFetch(url.toString(), {
               method: context.method,
               headers,
               body,
