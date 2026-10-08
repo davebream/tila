@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     cache-mode: read
+    outputs:
+      scopes_payload: ${{ steps.selection.outputs.scopes_payload }}
     env:
       TURBO_FORCE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
@@ -86,9 +88,20 @@ jobs:
       - name: Lint and version checks
         run: node scripts/ci-run.mjs lint pnpm lint
 
-      - name: Observe affected package selection
+      - name: Resolve queue-aware comparison commits
+        id: scope-refs
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true # Missing refs produce an all-scopes barrier.
+        uses: Mergifyio/gha-mergify-ci@ce0d6bef01217d90fb9e908e6966b0f6f4ea26d5 # v26
+        with:
+          action: scopes-git-refs
+
+      - name: Compute affected package scopes
+        id: selection
         env:
-          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_BASE_SHA: ${{ steps.scope-refs.outputs.base }}
+          CI_HEAD_SHA: ${{ steps.scope-refs.outputs.head }}
+          CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/ci-select.mjs
 
       - name: Typecheck
@@ -125,6 +138,45 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  scopes:
+    # Forks and Dependabot do not receive this secret; missing scopes use
+    # Mergify's conservative catch-all behavior. Never use pull_request_target.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions: {}
+    steps:
+      # No checkout, installs or repository code runs in this job.
+      - name: Validate scope payload
+        env:
+          SCOPE_PAYLOAD: ${{ needs.verify.outputs.scopes_payload }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          jq -e --arg head "$PR_HEAD" '
+            .head_ref == $head and
+            (.all_scopes | type == "boolean") and
+            (.scopes | type == "array") and
+            (.scopes | length <= 10000) and
+            (.all_scopes or (.scopes | length > 0)) and
+            all(.scopes[]; type == "string" and test("^(@[a-z0-9-]+/)?[a-z0-9._-]+$"))
+          ' <<< "$SCOPE_PAYLOAD"
+          jq '{scopes, all_scopes}' <<< "$SCOPE_PAYLOAD" > "$RUNNER_TEMP/mergify-scopes.json"
+      - name: Upload scopes for this PR revision
+        env:
+          MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test -n "$MERGIFY_TOKEN" || { echo '::error::MERGIFY_TOKEN is required'; exit 1; }
+          curl --fail-with-body --silent --show-error --retry 3 \
+            --request PUT \
+            --header "Authorization: Bearer $MERGIFY_TOKEN" \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/mergify-scopes.json" \
+            "https://api.mergify.com/v1/repos/$REPOSITORY/commits/$PR_HEAD/scopes"
+
   secrets:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -139,7 +191,7 @@ jobs:
 
   ci:
     if: ${{ always() }}
-    needs: [verify, secrets, runtime, consumer-node22]
+    needs: [verify, secrets, runtime, consumer-node22, scopes]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -147,7 +199,7 @@ jobs:
       - name: Require every check to succeed
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          REQUIRED_JOBS: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["verify","secrets","runtime","consumer-node22"]' || '["verify","secrets","runtime"]' }}
+          REQUIRED_JOBS: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["verify","secrets","runtime","consumer-node22"]' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') && '["verify","secrets","runtime","scopes"]' || '["verify","secrets","runtime"]' }}
         run: bash scripts/ci-gate.sh
 
   benchmark:
