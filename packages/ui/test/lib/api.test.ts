@@ -134,8 +134,25 @@ describe("mutate", () => {
       role: "viewer",
     });
     expect(seen.request?.headers.get("Content-Type")).toBe("application/json");
+    expect(seen.request?.headers.get("X-Tila-Participant-Id")).toMatch(
+      /^dashboard-/,
+    );
+    expect(seen.request?.headers.get("X-Tila-Client-Name")).toBe("dashboard");
     expect(seen.request?.headers.get("Idempotency-Key")).toBeNull();
     expect(await seen.request?.json()).toEqual({ role: "viewer" });
+  });
+
+  test("does not attach participant headers to non-project paths", async () => {
+    const seen: { request?: Request } = {};
+    server.use(
+      http.delete("*/api/tokens/old", ({ request }) => {
+        seen.request = request;
+        return HttpResponse.json({ ok: true, name: "old", revoked_at: 1 });
+      }),
+    );
+    await mutate("DELETE", "/api/tokens/old");
+    expect(seen.request?.headers.get("X-Tila-Participant-Id")).toBeNull();
+    expect(seen.request?.headers.get("Content-Type")).toBeNull();
   });
 
   test("maps the error envelope including details", async () => {

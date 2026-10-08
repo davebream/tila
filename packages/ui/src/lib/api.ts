@@ -81,25 +81,47 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
   return new ApiError(code, message, details);
 }
 
+const PARTICIPANT_KEY = "tila.participantId";
+
 /**
- * Send a write request with the session cookie. Only `Content-Type` is added,
- * so no CORS preflight header allowlist changes are needed; the Worker's CSRF
- * guard relies on the browser-supplied `Origin` header.
+ * Stable participant id for this browser profile. Project mutations require
+ * `X-Tila-Participant-Id` (journal attribution); the dashboard mints one per
+ * browser and keeps it in localStorage so audit rows stay correlated.
+ */
+export function dashboardParticipantId(): string {
+  try {
+    const existing = window.localStorage.getItem(PARTICIPANT_KEY);
+    if (existing) return existing;
+    const fresh = `dashboard-${crypto.randomUUID()}`;
+    window.localStorage.setItem(PARTICIPANT_KEY, fresh);
+    return fresh;
+  } catch {
+    return "dashboard";
+  }
+}
+
+/**
+ * Send a write request with the session cookie. Project mutations carry the
+ * participant id the Worker requires; the Worker's CSRF guard relies on the
+ * browser-supplied `Origin` header, so no CSRF token is needed.
  */
 export async function mutate<T>(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (path.startsWith("/projects/")) {
+    headers["X-Tila-Participant-Id"] = dashboardParticipantId();
+    headers["X-Tila-Client-Name"] = "dashboard";
+  }
   let response: Response;
   try {
     response = await fetch(absoluteUrl(path).toString(), {
       method,
       credentials: "include",
-      headers:
-        body === undefined
-          ? { Accept: "application/json" }
-          : { Accept: "application/json", "Content-Type": "application/json" },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
