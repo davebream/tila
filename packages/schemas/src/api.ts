@@ -525,6 +525,19 @@ export const DOHealthResponseSchema = z.object({
 
 export type DOHealthResponse = z.infer<typeof DOHealthResponseSchema>;
 
+// --- Admin Store Counts API ---
+
+export const StoreCountsResponseSchema = z.object({
+  counts: z.object({
+    domain: z.record(z.number().int().nonnegative()),
+    schemaHistory: z.number().int().nonnegative(),
+  }),
+  // Older deployments expose row counts only.
+  db_bytes: z.number().int().nonnegative().nullable().default(null),
+});
+
+export type StoreCountsResponse = z.infer<typeof StoreCountsResponseSchema>;
+
 // --- Doctor Probe API ---
 
 export const DoctorProbeResponseSchema = z.object({
