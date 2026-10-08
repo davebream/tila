@@ -66,6 +66,7 @@ export const groups: Record<string, string[]> = {
     "reset",
     "config",
     "doctor",
+    "update",
     "complete",
   ],
 };

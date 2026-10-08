@@ -28,6 +28,8 @@ for (const target of compileTargets) {
     [
       "build",
       "--compile",
+      "--define",
+      `TILA_BUILD_TARGET=${JSON.stringify(target)}`,
       `--metafile=dist/metadata/${name}.json`,
       "--target",
       `bun-${target}`,

@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+export const CliUpdateResultSchema = z.object({
+  status: z.enum(["current", "available", "updated", "pinned"]),
+  currentVersion: z.string(),
+  availableVersion: z.string(),
+  installedVersion: z.string(),
+  latestVersion: z.string(),
+  installationMethod: z.enum(["standalone", "homebrew", "npm", "pnpm", "bun"]),
+  executablePath: z.string(),
+  releaseNotes: z.string().url(),
+  channelBehind: z.boolean(),
+});
+export type CliUpdateResult = z.infer<typeof CliUpdateResultSchema>;
+
 /** The CLI contract is independent of HTTP responses and external hook protocols. */
 export const CliPageMetaSchema = z
   .object({
