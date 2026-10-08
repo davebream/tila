@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { defineCommand } from "citty";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
 import { deletePagesProject, queryD1 } from "../../lib/cloudflare-resources";
@@ -8,7 +7,9 @@ import type { AppCredentials } from "../../lib/github-app-setup";
 import { getInfraSlug } from "../../lib/infra-config";
 import { resolveInfraConfig } from "../../lib/infra-fallback";
 import { buildAuthStore } from "../../lib/instance-context";
-import { printJsonError } from "../../lib/output";
+import { exit, printJsonError } from "../../lib/output";
+
+import * as p from "../../lib/prompts";
 import { resolveCfApiToken, tilaHome } from "../../lib/provisioning";
 import { R2_BUCKET_NAME } from "../../lib/resource-names";
 import {
@@ -48,7 +49,7 @@ export default defineCommand({
       config = await resolveInfraConfig(tilaDir, buildAuthStore());
     } catch (err) {
       p.cancel("No infrastructure found. Run `tila infra provision` first.");
-      process.exit(1);
+      exit(1);
     }
 
     // Step 2: Resolve CF token — prompt if not found (skip in --yes mode)
@@ -59,18 +60,18 @@ export default defineCommand({
       });
       if (p.isCancel(tokenResult)) {
         p.cancel("Operation cancelled.");
-        process.exit(1);
+        exit(1);
       }
       cfToken = String(tokenResult ?? "").trim();
       if (!cfToken) {
         p.cancel("No token provided. Aborting.");
-        process.exit(1);
+        exit(1);
       }
     }
 
     if (!cfToken) {
       p.cancel("No CLOUDFLARE_API_TOKEN available. Aborting.");
-      process.exit(1);
+      exit(1);
     }
 
     const cf = createCloudflareClient(cfToken);
@@ -89,13 +90,13 @@ export default defineCommand({
       });
       if (p.isCancel(answer)) {
         p.cancel("Teardown cancelled.");
-        process.exit(1);
+        exit(1);
       }
       if (answer !== confirmText) {
         p.log.error(
           `Confirmation failed. Expected "${confirmText}", got "${answer}".`,
         );
-        process.exit(1);
+        exit(1);
       }
     }
 
@@ -112,7 +113,7 @@ export default defineCommand({
       p.log.error(
         `D1 database still has ${projectCount} project(s). Destroy all projects first with \`tila project destroy\`.`,
       );
-      process.exit(1);
+      exit(1);
     }
 
     // Step 4b: Check R2 bucket is empty before proceeding
@@ -138,7 +139,7 @@ export default defineCommand({
       p.log.error(
         `R2 bucket "${r2BucketNameForCheck}" still has objects under prefix "${nonEmptyPrefix}". Destroy all projects first with \`tila project destroy\` to remove artifact blobs.`,
       );
-      process.exit(1);
+      exit(1);
     }
 
     // Step 5a: Delete Pages project (if configured)

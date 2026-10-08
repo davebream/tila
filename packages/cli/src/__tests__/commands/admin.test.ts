@@ -197,7 +197,10 @@ describe("tila admin list", () => {
     await runCmd(list, { json: true });
 
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(out).toMatchObject({ ok: true, admins: expect.any(Array) });
+    expect(out).toMatchObject({
+      ok: true,
+      result: { admins: expect.any(Array) },
+    });
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -297,8 +300,7 @@ describe("tila admin grant", () => {
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(out).toMatchObject({
       ok: true,
-      github_user_id: 5555,
-      granted: true,
+      result: { github_user_id: 5555, granted: true },
     });
     expect(exitSpy).not.toHaveBeenCalled();
   });
@@ -393,8 +395,7 @@ describe("tila admin revoke", () => {
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(out).toMatchObject({
       ok: true,
-      github_user_id: 5555,
-      revoked: true,
+      result: { github_user_id: 5555, revoked: true },
     });
     expect(exitSpy).not.toHaveBeenCalled();
   });

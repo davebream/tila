@@ -58,8 +58,9 @@ function createApp(
   app.use("*", async (c, next) => {
     c.set("doStub", stub);
     c.set("tokenResult", tokenResult);
-    c.set("source", "cli");
-    c.set("sourceVersion", "test");
+    c.set("principalId", "token:tok_test");
+    c.set("participantId", "test-participant");
+    c.set("environment", { client_name: "cli", client_version: "test" });
     await next();
   });
   app.route("/", entities);
@@ -286,9 +287,10 @@ function createWiringApp(
   app.use("*", async (c, next) => {
     c.set("doStub", stub);
     c.set("tokenResult", FULL_TOKEN as never);
-    c.set("source", "cli");
-    c.set("sourceVersion", "test");
     c.set("projectId", "proj_wiring");
+    c.set("principalId", "token:tok_full");
+    c.set("participantId", "test-participant");
+    c.set("environment", { client_name: "cli", client_version: "test" });
     await next();
   });
   // idempotency middleware with injected in-memory store

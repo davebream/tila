@@ -361,12 +361,14 @@ describe("auth token", () => {
     const out = allStdout();
     const parsed = JSON.parse(out);
     expect(parsed).toMatchObject({
-      token: FIXTURE_TOKEN,
-      token_type: "Bearer",
-      instance_key: FIXTURE_KEY,
-      source: "keychain",
+      result: {
+        token: FIXTURE_TOKEN,
+        token_type: "Bearer",
+        instance_key: FIXTURE_KEY,
+        source: "keychain",
+      },
     });
-    expect(parsed.expires_at).toBeTypeOf("number");
+    expect(parsed.result.expires_at).toBeTypeOf("number");
   });
 
   it("--json emits inline-token shape: { token, token_type:Bearer, expires_at:null, instance_key:null, source }", async () => {
@@ -390,11 +392,14 @@ describe("auth token", () => {
     const out = allStdout();
     const parsed = JSON.parse(out);
     expect(parsed).toEqual({
-      token: INLINE,
-      token_type: "Bearer",
-      expires_at: null,
-      instance_key: null,
-      source: "inline-token",
+      ok: true,
+      result: {
+        token: INLINE,
+        token_type: "Bearer",
+        expires_at: null,
+        instance_key: null,
+        source: "inline-token",
+      },
     });
   });
 
@@ -483,11 +488,14 @@ describe("auth token", () => {
     const out = allStdout();
     const parsed = JSON.parse(out);
     expect(parsed).toEqual({
-      token: LEGACY,
-      token_type: "Bearer",
-      expires_at: null,
-      instance_key: null,
-      source: "legacy",
+      ok: true,
+      result: {
+        token: LEGACY,
+        token_type: "Bearer",
+        expires_at: null,
+        instance_key: null,
+        source: "legacy",
+      },
     });
   });
 });

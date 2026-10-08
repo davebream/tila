@@ -8,6 +8,8 @@ import {
   matchLine,
   validateGrepPattern,
 } from "@tila/core";
+import type { ArtifactReviewSummary, ArtifactRevision } from "@tila/schemas";
+import { ArtifactReviewRequestSchema } from "@tila/schemas";
 import {
   ArtifactGrepQuerySchema,
   ArtifactSearchQuerySchema,
@@ -32,6 +34,10 @@ export {
   callPointerWithRetry,
   compensateAndRespond,
 } from "../lib/artifact-service";
+import {
+  restoreArtifact,
+  writeVersionedArtifact,
+} from "../lib/artifact-version-service";
 import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO } from "../lib/do-forward";
 import { normalizeArtifactText } from "../lib/normalize-text";
@@ -39,6 +45,7 @@ import { getValidatedSchema } from "../lib/schema-validation";
 import { type ScanRow, buildRebuildCandidates } from "../lib/search-rebuild";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 const INLINE_THRESHOLD = 64 * 1024;
@@ -148,6 +155,12 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
 
   const encoder = new TextEncoder();
   const fileBytes = encoder.encode(content);
+  if (
+    parsed.data.lineage_id !== undefined ||
+    parsed.data.lineage_fence !== undefined
+  ) {
+    return writeVersionedArtifact(c, parsed.data, fileBytes.buffer);
+  }
 
   const hashBuffer = await crypto.subtle.digest("SHA-256", fileBytes);
   const sha256 = Array.from(new Uint8Array(hashBuffer))
@@ -180,7 +193,8 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     metadata: {
       "tila-task": resource ?? "",
       "tila-fence": fence !== undefined ? String(fence) : "",
-      "tila-machine": tokenResult.name,
+      "tila-principal": identityPayload(c).principal_id,
+      "tila-participant": identityPayload(c).participant_id,
       "tila-kind": kind,
       "tila-sha256": sha256,
       "tila-mime": mimeType,
@@ -207,10 +221,8 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     actor: tokenResult.name,
     search_title: normalizedText?.title ?? null,
     search_body_text: normalizedText?.body_text ?? null,
-    actor_token_id: tokenResult.tokenId,
     content_inline: contentInline,
-    source: c.get("source"),
-    source_version: c.get("sourceVersion"),
+    ...identityPayload(c),
     tags: tags ?? undefined,
   };
 
@@ -241,6 +253,9 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     key: r2Key,
     bytes: fileBytes.byteLength,
     deduplicated,
+    pointer: (
+      (await pointerResult.response.json()) as { pointer?: ArtifactRevision }
+    ).pointer,
   });
 });
 
@@ -325,6 +340,23 @@ artifacts.post("/", requirePermission("write"), async (c) => {
 
   // Compute SHA-256 of file content
   const fileBytes = await file.arrayBuffer();
+  if (formData.has("lineage_id") || formData.has("lineage_fence")) {
+    return writeVersionedArtifact(
+      c,
+      {
+        kind,
+        resource,
+        fence,
+        mime_type: mimeType,
+        tags,
+        lineage_id: formData.get("lineage_id") as string | undefined,
+        lineage_fence: formData.has("lineage_fence")
+          ? Number(formData.get("lineage_fence"))
+          : undefined,
+      },
+      fileBytes,
+    );
+  }
   const hashBuffer = await crypto.subtle.digest("SHA-256", fileBytes);
   const sha256 = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -365,7 +397,8 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     metadata: {
       "tila-task": resource ?? "",
       "tila-fence": fence !== null ? String(fence) : "",
-      "tila-machine": tokenResult.name,
+      "tila-principal": identityPayload(c).principal_id,
+      "tila-participant": identityPayload(c).participant_id,
       "tila-kind": kind,
       "tila-sha256": sha256,
       "tila-mime": mimeType,
@@ -395,10 +428,8 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     actor: tokenResult.name,
     search_title: normalizedText?.title ?? null,
     search_body_text: normalizedText?.body_text ?? null,
-    actor_token_id: tokenResult.tokenId,
     content_inline: contentInline,
-    source: c.get("source"),
-    source_version: c.get("sourceVersion"),
+    ...identityPayload(c),
     tags,
   };
 
@@ -433,6 +464,9 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     key: r2Key,
     bytes: fileBytes.byteLength,
     deduplicated,
+    pointer: (
+      (await pointerResult.response.json()) as { pointer?: ArtifactRevision }
+    ).pointer,
   });
 });
 
@@ -608,6 +642,9 @@ artifacts.get("/grep", requirePermission("read"), async (c) => {
 
     if (acc.lines.length > 0) {
       results.push({
+        provenance: candidate.provenance,
+        revision_creation: candidate.revision_creation,
+        review: candidate.review,
         key: candidate.r2_key,
         kind: candidate.kind,
         resource: candidate.resource,
@@ -760,9 +797,7 @@ artifacts.post("/relationship", requirePermission("write"), async (c) => {
       type: body.type,
       metadata: body.metadata ?? {},
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -827,7 +862,7 @@ artifacts.get(
 const RECONCILE_SCAN_MAX_LIMIT = 1000;
 const RECONCILE_SCAN_DEFAULT_LIMIT = 500;
 
-type ReconcilePrefix = "produced" | "sources";
+type ReconcilePrefix = "produced" | "sources" | "versioned";
 
 interface CompositeCursor {
   prefix: ReconcilePrefix;
@@ -884,11 +919,16 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     metadata: Record<string, string>;
   };
   const allBlobs: BlobItem[] = [];
+  const versionRecoveryKeys: string[] = [];
   let nextCursor: string | null = null;
   let remaining = limit;
 
   const prefixOrder: ReconcilePrefix[] =
-    startPrefix === "produced" ? ["produced", "sources"] : ["sources"];
+    startPrefix === "produced"
+      ? ["produced", "sources", "versioned"]
+      : startPrefix === "sources"
+        ? ["sources", "versioned"]
+        : ["versioned"];
 
   for (let pi = 0; pi < prefixOrder.length; pi++) {
     const prefix = prefixOrder[pi];
@@ -903,7 +943,10 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
     }
 
     const listed = await c.env.ARTIFACTS.list({
-      prefix: `${prefix}/`,
+      prefix:
+        prefix === "versioned"
+          ? `versioned/${encodeURIComponent(c.get("projectId"))}/`
+          : `${prefix}/`,
       limit: remaining,
       cursor: innerCursor,
       include: ["customMetadata"],
@@ -916,7 +959,16 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
         (o as unknown as { customMetadata?: Record<string, string> })
           .customMetadata ?? {},
     }));
-    allBlobs.push(...objects);
+    if (prefix === "versioned")
+      versionRecoveryKeys.push(
+        ...objects
+          .filter(
+            (o) =>
+              o.key.endsWith(".commit.json") || o.key.endsWith("/destroy.json"),
+          )
+          .map((o) => o.key),
+      );
+    else allBlobs.push(...objects);
     remaining -= objects.length;
 
     if (listed.truncated) {
@@ -980,13 +1032,25 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
       r2_blobs: enrichedBlobs,
       apply,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
   );
+
+  let versionRecovered = 0;
+  if (versionRecoveryKeys.length) {
+    const revisionResponse = await forwardToDO(
+      stub,
+      "/artifact/version/reconcile",
+      "POST",
+      { project_id: c.get("projectId"), apply, keys: versionRecoveryKeys },
+    );
+    if (!revisionResponse.ok) return revisionResponse;
+    versionRecovered = (
+      (await revisionResponse.json()) as { recovered: number }
+    ).recovered;
+  }
 
   // Phase 2 (C6): Cross-check R2 blob existence for non-tombstoned searchable pointers.
   // Repair: tombstone any searchable pointer whose R2 blob is missing.
@@ -1037,9 +1101,7 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
           {
             r2_key: pointer.r2_key,
             actor: tokenResult.name,
-            actor_token_id: tokenResult.tokenId,
-            source: c.get("source"),
-            source_version: c.get("sourceVersion"),
+            ...identityPayload(c),
           },
           undefined,
           analyticsCtxFrom(c),
@@ -1055,7 +1117,7 @@ artifacts.post("/reconcile", requirePermission("write"), async (c) => {
   }
 
   return c.json(
-    { ...doBody, repairErrors, scanned, nextCursor },
+    { ...doBody, repairErrors, scanned, nextCursor, versionRecovered },
     doResponse.status as 200,
   );
 });
@@ -1109,9 +1171,7 @@ artifacts.post("/search-rebuild", requirePermission("write"), async (c) => {
       candidates,
       apply,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -1128,6 +1188,19 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
   const stub = c.get("doStub");
   const r2 = new R2ArtifactBackend(c.env.ARTIFACTS);
 
+  if (key.startsWith("versioned/")) {
+    return forwardToDO(stub, "/artifact/version/delete", "POST", {
+      key,
+      fence:
+        c.req.query("fence") === undefined
+          ? undefined
+          : Number(c.req.query("fence")),
+      idempotencyKey: `${c.get("principalId")}:${c.req.header("Idempotency-Key") ?? crypto.randomUUID()}`,
+      actor: tokenResult.name,
+      ...identityPayload(c),
+    });
+  }
+
   // Step 1: Tombstone-first (DO pointer before R2 blob)
   const tombstoneRes = await forwardToDO(
     stub,
@@ -1136,9 +1209,7 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
     {
       r2_key: key,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -1170,6 +1241,91 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
 
 // GET /projects/:projectId/artifacts/:key{.+} -- download from R2 (with inline fast path)
 // Note: this must be registered AFTER all named routes to avoid matching them
+artifacts.get("/~/reviews/:key{.+$}", requirePermission("read"), (c) =>
+  forwardToDO(
+    c.get("doStub"),
+    "/artifact/reviews",
+    "GET",
+    undefined,
+    {
+      ...c.req.query(),
+      key: c.req.param("key"),
+    },
+    analyticsCtxFrom(c),
+  ),
+);
+artifacts.post(
+  "/~/reviews/:key{.+$}",
+  requirePermission("write"),
+  async (c) => {
+    const review = ArtifactReviewRequestSchema.parse(await c.req.json());
+    const identity = identityPayload(c);
+    return forwardToDO(
+      c.get("doStub"),
+      "/artifact/review",
+      "POST",
+      {
+        key: c.req.param("key"),
+        review,
+        ...identity,
+        operation_id: JSON.stringify([
+          identity.principal_id,
+          c.req.header("Idempotency-Key") ?? crypto.randomUUID(),
+        ]),
+      },
+      undefined,
+      analyticsCtxFrom(c),
+    );
+  },
+);
+
+artifacts.get("/~/history/:key{.+$}", requirePermission("read"), (c) =>
+  forwardToDO(c.get("doStub"), "/artifact/history", "GET", undefined, {
+    key: c.req.param("key"),
+    ...Object.fromEntries(
+      Object.entries({
+        limit: c.req.query("limit"),
+        cursor: c.req.query("cursor"),
+      }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
+  }),
+);
+artifacts.get("/:key{.+}/meta", requirePermission("read"), (c) =>
+  forwardToDO(c.get("doStub"), "/artifact/meta", "GET", undefined, {
+    key: c.req.param("key"),
+  }),
+);
+artifacts.post(
+  "/~/destroy/:lineageId",
+  requirePermission("write"),
+  async (c) => {
+    const idempotencyKey = c.req.header("Idempotency-Key");
+    if (!idempotencyKey)
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "missing-idempotency-key",
+            message: "Lineage destruction requires an Idempotency-Key",
+          },
+        },
+        400,
+      );
+    const body = await c.req.json();
+    return forwardToDO(c.get("doStub"), "/artifact/version/destroy", "POST", {
+      fence: body.fence,
+      lineage_id: c.req.param("lineageId"),
+      idempotencyKey: `${c.get("principalId")}:${idempotencyKey}`,
+      actor: c.get("tokenResult").name,
+      ...identityPayload(c),
+    });
+  },
+);
+
+artifacts.post("/~/restore/:key{.+$}", requirePermission("write"), async (c) =>
+  restoreArtifact(c, c.req.param("key"), await c.req.json()),
+);
+
 artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
   const key = c.req.param("key");
 
@@ -1177,7 +1333,11 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
   const stub = c.get("doStub");
   const { response: metaRes, json: meta } = await forwardTypedDO<{
     ok: boolean;
-    pointer?: { content_inline: string | null; mime_type: string } | null;
+    pointer?: {
+      content_inline: string | null;
+      mime_type: string;
+      review?: ArtifactReviewSummary;
+    } | null;
   }>(
     stub,
     DO_PATHS.artifactPointerMeta,
@@ -1187,6 +1347,7 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
     analyticsCtxFrom(c),
   );
   if (!metaRes.ok) {
+    if (metaRes.status === 410) return metaRes;
     return c.json(
       {
         ok: false,
@@ -1212,9 +1373,15 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
       404,
     );
   }
+  const reviewHeaders = {
+    "X-Tila-Artifact-Review-State": meta.pointer.review?.state ?? "unreviewed",
+    "X-Tila-Artifact-Review-Revision": String(
+      meta.pointer.review?.review_revision ?? 0,
+    ),
+  };
   if (meta.pointer.content_inline != null) {
     return new Response(meta.pointer.content_inline, {
-      headers: { "Content-Type": meta.pointer.mime_type },
+      headers: { "Content-Type": meta.pointer.mime_type, ...reviewHeaders },
     });
   }
 
@@ -1237,6 +1404,7 @@ artifacts.get("/:key{.+$}", requirePermission("read"), async (c) => {
   return new Response(result.body, {
     headers: {
       "Content-Type": result.contentType,
+      ...reviewHeaders,
     },
   });
 });

@@ -3,6 +3,7 @@ import { type ClaimMode, ClaimModeSchema } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 function isCompatAliasEnabled(): boolean {
   const val = process.env.TILA_MCP_COMPAT_ALIASES ?? "";
@@ -56,7 +57,7 @@ export function registerClaimTools(
   const acquireSchema = {
     resource: z.string().describe("Task ID to claim"),
     mode: ClaimModeSchema.default("exclusive").describe(
-      "Claim mode: exclusive (single holder), owner (one user across machines), or presence (advisory, non-exclusive)",
+      "Claim mode: exclusive (one participant), owner (one principal, transferable between its participants), or presence (advisory, non-exclusive)",
     ),
     ttl_ms: z
       .number()
@@ -72,21 +73,24 @@ export function registerClaimTools(
   };
 
   // Canonical tools (always registered)
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_claim_acquire",
     "Acquire an exclusive, owner, or presence claim on a task. Returns a fencing token and expiration time. The fencing token is REQUIRED for subsequent tila_task_update, tila_claim_release, and tila_gate_create calls.",
     acquireSchema,
     acquireHandler,
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_claim_release",
     "Release an active claim on a task. Requires the fencing token returned by tila_claim_acquire.",
     releaseSchema,
     releaseHandler,
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_claim_list",
     "List all active claims in the project. Returns claim resource IDs, owners, modes, expiration times, and fencing tokens.",
     {},
@@ -104,14 +108,16 @@ export function registerClaimTools(
 
   // Compat aliases — only registered when TILA_MCP_COMPAT_ALIASES is truthy
   if (isCompatAliasEnabled()) {
-    server.tool(
+    registerPrimitiveTool(
+      server,
       "tila_task_claim",
       "[DEPRECATED] Use tila_claim_acquire instead. Acquire an exclusive, owner, or presence claim on a task.",
       acquireSchema,
       acquireHandler,
     );
 
-    server.tool(
+    registerPrimitiveTool(
+      server,
       "tila_task_release",
       "[DEPRECATED] Use tila_claim_release instead. Release an active claim on a task.",
       releaseSchema,

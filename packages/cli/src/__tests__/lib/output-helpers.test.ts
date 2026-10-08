@@ -54,12 +54,14 @@ describe("eprintJson", () => {
     vi.restoreAllMocks();
   });
 
-  it("writes JSON to stderr", () => {
+  it("writes a normalized error to stderr", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     eprintJson({ ok: false, message: "error" });
-    expect(stderrSpy).toHaveBeenCalledWith(
-      `${JSON.stringify({ ok: false, message: "error" }, null, 2)}\n`,
-    );
-    expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(String(spy.mock.calls[0][0]))).toMatchObject({
+      ok: false,
+      error: { kind: "command-failed", message: "error", retryable: false },
+    });
+    spy.mockRestore();
   });
 });
 

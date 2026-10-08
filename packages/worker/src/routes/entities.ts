@@ -15,6 +15,7 @@ import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { getValidatedSchema } from "../lib/schema-validation";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
+import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const entities = new Hono<{
@@ -36,9 +37,7 @@ entities.post("/", requirePermission("write"), async (c) => {
     {
       ...parsed.data,
       created_by: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -61,9 +60,7 @@ entities.post("/relationships", requirePermission("write"), async (c) => {
     {
       ...parsed.data,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -114,9 +111,7 @@ entities.delete("/relationships", requirePermission("write"), async (c) => {
     {
       ...parsed.data,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -223,9 +218,7 @@ entities.patch("/:id", requirePermission("write"), async (c) => {
     {
       ...parsed.data,
       actor: tokenResult.name,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -250,9 +243,7 @@ entities.post("/:id/archive", requirePermission("write"), async (c) => {
     {
       actor: tokenResult.name,
       fence: parsed.data.fence,
-      actor_token_id: tokenResult.tokenId,
-      source: c.get("source"),
-      source_version: c.get("sourceVersion"),
+      ...identityPayload(c),
     },
     undefined,
     analyticsCtxFrom(c),
@@ -308,9 +299,7 @@ entities.post(
         slot: parsed.data.slot,
         metadata: parsed.data.metadata,
         actor: tokenResult.name,
-        actor_token_id: tokenResult.tokenId,
-        source: c.get("source"),
-        source_version: c.get("sourceVersion"),
+        ...identityPayload(c),
       },
       undefined,
       analyticsCtxFrom(c),

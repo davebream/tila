@@ -8,13 +8,42 @@ export type QueryFn = (
 export interface MigrationResult {
   applied: number;
   skipped: number;
+  appliedNames: string[];
+  watermark: string | null;
 }
 
 export async function applyD1Migrations(opts: {
   queryFn: QueryFn;
   migrationsDir: string;
+  migrate?: boolean;
 }): Promise<MigrationResult> {
   const { queryFn, migrationsDir } = opts;
+  // Resolve bundled files before any database writes (including the tracker).
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+
+  if (opts.migrate === false) {
+    const rows = [
+      ...(await readHistory(queryFn, "_d1_migrations")),
+      ...(await readHistory(queryFn, "d1_migrations")),
+    ];
+    const applied = new Set(
+      rows.map((row) => `${row.name.replace(/\.sql$/, "")}.sql`),
+    );
+    const pending = files.filter((file) => !applied.has(file));
+    if (pending.length > 0) {
+      throw new Error(
+        `Pending D1 migrations: ${pending.join(", ")}. Apply them separately or run tila deploy without --no-migrate.`,
+      );
+    }
+    return {
+      applied: 0,
+      skipped: files.length,
+      appliedNames: [],
+      watermark: [...applied].sort().at(-1) ?? null,
+    };
+  }
 
   await queryFn(`
     CREATE TABLE IF NOT EXISTS _d1_migrations (
@@ -31,12 +60,9 @@ export async function applyD1Migrations(opts: {
   )) as Array<{ name: string }>;
   const applied = new Set(appliedRes.map((r) => r.name));
 
-  const files = readdirSync(migrationsDir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
-
   let appliedCount = 0;
   let skipped = 0;
+  const appliedNames: string[] = [];
   for (const file of files) {
     if (applied.has(file)) {
       skipped++;
@@ -65,32 +91,74 @@ export async function applyD1Migrations(opts: {
       file,
     ]);
     appliedCount++;
+    appliedNames.push(file);
+    applied.add(file);
   }
 
-  return { applied: appliedCount, skipped };
+  return {
+    applied: appliedCount,
+    skipped,
+    appliedNames,
+    watermark: [...applied].sort().at(-1) ?? null,
+  };
+}
+
+async function readHistory(
+  queryFn: QueryFn,
+  table: "_d1_migrations" | "d1_migrations",
+): Promise<Array<{ name: string }>> {
+  try {
+    return (await queryFn(`SELECT name FROM ${table} ORDER BY id`)) as Array<{
+      name: string;
+    }>;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("no such table")) return [];
+    throw err;
+  }
 }
 
 async function seedFromWrangler(queryFn: QueryFn): Promise<void> {
-  try {
-    const rows = (await queryFn(
-      "SELECT name FROM d1_migrations ORDER BY id",
-    )) as Array<{ name: string }>;
-    for (const row of rows) {
-      const base = row.name.replace(/\.sql$/, "");
-      const name = `${base}.sql`;
-      await queryFn("INSERT OR IGNORE INTO _d1_migrations (name) VALUES (?)", [
-        name,
-      ]);
-    }
-  } catch {
-    // Table doesn't exist — fresh database, nothing to seed
+  const rows = await readHistory(queryFn, "d1_migrations");
+  for (const row of rows) {
+    const name = `${row.name.replace(/\.sql$/, "")}.sql`;
+    await queryFn("INSERT OR IGNORE INTO _d1_migrations (name) VALUES (?)", [
+      name,
+    ]);
   }
 }
 
 export function splitStatements(sql: string): string[] {
-  return sql
-    .replace(/--.*$/gm, "")
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const statements: string[] = [];
+  let statement = "";
+  let trigger = false;
+  let depth = 0;
+  // Consume comments and quoted values/identifiers as whole tokens so their
+  // semicolons and BEGIN/END keywords cannot affect statement boundaries.
+  const tokens = sql.matchAll(
+    /--[^\r\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[a-zA-Z_][\w$]*|[\s\S]/g,
+  );
+  for (const [token] of tokens) {
+    if (token.startsWith("--") || token.startsWith("/*")) {
+      statement += " ";
+      continue;
+    }
+    if (token === ";" && depth === 0) {
+      if (statement.trim()) statements.push(statement.trim());
+      statement = "";
+      trigger = false;
+      continue;
+    }
+    statement += token;
+    if (!trigger) {
+      trigger = /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\b/i.test(statement);
+    }
+    if (trigger) {
+      const keyword = token.toUpperCase();
+      if (keyword === "BEGIN" || keyword === "CASE") depth++;
+      else if (keyword === "END") depth--;
+    }
+  }
+  if (statement.trim()) statements.push(statement.trim());
+  return statements;
 }

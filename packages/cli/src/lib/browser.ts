@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { diagnostic } from "./output";
 
 /**
  * Open a URL in the default system browser.
@@ -10,7 +11,7 @@ import { execFile } from "node:child_process";
 export function openInBrowser(url: string): void {
   const onError = (err: Error | null) => {
     if (err) {
-      console.error(
+      diagnostic(
         `Could not open browser automatically. Open this URL manually: ${url}`,
       );
     }

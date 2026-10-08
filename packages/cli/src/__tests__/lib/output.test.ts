@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock console-table-printer
 const mockAddRow = vi.fn();
-const mockPrintTable = vi.fn();
+const mockRenderTable = vi.fn(() => "rendered table");
 vi.mock("console-table-printer", () => {
   return {
     Table: vi.fn().mockImplementation(
       class {
         addRow = mockAddRow;
-        printTable = mockPrintTable;
+        render = mockRenderTable;
       } as unknown as () => unknown,
     ),
   };
@@ -30,6 +30,11 @@ describe("output utilities", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    vi.stubEnv("CI", "");
+    Object.defineProperty(process.stderr, "isTTY", {
+      value: true,
+      configurable: true,
+    });
     consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
   afterEach(() => {
@@ -50,14 +55,14 @@ describe("output utilities", () => {
       );
       expect(Table).toHaveBeenCalled();
       expect(mockAddRow).toHaveBeenCalledWith({ id: "T-1", status: "open" });
-      expect(mockPrintTable).toHaveBeenCalled();
+      expect(mockRenderTable).toHaveBeenCalled();
     });
 
-    it("does not call printTable when rows is empty", async () => {
+    it("does not render a table when rows is empty", async () => {
       const { renderTable } = await import("../../lib/output");
-      mockPrintTable.mockClear();
+      mockRenderTable.mockClear();
       renderTable([], [{ key: "id", label: "ID" }]);
-      expect(mockPrintTable).not.toHaveBeenCalled();
+      expect(mockRenderTable).not.toHaveBeenCalled();
     });
   });
 

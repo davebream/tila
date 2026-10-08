@@ -4,6 +4,7 @@ import { type Mock, vi } from "vitest";
 
 export type MockServer = {
   tool: Mock;
+  registerTool: Mock;
   resource: Mock;
   prompt: Mock;
 };
@@ -14,14 +15,27 @@ export type MockServer = {
  * the old raw `client.get/post(path)` assertions. The shape mirrors the real
  * facade so tool handlers run unchanged.
  */
-export type MockFacade = {
-  [K in keyof TilaFacade]: K extends "close"
-    ? () => void
-    : Record<string, Mock>;
-};
+type Mockify<T> = T extends (...args: never[]) => unknown
+  ? Mock
+  : { [K in keyof T]: Mockify<T[K]> };
+
+export type MockFacade = Mockify<TilaFacade>;
 
 export function createMockServer(): MockServer {
-  return { tool: vi.fn(), resource: vi.fn(), prompt: vi.fn() };
+  const tool = vi.fn();
+  return {
+    tool,
+    registerTool: vi.fn((name, config, handler) =>
+      tool(
+        name,
+        config.description,
+        config.inputSchema.shape ?? config.inputSchema,
+        handler,
+      ),
+    ),
+    resource: vi.fn(),
+    prompt: vi.fn(),
+  };
 }
 
 /**
@@ -77,6 +91,13 @@ export type MockFacadeShape = {
   >;
   claims: Record<"acquire" | "renew" | "release" | "list" | "get", Mock>;
   artifacts: Record<
+    | "history"
+    | "meta"
+    | "restore"
+    | "delete"
+    | "destroyLineage"
+    | "reviews"
+    | "review"
     | "upload"
     | "download"
     | "writeText"
@@ -90,15 +111,30 @@ export type MockFacadeShape = {
     Mock
   >;
   gates: Record<"list" | "create" | "resolve" | "remove", Mock>;
-  signals: Record<"inbox" | "send" | "ack", Mock>;
-  journal: Record<"query", Mock>;
+  signals: Record<"inbox" | "send" | "ack" | "history", Mock> & {
+    groups: Record<"list" | "get" | "set" | "delete", Mock>;
+  };
+  journal: Record<"query" | "replay" | "getCursor" | "acknowledge", Mock>;
+  handoffs: Record<"create" | "get" | "list", Mock>;
+  reentry: Mock;
   presence: Record<"heartbeat" | "list" | "listAll", Mock>;
   schema: Record<"get" | "apply" | "history", Mock>;
   summary: Record<"get", Mock>;
   search: Record<"search", Mock>;
   indexes: Record<"create" | "addEntry" | "listEntries", Mock>;
   templates: Record<"instantiate" | "list", Mock>;
-  tokens: Record<"issue" | "revoke" | "list", Mock>;
+  tokens: Record<"issue" | "revoke" | "list" | "rotate", Mock>;
+  serviceAccounts: Record<
+    | "create"
+    | "list"
+    | "update"
+    | "revoke"
+    | "createWorkloadBinding"
+    | "listWorkloadBindings"
+    | "updateWorkloadBinding"
+    | "revokeWorkloadBinding",
+    Mock
+  >;
   close: Mock;
 };
 
@@ -137,6 +173,13 @@ export function createMockFacade(): MockFacadeShape {
     ),
     claims: fns("acquire", "renew", "release", "list", "get"),
     artifacts: fns(
+      "history",
+      "meta",
+      "restore",
+      "delete",
+      "destroyLineage",
+      "reviews",
+      "review",
       "upload",
       "download",
       "writeText",
@@ -149,15 +192,30 @@ export function createMockFacade(): MockFacadeShape {
       "listRelationships",
     ),
     gates: fns("list", "create", "resolve", "remove"),
-    signals: fns("inbox", "send", "ack"),
-    journal: fns("query"),
+    signals: {
+      ...fns("inbox", "send", "ack", "history"),
+      groups: fns("list", "get", "set", "delete"),
+    },
+    journal: fns("query", "replay", "getCursor", "acknowledge"),
+    handoffs: fns("create", "get", "list"),
+    reentry: vi.fn(),
     presence: fns("heartbeat", "list", "listAll"),
     schema: fns("get", "apply", "history"),
     summary: fns("get"),
     search: fns("search"),
     indexes: fns("create", "addEntry", "listEntries"),
     templates: fns("instantiate", "list"),
-    tokens: fns("issue", "revoke", "list"),
+    tokens: fns("issue", "revoke", "list", "rotate"),
+    serviceAccounts: fns(
+      "create",
+      "list",
+      "update",
+      "revoke",
+      "createWorkloadBinding",
+      "listWorkloadBindings",
+      "updateWorkloadBinding",
+      "revokeWorkloadBinding",
+    ),
     close: vi.fn(),
   };
 }
@@ -199,6 +257,8 @@ const _assertMockMatchesFacade: _MockMatchesFacade = {
   gates: true,
   signals: true,
   journal: true,
+  handoffs: true,
+  reentry: true,
   presence: true,
   schema: true,
   summary: true,
@@ -206,6 +266,7 @@ const _assertMockMatchesFacade: _MockMatchesFacade = {
   indexes: true,
   templates: true,
   tokens: true,
+  serviceAccounts: true,
 };
 void _assertMockMatchesFacade;
 
@@ -223,3 +284,61 @@ export function findToolHandler(
     content: Array<{ type: string; text: string }>;
   }>;
 }
+
+// Complete wire fixtures keep handler tests honest now that outputs are validated.
+export const TEST_ENTITY = {
+  id: "T-1",
+  type: "task",
+  schema_version: 1,
+  data: {},
+  archived: 0,
+  created_at: 0,
+  updated_at: 0,
+  created_by: "test",
+  tags: [],
+};
+export const TEST_GATE = {
+  id: "gate-1",
+  resource: "T-1",
+  await_type: "human",
+  status: "pending",
+  fence: 1,
+  timeout_at: null,
+  resolved_at: null,
+  resolution: null,
+  created_at: 0,
+  created_by: "test",
+  data: {},
+};
+export const TEST_RECORD = {
+  type: "config",
+  key: "main",
+  schema_version: 1,
+  value: {},
+  value_sha256: "hash",
+  revision: 1,
+  archived: 0,
+  created_at: 0,
+  updated_at: 0,
+  updated_by: "test",
+  tags: [],
+};
+export const TEST_ARTIFACT = {
+  r2_key: "abc.md",
+  resource: null,
+  kind: "report",
+  sha256: "hash",
+  bytes: 1,
+  fence: null,
+  mime_type: "text/plain",
+  produced_at: 0,
+  produced_by: "test",
+  expires_at: null,
+  tombstoned: 0,
+  tags: [],
+  lineage_id: null,
+  revision: null,
+  restored_from: null,
+  provenance: null,
+  review: { state: "unreviewed", review_revision: 0, latest: null },
+};

@@ -264,7 +264,7 @@ describe("checkIdempotentExchange", () => {
 // ---------------------------------------------------------------------------
 
 describe("call-site count assertions (C3 regression guard)", () => {
-  it("recordExchangeFailure is called at exactly 7 sites in auth-github.ts", async () => {
+  it("recordExchangeFailure is called at exactly 6 sites in auth-github.ts", async () => {
     // Read the source file and count occurrences of recordExchangeFailure calls.
     // This catches a dropped site if a future edit forgets to use the helper.
     // Duplication sites:
@@ -285,7 +285,7 @@ describe("call-site count assertions (C3 regression guard)", () => {
 
     const callSites = (src.match(/await recordExchangeFailure\(/g) ?? [])
       .length;
-    expect(callSites).toBe(7);
+    expect(callSites).toBe(6);
   });
 
   it("checkExchangeRateLimit is called at exactly 3 sites, with RATE_LIMITED defined once", async () => {

@@ -20,10 +20,12 @@ export async function sweepExpiredKey(
   },
   r2Delete: (key: string) => Promise<void>,
   summary: { artifactsExpired: number; r2DeleteErrors: number },
-): Promise<void> {
+): Promise<number> {
+  let requests = 0;
   let tombstoned = false;
   try {
-    await doStub.fetch("http://do/artifact/tombstone", {
+    requests++;
+    const response = await doStub.fetch("http://do/artifact/tombstone", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -32,21 +34,24 @@ export async function sweepExpiredKey(
         journal_kind: "artifact.expired",
       }),
     });
+    if (!response.ok) throw new Error(`Tombstone returned ${response.status}`);
     tombstoned = true;
   } catch (err) {
     console.error(`[sweep] failed to tombstone key ${key}:`, err);
     summary.r2DeleteErrors++;
   }
 
-  if (!tombstoned) return;
+  if (!tombstoned) return requests;
 
   let deleted = false;
   try {
+    requests++;
     await r2Delete(key);
     deleted = true;
   } catch (_firstErr) {
     // Single retry
     try {
+      requests++;
       await r2Delete(key);
       deleted = true;
     } catch (err) {
@@ -55,19 +60,27 @@ export async function sweepExpiredKey(
     }
   }
 
-  if (!deleted) return;
+  if (!deleted) return requests;
   summary.artifactsExpired++;
 
   // Confirm the blob deletion so the DO can later hard-delete the pointer row.
   // Non-fatal: a failed confirm just leaves the row pending until a future
   // sweep re-confirms (the blob is already gone, so re-delete is idempotent).
   try {
-    await doStub.fetch("http://do/artifact/confirm-blob-deleted", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ r2_key: key }),
-    });
+    requests++;
+    const response = await doStub.fetch(
+      "http://do/artifact/confirm-blob-deleted",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ r2_key: key }),
+      },
+    );
+    if (!response.ok)
+      throw new Error(`Confirmation returned ${response.status}`);
   } catch (err) {
+    summary.r2DeleteErrors++;
     console.error(`[sweep] failed to confirm blob deletion for ${key}:`, err);
   }
+  return requests;
 }

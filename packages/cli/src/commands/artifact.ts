@@ -1,21 +1,235 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
+import { ArtifactReviewRequestSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
 import {
+  boundedItems,
+  currentOutput,
+  diagnostic,
+  exit,
   failWithCliError,
   jsonArg,
+  outputText,
   printJson,
+  printJsonError,
+  rawOutput,
   renderTable,
   tsToIso,
 } from "../lib/output";
 
+const versionArgs = {
+  lineage: {
+    type: "string" as const,
+    description: "Explicit artifact lineage ID",
+  },
+  "lineage-fence": {
+    type: "string" as const,
+    description: "Fence for artifact:<lineage>",
+  },
+  tags: {
+    type: "string" as const,
+    description: "Comma-separated tags (empty clears tags)",
+  },
+  "idempotency-key": {
+    type: "string" as const,
+    description: "Reuse this key when retrying the same write",
+  },
+};
+function versionOptions(args: Record<string, unknown>) {
+  return {
+    lineageId: args.lineage as string | undefined,
+    lineageFence:
+      args["lineage-fence"] === undefined
+        ? undefined
+        : Number(args["lineage-fence"]),
+    tags:
+      args.tags === undefined
+        ? undefined
+        : String(args.tags).split(",").filter(Boolean),
+    idempotencyKey: args["idempotency-key"] as string | undefined,
+  };
+}
+
 export default defineCommand({
   meta: { name: "artifact", description: "Manage artifacts" },
   subCommands: {
+    review: defineCommand({
+      meta: {
+        name: "review",
+        description:
+          "Record an explicit artifact review (a hash does not establish trust)",
+      },
+      args: {
+        key: { type: "positional", required: true },
+        decision: {
+          type: "string",
+          required: true,
+          description: "trusted, rejected, superseded, or revoked",
+        },
+        "expected-review-revision": {
+          type: "string",
+          required: true,
+          description: "Current review revision (0 before the first review)",
+        },
+        reason: { type: "string" },
+        "idempotency-key": versionArgs["idempotency-key"],
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.review)
+            throw new Error("Artifact review is unavailable in this backend");
+          const request = ArtifactReviewRequestSchema.parse({
+            decision: args.decision,
+            expected_review_revision: Number(args["expected-review-revision"]),
+            reason: args.reason,
+          });
+          printJson(
+            await artifact.review(args.key, {
+              ...request,
+              idempotencyKey: args["idempotency-key"],
+            }),
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
+    reviews: defineCommand({
+      meta: { name: "reviews", description: "Read artifact review history" },
+      args: {
+        key: { type: "positional", required: true },
+        limit: { type: "string" },
+        "before-revision": { type: "string" },
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.reviews)
+            throw new Error("Artifact reviews are unavailable in this backend");
+          printJson(
+            await artifact.reviews(args.key, {
+              limit: args.limit === undefined ? undefined : Number(args.limit),
+              before_revision:
+                args["before-revision"] === undefined
+                  ? undefined
+                  : Number(args["before-revision"]),
+            }),
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
+    history: defineCommand({
+      meta: { name: "history", description: "List artifact revisions" },
+      args: {
+        key: {
+          type: "positional",
+          required: true,
+          description: "Artifact key",
+        },
+        limit: {
+          type: "string",
+          description: "Page size (1–200)",
+          default: "20",
+        },
+        cursor: {
+          type: "string",
+          description: "Cursor from the previous page",
+        },
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.history)
+            throw new Error("Artifact history is unavailable in this backend");
+          const result = await artifact.history(args.key, {
+            limit: Number(args.limit),
+            cursor: args.cursor,
+          });
+          if (args.json) {
+            printJson(result);
+            return;
+          }
+          renderTable(
+            result.items.map((p) => ({
+              revision: p.revision ?? "legacy",
+              key: p.r2_key,
+              bytes: p.bytes,
+              produced_at: tsToIso(p.produced_at),
+              tags: p.tags.join(","),
+              unavailable: Boolean(p.tombstoned || p.blob_deleted_at),
+            })),
+            [
+              { key: "revision", label: "Revision" },
+              { key: "key", label: "Key" },
+              { key: "bytes", label: "Bytes" },
+              { key: "produced_at", label: "Created" },
+              { key: "tags", label: "Tags" },
+              { key: "unavailable", label: "Unavailable" },
+            ],
+          );
+          if (result.meta.next_cursor)
+            outputText(`Next cursor: ${result.meta.next_cursor}`);
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
+    restore: defineCommand({
+      meta: {
+        name: "restore",
+        description: "Append a revision from an existing artifact",
+      },
+      args: {
+        key: {
+          type: "positional",
+          required: true,
+          description: "Source artifact key",
+        },
+        fence: {
+          type: "string",
+          required: true,
+          description: "Fence for artifact:<lineage>",
+        },
+        lineage: versionArgs.lineage,
+        tags: versionArgs.tags,
+        "idempotency-key": versionArgs["idempotency-key"],
+        ...jsonArg,
+      },
+      async run({ args }) {
+        try {
+          const { artifact } = await resolveContext();
+          if (!artifact.restore)
+            throw new Error("Artifact restore is unavailable in this backend");
+          const opts = versionOptions(args);
+          const result = await artifact.restore(args.key, {
+            fence: Number(args.fence),
+            lineage_id: opts.lineageId,
+            tags: opts.tags,
+            idempotencyKey: opts.idempotencyKey,
+          });
+          if (args.json) {
+            printJson(result);
+            return;
+          }
+          outputText(
+            `Restored revision ${result.pointer.revision}: ${result.key}`,
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
+        }
+      },
+    }),
     put: defineCommand({
       meta: { name: "put", description: "Upload an artifact" },
       args: {
+        ...versionArgs,
         file: { type: "positional", description: "File path", required: true },
         kind: { type: "string", description: "Artifact kind", required: true },
         resource: {
@@ -53,8 +267,9 @@ export default defineCommand({
         // error instead of leaking a bundled stack trace.
         try {
           const result = await ctx.artifact.put({
+            ...versionOptions(args),
             key: fileName, // placeholder -- Worker derives the canonical key
-            body: content.buffer as ArrayBuffer,
+            body: new Uint8Array(content).buffer,
             sha256: "", // Worker recomputes SHA-256
             metadata: {},
             contentType,
@@ -75,9 +290,7 @@ export default defineCommand({
             return;
           }
           const verb = deduplicated ? "Deduplicated" : "Uploaded";
-          console.log(
-            `${verb} artifact: ${result.key} (${result.bytes} bytes)`,
-          );
+          outputText(`${verb} artifact: ${result.key} (${result.bytes} bytes)`);
         } catch (err) {
           failWithCliError(err, Boolean(args.json));
         }
@@ -97,27 +310,46 @@ export default defineCommand({
         },
       },
       async run({ args }) {
+        if (currentOutput()?.json && !args.output)
+          printJsonError(
+            "JSON downloads require --output <file>",
+            "invalid-argument",
+          );
         const ctx = await resolveContext();
         const key = args.key as string;
         const result = await ctx.artifact.get(key);
 
         if (!result) {
-          console.error(`Artifact not found: ${key}`);
-          process.exit(1);
+          diagnostic(`Artifact not found: ${key}`);
+          exit(1);
         }
 
+        const pointer = ctx.artifact.meta
+          ? (await ctx.artifact.meta(key)).pointer
+          : undefined;
+        if (pointer) diagnostic(JSON.stringify({ artifact_metadata: pointer }));
         const buffer = Buffer.from(
           await new Response(result.body).arrayBuffer(),
         );
 
         if (args.output) {
           writeFileSync(args.output as string, buffer);
-          console.error(
+          if (currentOutput()?.json) {
+            printJson({
+              key,
+              bytes: buffer.byteLength,
+              content_type: result.contentType,
+              output: args.output,
+              pointer,
+            });
+            return;
+          }
+          diagnostic(
             `Downloaded ${buffer.byteLength} bytes (${result.contentType}) to ${args.output}`,
           );
         } else {
-          process.stdout.write(buffer);
-          console.error(`Content-Type: ${result.contentType}`);
+          rawOutput(buffer);
+          diagnostic(`Content-Type: ${result.contentType}`);
         }
       },
     }),
@@ -127,6 +359,7 @@ export default defineCommand({
         description: "Write text content as an artifact",
       },
       args: {
+        ...versionArgs,
         kind: {
           type: "string",
           description: "Artifact kind (e.g. plan, report, lesson)",
@@ -154,10 +387,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.writeText) {
-          console.error(
+          diagnostic(
             "Error: artifact write is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
 
         let content: string;
@@ -172,11 +405,12 @@ export default defineCommand({
           }
           content = Buffer.concat(chunks).toString("utf-8");
         } else {
-          console.error("Error: provide --text or pipe content via stdin");
-          process.exit(1);
+          diagnostic("Error: provide --text or pipe content via stdin");
+          exit(1);
         }
 
         const result = await ctx.artifact.writeText(content, {
+          ...versionOptions(args),
           kind: args.kind as string,
           mimeType: args.mimeType as string,
           resource: args.resource as string | undefined,
@@ -184,10 +418,10 @@ export default defineCommand({
         });
 
         if (args.json) {
-          printJson({ ok: true, key: result.key, bytes: result.bytes });
+          printJson({ ok: true, ...result });
           return;
         }
-        console.log(`Written artifact: ${result.key} (${result.bytes} bytes)`);
+        outputText(`Written artifact: ${result.key} (${result.bytes} bytes)`);
       },
     }),
     cat: defineCommand({
@@ -203,27 +437,36 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.readText) {
-          console.error(
+          diagnostic(
             "Error: artifact cat is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const key = args.key as string;
         const result = await ctx.artifact.readText(key);
         if (!result) {
-          console.error(`Artifact not found: ${key}`);
-          process.exit(1);
+          diagnostic(`Artifact not found: ${key}`);
+          exit(1);
         }
 
         if (args.json) {
           printJson({
             key,
             content: result.content,
+            pointer: result.pointer,
             mime_type: result.mimeType,
           });
           return;
         }
-        process.stdout.write(result.content);
+        diagnostic(
+          JSON.stringify({
+            artifact_metadata: result.pointer ?? {
+              provenance: null,
+              review: { state: "unreviewed" },
+            },
+          }),
+        );
+        rawOutput(result.content);
       },
     }),
     list: defineCommand({
@@ -242,10 +485,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.listPointers) {
-          console.error(
+          diagnostic(
             "Error: artifact list is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const pointers = await ctx.artifact.listPointers({
           resource: args.resource as string | undefined,
@@ -256,7 +499,7 @@ export default defineCommand({
           return;
         }
         if (pointers.length === 0) {
-          console.log("No artifacts found.");
+          outputText("No artifacts found.");
           return;
         }
         renderTable(
@@ -315,10 +558,10 @@ export default defineCommand({
           async run({ args }) {
             const ctx = await resolveContext();
             if (!ctx.artifact.addRelationship) {
-              console.error(
+              diagnostic(
                 "Error: artifact rel is not supported in this backend mode",
               );
-              process.exit(1);
+              exit(1);
             }
             const toKeyOrUri: { to_key?: string; to_uri?: string } = {};
             if (args.toKey) {
@@ -326,10 +569,10 @@ export default defineCommand({
             } else if (args.toUri) {
               toKeyOrUri.to_uri = args.toUri as string;
             } else {
-              console.error(
+              diagnostic(
                 "Error: either a positional toKey or --to-uri is required",
               );
-              process.exit(1);
+              exit(1);
             }
             await ctx.artifact.addRelationship(
               args.fromKey as string,
@@ -341,7 +584,7 @@ export default defineCommand({
               return;
             }
             const target = (args.toKey as string) || (args.toUri as string);
-            console.log(
+            outputText(
               `Added relationship: ${args.fromKey} -[${args.type}]-> ${target}`,
             );
           },
@@ -362,10 +605,10 @@ export default defineCommand({
           async run({ args }) {
             const ctx = await resolveContext();
             if (!ctx.artifact.listRelationships) {
-              console.error(
+              diagnostic(
                 "Error: artifact rel list is not supported in this backend mode",
               );
-              process.exit(1);
+              exit(1);
             }
             const rels = await ctx.artifact.listRelationships(
               args.key as string,
@@ -380,12 +623,12 @@ export default defineCommand({
               return;
             }
             if (rels.length === 0) {
-              console.log("No relationships found.");
+              outputText("No relationships found.");
               return;
             }
             for (const rel of rels) {
               const target = rel.to_key ?? rel.to_uri ?? "(none)";
-              console.log(
+              outputText(
                 `${rel.type}  ${target}  ${new Date(rel.created_at).toISOString()}`,
               );
             }
@@ -414,10 +657,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.getLatest) {
-          console.error(
+          diagnostic(
             "Error: artifact latest is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const pointer = await ctx.artifact.getLatest(
           args.kind as string,
@@ -425,17 +668,17 @@ export default defineCommand({
         );
         if (!pointer) {
           if (args.json) {
-            printJson({ ok: false, pointer: null });
+            printJson({ found: false, pointer: null });
             return;
           }
-          console.log("No artifact found.");
+          outputText("No artifact found.");
           return;
         }
         if (args.json) {
           printJson({ ok: true, pointer });
           return;
         }
-        console.log(JSON.stringify(pointer, null, 2));
+        outputText(JSON.stringify(pointer, null, 2));
       },
     }),
     grep: defineCommand({
@@ -474,10 +717,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.grepArtifacts) {
-          console.error(
+          diagnostic(
             "Error: artifact grep is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const response = await ctx.artifact.grepArtifacts({
           pattern: args.pattern as string,
@@ -493,23 +736,23 @@ export default defineCommand({
         }
 
         if (response.truncated) {
-          console.error(
+          diagnostic(
             "Warning: results truncated — narrow with --kind/--resource or raise --limit",
           );
         }
 
         if (response.results.length === 0) {
-          console.log("No results found.");
+          outputText("No results found.");
           return;
         }
 
-        for (const result of response.results) {
+        for (const result of boundedItems(response.results)) {
           const lines = result.lines;
           for (let i = 0; i < lines.length; i++) {
             const { line, text } = lines[i];
             const isLast = i === lines.length - 1;
             const suffix = isLast && result.truncated ? " (truncated)" : "";
-            console.log(`${result.key}:${line}: ${text}${suffix}`);
+            outputText(`${result.key}:${line}: ${text}${suffix}`);
           }
         }
       },
@@ -544,10 +787,10 @@ export default defineCommand({
       async run({ args }) {
         const ctx = await resolveContext();
         if (!ctx.artifact.searchArtifacts) {
-          console.error(
+          diagnostic(
             "Error: artifact search is not supported in this backend mode",
           );
-          process.exit(1);
+          exit(1);
         }
         const results = await ctx.artifact.searchArtifacts({
           q: args.query as string,
@@ -562,14 +805,14 @@ export default defineCommand({
         }
 
         if (results.length === 0) {
-          console.log("No results found.");
+          outputText("No results found.");
           return;
         }
 
-        for (const r of results) {
+        for (const r of boundedItems(results)) {
           const title = r.title ? `  ${r.title}` : "";
           const snippet = r.snippet ? `\n  ${r.snippet}` : "";
-          console.log(`${r.r2_key}  ${r.kind}${title}${snippet}`);
+          outputText(`${r.r2_key}  ${r.kind}${title}${snippet}`);
         }
       },
     }),

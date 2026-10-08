@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { EmbeddedArtifactBackend } from "@tila/backend-embedded";
 import type { schema } from "@tila/ops-sqlite";
+import type { IdentityContext } from "@tila/schemas";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 
 import { BunBlobStore } from "./bun-blob-store";
@@ -21,12 +22,19 @@ type BunDb = BunSQLiteDatabase<typeof schema> & { $client: Database };
  * exactly so existing callers (CLI context, tests) are unchanged.
  */
 export class LocalArtifactBackend extends EmbeddedArtifactBackend {
-  constructor(db: BunDb, artifactsRoot: string, org: string, project: string) {
+  constructor(
+    db: BunDb,
+    artifactsRoot: string,
+    org: string,
+    project: string,
+    identity?: IdentityContext,
+  ) {
     super({
       db,
       blobs: new BunBlobStore(artifactsRoot),
       org,
       project,
+      identity,
       sleepSync: Bun.sleepSync,
     });
   }

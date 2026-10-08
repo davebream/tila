@@ -1,7 +1,15 @@
-import * as p from "@clack/prompts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as p from "../../lib/prompts";
 
-vi.mock("@clack/prompts", () => ({
+const { mockRunD1Migrations } = vi.hoisted(() => ({
+  mockRunD1Migrations: vi.fn(),
+}));
+
+vi.mock("../../lib/d1-migrations", () => ({
+  applyD1Migrations: mockRunD1Migrations,
+}));
+
+vi.mock("../../lib/prompts", () => ({
   text: vi.fn().mockResolvedValue(""),
   password: vi.fn().mockResolvedValue(""),
   confirm: vi.fn().mockResolvedValue(true),
@@ -51,6 +59,81 @@ function makeMockClient(overrides?: Record<string, unknown>) {
     ...overrides,
   } as unknown as Cloudflare;
 }
+
+describe("applyD1Migrations provisioning warning", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("warns once with the affected link count when the policy migration is new", async () => {
+    mockRunD1Migrations.mockResolvedValue({
+      applied: 1,
+      skipped: 23,
+      appliedNames: ["0024_repo_oidc_policy.sql"],
+    });
+    const client = makeMockClient();
+    vi.mocked(client.d1.database.query).mockReturnValue(
+      makeAsyncIterable([{ results: [{ count: 7 }] }]) as never,
+    );
+    const { applyD1Migrations } = await import(
+      "../../lib/cloudflare-resources"
+    );
+
+    await applyD1Migrations(client, "acct-1", "db-1", "/migrations");
+
+    expect(p.log.warn).toHaveBeenCalledOnce();
+    expect(p.log.warn).toHaveBeenCalledWith(expect.stringContaining("7"));
+  });
+
+  it.each([
+    { appliedNames: [] as string[], count: 7 },
+    { appliedNames: ["0024_repo_oidc_policy.sql"], count: 0 },
+  ])("does not warn on later or empty provisioning runs", async (result) => {
+    mockRunD1Migrations.mockResolvedValue({
+      applied: result.appliedNames.length,
+      skipped: 24 - result.appliedNames.length,
+      appliedNames: result.appliedNames,
+    });
+    const client = makeMockClient();
+    vi.mocked(client.d1.database.query).mockReturnValue(
+      makeAsyncIterable([{ results: [{ count: result.count }] }]) as never,
+    );
+    const { applyD1Migrations } = await import(
+      "../../lib/cloudflare-resources"
+    );
+
+    await applyD1Migrations(client, "acct-1", "db-1", "/migrations");
+
+    expect(p.log.warn).not.toHaveBeenCalled();
+  });
+  it("returns migration status without prompt output in quiet mode", async () => {
+    const result = {
+      applied: 1,
+      skipped: 23,
+      appliedNames: ["0024_repo_oidc_policy.sql"],
+      watermark: "0024_repo_oidc_policy.sql",
+    };
+    mockRunD1Migrations.mockResolvedValue(result);
+    const client = makeMockClient();
+    const { applyD1Migrations } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    await expect(
+      applyD1Migrations(client, "acct-1", "db-1", "/migrations", {
+        quiet: true,
+        migrate: true,
+      }),
+    ).resolves.toEqual(result);
+    expect(mockRunD1Migrations).toHaveBeenCalledWith({
+      queryFn: expect.any(Function),
+      migrationsDir: "/migrations",
+      migrate: true,
+    });
+    expect(p.log.info).not.toHaveBeenCalled();
+    expect(p.log.warn).not.toHaveBeenCalled();
+    expect(client.d1.database.query).not.toHaveBeenCalled();
+  });
+});
 
 describe("ensureD1Database", () => {
   beforeEach(() => {
@@ -438,6 +521,33 @@ describe("applyR2Lifecycle", () => {
         }),
       ]),
     });
+  });
+
+  it("never expires versioned content or recovery records", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const client = makeMockClient({
+      r2: { buckets: { lifecycle: { update } } },
+    });
+    const { applyR2Lifecycle } = await import("../../lib/cloudflare-resources");
+    await applyR2Lifecycle(client, "acct", "bucket");
+    const rules = update.mock.calls[0][1].rules as Array<{
+      enabled: boolean;
+      conditions: { prefix: string };
+      deleteObjectsTransition?: unknown;
+    }>;
+    for (const key of [
+      "versioned/p/report/1/hash.txt",
+      "versioned/p/report/1/hash.txt.commit.json",
+      "versioned/p/report/destroy.json",
+    ])
+      expect(
+        rules.some(
+          (rule) =>
+            rule.enabled &&
+            rule.deleteObjectsTransition &&
+            key.startsWith(rule.conditions.prefix),
+        ),
+      ).toBe(false);
   });
 
   it("does not throw on SDK failure", async () => {

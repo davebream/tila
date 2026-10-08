@@ -3,7 +3,7 @@
  * Keypair is generated once per describe block using jose — no external fixtures.
  */
 
-import { canonicalizeHtu } from "@tila/schemas";
+import { accessTokenHash, canonicalizeHtu } from "@tila/schemas";
 import {
   type JWK,
   type JWTHeaderParameters,
@@ -36,6 +36,7 @@ let publicJwk: JWK;
 let jkt: string;
 
 async function mintProof(overrides?: {
+  ath?: unknown;
   htm?: string;
   htu?: string;
   iat?: number | null; // pass null to omit
@@ -59,6 +60,7 @@ async function mintProof(overrides?: {
   };
 
   const builder = new SignJWT({
+    ...(overrides?.ath !== undefined ? { ath: overrides.ath } : {}),
     htm,
     htu,
     ...(addIat ? { iat } : {}),
@@ -469,4 +471,39 @@ describe("SAFE_TO_EXPOSE_CODES partition", () => {
       expect(safe.has(code)).toBe(false);
     }
   });
+});
+
+describe("access token binding compatibility", () => {
+  it.each(["matching", "substituted", "missing-token", "malformed", "legacy"])(
+    "verifies %s ath",
+    async (scenario) => {
+      const ath =
+        scenario === "legacy"
+          ? undefined
+          : scenario === "malformed"
+            ? 123
+            : await accessTokenHash("actual-token");
+      const proof = await mintProof({ ath });
+      const result = await verifyDpopProof({
+        proofJwt: proof,
+        expectedJkt: jkt,
+        htm: HTM,
+        htu: HTU,
+        nowMs: NOW_MS,
+        maxAgeMs: MAX_AGE_MS,
+        clockSkewMs: CLOCK_SKEW_MS,
+        accessToken:
+          scenario === "missing-token"
+            ? undefined
+            : scenario === "substituted"
+              ? "another-token"
+              : "actual-token",
+      });
+      expect(result).toEqual(
+        ["matching", "legacy"].includes(scenario)
+          ? { ok: true }
+          : { ok: false, code: "ath-mismatch" },
+      );
+    },
+  );
 });

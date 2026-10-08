@@ -1,3 +1,13 @@
+import {
+  eprintln,
+  exit,
+  jsonArg,
+  outputText,
+  printJsonError,
+  printJsonSuccess,
+  requirePrompt,
+} from "../lib/output";
+
 /**
  * `tila link <worker_url>` — net-new registration + trust gesture (Task 9, WI-L).
  *
@@ -29,12 +39,6 @@ import {
   buildAuthStore,
   maybePromoteLegacyAfterWrite,
 } from "../lib/instance-context";
-import {
-  eprintln,
-  jsonArg,
-  printJsonError,
-  printJsonSuccess,
-} from "../lib/output";
 
 export default defineCommand({
   meta: {
@@ -81,7 +85,7 @@ export default defineCommand({
         printJsonError(msg, "invalid-worker-url", undefined, 1);
       } else {
         eprintln(`Error: ${msg}`);
-        process.exit(1);
+        exit(1);
       }
       return;
     }
@@ -102,6 +106,7 @@ export default defineCommand({
     // --- Step 2: Acquire the raw token ---
     let rawToken = args.token as string | undefined;
     if (!rawToken) {
+      requirePrompt("Supply --token or a configured credential.");
       // Prompt for the token interactively
       const { createInterface } = await import("node:readline");
       const rl = createInterface({
@@ -124,7 +129,7 @@ export default defineCommand({
         printJsonError(msg, "no-token", undefined, 1);
       } else {
         eprintln(`Error: ${msg}`);
-        process.exit(1);
+        exit(1);
       }
       return;
     }
@@ -165,7 +170,7 @@ export default defineCommand({
           printJsonError(reason, "credential-write-refused", undefined, 1);
         } else {
           eprintln(`Error: ${reason}`);
-          process.exit(1);
+          exit(1);
         }
         return;
       }
@@ -174,7 +179,7 @@ export default defineCommand({
         printJsonError(msg, "link-failed", undefined, 1);
       } else {
         eprintln(`Error: ${msg}`);
-        process.exit(1);
+        exit(1);
       }
       return;
     }
@@ -214,8 +219,8 @@ export default defineCommand({
         trusted: true,
       });
     } else {
-      console.log(`Linked instance "${instanceKey}" → ${canonicalUrl}`);
-      console.log(
+      outputText(`Linked instance "${instanceKey}" → ${canonicalUrl}`);
+      outputText(
         "Run `tila auth status` to verify or `tila switch` to set as current.",
       );
     }

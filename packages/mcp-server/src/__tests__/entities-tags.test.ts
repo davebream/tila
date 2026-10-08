@@ -3,6 +3,7 @@ import { registerEntityTools } from "../tools/entities";
 import {
   type MockFacade,
   type MockServer,
+  TEST_ENTITY,
   asFacade,
   asServer,
   createMockFacade,
@@ -40,7 +41,7 @@ describe("registerEntityTools — tags", () => {
   it("tila_task_create passes tags to tasks.create when provided", async () => {
     facade.tasks.create.mockResolvedValue({
       ok: true,
-      entity: { id: "T-1", tags: ["team:eng"] },
+      entity: { ...TEST_ENTITY, id: "T-1", tags: ["team:eng"] },
     });
 
     const handler = findHandler("tila_task_create");
@@ -63,7 +64,7 @@ describe("registerEntityTools — tags", () => {
   it("tila_task_create passes undefined tags when not provided", async () => {
     facade.tasks.create.mockResolvedValue({
       ok: true,
-      entity: { id: "T-2", tags: [] },
+      entity: { ...TEST_ENTITY, id: "T-2", tags: [] },
     });
 
     const handler = findHandler("tila_task_create");
@@ -81,6 +82,7 @@ describe("registerEntityTools — tags", () => {
     facade.tasks.get.mockResolvedValue({
       ok: true,
       entity: {
+        ...TEST_ENTITY,
         id: "T-1",
         type: "task",
         data: {},

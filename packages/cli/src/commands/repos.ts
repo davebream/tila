@@ -2,7 +2,14 @@ import { RepoRegisterResponseSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { TILA_ERRORS, TilaApiError } from "tila-sdk";
 import { requireClient, resolveContext } from "../context";
-import { jsonArg, printJson, printJsonError } from "../lib/output";
+import {
+  diagnostic,
+  exit,
+  jsonArg,
+  outputText,
+  printJson,
+  printJsonError,
+} from "../lib/output";
 
 export default defineCommand({
   meta: { name: "repos", description: "Manage the GitHub repo allowlist" },
@@ -40,11 +47,11 @@ export default defineCommand({
               "REMOTE_ONLY",
             );
           } else {
-            console.error(
+            diagnostic(
               "Error: this command requires a remote connection (tila init)",
             );
           }
-          process.exit(1);
+          exit(1);
           return;
         }
 
@@ -64,9 +71,9 @@ export default defineCommand({
           if (args.json) {
             printJsonError(msg, "NO_REPO");
           } else {
-            console.error(`Error: ${msg}`);
+            diagnostic(`Error: ${msg}`);
           }
-          process.exit(1);
+          exit(1);
           return;
         }
 
@@ -91,8 +98,8 @@ export default defineCommand({
             return;
           }
 
-          console.log(`Repo ${result.full_name} registered.`);
-          console.log("Re-running this command is safe (idempotent).");
+          outputText(`Repo ${result.full_name} registered.`);
+          outputText("Re-running this command is safe (idempotent).");
         } catch (err) {
           if (err instanceof TilaApiError) {
             switch (err.code) {
@@ -102,9 +109,9 @@ export default defineCommand({
                 if (args.json) {
                   printJsonError(msg, "FORBIDDEN");
                 } else {
-                  console.error(`Error: ${msg}`);
+                  diagnostic(`Error: ${msg}`);
                 }
-                process.exit(1);
+                exit(1);
                 return;
               }
               case TILA_ERRORS.REPO_ACCESS_DENIED: {
@@ -114,9 +121,9 @@ export default defineCommand({
                 if (args.json) {
                   printJsonError(msg, "REPO_ACCESS_DENIED");
                 } else {
-                  console.error(`Error: ${msg}`);
+                  diagnostic(`Error: ${msg}`);
                 }
-                process.exit(1);
+                exit(1);
                 return;
               }
               case TILA_ERRORS.REPO_NOT_FOUND: {
@@ -124,9 +131,9 @@ export default defineCommand({
                 if (args.json) {
                   printJsonError(msg, "REPO_NOT_FOUND");
                 } else {
-                  console.error(`Error: ${msg}`);
+                  diagnostic(`Error: ${msg}`);
                 }
-                process.exit(1);
+                exit(1);
                 return;
               }
             }
@@ -136,9 +143,9 @@ export default defineCommand({
               if (args.json) {
                 printJsonError(msg, "RETRYABLE");
               } else {
-                console.error(`Error: ${msg}`);
+                diagnostic(`Error: ${msg}`);
               }
-              process.exit(1);
+              exit(1);
               return;
             }
             // Any other TilaApiError (e.g. un-typed 403) — surface status +
@@ -147,9 +154,9 @@ export default defineCommand({
             if (args.json) {
               printJsonError(msg, "UNKNOWN");
             } else {
-              console.error(`Error: ${msg}`);
+              diagnostic(`Error: ${msg}`);
             }
-            process.exit(1);
+            exit(1);
             return;
           }
 
@@ -164,9 +171,9 @@ export default defineCommand({
             if (args.json) {
               printJsonError(msg, "WORKER_UNREACHABLE");
             } else {
-              console.error(`Error: ${msg}`);
+              diagnostic(`Error: ${msg}`);
             }
-            process.exit(1);
+            exit(1);
             return;
           }
 

@@ -1,6 +1,10 @@
 import { LruTtlCache } from "./lru-ttl-cache";
 
 export interface TokenClaims {
+  principalId?: string;
+  credentialId?: string;
+  policy?: import("@tila/schemas").CredentialPolicy;
+  expiresAt?: number | null;
   projectId: string;
   name: string;
   scopes: string;

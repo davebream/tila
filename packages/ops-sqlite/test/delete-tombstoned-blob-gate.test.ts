@@ -51,7 +51,7 @@ describe("deleteTombstonedPointers gates on confirmed blob deletion", () => {
     );
   });
 
-  it("deletes a past-grace tombstoned pointer whose blob deletion is confirmed", () => {
+  it("retains audit metadata after confirmed blob deletion", () => {
     const now = Date.now();
     const cutoff = now - 7 * 24 * 60 * 60 * 1000;
 
@@ -61,12 +61,12 @@ describe("deleteTombstonedPointers gates on confirmed blob deletion", () => {
     });
 
     const deleted = deleteTombstonedPointers(testDb.db, cutoff);
-    expect(deleted).toBe(1);
+    expect(deleted).toBe(0);
 
     const remaining = testDb.rawDb
       .prepare("SELECT r2_key FROM artifact_pointers")
       .all() as { r2_key: string }[];
-    expect(remaining.map((r) => r.r2_key)).not.toContain(
+    expect(remaining.map((r) => r.r2_key)).toContain(
       "produced/b/confirmed.bin",
     );
   });

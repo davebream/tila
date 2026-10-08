@@ -27,6 +27,9 @@ export {
   MIGRATION_0018,
   MIGRATION_0019,
   MIGRATION_0021,
+  MIGRATION_0024,
+  runMigration0023,
+  runMigration0024,
   runMigration0002,
   runMigration0004,
   runMigration0010,
@@ -43,6 +46,8 @@ export type { Migration, MigrationStorage } from "./migrations-sql";
 export * as entityOps from "./entity-ops";
 export * as coordinationOps from "./coordination-ops";
 export * as artifactOps from "./artifact-ops";
+export * as artifactVersionOps from "./artifact-version-ops";
+export { ArtifactVersionError } from "./artifact-version-ops";
 export * as journalOps from "./journal-ops";
 export * as journalArchiveOps from "./journal-archive-ops";
 export * as schemaOps from "./schema-ops";
@@ -66,6 +71,11 @@ export * as searchReindexOps from "./search-reindex-ops";
 export * as storeCountsOps from "./store-counts-ops";
 export * as destroyOps from "./destroy-ops";
 export * as templateOps from "./template-ops";
+export * as projectTransferOps from "./project-transfer-ops";
+export type {
+  ProjectBackupTable,
+  ProjectSqlStorage,
+} from "./project-transfer-ops";
 
 // Named type exports for downstream consumers
 export type { EnrichOpts } from "./entity-ops";
@@ -128,3 +138,11 @@ export type {
   InstantiateTemplateParams,
   InstantiateTemplateResult,
 } from "./template-ops";
+
+export * from "./credential-policy";
+export * as continuityOps from "./continuity-ops";
+export * as summaryOps from "./summary-ops";
+
+export * as artifactLifecycleOps from "./artifact-lifecycle-ops";
+export * as artifactReviewOps from "./artifact-review-ops";
+export { ArtifactReviewError } from "./artifact-review-ops";

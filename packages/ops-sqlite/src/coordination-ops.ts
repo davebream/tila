@@ -15,18 +15,17 @@ export interface AcquireResult {
   acquired: boolean;
   fence: number;
   expires_at: number;
+  participant_id: string;
 }
 
 export function acquire(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   resource: string,
-  machine: string,
-  user: string,
+  origin: RequestOrigin,
   mode: "exclusive" | "owner" | "presence",
   ttlMs: number,
   metadata?: Record<string, unknown>,
   now: number = Date.now(),
-  origin?: RequestOrigin,
   idempotency?: DoIdempotency<AcquireResult>,
 ): AcquireResult {
   return db.transaction((tx) => {
@@ -54,12 +53,15 @@ export function acquire(
         .get();
 
       if (existing && existing.expires_at > now) {
-        if (existing.machine === machine && existing.user === user) {
-          // Same-holder self-reacquire is treated as a RENEW, not a fresh acquire:
+        if (
+          existing.principal_id === origin.principalId &&
+          existing.participant_id === origin.participantId
+        ) {
+          // Same-participant reacquire is treated as a RENEW, not a fresh acquire:
           // we only extend expires_at and return the EXISTING fence unchanged. The
           // fence does NOT bump here. Per docs/01-DECISIONS §2 the fence increments
-          // on each *acquire* to invalidate a prior holder — but re-acquiring a lease
-          // you already hold has no prior holder to fence out, so bumping would
+          // on each *acquire* to invalidate a prior participant — but re-acquiring a
+          // lease you already hold has no prior participant to fence out, so bumping would
           // needlessly invalidate the caller's own in-flight fenced writes.
           const expiresAt = now + ttlMs;
           tx.update(schema.claims)
@@ -71,24 +73,24 @@ export function acquire(
             acquired: true,
             fence: existing.fence,
             expires_at: expiresAt,
+            participant_id: origin.participantId,
           };
         }
 
-        if (
-          mode === "exclusive" &&
-          (existing.machine !== machine || existing.user !== user)
-        ) {
+        if (existing.mode === "exclusive" || mode === "exclusive") {
           return {
             acquired: false,
             fence: existing.fence,
             expires_at: 0,
+            participant_id: origin.participantId,
           };
         }
-        if (mode === "owner" && existing.user !== user) {
+        if (mode === "owner" && existing.principal_id !== origin.principalId) {
           return {
             acquired: false,
             fence: existing.fence,
             expires_at: 0,
+            participant_id: origin.participantId,
           };
         }
       }
@@ -112,9 +114,9 @@ export function acquire(
       tx.insert(schema.claims)
         .values({
           resource: canonicalResource,
-          holder: `${machine}/${user}`,
-          machine,
-          user,
+          principal_id: origin.principalId,
+          participant_id: origin.participantId,
+          environment: JSON.stringify(origin.environment),
           mode,
           fence: newFence,
           acquired_at: now,
@@ -126,7 +128,10 @@ export function acquire(
       appendJournal(tx, {
         kind: "claim.acquired",
         resource: canonicalResource,
-        actor: `${machine}/${user}`,
+        actor: origin.actor,
+        principalId: origin.principalId,
+        participantId: origin.participantId,
+        environment: origin.environment,
         fence: newFence,
         tokenId: origin?.tokenId,
         source: origin?.source,
@@ -137,6 +142,7 @@ export function acquire(
         acquired: true,
         fence: newFence,
         expires_at: expiresAt,
+        participant_id: origin.participantId,
       };
     }
   });
@@ -150,12 +156,10 @@ export interface RenewResult {
 export function renew(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   resource: string,
-  machine: string,
-  user: string,
+  origin: RequestOrigin,
   fence: number,
   ttlMs: number,
   now: number = Date.now(),
-  origin?: RequestOrigin,
   idempotency?: DoIdempotency<RenewResult>,
 ): RenewResult {
   return db.transaction((tx) => {
@@ -179,7 +183,10 @@ export function renew(
         return { renewed: false, expires_at: 0 };
       }
 
-      if (claim.machine !== machine || claim.user !== user) {
+      if (
+        claim.principal_id !== origin.principalId ||
+        claim.participant_id !== origin.participantId
+      ) {
         return { renewed: false, expires_at: 0 };
       }
 
@@ -201,7 +208,10 @@ export function renew(
       appendJournal(tx, {
         kind: "claim.renewed",
         resource: canonicalResource,
-        actor: `${machine}/${user}`,
+        actor: origin.actor,
+        principalId: origin.principalId,
+        participantId: origin.participantId,
+        environment: origin.environment,
         fence,
         tokenId: origin?.tokenId,
         source: origin?.source,
@@ -244,7 +254,10 @@ export function release(
         // holder check below is skipped when there is no claim row.
         return { released: false };
       }
-      if (claimRow.holder !== origin.actor) {
+      if (
+        claimRow.principal_id !== origin.principalId ||
+        claimRow.participant_id !== origin.participantId
+      ) {
         throw new ClaimOwnershipError(resource);
       }
 
@@ -268,6 +281,9 @@ export function release(
         kind: "claim.released",
         resource: canonicalResource,
         actor: origin.actor,
+        principalId: origin.principalId,
+        participantId: origin.participantId,
+        environment: origin.environment,
         fence,
         tokenId: origin.tokenId,
         source: origin.source,
@@ -296,8 +312,9 @@ export function state(
 
   return {
     resource: row.resource,
-    machine: row.machine,
-    user: row.user,
+    principal_id: row.principal_id,
+    participant_id: row.participant_id,
+    environment: JSON.parse(row.environment) as Claim["environment"],
     mode: row.mode as "exclusive" | "owner" | "presence",
     fence: row.fence,
     acquired_at: row.acquired_at,
@@ -317,8 +334,9 @@ export function listClaims(
     .all();
   return rows.map((row) => ({
     resource: row.resource,
-    machine: row.machine,
-    user: row.user,
+    principal_id: row.principal_id,
+    participant_id: row.participant_id,
+    environment: JSON.parse(row.environment) as Claim["environment"],
     mode: row.mode as "exclusive" | "owner" | "presence",
     fence: row.fence,
     acquired_at: row.acquired_at,
@@ -345,12 +363,17 @@ export function countExpiredClaims(
 
 export function heartbeat(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  machine: string,
+  origin: RequestOrigin,
   info?: Record<string, unknown>,
   now: number = Date.now(),
 ): void {
   db.run(
-    sql`INSERT OR REPLACE INTO presence(machine, last_seen, info) VALUES(${machine}, ${now}, ${JSON.stringify(info ?? {})})`,
+    sql`INSERT INTO presence(principal_id, participant_id, environment, last_seen, info)
+        VALUES(${origin.principalId}, ${origin.participantId}, ${JSON.stringify(origin.environment)}, ${now}, ${JSON.stringify(info ?? {})})
+        ON CONFLICT(principal_id, participant_id) DO UPDATE SET
+          environment = excluded.environment,
+          last_seen = excluded.last_seen,
+          info = excluded.info`,
   );
 }
 
@@ -367,7 +390,9 @@ export function listPresence(
     .all();
 
   return rows.map((row) => ({
-    machine: row.machine,
+    principal_id: row.principal_id,
+    participant_id: row.participant_id,
+    environment: JSON.parse(row.environment) as Presence["environment"],
     last_seen: row.last_seen,
     info: JSON.parse(row.info) as Record<string, unknown>,
   }));
@@ -385,7 +410,9 @@ export function listAllPresence(
   const cutoff = now - ttlMs;
   const rows = db.select().from(schema.presence).all();
   return rows.map((row) => ({
-    machine: row.machine,
+    principal_id: row.principal_id,
+    participant_id: row.participant_id,
+    environment: JSON.parse(row.environment) as Presence["environment"],
     last_seen: row.last_seen,
     info: JSON.parse(row.info) as Record<string, unknown>,
     active: row.last_seen > cutoff,

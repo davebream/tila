@@ -18,6 +18,7 @@
  * imports handles from this module, they reference the same vi.fn() instances.
  */
 import { type Mock, vi } from "vitest";
+import { credentialMockExports } from "./credential-mock";
 
 // ---------------------------------------------------------------------------
 // Mutable mock handles — consumers import these to override per-test behavior
@@ -102,6 +103,7 @@ export const mockGitHubAppConfigGetInstallation: Mock = vi
  */
 export function backendD1MockFactory(): Record<string, unknown> {
   return {
+    ...credentialMockExports(),
     D1SessionStore: vi.fn().mockImplementation(
       class {
         validate = mockSessionValidate;

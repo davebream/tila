@@ -77,6 +77,7 @@ const FieldDeclarationSchema = z.object({
 export type FieldDeclaration = z.infer<typeof FieldDeclarationSchema>;
 
 const ReferenceSlotSchema = z.object({
+  require_trusted_for_statuses: z.array(z.string().min(1)).optional(),
   name: z.string(),
   multiple: z.boolean().default(false),
   kinds: z.array(z.string()),

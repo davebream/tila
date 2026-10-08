@@ -24,10 +24,21 @@ describe("upsertPointer with searchText", () => {
   it("inserts search doc when searchText is provided", () => {
     const { db, sqlite } = createTestDb();
     const pointer = makePointer();
-    upsertPointer(db, pointer, { actor: "test-actor" }, undefined, {
-      title: "My Lesson",
-      body_text: "Content about architecture decisions",
-    });
+    upsertPointer(
+      db,
+      pointer,
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      undefined,
+      {
+        title: "My Lesson",
+        body_text: "Content about architecture decisions",
+      },
+    );
 
     const rows = sqlite
       .prepare("SELECT * FROM artifact_search_docs WHERE artifact_key = ?")
@@ -43,7 +54,18 @@ describe("upsertPointer with searchText", () => {
 
   it("does not insert search doc when searchText is null", () => {
     const { db, sqlite } = createTestDb();
-    upsertPointer(db, makePointer(), { actor: "test-actor" }, undefined, null);
+    upsertPointer(
+      db,
+      makePointer(),
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      undefined,
+      null,
+    );
 
     const rows = sqlite
       .prepare("SELECT COUNT(*) as cnt FROM artifact_search_docs")
@@ -53,7 +75,12 @@ describe("upsertPointer with searchText", () => {
 
   it("does not insert search doc when searchText is omitted", () => {
     const { db, sqlite } = createTestDb();
-    upsertPointer(db, makePointer(), { actor: "test-actor" });
+    upsertPointer(db, makePointer(), {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
 
     const rows = sqlite
       .prepare("SELECT COUNT(*) as cnt FROM artifact_search_docs")
@@ -66,9 +93,31 @@ describe("upsertPointer with searchText", () => {
     const pointer = makePointer();
     const searchText = { title: "Title", body_text: "Body" };
 
-    upsertPointer(db, pointer, { actor: "test-actor" }, undefined, searchText);
+    upsertPointer(
+      db,
+      pointer,
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      undefined,
+      searchText,
+    );
     // Second upload of same r2_key (content-addressed dedup)
-    upsertPointer(db, pointer, { actor: "test-actor" }, undefined, searchText);
+    upsertPointer(
+      db,
+      pointer,
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      undefined,
+      searchText,
+    );
 
     const rows = sqlite
       .prepare("SELECT COUNT(*) as cnt FROM artifact_search_docs")
@@ -78,10 +127,21 @@ describe("upsertPointer with searchText", () => {
 
   it("FTS5 trigger fires -- content is discoverable via MATCH", () => {
     const { db, sqlite } = createTestDb();
-    upsertPointer(db, makePointer(), { actor: "test-actor" }, undefined, {
-      title: "Architecture Decision",
-      body_text: "We chose SQLite for persistence xyzuniq123",
-    });
+    upsertPointer(
+      db,
+      makePointer(),
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      undefined,
+      {
+        title: "Architecture Decision",
+        body_text: "We chose SQLite for persistence xyzuniq123",
+      },
+    );
 
     const results = sqlite
       .prepare(
@@ -102,16 +162,38 @@ describe("upsertPointer with searchText", () => {
       .run("task-1", "task", now, now);
     // Establish a live claim (creates the fence row at current_fence=1 and a
     // live lease) so the artifact write satisfies the requireLiveClaim contract.
-    coordinationOps.acquire(db, "task:task-1", "m1", "u1", "exclusive", 60_000);
+    coordinationOps.acquire(
+      db,
+      "task:task-1",
+      {
+        principalId: "test:u1",
+        participantId: "m1",
+        environment: { machine: "m1" },
+        actor: "m1/u1",
+      },
+      "exclusive",
+      60_000,
+    );
     const pointer = makePointer({
       r2_key: "produced/task-1/def456.md",
       resource: "task-1",
       fence: 1,
     });
-    upsertPointer(db, pointer, { actor: "test-actor" }, undefined, {
-      title: null,
-      body_text: "Produced content",
-    });
+    upsertPointer(
+      db,
+      pointer,
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      undefined,
+      {
+        title: null,
+        body_text: "Produced content",
+      },
+    );
 
     const row = sqlite
       .prepare(
@@ -123,10 +205,21 @@ describe("upsertPointer with searchText", () => {
 
   it("search doc title can be null", () => {
     const { db, sqlite } = createTestDb();
-    upsertPointer(db, makePointer(), { actor: "test-actor" }, undefined, {
-      title: null,
-      body_text: "No title content",
-    });
+    upsertPointer(
+      db,
+      makePointer(),
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      undefined,
+      {
+        title: null,
+        body_text: "No title content",
+      },
+    );
 
     const row = sqlite
       .prepare("SELECT title FROM artifact_search_docs WHERE artifact_key = ?")

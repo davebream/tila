@@ -88,7 +88,12 @@ describe("GET /artifact/latest route", () => {
 
   it("returns 200 with the latest pointer when one exists", async () => {
     const ptr = makePointer();
-    artifactOps.upsertPointer(db, ptr, { actor: "agent" });
+    artifactOps.upsertPointer(db, ptr, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
 
     const app = createArtifactRoutes(makeDeps(db));
     const res = await app.request("/artifact/latest?kind=plan&resource=task-1");
@@ -106,12 +111,22 @@ describe("GET /artifact/latest route", () => {
     const ptr1 = makePointer();
     const ptr2 = makePointer();
 
-    artifactOps.upsertPointer(db, ptr1, { actor: "agent" });
+    artifactOps.upsertPointer(db, ptr1, {
+      principalId: "test:agent",
+      participantId: "agent",
+      environment: {},
+      actor: "agent",
+    });
     // ptr2 supersedes ptr1 via autoSupersedes=true
     artifactOps.upsertPointer(
       db,
       ptr2,
-      { actor: "agent" },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
       undefined,
       null,
       true,
