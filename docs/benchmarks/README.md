@@ -24,7 +24,7 @@ From [BASELINE.md](BASELINE.md), 2026-10-08, harness 1.0.0, client in Warsaw (Cl
 | inproc | claims-uncontended | 8 | ~4800 | 0.19 | 0.26 | DO router + SQLite only |
 | embedded | claims-uncontended | 4 | ~3800 | 0.22 | 1.4 | ops-sqlite under Node |
 
-Read the deployed rows as "every Worker call from this client costs roughly 300 ms"; the DO-side work is well under a millisecond (in-process rows), so the deployed cost is dominated by auth/D1 lookups, the two DO hops and network RTT. The 500 ms per-operation cadence target in `docs/01-DECISIONS.md` holds for ~98% of calls from Warsaw; the tail does not.
+Read the historical deployed rows as "every Worker call from this client costs roughly 300 ms". The later #245 attribution in [BASELINE.md](BASELINE.md#deployed-latency-attribution-245-2026-10-08) measures two serial D1 auth reads at about 73% of mean client time, versus about 4% for transfer preflight. In-process sub-millisecond work does not establish deployed DO execution time. The original cadence run missed 6/360 deadlines; the instrumented run missed 1/360. These are single-host observations, not a tail guarantee or a multi-machine acceptance test.
 
 ## What is measured
 
@@ -40,6 +40,26 @@ Every scenario drives the same SDK facade (`tila-sdk`) and times each facade cal
 The harness never retries. The SDK's `withRetry` is not used, so percentiles contain no backoff time. Scenarios that re-acquire after a stale fence emit that as a separate `reacquire` op so retries are visible, not hidden.
 
 Latency percentiles come from a log-linear histogram (32 buckets per octave, so p50/p95/p99 carry at most ~3% relative error). Min, max, mean and count are exact. Throughput is recorded ops per second across all participants over the recorded window; warmup is excluded.
+
+## Per-request attribution (harness 1.1.0)
+
+Deploy the instrumented Worker with `tila deploy` (use `pnpm dev:cli deploy` from the checkout when investigating source changes). The existing HTTP benchmark command automatically captures `Server-Timing`; no credentials or payloads are put in timing headers. Run the documented deployed command three times on the same throwaway project, then run the 6-participant, 500 ms cadence control. Keep the deployed revision, deployment/version IDs, credential class, client host, and observed placement with the report.
+
+The optional `timing` object under each operation and the total contains response counts, valid timing coverage, invalid residual counts, per-component histograms with counts, and observed colo/placement counts. Older JSON files and Workers without timing headers remain usable; absent or malformed timings lower coverage and do not become zero-duration samples. The schema version stays at 1 because this is an optional addition; the harness version changes because the metrics and warmup boundary semantics changed.
+
+| Metric | Boundary |
+|---|---|
+| `worker` | Entire Worker middleware/handler interval; excludes background work |
+| `auth_rate_limit`, `auth_token`, `auth_credential` | Awaited failed-auth rate-limit check, D1 token validation, scoped-credential resolution |
+| `membership` | Project membership resolution |
+| `transfer`, `do` | Forwarded transfer-status and operation fetches, including transport and DO queuing/execution |
+| `worker_other`, `transport_client` | Unattributed Worker time; matched facade duration minus Worker time |
+
+`worker` encloses the other server phases: do not add it to them. Overlapping instrumented waits are counted once, in start order. The header uses `tila_` prefixes and emits zero for a phase that did not run. Other authentication paths and uninstrumented work remain in `worker_other`. Deployed timers advance on I/O, so these are wall-time attribution buckets, not CPU profiles.
+
+The benchmark uses asynchronous context to match response headers to facade calls without reading the response body. It excludes calls that started before recording began, even if a batch finishes after warmup. Setup/teardown requests are not recorded. Phase histograms count HTTP responses; `client` and `transport_client` count only facade calls with exactly one valid response. Calls with several responses retain server timing but have no inferred client residual. Negative residuals are counted as invalid, not clamped or included in a histogram. Compute residuals per call before aggregating; subtracting p50s/p99s is not meaningful.
+
+Response coverage counts responses, not network failures without a response. Observed placement comes from actual measured requests; `/api/health` is only the initial probe. These headers do not establish DO location. The cold-start scenario has its own measurements and does not use the generic timed-facade collector.
 
 ## Tiers
 

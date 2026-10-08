@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Bump on any change to metric semantics or the result layout. */
-export const HARNESS_VERSION = "1.0.0";
+export const HARNESS_VERSION = "1.1.0";
 export const SCHEMA_VERSION = 1;
 
 const LatencySchema = z.object({
@@ -12,7 +12,18 @@ const LatencySchema = z.object({
   mean: z.number(),
 });
 
+export const TimingSummarySchema = z.object({
+  requests: z.number().int().nonnegative(),
+  timed_requests: z.number().int().nonnegative(),
+  invalid_residuals: z.number().int().nonnegative(),
+  metrics: z.record(
+    LatencySchema.extend({ count: z.number().int().nonnegative() }),
+  ),
+  locations: z.record(z.number().int().nonnegative()),
+});
+
 export const MetricsSchema = z.object({
+  timing: TimingSummarySchema.optional(),
   ops: z.number().int().nonnegative(),
   ok: z.number().int().nonnegative(),
   conflicts: z.number().int().nonnegative(),

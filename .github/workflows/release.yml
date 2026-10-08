@@ -75,8 +75,10 @@ jobs:
       fail-fast: false
       matrix:
         node: ['22', '24']
+        sqlite: ['12.10.0', '13.0.3']
     env:
       RELEASE_SHA: ${{ needs.validate-build.outputs.sha }}
+      RELEASE_SQLITE_VERSION: ${{ matrix.sqlite }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -128,6 +130,9 @@ jobs:
       - name: Execute binary and local installer fixture
         shell: bash
         run: node scripts/ci-run.mjs platform node scripts/release-smoke.mjs .release binary "$RELEASE_TARGET"
+      - name: Test packed SDK and MCP native addons
+        shell: bash
+        run: node scripts/ci-run.mjs native-consumer node scripts/release-smoke.mjs .release consumer "$RELEASE_TARGET"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:

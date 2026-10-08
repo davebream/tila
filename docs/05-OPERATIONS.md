@@ -1413,6 +1413,56 @@ rules keep the existing 365-day `produced/` backstop and one-day incomplete-uplo
 cleanup. Backup/restore carries lifecycle records and metadata; full project
 destruction also removes the private versioned prefix.
 
+### Disposable deployed artifact verification
+
+The artifact-version integration suite has an explicit live gate. Ordinary test
+runs skip it, even when credentials are available. From the checkout root, run:
+
+```bash
+env TILA_RUN_LIVE_ARTIFACT_TESTS=1 \
+  TILA_BASE_URL=https://tila.breamcode.workers.dev \
+  pnpm --filter @tila/integration-tests exec vitest run \
+  src/artifact-versions.test.ts -t 'live artifact revision verification'
+```
+
+Use the infrastructure configuration created by `tila init` under the configured
+tila home. `TILA_BASE_URL` must match that configuration's Worker origin. The
+Cloudflare API credential (environment `CLOUDFLARE_API_TOKEN` or the existing
+tila home credential file) must allow D1 query and R2 lifecycle inspection. If
+the Worker uses `HASH_PEPPER`, supply the matching `TILA_HASH_PEPPER` privately.
+Missing prerequisites fail an enabled run; they do not silently skip it.
+
+Each run provisions a new UUID project and temporary project token with the
+existing provisioning helpers. It refuses an existing project identity. Writes
+use stable idempotency keys and requests have bounded timeouts. The gate checks
+exact restored bytes, tags, metadata, paginated history, restore retry identity,
+same-byte revision creation, project DO restart, repeated reconciliation, and
+deleted-content 410 responses with retained history. It also verifies that the
+only enabled R2 object expiration rule is the 365-day `produced/` backstop;
+versioned content and recovery records must remain exempt.
+
+For an attended browser check, optionally set
+`TILA_LIVE_ARTIFACT_UI_READY_FILE` to an operator-selected private file path.
+The test creates a temporary service with viewer membership and a scoped read-only
+credential, writes a mode-0600 JSON receipt containing the disposable project URL
+and that token, then waits up to three minutes. In the existing browser,
+verify the read-only drawer, revision links and Back navigation; save screenshots
+outside the receipt. Acknowledge by writing the receipt's exact `projectId` to
+the same path with `.done` appended. The receipt and acknowledgement are removed
+during cleanup. Do not commit or publish the credential receipt.
+
+Cleanup runs after success or failure. Before destroying project resources, it
+compares the run's creation receipt against fresh deployed registry identity.
+It wipes only that project's DO/R2 resources, verifies empty domain stores, then
+removes D1 metadata, browser service/membership/credential records, project
+registration and test tokens and confirms their
+absence. A cleanup failure reports the project ID and remaining resource class
+without printing credentials; resolve those resources before rerunning. Existing
+projects remain outside the mutation scope. This gate neither deploys code nor
+simulates SQLite loss or multi-day retention expiry: local lifecycle and recovery
+tests cover those cases. Record deployment/version metadata alongside behavioral
+results; health output alone does not identify the deployed source revision.
+
 ## Coding-client lifecycle integration
 
 The opt-in lifecycle adapters support **Claude Code CLI and Codex CLI on macOS
@@ -1612,8 +1662,11 @@ commit timestamp, target inventory, tarball integrity and every file checksum.
 
 Clean-directory consumers install the tarballs and check SDK ESM/CommonJS local
 SQLite persistence, MCP stdio initialization/tool discovery, and the npm CLI.
-Native Linux, macOS and Windows x64/arm64 runners execute the binaries and local
-installer fixtures; both musl binaries run in native-architecture Alpine containers.
+Node 22/24 consumers exercise both SQLite 12.10.0 and 13.0.3. Each SDK/MCP package
+must resolve the selected driver; the smoke test opens a native database and loads
+the MCP keyring addon without accessing credentials.
+Native Linux, macOS and Windows x64/arm64 runners also test packed SDK/MCP consumers
+with SQLite 13.0.3, execute the binaries and run local installer fixtures; both musl binaries run in native-architecture Alpine containers.
 The POSIX installer detects musl and selects that target. SDK private implementation
 packages are bundled build dependencies, never unpublished npm runtime dependencies.
 

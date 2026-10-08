@@ -38,6 +38,7 @@ export function createCorsMiddleware(): MiddlewareHandler<AppEnv> {
         "X-Tila-Client-Name",
       ],
       exposeHeaders: [
+        "Server-Timing",
         "X-Tila-Token-Estimate",
         "X-Tila-Artifact-Review-State",
         "X-Tila-Artifact-Review-Revision",

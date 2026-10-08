@@ -1,4 +1,5 @@
 import { classifyError } from "./classify";
+import { type HttpTimingSample, timingContext } from "./server-timing";
 import type { OpOutcome } from "./types";
 
 export interface Timed<T> extends OpOutcome {
@@ -11,15 +12,25 @@ export async function timed<T>(
   fn: () => Promise<T>,
 ): Promise<Timed<T>> {
   const t0 = performance.now();
+  const samples: HttpTimingSample[] = [];
   try {
-    const value = await fn();
-    return { op, cls: "ok", latencyMs: performance.now() - t0, value };
+    const value = await timingContext.run(samples, fn);
+    return {
+      op,
+      cls: "ok",
+      latencyMs: performance.now() - t0,
+      startedAt: t0,
+      httpTimings: samples,
+      value,
+    };
   } catch (err) {
     const c = classifyError(err);
     return {
       op,
       cls: c.cls,
       latencyMs: performance.now() - t0,
+      startedAt: t0,
+      httpTimings: samples,
       status: c.status,
       code: c.code,
       message: c.message,
