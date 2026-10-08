@@ -1,5 +1,21 @@
 # tila-mcp-server Changelog
 
+## 0.3.0 — Workflow tools and session continuity (2026-10-08)
+
+### Breaking changes
+
+- The default advertised catalog is six grouped workflow tools. Set `TILA_MCP_TOOLS=all` to restore the primitive catalog, or select existing named groups and `core`. Combine `workflow` with primitive groups when needed.
+- Mutations use canonical principal identity from the credential and a stable participant ID for each running session. Upgrade the MCP server with the Worker; old mutations without a participant ID fail with `participant-required`.
+- Signals use principal recipients and immutable participant deliveries rather than display-name targets. HTTP error codes and SDK error constants use kebab-case.
+
+### Added
+
+- Shared multi-instance credential resolution, scoped service credentials, and refreshable authentication.
+- Durable journal cursors, session handoffs, native coding-session lifecycle integration, artifact history/restore, and provenance/review operations.
+- Packed-consumer validation for Node 22/24 and SQLite 12/13, including native SQLite and keyring loading on supported platforms.
+
+For deployment migration effects and the complete release summary, see the [product changelog](../../CHANGELOG.md#030---2026-10-08).
+
 ## 0.2.0 — Context-audit hardening (2026-05-29)
 
 ### Breaking changes
