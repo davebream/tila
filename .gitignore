@@ -61,3 +61,8 @@ graphify-out/
 # Benchmark raw results (summaries are committed under docs/benchmarks/)
 packages/bench/results/*
 !packages/bench/results/.gitkeep
+
+# Explicit version-generation task outputs
+/packages/cli/src/version.ts
+/packages/sdk/src/version.ts
+/packages/backend-do/src/version.ts

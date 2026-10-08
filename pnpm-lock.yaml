@@ -446,6 +446,12 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20260602.1
         version: 4.20260602.1
+      '@tila/backend-d1':
+        specifier: workspace:*
+        version: link:../backend-d1
+      '@tila/backend-do':
+        specifier: workspace:*
+        version: link:../backend-do
       '@tila/backend-embedded':
         specifier: workspace:*
         version: link:../backend-embedded
@@ -455,6 +461,9 @@ importers:
       '@tila/backend-r2':
         specifier: workspace:*
         version: link:../backend-r2
+      '@tila/core':
+        specifier: workspace:*
+        version: link:../core
       '@tila/ops-sqlite':
         specifier: workspace:*
         version: link:../ops-sqlite

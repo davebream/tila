@@ -2,7 +2,7 @@
   "name": "tila-cli",
   "version": "0.2.7",
   "license": "MIT",
-  "description": "tila CLI — durable state & coordination for multi-machine agentic work",
+  "description": "tila CLI \u2014 durable state & coordination for multi-machine agentic work",
   "keywords": [
     "tila",
     "cli",
@@ -13,7 +13,7 @@
     "mcp",
     "state-management"
   ],
-  "author": "Dawid Leszczyński (https://github.com/davebream)",
+  "author": "Dawid Leszczy\u0144ski (https://github.com/davebream)",
   "homepage": "https://github.com/davebream/tila#readme",
   "bugs": "https://github.com/davebream/tila/issues",
   "repository": {
@@ -30,10 +30,10 @@
   },
   "files": ["bin"],
   "scripts": {
-    "build": "tsc",
-    "dev": "node scripts/gen-version.mjs && bun --tsconfig-override ../../tsconfig.json src/index.ts",
+    "build": "pnpm run gen:version && tsc",
+    "dev": "pnpm run gen:version && bun --tsconfig-override ../../tsconfig.json src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm run gen:version && tsc --noEmit",
     "clean": "rm -rf dist",
     "build:worker-sidecar": "pnpm --filter @tila/worker exec wrangler deploy --dry-run --outdir ../cli/worker --metafile ../cli/worker/bundle-meta.json",
     "compile": "bun run gen:version && bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:linux-x64-musl && bun run compile:linux-arm64-musl && bun run compile:darwin-arm64 && bun run compile:darwin-x64 && bun run compile:windows-x64 && bun run compile:windows-arm64 && bun run compile:installers",
@@ -46,7 +46,7 @@
     "compile:darwin-x64": "bun run build:worker-sidecar && mkdir -p dist/metadata && bun build --compile --metafile=dist/metadata/tila-darwin-x64.json --target bun-darwin-x64 src/index.ts --outfile dist/binaries/tila-darwin-x64",
     "compile:windows-x64": "bun run build:worker-sidecar && mkdir -p dist/metadata && bun build --compile --metafile=dist/metadata/tila-windows-x64.exe.json --target bun-windows-x64 src/index.ts --outfile dist/binaries/tila-windows-x64.exe",
     "compile:windows-arm64": "bun run build:worker-sidecar && mkdir -p dist/metadata && bun build --compile --metafile=dist/metadata/tila-windows-arm64.exe.json --target bun-windows-arm64 src/index.ts --outfile dist/binaries/tila-windows-arm64.exe",
-    "gen:version": "node scripts/gen-version.mjs"
+    "gen:version": "node ../../scripts/generate-version.mjs cli"
   },
   "optionalDependencies": {
     "tila-cli-darwin-arm64": "0.2.7",

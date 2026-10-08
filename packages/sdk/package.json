@@ -2,7 +2,7 @@
   "name": "tila-sdk",
   "version": "0.2.7",
   "license": "MIT",
-  "description": "TypeScript SDK for tila — durable state & coordination for multi-machine agentic work",
+  "description": "TypeScript SDK for tila \u2014 durable state & coordination for multi-machine agentic work",
   "keywords": [
     "tila",
     "sdk",
@@ -12,7 +12,7 @@
     "state-management",
     "typescript"
   ],
-  "author": "Dawid Leszczyński (https://github.com/davebream)",
+  "author": "Dawid Leszczy\u0144ski (https://github.com/davebream)",
   "homepage": "https://github.com/davebream/tila#readme",
   "bugs": "https://github.com/davebream/tila/issues",
   "repository": {
@@ -62,10 +62,10 @@
   "files": ["dist"],
   "sideEffects": false,
   "scripts": {
-    "build": "node scripts/gen-version.mjs && tsup",
-    "typecheck": "tsc --noEmit",
+    "build": "pnpm run gen:version && tsup",
+    "typecheck": "pnpm run gen:version && tsc --noEmit",
     "test": "vitest run",
-    "gen:version": "node scripts/gen-version.mjs"
+    "gen:version": "node ../../scripts/generate-version.mjs sdk"
   },
   "dependencies": {
     "@tila/backend-embedded": "workspace:*",
