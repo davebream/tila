@@ -24,7 +24,6 @@
 import {
   _resetMiddlewareStateForTest,
   authFixtures,
-  backendD1MockFactory,
   createAuthTestApp,
   featurePending,
   makeAuthEnv,
@@ -33,7 +32,12 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Per-file hoisted mock — vitest resolves this to the same module the worker source imports.
-vi.mock("@tila/backend-d1", () => backendD1MockFactory());
+vi.mock("@tila/backend-d1", async () => {
+  const { backendD1MockFactory } = await import(
+    "../../worker/src/test-support/backend-d1-mock"
+  );
+  return backendD1MockFactory();
+});
 
 const env = makeAuthEnv();
 
