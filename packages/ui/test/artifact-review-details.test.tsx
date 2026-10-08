@@ -37,6 +37,7 @@ vi.mock("@/hooks/use-auth", () => ({
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  vi.restoreAllMocks();
 });
 function show() {
   return render(
@@ -177,7 +178,10 @@ function showDetail(key = revision(2).r2_key) {
 }
 
 describe("artifact drawer version history", () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
+    // Keep React diagnostics visible while asserting the navigation contract.
+    consoleError = vi.spyOn(console, "error");
     activeProject = "p";
     vi.mocked(getArtifactMeta).mockResolvedValue({
       ok: true,
@@ -197,6 +201,14 @@ describe("artifact drawer version history", () => {
     vi.mocked(getArtifactHistory).mockResolvedValue(
       history([revision(2), revision(1, { tags: [] })]),
     );
+  });
+
+  afterEach(() => {
+    expect(
+      consoleError.mock.calls.filter((args: unknown[]) =>
+        args.some((arg) => String(arg).includes("same key")),
+      ),
+    ).toEqual([]);
   });
 
   it("shows all fields in server order and identifies the viewed revision", async () => {

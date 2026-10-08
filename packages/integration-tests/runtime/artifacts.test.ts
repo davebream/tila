@@ -1,4 +1,5 @@
 import {
+  SELF,
   evictDurableObject,
   runDurableObjectAlarm,
   runInDurableObject,
@@ -9,8 +10,78 @@ import { artifactCommitKey } from "@tila/schemas";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { expect, it } from "vitest";
 import { createProjectRouter } from "../../backend-do/src/project-do-router";
+import { hashToken } from "../../worker/src/lib/hash-token";
 import { identity, post } from "./helpers";
 import { bindings } from "./setup";
+
+it("returns a readable 410 envelope for deleted revision content through the Worker", async () => {
+  const projectId = "runtime-deleted-artifact";
+  const token = "runtime-artifact-token";
+  await bindings.DB.prepare(
+    "INSERT INTO _projects (project_id, display_name, created_at, created_by, cloudflare_account_id) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(projectId, projectId, Date.now(), "fixture", "local")
+    .run();
+  await bindings.DB.prepare(
+    "INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(
+      await hashToken(token, undefined),
+      projectId,
+      "init",
+      "full",
+      Date.now(),
+      "fixture",
+    )
+    .run();
+  const request = async <T = unknown>(
+    path: string,
+    method = "GET",
+    body?: unknown,
+  ) => {
+    const response = await SELF.fetch(
+      `https://worker/projects/${projectId}${path}`,
+      {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tila-Participant-Id": "runtime-worker",
+          "Content-Type": "application/json",
+          "Idempotency-Key": path,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+    );
+    return {
+      status: response.status,
+      body: await response.json<T>(),
+    };
+  };
+  const claim = await request<{ fence: number }>("/claims/acquire", "POST", {
+    resource: "artifact:report",
+    mode: "exclusive",
+    ttl_ms: 60_000,
+  });
+  expect(claim.status).toBe(200);
+  const written = await request<{ key: string }>("/artifacts/text", "POST", {
+    content: "deleted content",
+    kind: "report",
+    mime_type: "text/plain",
+    lineage_id: "report",
+    lineage_fence: claim.body.fence,
+  });
+  expect(written.status).toBe(200);
+  const path = `/artifacts/${encodeURIComponent(written.body.key)}`;
+  expect(
+    (await request(`${path}?fence=${claim.body.fence}`, "DELETE")).status,
+  ).toBe(202);
+  const unavailable = await request(path);
+  expect(unavailable.status).toBe(410);
+  expect(unavailable.body).toMatchObject({
+    ok: false,
+    error: { code: "artifact-unavailable", retryable: false },
+  });
+});
 
 it("recovers interrupted R2 publication after eviction without duplicate logical records", async () => {
   const stub = bindings.PROJECT.get(bindings.PROJECT.newUniqueId());
