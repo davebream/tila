@@ -2384,7 +2384,14 @@ Bun resolves these to local paths; in publishing, they get rewritten to actual v
 
 ---
 
-## Artifact revisions (#174 / #175, release-gated on #176)
+## Artifact revisions (#174–#177)
+
+The revision core and API shipped in [#228](https://github.com/davebream/tila/pull/228)
+and [#230](https://github.com/davebream/tila/pull/230). Version-aware retention and
+recovery shipped in [#231](https://github.com/davebream/tila/pull/231), satisfying
+the prerequisite for public API documentation. The read-only history drawer
+shipped in [#237](https://github.com/davebream/tila/pull/237). These are merged
+implementation milestones; deployment status depends on the installation.
 
 Versioning is explicit: clients supply a lineage ID and a live fence for
 `artifact:<lineage_id>`. Ordinary artifact uploads retain their existing keys,
