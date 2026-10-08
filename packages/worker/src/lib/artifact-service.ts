@@ -1,4 +1,5 @@
 import type { ArtifactProvenance, ArtifactReviewSummary } from "@tila/schemas";
+import type { ExecutionContext } from "hono";
 /**
  * artifact-service.ts
  *

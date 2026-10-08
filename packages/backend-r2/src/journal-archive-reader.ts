@@ -11,7 +11,7 @@ export function createR2JournalArchiveReader(
         const options = {
           prefix: `journal-archive/${projectId}/`,
           cursor,
-          include: ["customMetadata"],
+          include: ["customMetadata"] satisfies R2ListOptions["include"],
         };
         const page = await bucket.list(options);
         for (const object of page.objects) {

@@ -8,17 +8,14 @@
     ":maintainLockFilesWeekly"
   ],
   "timezone": "Europe/Warsaw",
-  "schedule": ["* 0-6 * * 1"],
+  "schedule": ["* * * * 1"],
   "updateNotScheduled": true,
   "prConcurrentLimit": 3,
   "prHourlyLimit": 2,
-  "rebaseWhen": "behind-base-branch",
+  "rebaseWhen": "conflicted",
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
-  "automergeType": "pr",
-  "automergeStrategy": "squash",
-  "platformAutomerge": true,
   "vulnerabilityAlerts": {
     "enabled": false
   },
@@ -35,11 +32,26 @@
       "groupName": "runtime dependencies"
     },
     {
-      "description": "Keep build and test tooling separate from production dependencies.",
+      "description": "Group shared tooling by package name so runtime libraries used in test fixtures stay in one update.",
       "matchManagers": ["npm"],
-      "matchDepTypes": ["devDependencies"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "groupName": "build and test tooling"
+      "groupName": "build and test tooling",
+      "matchPackageNames": [
+        "@biomejs/biome",
+        "@types/*",
+        "@testing-library/*",
+        "typescript",
+        "vitest",
+        "@vitest/*",
+        "tsx",
+        "tsup",
+        "turbo",
+        "lefthook",
+        "pnpm",
+        "jsdom",
+        "msw",
+        "esbuild"
+      ]
     },
     {
       "description": "Validate UI libraries and their testing tools together.",
@@ -54,47 +66,25 @@
         "@cloudflare/*",
         "wrangler",
         "miniflare",
-        "workerd"
+        "workerd",
+        "cloudflare"
       ],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "groupName": "cloudflare tooling",
-      "automerge": false
+      "groupName": "cloudflare tooling"
     },
     {
       "description": "Keep standalone npm experiments out of production update groups.",
       "matchManagers": ["npm"],
       "matchFileNames": ["experiments/**"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "groupName": "experiment dependencies",
-      "automerge": false
+      "groupName": "experiment dependencies"
     },
     {
       "description": "Batch compatible action updates while preserving SHA pins.",
       "matchManagers": ["github-actions"],
       "matchDepTypes": ["action"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "groupName": "github actions",
-      "automerge": true
-    },
-    {
-      "description": "Automatically merge npm patch fixes after required CI passes.",
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["patch", "pin", "digest"],
-      "automerge": true
-    },
-    {
-      "description": "Keep Cloudflare tooling and experiment changes under review.",
-      "matchPackageNames": [
-        "@cloudflare/*",
-        "wrangler",
-        "miniflare",
-        "workerd"
-      ],
-      "automerge": false
-    },
-    {
-      "matchFileNames": ["experiments/**"],
-      "automerge": false
+      "groupName": "github actions"
     },
     {
       "description": "Pre-1.0 releases do not guarantee compatible minor upgrades.",
@@ -102,14 +92,12 @@
       "matchCurrentVersion": "<1.0.0",
       "matchUpdateTypes": ["minor"],
       "dependencyDashboardApproval": true,
-      "automerge": false,
       "groupName": null
     },
     {
       "description": "Approve each major migration independently on the dashboard.",
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true,
-      "automerge": false,
       "groupName": null
     },
     {
@@ -124,5 +112,6 @@
       "matchPackageNames": ["@types/node"],
       "allowedVersions": "22.x"
     }
-  ]
+  ],
+  "automerge": false
 }
