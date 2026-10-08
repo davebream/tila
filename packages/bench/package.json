@@ -10,7 +10,7 @@
     "bench": "tsx --tsconfig ../../tsconfig.json src/cli.ts"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260602.1",
+    "@cloudflare/workers-types": "^5.20261008.1",
     "@tila/backend-do": "workspace:*",
     "@tila/backend-embedded": "workspace:*",
     "@tila/backend-r2": "workspace:*",

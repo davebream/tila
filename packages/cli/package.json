@@ -73,7 +73,7 @@
     "ansis": "^4.4.0",
     "better-sqlite3": "^12.11.1",
     "citty": "^0.2.2",
-    "cloudflare": "^6.5.0",
+    "cloudflare": "^7.3.0",
     "console-table-printer": "^2.16.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.4",
