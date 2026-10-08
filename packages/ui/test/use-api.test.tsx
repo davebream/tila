@@ -1,5 +1,5 @@
 import { useTaskIndex, useTasks } from "@/hooks/use-api";
-import { http, HttpResponse } from "msw/http";
+import { http, HttpResponse } from "msw";
 import { server } from "./mocks/server";
 import { renderWithProviders, screen, waitFor } from "./test-utils";
 

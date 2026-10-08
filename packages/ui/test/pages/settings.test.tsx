@@ -1,6 +1,6 @@
 import { SettingsPage } from "@/pages/settings";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw/http";
+import { http, HttpResponse } from "msw";
 import {
   adminHandlers,
   memberships,

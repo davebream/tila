@@ -1,4 +1,4 @@
-import { http, HttpResponse } from "msw/http";
+import { http, HttpResponse } from "msw";
 
 export const handlers = [
   // List entities

@@ -29,7 +29,7 @@ if (!window.matchMedia) {
 }
 
 beforeAll(() => {
-  server.listen({ onUnhandledFrame: "error" });
+  server.listen({ onUnhandledRequest: "error" });
 });
 
 afterEach(() => {

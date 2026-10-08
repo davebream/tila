@@ -1,6 +1,6 @@
 import { AuthGate } from "@/app";
 import { stashStepUpResume } from "@/lib/step-up";
-import { http, HttpResponse } from "msw/http";
+import { http, HttpResponse } from "msw";
 import { adminHandlers } from "../mocks/admin-fixtures";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor } from "../test-utils";
