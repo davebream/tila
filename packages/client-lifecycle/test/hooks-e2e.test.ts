@@ -51,8 +51,10 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
       else if (path === "/handoffs") result = await api.handoffs.create(body);
       else if (path === "/claims/release")
         result = await api.claims.release(body.resource, body.fence);
-      else if (path.startsWith("/claims/"))
-        result = await api.claims.get(decodeURIComponent(path.slice(8)));
+      else if (request.method === "GET" && path.startsWith("/claims/state/"))
+        result = await api.claims.get(
+          decodeURIComponent(path.slice("/claims/state/".length)),
+        );
       else throw new Error(`Unexpected request: ${path}`);
       response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify(result));
