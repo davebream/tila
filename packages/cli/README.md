@@ -19,6 +19,7 @@ See the [latest release](https://github.com/davebream/tila/releases/latest) for 
 | Command | Description |
 |---------|-------------|
 | `task` | Manage tasks (create, list, show, update, claim, release) |
+| `update` | Update this CLI installation, or check with `--check` |
 | `work-unit` | *(deprecated — use `task`)* Alias for `task` |
 | `entity` | *(deprecated — use `task`)* Alias for `task` |
 | `record` | Manage typed records (get, set, patch, list, history, archive) |
@@ -78,6 +79,55 @@ tila doctor
 tila summary
 tila presence
 ```
+
+## Updating the CLI
+
+```bash
+tila update                 # Install the latest stable version for this channel
+tila update --check         # Check availability; do not install
+tila update --check --json  # Structured result for automation
+```
+
+Updates require no project configuration, credentials, or confirmation prompt.
+There are no background checks or automatic updates. The command updates only
+the invoked CLI installation, not a deployed Worker, SDK, or MCP server.
+
+| Installation | Behavior |
+|---|---|
+| Homebrew | Refresh metadata, respect pins, and upgrade the owning formula |
+| Global npm/pnpm/Bun | Verify ownership and ask the same manager to install its latest stable version |
+| Official shell/PowerShell installer | Verify GitHub release checksums and replace the binary in the installer's user bin directory |
+| Source checkout, project dependency, temporary runner, unknown manager/path | Stop with instructions; no installation changes |
+
+`--check` can refresh package-manager metadata caches. Homebrew may lag behind
+GitHub; the result reports this separately and never switches installation
+methods. Versions newer than the channel are kept. Release candidates, explicit
+versions, reinstalls, and downgrades are not supported by this command.
+
+Global package ownership must be provable from manager-reported locations.
+If it cannot be established (including Yarn or a missing manager), use the
+original manager directly. For temporary runners, request `tila-cli@latest`.
+The updater never requests sudo or installs another copy elsewhere.
+
+JSON uses the normal `{ "ok": true, "result": ... }` envelope. Results include
+`status` (`current`, `available`, `updated`, or `pinned`), `currentVersion`,
+`availableVersion`, `installedVersion`, `latestVersion`, `installationMethod`,
+`executablePath`, `releaseNotes`, and `channelBehind`. Diagnostics go to stderr.
+Completed checks and successful/no-op updates exit 0, actionable failures exit 1,
+and transient network failures exit 2. A check finding an update still exits 0.
+
+Standalone downloads must match both the release checksum file and any GitHub
+asset digests provided. The candidate must report the expected version before
+replacement; the installed binary is then checked again. Failed installation
+or verification restores the previous binary when possible. An unrecoverable
+failure prints the exact backup and destination paths for manual restoration.
+Windows may retain a backup while an older tila process still has it open;
+existing processes are never stopped. An interrupted update may leave an
+installation lock: confirm that updater has exited before removing the lock
+directory named in the error and retrying.
+
+**First upgrade:** releases predating `tila update` need one normal package-manager
+upgrade or a rerun of the official installer. Later releases can use this command.
 
 ## Participant identity
 

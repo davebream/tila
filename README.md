@@ -200,6 +200,13 @@ Distribution channels:
 | PowerShell (Windows) | `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 \| iex` | ✅ Available (v0.2.7) |
 | Homebrew | `brew install davebream/tap/tila` | ✅ Available (v0.2.7) |
 
+Update an installed CLI with `tila update`, or preview with `tila update --check`.
+The command uses the existing Homebrew/npm/pnpm/Bun installation, or verifies and
+replaces a binary installed by the official shell/PowerShell installer. It does
+not require a configured project. Older versions without this command need one
+normal package-manager upgrade or installer run first. See the
+[CLI update guide](packages/cli/README.md#updating-the-cli) for automation and recovery.
+
 **Run from source (for development):**
 
 ```bash
