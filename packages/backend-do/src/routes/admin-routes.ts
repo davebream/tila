@@ -1,4 +1,5 @@
 import { artifactOps, destroyOps, storeCountsOps } from "@tila/ops-sqlite";
+import type { StoreCountsResponse } from "@tila/schemas";
 import { Hono } from "hono";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
@@ -26,7 +27,10 @@ export function createAdminRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.get("/admin/store-counts", (c) => {
     const counts = storeCountsOps.countStoreRows(deps.db);
-    return c.json({ counts });
+    return c.json({
+      counts,
+      db_bytes: deps.ctx.storage?.sql?.databaseSize ?? null,
+    } satisfies StoreCountsResponse);
   });
 
   app.post("/admin/destroy", async (c) => {

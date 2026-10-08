@@ -1,3 +1,4 @@
+import { StoreCountsResponseSchema } from "@tila/schemas";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -197,6 +198,41 @@ describe("GET /admin/pointer-keys", () => {
 // ---------------------------------------------------------------------------
 
 describe("GET /admin/store-counts", () => {
+  it.each([8192, 0, undefined])(
+    "reports database size %s without changing row counts",
+    async (databaseSize) => {
+      const { db, sqlite } = createTestDb();
+      try {
+        const app = createAdminRoutes(
+          makeDeps(db, { storage: { sql: { databaseSize } } }),
+        );
+        const res = await app.request("/admin/store-counts");
+        expect(res.status).toBe(200);
+        expect(StoreCountsResponseSchema.parse(await res.json())).toEqual({
+          counts: storeCountsOps.countStoreRows(db),
+          db_bytes: databaseSize ?? null,
+        });
+      } finally {
+        sqlite.close();
+      }
+    },
+  );
+
+  it("reads the current database size on every request", async () => {
+    const { db, sqlite } = createTestDb();
+    try {
+      const sql = { databaseSize: 8192 };
+      const app = createAdminRoutes(makeDeps(db, { storage: { sql } }));
+      const first = await app.request("/admin/store-counts");
+      expect((await first.json()).db_bytes).toBe(8192);
+      sql.databaseSize = 16384;
+      const second = await app.request("/admin/store-counts");
+      expect((await second.json()).db_bytes).toBe(16384);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it("returns counts object with domain and schemaHistory keys", async () => {
     const { db } = createTestDb();
     const app = createAdminRoutes(makeDeps(db, { abort: vi.fn() }));
@@ -206,7 +242,9 @@ describe("GET /admin/store-counts", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       counts: { domain: Record<string, number>; schemaHistory: number };
+      db_bytes: number | null;
     };
+    expect(body.db_bytes).toBeNull();
     expect(body.counts).toHaveProperty("domain");
     expect(body.counts).toHaveProperty("schemaHistory");
     // All domain counts should be 0 on an empty DB

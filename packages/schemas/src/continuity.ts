@@ -45,6 +45,8 @@ export const HandoffCreateRequestSchema = z
   .object({
     // Caller-generated ID makes retries safe across transports and process restarts.
     id: z.string().uuid(),
+    // Omission means work without changing legacy serialized retry requests.
+    kind: z.enum(["work", "shutdown"]).optional(),
     summary: z.string().min(1).max(16384),
     current_state: z.record(z.unknown()).default({}),
     findings: z.array(z.string().max(16384)).max(100).default([]),

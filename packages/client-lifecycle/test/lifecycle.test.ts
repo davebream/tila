@@ -67,6 +67,34 @@ it("isolates concurrent sessions and makes duplicate starts and ends idempotent"
   expect(h.store.read(one.state.key)?.phase).toBe("active");
 });
 
+it.each(["codex", "claude-code"] as const)(
+  "%s resumes the authored handoff after clean shutdown without changing its content",
+  async (client) => {
+    const resume = () =>
+      h.lifecycle.start(client, event("resume"), null, { client_name: client });
+    const { state } = await resume();
+    const api = await h.facade(state);
+    const { handoff } = await api.handoffs.create({
+      id: crypto.randomUUID(),
+      summary: "Migration reviewed; add the rollback test next.",
+      current_state: { reviewed: true },
+      findings: ["Preserve existing memberships."],
+      unresolved_questions: ["Does rollback preserve membership roles?"],
+      references: [{ type: "task", id: "rollback-test" }],
+      based_on_seq: 0,
+    });
+    expect((await api.reentry()).handoff).toEqual(handoff);
+    await h.lifecycle.end(state.key);
+    await finish(state.key, state.generation);
+    expect(h.store.read(state.key)?.phase).toBe("closed");
+    const snapshots = (await api.handoffs.list()).handoffs;
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0].kind).toBe("shutdown");
+    expect(JSON.parse((await resume()).text).handoff).toEqual(handoff);
+    expect((await api.handoffs.get(handoff.id)).handoff).toEqual(handoff);
+  },
+);
+
 it("retries an ambiguous handoff response with the same immutable request", async () => {
   const { state } = await start();
   const api = await h.facade(state);
@@ -93,6 +121,7 @@ it("retries an ambiguous handoff response with the same immutable request", asyn
   expect((await api.journal.getCursor()).cursor.seq).toBe(0);
   await lifecycle.tick(state.key, state.generation, true);
   expect(requests[1]).toEqual(requests[0]);
+  expect(requests[0]).toMatchObject({ kind: "shutdown" });
   await finish(state.key, state.generation);
   expect((await api.handoffs.list()).handoffs).toHaveLength(1);
 });

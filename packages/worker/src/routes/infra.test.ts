@@ -670,6 +670,7 @@ describe("infra store-counts route", () => {
     forwardToDOMock.mockReset().mockResolvedValue(
       Response.json({
         counts: { domain: { entities: 3 }, schemaHistory: 2 },
+        db_bytes: 8192,
       }),
     );
     getMock
@@ -730,7 +731,7 @@ describe("infra store-counts route", () => {
     expect(forwardToDOMock).not.toHaveBeenCalled();
   });
 
-  it("forwards to /admin/store-counts and passes the { counts } body through verbatim", async () => {
+  it("forwards to /admin/store-counts and passes counts and bytes through verbatim", async () => {
     const app = createApp();
     const env = makeEnv({ INFRA_ADMIN_TOKEN: TOKEN });
     const res = await req(app, "proj-target", env, AUTH);
@@ -740,6 +741,7 @@ describe("infra store-counts route", () => {
     };
     expect(body).toEqual({
       counts: { domain: { entities: 3 }, schemaHistory: 2 },
+      db_bytes: 8192,
     });
     expect(forwardToDOMock).toHaveBeenCalledWith(
       expect.anything(),

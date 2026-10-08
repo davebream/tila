@@ -75,4 +75,31 @@ describe("DO continuity routes", () => {
       404,
     );
   });
+  it("preserves marked shutdown snapshots over HTTP while selecting authored context", async () => {
+    const work = {
+      id: crypto.randomUUID(),
+      summary: "Next step",
+      based_on_seq: 0,
+    };
+    const shutdown = { ...work, id: crypto.randomUUID(), kind: "shutdown" };
+    expect((await send("/handoffs", "POST", work)).status).toBe(200);
+    const saved = await send("/handoffs", "POST", shutdown);
+    expect(saved.status).toBe(200);
+    const body = await saved.json();
+    expect(body).toMatchObject({ handoff: shutdown });
+    expect(await (await send("/handoffs", "POST", shutdown)).json()).toEqual(
+      body,
+    );
+    const base = "/reentry?principal_id=principal&participant_id=participant";
+    expect(await (await app.request(base)).json()).toMatchObject({
+      handoff: { id: work.id },
+    });
+    expect(
+      await (await app.request(`${base}&handoff_id=${shutdown.id}`)).json(),
+    ).toMatchObject({ handoff: shutdown });
+    expect(
+      (await send("/handoffs", "POST", { ...shutdown, kind: "invalid" }))
+        .status,
+    ).toBe(400);
+  });
 });
