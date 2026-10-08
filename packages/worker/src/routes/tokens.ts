@@ -16,6 +16,7 @@ import {
   denied,
   scopedPolicy,
 } from "../middleware/capability";
+import { requireFreshAuthentication } from "../middleware/protected-operation";
 import { principalIdFor } from "../middleware/request-identity";
 import { requireD1TokenHttp } from "../middleware/require-project-admin";
 import type { Env, HonoVariables } from "../types";
@@ -28,6 +29,8 @@ export const tokens = new Hono<AppEnv>();
 tokens.post("/", async (c) => {
   const authz = await credentialManagementGuard(c, "tokens:issue");
   if (authz) return authz;
+  const stale = requireFreshAuthentication(c);
+  if (stale) return stale;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;
 
@@ -141,6 +144,8 @@ tokens.post("/", async (c) => {
 tokens.delete("/:name", async (c) => {
   const authz = await credentialManagementGuard(c, "tokens:revoke");
   if (authz) return authz;
+  const stale = requireFreshAuthentication(c);
+  if (stale) return stale;
   const tokenResult = c.get("tokenResult");
   const projectId = tokenResult.projectId;
   const name = c.req.param("name");
@@ -220,6 +225,8 @@ tokens.get("/", async (c) => {
 tokens.post("/:name/rotate", async (c) => {
   const authz = await credentialManagementGuard(c, "tokens:rotate");
   if (authz) return authz;
+  const stale = requireFreshAuthentication(c);
+  if (stale) return stale;
   const parsed = TokenRotateRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const token = c.get("tokenResult");

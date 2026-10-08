@@ -398,6 +398,8 @@ export {
   type SessionExchangeRequest,
   SessionExchangeResponseSchema,
   type SessionExchangeResponse,
+  SessionCapabilitiesSchema,
+  type SessionCapabilities,
   SessionStatusResponseSchema,
   type SessionStatusResponse,
 } from "./session-cookie";

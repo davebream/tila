@@ -357,6 +357,7 @@ export function Layout() {
               "Presence",
               "Signals",
               "Artifacts",
+              "Settings",
             ].map((label) => (
               <NavLink
                 key={label}

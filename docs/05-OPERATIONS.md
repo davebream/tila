@@ -835,7 +835,7 @@ Note: `tila doctor --reconcile` alone handles pointer recovery (syncing `artifac
 
 D1 (the global database) has its own migration files at `packages/worker/migrations/global/`. These are separate from the per-project DO SQLite migrations that run automatically via `blockConcurrencyWhile` on DO cold start.
 
-D1 migrations must be applied **before** deploying a new Worker version when the update includes schema changes to the global D1 tables (tokens, projects, sessions, repos).
+D1 migrations must be applied **before** deploying a new Worker version when the update includes schema changes to the global D1 tables (tokens, projects, sessions, repos). For example, `0028_session_authenticated_at.sql` adds the column that session creation writes; a Worker deployed ahead of it cannot create browser sessions.
 
 ### Manual application
 
@@ -1252,6 +1252,50 @@ policy and intersect it with current binding policy and membership on every requ
 Tighter binding policy is immediate; later expansion does not expand an old session.
 Monitor `authorization/denied` and `auth/lookup` analytics alongside ordinary request
 errors and latency. Telemetry excludes bearer credentials and hashes.
+
+### Browser administration (#102)
+
+The dashboard's **Settings** page (`/p/<project>/settings`) lets a project owner
+administer memberships and credentials from a browser session. It is an
+observation and administration surface only: it never launches, assigns,
+schedules, cancels or retries agents, and it exposes no project destroy or
+archive operation.
+
+What it can do:
+
+- List explicit memberships (GitHub, OIDC and service principals), change roles,
+  revoke memberships and grant new ones. GitHub logins are resolved to numeric
+  user ids in the browser via GitHub's public API, so explicit-membership projects
+  need no GitHub App. A manual id field covers lookup failures and rate limits.
+- Change the membership policy mode. Leaving `explicit` asks for confirmation
+  because it widens access to GitHub collaborators.
+- Show the mirrored-access policy of each linked repository (`membership_enabled`
+  and `membership_role_cap`) and explain where the caller's own role comes from.
+  Mirrored members are evaluated per request and are **not** materialized, so they
+  cannot be listed.
+- List credentials with principal, status, effective policy, expiry and last-use
+  metadata, and revoke them with a typed-name confirmation. No secret material is
+  ever requested or shown.
+
+What it cannot do: issue or rotate credentials (use the CLI commands above),
+delete service accounts, or destroy/archive the project.
+
+Controls render only when `GET /auth/session/status` reports
+`capabilities.memberships_manage` / `capabilities.credentials_manage`. The Worker
+computes those flags with the same explicit-owner checks that guard the routes;
+GitHub repository permission, the legacy `permission` field and `scopes:"full"`
+are never consulted. When the membership store cannot be reached the flags are
+false and `membership_available` is false, and the page shows an unavailable
+state with no controls.
+
+Mutations from an interactive cookie session additionally require a recent
+sign-in (step-up reauthentication). A session older than
+`STEP_UP_MAX_AGE_SECONDS` (default 600) receives `403 step-up-required`; the UI
+offers to sign in again and returns to the page afterwards without replaying the
+change. Set the optional `STEP_UP_MAX_AGE_SECONDS` secret to adjust the window.
+Bearer credentials cannot re-authenticate interactively and are exempt. Migration
+`0028_session_authenticated_at.sql` records the authentication time and must be
+applied before deploying this Worker.
 
 ## Journal continuity and archival recovery
 

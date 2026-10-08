@@ -187,11 +187,21 @@ export const handlers = [
     return HttpResponse.json({ ok: true }, { status: 200 });
   }),
 
-  // Session status
+  // Session status — default to a fresh explicit owner (#102)
   http.get("*/auth/session/status", () => {
     return HttpResponse.json({
       ok: true,
       projectId: "test-project",
+      permission: "admin",
+      canManageTokens: true,
+      capabilities: {
+        memberships_manage: true,
+        credentials_manage: true,
+        membership_available: true,
+        auth_method: "github",
+        authenticated_at: Date.now() - 1_000,
+        step_up_max_age_seconds: 600,
+      },
     });
   }),
 

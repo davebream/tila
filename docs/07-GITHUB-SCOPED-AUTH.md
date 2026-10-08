@@ -316,6 +316,16 @@ The browser dashboard cannot use `gh auth token`. It needs a separate web login 
 
 The UI should use the same server-side repo allowlist and project/session checks as the CLI.
 
+The Settings page (#102) administers memberships and credentials from such a
+session. Its controls are gated by the `capabilities` block of
+`GET /auth/session/status`, which the Worker computes from explicit owner
+membership; a role mirrored from a GitHub repository is shown as a source of
+access but never unlocks management. Mutations require a sign-in newer than the
+step-up window (see `docs/10-AUTH-IMPLEMENTATION.md`, "Step-up Reauthentication").
+Mirrored collaborators are not materialized, so the page lists the linked
+repositories' `membership_enabled` / `membership_role_cap` policy instead of the
+collaborators themselves.
+
 ## Existing Token Mode
 
 Keep the current tila token model as an auth mode:

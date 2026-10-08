@@ -133,7 +133,7 @@ export function routeCapability(
   for (const [verb, regex, cap] of patterns)
     if ((read ? "GET" : method) === verb && regex.test(path)) return cap;
   if (
-    /^\/(?:memberships(?:\/[^/]+)?|membership-policy|membership-events|admins(?:\/[^/]+)?)$/.test(
+    /^\/(?:memberships(?:\/[^/]+)?|membership-policy|membership-events|membership-repos|admins(?:\/[^/]+)?)$/.test(
       path,
     )
   )

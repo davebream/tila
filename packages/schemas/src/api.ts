@@ -9,7 +9,7 @@ import { CredentialPolicySchema } from "./capability";
 import { ClaimModeSchema } from "./claim";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
-import { ProjectRoleSchema } from "./membership";
+import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
 import { RecordKeySchema, RecordTagSchema, RecordTypeSchema } from "./record";
 import {
   EntityRelationshipSchema,
@@ -500,6 +500,11 @@ export const WhoamiResponseSchema = z.object({
   token_id: z.string().optional(),
   credential_id: z.string().optional(),
   role: ProjectRoleSchema.optional(),
+  /** Role from the explicit membership row, when one exists. */
+  explicit_role: ProjectRoleSchema.optional(),
+  membership_sources: z.array(MembershipSourceSchema).optional(),
+  /** GitHub repository id the mirrored role was derived from, when applicable. */
+  mirrored_repo_id: z.number().int().optional(),
   policy: CredentialPolicySchema.optional(),
   legacy: z.boolean().optional(),
   github_login: z.string().optional(),

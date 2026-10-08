@@ -16,6 +16,10 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { requirePermission } from "../middleware/permission";
 import type { D1TokenResult, Env, HonoVariables } from "../types";
+// Imported at module level so the route's module graph loads before the first
+// test starts; a dynamic import inside the test body counted against the
+// 5s per-test timeout and timed out on slow CI runners.
+import { artifacts } from "./artifacts";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -131,8 +135,6 @@ async function makeReconcileApp(opts: {
   doStub: DurableObjectStub;
   r2List?: R2ListFn;
 }) {
-  const { artifacts } = await import("./artifacts");
-
   const r2List =
     opts.r2List ?? (async () => ({ objects: [], truncated: false }));
 

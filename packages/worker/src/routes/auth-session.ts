@@ -8,6 +8,7 @@ import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import { hashToken } from "../lib/hash-token";
 import { invalidateSession } from "../lib/session-cache";
 import { invalidate } from "../lib/token-cache";
+import { computeSessionCapabilities } from "../middleware/session-capabilities";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 import { checkExchangeRateLimit, recordExchangeFailure } from "./auth-github";
 
@@ -346,8 +347,10 @@ function canManageTokens(tokenResult: UnifiedTokenResult): boolean {
   return effectivePermission(tokenResult) === "admin";
 }
 
-// GET /auth/session/status — return current session info
-authSessionProtected.get("/status", (c) => {
+// GET /auth/session/status — return current session info.
+// `permission` and `canManageTokens` are legacy snapshots kept for
+// compatibility; management UI must gate on `capabilities` (#102).
+authSessionProtected.get("/status", async (c) => {
   const tokenResult = c.get("tokenResult");
   const permission = effectivePermission(tokenResult);
   return c.json({
@@ -355,5 +358,6 @@ authSessionProtected.get("/status", (c) => {
     projectId: tokenResult.projectId,
     permission,
     canManageTokens: canManageTokens(tokenResult),
+    capabilities: await computeSessionCapabilities(c),
   });
 });
