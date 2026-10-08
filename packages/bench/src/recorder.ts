@@ -1,4 +1,6 @@
+import type { z } from "zod";
 import { Histogram, type LatencySummary } from "./histogram";
+import type { TimingSummarySchema } from "./result-schema";
 import type { OpOutcome, OutcomeClass, RecorderView } from "./types";
 
 export interface ErrorSample {
@@ -9,6 +11,7 @@ export interface ErrorSample {
 }
 
 export interface Metrics {
+  timing?: z.infer<typeof TimingSummarySchema>;
   ops: number;
   ok: number;
   conflicts: number;
@@ -29,9 +32,47 @@ class OpAccumulator {
   stale_fence = 0;
   errors = 0;
   samples: ErrorSample[] = [];
+  timingHists = new Map<string, Histogram>();
+  requests = 0;
+  timedRequests = 0;
+  invalidResiduals = 0;
+  locations: Record<string, number> = {};
+
+  timingMetric(name: string, value: number): void {
+    let hist = this.timingHists.get(name);
+    if (!hist) {
+      hist = new Histogram();
+      this.timingHists.set(name, hist);
+    }
+    hist.record(value);
+  }
 
   add(o: OpOutcome): void {
     this.hist.record(o.latencyMs);
+    const samples = o.httpTimings ?? [];
+    this.requests += samples.length;
+    for (const sample of samples) {
+      const location = `${sample.colo ?? "unknown"}/${sample.placement ?? "unknown"}`;
+      // Bounded cardinality, even if a proxy supplies arbitrary header values.
+      const key =
+        Object.hasOwn(this.locations, location) ||
+        Object.keys(this.locations).length < 32
+          ? location.slice(0, 100)
+          : "other";
+      this.locations[key] = (this.locations[key] ?? 0) + 1;
+      if (!sample.server) continue;
+      this.timedRequests++;
+      for (const [name, value] of Object.entries(sample.server))
+        this.timingMetric(name, value);
+    }
+    // A facade may make several HTTP requests. Only subtract a matched single
+    // response from the complete facade duration (includes parsing and SDK work).
+    if (samples.length === 1 && samples[0].server) {
+      this.timingMetric("client", o.latencyMs);
+      const residual = o.latencyMs - samples[0].server.worker;
+      if (residual >= 0) this.timingMetric("transport_client", residual);
+      else this.invalidResiduals++;
+    }
     switch (o.cls) {
       case "ok":
         this.ok++;
@@ -73,6 +114,22 @@ class OpAccumulator {
   metrics(windowSec: number): Metrics {
     const ops = this.hist.count;
     return {
+      ...(this.requests
+        ? {
+            timing: {
+              requests: this.requests,
+              timed_requests: this.timedRequests,
+              invalid_residuals: this.invalidResiduals,
+              metrics: Object.fromEntries(
+                [...this.timingHists].map(([name, hist]) => [
+                  name,
+                  { count: hist.count, ...hist.summary() },
+                ]),
+              ),
+              locations: this.locations,
+            },
+          }
+        : {}),
       ops,
       ok: this.ok,
       conflicts: this.conflicts,
@@ -117,7 +174,13 @@ export class Recorder implements RecorderView {
   }
 
   record(o: OpOutcome): void {
-    if (!this.recording) return;
+    if (
+      !this.recording ||
+      (o.startedAt !== undefined &&
+        this.startedAt !== null &&
+        o.startedAt < this.startedAt)
+    )
+      return;
     let acc = this.byOp.get(o.op);
     if (!acc) {
       acc = new OpAccumulator();

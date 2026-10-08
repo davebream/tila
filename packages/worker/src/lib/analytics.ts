@@ -16,6 +16,7 @@ export function analyticsCtxFrom(c: AppContext) {
     ctx: c.executionCtx,
     projectId: c.get("projectId") ?? "",
     requestId: c.get("requestId"),
+    timing: c.get("requestTiming"),
   };
 }
 

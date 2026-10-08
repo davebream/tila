@@ -30,6 +30,7 @@ import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
 import { hashToken } from "../lib/hash-token";
 import { parseCookieHeader } from "../lib/parse-cookie";
+import { measurePhase } from "../lib/server-timing";
 import {
   getSessionFromCache,
   invalidateSession,
@@ -499,10 +500,8 @@ export function createAuthMiddleware(
     if (ip) {
       const store = opts.rateLimitStore ?? new D1RateLimitStore(c.env.DB);
       try {
-        const isLimited = await store.check(
-          ip,
-          RATE_LIMIT_MAX_FAILURES,
-          RATE_LIMIT_WINDOW_MS,
+        const isLimited = await measurePhase(c, "auth_rate_limit", () =>
+          store.check(ip, RATE_LIMIT_MAX_FAILURES, RATE_LIMIT_WINDOW_MS),
         );
         if (isLimited) {
           return c.json(
@@ -1161,10 +1160,13 @@ export function createAuthMiddleware(
     let claims: TokenClaims | null;
     const lookupStart = performance.now();
     try {
-      claims = await new D1TokenStore(c.env.DB).validate(tokenHash);
+      claims = await measurePhase(c, "auth_token", () =>
+        new D1TokenStore(c.env.DB).validate(tokenHash),
+      );
       if (claims?.scopes === SCOPED_TOKEN_MARKER) {
-        const scoped = await new CredentialStore(c.env.DB).resolve(
-          claims.tokenId,
+        const tokenId = claims.tokenId;
+        const scoped = await measurePhase(c, "auth_credential", () =>
+          new CredentialStore(c.env.DB).resolve(tokenId),
         );
         claims = scoped
           ? {

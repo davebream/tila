@@ -68,6 +68,25 @@ export function renderScenario(s: ScenarioResult): string {
   for (const [op, m] of Object.entries(s.ops)) lines.push(metricsRow(op, m));
   lines.push(metricsRow("**total**", s.totals));
   lines.push("");
+  for (const [op, m] of Object.entries(s.ops)) {
+    if (!m.timing) continue;
+    const t = m.timing;
+    lines.push(
+      `Timing for ${op}: ${t.timed_requests}/${t.requests} HTTP responses covered; ${t.invalid_residuals} invalid residuals.`,
+      "",
+      "| component | count | mean ms | p50 ms | p95 ms | p99 ms |",
+      "|---|---:|---:|---:|---:|---:|",
+    );
+    for (const [name, v] of Object.entries(t.metrics))
+      lines.push(
+        `| ${name} | ${v.count} | ${fmt(v.mean)} | ${fmt(v.p50)} | ${fmt(v.p95)} | ${fmt(v.p99)} |`,
+      );
+    lines.push(
+      "",
+      `Observed colo/placement: ${JSON.stringify(t.locations)}.`,
+      "",
+    );
+  }
   if (Object.keys(s.extra).length > 0)
     lines.push(
       `Counters: ${Object.entries(s.extra)

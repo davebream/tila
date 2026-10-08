@@ -5,6 +5,7 @@ import type {
   MembershipSource,
   ProjectRole,
 } from "@tila/schemas";
+import type { RequestTiming } from "./lib/server-timing";
 
 export interface Env {
   DB: D1Database;
@@ -139,6 +140,7 @@ export type UnifiedTokenResult =
   | OidcSessionTokenResult;
 
 export interface HonoVariables {
+  requestTiming?: RequestTiming;
   tokenResult: UnifiedTokenResult;
   projectId: string;
   doStub: DurableObjectStub;
