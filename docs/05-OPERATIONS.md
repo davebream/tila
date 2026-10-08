@@ -1610,7 +1610,7 @@ Do not disable Dependabot security updates when changing this configuration.
 Routine updates are collected on Mondays (Europe/Warsaw),
 with at most three open Renovate PRs and two new PRs per hour. Existing branches
 can receive new versions or conflict repairs outside that window. Renovate only
-rebases conflicts; Mergify owns updates needed for the strict, up-to-date `ci` gate.
+rebases conflicts; Mergify owns integration checks against current `main`.
 Compatible updates are grouped by runtime libraries, build/test tools, UI,
 Cloudflare tooling, experiments, and GitHub Actions. SHA-pinned actions stay pinned.
 Shared runtime libraries stay in one group even when test fixtures declare them
@@ -1622,7 +1622,8 @@ migrations. Pre-1.0 minor upgrades also require approval because their APIs can
 break. npm releases wait three days before routine updates. Renovate does not
 enable GitHub auto-merge or apply `merge-ready`. After reviewing an update and
 completing local validation, wait for the latest required `ci` check to pass,
-then add `merge-ready`. Mergify submits and merges it through the serial queue;
+then add `merge-ready`. Mergify validates serial batches of up to three PRs
+against current `main`, then merges them;
 verify the actual queue state rather than treating the label as proof of admission.
 
 Node 24 runs builds, while Node 22 remains the supported public-consumer floor.
