@@ -129,7 +129,7 @@ pnpm bench -- --tier inproc --scenario mix --participants 8 --soak --duration 2h
 SWEEP_SECRET=... pnpm bench -- --tier http --scenario mix --participants 8 --soak --duration 2h --sample-interval 60s --sweep-every 15m
 ```
 
-Every sample records process RSS and heap, the backend row counts per domain table, and the database size in bytes (in-process and embedded tiers only; over HTTP `/admin/store-counts` exposes counts but not bytes). With `--sweep-every` the sampler runs the sweep step itself: in-process it calls `sweepOps.sweep` and times the journal-archive scan (which loads every archivable row into memory); over HTTP it posts to `/_internal/sweep`, which sweeps every project on that Worker, so only do that on a deployment you own.
+Every sample records process RSS and heap, the backend row counts per domain table, and the database size in bytes. Over HTTP, `/projects/:id/admin/store-counts` returns `{ counts: { domain, schemaHistory }, db_bytes }`; the sampler reads the DO SQLite database size from `db_bytes`. Older deployments that omit this field, or runtimes where the size is unavailable, report `null` while retaining row counts. With `--sweep-every` the sampler runs the sweep step itself: in-process it calls `sweepOps.sweep` and times the journal-archive scan (which loads every archivable row into memory); over HTTP it posts to `/_internal/sweep`, which sweeps every project on that Worker, so only do that on a deployment you own.
 
 ## CI
 
