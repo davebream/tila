@@ -86,6 +86,10 @@ export interface CookieSessionTokenResult
   role?: ProjectRole;
   membershipSources?: MembershipSource[];
   sourceRepoId?: number;
+  /** Unix ms of the last interactive authentication (step-up reauth, #102). */
+  authenticatedAt?: number;
+  /** How the holder authenticated: GitHub OAuth or a presented project token. */
+  authMethod?: "github" | "token";
 }
 
 export interface WorkspaceSessionTokenResult {
@@ -98,6 +102,8 @@ export interface WorkspaceSessionTokenResult {
   githubLogin: string; // derived from name/actorName
   expiresAt: number; // milliseconds
   principalId?: string;
+  /** Unix ms of the last interactive authentication (carried into the project session). */
+  authenticatedAt?: number;
 }
 
 /**
