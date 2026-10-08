@@ -70,7 +70,7 @@ Every scenario ships invariants (exactly one winner per contended acquire, stale
 Two measurement details matter when reading results:
 
 - **Fence monotonicity is audited from the journal, not from responses.** Under concurrency a client sees acquire responses out of server order (the deployed owner-mode run observed 74 such reorders in 571 acquires), so `claims-contended` replays the journal in teardown and checks `claim.acquired` fences per resource in sequence order. `fence_reorders_observed` is informational; `journal_fence_regressions` is the invariant.
-- **`cold-start` counts a 5xx from `POST /admin/restart` as a successful trigger.** The DO route aborts the object before its response is flushed, so Cloudflare reports the request as failed even though the eviction happened; the following `cold_first_request` proves the DO came back. Only 401/403/404 are errors.
+- **`cold-start` requires `200 { ok: true }` from `POST /admin/restart`.** The Worker acknowledges the specific remote exception from the deliberate DO abort. Other exceptions and HTTP errors remain failures, including 5xx; failed triggers do not produce cold-read samples. The following `cold_first_request` checks that the project answers after the acknowledged restart. Historical baselines with `restart_aborted_responses` used the older permissive contract and should not be treated as verified restart samples.
 
 ## Same principal, different participant
 
