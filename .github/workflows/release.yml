@@ -52,14 +52,14 @@ jobs:
       - run: node scripts/release-verify.mjs
         env:
           RELEASE_SHA: ${{ steps.metadata.outputs.sha }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tested-release-inputs
           path: .release/
           include-hidden-files: true
           compression-level: 0
           retention-days: 7
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
           name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
@@ -84,12 +84,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-release-inputs
           path: .release
       - run: node scripts/ci-run.mjs consumer node scripts/release-smoke.mjs .release consumer linux-x64
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
           name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
@@ -121,14 +121,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-release-inputs
           path: .release
       - name: Execute binary and local installer fixture
         shell: bash
         run: node scripts/ci-run.mjs platform node scripts/release-smoke.mjs .release binary "$RELEASE_TARGET"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
           name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-release-inputs
           path: .release
@@ -166,7 +166,7 @@ jobs:
           -e RELEASE_SHA -e RELEASE_TARGET
           node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
           sh -c 'apk add --no-cache libstdc++ && node scripts/ci-run.mjs musl node scripts/release-smoke.mjs .release binary "$RELEASE_TARGET"'
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
           name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
@@ -192,7 +192,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-release-inputs
           path: .release
@@ -262,7 +262,7 @@ jobs:
             .release/binaries/tila-windows-arm64.exe.gz
           sbom-path: .release/binaries/tila-windows-arm64.exe.spdx.json
       - run: node scripts/ci-run.mjs attestations node scripts/release-attestations.mjs
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
           name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
@@ -289,7 +289,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-release-inputs
           path: .release
@@ -298,7 +298,7 @@ jobs:
       - run: node scripts/release-attestations.mjs
       - name: Publish tested tarballs in dependency order
         run: node scripts/ci-run.mjs publish node scripts/release-publish.mjs
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
           name: release-diagnostics-${{ github.job }}${{ strategy.job-index }}
@@ -324,7 +324,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-release-inputs
           path: .release
