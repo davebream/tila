@@ -191,7 +191,7 @@ jobs:
 
   ci:
     if: ${{ always() }}
-    needs: [verify, secrets, runtime, consumer-node22, scopes]
+    needs: [verify, secrets, runtime, consumer-node22, scopes, update-native]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -199,8 +199,26 @@ jobs:
       - name: Require every check to succeed
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          REQUIRED_JOBS: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["verify","secrets","runtime","consumer-node22"]' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') && '["verify","secrets","runtime","scopes"]' || '["verify","secrets","runtime"]' }}
+          REQUIRED_JOBS: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["verify","secrets","runtime","consumer-node22","update-native"]' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') && '["verify","secrets","runtime","scopes","update-native"]' || '["verify","secrets","runtime","update-native"]' }}
         run: bash scripts/ci-gate.sh
+
+  update-native:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - name: Verify native self-update and package-manager handoff
+        run: node --test scripts/self-update-native.test.mjs
 
   benchmark:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.benchmark }}
