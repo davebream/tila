@@ -1,3 +1,4 @@
+import { resolveActionsMembership } from "@tila/backend-d1";
 import { CredentialStore, SCOPED_TOKEN_MARKER } from "@tila/backend-d1";
 import {
   D1RateLimitStore,
@@ -8,6 +9,14 @@ import {
   type RateLimitStoreInterface,
   canonicalizePrincipal,
 } from "@tila/backend-d1";
+import {
+  AUTHORIZATION_VERSION,
+  CAPABILITIES,
+  GITHUB_ACTIONS_ISSUER,
+  delegablePolicy,
+  effectiveCredentialPolicy,
+  roleToPermission,
+} from "@tila/schemas";
 import { SessionPayloadSchema, canonicalizeHtu } from "@tila/schemas";
 import type { Context, MiddlewareHandler } from "hono";
 import { importJWK, jwtVerify } from "jose";
@@ -46,6 +55,7 @@ import {
 import { type TokenClaims, getFromCache, setInCache } from "../lib/token-cache";
 import { D1_TOKEN_PREFIX, verifyD1TokenChecksum } from "../lib/token-format";
 import type {
+  ActionsSessionTokenResult,
   CookieSessionTokenResult,
   D1TokenResult,
   Env,
@@ -754,6 +764,25 @@ export function createAuthMiddleware(
         !("sub_type" in payloadObj)
           ? { sub_type: "github", ...(payloadObj as Record<string, unknown>) }
           : payloadObj;
+      if (
+        typeof payloadForParse === "object" &&
+        payloadForParse !== null &&
+        (payloadForParse as Record<string, unknown>).sub_type === "github" &&
+        (payloadForParse as Record<string, unknown>).authorization_version !==
+          AUTHORIZATION_VERSION
+      )
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "session-reauth-required",
+              message:
+                "Session predates workload identity separation; authenticate again",
+              retryable: false,
+            },
+          },
+          401,
+        );
       const parsed = SessionPayloadSchema.safeParse(payloadForParse);
       if (!parsed.success) {
         return c.json(
@@ -968,12 +997,14 @@ export function createAuthMiddleware(
       // OIDC issuers are https:// URIs.
       {
         const { identityHost, subjectId } =
-          payload.sub_type === "oidc"
-            ? canonicalizePrincipal(payload.oidc_issuer, payload.oidc_subject)
-            : canonicalizePrincipal(
-                payload.github_host,
-                payload.github_user_id,
-              );
+          payload.sub_type === "github-actions"
+            ? canonicalizePrincipal(GITHUB_ACTIONS_ISSUER, payload.workload.sub)
+            : payload.sub_type === "oidc"
+              ? canonicalizePrincipal(payload.oidc_issuer, payload.oidc_subject)
+              : canonicalizePrincipal(
+                  payload.github_host,
+                  payload.github_user_id,
+                );
         const cacheKey = subjectCacheKey(
           payload.project_id,
           identityHost,
@@ -987,9 +1018,11 @@ export function createAuthMiddleware(
           // Use the same identity axes that canonicalizePrincipal consumed
           // above so the cache-key and the D1 lookup stay consistent.
           const [hostArg, subjectArg] =
-            payload.sub_type === "oidc"
-              ? ([payload.oidc_issuer, payload.oidc_subject] as const)
-              : ([payload.github_host, payload.github_user_id] as const);
+            payload.sub_type === "github-actions"
+              ? ([GITHUB_ACTIONS_ISSUER, payload.workload.sub] as const)
+              : payload.sub_type === "oidc"
+                ? ([payload.oidc_issuer, payload.oidc_subject] as const)
+                : ([payload.github_host, payload.github_user_id] as const);
           revokedBefore = await revokedSubjectsStore.getRevokedBefore(
             payload.project_id,
             hostArg,
@@ -1061,8 +1094,64 @@ export function createAuthMiddleware(
       // SECURITY: source ONLY from the verified payload (parsed.data), never the
       // pre-validation payloadObj. The OIDC branch produces no GitHub fields by
       // construction, making the admin-roster structurally unreachable.
-      let tokenKindResult: SessionTokenResult | OidcSessionTokenResult;
-      if (payload.sub_type === "oidc") {
+      let tokenKindResult:
+        | SessionTokenResult
+        | OidcSessionTokenResult
+        | ActionsSessionTokenResult;
+      if (payload.sub_type === "github-actions") {
+        let membership: Awaited<ReturnType<typeof resolveActionsMembership>>;
+        try {
+          membership = await resolveActionsMembership(
+            c.env.DB,
+            payload.project_id,
+            payload.workload,
+            payload.role,
+          );
+        } catch {
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "auth-unavailable",
+                message: "Workload authorization temporarily unavailable",
+                retryable: true,
+              },
+            },
+            503,
+          );
+        }
+        if (!membership)
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: "oidc-policy-denied",
+                message: "Workload authorization denied",
+                retryable: false,
+              },
+            },
+            403,
+          );
+        tokenKindResult = {
+          kind: "github-actions-session",
+          projectId: payload.project_id,
+          name: payload.actor_name,
+          scopes: roleToPermission(membership.role),
+          tokenId: "",
+          permission: roleToPermission(membership.role),
+          expiresAt: payload.expires_at,
+          workload: payload.workload,
+          jti: payload.jti,
+          role: membership.role,
+          membershipSources: membership.sources,
+          policy: delegablePolicy(
+            effectiveCredentialPolicy(
+              { role: membership.role, capabilities: [...CAPABILITIES] },
+              membership.role,
+            ),
+          ),
+        };
+      } else if (payload.sub_type === "oidc") {
         const oidcResult: OidcSessionTokenResult = {
           kind: "oidc-session",
           projectId: payload.project_id,

@@ -1,3 +1,5 @@
+import { canonicalMembershipPrincipal } from "@tila/backend-d1";
+import { GITHUB_ACTIONS_ISSUER } from "@tila/schemas";
 import {
   type EnvironmentMetadata,
   EnvironmentMetadataSchema,
@@ -29,6 +31,12 @@ export function principalIdFor(token: UnifiedTokenResult): string {
       }
       return `github:${token.githubHost.trim().toLowerCase()}:${token.githubUserId}`;
     }
+    case "github-actions-session":
+      return canonicalMembershipPrincipal({
+        provider: "oidc",
+        issuer: GITHUB_ACTIONS_ISSUER,
+        subject: token.workload.sub,
+      }).principalId;
     case "oidc-session":
       return `oidc:${canonicalIssuer(token.oidcIssuer)}:${token.oidcSubject}`;
     case "cookie-session":

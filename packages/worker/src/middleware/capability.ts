@@ -1,3 +1,4 @@
+import { ROOT_CAPABILITIES } from "@tila/schemas";
 import {
   CAPABILITIES,
   type Capability,
@@ -41,7 +42,9 @@ export function denied(c: Context<AppEnv>) {
 }
 export function scopedPolicy(c: Context<AppEnv>): CredentialPolicy | undefined {
   const token = c.get("tokenResult");
-  return token.kind === "d1-token" || token.kind === "cookie-session"
+  return token.kind === "d1-token" ||
+    token.kind === "cookie-session" ||
+    token.kind === "github-actions-session"
     ? token.policy
     : undefined;
 }
@@ -239,6 +242,15 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     const policy = scoped ?? compatibilityPolicy(role ?? "viewer");
 
     let capability = routeCapability(c.req.method, c.req.path);
+    // Root provenance must be checked before response replay and DO reads.
+    if (
+      (/^\/projects\/[^/]+\/admin\/(?:backup(?:\/|$)|store-counts\/?$)/.test(
+        c.req.path,
+      ) ||
+        (capability && ROOT_CAPABILITIES.has(capability))) &&
+      !(token.kind === "d1-token" && token.scopes === "full" && !token.policy)
+    )
+      return denied(c);
     if (
       c.req.method === "POST" &&
       /\/admin\/backup\/transfer\/(begin|renew|complete-export)$/.test(

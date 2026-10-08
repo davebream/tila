@@ -1,4 +1,5 @@
 import type { TokenResult } from "@tila/backend-d1";
+import type { GitHubActionsContext } from "@tila/schemas";
 import type { CredentialPolicy } from "@tila/schemas";
 import type {
   EnvironmentMetadata,
@@ -131,7 +132,23 @@ export interface OidcSessionTokenResult {
   membershipSources?: MembershipSource[];
 }
 
+export interface ActionsSessionTokenResult {
+  kind: "github-actions-session";
+  projectId: string;
+  name: string;
+  scopes: string;
+  tokenId: "";
+  permission: string;
+  expiresAt: number;
+  workload: GitHubActionsContext;
+  jti?: string;
+  role: ProjectRole;
+  policy: CredentialPolicy;
+  membershipSources?: MembershipSource[];
+}
+
 export type UnifiedTokenResult =
+  | ActionsSessionTokenResult
   | D1TokenResult
   | SessionTokenResult
   | CookieSessionTokenResult

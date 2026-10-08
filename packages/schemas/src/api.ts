@@ -494,6 +494,7 @@ export const WhoamiResponseSchema = z.object({
       "cookie-session",
       "workspace-session",
       "oidc-session",
+      "github-actions-session",
     ])
     .optional(),
   principal_id: z.string().optional(),

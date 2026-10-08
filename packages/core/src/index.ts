@@ -141,3 +141,5 @@ export {
 export * from "./continuity";
 
 export type { ContinuityBackend } from "./interfaces/continuity-backend";
+
+export * from "./github-oidc-policy";

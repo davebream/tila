@@ -1,8 +1,14 @@
+import { resolveActionsPolicy } from "@tila/backend-d1";
 import {
   CredentialConflict,
   CredentialDenied,
   CredentialStore,
 } from "@tila/backend-d1";
+import {
+  type GitHubActionsContext,
+  delegablePolicy,
+  effectiveCredentialPolicy,
+} from "@tila/schemas";
 import { CredentialPolicySchema, roleToPermission } from "@tila/schemas";
 import type { Context } from "hono";
 import type { Env, HonoVariables } from "../types";
@@ -21,6 +27,7 @@ async function exchangeScopedWorkloadUnchecked(
     jkt?: string;
     githubLogin?: string;
     githubRepoId?: number;
+    workloadContext?: GitHubActionsContext;
   },
 ): Promise<Response | null> {
   const store = new CredentialStore(c.env.DB);
@@ -56,11 +63,24 @@ async function exchangeScopedWorkloadUnchecked(
       },
       401,
     );
-  const issuedPolicy = await store.servicePolicy(
-    input.projectId,
-    binding.principal_id,
-    CredentialPolicySchema.parse(JSON.parse(binding.policy_json)),
+  let issuedPolicy = delegablePolicy(
+    await store.servicePolicy(
+      input.projectId,
+      binding.principal_id,
+      CredentialPolicySchema.parse(JSON.parse(binding.policy_json)),
+    ),
   );
+  if (input.provider === "github-actions") {
+    if (!input.workloadContext)
+      throw new CredentialDenied("Missing workload context");
+    const current = await resolveActionsPolicy(
+      c.env.DB,
+      input.projectId,
+      input.workloadContext,
+    );
+    if (!current) throw new CredentialDenied("Workload policy denied");
+    issuedPolicy = effectiveCredentialPolicy(issuedPolicy, current.role);
+  }
   const digest = await hashToken(
     `${binding.binding_id}:${input.assertionId}`,
     undefined,
@@ -92,6 +112,7 @@ async function exchangeScopedWorkloadUnchecked(
       tokenHash,
       cnfJkt: input.jkt,
       workloadBindingId: binding.binding_id,
+      workloadContext: input.workloadContext,
     },
     { principalId: binding.principal_id },
   );
