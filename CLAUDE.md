@@ -177,7 +177,7 @@ Defined in `packages/worker/wrangler.toml`: `PROJECT` (DO), `DB` (D1), `ARTIFACT
 - DON'T: Create circular dependencies between workspace packages
 - DON'T: Import Cloudflare Workers types in packages that don't run on Workers (schemas, core, ops-sqlite, cli, sdk)
 - DON'T: Store business logic in Worker route handlers — extract to backend packages
-- DON'T: Modify `.github/workflows/` — CI configuration is managed by the scaffold tool
+- Maintain `.github/workflows/` directly. Preserve the required `ci` gate and validate workflow changes.
 - DO: Deploy via `tila infra provision --force-redeploy` or `tila deploy` — both route through `deployWorkerWithAssets`, which generates a per-deploy `wrangler.<slug>.toml` and shells out to `wrangler deploy`. `wrangler deploy` **preserves Worker secrets** (secrets are never deleted by a deployment); plain `[vars]` absent from the generated config ARE removed (`keep_vars=false` by default — intentional, since `CORS_ALLOWED_ORIGINS` is dropped under same-origin deployment). Do NOT run `wrangler deploy` manually; let the CLI manage config generation and secret injection. `wrangler dev` for local development is fine.
 - DON'T: Poll a DO to check if it restarted — each request resets the 70-140s idle eviction timer, preventing the restart you're waiting for
 

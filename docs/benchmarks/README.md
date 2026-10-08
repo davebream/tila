@@ -133,7 +133,7 @@ Every sample records process RSS and heap, the backend row counts per domain tab
 
 ## CI
 
-`pnpm test` runs `packages/bench/test/smoke.test.ts`: every scenario in-process for a fixed iteration count, invariants only, a few seconds total. There is no Cloudflare credential in CI, so the deployed matrix is a release gate (`docs/05-OPERATIONS.md`, Pre-Tag Gates) and a step after any material coordination change, not a workflow. `.github/workflows/` is managed by the scaffold tool and is intentionally untouched.
+`pnpm test` runs `packages/bench/test/smoke.test.ts`: every scenario in-process for a fixed iteration count, invariants only, a few seconds total. There is no Cloudflare credential in CI, so the deployed matrix is a release gate (`docs/05-OPERATIONS.md`, Pre-Tag Gates) and a step after any material coordination change, not a workflow. CI workflows are maintained directly; deployed benchmarks remain a manual release gate.
 
 ## Publishing a baseline
 
