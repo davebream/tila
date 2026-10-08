@@ -40,8 +40,9 @@ export async function deleteR2Bucket(
     })) {
       if (!obj.key) continue;
       try {
-        await client.r2.buckets.objects.delete(bucketName, obj.key, {
+        await client.r2.buckets.objects.delete(obj.key, {
           account_id: accountId,
+          bucket_name: bucketName,
         });
       } catch (keyErr) {
         diagnostic(

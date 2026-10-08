@@ -1,4 +1,4 @@
-import type { Context } from "hono";
+import type { Context, ExecutionContext } from "hono";
 import type { Env, HonoVariables } from "../types";
 import { emitDoOperationDatapoint } from "./analytics";
 

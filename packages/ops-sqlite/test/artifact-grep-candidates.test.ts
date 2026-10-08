@@ -235,4 +235,22 @@ describe("listGrepCandidates", () => {
     const result = listGrepCandidates(testDb.db, {});
     expect(result).toEqual([]);
   });
+  it("counts multibyte UTF-8 content at the inline budget boundary", () => {
+    const content = "😀".repeat(GREP_INLINE_RESPONSE_BUDGET / 4);
+    insertPointer(testDb, {
+      r2_key: "sources/a/unicode.md",
+      content_inline: content,
+      produced_at: 1,
+    });
+    insertPointer(testDb, {
+      r2_key: "sources/b/overflow.md",
+      content_inline: "x",
+      produced_at: 2,
+    });
+
+    const result = listGrepCandidates(testDb.db, {});
+    expect(result[0].content_inline).toBe(content);
+    expect(result[1].content_inline).toBeNull();
+    expect(result[1].r2_key).toBe("sources/b/overflow.md");
+  });
 });

@@ -159,11 +159,13 @@ describe("deleteR2Bucket", () => {
     const { deleteR2Bucket } = await import("../../lib/teardown");
     const result = await deleteR2Bucket(client, "acct-1", "my-bucket");
     expect(result.ok).toBe(true);
-    expect(objectsDelete).toHaveBeenCalledWith("my-bucket", "file-a", {
+    expect(objectsDelete).toHaveBeenCalledWith("file-a", {
       account_id: "acct-1",
+      bucket_name: "my-bucket",
     });
-    expect(objectsDelete).toHaveBeenCalledWith("my-bucket", "file-b", {
+    expect(objectsDelete).toHaveBeenCalledWith("file-b", {
       account_id: "acct-1",
+      bucket_name: "my-bucket",
     });
     expect(bucketDelete).toHaveBeenCalled();
   });
@@ -246,8 +248,9 @@ describe("deleteR2Bucket", () => {
     expect(result.ok).toBe(true);
     expect(objectsDelete).toHaveBeenCalledTimes(5);
     for (let i = 0; i < 5; i++) {
-      expect(objectsDelete).toHaveBeenCalledWith("my-bucket", `obj-${i}`, {
+      expect(objectsDelete).toHaveBeenCalledWith(`obj-${i}`, {
         account_id: "acct-1",
+        bucket_name: "my-bucket",
       });
     }
   });

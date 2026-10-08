@@ -147,9 +147,9 @@ function isolateIsLimited(ip: string): boolean {
   return pruned.length >= ISOLATE_RL_MAX_FAILURES;
 }
 
-// --- HMAC CryptoKey cache (per-isolate, single-slot) ---
-// jose's jwtVerify accepts a CryptoKey; we keep the cache to avoid redundant importKey calls.
-let cachedHmacKey: CryptoKey | null = null;
+// --- HMAC key cache (per-isolate, single-slot) ---
+// jose imports symmetric JWKs as bytes; cache them to avoid decoding each request.
+let cachedHmacKey: Uint8Array | null = null;
 let cachedHmacKeyRaw: string | null = null;
 
 // --- Per-isolate jti revocation status cache (C9) ---
@@ -285,15 +285,15 @@ function isExpectedAudience(aud: unknown, expected: string): boolean {
   return Array.isArray(aud) ? aud.includes(expected) : aud === expected;
 }
 
-async function getHmacKey(rawKey: string): Promise<CryptoKey> {
+async function getHmacKey(rawKey: string): Promise<Uint8Array> {
   if (cachedHmacKeyRaw === rawKey && cachedHmacKey) {
     return cachedHmacKey;
   }
   const keyBytes = base64UrlDecode(rawKey);
-  const key = (await importJWK(
+  const key = await importJWK(
     { kty: "oct", k: base64UrlEncode(keyBytes), alg: "HS256" },
     "HS256",
-  )) as CryptoKey;
+  );
   cachedHmacKeyRaw = rawKey;
   cachedHmacKey = key;
   return key;
@@ -726,7 +726,7 @@ export function createAuthMiddleware(
 
       let payloadObj: unknown;
       try {
-        // Use cached CryptoKey — avoids redundant importKey on every request
+        // Use cached symmetric key bytes to avoid decoding every request
         const key = await getHmacKey(c.env.GITHUB_SESSION_HMAC_KEY);
         const { payload } = await jwtVerify(jwt, key);
         payloadObj = payload;

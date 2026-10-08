@@ -1,6 +1,6 @@
 import { D1ProjectRegistry } from "@tila/backend-d1";
 import { Hono } from "hono";
-import type { Context, MiddlewareHandler } from "hono";
+import type { Context, ExecutionContext, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { applyAdminGrant } from "../lib/admin-grant";

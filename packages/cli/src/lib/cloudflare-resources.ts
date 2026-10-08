@@ -412,8 +412,9 @@ export async function deleteWorkerSecret(
   name: string,
 ): Promise<void> {
   try {
-    await client.workers.scripts.secrets.delete(scriptName, name, {
+    await client.workers.scripts.secrets.delete(name, {
       account_id: accountId,
+      script_name: scriptName,
     });
   } catch (err) {
     // 404 / not-found: the secret was never set on this script — no-op

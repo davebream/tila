@@ -1625,18 +1625,24 @@ its version-update limit is zero, while repository security updates and alerts
 remain enabled. Renovate vulnerability PRs are disabled to avoid duplicate fixes.
 Do not disable Dependabot security updates when changing this configuration.
 
-Routine updates are collected on Monday mornings (00:00–07:00 Europe/Warsaw),
+Routine updates are collected on Mondays (Europe/Warsaw),
 with at most three open Renovate PRs and two new PRs per hour. Existing branches
-can be updated outside that window so the strict, up-to-date `ci` gate can finish.
+can receive new versions or conflict repairs outside that window. Renovate only
+rebases conflicts; Mergify owns integration checks against current `main`.
 Compatible updates are grouped by runtime libraries, build/test tools, UI,
 Cloudflare tooling, experiments, and GitHub Actions. SHA-pinned actions stay pinned.
-The weekly shared lockfile refresh is reviewed because it includes runtime tooling.
+Shared runtime libraries stay in one group even when test fixtures declare them
+as development dependencies. The weekly shared lockfile refresh stays in the
+overnight window and is reviewed because it includes runtime tooling.
 
 Major updates require approval on the Dependency Dashboard and remain separate
 migrations. Pre-1.0 minor upgrades also require approval because their APIs can
-break. npm releases wait three days before routine updates. npm patch updates
-and compatible action updates can merge automatically after required CI passes;
-Cloudflare tooling and standalone experiments remain under review.
+break. npm releases wait three days before routine updates. Renovate does not
+enable GitHub auto-merge or apply `merge-ready`. After reviewing an update and
+completing local validation, wait for the latest required `ci` check to pass,
+then add `merge-ready`. Mergify validates serial batches of up to three PRs
+against current `main`, then merges them;
+verify the actual queue state rather than treating the label as proof of admission.
 
 Node 24 runs builds, while Node 22 remains the supported public-consumer floor.
 The Node 22 consumer job and Node 22 type definitions must not be upgraded just
@@ -1649,3 +1655,25 @@ packed-consumer or native-runner checks. Changes to Cloudflare tooling must pass
 `pnpm test:runtime`; changes to workflows must preserve the required `ci` gate.
 Keep security overrides until the vulnerable dependency chain is demonstrably
 fixed. Do not widen an override's major-version range simply to remove an alert.
+
+### Major migrations held after the October 2026 catch-up
+
+The catch-up includes Cloudflare types/SDK, native SQLite/keyring, jsdom,
+jest-dom, Lefthook, dotenv and GitHub Actions majors after their targeted checks.
+Production Zod stays on v3; the standalone experiment already uses v4. These
+remaining dashboard entries need the following work before approval:
+
+| Update | Evidence or compatibility constraint | Work needed before merging |
+| --- | --- | --- |
+| TypeScript 7 | The SDK declaration build crashes in tsup/rollup-plugin-dts while reading `useCaseSensitiveFileNames`; the native compiler no longer provides the same JavaScript compiler API. | Adopt a declaration-build path that supports the compiler, then build and test packed SDK/MCP consumers. |
+| Vitest 5 | The pinned Cloudflare Vitest plugin requires Vitest 4. | Upgrade to a plugin release with matching peers and pass the required DO SQLite, D1 and R2 runtime gate. |
+| MSW 3 | Vitest 4 declares an optional MSW 2 peer for its mocker package, while the required Cloudflare plugin holds Vitest at v4. | Upgrade the compatible test-tooling combination first, then migrate MSW imports and strict unhandled-request settings together. |
+| Biome 2 | Migrating the configuration and running v2 on the current tree produced 363 errors and 231 warnings. | Land a dedicated configuration, formatting and rule migration with a clean lint gate. |
+| pnpm 12 | The trial moves configuration into the workspace file, ignores the old `package.json` override location, and rejects fresh dependencies under its new default release-age policy. | Migrate overrides and dependency build approvals explicitly, review the release-age policy, and validate frozen installs plus native consumers. Keep supply-chain checks enabled. |
+| Production Zod 4 | Schemas and inferred types are shared public SDK/API contracts. | Migrate schemas, error/default behavior and consumers together, with compatibility tests and an explicit API-impact review. |
+| Undici 8 overrides | Current Miniflare tooling depends on Undici 7; overrides intentionally constrain that supported major. | Wait for a supported parent dependency migration, then recheck security and runtime behavior. |
+| Node/Ubuntu baselines | Node 22 is the public consumer floor; Ubuntu 24.04 sets the native Linux binary baseline. | Change the support contract and validate packed consumers/native binaries before raising either baseline. |
+
+Keep these migrations visible on the Dependency Dashboard. Do not approve all
+pending entries merely to empty it, or disable the existing runtime, lint,
+security or consumer gates to make a dependency update pass.

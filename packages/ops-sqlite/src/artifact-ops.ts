@@ -431,7 +431,7 @@ export function listGrepCandidates(
   return enrichArtifacts(db, rows).map((row) => {
     let inline = row.content_inline;
     if (inline !== null) {
-      const byteLen = Buffer.byteLength(inline, "utf8");
+      const byteLen = new TextEncoder().encode(inline).byteLength;
       cumulativeInlineBytes += byteLen;
       if (cumulativeInlineBytes > GREP_INLINE_RESPONSE_BUDGET) {
         inline = null;
