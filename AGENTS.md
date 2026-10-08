@@ -116,6 +116,33 @@ HTTP -> Worker (Hono) -> auth middleware -> project middleware -> route handler
 - PR descriptions must include a concise summary, tests run, and any migration, schema, API, or deployment impact.
 - If tests are not run, state that explicitly in the PR description with the reason.
 
+### Merge queue handoff
+
+Mergify owns integration into `main`. The `merge-ready` label authorizes automatic
+queue submission and merging; applying it is part of finishing routine work.
+This repo-specific workflow replaces the general instruction to enable GitHub
+auto-merge.
+
+- After completing the work and local validation, commit and push, create or
+  update the non-draft PR targeting `main`, and wait for the required `ci` check
+  to pass on the latest pushed revision. Then run
+  `gh pr edit <pr-number> --add-label merge-ready` without asking the user to add
+  the label or approve routine queue submission.
+- Leave drafts, explicitly requested review holds, and genuinely risky or
+  ambiguous changes unlabelled. Explain the unresolved decision when human
+  review is needed; do not treat ordinary queue submission as requiring approval.
+- Do not merge directly or enable GitHub auto-merge (`gh pr merge --auto`). If
+  GitHub auto-merge is already enabled on the PR being submitted, disable it with
+  `gh pr merge <pr-number> --disable-auto` before adding `merge-ready`.
+- Let Mergify choose the order, update branches, and rerun integration checks.
+  Do not update or rebase waiting PRs merely because `main` advanced. If further
+  edits or actual conflict resolution are needed, remove `merge-ready` first,
+  make and validate the changes, push, and reapply it after the latest CI passes.
+- Check Mergify's actual queue state after labelling. A neutral check saying
+  "Merge queue is ready" means eligible, not queued. Report a blocked handoff
+  and its reason instead of bypassing checks; do not claim a PR merged until
+  GitHub's PR state and the target branch history independently confirm it.
+
 ## Correctness Model
 
 tila uses first-writer-wins coordination with fencing tokens. Every claim returns a monotonic fence. Every destructive write carries the fence, and the DO rejects stale fences. See `docs/01-DECISIONS.md` section 2 for the full model.
