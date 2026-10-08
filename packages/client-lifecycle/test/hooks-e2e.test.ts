@@ -15,6 +15,15 @@ import { expect, it } from "vitest";
 import { SessionStore, processAlive } from "../src/index";
 import { harness } from "./helpers";
 
+function stopDetachedHelper(pid: number): void {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (error) {
+    // A detached helper can exit after the liveness check.
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
 it("drives real CLI hooks and detached helpers for concurrent native sessions and SIGKILL", async () => {
   const root = mkdtempSync(join(tmpdir(), "tila-hooks-e2e-"));
   const h = harness(root);
@@ -190,7 +199,7 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
       }
     for (const state of store.list())
       if (state.worker && processAlive(state.worker))
-        process.kill(state.worker.pid, "SIGTERM");
+        stopDetachedHelper(state.worker.pid);
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     h.close();
