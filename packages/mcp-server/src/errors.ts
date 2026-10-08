@@ -14,10 +14,15 @@ export function toMcpError(err: unknown): McpError {
     const code =
       err.status >= 500 ? ErrorCode.InternalError : ErrorCode.InvalidRequest;
     const retryHint = err.retryable ? " (retryable)" : "";
-    return new McpError(code, `[${err.code}] ${err.message}${retryHint}`);
+    return Object.assign(
+      new McpError(code, `[${err.code}] ${err.message}${retryHint}`),
+      { cause: err },
+    );
   }
   if (err instanceof Error) {
-    return new McpError(ErrorCode.InternalError, err.message);
+    return Object.assign(new McpError(ErrorCode.InternalError, err.message), {
+      cause: err,
+    });
   }
   return new McpError(ErrorCode.InternalError, String(err));
 }

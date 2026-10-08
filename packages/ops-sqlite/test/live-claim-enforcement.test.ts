@@ -3,7 +3,7 @@ import { upsertPointer } from "../src/artifact-ops";
 import { acquire } from "../src/coordination-ops";
 import { ExpiredClaimError } from "../src/fence-ops";
 import { createGate } from "../src/gate-ops";
-import { createEntity, createTestDb } from "./helpers";
+import { createEntity, createTestDb, testOrigin } from "./helpers";
 
 // The zombie-write window: entity/gate/artifact fences bump only on acquire,
 // not on write. So after a lease EXPIRES with no competing re-acquirer, the
@@ -20,8 +20,7 @@ describe("live-claim enforcement on gate creation", () => {
     const claim = acquire(
       db,
       "task:task-lg",
-      "m1",
-      "u1",
+      testOrigin("m1", "u1"),
       "exclusive",
       1_000,
       undefined,
@@ -37,7 +36,7 @@ describe("live-claim enforcement on gate creation", () => {
           await_type: "human",
           fence: claim.fence,
         },
-        { actor: "m1/u1" },
+        testOrigin("m1/u1"),
         T + 500, // within the 1s lease
       ),
     ).not.toThrow();
@@ -52,8 +51,7 @@ describe("live-claim enforcement on gate creation", () => {
     const claim = acquire(
       db,
       "task:task-zg",
-      "m1",
-      "u1",
+      testOrigin("m1", "u1"),
       "exclusive",
       1_000,
       undefined,
@@ -69,7 +67,7 @@ describe("live-claim enforcement on gate creation", () => {
           await_type: "human",
           fence: claim.fence,
         },
-        { actor: "m1/u1" },
+        testOrigin("m1/u1"),
         T + 2_000, // lease has expired
       ),
     ).toThrow(ExpiredClaimError);
@@ -82,7 +80,13 @@ describe("live-claim enforcement on artifact pointers", () => {
     createEntity(db, { id: "task-la" });
 
     // Default now (real Date.now()); 60s TTL -> claim is live when upsert runs.
-    const claim = acquire(db, "task:task-la", "m1", "u1", "exclusive", 60_000);
+    const claim = acquire(
+      db,
+      "task:task-la",
+      testOrigin("m1", "u1"),
+      "exclusive",
+      60_000,
+    );
 
     expect(() =>
       upsertPointer(
@@ -99,7 +103,7 @@ describe("live-claim enforcement on artifact pointers", () => {
           produced_by: "m1/u1",
           expires_at: null,
         },
-        { actor: "m1/u1" },
+        testOrigin("m1/u1"),
       ),
     ).not.toThrow();
   });
@@ -115,8 +119,7 @@ describe("live-claim enforcement on artifact pointers", () => {
     const claim = acquire(
       db,
       "task:task-za",
-      "m1",
-      "u1",
+      testOrigin("m1", "u1"),
       "exclusive",
       1_000,
       undefined,
@@ -138,7 +141,7 @@ describe("live-claim enforcement on artifact pointers", () => {
           produced_by: "m1/u1",
           expires_at: null,
         },
-        { actor: "m1/u1" },
+        testOrigin("m1/u1"),
       ),
     ).toThrow(ExpiredClaimError);
   });

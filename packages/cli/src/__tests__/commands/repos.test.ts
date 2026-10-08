@@ -117,11 +117,13 @@ describe("tila repos register", () => {
     const out = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(out).toEqual({
       ok: true,
-      owner: "acme",
-      repo: "widgets",
-      github_repo_id: 12345,
-      full_name: "acme/widgets",
-      registered_at: 1700000000,
+      result: {
+        owner: "acme",
+        repo: "widgets",
+        github_repo_id: 12345,
+        full_name: "acme/widgets",
+        registered_at: 1700000000,
+      },
     });
     expect(exitSpy).not.toHaveBeenCalled();
   });

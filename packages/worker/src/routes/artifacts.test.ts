@@ -306,6 +306,9 @@ function buildTestApp(doStubResponses: Array<Response | Error>) {
     c.set("tokenResult", tokenResult);
     c.set("doStub", doStub);
     c.set("projectId", "test-project");
+    c.set("principalId", "token:tok_test");
+    c.set("participantId", "test-participant");
+    c.set("environment", { client_name: "test" });
     return next();
   });
 

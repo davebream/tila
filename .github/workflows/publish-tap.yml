@@ -1,8 +1,14 @@
 name: Publish Homebrew Tap
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      TAP_GITHUB_TOKEN:
+        required: true
 
 jobs:
   update-formula:
@@ -13,11 +19,13 @@ jobs:
     steps:
       - name: Extract release metadata
         id: meta
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
           VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Download checksums
         id: checksums
@@ -30,10 +38,15 @@ jobs:
           SHA_LINUX_ARM64=$(grep 'tila-linux-arm64$' checksums.txt | awk '{print $1}')
           SHA_LINUX_X64=$(grep 'tila-linux-x64$' checksums.txt | awk '{print $1}')
 
-          echo "sha_darwin_arm64=${SHA_DARWIN_ARM64}" >> $GITHUB_OUTPUT
-          echo "sha_darwin_x64=${SHA_DARWIN_X64}" >> $GITHUB_OUTPUT
-          echo "sha_linux_arm64=${SHA_LINUX_ARM64}" >> $GITHUB_OUTPUT
-          echo "sha_linux_x64=${SHA_LINUX_X64}" >> $GITHUB_OUTPUT
+          for digest in "$SHA_DARWIN_ARM64" "$SHA_DARWIN_X64" "$SHA_LINUX_ARM64" "$SHA_LINUX_X64"; do
+            [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+          done
+          {
+          echo "sha_darwin_arm64=${SHA_DARWIN_ARM64}"
+          echo "sha_darwin_x64=${SHA_DARWIN_X64}"
+          echo "sha_linux_arm64=${SHA_LINUX_ARM64}"
+          echo "sha_linux_x64=${SHA_LINUX_X64}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew-tap
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0

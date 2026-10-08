@@ -173,8 +173,8 @@ describe("instances list", () => {
       .join("\n");
     const parsed = JSON.parse(logCalls);
     expect(parsed.ok).toBe(true);
-    expect(parsed.result.instances).toBeDefined();
-    const keys = parsed.result.instances.map(
+    expect(parsed.result.items).toBeDefined();
+    const keys = parsed.result.items.map(
       (r: { instance_key: string }) => r.instance_key,
     );
     expect(keys).toContain(FIXTURE_KEY);
@@ -281,7 +281,7 @@ describe("instances remove", () => {
       .join("\n");
     const parsed = JSON.parse(errOutput);
     expect(parsed.ok).toBe(false);
-    expect(parsed.code).toBeDefined();
+    expect(parsed.error.kind).toBeDefined();
   });
 });
 

@@ -257,7 +257,7 @@ describe("record commands (local mode, real EmbeddedProject)", () => {
     await runCmd(getSubCommand(cmd, "patch"), {
       type: "service",
       key: "api",
-      json: '{"port":8080}',
+      data: '{"port":8080}',
       fence: String(updated?.fence),
     });
     const patched = await project.getRecord("service", "api");
@@ -278,8 +278,8 @@ describe("record commands (local mode, real EmbeddedProject)", () => {
     await runCmd(getSubCommand(cmd, "list"), { type: "service", json: true });
     const envelope = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(envelope.ok).toBe(true);
-    expect(envelope.items).toHaveLength(1);
-    expect(envelope.items[0].key).toBe("api");
+    expect(envelope.result.items).toHaveLength(1);
+    expect(envelope.result.items[0].key).toBe("api");
   });
 
   it("history -> returns revisions from the local backend", async () => {
@@ -310,7 +310,7 @@ describe("record commands (local mode, real EmbeddedProject)", () => {
     const envelope = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(envelope.ok).toBe(true);
     // Two revisions: created + set.
-    expect(envelope.items.length).toBeGreaterThanOrEqual(2);
+    expect(envelope.result.items.length).toBeGreaterThanOrEqual(2);
   });
 
   it("set of a SNAPSHOT-history type fails in local mode with a clear message", async () => {
@@ -371,12 +371,12 @@ type = "string"
     logSpy.mockClear();
     await runCmd(getSubCommand(cmd, "types"), { json: true, "in-use": false });
     const merged = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(merged.types).toEqual(["declared_only", "service"]);
+    expect(merged.result.items).toEqual(["declared_only", "service"]);
 
     // --in-use: declared_only is EXCLUDED.
     logSpy.mockClear();
     await runCmd(getSubCommand(cmd, "types"), { json: true, "in-use": true });
     const inUse = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(inUse.types).toEqual(["service"]);
+    expect(inUse.result.items).toEqual(["service"]);
   });
 });

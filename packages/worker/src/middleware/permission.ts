@@ -1,6 +1,11 @@
+import { PROJECT_ROLE_RANK, type ProjectRole } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
-import { reverifySessionPermission } from "../lib/permission-recheck";
 import type { Env, HonoVariables } from "../types";
+import {
+  authorizeProtectedOperation,
+  isProtectedMutation,
+  withRequiredRole,
+} from "./protected-operation";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -17,33 +22,33 @@ const PERMISSION_LEVELS: Record<string, number> = {
   [ADMIN_PERMISSION]: 3,
 };
 
-/**
- * Returns true when the request falls within the re-verify scope for Layer B.
- * Re-verify fires when the required level is "admin" (highest-privilege mutations)
- * OR when the HTTP method is "DELETE" (destructive). This covers:
- *   - requirePermission("admin") routes (doctor, search reindex, admin authz)
- *   - write-level DELETE routes (artifacts.delete, gates.delete, entities.delete)
- * Keeping the predicate a single exported function makes future scope widening
- * (e.g. all write mutations) a one-line change without touching call sites.
- */
+const REQUIRED_ROLE: Record<"read" | "write" | "admin", ProjectRole> = {
+  read: "viewer",
+  write: "participant",
+  admin: "maintainer",
+};
+
+/** All mutations and administrative reads require current protected authority. */
 export function recheckInScope(
   level: "read" | "write" | "admin",
   method: string,
+  path = "",
 ): boolean {
-  return level === "admin" || method === "DELETE";
+  return level === "admin" || isProtectedMutation(method, path);
 }
 
 /**
  * Route-level permission gate.
  * For D1 tokens: scopes === "full" grants all access.
- * For session tokens: checks permission hierarchy (snapshot gate) followed by
- * live GitHub re-verify when recheckInScope is true (Layer B, WI-H).
+ * For sessions: checks current membership role, then requires independent
+ * explicit authority or a verified GitHub grant for protected operations.
  */
 export function requirePermission(
   level: "read" | "write" | "admin",
 ): MiddlewareHandler<AppEnv> {
-  return async (c, next) => {
+  return withRequiredRole(REQUIRED_ROLE[level], async (c, next) => {
     const tokenResult = c.get("tokenResult");
+    if (c.get("authorizationChecked")) return next();
 
     if (tokenResult.kind === "workspace-session") {
       return c.json(
@@ -78,92 +83,52 @@ export function requirePermission(
       );
     }
 
-    if (tokenResult.kind === "session") {
-      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
-      const requiredLevel = PERMISSION_LEVELS[level] ?? 0;
-
-      if (userLevel < requiredLevel) {
-        return c.json(
-          {
-            ok: false,
-            error: {
-              code: "permission-denied",
-              message: `Requires ${level} permission`,
-              retryable: false,
-            },
+    const snapshotPermission =
+      tokenResult.kind === "session" ||
+      tokenResult.kind === "cookie-session" ||
+      tokenResult.kind === "oidc-session"
+        ? tokenResult.permission
+        : "";
+    // Directly-mounted route tests and compatibility integrations may invoke
+    // the guard without projectMembershipMiddleware. Production project routes
+    // always set effectiveRole, so request-time membership remains authoritative.
+    const effectiveRole =
+      c.get("effectiveRole") ??
+      (snapshotPermission === "read"
+        ? "viewer"
+        : snapshotPermission === "write"
+          ? "participant"
+          : snapshotPermission === "admin"
+            ? "maintainer"
+            : undefined);
+    const requiredRole = REQUIRED_ROLE[level];
+    if (
+      !effectiveRole ||
+      PROJECT_ROLE_RANK[effectiveRole] < PROJECT_ROLE_RANK[requiredRole]
+    ) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "permission-denied",
+            message: `Requires ${requiredRole} role`,
+            retryable: false,
           },
-          403,
-        );
-      }
+        },
+        403,
+      );
+    }
 
-      // Snapshot gate passed. For admin-level or destructive (DELETE) routes,
-      // perform a live GitHub permission re-verify (Layer B, WI-H / #131).
-      if (recheckInScope(level, c.req.method)) {
-        const verdict = await reverifySessionPermission(c, tokenResult, level);
-        if (verdict.decision === "deny") {
-          return c.json(
-            {
-              ok: false,
-              error: {
-                code: "permission-revoked",
-                message: "Repository permission was revoked or downgraded",
-                retryable: false,
-              },
-            },
-            403,
-          );
-        }
-      }
-
+    if (recheckInScope(level, c.req.method, c.req.path)) {
+      const denied = await authorizeProtectedOperation(c, requiredRole);
+      if (denied) return denied;
+    }
+    if (
+      tokenResult.kind === "session" ||
+      tokenResult.kind === "oidc-session" ||
+      tokenResult.kind === "cookie-session"
+    )
       return next();
-    }
-
-    if (tokenResult.kind === "oidc-session") {
-      // OIDC sessions use a static permission granted at allowlist registration.
-      // Do NOT call reverifySessionPermission — that helper is GitHub-specific
-      // (reads githubHost/githubRepoId/githubLogin) and OidcSessionTokenResult
-      // carries none of those fields. The permission is locked at exchange time.
-      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
-      if (userLevel >= (PERMISSION_LEVELS[level] ?? 0)) {
-        return next();
-      }
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "permission-denied",
-            message: `Requires ${level} permission`,
-            retryable: false,
-          },
-        },
-        403,
-      );
-    }
-
-    if (tokenResult.kind === "cookie-session") {
-      // Map cookie-session normalized permission onto the PERMISSION_LEVELS hierarchy.
-      // Uses the persisted GitHub-derived permission tier ("read"/"write"/"admin"),
-      // same as the bearer session branch above — closes the privilege-escalation gap
-      // where a GitHub *write* user could previously reach admin routes via cookie
-      // (because the old code mapped scopes:"full" → admin unconditionally).
-      const userLevel = PERMISSION_LEVELS[tokenResult.permission] ?? 0;
-
-      if (userLevel >= (PERMISSION_LEVELS[level] ?? 0)) {
-        return next();
-      }
-
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "permission-denied",
-            message: `Requires ${level} permission`,
-            retryable: false,
-          },
-        },
-        403,
-      );
-    }
 
     // Unknown token kind -- deny
     return c.json(
@@ -177,5 +142,5 @@ export function requirePermission(
       },
       403,
     );
-  };
+  });
 }

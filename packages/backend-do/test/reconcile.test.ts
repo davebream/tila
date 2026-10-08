@@ -20,7 +20,17 @@ afterEach(() => {
 describe("reconcilePointers", () => {
   it("reports 0 orphans when r2_blobs list is empty", () => {
     const { db } = testDb;
-    const result = reconcilePointers(db, [], { actor: "test-actor" }, false);
+    const result = reconcilePointers(
+      db,
+      [],
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      false,
+    );
     expect(result.orphans_found).toBe(0);
     expect(result.orphans_recovered).toBe(0);
     expect(result.orphans_unrecoverable).toBe(0);
@@ -44,7 +54,12 @@ describe("reconcilePointers", () => {
     const result = reconcilePointers(
       db,
       orphans,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       false,
     );
     expect(result.orphans_found).toBe(1);
@@ -69,7 +84,12 @@ describe("reconcilePointers", () => {
     const result = reconcilePointers(
       db,
       orphans,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.orphans_recovered).toBe(1);
@@ -93,7 +113,12 @@ describe("reconcilePointers", () => {
     const result = reconcilePointers(
       db,
       orphans,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.orphans_unrecoverable).toBe(1);
@@ -115,7 +140,17 @@ describe("reconcilePointers", () => {
         },
       },
     ];
-    reconcilePointers(db, orphans, { actor: "test-actor" }, true);
+    reconcilePointers(
+      db,
+      orphans,
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
+      true,
+    );
     // Check journal for artifact.reconciled event
     const journalRows = db
       .select()
@@ -123,7 +158,9 @@ describe("reconcilePointers", () => {
       .where(eq(schema.journal.kind, "artifact.reconciled"))
       .all();
     expect(journalRows.length).toBe(1);
-    expect(journalRows[0].actor).toBe("test-actor");
+    expect(journalRows[0].principal_id).toBe("test:test-actor");
+    expect(journalRows[0].participant_id).toBe("test-actor");
+    expect(journalRows[0].actor).toBe("");
   });
 
   it("creates artifact_search_docs row when search_body_text is provided", () => {
@@ -145,7 +182,12 @@ describe("reconcilePointers", () => {
     const result = reconcilePointers(
       db,
       orphans,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.orphans_recovered).toBe(1);
@@ -176,7 +218,12 @@ describe("reconcilePointers", () => {
     const result = reconcilePointers(
       db,
       orphans,
-      { actor: "test-actor" },
+      {
+        principalId: "test:test-actor",
+        participantId: "test-actor",
+        environment: {},
+        actor: "test-actor",
+      },
       true,
     );
     expect(result.orphans_recovered).toBe(1);

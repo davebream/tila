@@ -67,7 +67,12 @@ describe("LocalArtifactBackend.grepArtifacts", () => {
           expires_at: null,
           content_inline: inlineContent,
         },
-        { actor: "test" },
+        {
+          actor: "test",
+          principalId: "local:test",
+          participantId: "test-session",
+          environment: {},
+        },
       );
 
       // Spy on Bun.file to track blob disk reads
@@ -154,7 +159,12 @@ describe("LocalArtifactBackend.grepArtifacts", () => {
           expires_at: null,
           content_inline: null, // no inline, and no blob on disk
         },
-        { actor: "test" },
+        {
+          actor: "test",
+          principalId: "local:test",
+          participantId: "test-session",
+          environment: {},
+        },
       );
 
       const result = await backend.grepArtifacts({ pattern: "ghost" });
@@ -300,7 +310,12 @@ describe("LocalArtifactBackend.grepArtifacts", () => {
           expires_at: null,
           content_inline: null,
         },
-        { actor: "test" },
+        {
+          actor: "test",
+          principalId: "local:test",
+          participantId: "test-session",
+          environment: {},
+        },
       );
 
       const result = await backend.grepArtifacts({ pattern: "artifact" });

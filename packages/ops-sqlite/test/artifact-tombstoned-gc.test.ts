@@ -4,7 +4,7 @@ import {
   tombstonePointer,
   upsertPointer,
 } from "../src/artifact-ops";
-import { type TestDb, createTestDb } from "./helpers";
+import { type TestDb, createTestDb, testOrigin } from "./helpers";
 
 let testDb: TestDb;
 
@@ -39,12 +39,12 @@ function insertPointer(
 }
 
 describe("deleteTombstonedPointers", () => {
-  it("deletes rows where tombstoned=1 AND tombstoned_at < cutoff", () => {
+  it("retains legacy metadata even after confirmed blob deletion and grace", () => {
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     const cutoff = now - sevenDaysMs;
 
-    // tombstoned past grace WITH confirmed blob deletion (should be deleted)
+    // tombstoned past grace WITH confirmed blob deletion (retained for audit)
     insertPointer(testDb, "produced/a/old.bin", {
       tombstoned: 1,
       tombstoned_at: cutoff - 1000,
@@ -67,13 +67,13 @@ describe("deleteTombstonedPointers", () => {
     });
 
     const deleted = deleteTombstonedPointers(testDb.db, cutoff);
-    expect(deleted).toBe(1);
+    expect(deleted).toBe(0);
 
     const remaining = testDb.rawDb
       .prepare("SELECT r2_key FROM artifact_pointers ORDER BY r2_key")
       .all() as { r2_key: string }[];
     const keys = remaining.map((r) => r.r2_key);
-    expect(keys).not.toContain("produced/a/old.bin");
+    expect(keys).toContain("produced/a/old.bin");
     expect(keys).toContain("produced/b/fresh.bin");
     expect(keys).toContain("produced/c/null-ts.bin");
     expect(keys).toContain("produced/d/live.bin");
@@ -115,7 +115,7 @@ describe("tombstonePointer stamps tombstoned_at", () => {
         produced_by: "test",
         expires_at: null,
       },
-      { actor: "test" },
+      testOrigin("test"),
     );
 
     const tsBefore = testDb.rawDb
@@ -125,7 +125,11 @@ describe("tombstonePointer stamps tombstoned_at", () => {
       .get() as { tombstoned_at: number | null };
     expect(tsBefore.tombstoned_at).toBeNull();
 
-    tombstonePointer(testDb.db, "produced/f/test.bin", { actor: "sweep-cron" });
+    tombstonePointer(
+      testDb.db,
+      "produced/f/test.bin",
+      testOrigin("sweep-cron"),
+    );
     const after = Date.now();
 
     const row = testDb.rawDb

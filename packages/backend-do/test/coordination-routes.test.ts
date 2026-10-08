@@ -46,8 +46,12 @@ describe("POST /coord/release", () => {
     const claim = coordinationOps.acquire(
       db,
       "task:claim-1",
-      "holder",
-      "holder",
+      {
+        principalId: "test:holder",
+        participantId: "holder",
+        environment: { machine: "holder" },
+        actor: "holder/holder",
+      },
       "exclusive",
       60_000,
     );
@@ -58,6 +62,9 @@ describe("POST /coord/release", () => {
       body: JSON.stringify({
         resource: "task:claim-1",
         fence: claim.fence,
+        principal_id: "test:holder",
+        participant_id: "holder",
+        environment: { machine: "holder" },
         actor: "holder/holder",
       }),
     });
@@ -70,8 +77,12 @@ describe("POST /coord/release", () => {
     const claim = coordinationOps.acquire(
       db,
       "task:claim-1",
-      "holder",
-      "holder",
+      {
+        principalId: "test:holder",
+        participantId: "holder",
+        environment: { machine: "holder" },
+        actor: "holder/holder",
+      },
       "exclusive",
       60_000,
     );
@@ -82,6 +93,9 @@ describe("POST /coord/release", () => {
       body: JSON.stringify({
         resource: "task:claim-1",
         fence: claim.fence,
+        principal_id: "test:other",
+        participant_id: "other",
+        environment: { machine: "other" },
         actor: "other/other",
       }),
     });

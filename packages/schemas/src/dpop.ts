@@ -12,6 +12,17 @@ export const DPOP_TYP = "dpop+jwt" as const;
 /** Required `alg` value in a DPoP proof JWT header. */
 export const DPOP_ALG = "ES256" as const;
 
+/** RFC 9449 ath: base64url SHA-256 of the presented access token. */
+export async function accessTokenHash(token: string): Promise<string> {
+  const bytes = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
+  );
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 /**
  * Canonicalize a URL for use as the `htu` claim in a DPoP proof (RFC 9449 §4.3).
  *

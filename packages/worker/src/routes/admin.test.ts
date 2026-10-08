@@ -41,6 +41,32 @@ vi.mock("@tila/backend-d1", () => ({
       deleteByTokenHash = mockDeleteByTokenHash;
     } as unknown as () => unknown,
   ),
+  ProjectMembershipStore: vi.fn().mockImplementation(
+    class {
+      getActive = vi.fn().mockResolvedValue(null);
+      countActiveOwners = vi.fn().mockResolvedValue(0);
+    } as unknown as () => unknown,
+  ),
+  canonicalMembershipPrincipal: (principal: {
+    provider: "github" | "oidc";
+    host?: string;
+    user_id?: number;
+    issuer?: string;
+    subject?: string;
+  }) => {
+    const identityHost =
+      principal.provider === "github"
+        ? (principal.host ?? "github.com").toLowerCase()
+        : (principal.issuer ?? "").replace(/\/$/, "").toLowerCase();
+    const subjectId = String(
+      principal.provider === "github" ? principal.user_id : principal.subject,
+    );
+    return {
+      identityHost,
+      subjectId,
+      principalId: `${principal.provider}:${identityHost}:${subjectId}`,
+    };
+  },
   revokePrincipalBatch: (...args: unknown[]) =>
     mockRevokePrincipalBatch(...args),
 }));
@@ -49,6 +75,8 @@ vi.mock("@tila/backend-d1", () => ({
 const mockRevokeJtiInCache = vi.fn();
 const mockRevokeSubjectInCache = vi.fn();
 vi.mock("../middleware/auth", () => ({
+  createAuthMiddleware: () => async (_c: unknown, next: () => Promise<void>) =>
+    next(),
   revokeJtiInCache: (...args: unknown[]) => mockRevokeJtiInCache(...args),
   revokeSubjectInCache: (...args: unknown[]) =>
     mockRevokeSubjectInCache(...args),
@@ -117,6 +145,7 @@ function makeTokenResult(
   if (tokenKind === "session") {
     return {
       kind: "session",
+      jti: "route-test-jti",
       projectId: "proj-target",
       name: "user",
       scopes,
@@ -145,6 +174,7 @@ function createApp(
     c.set("doStub", {} as DurableObjectStub);
     c.set("projectId", "proj-target");
     c.set("tokenResult", makeTokenResult(tokenKind, scopes));
+    if (tokenKind === "session") c.set("explicitRole", "maintainer");
     await next();
   });
   app.route("/admin", admin);
@@ -874,6 +904,25 @@ describe("project admin routes", () => {
       expect(targetPageIdx).toBe(2);
     });
 
+    it("removes versioned recovery records after pointer cleanup and retains SQLite if prefix cleanup fails", async () => {
+      setupDestroyMocks({ targetKeys: [] });
+      listAllIncludingArchivedMock.mockResolvedValue([
+        { projectId: "proj-target" },
+      ]);
+      deleteByPrefixMock.mockImplementation(async (prefix: string) => ({
+        deleted: 0,
+        failed: prefix.startsWith("versioned/")
+          ? ["versioned/proj-target/report/destroy.json"]
+          : [],
+      }));
+      const response = await req(createApp("full"), "/admin/destroy", "POST");
+      expect(response.status).toBe(502);
+      expect(deleteByPrefixMock).toHaveBeenCalledWith("versioned/proj-target/");
+      expect(
+        forwardToDOMock.mock.calls.some((call) => call[1] === "/admin/destroy"),
+      ).toBe(false);
+    });
+
     it("(g) surfaces failure when DO destroy returns a non-ok body", async () => {
       setupDestroyMocks({
         targetKeys: [],
@@ -1147,12 +1196,14 @@ describe("project admin routes", () => {
       // Two distinct year/month groups → two R2 puts
       expect(putMock).toHaveBeenCalledTimes(2);
       expect(putMock).toHaveBeenCalledWith(
-        "journal-archive/proj-target/2026/03.jsonl",
+        "journal-archive/proj-target/2026/03.part-2-from-1.jsonl",
         expect.any(String),
+        { customMetadata: { first_seq: "1", last_seq: "1" } },
       );
       expect(putMock).toHaveBeenCalledWith(
-        "journal-archive/proj-target/2026/04.jsonl",
+        "journal-archive/proj-target/2026/04.part-2-from-2.jsonl",
         expect.any(String),
+        { customMetadata: { first_seq: "2", last_seq: "2" } },
       );
       // confirm was forwarded with throughSeq
       expect(forwardToDOMock).toHaveBeenCalledWith(

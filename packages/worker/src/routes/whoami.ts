@@ -1,5 +1,9 @@
+import type { MembershipSource, ProjectRole } from "@tila/schemas";
 import { Hono } from "hono";
 import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
+import { compatibilityPolicy, scopedPolicy } from "../middleware/capability";
+import { resolveTokenMembership } from "../middleware/membership";
+import { principalIdFor } from "../middleware/request-identity";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 
 type WhoamiEnv = { Bindings: Env; Variables: HonoVariables };
@@ -34,8 +38,16 @@ whoami.get("/whoami", async (c) => {
       | "oidc-session";
     github_login?: string;
     permission?: string;
-    expires_at?: number;
+    expires_at?: number | null;
     instance_id?: string;
+    role?: ProjectRole;
+    explicit_role?: ProjectRole;
+    membership_sources?: MembershipSource[];
+    mirrored_repo_id?: number;
+    principal_id?: string;
+    credential_id?: string;
+    policy?: import("@tila/schemas").CredentialPolicy;
+    legacy?: boolean;
   } = {
     ok: true as const,
     project_id: token.projectId,
@@ -49,14 +61,52 @@ whoami.get("/whoami", async (c) => {
     response.instance_id = instanceId;
   }
 
+  if (token.projectId) {
+    try {
+      const membership = await resolveTokenMembership(
+        c.env.DB,
+        token,
+        token.projectId,
+      );
+      if (membership) {
+        response.role = membership.role;
+        response.membership_sources = membership.sources;
+        if (membership.explicitRole)
+          response.explicit_role = membership.explicitRole;
+        if (membership.mirroredRepoId !== undefined)
+          response.mirrored_repo_id = membership.mirroredRepoId;
+      }
+    } catch {
+      // Best-effort identity inspection; guarded project routes still fail closed.
+    }
+  }
+
   // Add session-specific fields
   if (token.kind === "session") {
     response.github_login = token.githubLogin;
     response.permission = token.permission;
     response.expires_at = token.expiresAt;
-  } else if (token.kind === "cookie-session") {
+  } else if (
+    token.kind === "cookie-session" ||
+    token.kind === "oidc-session" ||
+    (token.kind === "d1-token" && token.policy)
+  ) {
     response.expires_at = token.expiresAt;
   }
 
+  try {
+    response.principal_id = principalIdFor(token);
+  } catch {
+    /* Legacy sessions may lack canonical identity; they cannot mutate. */
+  }
+  const policy = scopedPolicy(c);
+  response.policy =
+    policy ?? (response.role ? compatibilityPolicy(response.role) : undefined);
+  response.legacy = !policy;
+  if (
+    (token.kind === "d1-token" || token.kind === "cookie-session") &&
+    token.credentialId
+  )
+    response.credential_id = token.credentialId;
   return c.json(response);
 });

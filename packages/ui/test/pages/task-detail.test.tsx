@@ -108,8 +108,9 @@ function entityHandler(id: string, type: string) {
 function activeClaim(resource: string, expiresAt: number) {
   return {
     resource,
-    machine: "agent-sonnet",
-    user: "agent-sonnet",
+    principal_id: "token:test-token",
+    participant_id: "agent-sonnet",
+    environment: { machine: "agent-sonnet" },
     mode: "exclusive",
     fence: 1,
     acquired_at: Date.now() - 60_000,
@@ -139,8 +140,10 @@ describe("TaskDetailPage claim state", () => {
     );
 
     const claimTable = screen.getByRole("table", { name: "Claim state" });
-    // machine + user both "agent-sonnet"
-    expect(within(claimTable).getAllByText("agent-sonnet")).toHaveLength(2);
+    expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
+    expect(
+      within(claimTable).getByText("token:test-token"),
+    ).toBeInTheDocument();
     expect(within(claimTable).getByText("exclusive")).toBeInTheDocument();
     // fence "1" — scoped to the claim table (collides with schema_version: 1)
     expect(within(claimTable).getByText("1")).toBeInTheDocument();
@@ -165,7 +168,7 @@ describe("TaskDetailPage claim state", () => {
     );
 
     const claimTable = screen.getByRole("table", { name: "Claim state" });
-    expect(within(claimTable).getAllByText("agent-sonnet")).toHaveLength(2);
+    expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
   });
 
   test("resolves a canonical epic:<id> resource via the shared drawer", async () => {
@@ -182,7 +185,7 @@ describe("TaskDetailPage claim state", () => {
     );
 
     const claimTable = screen.getByRole("table", { name: "Claim state" });
-    expect(within(claimTable).getAllByText("agent-sonnet")).toHaveLength(2);
+    expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
   });
 
   test("resolves a canonical milestone:<id> resource via the shared drawer", async () => {
@@ -199,7 +202,7 @@ describe("TaskDetailPage claim state", () => {
     );
 
     const claimTable = screen.getByRole("table", { name: "Claim state" });
-    expect(within(claimTable).getAllByText("agent-sonnet")).toHaveLength(2);
+    expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
   });
 
   test("shows 'Not claimed.' when there is no active claim (AC-2)", async () => {

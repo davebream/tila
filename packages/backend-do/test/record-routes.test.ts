@@ -63,6 +63,11 @@ type MutateBody = {
 let testDb: TestDb;
 let db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 let app: Hono;
+const IDENTITY_BODY = {
+  principal_id: "test:records",
+  participant_id: "participant-1",
+  environment: {},
+};
 
 beforeEach(() => {
   testDb = createTestDb();
@@ -82,7 +87,7 @@ async function put(
   return app.request(`/record/${type}/${key}/put`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, ...IDENTITY_BODY }),
   });
 }
 
@@ -134,6 +139,7 @@ describe("POST /record/:type/:key/put", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         key: "attr",
         value: { env: "a" },
         actor: "alice",
@@ -147,6 +153,7 @@ describe("POST /record/:type/:key/put", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...IDENTITY_BODY,
         value: { env: "b" },
         fence: createdBody.fence,
         actor: "bob",
@@ -184,7 +191,11 @@ describe("POST /record/:type/:key/put", () => {
       const setRes = await app.request("/record/config/main/set", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: { other: 1 }, fence: 0 }),
+        body: JSON.stringify({
+          ...IDENTITY_BODY,
+          value: { other: 1 },
+          fence: 0,
+        }),
       });
       expect(setRes.status).toBe(422);
       const setBody = (await setRes.json()) as {

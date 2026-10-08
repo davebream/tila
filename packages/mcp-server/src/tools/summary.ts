@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 export function registerSummaryTool(
   server: McpServer,
@@ -9,9 +10,10 @@ export function registerSummaryTool(
 ): void {
   const summary = facade.summary;
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     "tila_summary",
-    "Get a compact project summary: entity counts by type and status, active claims, ready count, online machines, recent journal events, and estimated token count.",
+    "Get a compact project summary: entity counts by type and status, active claims, ready count, online participants, recent journal events, and estimated token count.",
     {},
     async () => {
       try {

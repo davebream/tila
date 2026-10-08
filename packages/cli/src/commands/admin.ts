@@ -5,7 +5,15 @@ import { requireClient, resolveContext } from "../context";
 import type { AdminListRow } from "../lib/admin-user-arg";
 import { parseGrantArg, resolveRevokeArg } from "../lib/admin-user-arg";
 import { createCliClient } from "../lib/client-factory";
-import { jsonArg, printJson, printJsonError } from "../lib/output";
+import {
+  diagnostic,
+  exit,
+  jsonArg,
+  outputText,
+  printJson,
+  printJsonError,
+  warning,
+} from "../lib/output";
 
 /**
  * Token arg shared across all admin subcommands.
@@ -55,7 +63,7 @@ async function resolveAdminClient(args: {
     // C5: direct client — no CF auth, no CLOUDFLARE_API_TOKEN required.
     // Warn on interactive --token use (value visible in `ps aux`).
     if (args.token && process.stdout.isTTY) {
-      console.warn(
+      warning(
         "Warning: --token value is visible in the process table (ps aux). " +
           "Prefer TILA_TOKEN env var for interactive use.",
       );
@@ -69,7 +77,7 @@ async function resolveAdminClient(args: {
           "NO_CONFIG",
         );
       } else {
-        console.error(
+        diagnostic(
           "Error: no tila project found. Run `tila project create` or `tila init`.",
         );
       }
@@ -82,7 +90,7 @@ async function resolveAdminClient(args: {
           "NO_WORKER_URL",
         );
       } else {
-        console.error(
+        diagnostic(
           "Error: no worker_url in config. Run `tila project create`.",
         );
       }
@@ -124,11 +132,11 @@ export default defineCommand({
                 "REMOTE_ONLY",
               );
             } else {
-              console.error(
+              diagnostic(
                 "Error: this command requires a remote connection (tila init)",
               );
             }
-            process.exit(1);
+            exit(1);
             return;
           }
           const client = requireClient(ctx);
@@ -139,7 +147,7 @@ export default defineCommand({
 
         const resolved = await resolveAdminClient(args);
         if (!resolved) {
-          process.exit(1);
+          exit(1);
           return;
         }
         await runAdminList(resolved.client, resolved.projectId, args);
@@ -173,11 +181,11 @@ export default defineCommand({
                 "REMOTE_ONLY",
               );
             } else {
-              console.error(
+              diagnostic(
                 "Error: this command requires a remote connection (tila init)",
               );
             }
-            process.exit(1);
+            exit(1);
             return;
           }
           const client = requireClient(ctx);
@@ -188,7 +196,7 @@ export default defineCommand({
 
         const resolved = await resolveAdminClient(args);
         if (!resolved) {
-          process.exit(1);
+          exit(1);
           return;
         }
         await runAdminGrant(
@@ -227,11 +235,11 @@ export default defineCommand({
                 "REMOTE_ONLY",
               );
             } else {
-              console.error(
+              diagnostic(
                 "Error: this command requires a remote connection (tila init)",
               );
             }
-            process.exit(1);
+            exit(1);
             return;
           }
           const client = requireClient(ctx);
@@ -242,7 +250,7 @@ export default defineCommand({
 
         const resolved = await resolveAdminClient(args);
         if (!resolved) {
-          process.exit(1);
+          exit(1);
           return;
         }
         await runAdminRevoke(
@@ -278,14 +286,14 @@ async function runAdminList(
 
     const admins = result.admins;
     if (admins.length === 0) {
-      console.log("No active admins.");
+      outputText("No active admins.");
       return;
     }
 
     for (const admin of admins) {
       const login = admin.login ? ` (@${admin.login})` : "";
       const grantedBy = admin.granted_by ? ` by ${admin.granted_by}` : "";
-      console.log(
+      outputText(
         `  ${admin.github_user_id}${login} — granted${grantedBy} at ${new Date(admin.granted_at * 1000).toISOString()}`,
       );
     }
@@ -295,9 +303,9 @@ async function runAdminList(
       if (args.json) {
         printJsonError(msg, "API_ERROR");
       } else {
-        console.error(`Error: ${msg}`);
+        diagnostic(`Error: ${msg}`);
       }
-      process.exit(1);
+      exit(1);
       return;
     }
     throw err;
@@ -328,9 +336,9 @@ async function runAdminGrant(
         ? `@${body.login} (id: ${result.github_user_id})`
         : `${result.github_user_id}`;
     if (result.granted) {
-      console.log(`Granted admin access to ${label}.`);
+      outputText(`Granted admin access to ${label}.`);
     } else {
-      console.log(
+      outputText(
         `${label} is already an active admin (idempotent — no change).`,
       );
     }
@@ -340,9 +348,9 @@ async function runAdminGrant(
       if (args.json) {
         printJsonError(msg, "API_ERROR");
       } else {
-        console.error(`Error: ${msg}`);
+        diagnostic(`Error: ${msg}`);
       }
-      process.exit(1);
+      exit(1);
       return;
     }
     throw err;
@@ -379,9 +387,9 @@ async function runAdminRevoke(
       if (args.json) {
         printJsonError(resolved.error, "RESOLVE_ERROR");
       } else {
-        console.error(`Error: ${resolved.error}`);
+        diagnostic(`Error: ${resolved.error}`);
       }
-      process.exit(1);
+      exit(1);
       return;
     }
     githubUserId = resolved.id;
@@ -398,9 +406,9 @@ async function runAdminRevoke(
     }
 
     if (result.revoked) {
-      console.log(`Revoked admin access from ${githubUserId}.`);
+      outputText(`Revoked admin access from ${githubUserId}.`);
     } else {
-      console.log(`${githubUserId} was not an active admin (no change).`);
+      outputText(`${githubUserId} was not an active admin (no change).`);
     }
   } catch (err) {
     if (err instanceof TilaApiError) {
@@ -409,9 +417,9 @@ async function runAdminRevoke(
       if (args.json) {
         printJsonError(msg, err.status === 409 ? "LAST_ADMIN" : "API_ERROR");
       } else {
-        console.error(`Error: ${msg}`);
+        diagnostic(`Error: ${msg}`);
       }
-      process.exit(1);
+      exit(1);
       return;
     }
     throw err;

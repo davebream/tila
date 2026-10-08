@@ -8,7 +8,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as p from "@clack/prompts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TARGET_DEFS,
@@ -18,8 +17,9 @@ import {
   runMcpInit,
   stripJsoncComments,
 } from "../../lib/mcp-targets";
+import * as p from "../../lib/prompts";
 
-vi.mock("@clack/prompts", () => ({
+vi.mock("../../lib/prompts", () => ({
   text: vi.fn(),
   password: vi.fn(),
   confirm: vi.fn().mockResolvedValue(true),

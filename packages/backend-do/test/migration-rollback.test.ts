@@ -1,9 +1,10 @@
+import { MIGRATIONS } from "@tila/ops-sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { runMigrationsWithPitrRollback } from "../src/migration-runner";
 
 type SqlExecResult = { toArray: () => unknown[] };
 
-const ALL_MIGRATION_VERSIONS = Array.from({ length: 22 }, (_, i) => i + 1);
+const ALL_MIGRATION_VERSIONS = MIGRATIONS.map((migration) => migration.version);
 
 function makeMockStorage(opts: {
   failOnSql?: string;
@@ -200,9 +201,9 @@ describe("runMigrationsWithPitrRollback", () => {
                 ],
                 claims: [
                   "resource",
-                  "holder",
-                  "machine",
-                  "user",
+                  "principal_id",
+                  "participant_id",
+                  "environment",
                   "mode",
                   "fence",
                   "acquired_at",
@@ -265,8 +266,17 @@ describe("runMigrationsWithPitrRollback", () => {
                   "token_id",
                   "source",
                   "source_version",
+                  "principal_id",
+                  "participant_id",
+                  "environment",
                 ],
-                presence: ["machine", "last_seen", "info"],
+                presence: [
+                  "principal_id",
+                  "participant_id",
+                  "environment",
+                  "last_seen",
+                  "info",
+                ],
                 record_revisions: [
                   "type",
                   "key",
@@ -300,10 +310,41 @@ describe("runMigrationsWithPitrRollback", () => {
                   "kind",
                   "resource",
                   "payload",
-                  "created_by",
+                  "sender_principal_id",
+                  "sender_participant_id",
+                  "sender_display_name",
+                  "sender_environment",
                   "created_at",
                   "expires_at",
-                  "acked_at",
+                ],
+                signal_deliveries: [
+                  "signal_id",
+                  "recipient_principal_id",
+                  "recipient_participant_id",
+                  "recipient_display_name",
+                  "recipient_environment",
+                  "acknowledged_at",
+                  "acknowledged_by_principal_id",
+                  "acknowledged_by_participant_id",
+                  "acknowledged_by_display_name",
+                  "acknowledged_by_environment",
+                ],
+                signal_groups: [
+                  "id",
+                  "name",
+                  "created_at",
+                  "updated_at",
+                  "created_by_principal_id",
+                  "created_by_participant_id",
+                  "updated_by_principal_id",
+                  "updated_by_participant_id",
+                ],
+                signal_group_members: [
+                  "group_id",
+                  "principal_id",
+                  "added_at",
+                  "added_by_principal_id",
+                  "added_by_participant_id",
                 ],
                 _do_idempotency: [
                   "key",

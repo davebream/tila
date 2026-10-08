@@ -1,16 +1,13 @@
-import { AdminGrantsStore } from "@tila/backend-d1";
+import { ProjectMembershipStore } from "@tila/backend-d1";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { adminCacheKey } from "../lib/admin-cache-key";
 import { applyAdminGrant } from "../lib/admin-grant";
 import {
   type AdminRosterOutcome,
   emitAdminRosterDatapoint,
 } from "../lib/analytics";
-import {
-  requireProjectAdmin,
-  revokeAdminGrantInCache,
-} from "../middleware/require-project-admin";
+import { stepUpGuard } from "../middleware/protected-operation";
+import { requireProjectOwner } from "../middleware/require-project-owner";
 import type { Env, HonoVariables } from "../types";
 
 type AdminEnv = { Bindings: Env; Variables: HonoVariables };
@@ -45,15 +42,19 @@ function emit(
 // ─────────────────────────────────────────────────────────────────────────────
 // GET / — list active admins
 // ─────────────────────────────────────────────────────────────────────────────
-adminRoster.get("/", requireProjectAdmin, async (c) => {
+adminRoster.get("/", requireProjectOwner, async (c) => {
   const projectId = c.get("projectId");
-  const store = new AdminGrantsStore(c.env.DB);
-  const rows = await store.list(projectId);
+  const store = new ProjectMembershipStore(c.env.DB);
+  const rows = (await store.list(projectId)).filter(
+    (row) => row.provider === "github" && row.role === "owner",
+  );
 
   const admins = rows.map((r) => ({
-    github_user_id: r.github_user_id,
-    login: r.github_login_snapshot,
-    granted_by: r.granted_by_user_id,
+    github_user_id: Number(r.subject_id),
+    login: r.display_name,
+    granted_by: r.granted_by.startsWith("github:github.com:")
+      ? Number(r.granted_by.slice("github:github.com:".length))
+      : null,
     granted_at: r.granted_at,
   }));
 
@@ -74,7 +75,7 @@ adminRoster.get("/", requireProjectAdmin, async (c) => {
 //      returns 400 pre-emit; only the free-string emitInfraAdminDatapoint path
 //      in the seeder carries it.)
 // ─────────────────────────────────────────────────────────────────────────────
-adminRoster.post("/", requireProjectAdmin, async (c) => {
+adminRoster.post("/", requireProjectOwner, stepUpGuard, async (c) => {
   const projectId = c.get("projectId");
   const tokenResult = c.get("tokenResult");
 
@@ -152,89 +153,97 @@ adminRoster.post("/", requireProjectAdmin, async (c) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /:githubUserId — revoke admin
 // ─────────────────────────────────────────────────────────────────────────────
-adminRoster.delete("/:githubUserId", requireProjectAdmin, async (c) => {
-  const projectId = c.get("projectId");
-  const tokenResult = c.get("tokenResult");
+adminRoster.delete(
+  "/:githubUserId",
+  requireProjectOwner,
+  stepUpGuard,
+  async (c) => {
+    const projectId = c.get("projectId");
+    const tokenResult = c.get("tokenResult");
 
-  // Parse and validate path param
-  const rawId = c.req.param("githubUserId");
-  const parsed = Number(rawId);
-  if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== rawId) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "validation-error",
-          message: "githubUserId must be a positive integer",
-          retryable: false,
+    // Parse and validate path param
+    const rawId = c.req.param("githubUserId");
+    const parsed = Number(rawId);
+    if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== rawId) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "validation-error",
+            message: "githubUserId must be a positive integer",
+            retryable: false,
+          },
         },
-      },
-      400,
+        400,
+      );
+    }
+    const targetUserId = parsed;
+
+    const store = new ProjectMembershipStore(c.env.DB);
+
+    // Call list() once — used for both the last-admin guard AND the revoked boolean.
+    const activeAdmins = (await store.list(projectId)).filter(
+      (row) => row.provider === "github" && row.role === "owner",
     );
-  }
-  const targetUserId = parsed;
+    const isTargetActive = activeAdmins.some(
+      (r) => r.subject_id === String(targetUserId),
+    );
 
-  const store = new AdminGrantsStore(c.env.DB);
+    // Resolve actor identity (d1-token → null, session → githubUserId).
+    // require-project-admin.ts:131 already rejected null-identity sessions.
+    const callerUserId =
+      tokenResult.kind === "session"
+        ? (tokenResult.githubUserId ?? null)
+        : null;
+    const isD1Token =
+      tokenResult.kind === "d1-token" && tokenResult.scopes === "full";
 
-  // Call list() once — used for both the last-admin guard AND the revoked boolean.
-  const activeAdmins = await store.list(projectId);
-  const isTargetActive = activeAdmins.some(
-    (r) => r.github_user_id === targetUserId,
-  );
-
-  // Resolve actor identity (d1-token → null, session → githubUserId).
-  // require-project-admin.ts:131 already rejected null-identity sessions.
-  const callerUserId =
-    tokenResult.kind === "session" ? (tokenResult.githubUserId ?? null) : null;
-  const isD1Token = tokenResult.kind === "d1-token";
-
-  // ── Last-admin guard ────────────────────────────────────────────────────
-  // Guard: active roster count==1 AND sole row id==target AND bearer caller
-  // githubUserId==target → 409 last-admin (emit denied datapoint), grant untouched.
-  // Full-scope D1 tokens bypass the guard (bootstrap escape hatch).
-  if (
-    !isD1Token &&
-    activeAdmins.length === 1 &&
-    activeAdmins[0]?.github_user_id === targetUserId &&
-    callerUserId === targetUserId
-  ) {
-    emit(c, "revoke", "last-admin", 409);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "last-admin",
-          message:
-            "Cannot revoke the last admin; grant another admin first or use a D1 bootstrap token",
-          retryable: false,
+    // ── Last-admin guard ────────────────────────────────────────────────────
+    // Guard: active roster count==1 AND sole row id==target AND bearer caller
+    // githubUserId==target → 409 last-admin (emit denied datapoint), grant untouched.
+    // Full-scope D1 tokens bypass the guard (bootstrap escape hatch).
+    if (
+      !isD1Token &&
+      activeAdmins.length === 1 &&
+      activeAdmins[0]?.subject_id === String(targetUserId) &&
+      callerUserId === targetUserId
+    ) {
+      emit(c, "revoke", "last-admin", 409);
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "last-admin",
+            message:
+              "Cannot revoke the last admin; grant another admin first or use a D1 bootstrap token",
+            retryable: false,
+          },
         },
-      },
-      409,
+        409,
+      );
+    }
+
+    // Revoke (soft-delete; double-revoke is a no-op → still 200 with revoked:false).
+    const revokedByUserId = callerUserId;
+    const target = activeAdmins.find(
+      (row) => row.subject_id === String(targetUserId),
     );
-  }
+    if (target) {
+      await store.revoke({
+        projectId,
+        membershipId: target.membership_id,
+        actorPrincipalId:
+          callerUserId === null
+            ? "bootstrap:admin-roster"
+            : `github:github.com:${callerUserId}`,
+      });
+    }
 
-  // Revoke (soft-delete; double-revoke is a no-op → still 200 with revoked:false).
-  const revokedByUserId = callerUserId;
-  await store.revoke(
-    projectId,
-    "github.com",
-    targetUserId,
-    revokedByUserId ?? undefined,
-  );
-
-  // ── Same-isolate cache purge ────────────────────────────────────────────
-  // Both this revoke purge and the roster lookup in require-project-admin.ts
-  // call adminCacheKey() from lib/admin-cache-key.ts — the shared function
-  // enforces byte-identical key format. If GHES/multi-host support lands,
-  // update the host argument here to match the lookup site's githubHost value.
-  revokeAdminGrantInCache(
-    adminCacheKey({ host: "github.com", projectId, userId: targetUserId }),
-  );
-
-  emit(c, "revoke", "success", 200);
-  return c.json({
-    ok: true,
-    github_user_id: targetUserId,
-    revoked: isTargetActive,
-  });
-});
+    emit(c, "revoke", "success", 200);
+    return c.json({
+      ok: true,
+      github_user_id: targetUserId,
+      revoked: isTargetActive,
+    });
+  },
+);

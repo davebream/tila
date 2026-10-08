@@ -11,10 +11,20 @@ const CREATE_PROJECT_REPOS = `
     github_repo_id        INTEGER NOT NULL,
     min_read_permission   TEXT    NOT NULL DEFAULT 'read',
     min_write_permission  TEXT    NOT NULL DEFAULT 'write',
+    max_permission        TEXT    NOT NULL DEFAULT 'write',
+    membership_enabled   INTEGER NOT NULL DEFAULT 0,
+    membership_role_cap  TEXT    NOT NULL DEFAULT 'participant',
     enabled               INTEGER NOT NULL DEFAULT 1,
     created_at            INTEGER NOT NULL,
     created_by            TEXT    NOT NULL,
-    oidc_permission       TEXT    NOT NULL DEFAULT 'write'
+    oidc_permission       TEXT    NOT NULL DEFAULT 'write',
+    oidc_enabled          INTEGER NOT NULL DEFAULT 0,
+    oidc_max_permission   TEXT    NOT NULL DEFAULT 'read',
+    oidc_subject_pattern  TEXT,
+    oidc_allowed_events   TEXT    NOT NULL DEFAULT '[]',
+    oidc_allowed_refs     TEXT    NOT NULL DEFAULT '[]',
+    oidc_allowed_environments TEXT NOT NULL DEFAULT '[]',
+    oidc_allowed_workflows TEXT NOT NULL DEFAULT '[]'
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_project_repos_lookup
     ON _project_repos (project_id, github_host, github_repo_id);
@@ -94,8 +104,11 @@ describe("RepoAllowlistStore", () => {
       expect(r.github_repo_id).toBe(12345);
       expect(r.min_read_permission).toBe("write");
       expect(r.min_write_permission).toBe("write");
+      expect(r.max_permission).toBe("write");
       expect(r.enabled).toBe(1);
       expect(r.created_by).toBe("admin-user");
+      expect(r.oidc_enabled).toBe(0);
+      expect(r.oidc_max_permission).toBe("read");
     });
 
     it("isRegistered() returns null for unknown repo", async () => {
@@ -146,6 +159,84 @@ describe("RepoAllowlistStore", () => {
     });
   });
 
+  describe("human access policy", () => {
+    it("lists every enabled repository policy and skips malformed rows", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      await store.register({
+        ...BASE_PARAMS,
+        githubRepo: "gadgets",
+        githubRepoId: 67890,
+        membershipEnabled: true,
+        membershipRoleCap: "maintainer",
+      });
+      await store.register({
+        ...BASE_PARAMS,
+        githubRepo: "broken",
+        githubRepoId: 11111,
+      });
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET min_read_permission = 'admin', min_write_permission = 'write' WHERE github_repo_id = 11111",
+        )
+        .run();
+
+      const listed = await store.listAccessPolicies("proj-1");
+      expect(listed.map((entry) => entry.repo.github_repo_id).sort()).toEqual([
+        12345, 67890,
+      ]);
+      const gadgets = listed.find(
+        (entry) => entry.repo.github_repo_id === 67890,
+      );
+      expect(gadgets?.repo.github_owner).toBe("acme");
+      expect(gadgets?.policy.membership_enabled).toBe(true);
+      expect(gadgets?.policy.membership_role_cap).toBe("maintainer");
+      await expect(store.listAccessPolicies("other")).resolves.toEqual([]);
+    });
+
+    it("reads and atomically replaces a valid policy", async () => {
+      const { store } = createTestStore();
+      await store.register(BASE_PARAMS);
+
+      const updated = await store.setAccessPolicy(
+        "proj-1",
+        "github.com",
+        12345,
+        {
+          min_read_permission: "read",
+          min_write_permission: "maintain",
+          max_permission: "admin",
+        },
+      );
+
+      expect(updated).toMatchObject({
+        status: "ok",
+        policy: {
+          min_read_permission: "read",
+          min_write_permission: "maintain",
+          max_permission: "admin",
+        },
+      });
+      await expect(
+        store.getAccessPolicy("proj-1", "github.com", 12345),
+      ).resolves.toMatchObject(updated);
+    });
+
+    it("fails closed when stored policy is malformed", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET min_read_permission = 'admin', min_write_permission = 'write'",
+        )
+        .run();
+
+      await expect(
+        store.getAccessPolicy("proj-1", "github.com", 12345),
+      ).resolves.toEqual({ status: "invalid-policy" });
+    });
+  });
+
   describe("listForProject", () => {
     it("returns only enabled rows for the project", async () => {
       const { store, sqlite } = createTestStore();
@@ -181,6 +272,89 @@ describe("RepoAllowlistStore", () => {
       const rows = await store.listForProject("proj-1");
       expect(rows).toHaveLength(1);
       expect(rows[0].project_id).toBe("proj-1");
+    });
+  });
+
+  describe("GitHub Actions OIDC policy", () => {
+    it("returns the disabled, read-only policy for a new repository link", async () => {
+      const { store } = createTestStore();
+      await store.register(BASE_PARAMS);
+
+      const result = await store.getOidcPolicy("proj-1", "github.com", 12345);
+      expect(result).toMatchObject({
+        status: "ok",
+        policy: {
+          enabled: false,
+          max_permission: "read",
+          subject_pattern: null,
+          allowed_events: [],
+          allowed_refs: [],
+          allowed_environments: [],
+          allowed_workflows: [],
+        },
+      });
+    });
+
+    it("atomically replaces and round-trips the complete policy", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      const policy = {
+        enabled: true,
+        max_permission: "write" as const,
+        subject_pattern: "repo:acme/widgets:*",
+        allowed_events: ["push"],
+        allowed_refs: ["refs/heads/main"],
+        allowed_environments: ["production"],
+        allowed_workflows: [
+          "acme/workflows/.github/workflows/deploy.yml@refs/heads/main",
+        ],
+      };
+
+      const written = await store.setOidcPolicy(
+        "proj-1",
+        "github.com",
+        12345,
+        policy,
+      );
+      expect(written).toMatchObject({ status: "ok", policy });
+      expect(
+        sqlite
+          .prepare(
+            "SELECT oidc_permission FROM _project_repos WHERE github_repo_id = 12345",
+          )
+          .get(),
+      ).toEqual({ oidc_permission: "write" });
+      expect(
+        await store.getOidcPolicy("proj-1", "github.com", 12345),
+      ).toMatchObject({ status: "ok", policy });
+    });
+
+    it("returns not-found when replacing a missing repository policy", async () => {
+      const { store } = createTestStore();
+      const result = await store.setOidcPolicy("proj-1", "github.com", 99999, {
+        enabled: false,
+        max_permission: "read",
+        subject_pattern: null,
+        allowed_events: [],
+        allowed_refs: [],
+        allowed_environments: [],
+        allowed_workflows: [],
+      });
+      expect(result).toEqual({ status: "not-found" });
+    });
+
+    it("fails closed when stored policy JSON is malformed", async () => {
+      const { store, sqlite } = createTestStore();
+      await store.register(BASE_PARAMS);
+      sqlite
+        .prepare(
+          "UPDATE _project_repos SET oidc_enabled = 1, oidc_allowed_events = 'not-json' WHERE github_repo_id = 12345",
+        )
+        .run();
+
+      expect(await store.getOidcPolicy("proj-1", "github.com", 12345)).toEqual({
+        status: "invalid-policy",
+      });
     });
   });
 

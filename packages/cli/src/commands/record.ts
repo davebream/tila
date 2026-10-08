@@ -12,8 +12,12 @@ import yaml, { type YAMLWarning } from "yaml";
 import type { z } from "zod";
 import { resolveContext } from "../context";
 import {
+  boundedItems,
+  diagnostic,
+  exit,
   formatTimestamp,
   jsonArg,
+  outputText,
   printJson,
   renderTable,
   withSpinner,
@@ -133,8 +137,8 @@ export default defineCommand({
         try {
           value = parseInputFile(filePath);
         } catch (err) {
-          console.error(`Error: ${(err as Error).message}`);
-          process.exit(1);
+          diagnostic(`Error: ${(err as Error).message}`);
+          exit(1);
         }
 
         // Check if snapshot preupload is needed
@@ -146,10 +150,10 @@ export default defineCommand({
           // dropping the source artifact (the local backend would still write
           // the record, but without the snapshot provenance the type promises).
           if (!ctx.client) {
-            console.error(
+            diagnostic(
               `Error: record type "${recordType}" uses history = "snapshot", which requires a remote backend (snapshot source artifacts are uploaded to R2 via the Worker). It is not supported in local mode.`,
             );
-            process.exit(1);
+            exit(1);
             return;
           }
           try {
@@ -166,7 +170,7 @@ export default defineCommand({
             sourceArtifactKey = (uploadResult as Record<string, unknown>)
               .key as string;
           } catch (err) {
-            console.error(
+            diagnostic(
               `Warning: snapshot preupload failed: ${(err as Error).message}. Continuing without source artifact.`,
             );
           }
@@ -189,7 +193,7 @@ export default defineCommand({
             printJson(result);
             return;
           }
-          console.log(
+          outputText(
             `Set record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
           );
         } else {
@@ -206,7 +210,7 @@ export default defineCommand({
             printJson(result);
             return;
           }
-          console.log(
+          outputText(
             `Set record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
           );
         }
@@ -242,8 +246,8 @@ export default defineCommand({
         );
 
         if (!record) {
-          console.error(`Error: record ${recordType}/${key} not found`);
-          process.exit(1);
+          diagnostic(`Error: record ${recordType}/${key} not found`);
+          exit(1);
           return;
         }
 
@@ -260,9 +264,9 @@ export default defineCommand({
         }
 
         if (outputFormat === "yaml") {
-          console.log(yaml.stringify(record.value).trimEnd());
+          outputText(yaml.stringify(record.value).trimEnd());
         } else {
-          console.log(JSON.stringify(record.value, null, 2));
+          outputText(JSON.stringify(record.value, null, 2));
         }
       },
     }),
@@ -297,8 +301,8 @@ export default defineCommand({
               unknown
             >;
           } catch {
-            console.error("Error: --filter must be valid JSON");
-            process.exit(1);
+            diagnostic("Error: --filter must be valid JSON");
+            exit(1);
             return;
           }
         }
@@ -327,7 +331,7 @@ export default defineCommand({
         }
 
         if (page.items.length === 0) {
-          console.log("No records found.");
+          outputText("No records found.");
           return;
         }
 
@@ -349,7 +353,7 @@ export default defineCommand({
         );
 
         if (page.next_cursor === "truncated") {
-          console.log(`(results truncated at ${args.limit ?? page.total})`);
+          outputText(`(results truncated at ${args.limit ?? page.total})`);
         }
       },
     }),
@@ -367,7 +371,7 @@ export default defineCommand({
           description: "Record key",
           required: true,
         },
-        json: {
+        data: {
           type: "string",
           description: "Inline JSON patch payload",
           required: true,
@@ -377,6 +381,7 @@ export default defineCommand({
           description: "Fencing token (required)",
           required: true,
         },
+        ...jsonArg,
       },
       async run({ args }) {
         const recordType = args.type as string;
@@ -384,16 +389,16 @@ export default defineCommand({
         const fenceStr = args.fence as string | undefined;
 
         if (!fenceStr) {
-          console.error("Error: --fence is required for patch");
-          process.exit(1);
+          diagnostic("Error: --fence is required for patch");
+          exit(1);
         }
 
         let patch: Record<string, unknown>;
         try {
-          patch = JSON.parse(args.json as string) as Record<string, unknown>;
+          patch = JSON.parse(args.data as string) as Record<string, unknown>;
         } catch {
-          console.error("Error: --json must be valid JSON");
-          process.exit(1);
+          diagnostic("Error: --data must be valid JSON");
+          exit(1);
         }
 
         const ctx = await resolveContext();
@@ -406,7 +411,11 @@ export default defineCommand({
           }),
         );
 
-        console.log(
+        if (args.json) {
+          printJson(result);
+          return;
+        }
+        outputText(
           `Patched record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
         );
       },
@@ -434,8 +443,8 @@ export default defineCommand({
         const fenceStr = args.fence as string | undefined;
 
         if (!fenceStr) {
-          console.error("Error: --fence is required for archive");
-          process.exit(1);
+          diagnostic("Error: --fence is required for archive");
+          exit(1);
         }
 
         const ctx = await resolveContext();
@@ -451,7 +460,7 @@ export default defineCommand({
           printJson(result);
           return;
         }
-        console.log(
+        outputText(
           `Archived record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
         );
       },
@@ -479,8 +488,8 @@ export default defineCommand({
         const fenceStr = args.fence as string | undefined;
 
         if (!fenceStr) {
-          console.error("Error: --fence is required for unarchive");
-          process.exit(1);
+          diagnostic("Error: --fence is required for unarchive");
+          exit(1);
         }
 
         const ctx = await resolveContext();
@@ -496,7 +505,7 @@ export default defineCommand({
           printJson(result);
           return;
         }
-        console.log(
+        outputText(
           `Unarchived record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
         );
       },
@@ -546,7 +555,7 @@ export default defineCommand({
         }
 
         if (page.items.length === 0) {
-          console.log("No history found.");
+          outputText("No history found.");
           return;
         }
 
@@ -598,8 +607,8 @@ export default defineCommand({
         } else {
           const recordType = args.type as string | undefined;
           if (!recordType) {
-            console.error("Error: specify a record type or use --all");
-            process.exit(1);
+            diagnostic("Error: specify a record type or use --all");
+            exit(1);
             return;
           }
           types = [recordType];
@@ -638,7 +647,7 @@ export default defineCommand({
                 : `${JSON.stringify(record.value, null, 2)}\n`;
 
             writeFileSync(outPath, content, "utf-8");
-            console.log(`Exported ${recordType}/${item.key} -> ${outPath}`);
+            outputText(`Exported ${recordType}/${item.key} -> ${outPath}`);
           }
         }
       },
@@ -681,12 +690,12 @@ export default defineCommand({
         }
 
         if (typesToShow.length === 0) {
-          console.log("No record types found.");
+          outputText("No record types found.");
           return;
         }
 
-        for (const t of typesToShow) {
-          console.log(t);
+        for (const t of boundedItems(typesToShow)) {
+          outputText(t);
         }
       },
     }),

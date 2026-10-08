@@ -81,14 +81,19 @@ erDiagram
         int t "unix ms"
         text kind "event type"
         text resource "soft link"
-        text actor
+        text principal_id
+        text participant_id
+        json environment
+        text token_id "credential audit"
         int fence
         json data "event payload"
     }
 
     claims {
         text resource PK
-        text holder
+        text principal_id
+        text participant_id
+        json environment
         text mode "exclusive or owner or presence"
         int fence "value at acquire time"
         int acquired_at
@@ -102,7 +107,9 @@ erDiagram
     }
 
     presence {
-        text machine PK
+        text principal_id PK
+        text participant_id PK
+        json environment
         int last_seen "60s TTL by default"
         json info "current resource and status"
     }
@@ -153,7 +160,7 @@ erDiagram
 
 **One DO per project.** Every table outside the global D1 set (see below) lives inside the project's Durable Object's SQLite storage. There is one DO instance per tila project. All per-project state — entities, relationships, artifacts metadata, claims, journal, schema history — is in this DO. The DO is reachable only through the Worker; access goes through Cloudflare's serialization, which is what makes single-transaction claim+entity+journal writes safe.
 
-**Global D1 is narrow.** The global D1 instance holds 12 account-wide tables shared across all tila projects in a Cloudflare account: `_projects`, `_tokens`, `_idempotency`, plus the auth/session tables added for multi-instance auth (`_sessions`, `_project_repos`, `_rate_limits`, `_github_app_config`, `_revoked_jti`, `_revoked_subjects`, `_oidc_principals`, `_admin_grants`, `_deployment_meta`). The Worker reads these to authenticate requests and route to the right DO. They're separate because they have cross-project scope (an account-wide token registry; idempotency keys that may span requests across DOs; session and revocation state).
+**Global D1 is narrow.** The global D1 instance holds 14 account-wide tables shared across all tila projects in a Cloudflare account: `_projects`, `_tokens`, `_idempotency`, plus the auth/session tables added for multi-instance auth (`_sessions`, `_project_repos`, `_rate_limits`, `_github_app_config`, `_revoked_jti`, `_revoked_subjects`, `_oidc_principals`, `_admin_grants`, `_deployment_meta`) and canonical authorization (`_project_memberships`, `_membership_events`). The Worker reads these to authenticate requests, resolve current project membership, and route to the right DO. `_project_memberships` has at most one active row per project/principal; `_membership_events` is append-only audit history. Legacy `_admin_grants` and `_oidc_principals` are retained as historical migration inputs, not live authorization sources.
 
 **Solid lines are foreign-key relationships inside one storage layer.** Within DO SQLite, `entities.id` is referenced by `entity_relationships.from_id`/`to_id`, `entity_artifact_references.entity_id`, and `artifact_pointers.resource`. Within global D1, `_projects.project_id` is referenced by `_tokens.project_id`.
 
@@ -168,7 +175,7 @@ erDiagram
 The 2024 design held entities in D1 and only coordination state in the DO. The 2026 design unifies them. Three reasons:
 
 1. **Claim + entity + journal in one transaction.** Claiming a task and updating its status used to require Worker-coordinated writes across two backends (D1 entity update, DO claim acquire, D1 journal append). Now it's one DO SQLite transaction. The two-write problem dissolves.
-2. **Latency.** D1 reads from a Worker are ~30ms. DO SQLite reads from inside the DO are <1ms. Most operations touch both entity state and claim state; co-locating them drops the hot path 5-10x.
+2. **Latency.** D1 reads from a Worker are ~30ms. DO SQLite reads from inside the DO are <1ms (the `inproc` benchmark tier measures the DO-side cost; see [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)). Most operations touch both entity state and claim state; co-locating them drops the hot path 5-10x.
 3. **Free tier headroom.** D1's 100K writes/day free tier was a real constraint at autopilot rates. DO storage has different (more generous for active projects) limits.
 
 D1 still exists for things that genuinely need cross-project scope: API tokens (must be readable before contacting any DO, to authenticate), idempotency keys (cross-request scope), project registry (a directory of projects in the account).
@@ -205,7 +212,8 @@ DO SQLite is the source of truth for everything per-project. It is *not* a cache
 - **Claims:** persisted, not transient. The single-DO transaction model means claim acquisition is the same kind of write as entity creation.
 - **Fences:** persisted indefinitely. Even after a resource is deleted, its fence counter survives (so future re-creates don't reuse fence numbers).
 - **Journal:** the audit log. Append-only, durable, recoverable via Cloudflare's DO SQLite point-in-time recovery.
-- **Presence:** the one mostly-ephemeral table. Refreshed on heartbeat, reaped by the sweeper. Crashes are recoverable (machines re-register).
+- **Presence:** the one mostly-ephemeral table. It is keyed by `(principal_id, participant_id)`, refreshed on heartbeat, and reaped by the sweeper. Crashes are recoverable (participants re-register).
+- **Signals:** `signals` stores sender and typed-target snapshots; `signal_deliveries` stores immutable recipient and acknowledgement identities; `signal_groups` and `signal_group_members` store named principal audiences. Group edits never rewrite prior deliveries.
 
 If a DO is wiped (catastrophic incident with no PIT recovery), the recovery story is:
 - **Artifacts are recoverable from R2 + object metadata.** `tila doctor --reconcile` walks R2 and synthesizes `artifact_pointers` rows from `x-amz-meta-tila-*` metadata.
@@ -249,8 +257,28 @@ These are worth confirming or deferring; the diagram makes them visible:
 
 Looking at the structure end-to-end, three things stand out:
 
-**The DO is the heart.** Almost every per-project table is in DO SQLite. The D1 piece is narrowly scoped (12 tables: account-wide auth, routing, idempotency, and session/revocation state). R2 holds blobs and nothing else. This is the cleanest expression of "one project = one DO" — every write that needs project-level consistency goes through the same single-threaded SQLite database.
+**The DO is the heart.** Almost every per-project table is in DO SQLite. The D1 piece is narrowly scoped (14 tables: account-wide auth, membership, routing, idempotency, and session/revocation state). R2 holds blobs and nothing else. Membership tables and the new `_projects.membership_mode`, repository adapter columns, and session role/source columns are included in D1 backup/restore allowlists and validation.
 
 **The cross-store edge is narrow.** R2 connects to DO through exactly one column: `artifact_pointers.r2_key`. Every R2 object should have exactly one pointer row, and every non-tombstoned pointer row should reference exactly one R2 object. If this invariant breaks, `tila doctor` detects it and reports orphans on either side.
 
 **The audit trail is unified.** All meaningful state changes emit a journal row in the same transaction as the change itself. There's no journal-vs-state-table drift to worry about because the journal IS in the same SQLite database as the state. This is the largest 2024-vs-2026 improvement: the old design split journal across two backends (D1 for durability, DO for fast queries), creating a class of consistency bugs that simply cannot occur now.
+
+
+## Artifact provenance and reviews (migration 29)
+
+`artifact_pointers.provenance` and `revision_creation` are nullable JSON columns.
+They contain principal ID, participant ID, creation timestamp, client name/version,
+and environment metadata. SQLite rejects modifications to these columns after
+insertion. Legacy display names remain compatibility fields, not verified identity.
+
+`artifact_reviews` is keyed by `(artifact_key, review_revision)` and stores reviewer
+principal/participant, timestamp, decision, optional reason, unique operation ID,
+and normalized request data for duplicate-safe retries. Review revisions increase
+monotonically per artifact; the latest event supplies current state. Updates are
+forbidden; deletes are reserved for authorized backup replacement/project deletion.
+The review event and its journal record commit together. Transfer guards include
+the new table, and project exports include it in the semantic digest.
+
+Blob lifecycle cleanup retains pointer and review rows, including legacy metadata.
+Confirmed deletion clears inline content. Audit metadata grows with artifact and
+review count until the project is explicitly destroyed or replaced from backup.

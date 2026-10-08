@@ -1,6 +1,13 @@
 import { defineCommand } from "citty";
 import { resolveContext } from "../context";
-import { jsonArg, printJson, renderTable } from "../lib/output";
+import {
+  diagnostic,
+  exit,
+  jsonArg,
+  outputText,
+  printJson,
+  renderTable,
+} from "../lib/output";
 
 const listCommand = defineCommand({
   meta: { name: "list", description: "List all active claims" },
@@ -15,22 +22,24 @@ const listCommand = defineCommand({
       return;
     }
     if (claims.length === 0) {
-      console.log("No active claims.");
+      outputText("No active claims.");
       return;
     }
     renderTable(
       claims.map((c) => ({
         resource: c.resource,
-        machine: c.machine,
-        user: c.user,
+        principal: c.principal_id,
+        participant: c.participant_id,
+        machine: c.environment.machine ?? "",
         mode: c.mode,
         fence: c.fence,
         ttl: `${Math.max(0, Math.round((c.expires_at - Date.now()) / 1000))}s`,
       })),
       [
         { key: "resource", label: "Resource" },
-        { key: "machine", label: "Machine" },
-        { key: "user", label: "User" },
+        { key: "principal", label: "Principal" },
+        { key: "participant", label: "Participant" },
+        { key: "machine", label: "Environment" },
         { key: "mode", label: "Mode" },
         { key: "fence", label: "Fence" },
         { key: "ttl", label: "TTL" },
@@ -54,8 +63,8 @@ export default defineCommand({
   },
   async run({ args }) {
     if (!args.resource) {
-      console.error("Usage: tila state <resource> | tila state list");
-      process.exit(1);
+      diagnostic("Usage: tila state <resource> | tila state list");
+      exit(1);
     }
     const { coordination } = await resolveContext();
     const claim = await coordination.state(args.resource as string);
@@ -65,19 +74,22 @@ export default defineCommand({
       return;
     }
     if (!claim) {
-      console.log(`${args.resource}: unclaimed`);
+      outputText(`${args.resource}: unclaimed`);
       return;
     }
     const ttlSec = Math.max(
       0,
       Math.round((claim.expires_at - Date.now()) / 1000),
     );
-    console.log(`${args.resource}:`);
-    console.log(`  machine: ${claim.machine}`);
-    console.log(`  user:    ${claim.user}`);
-    console.log(`  mode:    ${claim.mode}`);
-    console.log(`  fence:   ${claim.fence}`);
-    console.log(`  ttl:     ${ttlSec}s`);
-    console.log(`  expires: ${new Date(claim.expires_at).toISOString()}`);
+    outputText(`${args.resource}:`);
+    outputText(`  principal:   ${claim.principal_id}`);
+    outputText(`  participant: ${claim.participant_id}`);
+    if (claim.environment.machine) {
+      outputText(`  machine:     ${claim.environment.machine}`);
+    }
+    outputText(`  mode:    ${claim.mode}`);
+    outputText(`  fence:   ${claim.fence}`);
+    outputText(`  ttl:     ${ttlSec}s`);
+    outputText(`  expires: ${new Date(claim.expires_at).toISOString()}`);
   },
 });

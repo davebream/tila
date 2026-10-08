@@ -2,6 +2,28 @@
 
 > The technical specification. Detailed enough that an autopilot can implement against it without inventing things. Reads top to bottom; subsections reference each other but each section is meaningful on its own.
 
+## Direction and implementation status — 2026-09-20
+
+The existing sections describe the implemented coordination engine and historical
+plans. [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20) and
+[the active roadmap](03-ROADMAP.md) take precedence for new work.
+
+The target adds a management service in the same repo, with tasks distinct from
+attempts and replaceable provider sessions. One orchestrator coordinates workers
+first. Cloudflare owns shared state; a Mac/Linux host integration owns execution.
+Evaluate Herdr's runtime before writing a new supervisor. Native clients are later
+API consumers, not a requirement for workers to stay alive.
+
+Keys bound to native principals and explicit memberships will replace GitHub auth.
+The membership foundation from #184 / #218 is implemented; key-only onboarding,
+auth retirement and standalone local-mode retirement are not. Preserve current
+compatibility until migration/export and access tests cover each removal.
+
+For development, Wrangler, Bun and tsx use the root source path mappings; Vite reads
+schemas from source. Production package exports, declaration builds and packaging
+tests remain separate. Deployed hosts must use identifiable immutable revisions.
+Client/server API compatibility must be negotiated independently of release versions.
+
 ---
 
 ## Section 0: Implementation stack
@@ -13,7 +35,7 @@ The languages, frameworks, and libraries this is built with. Decisions are made;
 - **Language:** TypeScript throughout. CLI, Worker, shared schemas, UI bundle. One language eliminates client-server type drift and maximizes Claude Code's effectiveness during AI-assisted implementation.
 - **CLI runtime:** Bun (>=1.2). Source is TypeScript; distribution is a static binary per platform via `bun build --compile`. Cold start ~20-30ms vs Node's 200-500ms. Bun's test runner is acceptable for v0.1; Vitest is the fallback for tests that need `@cloudflare/vitest-pool-workers` (the Worker tests specifically).
 - **Worker runtime:** Cloudflare Workers (workerd). Same TypeScript source as the CLI; bundled via Wrangler.
-- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun is used only to compile the CLI binary (`bun build --compile`), not for workspace management.
+- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun runs the source CLI and compiles its release binary (`bun build --compile`); pnpm owns workspace management.
 - **Monorepo tooling:** Turborepo for task orchestration across packages (matching the maintainer's existing setup).
 - **ORM / DB access:** Drizzle for SQL access. In the Worker, `drizzle-orm/durable-sqlite` for the per-project DO (the primary persistence layer) and `drizzle-orm/d1` for the global D1 instance (auth tokens, idempotency). The EntityBackend interface preserves the option for v0.2+ alternatives (GitHub Issues, Linear, Upstash, self-hosted Postgres).
 - **HTTP framework in the Worker:** Hono. Route handlers, middleware, error handling.
@@ -200,13 +222,15 @@ Artifacts of either flavor can reference other artifacts via typed edges (a revi
 
 **4. Journal events.** Append-only audit log of meaningful state transitions. Every claim, release, artifact write, record mutation, schema apply, gate transition, signal emission, archive — anything that changes durable state — produces a journal event. Persisted in the per-project DO SQLite `journal` table; immutable after write.
 
+**Client identity.** Every client instance binds `{ principal_id, participant_id, environment }`. The Worker derives the principal from authentication (`token:<uuid>`, `github:<host>:<numeric-user-id>`, or `oidc:<issuer>:<subject>`) and ignores client-supplied principal values. `X-Tila-Participant-Id` is required on authenticated state-changing project requests. Optional `X-Tila-Machine`, repository/worktree/branch/commit, and client headers populate untrusted environment metadata; they never authorize a write or own a claim.
+
 ### 1.2a Coordination primitives
 
 Beyond the four data shapes, tila ships five coordination primitives that operate across them:
 
 - **Claims.** First-writer-wins coordination with fencing tokens against any resource name. Used for work-unit claims (`task:T-142`), file-edit locks (`file:src/auth.rb`), record mutations (`record:service/api`), and any other resource the consumer wants to serialize.
 - **Gates.** Approval and quality gates that govern work-unit transitions. A work unit cannot leave a state without all required gates being satisfied. Gates emit journal events on satisfaction.
-- **Signals.** Lightweight notifications distinct from journal events. Used for cross-machine coordination of non-state-changing events ("agent A finished its review, agent B may proceed"). Signals do not modify durable state beyond their own emission record.
+- **Signals.** Lightweight notifications distinct from journal events. Targets are canonical participants, principals, principal-based groups, or the active broadcast audience. Each send snapshots immutable participant deliveries; inboxes and acknowledgements are authorized by the caller's exact principal/participant pair. Display names and environment fields are retained only as audit metadata. Acknowledged deliveries remain through expiry, when the signal and all deliveries are swept together.
 - **Presence.** TTL'd machine activity for "who's online and on what."
 - **Search.** Lexical full-text search (FTS5) across indexed artifact content. Searchable kinds are declared in `tila.schema.toml`.
 
@@ -229,7 +253,7 @@ Three concepts, three relationship tables:
 | Artifact-to-artifact relationships | DO SQLite | `artifact_relationships` table |
 | Records (typed mutable JSON state) | DO SQLite | `records` table keyed by `(type, key)`, plus `record_tags` and `record_revisions`. See [`docs/08-RECORDS.md`](08-RECORDS.md) for full schema. |
 | Gates (approval and quality gates on work-unit transitions) | DO SQLite | Gate definitions and satisfaction state per work unit |
-| Signals (lightweight notifications) | DO SQLite | Append-only signal emission record |
+| Signals (lightweight notifications) | DO SQLite | Signal emissions, immutable participant deliveries, and principal-based groups |
 | Journal events | DO SQLite | Append-only `journal` table |
 | Schema history (every schema definition ever applied) | DO SQLite | `_schema_history` table |
 | Live claims and leases | DO SQLite | `claims` table — same transaction scope as entities |
@@ -260,7 +284,7 @@ On the local path (`tila project create --local`), all per-project DO SQLite sta
 7. Worker returns JSON to CLI.
 8. CLI renders.
 
-Total Worker → response latency: ~5-15ms when DO is warm (Smart Placement co-locates them). Cold DO adds ~50ms one-time startup.
+Total Worker → response latency was estimated at ~5-15ms when the DO is warm (Smart Placement co-locates them), with a cold DO adding ~50ms one-time startup. Measured values for the deployed path (`claims-uncontended`, `cold-start` scenarios) and for the DO-only cost (`inproc` tier) are in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md); the step costs above remain the model, not measurements.
 
 **Write path** (e.g., `tila task claim T-142`):
 1. CLI makes HTTPS POST to `<worker>/acquire`.
@@ -310,7 +334,7 @@ The Cloudflare path serializes writes via the Durable Object's single-threaded e
 
 1. `PRAGMA journal_mode=WAL` -- enables concurrent readers while a writer holds the write lock. Without WAL, readers block writers and vice versa. WAL separates read and write paths so agents reading state do not block agents writing claims.
 
-2. `PRAGMA busy_timeout=5000` -- SQLite waits up to 5 seconds for a write lock before returning `SQLITE_BUSY`. Eliminates the need for application-layer polling in most contention scenarios. The 5-second window covers typical tila write transactions (sub-millisecond).
+2. `PRAGMA busy_timeout=5000` -- SQLite waits up to 5 seconds for a write lock before returning `SQLITE_BUSY`. Eliminates the need for application-layer polling in most contention scenarios. The 5-second window covers typical tila write transactions, which the `embedded` benchmark tier measures at well under a millisecond per op ([docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)).
 
 3. `PRAGMA foreign_keys=ON` -- enforces referential integrity. Disabled by default in SQLite; must be set per connection.
 
@@ -331,7 +355,7 @@ Local mode therefore now runs under **plain Node**, not just Bun. There is no AD
 
 **Cross-runtime schema identity.** Both hosts run the *same* `EMBEDDED_MIGRATIONS` from `@tila/backend-embedded`, which reuse the canonical `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` *verbatim* (not a copy that can drift). Both apply the same ordered `EMBEDDED_PRAGMAS` (`busy_timeout=5000`, then `journal_mode=WAL`, then `foreign_keys=ON`) and the same network-filesystem matcher. The result: a Bun (CLI)-created DB file and a Node (SDK/MCP)-created DB file are byte-for-byte schema-identical, so **a DB file is portable between the CLI and a Node SDK/MCP consumer** (proven by a cross-runtime interop test: bun writes, node reads). Applied versions are tracked in the **`_migrations` table**, not `PRAGMA user_version`.
 
-**Schema versioning & cross-version compatibility.** The embedded migration set is the canonical versions **1–18 minus v15** (`_journal_archive_watermark`; journal archival to R2 is a DO-only feature with no embedded equivalent — skipping it touches no shared table), **plus an embedded-only idempotency table at version `1000`**. In Cloudflare mode idempotency lives in D1; in embedded mode it lives in the same project SQLite file (one fewer store to coordinate), as a standalone `INSERT OR IGNORE`. Version `1000` is deliberately *outside* the canonical 1–18 range so it is purely additive and never hijacks canonical **v5** (the `idx_er_to_id_type` index) — every canonical version, including v5, applies exactly as upstream. Because both hosts share one migration set keyed by version in `_migrations`, a CLI and an SDK/MCP of *different* releases interoperate on one file as long as they share that set: each applies only the versions it doesn't yet have, in ascending order.
+**Schema versioning & cross-version compatibility.** The embedded migration set reuses every canonical migration except v21 (`_do_idempotency`, which is DO-only), including v15 (journal archive watermark), v23 (canonical identity), and v24 (project transfer lock). It adds the embedded-only idempotency table at version `1000`. Sharing the watermark and transfer state is required for cloud/local backup compatibility and for maintenance triggers to block every SQLite mutation during a snapshot. Because both hosts share one migration set keyed by version in `_migrations`, a CLI and an SDK/MCP of different releases apply only missing versions in ascending order.
 
 **Idempotency is accepted but not honored locally — a known divergence.** The embedded `_idempotency` table (v`1000`) and `EmbeddedProject.checkIdempotency` / `storeIdempotency` exist, but no local resource adapter currently calls them: in local mode an `idempotency_key` (e.g. on `claims.acquire`) is **accepted but not honored**. Remote dedups retries via D1; local relies on **primary-key-level dedup** instead — a retried create of an existing id fails rather than duplicating. Full idempotency wiring is single-machine-low-risk and remains **remote-only**; the table + methods are kept available-but-unwired so a future wiring has the storage already in place. (Mirrored in the SDK README local-divergence list.)
 
@@ -452,7 +476,9 @@ CREATE INDEX artifact_rel_type ON artifact_relationships(type);
 -- Lazy expiry: a claim past expires_at is considered released on next read; sweeper deletes it.
 CREATE TABLE claims (
   resource        TEXT PRIMARY KEY,             -- 'task:T-142', 'file:src/auth.rb', 'epic:E-5'
-  holder          TEXT NOT NULL,                -- 'alice@machine-A:pid-9821'
+  principal_id    TEXT NOT NULL,                -- immutable authenticated subject
+  participant_id  TEXT NOT NULL,                -- independent client process/session
+  environment     JSON NOT NULL DEFAULT '{}',   -- untrusted machine/repository/Git/client metadata
   mode            TEXT NOT NULL,                -- 'exclusive' | 'owner' | 'presence'
   fence           INTEGER NOT NULL,             -- value of fences.current_fence at time of acquire
   acquired_at     INTEGER NOT NULL,
@@ -461,7 +487,6 @@ CREATE TABLE claims (
 );
 
 CREATE INDEX claims_expires_at ON claims(expires_at);
-CREATE INDEX claims_holder ON claims(holder);
 
 -- Monotonic fence counter per resource. Incremented on every acquire (even after release).
 -- Never decrements. Persists across DO evictions.
@@ -470,11 +495,14 @@ CREATE TABLE fences (
   current_fence   INTEGER NOT NULL DEFAULT 0
 );
 
--- Presence: TTL'd machine activity. Refreshed by heartbeat; reaped by the sweeper.
+-- Presence: TTL'd participant activity. Refreshed by heartbeat; reaped by the sweeper.
 CREATE TABLE presence (
-  machine         TEXT PRIMARY KEY,             -- 'alice@machine-A'
+  principal_id    TEXT NOT NULL,
+  participant_id  TEXT NOT NULL,
+  environment     JSON NOT NULL DEFAULT '{}',
   last_seen       INTEGER NOT NULL,
-  info            JSON                           -- current resource, status, etc.
+  info            JSON NOT NULL DEFAULT '{}',   -- current resource, status, etc.
+  PRIMARY KEY (principal_id, participant_id)
 );
 
 CREATE INDEX presence_last_seen ON presence(last_seen);
@@ -488,7 +516,10 @@ CREATE TABLE journal (
   t               INTEGER NOT NULL,             -- unix ms
   kind            TEXT NOT NULL,                -- 'task.claimed', 'artifact.produced', 'artifact.referenced', 'task.completed', 'schema.applied', etc.
   resource        TEXT,                         -- 'task:T-142', null for global events
-  actor           TEXT NOT NULL,                -- 'alice@machine-A' or any actor string
+  principal_id    TEXT NOT NULL,
+  participant_id  TEXT NOT NULL,
+  environment     JSON NOT NULL DEFAULT '{}',
+  token_id        TEXT,                         -- credential audit data
   fence           INTEGER,                      -- if applicable
   data            JSON NOT NULL                 -- full event payload
 );
@@ -614,7 +645,7 @@ Internal routing inside the DO:
 
 **Journal is the durability anchor.** Every meaningful state change emits a journal row in the same transaction that produced it. If the DO is ever restored from a backup, replaying the journal from a snapshot point produces consistent state. The journal is also how cross-backend operations (Worker → R2 → DO) are made recoverable: if the R2 write succeeds but the DO write fails, the next `tila doctor --reconcile` walks R2 against journal and emits a synthesizing journal event to recover.
 
-**DO eviction is safe.** DO instances evict when idle (typical: minutes). SQLite storage persists. In-memory state (cached schema, prepared statements) rebuilds on next fetch via `blockConcurrencyWhile`. No state loss; just a cold start of ~50ms on the next request.
+**DO eviction is safe.** DO instances evict when idle (typical: minutes). SQLite storage persists. In-memory state (cached schema, prepared statements) rebuilds on next fetch via `blockConcurrencyWhile`. No state loss; just a cold start on the next request. The `cold-start` benchmark scenario measures it on the deployed Worker (`cold_first_request` vs `warm_after_restart` in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)).
 
 **`blockConcurrencyWhile` for migrations.** On DO startup, the init function runs DDL migrations idempotently (compare current schema version against the bundled migration set, apply missing). All requests block until migrations complete. This is how new tila Worker versions safely evolve the DO schema.
 
@@ -647,17 +678,22 @@ The external API surface that the CLI calls. All requests are JSON over HTTPS. A
 | POST | `/entities/:id/archive` | `{ idempotency_key }` | `{ ok }` |
 | POST | `/entities/:id/relationships` | `{ to, type, idempotency_key }` | `{ ok }` |
 | DELETE | `/entities/:id/relationships/:to/:type` | — | `{ ok }` |
-| POST | `/acquire` | `{ resource, holder, mode, ttl_ms, metadata?, idempotency_key }` | `{ ok: true, fence, expires_at }` or `{ ok: false, reason, holder, expires_in_ms }` (409) |
-| POST | `/renew` | `{ resource, holder, fence }` | `{ ok: true, expires_at }` or 409 |
-| POST | `/release` | `{ resource, holder, fence }` | `{ ok: true }` |
+| POST | `/acquire` | `{ resource, mode, ttl_ms, metadata? }` + participant/environment headers | `{ ok: true, fence, expires_at, participant_id }` or 409 |
+| POST | `/renew` | `{ resource, fence, ttl_ms }` + participant/environment headers | `{ ok: true, expires_at }` or 409 |
+| POST | `/release` | `{ resource, fence }` + participant/environment headers | `{ ok: true }` |
 | GET | `/state` | query: `resource` | `{ claim?, owners: [], presence: [] }` |
-| GET | `/presence` | — | `{ machines: [] }` |
-| POST | `/presence` | `{ machine, current_resource?, metadata? }` | `{ ok }` |
+| GET | `/presence` | — | `{ participants: [] }` |
+| POST | `/presence` | `{ info? }` + participant/environment headers | `{ ok }` |
+| POST | `/signals/send` | `{ target: participant \| principal \| group \| broadcast, kind, resource?, payload?, ttl_ms? }` + participant/environment headers | `{ ok, id, recipient_count }` |
+| GET | `/signals` | participant/environment headers | Current participant's unacknowledged inbox |
+| POST | `/signals/:id/ack` | participant/environment headers | `{ ok }` or 403 for an unrelated participant |
+| GET | `/signals/history` | query: `limit`, `cursor`; admin only | Paginated signal and delivery audit history |
+| GET/PUT/DELETE | `/signals/groups[/:id]` | group reads require project read; mutations require admin | Principal-based signal groups |
 | PUT | `/artifacts/:key` | binary body, metadata in headers | `{ ok, key, deduplicated? }` |
 | GET | `/artifacts/:key` | — | binary body with metadata headers |
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
-| GET | `/journal` | query: `since_seq`, `resource`, `kind`, `limit` | `{ ok, events: [], archived, lastArchivedSeq }` — `archived: true` (with `lastArchivedSeq`) signals the requested cursor falls below the archival watermark, so the range was cold-stored to R2 and pruned from DO SQLite rather than being genuinely empty; resume reads from `lastArchivedSeq` |
+| GET | `/journal` | query: `since_seq`, `resource`, `kind`, `client_name`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — `archived: true` signals a cold-stored range |
 | GET | `/journal/stream` | query: `since_seq` | SSE event stream (v0.2; v0.1 uses polling) |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
@@ -692,7 +728,7 @@ All error responses use the shape:
     "code": "stale-fence",          // machine-readable
     "message": "Fence 42 is stale; current is 43",  // human-readable
     "retryable": false,
-    "details": { "current_fence": 43, "holder": "bob@..." }
+    "details": { "current_fence": 43, "participant_id": "550e8400-e29b-41d4-a716-446655440000" }
   }
 }
 ```
@@ -701,9 +737,9 @@ Standard codes: `unauthorized`, `not-found`, `stale-fence`, `already-held`, `rat
 
 ### 3a.5 Rate limiting and backpressure
 
-- Worker enforces 100 req/sec per token (token-bucket). Excess returns 429.
+- The Worker does not enforce a per-token throughput limit. The only limiter is on failed authentication: 20 failures per client IP per 60 seconds (`RATE_LIMIT_MAX_FAILURES` / `RATE_LIMIT_WINDOW_MS` in `packages/worker/src/config.ts`), checked against D1 before authentication.
 - D1 / DO / R2 rate-limit responses propagate as 429 with `Retry-After` header.
-- CLI implements exponential backoff (100ms, 200ms, 400ms, …) up to 5 retries on 429.
+- The SDK ships an opt-in `withRetry` helper (3 retries, 200 ms base with full jitter, honours `retryable`); `TilaClient` itself never retries except for one credential refresh on 401. The benchmark harness does not use `withRetry`, so its percentiles contain no backoff time.
 
 ### 3a.6 Cross-backend operation ordering
 
@@ -971,7 +1007,7 @@ interface EntityBackendCapabilities {
 ```
 
 v0.1 implementations:
-- `do-sqlite` — full capabilities, ~1ms reads (DO-local SQLite), co-located with coordination state in the same DO
+- `do-sqlite` — full capabilities, sub-millisecond reads inside the DO (measured by the `inproc` benchmark tier, see [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), co-located with coordination state in the same DO
 - `local-sqlite` -- full capabilities (same as do-sqlite), <1ms reads (bun:sqlite, process-local), same SQLite storage as coordination state in the same DB file. Requires single-machine deployment; not suitable for multi-machine teams.
 
 Test fixtures (not shipped as backends):
@@ -988,29 +1024,28 @@ Stubs for v0.2+:
 interface CoordinationBackend {
   acquire(
     resource: string,
-    holder: string,
     mode: 'exclusive' | 'owner',
     ttlMs: number,
     metadata?: object
   ): Promise<AcquireResult>;
 
-  renew(resource: string, holder: string, fence: number): Promise<RenewResult>;
-  release(resource: string, holder: string, fence: number): Promise<void>;
+  renew(resource: string, fence: number, ttlMs: number): Promise<RenewResult>;
+  release(resource: string, fence: number): Promise<void>;
 
   getState(resource: string): Promise<ResourceState>;
-  presence(): Promise<MachineActivity[]>;
-  updatePresence(machine: string, info: PresenceInfo): Promise<void>;
+  listPresence(): Promise<ParticipantActivity[]>;
+  heartbeat(info: PresenceInfo): Promise<void>;
 
   capabilities: CoordinationBackendCapabilities;
 }
 
 type AcquireResult =
-  | { ok: true; fence: number; expiresAt: number }
-  | { ok: false; reason: 'already-held'; holder: string; expiresInMs: number };
+  | { acquired: true; fence: number; expires_at: number; participant_id: string }
+  | { acquired: false; fence: number; expires_at: number; participant_id: string };
 ```
 
 v0.1 implementations:
-- `do-sqlite` — strong consistency via DO single-thread serialization, ~1ms p50 from same DO, same SQLite storage as entities (one transaction can claim and update an entity atomically)
+- `do-sqlite` — strong consistency via DO single-thread serialization, sub-millisecond p50 for acquire/renew/release inside the DO (`inproc` tier in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), same SQLite storage as entities (one transaction can claim and update an entity atomically)
 - `local-sqlite` -- strong consistency via SQLite `BEGIN IMMEDIATE` serialization, <1ms p50 (bun:sqlite, process-local), same SQLite storage as entities (one transaction can claim and update an entity atomically)
 
 Test fixtures: a Map-backed in-memory fake CoordinationBackend in `packages/core/test/fixtures/` for unit testing.
@@ -1325,7 +1360,8 @@ Every artifact carries:
 ```
 x-amz-meta-tila-resource:    task:task-a1b2c3 | (empty for sources)
 x-amz-meta-tila-fence:       42 | (empty for sources)
-x-amz-meta-tila-machine:     alice@machine-A
+x-amz-meta-tila-principal:   github:github.com:123456
+x-amz-meta-tila-participant: 550e8400-e29b-41d4-a716-446655440000
 x-amz-meta-tila-kind:        plan | design | review | patch | transcript | research | lesson | index | ...
 x-amz-meta-tila-mime:        text/markdown
 x-amz-meta-tila-produced-at: 2026-05-15T10:28:11Z
@@ -1417,7 +1453,8 @@ Search documents in `artifact_search_docs` are a recoverable projection of artif
 // only cross-backend step. See §3a.6 for the full cross-backend ordering rules.
 async function putArtifact(req: Request, env: Env): Promise<Response> {
   const input = await req.json();
-  const { resource, fence, holder, body, kind, mime, idempotencyKey } = input;
+  const { resource, fence, body, kind, mime, idempotencyKey } = input;
+  const identity = resolveAuthenticatedIdentity(req); // principal is never read from input
 
   // 1. Idempotency check (global D1 lookup, cached for 60s in Worker memory)
   const cached = await checkIdempotency(env.GLOBAL, idempotencyKey);
@@ -1427,7 +1464,12 @@ async function putArtifact(req: Request, env: Env): Promise<Response> {
   const projectDO = env.PROJECT.get(env.PROJECT.idFromName(env.PROJECT_ID));
   const state = await projectDO.fetch('https://do/coord/state?resource=' + encodeURIComponent(resource));
   const { claim } = await state.json();
-  if (!claim || claim.holder !== holder || claim.fence < fence) {
+  if (
+    !claim ||
+    claim.principal_id !== identity.principal_id ||
+    claim.participant_id !== identity.participant_id ||
+    claim.fence < fence
+  ) {
     return Response.json({ ok: false, reason: 'stale-fence' }, { status: 409 });
   }
 
@@ -1446,7 +1488,8 @@ async function putArtifact(req: Request, env: Env): Promise<Response> {
       customMetadata: {
         'tila-resource': resource ?? '',
         'tila-fence': String(fence),
-        'tila-machine': holder,
+        'tila-principal': identity.principal_id,
+        'tila-participant': identity.participant_id,
         'tila-kind': kind,
         'tila-produced-at': new Date().toISOString(),
       },
@@ -1472,7 +1515,7 @@ async function putArtifact(req: Request, env: Env): Promise<Response> {
       sha256,
       bytes: body.byteLength,
       fence,
-      produced_by: holder,
+      identity,
       mime_type: mime,
       // Includes any required-reference inserts for [artifacts.<kind>].requires_reference_to
       references: input.references ?? [],
@@ -1655,8 +1698,8 @@ T+0:01  CLI: GET <worker>/tasks/T-142
         → Returns: { entity: {...}, claim: null }
 
 T+0:02  CLI: POST <worker>/acquire
-        Body: { resource: "task:T-142", holder: "alice@machine-A:pid-9821",
-                mode: "exclusive", ttl_ms: 600000 }
+        Header: X-Tila-Participant-Id: 550e8400-e29b-41d4-a716-446655440000
+        Body: { resource: "task:T-142", mode: "exclusive", ttl_ms: 600000 }
         → Worker routes to DO
         → DO single SQLite transaction:
             SELECT * FROM claims WHERE resource = 'task:T-142'
@@ -1664,14 +1707,14 @@ T+0:02  CLI: POST <worker>/acquire
             SELECT current_fence FROM fences WHERE resource = 'task:T-142'
             → 41 (or NULL if first time, defaults to 0)
             UPDATE fences SET current_fence = 42 WHERE resource = 'task:T-142'
-            INSERT INTO claims (resource, holder, mode, fence, ...) VALUES (..., 42, ...)
-            INSERT INTO journal (kind, resource, actor, fence, data, ...) VALUES ('task.claimed', 'task:T-142', 'alice@machine-A:pid-9821', 42, ...)
+            INSERT INTO claims (resource, principal_id, participant_id, mode, fence, ...) VALUES (..., 42, ...)
+            INSERT INTO journal (kind, resource, principal_id, participant_id, fence, data, ...) VALUES ('task.claimed', 'task:T-142', ..., 42, ...)
             COMMIT
-        → DO returns { ok: true, fence: 42, expiresAt: ... }
+        → DO returns { ok: true, fence: 42, expires_at: ..., participant_id: "550e..." }
         → Worker returns to CLI
 
 T+0:03  CLI begins agent work.
-        → Background renew loop: POST /renew every 60s with { resource, holder, fence: 42 }
+        → Background renew loop: POST /renew every 60s with { resource, fence: 42 }
 
 T+0:14  Agent produces 3 artifacts.
         → CLI uploads each via PUT /artifacts/<key>
@@ -1680,7 +1723,7 @@ T+0:14  Agent produces 3 artifacts.
         → Worker calls DO /artifact/record; DO transaction inserts pointer row, required-reference edges, and 'artifact.produced' journal event
 
 T+0:15  Work complete. CLI: POST /release
-        Body: { resource: "task:T-142", holder: "alice@machine-A:pid-9821", fence: 42 }
+        Body: { resource: "task:T-142", fence: 42 }
         → DO single transaction: DELETE FROM claims; INSERT journal('task.released'); INSERT journal('task.completed')
 
 T+0:16  Meanwhile, Bob's machine had stale local state and was about to pick T-142.
@@ -1707,24 +1750,25 @@ T+15:00 Alice's laptop wakes up. Agent tries to commit artifact with fence=42.
         → No clobber of Bob's work.
 ```
 
-### 8.3 Issue ownership (soft, non-exclusive)
+### 8.3 Issue ownership (principal-scoped)
 
 Alice takes ownership of issue I-23:
 
 ```
 CLI: POST /acquire
-Body: { resource: "issue:I-23", holder: "alice", mode: "owner", ttl_ms: 86400000 }
+Header: X-Tila-Participant-Id: 550e8400-e29b-41d4-a716-446655440000
+Body: { resource: "issue:I-23", mode: "owner", ttl_ms: 86400000 }
 
 DO transaction:
-  INSERT INTO owner_claims (resource, holder, is_primary, fence, ...) VALUES (...)
-  → If no other owner: is_primary = 1.
-  → If other owners exist: is_primary = 0 (Alice is non-primary owner).
-  → Fence increments regardless.
+  INSERT INTO claims (resource, principal_id, participant_id, mode, fence, ...) VALUES (...)
+  → A different principal conflicts.
+  → The same principal from a different participant transfers ownership and increments the fence.
+  → The previous participant can no longer renew or release.
 
-Returns { ok: true, fence: 7, is_primary: true }.
+Returns { ok: true, fence: 7, participant_id: "550e..." }.
 ```
 
-Bob can still claim individual tasks within I-23 via exclusive mode. Owner claims and exclusive claims are independent.
+Bob can still claim individual task resources within I-23 via exclusive mode. The issue owner claim and task claims are on different resources.
 
 ### 8.4 DO eviction and recovery
 
@@ -1746,20 +1790,28 @@ If a DO is wiped (Cloudflare incident, manual reset via `tila reset`, accidental
 1. CLI calls /health, gets a 5xx or empty state.
 2. CLI calls `tila doctor` which reports the DO is uninitialized/inaccessible.
 3. Recovery options:
-   a. If R2 still has artifacts and the user has external journal backups (v0.2 feature):
-      `tila restore --from-r2-and-backup` rebuilds entities and journal from the backup,
-      and reconciles artifact_pointers from R2 object metadata.
+   a. Restore the latest verified archive with
+      `tila project import /absolute/path/project.tila-backup`. This restores the
+      same project ID, exact journal sequence, fences, revisions, ACL metadata,
+      artifact metadata, and blobs, then verifies a canonical semantic digest.
    b. If only R2 survives: `tila doctor --reconcile` walks R2, synthesizes artifact_pointers
       from R2 object metadata, and emits `artifact.reconciled` journal events. Entities and
       claims are lost; the user must recreate them.
    c. Otherwise: `tila reset --force` and start fresh.
 
 In practice (a) and (c) are the expected outcomes; (b) is partial recovery for catastrophic
-loss with no backup. v0.1 does not implement (a) — backups are v0.2. v0.1's recovery story
-is: trust DO SQLite durability (PIT recovery is built in) and have R2 as the long-tail backstop.
+loss with no backup.
 ```
 
-**The journal is the source of truth for "what happened."** Any reconstruction starts from the journal. If a DO is restored from a SQLite snapshot taken at time T, replaying journal events after T (if available externally) brings state forward. v0.1 relies on Cloudflare's built-in DO SQLite PIT recovery; explicit external backups are v0.2.
+**The journal is the source of truth for "what happened."** A complete backup carries both confirmed archived ranges and the live tail, validates unique contiguous coverage through the archive watermark, and restores `sqlite_sequence` exactly.
+
+### 8.5 Complete project backup format
+
+Format v1 is an uncompressed tar stream. `header.json` is first and `manifest.json` is last; absence of the final complete manifest makes the archive unusable. Canonical JSONL sections live below `do/` and `d1/`, object metadata is in `objects.jsonl`, and deduplicated bytes are stored as `blobs/<sha256>`. Paths must be relative and traversal-free. Every entry declares bytes, rows where applicable, and SHA-256; the manifest binds them with a sorted content-root digest and a semantic digest of authoritative SQLite state.
+
+V1 readers accept older v1 producers by applying schema defaults, ignore only explicitly declared optional sections, reject unknown required features, and reject DO migration versions newer than they support. Project renaming is unsupported because project IDs participate in Durable Object identity and artifact keys. The separate `tila-sdk/backup` entry exposes `inspectProjectBackup`, `exportProjectBackup`, `importProjectBackup`, and the infra-authenticated operator client; the main SDK and MCP surface remain unchanged.
+
+Cloud export uses a renewable transfer lock: reads continue and all mutations, including sweep work and D1 ACL writes, return `423 project-maintenance`. Existing restore keeps one continuous lock across its verified safety export and promotion to a non-expiring import lock. Blobs are restored idempotently by checksum before pointers; rows follow dependency order; FTS virtual tables are rebuilt; D1 ACL replacement is batched; only then can the semantic digest unlock the project. Local replace stages a migrated database and artifact tree in sibling paths, verifies both, and swaps them into place with rollback on a failed swap.
 
 ---
 
@@ -1881,14 +1933,16 @@ The point: every framework operation reduces to tila primitives plus framework-l
 import { TilaClient } from "tila-sdk";
 
 const client = new TilaClient({
-  workerUrl: "https://tila-myproj.example.workers.dev",
-  apiToken: process.env.TILA_API_TOKEN!,
+  baseUrl: "https://tila-myproj.example.workers.dev",
+  token: process.env.TILA_API_TOKEN!,
+  participantId: "550e8400-e29b-41d4-a716-446655440000",
+  environment: { machine: "build-host", client_name: "my-framework" },
 });
 
 const task = await client.entities.create({ type: "task", data: { title: "Refactor auth" } });
-const claim = await client.claims.acquire({ resource: `task:${task.id}`, holder: "agent-a", mode: "exclusive", ttlMs: 600_000 });
+const claim = await client.claims.acquire({ resource: `task:${task.id}`, mode: "exclusive", ttlMs: 600_000 });
 await client.artifacts.put({ resource: `task:${task.id}`, fence: claim.fence, kind: "plan", body: planMarkdown });
-await client.claims.release({ resource: `task:${task.id}`, holder: "agent-a", fence: claim.fence });
+await client.claims.release({ resource: `task:${task.id}`, fence: claim.fence });
 
 const service = await client.records.get({ type: "service", key: "api" });
 ```
@@ -2050,13 +2104,13 @@ The Worker-driven sweep should keep these in sync, but if a manual R2 delete hap
 The artifact upload sequence guarantees that if R2 succeeds and the DO write fails, the R2 blob is orphaned but recoverable. `tila doctor --reconcile` walks R2 prefixes, finds blobs without pointer rows, synthesizes pointer rows from R2 object metadata (the metadata carries `x-amz-meta-tila-resource`, `-fence`, `-kind`, etc.), and emits `artifact.reconciled` journal events. Worst-case window: ~24h until the next reconcile cron run, configurable. The CLI returns an error to the caller in real time so they know not to assume success.
 
 ### 10.46 Worker Smart Placement disabled or unsupported
-Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region. `tila doctor` reports the placement mode and Worker→DO latency from a `/health` probe.
+Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region (Cloudflare's figures; tila does not measure the hop in isolation). `tila doctor` reports the placement mode and Worker→DO latency from a `/health` probe; the benchmark harness records the serving colo and `cf-placement` header with every deployed run.
 
 ### 10.47 D1 token validation cache hit/miss
 The Worker caches token validation results in a per-isolate Map for 60 seconds after first validation. Cache miss = D1 lookup; cache hit = ~1ms. When `DELETE /api/tokens/:name` is called, D1 is updated immediately and the calling Worker isolate's in-memory cache entry is invalidated synchronously via `invalidate(tokenHash)`. Other isolates that have the token positively cached will continue accepting it until their cache entry expires (max 60 seconds TTL). The `tila token revoke` CLI output notes this propagation delay. Cross-isolate immediate invalidation (via a revocation marker or broadcast mechanism) is deferred to v0.2.
 
 ### 10.48 Journal table growth over time
-The `journal` table grows with every operation. For a busy autopilot project, expect ~1-5MB/day. DO SQLite's 10GB limit means roughly 5-10 years of journal at typical rates before pressure. Long before that becomes a concern, v0.2+ adds journal archival: events older than N days are cold-stored to R2 under `journal/<year>/<month>.jsonl.gz` and pruned from DO SQLite. v0.1 does not implement this; the assumption is that a project's actual lifetime is shorter than the practical limit. `tila doctor` reports journal size and projected fill date as part of `tila status`.
+The `journal` table grows with every operation. The earlier estimate was ~1-5MB/day for a busy autopilot project; the benchmark harness's soak mode (`--soak`, see `docs/benchmarks/README.md`) measures journal rows and database bytes per minute for a given workload, and sweep behaviour, so size this from a soak run rather than the estimate. DO SQLite's 10GB limit means roughly 5-10 years of journal at typical rates before pressure. Long before that becomes a concern, v0.2+ adds journal archival: events older than N days are cold-stored to R2 under `journal/<year>/<month>.jsonl.gz` and pruned from DO SQLite. v0.1 does not implement this; the assumption is that a project's actual lifetime is shorter than the practical limit. `tila doctor` reports journal size and projected fill date as part of `tila status`.
 
 ### 10.49 Observability: tail Workers and metrics
 v0.1 provides three observability surfaces:
@@ -2330,6 +2384,98 @@ Bun resolves these to local paths; in publishing, they get rewritten to actual v
 
 ---
 
+## Artifact revisions (#174–#177)
+
+The revision core and API shipped in [#228](https://github.com/davebream/tila/pull/228)
+and [#230](https://github.com/davebream/tila/pull/230). Version-aware retention and
+recovery shipped in [#231](https://github.com/davebream/tila/pull/231), satisfying
+the prerequisite for public API documentation. The read-only history drawer
+shipped in [#237](https://github.com/davebream/tila/pull/237). These are merged
+implementation milestones; deployment status depends on the installation.
+
+Versioning is explicit: clients supply a lineage ID and a live fence for
+`artifact:<lineage_id>`. Ordinary artifact uploads retain their existing keys,
+deduplication and supersedes behavior. A lineage fixes its kind and resource;
+numbered revisions identify events while SHA-256 identifies bytes. Restore always
+appends a new revision, including when its bytes equal the current head.
+
+Migration 27 adds nullable pointer fields and the lineage/operation tables to the
+shared DO/embedded migration registry. Existing artifacts are not backfilled from
+supersedes links. Explicit adoption copies a selected legacy artifact into revision
+1 of a new lineage and records its original key; the old artifact stays unchanged.
+This replaces #174's originally proposed inferred historical backfill.
+
+The write protocol reserves an ordinal, persists an immutable revision blob,
+revalidates the fence, accepts the commit transactionally with its journal event,
+and publishes an immutable recovery record before exposing the pointer. Accepted
+operations form a durable outbox. DO alarms share scheduling with reindexing;
+embedded consumers resume the outbox on subsequent writes. Metadata and history
+reads never access the blob store. Replays of an accepted
+operation remain valid after lease expiry. New operations require a current live
+claim. Pending publication blocks later writes to that lineage but leaves the
+previously published head readable.
+
+R2 keys use the project-scoped `versioned/` prefix, outside the legacy `produced/`
+backstop. Every revision has separate bytes and a `.commit.json` recovery record.
+Recovery accepts records from the private project prefix, validates their identity,
+and preserves revision numbers, timestamps, producer identity, tags and restore
+provenance. A blob without an accepted recovery record is never a recoverable
+revision. Gaps from failed reservations are permitted. Project backup/destroy also
+includes lineage and operation state.
+
+History uses a lineage-bound cursor with a fixed initial revision ceiling and an
+exclusive next-page boundary. Metadata never includes inline or blob content.
+Tags are set on write/restore; omitted restore tags inherit the source and an
+empty list clears tags only on the new revision. The MCP addition is read-only
+history.
+
+### Version-aware retention and deletion
+
+Migration 28 separates permanent revision metadata (`artifact_revisions`) from
+live/disposable `artifact_pointers`. History and metadata use the ledger, including
+revision tags and deletion timestamps. Tombstoned pointers still require a
+confirmed blob deletion. Migration 29 retains pointer rows as provenance and review audit records after cleanup.
+The ledger and immutable recovery records remain until project destruction.
+
+Retention is opt-in per kind (`retention_days = 0` means keep forever). New writes
+and restores snapshot the current policy at reservation. Existing revisions are
+assigned retention in bounded batches against one persisted project policy
+snapshot. Expiry is production time plus the configured days, so enabling this
+migration can immediately expire old non-head content. Later schema changes do
+not rewrite assigned expiry. A live lineage head is never automatically swept;
+deleting it selects the newest remaining live revision without cascading.
+
+Lifecycle operations persist retention assignments, tombstones, deletion
+confirmations, and lineage retirement as immutable JSON records beside revision
+commit records under the project-scoped `versioned/` prefix. Deletion intent must
+be durable before deleting bytes; the confirmation timestamp is persisted before
+publishing its record so retries write identical content. A durable SQLite queue
+retries failed work with capped exponential backoff. DO alarms and the daily
+sweep drain it; embedded consumers expose `drainLifecycle()` and also drain on
+subsequent writes. Metadata reads do not touch blob storage.
+
+Individual versioned DELETE requests require a live `artifact:<lineage_id>` fence
+via the `fence` query parameter. Ordinary artifact deletion is unchanged.
+`POST /artifacts/~/destroy/:lineageId` accepts `{ fence }` plus an idempotency key
+and returns 202 after permanent retirement is durable. This operation cascades
+blob deletion, preserves history, and rejects all future writes/restores into
+that lineage. SDK and embedded clients expose `destroyLineage()`; no destructive
+MCP tool is provided. Conflicts with pending revision publication return a
+retryable lineage-busy error. Accepted operation retries survive lease expiry.
+
+History/meta remain 200 for deleted revisions; downloads/restores return 410
+`artifact-unavailable`. Recovery applies lifecycle records before publishing
+recovered pointers, preventing deleted content or retired lineages from becoming
+live. Reconciliation also imports standalone retirement records for lineages that
+never published a revision. Backup includes the ledger, lifecycle queue, policy
+snapshot, and immutable recovery records even after pointer cleanup. Project
+destruction removes the entire private versioned prefix as well as SQLite state.
+
+The 365-day R2 backstop remains scoped to `produced/`. No object expiration rule
+may cover `versioned/`; multipart-upload abortion remains bucket-wide.
+
+---
+
 ## Section 13: Versioning and release
 
 - **Semantic versioning** for tila packages and the `tila` CLI.
@@ -2341,3 +2487,63 @@ Bun resolves these to local paths; in publishing, they get rewritten to actual v
 ---
 
 This is the technical spine. It's not exhaustive — implementation will surface details not captured here — but it's complete enough that an AI agent or engineer working from it can build the v1 without inventing the architecture.
+
+
+### Artifact provenance and review decisions (#188)
+
+Each artifact key has immutable `provenance` identifying its original producer and
+`revision_creation` identifying the actor creating that revision. Both contain
+principal, participant, timestamp, client name/version, and environment metadata.
+Cloud principals come from authentication. Participant and environment values are
+client-supplied; local identities are local assertions. Unknown legacy provenance
+is `null`, never inferred from a display name. Missing client versions are `null`.
+Deduplicated uploads retain the first accepted attribution. Restores preserve the
+original producer, record the restoring actor separately, and start unreviewed.
+Private revision commit records preserve provenance during recovery, but never
+carry mutable reviews. Old non-deduplicated publication records can recover a
+producer; a restore or deduplicated request alone cannot establish that identity.
+
+Any project writer may record a review, including self-review and replacement of
+another writer's decision. `trusted`, `rejected`, `superseded`, and `revoked` events
+are append-only. The latest event determines state; revocation yields `unreviewed`
+and does not reactivate an older approval. New revisions and `supersedes`
+relationships never implicitly change a review. A hash verifies byte integrity,
+not truth or safety. Reviews are explicit assertions, not automated evaluations.
+
+| Interface | Contract |
+|---|---|
+| GET `/projects/:projectId/artifacts/~/reviews/:key` | History newest first; `limit` 1–100 (default 50), exclusive `before_revision`; `next_revision` supplies the next cursor |
+| POST at the same path | `{decision, expected_review_revision, reason?}`; initial expected revision is 0; supports `Idempotency-Key` |
+| SDK | `artifacts.reviews(key, query)` and `artifacts.review(key, request)`; `idempotencyKey` is optional |
+| CLI | `tila artifact reviews KEY`; `tila artifact review KEY --decision trusted --expected-review-revision 0 --reason 'Checked source'` |
+| MCP | `tila_artifact_reviews`, `tila_artifact_review`; text reads separate structured metadata from artifact content |
+
+A review write atomically appends its event and journal entry. A stale expected
+revision returns `409 review-conflict`; reusing an idempotency key with different
+input returns `422 idempotency-key-conflict`. Identical retries return the original
+decision, while metadata reads always return the current state. Permissions use
+existing project membership and `artifacts:read` / `artifacts:write` capabilities;
+namespace-restricted credentials retain the existing artifact access restrictions.
+
+Artifact responses expose producer and review metadata by default. Raw downloads
+preserve their bytes and add `X-Tila-Artifact-Review-State` and
+`X-Tila-Artifact-Review-Revision`; full identity is available from artifact metadata.
+The web UI displays current decisions, provenance, and paginated review history,
+including for unavailable content. It does not submit review decisions.
+
+A work-unit reference slot can set `require_trusted_for_statuses = ["done"]`.
+Entering a selected status requires at least one reference in that slot and all
+its artifacts to be trusted, unexpired, and not tombstoned or confirmed deleted.
+Checks run within the task transaction, including direct and template creation.
+Failure returns `422 artifact-review-required` with failing slots and states.
+Absent rules preserve existing behavior. Later review changes do not undo a task
+transition; ordinary reads remain available. Backup restoration does not replay
+workflow checks. Tila does not execute agents or automatically assess content.
+
+Migration 29 adds immutable identity columns and append-only reviews to both DO
+and embedded stores. Backups require `artifact-review-v1`; older backups remain
+readable with unknown identity and no reviews where evidence is missing. Lifecycle
+cleanup removes blob/inline content but retains metadata, tags, and review history
+for audit. Full project destruction and authorized backup replacement remain
+explicit exceptions. Review loss during blob-only recovery yields unreviewed
+state, never an inferred approval.

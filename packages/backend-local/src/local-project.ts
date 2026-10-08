@@ -1,7 +1,10 @@
 import type { Database } from "bun:sqlite";
+import { createBlobJournalArchiveReader } from "@tila/backend-embedded";
 import { EmbeddedProject } from "@tila/backend-embedded";
 import type { schema } from "@tila/ops-sqlite";
+import type { IdentityContext } from "@tila/schemas";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { BunBlobStore } from "./bun-blob-store";
 
 import { createLocalConnection } from "./connection";
 import type { LocalConnectionOptions } from "./connection";
@@ -34,11 +37,20 @@ export class LocalProject extends EmbeddedProject {
     private readonly bunDb: BunDb,
     org: string,
     project: string,
+    identity?: IdentityContext,
+    artifactsPath?: string,
   ) {
     super({
       db: bunDb,
+      archives: artifactsPath
+        ? createBlobJournalArchiveReader(
+            new BunBlobStore(artifactsPath),
+            project,
+          )
+        : undefined,
       org,
       project,
+      identity,
       sleepSync: Bun.sleepSync,
       close: () => bunDb.$client.close(),
     });
@@ -53,9 +65,11 @@ export class LocalProject extends EmbeddedProject {
     org: string,
     project: string,
     options?: LocalConnectionOptions,
+    identity?: IdentityContext,
+    artifactsPath?: string,
   ): LocalProject {
     const db = createLocalConnection(dbPath, org, project, options);
-    return new LocalProject(db, org, project);
+    return new LocalProject(db, org, project, identity, artifactsPath);
   }
 
   /**

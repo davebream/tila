@@ -16,7 +16,7 @@ export class FenceNotFoundError extends Error {
 
 export class ClaimOwnershipError extends Error {
   constructor(resource: string) {
-    super(`Only the current holder may release claim ${resource}`);
+    super(`Only the acquiring participant may release claim ${resource}`);
     this.name = "ClaimOwnershipError";
   }
 }

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
+import { registerPrimitiveTool } from "../tool-registration";
 
 type TaskMethods = TilaFacade["tasks"];
 
@@ -12,7 +13,8 @@ function registerCrudTools(
   labelSingular: string,
   labelPlural: string,
 ): void {
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_create`,
     `Create a new ${labelSingular} (task, epic, etc.) in the tila project. Returns the created ${labelSingular} object.`,
     {
@@ -45,7 +47,8 @@ function registerCrudTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_list`,
     `List all ${labelPlural} in the project. Returns compact format (id, type, title, status, claimed_by, blockers, artifacts) to minimize token usage.`,
     {
@@ -75,7 +78,8 @@ function registerCrudTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_show`,
     `Get detailed information about a single ${labelSingular}, including its relationships. Returns the full ${labelSingular} object and up to limit relationships (default 50); adds {truncated:true,total:n} when capped.`,
     {
@@ -117,7 +121,8 @@ function registerCrudTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_update`,
     `Update a ${labelSingular}'s data fields. Requires a valid fencing token from tila_claim_acquire. A stale fence (from an expired or superseded claim) will be rejected with a 409 error.`,
     {
@@ -148,7 +153,8 @@ function registerCrudTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_ready`,
     `List ${labelPlural} that are ready for work -- no open blockers, no pending gates, not claimed by another agent. Returns up to limit ${labelSingular} objects (default 50); add {truncated:true,total:n} when capped.`,
     {
@@ -186,7 +192,8 @@ function registerCrudTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_archive`,
     `Archive a ${labelSingular}. Requires a valid fencing token from tila_claim_acquire. The ${labelSingular} is soft-deleted and removed from the ready set.`,
     {
@@ -214,7 +221,8 @@ function registerCrudTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_relationships_add`,
     `Add a relationship between two ${labelPlural}. Creates a directed edge from one ${labelSingular} to another with a named type.`,
     {
@@ -236,7 +244,8 @@ function registerCrudTools(
     },
   );
 
-  server.tool(
+  registerPrimitiveTool(
+    server,
     `${namePrefix}_relationships_list`,
     `List OUTBOUND relationships for a ${labelSingular} (edges where this ${labelSingular} is the source/from). Up to limit results (default 50); adds {truncated:true,total:n} when capped.`,
     {

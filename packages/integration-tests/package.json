@@ -7,14 +7,18 @@
   "scripts": {
     "test": "vitest run",
     "consumer": "vitest run --reporter=verbose src/consumer.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.runtime.json",
+    "test:runtime": "vitest run --config vitest.runtime.config.ts"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.6",
+    "@cloudflare/vitest-plugin": "1.3.7",
     "@cloudflare/workers-types": "^4.20260602.1",
+    "@tila/backend-d1": "workspace:*",
+    "@tila/backend-do": "workspace:*",
     "@tila/backend-embedded": "workspace:*",
     "@tila/backend-local": "workspace:*",
     "@tila/backend-r2": "workspace:*",
+    "@tila/core": "workspace:*",
     "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@tila/worker": "workspace:*",
@@ -24,6 +28,7 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.26",
     "jose": "^6.2.3",
+    "smol-toml": "1.8.0",
     "tila-cli": "workspace:*",
     "tila-mcp-server": "workspace:*",
     "tila-sdk": "workspace:*",
