@@ -209,6 +209,63 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@26.1.1)(jsdom@29.1.1)(msw@2.14.6(@types/node@26.1.1)(typescript@5.9.3))(vite@8.0.16(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  packages/bench:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20260602.1
+        version: 4.20260602.1
+      '@tila/backend-do':
+        specifier: workspace:*
+        version: link:../backend-do
+      '@tila/backend-embedded':
+        specifier: workspace:*
+        version: link:../backend-embedded
+      '@tila/backend-r2':
+        specifier: workspace:*
+        version: link:../backend-r2
+      '@tila/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tila/ops-sqlite':
+        specifier: workspace:*
+        version: link:../ops-sqlite
+      '@tila/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      '@tila/worker':
+        specifier: workspace:*
+        version: link:../worker
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.0
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@cloudflare/workers-types@4.20260602.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(bun-types@1.4.2)
+      hono:
+        specifier: '>=4.12.26'
+        version: 4.12.26
+      tila-sdk:
+        specifier: workspace:*
+        version: link:../sdk
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.20.0)(typescript@5.9.3))(vite@8.0.16(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+
   packages/cli:
     optionalDependencies:
       tila-cli-darwin-arm64:

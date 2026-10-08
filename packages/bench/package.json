@@ -1,0 +1,32 @@
+{
+  "name": "@tila/bench",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "bench": "tsx --tsconfig ../../tsconfig.json src/cli.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260602.1",
+    "@tila/backend-do": "workspace:*",
+    "@tila/backend-embedded": "workspace:*",
+    "@tila/backend-r2": "workspace:*",
+    "@tila/core": "workspace:*",
+    "@tila/ops-sqlite": "workspace:*",
+    "@tila/schemas": "workspace:*",
+    "@tila/worker": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.20.0",
+    "better-sqlite3": "^12.10.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.26",
+    "tila-sdk": "workspace:*",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9",
+    "zod": "^3.24.0"
+  }
+}

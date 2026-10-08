@@ -21,6 +21,8 @@ pnpm run check        # Biome check --write (auto-fixes formatting + imports)
 pnpm run typecheck    # TypeScript type checking (turbo)
 pnpm version:check    # Verify public release version lockstep
 pnpm version:test     # Test version policy scripts
+pnpm bench -- --tier inproc --scenario all   # Coordination benchmarks (see docs/benchmarks/README.md)
+pnpm bench:report -- --in packages/bench/results --out docs/benchmarks/BASELINE.md
 ```
 
 ### Single-package commands
@@ -31,7 +33,7 @@ pnpm --filter @tila/backend-do test -- --run artifact-ops  # Single test file (s
 pnpm --filter @tila/worker typecheck         # Typecheck one package
 ```
 
-Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. The `backend-do` tests are in `test/` (not `src/`). Integration tests use `@cloudflare/vitest-pool-workers`.
+Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. The `backend-do` tests are in `test/` (not `src/`). Integration tests are either env-gated live HTTP tests (`TILA_BASE_URL`/`TILA_TOKEN`, skipped in CI) or in-process tests that mount the Worker route modules over the real DO router and better-sqlite3 (`packages/integration-tests/src/artifact-versions.test.ts` is the pattern). The benchmark smoke suite in `packages/bench/test` uses the same in-process pattern.
 
 ### Local development setup
 
@@ -117,7 +119,8 @@ Turborepo monorepo under `packages/`:
 | `@tila/auth-store` | Client-side auth persistence — instance registry, credential store, keychain seam. Consumed by `tila-cli` |
 | `tila-cli` | `tila` CLI binary (Citty framework, Bun-compiled for multi-platform distribution) |
 | `tila-cli-{platform}` | Platform-specific binary packages for npm distribution |
-| `@tila/integration-tests` | E2E tests via `@cloudflare/vitest-pool-workers` |
+| `@tila/integration-tests` | E2E tests: env-gated live HTTP tests plus in-process Worker-route + DO-router tests |
+| `@tila/bench` | Coordination benchmark harness: `inproc` (CI smoke), `embedded`, `http` (wrangler dev or deployed) tiers; methodology and baselines in `docs/benchmarks/` |
 
 ### Naming: tasks vs entities
 

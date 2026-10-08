@@ -175,7 +175,7 @@ erDiagram
 The 2024 design held entities in D1 and only coordination state in the DO. The 2026 design unifies them. Three reasons:
 
 1. **Claim + entity + journal in one transaction.** Claiming a task and updating its status used to require Worker-coordinated writes across two backends (D1 entity update, DO claim acquire, D1 journal append). Now it's one DO SQLite transaction. The two-write problem dissolves.
-2. **Latency.** D1 reads from a Worker are ~30ms. DO SQLite reads from inside the DO are <1ms. Most operations touch both entity state and claim state; co-locating them drops the hot path 5-10x.
+2. **Latency.** D1 reads from a Worker are ~30ms. DO SQLite reads from inside the DO are <1ms (the `inproc` benchmark tier measures the DO-side cost; see [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)). Most operations touch both entity state and claim state; co-locating them drops the hot path 5-10x.
 3. **Free tier headroom.** D1's 100K writes/day free tier was a real constraint at autopilot rates. DO storage has different (more generous for active projects) limits.
 
 D1 still exists for things that genuinely need cross-project scope: API tokens (must be readable before contacting any DO, to authenticate), idempotency keys (cross-request scope), project registry (a directory of projects in the account).

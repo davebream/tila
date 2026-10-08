@@ -426,7 +426,7 @@ Beads is a Dolt-powered distributed issue tracker with agent memory, dependency 
 <details>
 <summary><b>Why full-text search and not a vector database?</b></summary>
 
-tila's search is keyword retrieval: "find the auth migration plan," not "find documents conceptually related to authentication." FTS5 handles this inside DO SQLite with BM25 ranking, phrase and prefix queries, sub-millisecond latency, and transactional consistency with artifact writes, all with zero additional infrastructure. Vector search is the right tool when you need semantic similarity over large corpora with unpredictable terminology, but it requires an embedding model, a vector store, and an embedding pipeline. Those are three new dependencies that conflict with tila's zero-ops design. If your workflow needs semantic search over tila artifacts, a consuming framework can maintain its own vector index via the artifact API.
+tila's search is keyword retrieval: "find the auth migration plan," not "find documents conceptually related to authentication." FTS5 handles this inside DO SQLite with BM25 ranking, phrase and prefix queries, and transactional consistency with artifact writes, all with zero additional infrastructure. Vector search is the right tool when you need semantic similarity over large corpora with unpredictable terminology, but it requires an embedding model, a vector store, and an embedding pipeline. Those are three new dependencies that conflict with tila's zero-ops design. If your workflow needs semantic search over tila artifacts, a consuming framework can maintain its own vector index via the artifact API.
 </details>
 
 <details>

@@ -174,7 +174,7 @@ missing, and full bootstrap tokens still carry owner access.
 | Issue | Draft disposition |
 |---|---|
 | #194 | Replace public case-study prerequisite with first-project migration and acceptance evidence |
-| #193 | Defer broad public benchmark suite; retain targeted contention/recovery checks |
+| #193 | Implemented: `packages/bench` harness with in-process CI smoke, local and deployed http tiers, soak mode; baselines in `docs/benchmarks/` |
 
 ## 5. Copyable issue drafts
 

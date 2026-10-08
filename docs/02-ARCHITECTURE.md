@@ -284,7 +284,7 @@ On the local path (`tila project create --local`), all per-project DO SQLite sta
 7. Worker returns JSON to CLI.
 8. CLI renders.
 
-Total Worker → response latency: ~5-15ms when DO is warm (Smart Placement co-locates them). Cold DO adds ~50ms one-time startup.
+Total Worker → response latency was estimated at ~5-15ms when the DO is warm (Smart Placement co-locates them), with a cold DO adding ~50ms one-time startup. Measured values for the deployed path (`claims-uncontended`, `cold-start` scenarios) and for the DO-only cost (`inproc` tier) are in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md); the step costs above remain the model, not measurements.
 
 **Write path** (e.g., `tila task claim T-142`):
 1. CLI makes HTTPS POST to `<worker>/acquire`.
@@ -334,7 +334,7 @@ The Cloudflare path serializes writes via the Durable Object's single-threaded e
 
 1. `PRAGMA journal_mode=WAL` -- enables concurrent readers while a writer holds the write lock. Without WAL, readers block writers and vice versa. WAL separates read and write paths so agents reading state do not block agents writing claims.
 
-2. `PRAGMA busy_timeout=5000` -- SQLite waits up to 5 seconds for a write lock before returning `SQLITE_BUSY`. Eliminates the need for application-layer polling in most contention scenarios. The 5-second window covers typical tila write transactions (sub-millisecond).
+2. `PRAGMA busy_timeout=5000` -- SQLite waits up to 5 seconds for a write lock before returning `SQLITE_BUSY`. Eliminates the need for application-layer polling in most contention scenarios. The 5-second window covers typical tila write transactions, which the `embedded` benchmark tier measures at well under a millisecond per op ([docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)).
 
 3. `PRAGMA foreign_keys=ON` -- enforces referential integrity. Disabled by default in SQLite; must be set per connection.
 
@@ -645,7 +645,7 @@ Internal routing inside the DO:
 
 **Journal is the durability anchor.** Every meaningful state change emits a journal row in the same transaction that produced it. If the DO is ever restored from a backup, replaying the journal from a snapshot point produces consistent state. The journal is also how cross-backend operations (Worker → R2 → DO) are made recoverable: if the R2 write succeeds but the DO write fails, the next `tila doctor --reconcile` walks R2 against journal and emits a synthesizing journal event to recover.
 
-**DO eviction is safe.** DO instances evict when idle (typical: minutes). SQLite storage persists. In-memory state (cached schema, prepared statements) rebuilds on next fetch via `blockConcurrencyWhile`. No state loss; just a cold start of ~50ms on the next request.
+**DO eviction is safe.** DO instances evict when idle (typical: minutes). SQLite storage persists. In-memory state (cached schema, prepared statements) rebuilds on next fetch via `blockConcurrencyWhile`. No state loss; just a cold start on the next request. The `cold-start` benchmark scenario measures it on the deployed Worker (`cold_first_request` vs `warm_after_restart` in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)).
 
 **`blockConcurrencyWhile` for migrations.** On DO startup, the init function runs DDL migrations idempotently (compare current schema version against the bundled migration set, apply missing). All requests block until migrations complete. This is how new tila Worker versions safely evolve the DO schema.
 
@@ -737,9 +737,9 @@ Standard codes: `unauthorized`, `not-found`, `stale-fence`, `already-held`, `rat
 
 ### 3a.5 Rate limiting and backpressure
 
-- Worker enforces 100 req/sec per token (token-bucket). Excess returns 429.
+- The Worker does not enforce a per-token throughput limit. The only limiter is on failed authentication: 20 failures per client IP per 60 seconds (`RATE_LIMIT_MAX_FAILURES` / `RATE_LIMIT_WINDOW_MS` in `packages/worker/src/config.ts`), checked against D1 before authentication.
 - D1 / DO / R2 rate-limit responses propagate as 429 with `Retry-After` header.
-- CLI implements exponential backoff (100ms, 200ms, 400ms, …) up to 5 retries on 429.
+- The SDK ships an opt-in `withRetry` helper (3 retries, 200 ms base with full jitter, honours `retryable`); `TilaClient` itself never retries except for one credential refresh on 401. The benchmark harness does not use `withRetry`, so its percentiles contain no backoff time.
 
 ### 3a.6 Cross-backend operation ordering
 
@@ -1007,7 +1007,7 @@ interface EntityBackendCapabilities {
 ```
 
 v0.1 implementations:
-- `do-sqlite` — full capabilities, ~1ms reads (DO-local SQLite), co-located with coordination state in the same DO
+- `do-sqlite` — full capabilities, sub-millisecond reads inside the DO (measured by the `inproc` benchmark tier, see [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), co-located with coordination state in the same DO
 - `local-sqlite` -- full capabilities (same as do-sqlite), <1ms reads (bun:sqlite, process-local), same SQLite storage as coordination state in the same DB file. Requires single-machine deployment; not suitable for multi-machine teams.
 
 Test fixtures (not shipped as backends):
@@ -1045,7 +1045,7 @@ type AcquireResult =
 ```
 
 v0.1 implementations:
-- `do-sqlite` — strong consistency via DO single-thread serialization, ~1ms p50 from same DO, same SQLite storage as entities (one transaction can claim and update an entity atomically)
+- `do-sqlite` — strong consistency via DO single-thread serialization, sub-millisecond p50 for acquire/renew/release inside the DO (`inproc` tier in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), same SQLite storage as entities (one transaction can claim and update an entity atomically)
 - `local-sqlite` -- strong consistency via SQLite `BEGIN IMMEDIATE` serialization, <1ms p50 (bun:sqlite, process-local), same SQLite storage as entities (one transaction can claim and update an entity atomically)
 
 Test fixtures: a Map-backed in-memory fake CoordinationBackend in `packages/core/test/fixtures/` for unit testing.
@@ -2104,13 +2104,13 @@ The Worker-driven sweep should keep these in sync, but if a manual R2 delete hap
 The artifact upload sequence guarantees that if R2 succeeds and the DO write fails, the R2 blob is orphaned but recoverable. `tila doctor --reconcile` walks R2 prefixes, finds blobs without pointer rows, synthesizes pointer rows from R2 object metadata (the metadata carries `x-amz-meta-tila-resource`, `-fence`, `-kind`, etc.), and emits `artifact.reconciled` journal events. Worst-case window: ~24h until the next reconcile cron run, configurable. The CLI returns an error to the caller in real time so they know not to assume success.
 
 ### 10.46 Worker Smart Placement disabled or unsupported
-Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region. `tila doctor` reports the placement mode and Worker→DO latency from a `/health` probe.
+Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region (Cloudflare's figures; tila does not measure the hop in isolation). `tila doctor` reports the placement mode and Worker→DO latency from a `/health` probe; the benchmark harness records the serving colo and `cf-placement` header with every deployed run.
 
 ### 10.47 D1 token validation cache hit/miss
 The Worker caches token validation results in a per-isolate Map for 60 seconds after first validation. Cache miss = D1 lookup; cache hit = ~1ms. When `DELETE /api/tokens/:name` is called, D1 is updated immediately and the calling Worker isolate's in-memory cache entry is invalidated synchronously via `invalidate(tokenHash)`. Other isolates that have the token positively cached will continue accepting it until their cache entry expires (max 60 seconds TTL). The `tila token revoke` CLI output notes this propagation delay. Cross-isolate immediate invalidation (via a revocation marker or broadcast mechanism) is deferred to v0.2.
 
 ### 10.48 Journal table growth over time
-The `journal` table grows with every operation. For a busy autopilot project, expect ~1-5MB/day. DO SQLite's 10GB limit means roughly 5-10 years of journal at typical rates before pressure. Long before that becomes a concern, v0.2+ adds journal archival: events older than N days are cold-stored to R2 under `journal/<year>/<month>.jsonl.gz` and pruned from DO SQLite. v0.1 does not implement this; the assumption is that a project's actual lifetime is shorter than the practical limit. `tila doctor` reports journal size and projected fill date as part of `tila status`.
+The `journal` table grows with every operation. The earlier estimate was ~1-5MB/day for a busy autopilot project; the benchmark harness's soak mode (`--soak`, see `docs/benchmarks/README.md`) measures journal rows and database bytes per minute for a given workload, and sweep behaviour, so size this from a soak run rather than the estimate. DO SQLite's 10GB limit means roughly 5-10 years of journal at typical rates before pressure. Long before that becomes a concern, v0.2+ adds journal archival: events older than N days are cold-stored to R2 under `journal/<year>/<month>.jsonl.gz` and pruned from DO SQLite. v0.1 does not implement this; the assumption is that a project's actual lifetime is shorter than the practical limit. `tila doctor` reports journal size and projected fill date as part of `tila status`.
 
 ### 10.49 Observability: tail Workers and metrics
 v0.1 provides three observability surfaces:
