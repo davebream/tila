@@ -299,10 +299,13 @@ HTTP backend. These are intentional and called out so consumers are not surprise
 |--------|----------------|-----|
 | `schema.history` | Returns `[]` | Dead on **both** sides — the Worker exposes no schema-history route either, so the cloudflare branch would 404. (The data exists in `_schema_history`; it is simply not surfaced.) |
 | `presence.listAll` | Returns only **active** participants (every row `active: true`) | The embedded backend's `listPresence()` already filters to active participants by TTL; remote additionally includes stale participants as `active: false`. |
-| `artifacts.writeText` | Returns `deduplicated: false` and drops `tags` | The embedded artifacts table has no `tags` column, and the local write path does not report dedup. |
 | `tasks.list` | Ignores `compact`, emits no pagination cursor | `compact` is an HTTP-only projection; the local list is non-paginated (no `next_cursor`/`total`). |
 | `templates.list` | `variables` derived from `{{placeholders}}` | Local derives variables by scanning each template's entity data for `{{name}}` placeholders (`/\{\{(\w+)\}\}/`). |
-| `idempotency_key` (e.g. on `claims.acquire`) | Accepted but **not honored** | Remote dedups retries via D1; local relies on primary-key-level dedup instead — a retried create of an existing id fails rather than duplicating. Full idempotency is single-machine-low-risk and remote-only. (The embedded `_idempotency` table + `check/storeIdempotency` exist but are intentionally unwired.) |
+| Generic `idempotency_key` (e.g. on `claims.acquire`) | Accepted but **not honored** | Generic local request deduplication is not wired; a retried entity create can fail on its existing primary key. This does not apply to versioned artifact operations, which persist their own retry receipts using `idempotencyKey`. |
+
+Local `artifacts.writeText()` preserves tags and reports content deduplication.
+Explicit artifact revisions share history, metadata, restore, and operation-retry
+semantics with the remote backend. See [Revision history and restore](#revision-history-and-restore).
 
 ### Constructor Options
 
@@ -436,6 +439,102 @@ await Bun.write(file, body);
 const text = await new Response(body).text();
 ```
 
+### Revision history and restore
+
+Versioning is opt-in. Supply `lineageId` and a live `lineageFence` when writing;
+claim the canonical resource `artifact:<lineageId>`. A lineage keeps one kind and
+resource for its lifetime. Writes without lineage options keep their existing
+content-addressed behavior. If a versioned write also names an entity `resource`,
+acquire that entity's claim separately and pass its `fence` as well.
+
+This example assumes the project exists, the token has write access, and the
+project schema permits the `report` artifact kind. It writes two revisions,
+pages through their metadata, then restores the first revision as a new head:
+
+```typescript
+import { TilaClient, createArtifactMethods, withClaim } from "tila-sdk";
+
+const client = new TilaClient({
+  baseUrl: process.env.TILA_URL!,
+  token: process.env.TILA_TOKEN!,
+});
+const projectId = "my-project";
+const lineageId = "release-report";
+const artifacts = createArtifactMethods(client, projectId);
+const operationId = crypto.randomUUID(); // Persist this if retries span restarts.
+
+await withClaim(client, projectId, `artifact:${lineageId}`, "exclusive", 60_000, async (claim) => {
+  const heartbeat = claim.startHeartbeat(60_000);
+  try {
+    const writeOptions = {
+      kind: "report",
+      lineageId,
+      lineageFence: claim.fence,
+    };
+    const first = await artifacts.writeText("# Initial report", {
+      ...writeOptions,
+      tags: ["draft"],
+      idempotencyKey: `${operationId}:first`,
+    });
+    await artifacts.writeText("# Updated report", {
+      ...writeOptions,
+      tags: ["reviewed"],
+      idempotencyKey: `${operationId}:second`,
+    });
+
+    let page = await artifacts.history(first.key, { limit: 1 });
+    for (;;) {
+      console.log(page.items); // Newest first; metadata only.
+      if (page.meta.next_cursor === null) break;
+      page = await artifacts.history(first.key, {
+        limit: 1,
+        cursor: page.meta.next_cursor,
+      });
+    }
+
+    const restored = await artifacts.restore(first.key, {
+      fence: claim.fence,
+      idempotencyKey: `${operationId}:restore`,
+    });
+    const { pointer } = await artifacts.meta(restored.key);
+    console.log(pointer.revision, pointer.restored_from, pointer.tags);
+    console.log((await artifacts.readText(restored.key)).content);
+  } finally {
+    heartbeat.stop();
+  }
+}); // withClaim releases the lineage claim even if the callback throws.
+```
+
+| Operation | Contract |
+|---|---|
+| `history(key, { limit?, cursor? })` | Accepts any revision key in the lineage. Returns `items` and `meta` (`total`, `limit`, `next_cursor`). Default limit is 20, clamped to 1–200. Cursors are lineage-bound and retain the initial revision ceiling, so new writes do not shift later pages. Restart without a cursor to see newer writes. |
+| `meta(key)` | Returns `{ ok: true, pointer }` without reading blob contents. The pointer includes lineage, revision, tags, restore origin, and deletion state. |
+| `restore(key, { fence, lineage_id?, tags?, idempotencyKey? })` | Appends a new revision with its own key, even when the bytes match the current head. `restored_from` records the source key. Omitted tags inherit the source; `tags: []` clears tags only on the new revision. |
+| Reading a specific version | Use a history item's `r2_key` with `download()` or `readText()`. Ordinary identical-content uploads may deduplicate to an earlier revision without moving the head; use `restore()` to record a head change. |
+
+Tags on versioned artifacts are assigned at write/restore time; there is no
+revision tag-edit endpoint. Restoring a legacy artifact requires a new explicit
+`lineage_id`; it creates revision 1 without rewriting the source or inferring
+history from old supersedes links.
+
+Use a distinct `idempotencyKey` per logical write or restore, and reuse that key
+with the same request when retrying an uncertain response. Reusing it with
+different input is rejected. An accepted operation can finish publication after
+its lease expires; a new operation needs a live claim. Persist both the retry key
+and request if recovery must survive a client restart. These revision receipts
+also work in the Node/Bun embedded backends; they do not imply generic local
+request idempotency.
+
+Retention is opt-in per artifact kind; zero or omitted `retention_days` keeps
+content indefinitely. Each restore gets its own production time and current
+retention policy, and the live head is protected from automatic sweep. Deleted
+revisions remain available through history/meta with `tombstoned_at` and
+`blob_deleted_at` state; remote downloads/restores return HTTP 410
+`artifact-unavailable` once content is unavailable. Embedded operations report
+the same error code. An unknown key returns not-found instead. See the
+[lifecycle operations guide](../../docs/05-OPERATIONS.md#versioned-artifact-lifecycle)
+for deletion and recovery details.
+
 ## Error Handling
 
 ### Typed Catch Pattern
@@ -533,7 +632,7 @@ const result = await withRetry(
 |---------|----------------|-------------|
 | `createEntityMethods(client, projectId)` | `create`, `get`, `list`, `update`, `archive`, `addRelationship`, `addArtifactRef`, `listArtifactRefs` | Entity CRUD and relationships |
 | `createClaimMethods(client, projectId)` | `acquire`, `renew`, `release`, `list`, `get` | Low-level claim management |
-| `createArtifactMethods(client, projectId)` | `upload`, `download`, `list`, `search`, `addRelationship`, `listRelationships` | Artifact storage and search |
+| `createArtifactMethods(client, projectId)` | `upload`, `writeText`, `download`, `readText`, `list`, `search`, `history`, `meta`, `restore`, `addRelationship`, `listRelationships` | Artifact storage, search, and revision history |
 | `createPresenceMethods(client, projectId)` | `heartbeat`, `list`, `listAll` | Machine presence tracking |
 | `createSignalMethods(client, projectId)` | `inbox`, `send`, `ack` | Inter-machine signaling |
 | `createGateMethods(client, projectId)` | `list`, `create`, `resolve`, `remove` | Coordination gates |
