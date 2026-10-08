@@ -1599,3 +1599,35 @@ benchmark runs fifteen samples on one fixed revision. Keep the baseline until a
 candidate meets the speed, zero-failure and runner-time criteria. Affected-only
 execution remains disabled pending ten paired PR observations. The under-two-minute
 warm-PR target is not yet demonstrated.
+
+## Dependency update policy
+
+Renovate owns routine version updates. Dependabot owns immediate security fixes;
+its version-update limit is zero, while repository security updates and alerts
+remain enabled. Renovate vulnerability PRs are disabled to avoid duplicate fixes.
+Do not disable Dependabot security updates when changing this configuration.
+
+Routine updates are collected on Monday mornings (00:00–07:00 Europe/Warsaw),
+with at most three open Renovate PRs and two new PRs per hour. Existing branches
+can be updated outside that window so the strict, up-to-date `ci` gate can finish.
+Compatible updates are grouped by runtime libraries, build/test tools, UI,
+Cloudflare tooling, experiments, and GitHub Actions. SHA-pinned actions stay pinned.
+The weekly shared lockfile refresh is reviewed because it includes runtime tooling.
+
+Major updates require approval on the Dependency Dashboard and remain separate
+migrations. Pre-1.0 minor upgrades also require approval because their APIs can
+break. npm releases wait three days before routine updates. npm patch updates
+and compatible action updates can merge automatically after required CI passes;
+Cloudflare tooling and standalone experiments remain under review.
+
+Node 24 runs builds, while Node 22 remains the supported public-consumer floor.
+The Node 22 consumer job and Node 22 type definitions must not be upgraded just
+to clear dashboard entries. Public SQLite peer ranges, native binary runner
+baselines, and Cloudflare/Vitest compatibility also require migration-specific
+validation rather than blanket approval of every major update.
+
+For each approved migration, run package tests, type checks, and the relevant
+packed-consumer or native-runner checks. Changes to Cloudflare tooling must pass
+`pnpm test:runtime`; changes to workflows must preserve the required `ci` gate.
+Keep security overrides until the vulnerable dependency chain is demonstrably
+fixed. Do not widen an override's major-version range simply to remove an alert.
