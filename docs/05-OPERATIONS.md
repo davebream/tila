@@ -1960,3 +1960,18 @@ includes every conversation table.
 A watched mailbox holds at most two waiters for at most 25 seconds. Clients should
 re-poll with jitter; timeout is a successful `changed:false` response. Native wake
 and unattended restoration require the later connector and live acceptance gates.
+
+
+### Host conversation connector
+
+`tila connector start|status|register|unregister|stop` manages a single private
+macOS/Linux relay process. Registration takes a discovered native lifecycle key
+and an expected binding epoch; the existing acting run remains the mailbox holder.
+Use separately verified provider profiles and explicit enrollment conversation
+capabilities. [Connector operations](../packages/connector/README.md) documents
+native support, pending wake recovery, explicit attended restoration, and limits.
+
+Deploy the additive dispatch status `attempt`/`server_now` metadata before connector
+clients. No new migration is required for this slice. Missing metadata, unverified
+process/profile identity, unsupported native guarantees, and uncertain wake outcomes
+leave delivery pending. Do not repair these states by acknowledging unread inboxes.

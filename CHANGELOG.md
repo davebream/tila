@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Native host connector (#283, slice 3)
+
+- Add an authenticated host connector with private JSON recovery state, bounded relay registrations, verified native session/profile discovery, and body-free Claude/Codex notices.
+- Preserve managed acting-run identity through native hooks; redact and purge Claude messaging credentials. Record launch intent before explicit attended restoration and reconcile uncertain wakes using server attempt metadata.
+- Deploy additive dispatch status metadata before connector clients; no new migration is required. Codex idle start is opt-in, ordinary busy wakes remain pending without a supported queue, and unattended restoration/Herdr/live cross-host acceptance remain separate gates.
+
 ### Durable conversations (#283, slice 2)
 
 - Add rooms, memberships, threads, author-idempotent publication, offline recipient snapshots, inbox fetch/ack/watch, metadata-only dispatch reconciliation and bounded wake retries.
