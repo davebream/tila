@@ -724,3 +724,39 @@ process restarts. Creation returns `{ ok, handoff }`; repeating the same ID, cre
 and content returns the original snapshot. Referenced objects are not pinned, and
 historical claim snapshots never grant current write authority. Continuity state has
 no automatic expiry and is included in project backups.
+
+## Durable conversations
+
+Cloudflare facades expose `conversations`, `inbox` and `dispatch`. Local facades
+expose the same methods but reject them with `unsupported-capability`. Agent run
+pins and explicit enrollment capabilities are required to consume an inbox.
+
+```typescript
+const sent = await tila.conversations.publish("coordination", {
+  client_op_id: "review-request-1", // Preserve across retries.
+  body: "Please inspect the deployment",
+  targets: [{ kind: "agent", agent_id: "worker" }],
+  reply_expected: true,
+});
+const page = await tila.inbox.fetch("worker");
+for (const item of page.deliveries) {
+  await tila.inbox.ack("worker", item.delivery.id, {
+    ...page.binding,
+    disposition: "accepted",
+  });
+  // Process peer content only after accepting responsibility.
+}
+```
+
+History and inbox cursors are independent. An expired inbox page cursor returns a
+fresh pending page with `cursor_error`; an expired history cursor throws
+`cursor-expired`. Replies reuse the supplied `reply_op_id`. Acknowledgement records
+accepted processing or decline, never task completion. Inline bodies are limited
+to 64 KB UTF-8; `artifact_refs` accepts existing artifact keys.
+
+Relay runs can only use dispatch and attachment authority. `dispatch.status(agent,
+leaseToken)` reconciles a particular wake using metadata, including subsequent
+fetch/ack observations. It never returns bodies or stamps deliveries as fetched.
+`dispatch.lease` and `dispatch.report` require the current binding and enrollment;
+old reports cannot quiet newer publications. Native wake transport is a separate
+host-connector integration.

@@ -30,10 +30,11 @@ writes and transactional entity/claim changes remain requirements during the res
 
 ### Distributed conversations — #283
 
-Delivery is split into five sequential changes: identity/bindings/profiles;
+Delivery is split into five dependent changes: identity/bindings/profiles;
 durable conversations and CLI/MCP; standalone connector/native wake; narrow Herdr
 evaluation/plugin; dashboard and distributed acceptance. This revision implements
-the first slice and requires authentication-boundary review. Subsequent slices
+the first two slices, stacked for review; authentication-boundary changes remain
+held for explicit review. Connector, Herdr and dashboard/live-acceptance slices
 remain open. Only the final change may close #283 after live Mac/Linux acceptance
 with three independent Claude accounts and a Codex coordinator. Fixture results
 do not satisfy those live gates. Task assignments, attempts and durable questions

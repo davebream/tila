@@ -1553,8 +1553,9 @@ Credential events record creation, replacement, closure, revocation, and denied 
 
 ## Agent bindings and account profiles
 
-Issue #283 slice 1 adds agent identity and binding management. Durable messages,
-inbox commands and automatic wake arrive in later slices.
+Issue #283 slice 1 adds agent identity and binding management. Durable messages
+and inbox commands are introduced in slice 2 below; automatic wake arrives in a
+later slice.
 
 Apply `0031_runtime_agents.sql` to global D1 before deploying this Worker. The DO
 and embedded stores apply shared migration 30. Deploy the compatible backend
@@ -1580,7 +1581,7 @@ in this slice.
 
 `--capabilities` replaces a preset. Keep the worker capabilities needed by the
 session and add the two agent capabilities to both enrollment and run policy.
-A relay requests only `agent-bindings:attach` in this slice. It supplies
+A relay requests only `agent-bindings:attach` and `dispatch:relay`. It supplies
 `acting_run_id` to the SDK/HTTP bind operation; D1 verifies that acting run belongs
 to the same enrollment and agent. Relay credentials cannot list agents or act as
 the mailbox consumer.
@@ -1926,3 +1927,36 @@ remaining dashboard entries need the following work before approval:
 Keep these migrations visible on the Dependency Dashboard. Do not approve all
 pending entries merely to empty it, or disable the existing runtime, lint,
 security or consumer gates to make a dependency update pass.
+
+## Durable conversation operations
+
+Deploy compatible server behavior before clients. Slice 2 needs shared DO/embedded
+migration 31 and the slice-1 D1 migration 0031; it adds no further D1 migration.
+Ensure the existing `HASH_PEPPER` secret is configured. Conversation routes fail
+with `config-unavailable` without it. Follow the existing token-hash migration
+procedure before introducing or changing this secret on an established deployment.
+
+| Symptom | Recovery |
+|---------|----------|
+| `stale-binding` | Inspect the current agent epoch and stop using the old binding; replace only with authorized current state |
+| `cursor-expired` | Restart history; fetch the inbox without a cursor to recover pending work |
+| `fetched-not-acked` | Inspect the session; fetch does not accept responsibility and may indicate a crash |
+| `budget-suppressed` | Inspect the delivery timeline and loop cause; a maintainer can use `tila inbox resume AGENT --delivery ID` |
+| Uncertain native wake | Reconcile `dispatch.status(agent, leaseToken)`; fetched/acked observations are metadata only |
+
+Room membership controls publication and private history. Creating rooms and
+changing members requires `conversations:manage`. Explicit enrollment policies
+must grant mailbox capabilities; no existing worker credential gains them silently.
+Relay policy allows only `dispatch:relay` and `agent-bindings:attach`; relay runs
+cannot fetch bodies, publish replies or acknowledge processing.
+
+The daily sweep and lazy fetch/lease expiry mark overdue deliveries expired while
+retaining messages. Backups carry all conversation tables. Restore verifies the
+snapshot, invalidates copied bindings, clears dispatch leases, resets reply context
+and changes cursor generation. Reattach valid current runs after restoration;
+exact-binding deliveries never transfer to replacement sessions. Project destruction
+includes every conversation table.
+
+A watched mailbox holds at most two waiters for at most 25 seconds. Clients should
+re-poll with jitter; timeout is a successful `changed:false` response. Native wake
+and unattended restoration require the later connector and live acceptance gates.

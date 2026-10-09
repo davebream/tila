@@ -2565,3 +2565,31 @@ cleanup removes blob/inline content but retains metadata, tags, and review histo
 for audit. Full project destruction and authorized backup replacement remain
 explicit exceptions. Review loss during blob-only recovery yields unreviewed
 state, never an inferred approval.
+
+## Durable conversations (#283, slices 1–2)
+
+The Worker authenticates each request, applies current project membership and
+capability checks, and creates a separate internal conversation authority envelope.
+Room/inbox/dispatch routes run before D1 response replay and shared caching. They
+return `private, no-store`; publication rejects `Idempotency-Key` and uses the
+SQLite author-scoped operation ledger instead.
+
+Shared migration 31 adds `rooms`, `room_members`, `threads`, `messages`,
+`message_recipients`, `dispatch_outbox`, `dispatch_attempts`, `conversation_context`
+and `_conversation_state`. The DO transaction owns publication, snapshots,
+acknowledgement fencing and wake generations. D1 remains the source of current run
+validity; relay requests check both the relay and the acting holder. R2 references
+are accepted only after their artifact pointers exist. Journal events contain IDs
+and dispositions, not message bodies.
+
+The outbox holds two states and a separate expiring lease. Delivery suppression
+and stalled retry metadata never replace the pending delivery state. Seven-day
+expiry affects delivery responsibility, not room history. Restore invalidates
+bindings, removes leases/reply contexts and rotates signed cursor generation after
+verifying the archive's semantic digest. Embedded backends carry the migrations
+and backup data but their public conversation methods remain unsupported.
+
+See [the conversation contract](distributed-agent-conversations.md) and
+[operations](05-OPERATIONS.md#durable-conversation-operations) for the API and
+recovery boundaries. Native connectors, Herdr and the conversation UI are later
+slices, and fixture coverage does not satisfy distributed live acceptance.

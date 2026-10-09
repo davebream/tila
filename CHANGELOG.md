@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Durable conversations (#283, slice 2)
+
+- Add rooms, memberships, threads, author-idempotent publication, offline recipient snapshots, inbox fetch/ack/watch, metadata-only dispatch reconciliation and bounded wake retries.
+- Add SDK conversation/inbox/dispatch methods, CLI room/inbox commands and opt-in MCP conversation tools with typed errors and recovery guidance. Peer content never conveys human approval.
+- Shared DO/embedded migration 31 adds conversation storage; backups include the new tables and restore invalidates bindings, leases and cursors. Configure `HASH_PEPPER` before enabling conversation routes. No additional D1 migration beyond slice 1 is required; deploy the server before clients.
+
 ### Agent identity foundation (#283, slice 1)
 
 - Add optional immutable agent/role pins to authenticated runs, conditional DO consumer bindings, redacted inspection, and revocation/restore invalidation.
 - Add SDK/CLI agent operations, local credential profiles, profile-qualified lifecycle keys, and `run exec --agent --profile` with an environment allowlist and account checks.
-- Apply additive global D1 migration 0031 before the Worker; shared DO/embedded migration 30 follows automatically. Existing unpinned runs and default worker authority remain compatible. Local agent operations return `unsupported-capability`. Conversations and host connectors are subsequent slices.
+- Apply additive global D1 migration 0031 before the Worker; shared DO/embedded migration 30 follows automatically. Existing unpinned runs and default worker authority remain compatible. Local agent operations return `unsupported-capability`. Durable conversations follow in slice 2; host connectors remain a subsequent slice.
 
 ### 0.4.0 breaking cutover
 

@@ -1,16 +1,18 @@
 # Distributed agent conversations
 
-Status: design proposal, 2026-10-09. This specifies future contracts; it does not
-claim that rooms, host connectors, account routing, or a Herdr integration have
-shipped. It supplements the current [architecture](02-ARCHITECTURE.md) and
+Status: implementation in progress, 2026-10-09. Slices 1–2 implement identity,
+profiles and durable conversations. Host connectors, native wake, Herdr and the
+dashboard remain future slices. It supplements the current [architecture](02-ARCHITECTURE.md) and
 [roadmap](03-ROADMAP.md). Existing identity, membership, and fencing guarantees
 remain in force during migration.
 
-## Implementation boundary — issue #283, slice 1
+## Implementation boundary — issue #283, slices 1–2
 
 This revision implements durable agent registration, run-pinned agent/role identity,
-the consumer-binding ledger, and host-local credential profiles. Rooms, messages,
-inbox consumption, native wake, Herdr and dashboard delivery remain future slices.
+the consumer-binding ledger, host-local credential profiles, rooms, threads,
+messages, offline recipient snapshots, inbox acknowledgement and dispatch leases.
+CLI, SDK and MCP access work without a host connector. Native wake, Herdr and
+dashboard delivery remain future slices.
 Assignments, task attempts and durable questions are outside #283.
 
 An acting run holds a mailbox binding. A relay can attach an authenticated acting
@@ -39,6 +41,44 @@ host-keyed account references. A profile revision is immutable for a running
 session. Verification can establish only `declared` isolation: profiles under one
 OS account are not a process security boundary. See the
 [operations procedure](05-OPERATIONS.md#agent-bindings-and-account-profiles).
+
+## Durable conversation contract
+
+Publication commits the parsed-request hash, per-room sequence, message, recipient
+snapshot, dispatch generation and ID-only journal event in one SQLite transaction.
+The author and `client_op_id` identify retries; a changed payload conflicts. Room
+broadcasts snapshot wake-enabled members even when they have no active binding.
+Explicit recipients must belong to the room at publication. Later room membership
+changes restrict history and future snapshots; they do not retract already accepted
+mailbox deliveries. Current project/run authorization still applies to every fetch.
+Exact-binding deliveries remain tied
+to the selected binding and epoch after replacement.
+
+Inbox order is a project-wide message ordinal followed by delivery ID. This gives
+stable pagination across rooms, including publications sharing a timestamp. Fetch
+stamps observations without acknowledging. Acknowledgement checks the current
+run/binding/epoch inside the transaction; an identical acknowledgement replays even
+after the delivery TTL. It means accepted processing or decline, never completion.
+
+Dispatch state is `pending` or `quiet`; the lease is separate. Each publication
+advances its generation. Reports must match the lease, epoch and captured generation;
+a report never quiets a newer publication. Quiet accepted work becomes eligible
+again at its backoff deadline if still pending. Poll-only bindings stay quiet.
+Fetched work gets at most three re-wakes before becoming inspectably stalled.
+Suppression remains on a pending delivery until a maintainer resumes it.
+
+Relay-only dispatch status contains metadata, never bodies, and never stamps fetch.
+Pass `lease_token` to reconcile the exact recipient snapshot of an uncertain wake,
+including deliveries acknowledged since the lease. A lease contains at most 100
+deliveries. Every relay request also checks the acting holder's current D1 validity.
+
+Conversation protocol 1 is separate from runtime protocol 1. History uses signed,
+reader-bound three-day cursors; pending inboxes are independent. Expired inbox page
+cursors restart the pending page and report `cursor_error`. Watches last at most
+25 seconds, allow two waiters per agent, and return `changed:false` on timeout.
+`HASH_PEPPER` is required for conversation routes; absent signing configuration
+fails closed. Restore clears leases and server-held reply contexts, rotates cursor
+generation and invalidates copied bindings. Delivery expiry preserves messages.
 
 ## 1. Product boundary and required scenario
 

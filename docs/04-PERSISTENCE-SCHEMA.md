@@ -282,3 +282,20 @@ the new table, and project exports include it in the semantic digest.
 Blob lifecycle cleanup retains pointer and review rows, including legacy metadata.
 Confirmed deletion clears inline content. Audit metadata grows with artifact and
 review count until the project is explicitly destroyed or replaced from backup.
+
+## Durable conversations (shared migration 31)
+
+| Table | Durable responsibility |
+|-------|------------------------|
+| `rooms`, `room_members`, `threads` | Project conversation policy, membership and thread identity |
+| `messages` | Immutable peer bodies/provenance, author operation hashes, room sequence and project-wide ordinal |
+| `message_recipients` | Offline recipient snapshot, exact-binding targets, fetch/ack observations, expiry and wake suppression |
+| `dispatch_outbox`, `dispatch_attempts` | Current publication generation, separate expiring relay lease and attempt recipient snapshots |
+| `conversation_context`, `_conversation_state` | Server-held causal delivery context and cursor generation |
+
+Publication and acknowledgement each use a single DO SQLite transaction. Message
+bodies never enter the journal or relay status. Seven-day default expiry marks
+recipient deliveries expired; it does not delete messages. Backup includes every
+table. Restore clears active leases/context, rotates cursor generation and advances
+agent epochs before releasing the project transfer lock. Embedded stores use the
+same migration while public local-mode conversation operations remain unsupported.
