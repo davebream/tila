@@ -180,6 +180,28 @@ describe("runtime HTTP authority and SDK wire contracts", () => {
       new RuntimeStore(f.db).context(recovered.context.token_id),
     ).rejects.toMatchObject({ code: "enrollment-revoked" });
   });
+  it("rejects unknown invitations before persisting their otherwise valid proofs", async () => {
+    const key = await runtimeBinding(
+      await generateRuntimeKey(),
+      "https://tila.test",
+      () => true,
+    );
+    await expect(
+      owner.enroll(
+        {
+          operation_id: crypto.randomUUID(),
+          installation_id: crypto.randomUUID(),
+          name: "unauthorized",
+          jkt: key.jkt,
+        },
+        key,
+        "unknown-invitation".repeat(3),
+      ),
+    ).rejects.toMatchObject({ code: "invitation-invalid" });
+    expect(
+      f.sqlite.prepare("SELECT COUNT(*) AS count FROM _runtime_proofs").get(),
+    ).toEqual({ count: 0 });
+  });
   it("enrolls through single-use invitation and assigns a participant server-side", async () => {
     const r = await runtime();
     expect((await r.enrollment.context()).purpose).toBe("enrollment");
