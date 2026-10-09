@@ -61,7 +61,13 @@
     "profile_store_verification": true,
     "configuration_directories": "Existing isolated CCS instances and the plain Codex home; all verified owner-only. No credential material copied.",
     "codex_probe": "Short-lived native app-server stdio initialize followed by account/read with refreshToken=false; matching returned home required; no thread creation or resume.",
-    "limits": "Account metadata verification does not prove native wake, durable message exchange, draft preservation or restoration."
+    "limits": "Account metadata verification does not prove native wake, durable message exchange, draft preservation or restoration.",
+    "compiled_macos_cli_verification": true,
+    "claude_native_response_probe": {
+      "result": "passed-for-both-accounts",
+      "method": "One fixed response requested through each selected native Claude CLI context with safe mode, no tools, strict MCP configuration and no session persistence.",
+      "limits": "This proves authenticated provider response availability, not Tila routing, native wake, drafts or restoration."
+    }
   },
   "native_transport_observations": {
     "codex_existing_daemon_proxy": "No initialize reply within eight seconds during read-only probes. Native stdio account verification succeeded. Existing daemon observation/wake remains separately unproven."
