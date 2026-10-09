@@ -14,6 +14,8 @@ afterEach(() => {
 
 // The canonical set of domain tables that must be zero after a destroy + reconstruction.
 const EXPECTED_DOMAIN_TABLES = [
+  "agents",
+  "agent_bindings",
   "entities",
   "entity_relationships",
   "artifact_pointers",

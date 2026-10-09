@@ -22,6 +22,8 @@ function collectSourceFiles(dir: string): string[] {
 function collectEmittedCodesFromContent(content: string): string[] {
   const codes: string[] = [];
   const patterns = [
+    // Shared agent-binding operations use the typed fail helper.
+    /fail\(\s*"([a-z][a-z0-9-]*)"/g,
     /OidcVerificationError\(\s*"([a-z][a-z0-9-]*)"/g,
     /RuntimeDenied\(\s*"([a-z][a-z0-9-]*)"/g,
     /this\.deny\(\s*"([a-z][a-z0-9-]*)"/g,
@@ -82,18 +84,24 @@ function collectServerEmittedCodes(): Set<string> {
 /** SDK-generated codes — not emitted by the worker HTTP layer. */
 const SDK_LOCAL_WIRE_CODES = new Set<string>([
   TILA_ERRORS.UNKNOWN,
+  TILA_ERRORS.UNSUPPORTED_CAPABILITY,
   TILA_ERRORS.ARTIFACT_GET_FAILED,
   TILA_ERRORS.ARTIFACT_GET_LATEST_FAILED,
 ]);
 
 describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   const SDK_ONLY_ERROR_CODES = new Set<string>([
+    "unsupported-capability",
     "artifact-get-failed",
     "artifact-get-latest-failed",
     "UNKNOWN",
   ]);
 
   const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "stale-binding",
+    "no-active-binding",
+    "runtime-required",
+    "profile-mismatch",
     "runtime-purpose-denied",
     "runtime-binding-mismatch",
     "runtime-proof-replayed",
