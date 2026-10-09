@@ -1,3 +1,4 @@
+import { RuntimeStore } from "@tila/backend-d1";
 import { Hono } from "hono";
 import { emitRequestDatapoint, emitSweepErrorDatapoint } from "./lib/analytics";
 import { constantTimeSecretMatch } from "./lib/constant-time-compare";
@@ -44,6 +45,7 @@ import { memberships } from "./routes/memberships";
 import { presence } from "./routes/presence";
 import { records } from "./routes/records";
 import { repos } from "./routes/repos";
+import { runtimeRoutes } from "./routes/runtime";
 import { schemaRoutes } from "./routes/schema";
 import { search } from "./routes/search";
 import { serviceAccountRoutes } from "./routes/service-accounts";
@@ -125,6 +127,8 @@ app.route("/auth/session", authSessionExchange);
 // Static Assets (wrangler [assets] binding) serves the SPA index.html for
 // unmatched paths. run_worker_first ensures API/auth routes are handled here.
 // See packages/schemas/src/deploy-routes.ts for the authoritative prefix list.
+
+app.route("/", runtimeRoutes);
 
 // Session-protected auth routes (logout, status)
 const authSessionRoutes = new Hono<AppEnv>();
@@ -278,6 +282,11 @@ export default {
     // record. Catch it, log it, and emit a sweep-level error datapoint so the
     // pre-loop crash leaves a forensic footprint. Per-project Analytics are
     // emitted inside runSweep.
+    ctx.waitUntil(
+      new RuntimeStore(env.DB).pruneReplayState().catch(() => {
+        console.error("[runtime] replay-state cleanup unavailable");
+      }),
+    );
     ctx.waitUntil(
       runSweep(env).then(
         () => {},

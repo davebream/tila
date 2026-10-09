@@ -5,6 +5,17 @@
  * strings returned by the worker and DO layers.
  */
 export const TILA_ERRORS = {
+  RUNTIME_PROOF_REPLAYED: "runtime-proof-replayed",
+  RUNTIME_PURPOSE_DENIED: "runtime-purpose-denied",
+  RUNTIME_BINDING_MISMATCH: "runtime-binding-mismatch",
+  RUNTIME_POLICY_DENIED: "runtime-policy-denied",
+  RUNTIME_RENEWAL_CONFLICT: "runtime-renewal-conflict",
+  RUNTIME_CONFLICT: "runtime-conflict",
+  RUNTIME_AUTHORIZATION_UNAVAILABLE: "runtime-authorization-unavailable",
+  ENROLLMENT_REVOKED: "enrollment-revoked",
+  RUN_CLOSED: "run-closed",
+  RUN_EXPIRED: "run-expired",
+  INVITATION_INVALID: "invitation-invalid",
   // Auth / middleware (worker layer)
   UNAUTHORIZED: "unauthorized",
   SESSION_EXPIRED: "session-expired",

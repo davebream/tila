@@ -117,6 +117,7 @@ interface DpopPayload {
 export async function verifyDpopProof(opts: {
   proofJwt: string;
   accessToken?: string;
+  requireAth?: boolean;
   expectedJkt: string;
   htm: string;
   htu: string;
@@ -216,7 +217,7 @@ export async function verifyDpopProof(opts: {
   }
 
   // Legacy proofs may omit ath. A supplied hash must bind the actual bearer.
-  if (payload.ath !== undefined) {
+  if (payload.ath !== undefined || opts.requireAth) {
     try {
       if (
         typeof payload.ath !== "string" ||

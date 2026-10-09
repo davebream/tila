@@ -172,3 +172,9 @@ export type {
   DpopProofContext,
   OidcWorkloadTokenProviderOptions,
 } from "./token-provider";
+
+export {
+  RuntimeClient,
+  assertRuntimeContext,
+  exchangeRuntimeWorkload,
+} from "./runtime";

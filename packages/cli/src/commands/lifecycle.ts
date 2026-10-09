@@ -55,7 +55,11 @@ export default defineCommand({
         printJson(
           new SessionStore()
             .list()
-            .filter((state) => state.namespace === namespace),
+            .filter((state) => state.namespace === namespace)
+            .map(({ runtime, ...state }) => ({
+              ...state,
+              runId: runtime?.runId,
+            })),
         );
       },
     }),

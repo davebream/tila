@@ -7,6 +7,11 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+export const runtimeProofs = sqliteTable("_runtime_proofs", {
+  proof_hash: text("proof_hash").primaryKey(),
+  expires_at: integer("expires_at").notNull(),
+});
+
 // --- _projects ---
 export const projects = sqliteTable("_projects", {
   project_id: text("project_id").primaryKey(),
@@ -358,4 +363,60 @@ export const credentialEvents = sqliteTable("_credential_events", {
   action: text("action").notNull(),
   occurred_at: integer("occurred_at").notNull(),
   details_json: text("details_json").notNull().default("{}"),
+});
+// Runtime authority is separate from general API credentials. Every token version
+// resolves its live enrollment/run ancestry before it can authorize a request.
+export const runtimeEnrollments = sqliteTable("_runtime_enrollments", {
+  enrollment_id: text("enrollment_id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  installation_id: text("installation_id").notNull(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull(),
+  principal_id: text("principal_id").notNull().unique(),
+  sponsor_id: text("sponsor_id"),
+  sponsor_context_json: text("sponsor_context_json"),
+  invitation_hash: text("invitation_hash").unique(),
+  jkt: text("jkt").notNull(),
+  policy_json: text("policy_json").notNull(),
+  created_at: integer("created_at").notNull(),
+  revoked_at: integer("revoked_at"),
+});
+export const runtimeInvitations = sqliteTable("_runtime_invitations", {
+  invitation_hash: text("invitation_hash").primaryKey(),
+  project_id: text("project_id").notNull(),
+  name: text("name").notNull(),
+  policy_json: text("policy_json").notNull(),
+  created_by: text("created_by").notNull(),
+  expires_at: integer("expires_at").notNull(),
+});
+export const runtimeRuns = sqliteTable("_runtime_runs", {
+  run_id: text("run_id").primaryKey(),
+  project_id: text("project_id").notNull(),
+  enrollment_id: text("enrollment_id"),
+  workload_binding_id: text("workload_binding_id"),
+  workload_context_json: text("workload_context_json"),
+  principal_id: text("principal_id").notNull(),
+  participant_id: text("participant_id").notNull().unique(),
+  jkt: text("jkt").notNull(),
+  policy_json: text("policy_json").notNull(),
+  state: text("state").notNull().default("active"),
+  lease_expires_at: integer("lease_expires_at").notNull(),
+  created_at: integer("created_at").notNull(),
+  current_token_id: text("current_token_id").notNull(),
+});
+export const runtimeCredentials = sqliteTable("_runtime_credentials", {
+  token_id: text("token_id").primaryKey(),
+  predecessor_id: text("predecessor_id").unique(),
+  purpose: text("purpose").notNull(),
+  enrollment_id: text("enrollment_id"),
+  run_id: text("run_id"),
+  expires_at: integer("expires_at"),
+  retire_at: integer("retire_at"),
+});
+
+export const runtimeAssertions = sqliteTable("_runtime_assertions", {
+  assertion_hash: text("assertion_hash").primaryKey(),
+  binding_id: text("binding_id").notNull(),
+  run_id: text("run_id").notNull(),
+  expires_at: integer("expires_at").notNull(),
 });

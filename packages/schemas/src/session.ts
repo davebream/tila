@@ -198,6 +198,13 @@ export const GitHubAppInfoResponseSchema = z.object({
 export type GitHubAppInfoResponse = z.infer<typeof GitHubAppInfoResponseSchema>;
 
 export const OidcExchangeRequestSchema = z.object({
+  runtime: z
+    .object({
+      operation_id: z.string().uuid(),
+      policy: CredentialPolicySchema.optional(),
+    })
+    .strict()
+    .optional(),
   jkt: z
     .string()
     .regex(/^[A-Za-z0-9_-]{43}$/)

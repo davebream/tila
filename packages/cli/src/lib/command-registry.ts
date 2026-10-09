@@ -30,7 +30,15 @@ export const errorDefinitions = [
   }));
 
 export const groups: Record<string, string[]> = {
-  "Getting Started": ["init", "link", "open", "mcp", "lifecycle"],
+  "Getting Started": [
+    "init",
+    "link",
+    "open",
+    "mcp",
+    "lifecycle",
+    "machine",
+    "run",
+  ],
   "Work and Coordination": [
     "task",
     "state",
@@ -86,6 +94,10 @@ export const sharedArgs = {
 
 // Audited read-only operations. Unknown/new commands remain mutating until reviewed.
 const readOnly = new Set([
+  "machine list",
+  "machine inspect",
+  "run list",
+  "run inspect",
   "schema",
   "complete",
   "task list",

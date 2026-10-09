@@ -100,3 +100,9 @@ export type {
   TraceStep,
   TrustDecision,
 } from "./resolver-types.js";
+
+export {
+  RuntimeEnrollmentStore,
+  RuntimeFileSecretStore,
+  type RuntimeEnrollmentSecret,
+} from "./runtime-store.js";

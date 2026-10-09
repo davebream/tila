@@ -1,3 +1,4 @@
+import { RuntimeStore } from "@tila/backend-d1";
 import { CredentialStore } from "@tila/backend-d1";
 import { CredentialPolicySchema, policyContains } from "@tila/schemas";
 import { Hono } from "hono";
@@ -494,6 +495,7 @@ export function createBackupRoutes(options: {
         );
       }
     }
+    await new RuntimeStore(c.env.DB).revokeProject(projectId, callerOwner(c));
     // Restoring membership/binding metadata must not resurrect old credentials.
     await new CredentialStore(c.env.DB).revokeProjectCredentials(projectId, {
       principalId: callerOwner(c),

@@ -28,6 +28,7 @@ import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";
 import { getGlobalFlags, resolveParticipantId } from "./lib/global-flags";
+import { managedRuntime } from "./lib/managed-runtime";
 import { outputText } from "./lib/output";
 import { deriveOrg, resolveCfApiToken } from "./lib/provisioning";
 import { checkAccountMatch, verifyCloudflareAuth } from "./lib/wrangler";
@@ -123,7 +124,21 @@ export async function runStartupChecks(
   const machine = resolvedIdentity.environment.machine ?? hostname();
 
   // Step 1: Project context
-  const config = findConfig();
+  const managed = await managedRuntime();
+  if (managed) {
+    resolvedIdentity.participantId = managed.context.participant_id;
+    resolvedIdentity.explicit = true;
+  }
+  const config: TilaProjectConfig | null = managed
+    ? {
+        backend: "cloudflare",
+        project_id: managed.context.project_id,
+        worker_url: managed.deployment,
+        schema_version: 0,
+        tila_version: CLI_VERSION,
+        created_at: new Date(0).toISOString(),
+      }
+    : findConfig();
   if (!config) {
     throw new Error(
       "No tila project found.\n\n" +
@@ -187,7 +202,7 @@ export async function runStartupChecks(
   }
 
   // Step 2: API token (async for github-repo mode)
-  const token = await requireTokenAsync();
+  const token = managed?.provider ?? (await requireTokenAsync());
 
   // Step 2.5: Git remote mismatch warning (github-repo mode only)
   const authMode = config?.auth?.mode ?? "tila-token";
@@ -196,7 +211,7 @@ export async function runStartupChecks(
   }
 
   // Steps 3-5: Cloudflare auth checks (skipped with --skip-auth or non-cloudflare backend)
-  if (!skipAuth && backendMode === "cloudflare") {
+  if (!managed && !skipAuth && backendMode === "cloudflare") {
     const cfToken = resolveCfApiToken();
     if (cfToken) {
       const whoami = await verifyCloudflareAuth(cfToken);

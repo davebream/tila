@@ -1334,6 +1334,8 @@ authGithub.post("/exchange-oidc", async (c) => {
     assertionId: claims.jti,
     expiresAt: claims.exp,
     jkt: parsed.data.jkt,
+    runtime: parsed.data.runtime,
+    assertion: parsed.data.oidc_token,
   });
   if (scopedResponse) return scopedResponse;
 

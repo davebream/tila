@@ -336,6 +336,8 @@ authOidc.post("/exchange", async (c) => {
     assertionId: hasJti ? String(jti) : `${subject}:${iat}`,
     expiresAt: Number(payload.exp),
     jkt: parsed.data.jkt,
+    runtime: parsed.data.runtime,
+    assertion: parsed.data.oidc_token,
   });
   if (scopedResponse) return scopedResponse;
 

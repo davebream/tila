@@ -7,6 +7,7 @@ import {
   Lifecycle,
   SessionStore,
   clientOwner,
+  connectRuntimeBroker,
   environmentMetadata,
   processAlive,
   processIdentity,
@@ -18,12 +19,12 @@ import {
   type LifecycleState,
 } from "@tila/schemas";
 import { type TilaFacade, createTila } from "tila-sdk";
-import { requireTokenAsync } from "../auth";
 import { findConfig } from "../config";
 import { diagnostic, outputText, protocolJson } from "./output";
+import { startEnrolledRun } from "./runtime";
 
-export function lifecycleNamespace(): string {
-  const config = findConfig();
+export function lifecycleNamespace(cwd?: string): string {
+  const config = findConfig(cwd);
   if (!config?.worker_url || config.backend === "local")
     throw new Error(
       "Lifecycle integration requires a configured Cloudflare project",
@@ -58,7 +59,11 @@ export function runtime(store = new SessionStore()): {
     if (!api) {
       const config = findConfig();
       if (!config) throw new Error("Project configuration is missing");
-      api = await createTila(config, await requireTokenAsync(), {
+      if (!state.runtime) throw new Error("Runtime initialization pending");
+      const connected = await connectRuntimeBroker(state.runtime);
+      if (connected.context.participant_id !== state.participantId)
+        throw new Error("Runtime participant mismatch");
+      api = await createTila(config, connected.provider, {
         participantId: state.participantId,
         environment: state.environment,
         timeoutMs: 1200,
@@ -87,6 +92,15 @@ export async function ensureWorker(
       processAlive(latest.worker)
     )
       return;
+    if (latest.runtime) {
+      // A crashed helper cannot recover its ephemeral run proof key. Never
+      // silently replace the authentication of an existing conversation.
+      latest.phase = "crashed";
+      latest.degraded =
+        "Run helper stopped; start a replacement session to recover through handoffs.";
+      store.write(latest);
+      return;
+    }
     const [command, ...args] = cliInvocation();
     const child = spawn(
       command,
@@ -118,12 +132,29 @@ export async function runLifecycleHook(
   try {
     if (event.hook_event_name === "SessionStart") {
       const owner = clientOwner(client);
-      const { state, text } = await lifecycle.start(
+      let { state, text } = await lifecycle.start(
         client,
         event,
         owner,
         environmentMetadata(client, event.cwd),
       );
+      await ensureWorker(lifecycle.store, state);
+      const deadline = Date.now() + 8000;
+      while (
+        !state.runtime &&
+        state.phase === "active" &&
+        Date.now() < deadline
+      ) {
+        await delay(100);
+        state = lifecycle.store.read(key) ?? state;
+      }
+      if (state.runtime)
+        ({ state, text } = await lifecycle.start(
+          client,
+          event,
+          owner,
+          environmentMetadata(client, event.cwd),
+        ));
       let warning =
         client === "claude-code" && !owner
           ? "Tila lifecycle degraded: cannot identify the Claude Code runtime. Use its native CLI installation; presence will remain offline."
@@ -132,7 +163,7 @@ export async function runLifecycleHook(
         if (client === "claude-code" && process.env.CLAUDE_ENV_FILE) {
           appendFileSync(
             process.env.CLAUDE_ENV_FILE,
-            `\nexport TILA_PARTICIPANT_ID=${shellQuote(state.participantId)}\nexport TILA_LIFECYCLE_KEY=${shellQuote(state.key)}\n`,
+            `\nexport TILA_LIFECYCLE_KEY=${shellQuote(state.key)}\n`,
           );
         }
         await ensureWorker(lifecycle.store, state);
@@ -193,10 +224,37 @@ export async function runLifecycleWorker(
   const initial = await store.locked(key, async () => store.read(key));
   if (!initial || initial.generation !== generation) return;
   process.chdir(initial.cwd);
+  if (initial.runtime)
+    throw new Error("An existing run cannot be resumed after helper loss");
+  const config = findConfig();
+  if (!config?.worker_url) throw new Error("Remote configuration is required");
+  const managed = await startEnrolledRun({
+    deployment: new URL(config.worker_url).origin,
+    projectId: config.project_id,
+  });
+  try {
+    await store.locked(key, async () => {
+      const state = store.read(key);
+      if (
+        !state ||
+        state.generation !== generation ||
+        state.worker?.pid !== process.pid
+      )
+        throw new Error("Session generation changed during runtime creation");
+      state.runtime = {
+        ...managed.reference,
+        runId: managed.broker.context.run_id,
+      };
+      state.participantId = managed.broker.context.participant_id;
+      store.write(state);
+    });
+  } catch (error) {
+    await managed.broker.close().catch(() => {});
+    throw error;
+  }
   const { lifecycle, close } = runtime(store);
   const observer = new CodexObserver();
   let closingSince: number | undefined;
-  let exhausted = false;
   try {
     for (;;) {
       const state = store.read(key);
@@ -220,20 +278,15 @@ export async function runLifecycleWorker(
               store.write(latest);
             }
           });
-          if (!alive) {
-            await lifecycle.tick(key, generation, false);
-            return;
-          }
-          await delay(15_000);
-          continue;
+          await lifecycle.tick(key, generation, false);
+          return;
         }
       }
       if (!(await lifecycle.tick(key, generation, alive))) return;
       const latest = store.read(key);
       if (latest?.phase === "closing") {
         closingSince ??= Date.now();
-        if (Date.now() - closingSince > 30_000) {
-          exhausted = true;
+        if (Date.now() - closingSince > 300_000) {
           return; // Persist the outbox for explicit retry, never retry forever.
         }
       }
@@ -242,6 +295,10 @@ export async function runLifecycleWorker(
   } finally {
     observer.close();
     close();
+    let closureConfirmed = true;
+    await managed.broker.close().catch(() => {
+      closureConfirmed = false;
+    });
     // A clean end can race the monitor's final liveness check. Publish that this
     // helper is leaving so an end hook never relies on an exiting process.
     const pending = await store.locked(key, async () => {
@@ -253,9 +310,22 @@ export async function runLifecycleWorker(
       )
         return null;
       latest.worker = null;
+      if (!closureConfirmed)
+        latest.degraded =
+          "Local runtime access stopped; server closure could not be confirmed. The run lease will expire within five minutes.";
       store.write(latest);
-      return latest.phase === "closing" && !exhausted ? latest : null;
+      return latest.phase === "closing" ? latest : null;
     });
-    if (pending) await ensureWorker(store, pending);
+    if (pending)
+      await store.locked(key, async () => {
+        const state = store.read(key);
+        if (state?.generation === generation) {
+          state.phase = "crashed";
+          state.degraded = closureConfirmed
+            ? "Cleanup incomplete; runtime access is closed. Remaining claims expire normally."
+            : "Cleanup incomplete; local runtime access stopped but server closure could not be confirmed. The run lease and remaining claims expire normally.";
+          store.write(state);
+        }
+      });
   }
 }

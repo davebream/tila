@@ -73,6 +73,11 @@ export async function resolveTokenMembership(
   sources: MembershipSource[];
   mirroredRepoId?: number;
 } | null> {
+  if (token.kind === "d1-token" && token.runtime) {
+    // RuntimeStore already revalidated this enrollment's canonical membership,
+    // sponsor, project and repository restrictions for this request.
+    return { role: token.runtime.policy.role, sources: ["explicit"] };
+  }
   if (token.kind === "github-actions-session")
     return resolveActionsMembership(db, projectId, token.workload, token.role);
   if (
