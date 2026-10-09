@@ -29,7 +29,7 @@ tila implements a unified authentication system with three distinct auth paths, 
 
 | Auth Path | Client | Use Case | Lifetime | Revocation |
 |-----------|--------|----------|----------|------------|
-| D1 API Token | CLI, SDK, MCP | Long-lived machine access | Indefinite (until revoked) | Explicit (via `/api/tokens/:tokenId` DELETE) |
+| D1 API Token | Operator CLI, SDK | Long-lived machine access | Indefinite (until revoked) | Explicit (via `/api/tokens/:tokenId` DELETE) |
 | GitHub Session Token | CLI (github-repo mode) | Repo-scoped collaboration | Tiered by permission: read 1 h / write 15 min / admin 5 min (see §12) | Automatic (expiry only, no explicit revoke) |
 | Cookie Session | Browser UI | Interactive web access | 8 hours | Explicit (via `/auth/session/logout` POST) |
 
@@ -1284,3 +1284,7 @@ TTL. A dual-verify path is a tracked follow-up, not yet implemented. Migration g
 ---
 
 **End of Auth Implementation Documentation**
+
+## MCP runtime cutover (0.4.0)
+
+The operator authentication methods above remain available for CLI/SDK administration. MCP now requires a project run through the enrollment broker or runtime OIDC flow; it does not resolve personal sessions, API-token environment variables, or local credential files. See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs).

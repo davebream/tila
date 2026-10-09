@@ -11,7 +11,7 @@ The CLI (`tila-cli`) supports two execution modes:
 - **Remote mode** — forwards calls to the live Cloudflare Worker over HTTP.
 - **Local mode** — runs against the embedded SQLite core (`@tila/backend-embedded`),
   on the developer's machine, without a network connection. The CLI hosts it via
-  `@tila/backend-local` (`bun:sqlite`); the SDK/MCP host it via `tila-sdk/local`
+  `@tila/backend-local` (`bun:sqlite`); the SDK hosts it via `tila-sdk/local`
   (`better-sqlite3`).
 
 These interfaces are the boundary that makes the swap transparent. The CLI resolves a

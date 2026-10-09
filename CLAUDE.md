@@ -170,7 +170,7 @@ schemas → sdk → mcp-server
 cli -> schemas, core, auth-store, backend-local, sdk
 ```
 
-`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by `backend-local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK + MCP server), not just Bun. The DB file is portable between the CLI and a Node SDK/MCP consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
+`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by `backend-local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK), not just Bun. The DB file is portable between the CLI and a Node SDK consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
 
 ### Request flow
 

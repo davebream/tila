@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 0.4.0 breaking cutover
+
+- **Strict project MCP:** MCP requires a managed run backed by the shared server. Direct personal/owner credentials, ambient keychain lookup, and private SQLite MCP mode are removed without fallback. Operator CLI authentication and CLI/SDK local functionality remain available.
+- **Unattended runs:** Personal/shared installation enrollment, single-use invitations, runtime OIDC exchange, protected installation storage, `tila machine` management, and `tila run exec` provide separate participants and automatically renewed proof-bound credentials. Current membership, sponsor/workload restrictions, lease, and policy are checked before access and replay.
+- **Upgrade backend first:** Apply additive D1 migration 0030, deploy the compatible Worker, then upgrade public artifacts together to 0.4.0. Enroll installations, regenerate client configuration, and restart sessions. Preserve project data and ownership; retain additive schema during explicit rollback. Authentication review and isolated deployment/client validation remain required before production cutover.
+
 ## [0.3.0] - 2026-10-08
 
 ### Upgrade notes

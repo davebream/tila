@@ -10,89 +10,56 @@ triggers:
   - shared state
 ---
 
-tila is a state-and-coordination engine for multi-machine agentic work — not an orchestrator. Agents coordinate by claiming tasks (receiving fencing tokens), performing work, uploading results as artifacts, and releasing claims. tila tracks what is ready, what is blocked, and who holds what.
-
-## Core Workflow
-
-The **claim → fence → write** pattern is tila's correctness model:
-
-1. **Claim** — call `tila_claim_acquire` with an entity ID to acquire exclusive access. The response includes a `fence` integer and an expiration time (default TTL: 5 minutes).
-
-2. **Write with fence** — pass the `fence` value to every write call: `tila_task_update`, `tila_task_archive`, and `tila_gate_create` (and artifact writes against a claimed task). The fence proves your claim is current.
-
-3. **Handle 409** — if your fence is stale (claim expired or another agent re-claimed the entity, incrementing the fence), writes return HTTP 409. Re-claim to get a fresh fence before retrying.
-
-**Example sequence:**
-
-```
-1. tila_claim_acquire { resource: "task-42" }
-   → { fence: 7, expires_at: 1716123456789 }
-
-2. tila_task_update { id: "task-42", data: { status: "in-progress" }, fence: 7 }
-   → { ok: true }
-
-3. tila_claim_release { resource: "task-42", fence: 7 }
-   → { ok: true }
-```
-
-## Tools
-
-- **Lean profile:** set `TILA_MCP_TOOLS=core` to expose only the 20 coordination tools
-  (tasks, claims, gates, signals, summary, presence, journal). Unset = all tools.
-
-| Tool | Description |
-|------|-------------|
-| `tila_task_create` | Create a new entity (task, epic, etc.) in the project |
-| `tila_task_list` | List entities in compact format (id, type, status, claimed\_by, blockers) |
-| `tila_task_show` | Get full entity details including relationships |
-| `tila_task_update` | Update entity data fields — **requires fence** |
-| `tila_claim_acquire` | Acquire a claim on an entity — **returns fence + expiry** |
-| `tila_claim_release` | Release a claim — **requires fence** |
-| `tila_task_ready` | List entities with no blockers and no pending gates (ready for work) |
-| `tila_artifact_put` | Upload an artifact (base64-encoded content) — fence optional, required only when uploading against a claimed entity |
-| `tila_artifact_search` | Full-text search across all indexed artifacts |
-| `tila_gate_create` | Create a coordination gate (CI, PR, human approval, timer, webhook) — **requires fence** |
-| `tila_gate_resolve` | Resolve a pending gate, returning the entity to the ready set |
-| `tila_summary` | Get compact project summary: counts by type/status, active claims, ready count, recent events |
-
-## Resources
-
-Subscribe to these MCP resources for live project state without polling tools:
-
-| URI | Description |
-|-----|-------------|
-| `tila://project/summary` | Entity counts, status breakdown, active claims, ready count, online participants |
-| `tila://project/ready` | Entities with no open blockers and no pending gates |
-| `tila://project/presence` | Participants with recorded heartbeats |
-| `tila://project/schema` | Current project schema version and definition |
+Tila provides shared-project coordination through a managed coding run. The CLI handles operator administration. MCP authenticates through the run broker and never accepts personal tokens, owner credentials, ambient keychain authentication, or private SQLite configuration.
 
 ## Setup
 
-**Launch:**
-```bash
-npx -y tila-mcp-server
+Authorize the installation once with existing human authentication, then generate client configuration:
+
+```sh
+tila --instance https://tila.example.com --project my-project machine enroll
+tila --instance https://tila.example.com --project my-project mcp init
 ```
 
-**Environment variables:**
+For a single MCP process after enrollment:
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TILA_API_TOKEN` | Yes (secret) | API token for authentication |
-| `TILA_API_URL` | No | Worker URL — overrides `.tila/config.toml` `worker_url` |
-| `TILA_PROJECT_ID` | No | Project ID — overrides `.tila/config.toml` `project_id` |
-| `TILA_MCP_TOOLS` | No | Comma-separated tool groups to register; set `core` for the lean coordination profile |
-| `TILA_PARTICIPANT_ID` | No | Stable participant ID; otherwise one UUID is generated per server process |
+```sh
+tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.4.0
+```
 
-If your project has a `.tila/config.toml` (created by `tila init`), `TILA_API_URL` and `TILA_PROJECT_ID` are read from it automatically. Only `TILA_API_TOKEN` must be set explicitly (or placed in `.tila/.env`).
+The helper supplies a run-specific socket capability, renews credentials, and closes authentication at session termination. Native hooks reuse the active run across MCP reconnects. Missing or ambiguous host session mappings fail closed. Do not configure `TILA_API_TOKEN`, `TILA_TOKEN`, or local database paths for MCP. Never persist broker capabilities or enrollment secrets in repository settings.
 
-## Gotchas
+The default installation store is the OS secret store. Headless Linux requires an explicitly selected private file store. Shared runners enroll through an owner-authorized invitation; supported OIDC jobs obtain runtime access without an owner secret. See the operations guide for enrollment, renewal, revocation, and recovery.
 
-- **Default claim TTL is 5 minutes** (300000 ms). The response from `tila_claim_acquire` includes the exact expiration timestamp — track it and re-claim before it expires if your work takes longer.
-- **Same-participant re-claim renews without a fence bump.** An owner claim transferred to another participant under the same principal does bump the fence and invalidates the prior participant.
-- **HTTP 409 means stale fence** — re-claim to get a fresh fence before retrying the write.
-- **`tila_task_ready` is the polling surface.** Use it to discover which entities are available for work. An entity appears in the ready set only when it has no open blockers and no pending gates.
-- **Gates block the ready set.** `tila_gate_create` removes an entity from the ready set until `tila_gate_resolve` is called (or the gate times out). Use gates for external sync points: CI passes, PR merges, human approvals.
+## Default workflow tools
 
----
+The default `workflow` profile exposes six tools:
 
-See `docs/` for architecture details and the correctness model specification.
+| Tool | Purpose |
+| --- | --- |
+| `tila_session` | Open/resume, heartbeat, acknowledge processed journal events |
+| `tila_inspect` | Read ready work, tasks, records, artifacts, handoffs, or changes |
+| `tila_claim` | Acquire, renew, or release an exact fenced claim |
+| `tila_publish` | Create/update tasks, create/set records, write text artifacts |
+| `tila_signal` | Send, read inbox, acknowledge delivery |
+| `tila_close` | Save a handoff and release explicitly listed claims |
+
+Start with `tila_session`, inspect ready work, acquire the relevant claim, and carry its returned fence into writes. Renew the exact claim before its returned expiry. A stale-fence conflict requires inspecting current ownership and obtaining a valid fence before retrying. Do not treat every HTTP 409 as a stale fence; runtime renewal and replay conflicts have separate error codes.
+
+Preserve immutable handoff IDs across uncertain-delivery retries. Acknowledge journal events only after processing them. Cleanup releases only explicitly captured claims and fences. `tila_close` performs coordination cleanup; authentication closes when the session ends or access is revoked. Replacement sessions receive new participants and recover through handoffs.
+
+The `worker` policy allows these workflows and supporting reads. It excludes deletion, governance, credential management, infrastructure, and gate resolution. Narrower run policies can deny individual operations. `TILA_MCP_TOOLS` can select primitive groups or `all`, but exposing a tool never grants permission to use it.
+
+## Resources and identity
+
+| URI | Data |
+| --- | --- |
+| `tila://project/summary` | Project counts and coordination summary |
+| `tila://project/ready` | Work without blockers or pending gates |
+| `tila://project/presence` | Participant presence |
+| `tila://project/schema` | Current schema |
+| `tila://records/{type}/{key}` | Records explicitly exposed by the current schema |
+
+Tools, resources, prompts, and discovery authenticate the current run on every request. The server assigns participant identity; conflicting overrides are rejected. Revoked, closed, or expired runs cannot recover access through cached results, reconnect, or stronger credentials.
+
+See [the MCP reference](README.md) for schemas and primitive groups, and [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for lifecycle and deployment details.
