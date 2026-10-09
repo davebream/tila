@@ -5,6 +5,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -18,13 +19,18 @@ it("checks default-daemon status without resuming or subscribing to a thread", a
     executable,
     `#!/usr/bin/env node
 const fs = require('node:fs');
-const readline = require('node:readline');
+const { createServer } = require('node:http');
+const { Duplex } = require('node:stream');
+const { WebSocketServer } = require(${JSON.stringify(createRequire(import.meta.url).resolve("ws-node"))});
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2))+'\\n');
-readline.createInterface({input:process.stdin}).on('line', line => {
-  const request = JSON.parse(line);
-  fs.appendFileSync(${JSON.stringify(log)}, line+'\\n');
-  if (request.id !== undefined) console.log(JSON.stringify({id: request.id, result: request.method === 'initialize' ? {} : {thread:{status:{type:request.params.threadId}}}}));
-});
+const server = createServer();
+const sockets = new WebSocketServer({server});
+sockets.on('connection', socket => socket.on('message', data => {
+  const request = JSON.parse(data.toString());
+  fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(request)+'\\n');
+  if (request.id !== undefined) socket.send(JSON.stringify({id: request.id, result: request.method === 'initialize' ? {} : {thread:{status:{type:request.params.threadId}}}}));
+}));
+server.emit('connection', Duplex.from({readable:process.stdin,writable:process.stdout}));
 
 `,
     { mode: 0o700 },

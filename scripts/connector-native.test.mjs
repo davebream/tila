@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -24,17 +25,50 @@ test(
       assert.equal(version.status, 0, version.stderr);
       const source = join(root, "fixture.ts");
       const binary = join(root, "connector-test");
+      const proxy = join(root, "codex-proxy");
+      const proxyLog = join(root, "codex-requests.jsonl");
+      const wsPath = createRequire(
+        resolve("packages/client-lifecycle/package.json"),
+      ).resolve("ws-node");
+      writeFileSync(
+        proxy,
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const {createServer} = require("node:http");
+const {Duplex} = require("node:stream");
+const {WebSocketServer} = require(${JSON.stringify(wsPath)});
+fs.appendFileSync(${JSON.stringify(proxyLog)}, JSON.stringify(process.argv.slice(2))+"\\n");
+const server = createServer();
+new WebSocketServer({server}).on("connection", socket => socket.on("message", data => {
+  const message = JSON.parse(data.toString());
+  fs.appendFileSync(${JSON.stringify(proxyLog)}, JSON.stringify(message)+"\\n");
+  if (message.id === undefined) return;
+  socket.send(JSON.stringify({id:message.id,result:message.method === "initialize" ? {codexHome:process.env.CODEX_HOME} : {account:{type:"chatgpt",email:"fixture@example.test"}}}));
+}));
+server.emit("connection",Duplex.from({readable:process.stdin,writable:process.stdout}));
+`,
+        { mode: 0o700 },
+      );
       writeFileSync(
         source,
         `
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, chmodSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
-import { ConnectorStore, ConnectorControl, controlRequest, wakeCodex, wakeClaude } from ${JSON.stringify(resolve("packages/connector/src/index.ts"))};
+import { ConnectorStore, ConnectorControl, controlRequest, wakeCodex, wakeClaude, CodexProxy } from ${JSON.stringify(resolve("packages/connector/src/index.ts"))};
 const root = mkdtempSync("/tmp/tila-native-");
 const store = new ConnectorStore(root); const control = new ConnectorControl(store);
 try {
+  const proxy = new CodexProxy({id:"fixture",revision:1,harness:"codex",launcher:${JSON.stringify(proxy)},config_dir:root,credential_store:"auto",account_ref:"fixture",env_allowlist:[]});
+  try {
+    const account = await proxy.request("account/read", {refreshToken:false});
+    assert.equal(account.account.type,"chatgpt");
+    const messages = readFileSync(${JSON.stringify(proxyLog)},"utf8").trim().split("\\n").map(line => JSON.parse(line));
+    assert.deepEqual(messages[0],["app-server","proxy"]);
+    assert.deepEqual(messages.slice(1).map(row => row.method),["initialize","initialized","account/read"]);
+    assert.deepEqual(messages.at(-1).params,{refreshToken:false});
+  } finally { proxy.close(); }
   await control.listen(async request => ({ action: request.action }));
   assert.deepEqual(await controlRequest(store, { action: "status" }), { action: "status" });
   await assert.rejects(controlRequest(store, { action: "register", key: "a".repeat(64), expectedEpoch: 0, allowIdleStart: false, launcher: "/bin/sh" }));
