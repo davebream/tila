@@ -13,8 +13,7 @@
  *  2. Schema identity across the two drivers: normalized `sqlite_master` DDL +
  *     identical `_migrations` rows (NOT `user_version`, which both leave at 0).
  *  3. SDK-local-only round-trip (task / claim+fence / record / artifact / journal).
- *  4. MCP-local round-trip: the BUILT `dist/index.js` under plain `node`, driven
- *     over stdio JSON-RPC.
+ *  4. The built MCP executable rejects removed private local mode.
  *  5. Concurrent-writer: two `better-sqlite3` handles contend on one file; the
  *     injected `sleepSync` (the `withBusyRetry` second-layer retry) is PROVEN to
  *     fire, no `SQLITE_BUSY` escapes, and both writes land.
@@ -321,188 +320,26 @@ describe("SDK-local round-trip (tila-sdk/local under node)", () => {
 // 4. MCP-local round-trip: BUILT dist/index.js under plain node, over stdio
 // ---------------------------------------------------------------------------
 
-describe("MCP-local round-trip (built server under node, stdio JSON-RPC)", () => {
-  beforeAll(() => {
-    // The built server is required. turbo `^build` builds tila-mcp-server
-    // (now a devDependency of this package); guard anyway in case the test is
-    // run in isolation without a prior build.
-    if (!existsSync(MCP_DIST)) {
-      const built = spawnSync(
-        "pnpm",
-        ["--filter", "tila-mcp-server", "build"],
-        {
-          cwd: resolve(PKG_ROOT, "..", ".."),
-          encoding: "utf-8",
-        },
-      );
-      if (built.status !== 0) {
-        throw new Error(
-          `failed to build tila-mcp-server: ${built.stderr ?? ""}\n${built.stdout ?? ""}`,
-        );
-      }
-    }
-    expect(existsSync(MCP_DIST)).toBe(true);
-  });
-
-  it("initialize + tila_task_create + tila_task_list over stdio against a local config", async () => {
+describe("MCP breaking cutover (built server under Node)", () => {
+  it("rejects removed local configuration without creating private state", () => {
     const tmp = makeTmp();
-    const dbPath = join(tmp, "mcp.db");
-    const artifactsPath = join(tmp, "artifacts");
-
-    // The built server resolves "local" backend from a .tila/config.toml whose
-    // `backend = "local"`. Env-only (TILA_DB_PATH) keeps backend=cloudflare, so
-    // we materialize a config file and run the server with cwd = tmp.
-    const { writeFileSync, mkdirSync } = await import("node:fs");
-    mkdirSync(join(tmp, ".tila"), { recursive: true });
-    writeFileSync(
-      join(tmp, ".tila", "config.toml"),
-      [
-        'project_id = "mcp-local-proj"',
-        'backend = "local"',
-        "schema_version = 0",
-        'tila_version = "0.0.0"',
-        'created_at = "1970-01-01T00:00:00.000Z"',
-        "",
-        "[local]",
-        `db_path = "${dbPath}"`,
-        `artifacts_path = "${artifactsPath}"`,
-        `org = "${ORG}"`,
-        "",
-      ].join("\n"),
-    );
-
-    const result = await runMcpRoundtrip(tmp);
-    expect(result.initialized).toBe(true);
-    expect(result.created).toBe("M-1");
-    expect(result.listedIds).toContain("M-1");
+    const result = spawnSync("node", [MCP_DIST], {
+      cwd: tmp,
+      env: {
+        ...process.env,
+        TILA_BACKEND: "local",
+        TILA_API_TOKEN: "",
+        TILA_TOKEN: "",
+        TILA_RUN_SOCKET: "",
+        TILA_RUN_CAPABILITY: "",
+      },
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("private SQLite mode was removed");
   });
 });
-
-/**
- * Spawn `node dist/index.js` with cwd at a directory containing
- * `.tila/config.toml` (backend = local), perform an MCP stdio JSON-RPC
- * handshake, create a task, and list tasks. Returns the parsed outcomes.
- */
-async function runMcpRoundtrip(cwd: string): Promise<{
-  initialized: boolean;
-  created: string | null;
-  listedIds: string[];
-}> {
-  const { spawn } = await import("node:child_process");
-  const child = spawn("node", [MCP_DIST], {
-    cwd,
-    env: { ...process.env, TILA_MCP_TOOLS: "all" },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-
-  let buffer = "";
-  const pending = new Map<number, (msg: Record<string, unknown>) => void>();
-  let stderr = "";
-
-  child.stderr.on("data", (d: Buffer) => {
-    stderr += d.toString();
-  });
-
-  child.stdout.on("data", (d: Buffer) => {
-    buffer += d.toString();
-    // Messages are newline-delimited JSON (stdio transport).
-    let idx = buffer.indexOf("\n");
-    while (idx !== -1) {
-      const line = buffer.slice(0, idx).trim();
-      buffer = buffer.slice(idx + 1);
-      if (line.length > 0) {
-        try {
-          const msg = JSON.parse(line) as Record<string, unknown>;
-          const id = msg.id as number | undefined;
-          if (typeof id === "number" && pending.has(id)) {
-            const fn = pending.get(id);
-            pending.delete(id);
-            fn?.(msg);
-          }
-        } catch {
-          // ignore non-JSON lines
-        }
-      }
-      idx = buffer.indexOf("\n");
-    }
-  });
-
-  function send(msg: Record<string, unknown>): void {
-    child.stdin.write(`${JSON.stringify(msg)}\n`);
-  }
-
-  function request(
-    id: number,
-    method: string,
-    params: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    return new Promise((resolvePromise, rejectPromise) => {
-      const timer = setTimeout(() => {
-        rejectPromise(
-          new Error(
-            `MCP request ${method} (id ${id}) timed out. stderr:\n${stderr}`,
-          ),
-        );
-      }, 15_000);
-      pending.set(id, (msg) => {
-        clearTimeout(timer);
-        resolvePromise(msg);
-      });
-      send({ jsonrpc: "2.0", id, method, params });
-    });
-  }
-
-  try {
-    // 1. initialize
-    const initResp = await request(1, "initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "xrt-test", version: "0.0.0" },
-    });
-    const initialized =
-      (initResp.result as Record<string, unknown>) !== undefined;
-    // notifications/initialized (no id, no response expected)
-    send({ jsonrpc: "2.0", method: "notifications/initialized" });
-
-    // 2. tila_task_create
-    const createResp = await request(2, "tools/call", {
-      name: "tila_task_create",
-      arguments: { id: "M-1", type: "task", data: { title: "mcp-local" } },
-    });
-    const createText = extractToolText(createResp);
-    const created = createText
-      ? (JSON.parse(createText).entity?.id ?? null)
-      : null;
-
-    // 3. tila_task_list
-    const listResp = await request(3, "tools/call", {
-      name: "tila_task_list",
-      arguments: {},
-    });
-    const listText = extractToolText(listResp);
-    const listedIds: string[] = listText
-      ? (JSON.parse(listText).entities ?? []).map((e: { id: string }) => e.id)
-      : [];
-
-    return {
-      initialized: initialized && typeof initResp.result === "object",
-      created,
-      listedIds,
-    };
-  } finally {
-    child.stdin.end();
-    child.kill();
-  }
-}
-
-/** Pull the first text-content block out of an MCP tools/call response. */
-function extractToolText(resp: Record<string, unknown>): string | null {
-  const result = resp.result as
-    | { content?: Array<{ type: string; text?: string }> }
-    | undefined;
-  const block = result?.content?.find((c) => c.type === "text");
-  return block?.text ?? null;
-}
 
 // ---------------------------------------------------------------------------
 // 5. Concurrent-writer: prove withBusyRetry's injected sleepSync fires

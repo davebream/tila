@@ -32,8 +32,14 @@ describe("MCP source-header attribution (remote mode)", () => {
       mode: "remote",
       apiUrl: "https://api.test",
       projectId: "proj-1",
-      authMode: "tila-token",
-      getToken: () => Promise.resolve("tok"),
+      resolveRun: async () => ({
+        deployment: "https://api.test",
+        context: {
+          project_id: "proj-1",
+          participant_id: "runtime-participant",
+        } as import("@tila/schemas").RuntimeRunContext,
+        provider: async () => ({ token: "tok" }),
+      }),
     };
 
     const facade = await buildFacade(config);

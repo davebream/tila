@@ -1,110 +1,114 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Lifecycle, SessionStore } from "@tila/client-lifecycle";
-import type { TilaFacade } from "tila-sdk";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  ListPromptsResultSchema,
+  ListResourcesResultSchema,
+  ListToolsResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import type { RuntimeRunContext } from "@tila/schemas";
 import { afterEach, expect, it, vi } from "vitest";
 import { lifecycleTools } from "./lifecycle";
-const mocks = vi.hoisted(() => ({ build: vi.fn() }));
-vi.mock("./facade", () => ({ buildFacade: mocks.build }));
-afterEach(() => {
-  vi.unstubAllEnvs();
-  vi.resetAllMocks();
-});
-it("routes interleaved shared-daemon calls by session metadata, including captured resource methods", async () => {
-  const root = mkdtempSync(join(tmpdir(), "tila-mcp-lifecycle-"));
-  vi.stubEnv("TILA_HOME", root);
-  vi.stubEnv("TILA_LIFECYCLE_CLIENT", "codex");
-  const store = new SessionStore();
-  const namespace = JSON.stringify(["https://tila.example", "test"]);
-  const lifecycle = new Lifecycle(store, namespace, async () => {
-    throw new Error("offline start");
-  });
-  const start = (session_id: string) =>
-    lifecycle.start(
-      "codex",
-      { session_id, cwd: root, hook_event_name: "SessionStart" },
-      null,
-      { client_name: "codex" },
+
+afterEach(() => vi.unstubAllGlobals());
+it("isolates interleaved tools, resources, prompts and discovery using actual MCP requests", async () => {
+  const calls: string[] = [];
+  const active = new Set(["one", "two"]);
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    const participant = new Headers(init.headers).get("X-Tila-Participant-Id");
+    await new Promise((resolve) =>
+      setTimeout(resolve, participant === "one" ? 20 : 1),
     );
-  const [a, b] = await Promise.all([start("one"), start("two")]);
-  const closed: string[] = [];
-  mocks.build.mockImplementation(async (_config, identity) => ({
-    claims: {
-      list: async () => {
-        await new Promise((resolve) =>
-          setTimeout(
-            resolve,
-            identity.participantId === a.state.participantId ? 20 : 1,
-          ),
-        );
-        return identity.participantId;
-      },
+    return new Response(JSON.stringify({ participant }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const base = new McpServer({ name: "runtime-test", version: "1" });
+  const scoped = lifecycleTools(base, {
+    mode: "remote",
+    apiUrl: "https://tila.test",
+    projectId: "p",
+    async resolveRun(meta) {
+      const id = meta?.sessionId;
+      if (typeof id !== "string" || !active.has(id))
+        throw new Error("runtime-session-unavailable");
+      calls.push(id);
+      return {
+        deployment: "https://tila.test",
+        context: { project_id: "p", participant_id: id } as RuntimeRunContext,
+        provider: async () => ({ token: `run-${id}` }),
+      };
     },
-    close: () => closed.push(identity.participantId),
+  });
+  const captured = scoped.facade.summary;
+  scoped.server.registerTool("who", { inputSchema: {} }, async () => ({
+    content: [{ type: "text", text: JSON.stringify(await captured.get()) }],
   }));
-  let handler: (...args: unknown[]) => Promise<unknown> = async () => undefined;
-  const server = {
-    registerTool: (...args: unknown[]) => {
-      handler = args.at(-1) as typeof handler;
-    },
-  } as unknown as McpServer;
-  const scoped = lifecycleTools(
-    server,
-    {
-      mode: "remote",
-      apiUrl: "https://tila.example",
-      projectId: "test",
-      authMode: "tila-token",
-      getToken: async () => "test",
-    },
-    {} as TilaFacade,
-  );
-  const captured = scoped.facade.claims;
-  scoped.server.registerTool(
-    "test",
-    { description: "test", inputSchema: {} },
-    async () => ({
-      content: [{ type: "text", text: JSON.stringify(await captured.list()) }],
-    }),
-  );
+  scoped.server.resource("who", "tila://who", async (uri) => ({
+    contents: [{ uri: uri.href, text: JSON.stringify(await captured.get()) }],
+  }));
+  scoped.server.prompt("who", async () => ({
+    messages: [
+      {
+        role: "user",
+        content: { type: "text", text: JSON.stringify(await captured.get()) },
+      },
+    ],
+  }));
+  const client = new Client({ name: "host", version: "1" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await base.connect(a);
+  await client.connect(b);
   try {
     const results = await Promise.all([
-      handler({}, { _meta: { sessionId: "one", threadId: "child-one" } }),
-      handler({}, { _meta: { sessionId: "two" } }),
+      client.callTool({
+        name: "who",
+        arguments: {},
+        _meta: { sessionId: "one" },
+      }),
+      client.callTool({
+        name: "who",
+        arguments: {},
+        _meta: { sessionId: "two" },
+      }),
+      client.readResource({ uri: "tila://who", _meta: { sessionId: "one" } }),
+      client.getPrompt({ name: "who", _meta: { sessionId: "two" } }),
     ]);
-    expect(JSON.stringify(results[0])).toContain(a.state.participantId);
-    expect(JSON.stringify(results[1])).toContain(b.state.participantId);
-    expect(closed.sort()).toEqual(
-      [a.state.participantId, b.state.participantId].sort(),
-    );
-    expect(JSON.stringify(await handler({}, {}))).toContain(
-      "per-request session metadata",
-    );
-    await lifecycle.end(a.state.key);
+    expect(JSON.stringify(results[0])).toContain("one");
+    expect(JSON.stringify(results[1])).toContain("two");
+    expect(JSON.stringify(results[2])).toContain("one");
+    expect(JSON.stringify(results[3])).toContain("two");
+    for (const [method, schema] of [
+      ["tools/list", ListToolsResultSchema],
+      ["resources/list", ListResourcesResultSchema],
+      ["prompts/list", ListPromptsResultSchema],
+    ] as const) {
+      await expect(
+        client.request(
+          { method, params: { _meta: { sessionId: "one" } } },
+          schema,
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        client.request({ method, params: {} }, schema),
+      ).rejects.toThrow("runtime-session-unavailable");
+    }
+    active.delete("one");
+    await expect(
+      client.readResource({ uri: "tila://who", _meta: { sessionId: "one" } }),
+    ).rejects.toThrow("runtime-session-unavailable");
     expect(
-      JSON.stringify(await handler({}, { _meta: { sessionId: "one" } })),
-    ).toContain("no unambiguous active session");
+      JSON.stringify(
+        await client.callTool({
+          name: "who",
+          arguments: {},
+          _meta: { sessionId: "two" },
+        }),
+      ),
+    ).toContain("two");
+    expect(calls.filter((id) => id === "one").length).toBeGreaterThan(2);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await client.close();
+    await base.close();
   }
-});
-it("leaves unconfigured servers untouched", () => {
-  vi.stubEnv("TILA_LIFECYCLE_CLIENT", "");
-  const server = {} as McpServer;
-  const facade = {} as TilaFacade;
-  expect(
-    lifecycleTools(
-      server,
-      {
-        mode: "local",
-        projectId: "test",
-        dbPath: "unused",
-        artifactsPath: "unused",
-        org: "test",
-      },
-      facade,
-    ),
-  ).toEqual({ server, facade });
 });

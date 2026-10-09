@@ -77,6 +77,9 @@ const mockD1TokenUpdateLastUsedAt = vi.fn().mockResolvedValue(undefined);
 const mockD1SessionCreate = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@tila/backend-d1", async () => ({
+  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
+    "@tila/backend-d1",
+  )),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   resolveActionsMembership: vi.fn(async () => {
     const { policy, repo } = await mockGetOidcPolicy();

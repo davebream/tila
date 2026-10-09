@@ -19,6 +19,9 @@ const mockMembershipResolve = vi.fn().mockResolvedValue(null);
 const mockRepoAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 
 vi.mock("@tila/backend-d1", async () => ({
+  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
+    "@tila/backend-d1",
+  )),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   ProjectMembershipStore: vi.fn().mockImplementation(
     class {

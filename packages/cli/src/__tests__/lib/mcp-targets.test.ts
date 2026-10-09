@@ -41,79 +41,20 @@ vi.mock("../../lib/prompts", () => ({
 // ─── buildMcpEntry ───────────────────────────────────────────────────────────
 
 describe("buildMcpEntry", () => {
-  it("returns placeholder strings when no config provided", () => {
-    const entry = buildMcpEntry();
-    expect(entry.command).toBe("npx");
-    expect(entry.args).toEqual(["-y", "tila-mcp-server"]);
-    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
-    expect(entry.env.TILA_API_URL).toBe("${TILA_API_URL}");
-    expect(entry.env.TILA_PROJECT_ID).toBe("${TILA_PROJECT_ID}");
+  it("requires concrete project selection", () => {
+    expect(() => buildMcpEntry()).toThrow("selected deployment");
   });
-
-  it("uses concrete apiUrl and projectId when provided", () => {
+  it("pins the MCP release and stores no credentials", () => {
     const entry = buildMcpEntry({
-      apiUrl: "https://tila-myproj.workers.dev",
-      projectId: "myproj-abc123",
+      apiUrl: "https://tila.test",
+      projectId: "p",
     });
-    expect(entry.env.TILA_API_URL).toBe("https://tila-myproj.workers.dev");
-    expect(entry.env.TILA_PROJECT_ID).toBe("myproj-abc123");
-    // Token always remains a placeholder
-    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
-  });
-
-  it("uses placeholder for apiUrl when only projectId provided", () => {
-    const entry = buildMcpEntry({ projectId: "myproj" });
-    expect(entry.env.TILA_API_URL).toBe("${TILA_API_URL}");
-    expect(entry.env.TILA_PROJECT_ID).toBe("myproj");
-  });
-
-  it("includes TILA_API_TOKEN when authMode is tila-token", () => {
-    const entry = buildMcpEntry({ authMode: "tila-token" });
-    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
-  });
-
-  it("omits TILA_API_TOKEN when authMode is github-repo", () => {
-    const entry = buildMcpEntry({ authMode: "github-repo" });
-    expect(entry.env.TILA_API_TOKEN).toBeUndefined();
-  });
-
-  it("includes TILA_API_TOKEN when authMode is undefined (backward compat)", () => {
-    const entry = buildMcpEntry({});
-    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
-  });
-
-  it("omits TILA_API_TOKEN in github-repo mode with concrete values", () => {
-    const entry = buildMcpEntry({
-      apiUrl: "https://tila-myproj.workers.dev",
-      projectId: "myproj-abc123",
-      authMode: "github-repo",
-    });
-    expect(entry.env.TILA_API_URL).toBe("https://tila-myproj.workers.dev");
-    expect(entry.env.TILA_PROJECT_ID).toBe("myproj-abc123");
-    expect(entry.env.TILA_API_TOKEN).toBeUndefined();
-  });
-
-  it("sets TILA_INSTANCE and omits TILA_API_TOKEN when instanceKey is provided", () => {
-    const entry = buildMcpEntry({ instanceKey: "inst-abc123" });
-    expect(entry.env.TILA_INSTANCE).toBe("inst-abc123");
-    // Regression guard: no stale token that would shadow the keychain path
-    expect(entry.env.TILA_API_TOKEN).toBeUndefined();
-  });
-
-  it("uses legacy TILA_API_TOKEN placeholder when no instanceKey (empty config)", () => {
-    const entry = buildMcpEntry({});
-    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
-    expect(entry.env.TILA_INSTANCE).toBeUndefined();
-  });
-
-  it("uses legacy TILA_API_TOKEN placeholder when instanceKey is null (treated as absent)", () => {
-    const entry = buildMcpEntry({ instanceKey: null });
-    expect(entry.env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
-    expect(entry.env.TILA_INSTANCE).toBeUndefined();
+    expect(entry.command).toBe("tila");
+    expect(entry.args).toContain("exec");
+    expect(entry.args.at(-1)).toMatch(/^tila-mcp-server@\d+\.\d+\.\d+$/);
+    expect(entry.env).toEqual({});
   });
 });
-
-// ─── stripJsoncComments ──────────────────────────────────────────────────────
 
 describe("stripJsoncComments", () => {
   it("passes through JSON with no comments unchanged", () => {
@@ -456,169 +397,56 @@ describe("detectEditors", () => {
 
 // ─── runMcpInit ─────────────────────────────────────────────────────────────
 
+vi.mock("../../lib/runtime", () => ({
+  runtimeSelection: async () => ({
+    deployment: "https://tila.test",
+    projectId: "p",
+  }),
+  enrollmentReference: async () => ({ enrollmentId: "enrolled" }),
+  enrollMachine: vi.fn(),
+}));
 describe("runMcpInit", () => {
   let tempDir: string;
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "tila-run-test-"));
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.clearAllMocks();
-    vi.mocked(p.confirm).mockResolvedValue(true);
-    vi.mocked(p.isCancel).mockReturnValue(false);
+    tempDir = mkdtempSync(join(tmpdir(), "tila-runtime-config-"));
   });
-
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
-    consoleSpy.mockRestore();
-    vi.restoreAllMocks();
   });
-
-  it("writes to claude-code target when explicitly specified", async () => {
-    await runMcpInit({
-      targets: ["claude-code"],
-      dryRun: false,
-      cwd: tempDir,
-    });
-
-    const filePath = join(tempDir, ".mcp.json");
-    expect(existsSync(filePath)).toBe(true);
-    const content = JSON.parse(readFileSync(filePath, "utf-8")) as Record<
-      string,
-      unknown
-    >;
-    expect((content.mcpServers as Record<string, unknown>).tila).toBeDefined();
+  it("preserves unrelated editor settings while writing a managed command", async () => {
+    mkdirSync(join(tempDir, ".cursor"));
+    writeFileSync(
+      join(tempDir, ".cursor/mcp.json"),
+      JSON.stringify({
+        mcpServers: { other: { command: "other" } },
+        setting: true,
+      }),
+    );
+    await runMcpInit({ targets: ["cursor"], dryRun: false, cwd: tempDir });
+    const result = JSON.parse(
+      readFileSync(join(tempDir, ".cursor/mcp.json"), "utf8"),
+    );
+    expect(result.mcpServers.other.command).toBe("other");
+    expect(result.setting).toBe(true);
+    expect(result.mcpServers.tila.args).toContain("exec");
+    expect(JSON.stringify(result)).not.toContain("TOKEN");
   });
-
-  it("writes to cursor target when explicitly specified", async () => {
-    await runMcpInit({
-      targets: ["cursor"],
-      dryRun: false,
-      cwd: tempDir,
-    });
-
-    const filePath = join(tempDir, ".cursor", "mcp.json");
-    expect(existsSync(filePath)).toBe(true);
+  it("validates malformed destinations and unsupported targets before provisioning", async () => {
+    mkdirSync(join(tempDir, ".cursor"));
+    writeFileSync(join(tempDir, ".cursor/mcp.json"), "invalid");
+    await expect(
+      runMcpInit({ targets: ["cursor"], dryRun: false, cwd: tempDir }),
+    ).rejects.toThrow();
+    await expect(
+      runMcpInit({ targets: ["unsupported"], dryRun: false, cwd: tempDir }),
+    ).rejects.toThrow("Unsupported editor");
   });
-
-  it("uses VS Code servers key for vscode-copilot target", async () => {
+  it("previews without writing configuration", async () => {
     await runMcpInit({
       targets: ["vscode-copilot"],
-      dryRun: false,
-      cwd: tempDir,
-    });
-
-    const filePath = join(tempDir, ".vscode", "mcp.json");
-    expect(existsSync(filePath)).toBe(true);
-    const content = JSON.parse(readFileSync(filePath, "utf-8")) as Record<
-      string,
-      unknown
-    >;
-    expect(content.servers).toBeDefined();
-    expect(content.mcpServers).toBeUndefined();
-  });
-
-  it("cline target prints snippet without writing a file", async () => {
-    await runMcpInit({
-      targets: ["cline"],
-      dryRun: false,
-      cwd: tempDir,
-    });
-
-    // No file should be written
-    expect(existsSync(join(tempDir, ".cline"))).toBe(false);
-    // Snippet should be shown via p.note
-    expect(vi.mocked(p.note)).toHaveBeenCalledWith(
-      expect.stringContaining("tila-mcp-server"),
-      expect.stringContaining("cline"),
-    );
-  });
-
-  it("prints error and skips for unknown target slug", async () => {
-    await runMcpInit({
-      targets: ["unknown-editor"],
-      dryRun: false,
-      cwd: tempDir,
-    });
-
-    expect(vi.mocked(p.log.info)).toHaveBeenCalledWith(
-      expect.stringContaining("Unknown target: unknown-editor"),
-    );
-  });
-
-  it("warns about placeholder values when no config found", async () => {
-    await runMcpInit({
-      targets: ["claude-code"],
-      dryRun: false,
-      cwd: tempDir,
-    });
-
-    expect(vi.mocked(p.log.info)).toHaveBeenCalledWith(
-      expect.stringContaining("placeholder"),
-    );
-  });
-
-  it("uses concrete config values when .tila/config.toml exists", async () => {
-    // Create a minimal config.toml
-    const tilaDir = join(tempDir, ".tila");
-    mkdirSync(tilaDir, { recursive: true });
-    const toml = `project_id = "test-abc123"
-worker_url = "https://tila-test.workers.dev"
-schema_version = 1
-tila_version = "0.1.0"
-created_at = "2026-01-01T00:00:00.000Z"
-
-[cloudflare]
-account_id = "acc-123"
-
-[backends]
-entity = "do-sqlite"
-coordination = "do-sqlite"
-artifact = "r2"
-auth = "d1"
-`;
-    writeFileSync(join(tilaDir, "config.toml"), toml, "utf-8");
-
-    await runMcpInit({
-      targets: ["claude-code"],
-      dryRun: false,
-      cwd: tempDir,
-    });
-
-    const filePath = join(tempDir, ".mcp.json");
-    const content = JSON.parse(readFileSync(filePath, "utf-8")) as Record<
-      string,
-      unknown
-    >;
-    const tilaEntry = (content.mcpServers as Record<string, unknown>)
-      .tila as Record<string, unknown>;
-    const env = tilaEntry.env as Record<string, string>;
-    expect(env.TILA_API_URL).toBe("https://tila-test.workers.dev");
-    expect(env.TILA_PROJECT_ID).toBe("test-abc123");
-    // Token is always placeholder
-    expect(env.TILA_API_TOKEN).toBe("${TILA_API_TOKEN}");
-  });
-
-  it("dry-run does not write files", async () => {
-    await runMcpInit({
-      targets: ["claude-code"],
       dryRun: true,
       cwd: tempDir,
     });
-
-    expect(existsSync(join(tempDir, ".mcp.json"))).toBe(false);
-    expect(vi.mocked(p.note)).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.stringContaining("[dry-run]"),
-    );
-  });
-
-  it("auto-detects and exits silently when no editors detected and targets is empty", async () => {
-    // Empty temp dir — no editors
-    await runMcpInit({ targets: [], dryRun: false, cwd: tempDir });
-
-    expect(vi.mocked(p.log.info)).toHaveBeenCalledWith(
-      expect.stringContaining("No supported editor config detected"),
-    );
+    expect(existsSync(join(tempDir, ".vscode/mcp.json"))).toBe(false);
   });
 });

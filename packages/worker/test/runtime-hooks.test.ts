@@ -1,4 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
   chmodSync,
@@ -11,9 +12,25 @@ import {
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { Hono } from "hono";
 import { expect, it } from "vitest";
-import { SessionStore, processAlive } from "../src/index";
-import { harness } from "./helpers";
+import {
+  RuntimeEnrollmentStore,
+  RuntimeFileSecretStore,
+} from "../../auth-store/src/runtime-store";
+import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
+import { SessionStore, processAlive } from "../../client-lifecycle/src/index";
+import {
+  generateRuntimeKey,
+  runtimeBinding,
+} from "../../client-lifecycle/src/runtime-proof";
+import { harness } from "../../client-lifecycle/test/helpers";
+import { RuntimeClient } from "../../sdk/src/runtime";
+import { hashToken } from "../src/lib/hash";
+import { createAuthMiddleware } from "../src/middleware/auth";
+import { requestIdentityMiddleware } from "../src/middleware/request-identity";
+import { runtimeRoutes } from "../src/routes/runtime";
+import type { Env, HonoVariables } from "../src/types";
 
 function stopDetachedHelper(pid: number): void {
   try {
@@ -30,19 +47,34 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
   const store = new SessionStore(join(root, "client-lifecycle"));
   const clients: ChildProcess[] = [];
   const serverErrors: string[] = [];
-  const server = createServer(async (request, response) => {
+  const f = createCredentialFixture();
+  f.sqlite
+    .prepare("UPDATE _projects SET project_id='test' WHERE project_id='p'")
+    .run();
+  await f.legacy.issue({
+    projectId: "test",
+    tokenHash: await hashToken("fixture-owner", undefined),
+    name: "owner",
+    createdBy: "fixture",
+    createdAt: 0,
+  });
+  const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
+  app.route("/", runtimeRoutes);
+  app.use(
+    "/projects/:projectId/*",
+    createAuthMiddleware(),
+    requestIdentityMiddleware(),
+  );
+  app.all("/projects/:projectId/*", async (c) => {
+    const request = c.req.raw;
     try {
       const state = store
         .list()
-        .find(
-          (entry) =>
-            entry.participantId === request.headers["x-tila-participant-id"],
-        );
+        .find((entry) => entry.participantId === c.get("participantId"));
       if (!state) throw new Error("Unknown hook identity");
       const api = await h.facade(state);
-      const url = new URL(request.url ?? "/", "http://fixture");
-      let text = "";
-      for await (const chunk of request) text += chunk;
+      const url = new URL(request.url);
+      const text = await request.text();
       const body = text ? JSON.parse(text) : {};
       const path = url.pathname.replace("/projects/test", "");
       let result: unknown;
@@ -66,13 +98,33 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
           decodeURIComponent(path.slice("/claims/state/".length)),
         );
       else throw new Error(`Unexpected request: ${path}`);
-      response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify(result));
+      return c.json(result as Record<string, unknown>);
     } catch (error) {
       serverErrors.push(String(error));
-      response.statusCode = 500;
-      response.end(JSON.stringify({ error: String(error) }));
+      return c.json({ error: String(error) }, 500);
     }
+  });
+  let origin = "";
+  const env = {
+    DB: f.db,
+    ANALYTICS: { writeDataPoint() {} },
+  } as unknown as Env;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = Buffer.concat(chunks);
+    const result = await app.request(
+      `${origin}${request.url}`,
+      {
+        method: request.method,
+        headers: request.headers as HeadersInit,
+        ...(body.length ? { body } : {}),
+      },
+      env,
+      { waitUntil() {} } as unknown as ExecutionContext,
+    );
+    response.writeHead(result.status, Object.fromEntries(result.headers));
+    response.end(Buffer.from(await result.arrayBuffer()));
   });
   const until = async (ready: () => boolean) => {
     const deadline = Date.now() + 25_000;
@@ -91,6 +143,51 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
     const address = server.address();
     if (!address || typeof address === "string")
       throw new Error("No fixture port");
+    origin = `http://127.0.0.1:${address.port}`;
+    const owner = new RuntimeClient(
+      { baseUrl: origin, token: "fixture-owner" },
+      "test",
+    );
+    const invite = await owner.authorize("Native fixture");
+    const privateJwk = await generateRuntimeKey();
+    const key = await runtimeBinding(privateJwk, origin, () => true);
+    const installationId = crypto.randomUUID();
+    const enrollmentId = crypto.randomUUID();
+    const parent = await owner.enroll(
+      {
+        operation_id: enrollmentId,
+        installation_id: installationId,
+        name: "Native fixture",
+        jkt: key.jkt,
+      },
+      key,
+      invite.invitation,
+    );
+    const selection = { deployment: origin, projectId: "test" };
+    const reference = {
+      ...selection,
+      instanceId: parent.context.instance_id,
+      enrollmentId,
+      fileStore: join(root, "secrets"),
+    };
+    await new RuntimeEnrollmentStore(
+      new RuntimeFileSecretStore(reference.fileStore),
+    ).save({
+      ...reference,
+      version: 1,
+      installationId,
+      privateJwk,
+      token: parent.token,
+    });
+    mkdirSync(join(root, "runtime"), { mode: 0o700 });
+    writeFileSync(
+      join(
+        root,
+        "runtime",
+        `${createHash("sha256").update(JSON.stringify(selection)).digest("hex")}.json`,
+      ),
+      JSON.stringify(reference),
+    );
     mkdirSync(join(root, ".tila"));
     writeFileSync(
       join(root, ".tila/config.toml"),
@@ -109,7 +206,10 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
       const child = spawn(
         executable,
         [
-          new URL("./fixtures/hook-client.mjs", import.meta.url).pathname,
+          new URL(
+            "../../client-lifecycle/test/fixtures/hook-client.mjs",
+            import.meta.url,
+          ).pathname,
           resolve("../.."),
           root,
           session,
@@ -120,7 +220,11 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
             ...process.env,
             PATH: `${root}${delimiter}${process.env.PATH}`,
             TILA_HOME: root,
-            TILA_API_TOKEN: "fixture-only",
+            TILA_API_TOKEN: "",
+            TILA_TOKEN: "",
+            CODEX_THREAD_ID: "",
+            TILA_RUN_SOCKET: "",
+            TILA_RUN_CAPABILITY: "",
             TILA_LIFECYCLE_KEY: "",
             TILA_PARTICIPANT_ID: "",
             CLAUDE_ENV_FILE: "",
@@ -135,7 +239,7 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
       const output = await new Promise<unknown>((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new Error(`Client hook did not start: ${stderr}`)),
-          10_000,
+          20_000,
         );
         child.once("message", (value) => {
           clearTimeout(timer);
@@ -203,6 +307,7 @@ it("drives real CLI hooks and detached helpers for concurrent native sessions an
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     h.close();
+    f.sqlite.close();
     rmSync(root, { recursive: true, force: true });
   }
-}, 40_000);
+}, 60_000);
