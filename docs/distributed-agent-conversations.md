@@ -581,3 +581,14 @@ urgent adapter requests require an observed turn ID and never override configura
 Explicit native restoration records a stable operation before spawning and requires
 an attended terminal. Unattended restoration, Herdr integration, and actual Mac/Linux
 multi-account acceptance remain unproven until their separate live gates pass.
+
+
+## Herdr evaluation status (slice 4)
+
+The pinned 0.9.3 adapter is read-only and the plugin exposes authenticated host
+connector status/reconciliation. Register/open remain explicitly unsupported because
+required native multi-account, draft-preservation, Linux, and authenticated restoration
+gates have not passed. [Versioned evidence](evidence/issue-283-herdr-0-9-3-v1.json)
+records isolated Mac runtime/plugin observations without substituting them for live
+acceptance. Activating Herdr attachment/restoration remains unfinished work under
+#283; no supervisor or terminal fallback is introduced.
