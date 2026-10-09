@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -264,4 +265,44 @@ it("honors a clean end event that arrives just after the liveness monitor", asyn
   expect(h.store.read(state.key)?.phase).toBe("closing");
   await finish(state.key, state.generation);
   expect(h.store.read(state.key)?.phase).toBe("closed");
+});
+
+it("pins inherited run identity and purges native messaging secrets at session end", async () => {
+  const reference = {
+    socket: "/tmp/test-broker.sock",
+    capability: "private-capability",
+    runId: randomUUID(),
+  };
+  const runtime = {
+    participantId: "managed-participant",
+    reference,
+    inherited: true,
+    profile: { id: "one", revision: 1 },
+  };
+  const { state } = await h.lifecycle.start(
+    "claude-code",
+    event("native-one"),
+    processIdentity(process.pid),
+    { client_name: "claude-code" },
+    runtime,
+  );
+  expect(state.runtimeInherited).toBe(true);
+  expect(state.runtime?.runId).toBe(reference.runId);
+  state.nativeMessaging = {
+    socket: "/tmp/test-native.sock",
+    token: "private-token",
+    idle: true,
+  };
+  h.store.write(state);
+  await expect(
+    h.lifecycle.start(
+      "claude-code",
+      event("native-one"),
+      processIdentity(process.pid),
+      { client_name: "claude-code" },
+      { ...runtime, reference: { ...reference, runId: randomUUID() } },
+    ),
+  ).rejects.toThrow("different run");
+  await h.lifecycle.end(state.key);
+  expect(h.store.read(state.key)?.nativeMessaging).toBeUndefined();
 });

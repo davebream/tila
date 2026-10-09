@@ -280,7 +280,11 @@ it("exchanges durable peer messages between authenticated SDK runs and rejects r
       )
     ).status,
   ).toBe(403);
-  const metadata = await json<{ deliveries: unknown[] }>(
+  const metadata = await json<{
+    deliveries: unknown[];
+    server_now: number;
+    attempt: unknown;
+  }>(
     await http(
       "/dispatch/two/status",
       undefined,
@@ -290,6 +294,8 @@ it("exchanges durable peer messages between authenticated SDK runs and rejects r
     ),
   );
   expect(JSON.stringify(metadata)).not.toContain("Please review");
+  expect(metadata.server_now).toEqual(expect.any(Number));
+  expect(metadata.attempt).toBeNull();
   const history = await one.rooms.history("general", { limit: 1 });
   expect(history.has_more).toBe(true);
   expect(
