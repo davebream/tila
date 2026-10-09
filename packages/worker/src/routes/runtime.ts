@@ -47,12 +47,12 @@ runtimeRoutes.post("/projects/:projectId/runtime/redeem", async (c) => {
   const parsed = RuntimeRedeemRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const { invitation, ...input } = parsed.data;
-  await runtimeProof(c, input.jkt, invitation);
   const store = new RuntimeStore(c.env.DB);
   const hash = await hashToken(invitation, c.env.HASH_PEPPER);
   const invite = await store.invitation(hash);
   if (!invite || invite.project_id !== c.req.param("projectId"))
     throw new RuntimeDenied("invitation-invalid", "Invalid invitation");
+  await runtimeProof(c, input.jkt, invitation);
   const { token, secret } = await runtimeSecret(c);
   const context = await store.enroll(
     invite.project_id,
