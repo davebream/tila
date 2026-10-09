@@ -10,6 +10,7 @@ interface DrawerProps {
   title: React.ReactNode;
   expanded?: boolean;
   headerActions?: React.ReactNode;
+  restoreFocus?: () => void;
 }
 
 export function Drawer({
@@ -18,6 +19,7 @@ export function Drawer({
   title,
   expanded,
   headerActions,
+  restoreFocus,
 }: DrawerProps) {
   return (
     <Dialog.Root
@@ -34,6 +36,14 @@ export function Drawer({
             expanded ? "w-full" : "w-full max-w-2xl",
           )}
           aria-describedby={undefined}
+          onCloseAutoFocus={
+            restoreFocus
+              ? (event) => {
+                  event.preventDefault();
+                  restoreFocus();
+                }
+              : undefined
+          }
         >
           <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
             <Dialog.Title className="min-w-0 truncate font-logo text-xl tracking-tight text-foreground">

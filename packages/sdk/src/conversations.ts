@@ -78,11 +78,21 @@ export function createConversationMethods(
         CreateThreadSchema.parse(input),
         options(z.object({ ok: z.literal(true), thread: ThreadSchema })),
       ),
-    history: (room: string, raw: Page & { thread_id?: string } = {}) =>
+    history: (
+      room: string,
+      raw: Page & {
+        thread_id?: string;
+        direction?: "forward" | "backward";
+      } = {},
+    ) =>
       client.get(`${path(room)}/messages`, {
         ...options(RoomHistoryResponseSchema),
         ...page(raw),
-        query: { ...page(raw).query, thread_id: raw.thread_id },
+        query: {
+          ...page(raw).query,
+          thread_id: raw.thread_id,
+          direction: raw.direction,
+        },
       }),
     publish: (
       room: string,

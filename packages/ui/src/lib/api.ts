@@ -1,4 +1,13 @@
 import type {
+  AgentListResponseSchema,
+  DeliveryExplainResponseSchema,
+  MessagePublishResponseSchema,
+  RoomHistoryResponseSchema,
+  RoomListResponseSchema,
+  RoomResponseSchema,
+  ThreadSchema,
+} from "@tila/schemas";
+import type {
   ArtifactHistoryQuery,
   ArtifactHistoryResponse,
   ArtifactMetaResponse,
@@ -112,6 +121,8 @@ export async function mutate<T>(
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (/\/rooms(?:\/|$)/.test(path))
+    headers["X-Tila-Conversation-Protocol"] = "1";
   if (path.startsWith("/projects/")) {
     headers["X-Tila-Participant-Id"] = dashboardParticipantId();
     headers["X-Tila-Client-Name"] = "dashboard";
@@ -160,11 +171,16 @@ async function request<T>(
       if (v !== undefined && v !== "") url.searchParams.set(k, v);
     }
   }
+  const conversation = /^\/(rooms|inbox)(\/|$)/.test(path);
   let response: Response;
   try {
     response = await fetch(url.toString(), {
       credentials: "include",
-      headers: { Accept: "application/json" },
+      cache: conversation ? "no-store" : "default",
+      headers: {
+        Accept: "application/json",
+        ...(conversation ? { "X-Tila-Conversation-Protocol": "1" } : {}),
+      },
     });
   } catch {
     throw new ApiError("network-error", "Network error: check connection");
@@ -763,4 +779,68 @@ export async function githubUserLookup(
     );
   const data = (await response.json()) as { id: number; login: string };
   return { id: data.id, login: data.login };
+}
+
+// Durable conversations use body operation IDs; never attach Idempotency-Key.
+export type RoomHistory = (typeof RoomHistoryResponseSchema)["_output"];
+export type DeliveryInspection =
+  (typeof DeliveryExplainResponseSchema)["_output"];
+export type AgentList = (typeof AgentListResponseSchema)["_output"];
+export function listRooms(
+  projectId: string,
+): Promise<(typeof RoomListResponseSchema)["_output"]> {
+  return request(projectId, "/rooms");
+}
+export function getRoom(
+  projectId: string,
+  room: string,
+): Promise<(typeof RoomResponseSchema)["_output"]> {
+  return request(projectId, `/rooms/${encodeURIComponent(room)}`);
+}
+export function listRoomThreads(
+  projectId: string,
+  room: string,
+): Promise<{
+  ok: true;
+  threads: (typeof ThreadSchema)["_output"][];
+}> {
+  return request(projectId, `/rooms/${encodeURIComponent(room)}/threads`);
+}
+export function roomHistory(
+  projectId: string,
+  room: string,
+  params: {
+    cursor?: string;
+    thread_id?: string;
+    direction?: "forward" | "backward";
+  } = {},
+): Promise<RoomHistory> {
+  return request(projectId, `/rooms/${encodeURIComponent(room)}/messages`, {
+    ...params,
+    limit: "50",
+  });
+}
+export function publishReply(
+  projectId: string,
+  room: string,
+  body: import("@tila/schemas").PublishMessage,
+): Promise<(typeof MessagePublishResponseSchema)["_output"]> {
+  return mutate(
+    "POST",
+    projectPath(projectId, `/rooms/${encodeURIComponent(room)}/messages`),
+    body,
+  );
+}
+export function listAgents(projectId: string): Promise<AgentList> {
+  return request(projectId, "/agents");
+}
+export function inspectDelivery(
+  projectId: string,
+  agent: string,
+  delivery: string,
+): Promise<DeliveryInspection> {
+  return request(
+    projectId,
+    `/inbox/${encodeURIComponent(agent)}/deliveries/${encodeURIComponent(delivery)}`,
+  );
 }
