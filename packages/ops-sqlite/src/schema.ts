@@ -723,3 +723,115 @@ export const artifactReviews = sqliteTable(
     uniqueIndex("idx_artifact_reviews_operation").on(table.operation_id),
   ],
 );
+
+export const rooms = sqliteTable("rooms", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  history_policy: text("history_policy").notNull(),
+  delivery_ttl_seconds: integer("delivery_ttl_seconds").notNull(),
+  budgets: text("budgets", { mode: "json" })
+    .$type<import("@tila/schemas").Room["budgets"]>()
+    .notNull(),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  next_seq: integer("next_seq").notNull().default(0),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+});
+
+export const roomMembers = sqliteTable(
+  "room_members",
+  {
+    room_id: text("room_id").notNull(),
+    member: text("member").notNull(),
+    wake: integer("wake", { mode: "boolean" }).notNull(),
+    joined_at: integer("joined_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.room_id, t.member] })],
+);
+
+export const conversationThreads = sqliteTable("threads", {
+  id: text("id").primaryKey(),
+  room_id: text("room_id").notNull(),
+  title: text("title").notNull(),
+  created_at: integer("created_at").notNull(),
+});
+
+export const messages = sqliteTable("messages", {
+  ordinal: integer("ordinal").notNull().unique(),
+  id: text("id").primaryKey(),
+  room_id: text("room_id").notNull(),
+  thread_id: text("thread_id"),
+  seq: integer("seq").notNull(),
+  author_key: text("author_key").notNull(),
+  client_op_id: text("client_op_id").notNull(),
+  request_hash: text("request_hash").notNull(),
+  message: text("message", { mode: "json" })
+    .$type<import("@tila/schemas").Message>()
+    .notNull(),
+  author_agent: text("author_agent"),
+  chain_id: text("chain_id").notNull(),
+  hop: integer("hop").notNull(),
+  created_at: integer("created_at").notNull(),
+});
+
+export const messageRecipients = sqliteTable("message_recipients", {
+  ordinal: integer("ordinal").notNull(),
+  id: text("id").primaryKey(),
+  message_id: text("message_id").notNull(),
+  agent_id: text("agent_id").notNull(),
+  target_binding_id: text("target_binding_id"),
+  target_epoch: integer("target_epoch"),
+  state: text("state").notNull().default("pending"),
+  fetched_at: integer("fetched_at"),
+  fetched_binding_id: text("fetched_binding_id"),
+  fetched_epoch: integer("fetched_epoch"),
+  acked_at: integer("acked_at"),
+  acked_binding_id: text("acked_binding_id"),
+  acked_epoch: integer("acked_epoch"),
+  disposition: text("disposition"),
+  wake_suppressed: text("wake_suppressed"),
+  rewakes: integer("rewakes").notNull().default(0),
+  created_at: integer("created_at").notNull(),
+  expires_at: integer("expires_at").notNull(),
+});
+
+export const dispatchOutbox = sqliteTable("dispatch_outbox", {
+  agent_id: text("agent_id").primaryKey(),
+  state: text("state").notNull().default("pending"),
+  publish_gen: integer("publish_gen").notNull().default(0),
+  lease_token: text("lease_token"),
+  lease_until: integer("lease_until"),
+  lease_gen: integer("lease_gen"),
+  lease_binding_id: text("lease_binding_id"),
+  lease_epoch: integer("lease_epoch"),
+  next_attempt_at: integer("next_attempt_at").notNull(),
+  attempt_count: integer("attempt_count").notNull().default(0),
+  updated_at: integer("updated_at").notNull(),
+});
+
+export const dispatchAttempts = sqliteTable("dispatch_attempts", {
+  room_ids: text("room_ids", { mode: "json" }).$type<string[]>().notNull(),
+  delivery_ids: text("delivery_ids", { mode: "json" })
+    .$type<string[]>()
+    .notNull(),
+  id: text("id").primaryKey(),
+  agent_id: text("agent_id").notNull(),
+  lease_token: text("lease_token").notNull(),
+  consumer_binding_id: text("consumer_binding_id").notNull(),
+  binding_epoch: integer("binding_epoch").notNull(),
+  publish_gen: integer("publish_gen").notNull(),
+  outcome: text("outcome").notNull(),
+  created_at: integer("created_at").notNull(),
+  reported_at: integer("reported_at"),
+});
+
+export const conversationContext = sqliteTable("conversation_context", {
+  consumer_binding_id: text("consumer_binding_id").primaryKey(),
+  delivery_id: text("delivery_id").notNull(),
+  opened_at: integer("opened_at").notNull(),
+});
+
+export const conversationState = sqliteTable("_conversation_state", {
+  singleton: integer("singleton").primaryKey(),
+  generation: text("generation").notNull(),
+});

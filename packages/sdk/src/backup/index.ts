@@ -37,7 +37,7 @@ import { SDK_VERSION } from "../version";
 export const SUPPORTED_BACKUP_FEATURES = new Set<string>([
   "artifact-review-v1",
 ]);
-export const MAX_SUPPORTED_DO_MIGRATION = 30;
+export const MAX_SUPPORTED_DO_MIGRATION = 31;
 
 export type LocalBackupEndpoint = {
   backend: "local";

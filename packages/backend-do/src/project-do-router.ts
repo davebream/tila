@@ -10,6 +10,7 @@ import { createAgentRoutes } from "./routes/agent-routes";
 import { createArtifactRoutes } from "./routes/artifact-routes";
 import { createArtifactVersionRoutes } from "./routes/artifact-version-routes";
 import { createContinuityRoutes } from "./routes/continuity-routes";
+import { createConversationRoutes } from "./routes/conversation-routes";
 import { createCoordinationRoutes } from "./routes/coordination-routes";
 import { createDiagnosticRoutes } from "./routes/diagnostic-routes";
 import { createEntityRoutes } from "./routes/entity-routes";
@@ -109,6 +110,7 @@ export function createProjectRouter(deps: RouterDeps) {
   app.route("/", createTransferRoutes(deps));
   app.route("/", createAdminRoutes(deps));
   app.route("/", createAgentRoutes(deps));
+  app.route("/", createConversationRoutes(deps));
   app.route("/", createEntityRoutes(deps));
   app.route("/", createArtifactRoutes(deps));
   app.route("/", createArtifactVersionRoutes(deps));

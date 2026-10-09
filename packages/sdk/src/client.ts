@@ -24,6 +24,11 @@ import {
 } from "./token-provider";
 export { TilaApiError, isTilaApiError } from "./errors";
 import { createAgentMethods } from "./agents";
+import {
+  createConversationMethods,
+  createDispatchMethods,
+  createInboxMethods,
+} from "./conversations";
 import { createGateMethods } from "./gates";
 import { createIndexMethods } from "./indexes";
 import { createJournalMethods } from "./journal";
@@ -228,6 +233,10 @@ export class TilaClient {
         if (format !== "raw") headers.Accept = "application/json";
         if (format === "json" && body !== undefined)
           headers["Content-Type"] = "application/json";
+        if (opts?.conversationProtocol !== undefined)
+          headers["X-Tila-Conversation-Protocol"] = String(
+            opts.conversationProtocol,
+          );
         if (opts?.idempotencyKey)
           headers["Idempotency-Key"] = opts.idempotencyKey;
         const htu = canonicalizeHtu(url.toString());
@@ -393,6 +402,7 @@ export class TilaClient {
 }
 
 export interface RequestOptions<T = unknown> {
+  conversationProtocol?: number;
   signal?: AbortSignal;
   idempotencyKey?: string;
   query?: Record<string, string | undefined>;
@@ -482,6 +492,9 @@ export async function exchangeGitHubToken(
  */
 export interface TilaFacade {
   agents: ReturnType<typeof createAgentMethods>;
+  conversations: ReturnType<typeof createConversationMethods>;
+  inbox: ReturnType<typeof createInboxMethods>;
+  dispatch: ReturnType<typeof createDispatchMethods>;
   handoffs: ReturnType<typeof createHandoffMethods>;
   reentry: ReturnType<typeof createReentryMethod>;
   tasks: ReturnType<typeof createTaskMethods>;
@@ -511,6 +524,9 @@ export interface TilaFacade {
 function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
   return {
     agents: createAgentMethods(client, projectId),
+    conversations: createConversationMethods(client, projectId),
+    inbox: createInboxMethods(client, projectId),
+    dispatch: createDispatchMethods(client, projectId),
     tasks: createTaskMethods(client, projectId),
     records: createRecordMethods(client, projectId),
     claims: createClaimMethods(client, projectId),

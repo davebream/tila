@@ -1,6 +1,7 @@
 import { lt, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { deleteTombstonedPointers } from "./artifact-ops";
+import { expireDeliveries } from "./conversation-ops";
 import { appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 
@@ -104,6 +105,7 @@ export function sweep(
       .run();
     const doIdempotencyDeleted = readChanges(tx);
 
+    expireDeliveries(tx, now);
     return {
       claimsDeleted,
       presenceDeleted,

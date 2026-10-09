@@ -61,6 +61,25 @@ export function routeCapability(
       .replace(/\/$/, "") || "/";
   const read = method === "GET" || method === "HEAD";
   const patterns: Array<[string, RegExp, Capability]> = [
+    [
+      "GET",
+      /^\/rooms(?:\/[^/]+(?:\/(?:messages|threads))?)?$/,
+      "conversations:read",
+    ],
+    ["POST", /^\/rooms$/, "conversations:manage"],
+    ["PUT", /^\/rooms\/[^/]+\/members\/[^/]+$/, "conversations:manage"],
+    ["DELETE", /^\/rooms\/[^/]+\/members\/[^/]+$/, "conversations:manage"],
+    ["POST", /^\/rooms\/[^/]+\/(?:messages|threads)$/, "conversations:publish"],
+    ["GET", /^\/inbox\/[^/]+(?:\/watch)?$/, "inbox:consume"],
+    ["GET", /^\/inbox\/[^/]+\/deliveries\/[^/]+$/, "conversations:read"],
+    ["POST", /^\/inbox\/[^/]+\/deliveries\/[^/]+\/ack$/, "inbox:consume"],
+    [
+      "POST",
+      /^\/inbox\/[^/]+\/deliveries\/[^/]+\/resume$/,
+      "conversations:manage",
+    ],
+    ["GET", /^\/dispatch\/[^/]+\/status$/, "dispatch:relay"],
+    ["POST", /^\/dispatch\/[^/]+\/(?:lease|report)$/, "dispatch:relay"],
     ["GET", /^\/agents(?:\/[^/]+)?$/, "agents:read"],
     ["POST", /^\/agents$/, "agents:manage"],
     ["POST", /^\/agents\/[^/]+\/(?:bind|release)$/, "agent-bindings:attach"],
@@ -378,14 +397,18 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     c.set("authorizationChecked", true);
     c.header(
       "Cache-Control",
-      /^\/projects\/[^/]+\/agents(?:\/|$)/.test(c.req.path)
+      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch)(?:\/|$)/.test(
+        c.req.path,
+      )
         ? "private, no-store"
         : "no-store",
     );
     await next();
     c.header(
       "Cache-Control",
-      /^\/projects\/[^/]+\/agents(?:\/|$)/.test(c.req.path)
+      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch)(?:\/|$)/.test(
+        c.req.path,
+      )
         ? "private, no-store"
         : "no-store",
     );

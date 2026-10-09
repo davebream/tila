@@ -46,6 +46,11 @@ runtimeRoutes.get("/api/runtime/info", async (c) =>
   c.json({
     ok: true,
     protocol: 1,
+    conversation_protocols: [1],
+    capabilities: {
+      "io.tila/durable-conversations": true,
+      "io.tila/dispatch-metadata": true,
+    },
     instance_id: await new D1DeploymentMetaStore(c.env.DB).ensure(),
   }),
 );

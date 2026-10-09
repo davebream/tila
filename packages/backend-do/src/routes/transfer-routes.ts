@@ -96,7 +96,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({
       digest,
       journal,
-      migrationVersion: 30,
+      migrationVersion: 31,
       tables: projectTransferOps.PROJECT_BACKUP_TABLES,
     });
   });
@@ -183,7 +183,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     projectTransferOps.finalizeSnapshotRestore(sql, body.journalNextSequence);
     const actual = await projectTransferOps.semanticDigest(
       sql,
-      body.migrationVersion ?? 30,
+      body.migrationVersion ?? 31,
     );
     if (actual !== body.semanticDigest) {
       return jsonError(

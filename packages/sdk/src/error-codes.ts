@@ -5,6 +5,10 @@
  * strings returned by the worker and DO layers.
  */
 export const TILA_ERRORS = {
+  UNSUPPORTED_PROTOCOL: "unsupported-protocol",
+  CURSOR_EXPIRED: "cursor-expired",
+  DELIVERY_EXPIRED: "delivery-expired",
+  BODY_TOO_LARGE: "body-too-large",
   STALE_BINDING: "stale-binding",
   NO_ACTIVE_BINDING: "no-active-binding",
   RUNTIME_REQUIRED: "runtime-required",

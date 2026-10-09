@@ -8,6 +8,16 @@ import type * as schema from "./schema";
  * `_schema_history` is excluded from the domain set and returned separately as a diagnostic.
  */
 export const DOMAIN_TABLE_NAMES = [
+  "_conversation_state",
+  "conversation_context",
+  "dispatch_attempts",
+  "dispatch_outbox",
+  "message_recipients",
+  "messages",
+  "threads",
+  "room_members",
+  "rooms",
+
   "agent_bindings",
   "agents",
   "entities",
@@ -78,6 +88,16 @@ export function countStoreRows(
 ): StoreCountsResult {
   return {
     domain: {
+      rooms: countTable(db, "rooms"),
+      room_members: countTable(db, "room_members"),
+      threads: countTable(db, "threads"),
+      messages: countTable(db, "messages"),
+      message_recipients: countTable(db, "message_recipients"),
+      dispatch_outbox: countTable(db, "dispatch_outbox"),
+      dispatch_attempts: countTable(db, "dispatch_attempts"),
+      conversation_context: countTable(db, "conversation_context"),
+      _conversation_state: countTable(db, "_conversation_state"),
+
       agents: countTable(db, "agents"),
       agent_bindings: countTable(db, "agent_bindings"),
       entities: countTable(db, "entities"),

@@ -7,6 +7,11 @@ import {
 import { RecordKeySchema, RecordTypeSchema } from "./record";
 
 export const CAPABILITIES = [
+  "conversations:read",
+  "conversations:publish",
+  "conversations:manage",
+  "inbox:consume",
+  "dispatch:relay",
   "agents:read",
   "agents:manage",
   "agent-bindings:attach",
@@ -142,6 +147,7 @@ export function capabilityRole(capability: Capability): ProjectRole {
       "schema:write",
       "signals:manage",
       "agents:manage",
+      "conversations:manage",
       "search:reindex",
       "journal:archive",
     ].includes(capability)
@@ -228,6 +234,10 @@ export const RUNTIME_RUN_CEILING: CredentialPolicy = {
   role: "participant",
   capabilities: [
     ...CREDENTIAL_PRESETS.worker.capabilities,
+    "conversations:read",
+    "conversations:publish",
+    "inbox:consume",
+    "dispatch:relay",
     "agents:read",
     "agent-bindings:attach",
   ],

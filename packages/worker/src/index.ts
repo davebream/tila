@@ -36,6 +36,7 @@ import {
 import { backup } from "./routes/backup";
 import { claims } from "./routes/claims";
 import { continuity } from "./routes/continuity";
+import { conversations } from "./routes/conversations";
 import { doctor } from "./routes/doctor";
 import { entities } from "./routes/entities";
 import { gates } from "./routes/gates";
@@ -244,6 +245,9 @@ projectRoutes.use("/*", async (c, next) => {
   return next();
 });
 projectRoutes.route("/agents", agents);
+projectRoutes.route("/rooms", conversations);
+projectRoutes.route("/inbox", conversations);
+projectRoutes.route("/dispatch", conversations);
 projectRoutes.use("/*", createIdempotencyMiddleware());
 projectRoutes.use("/*", createCacheMiddleware());
 projectRoutes.route("/service-accounts", serviceAccountRoutes);

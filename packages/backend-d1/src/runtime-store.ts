@@ -544,7 +544,9 @@ export class RuntimeStore {
       !policyContains(ceiling, policy) ||
       !policyContains(RUNTIME_RUN_CEILING, policy) ||
       (role === "relay" &&
-        policy.capabilities.some((cap) => cap !== "agent-bindings:attach"))
+        policy.capabilities.some(
+          (cap) => cap !== "agent-bindings:attach" && cap !== "dispatch:relay",
+        ))
     ) {
       await this.recordDenial(
         project,
