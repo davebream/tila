@@ -1,6 +1,7 @@
 export * from "./lifecycle";
 export * from "./store";
 export * from "./codex";
+export * from "./codex-daemon";
 export * from "./profiles";
 
 export * from "./runtime-proof";

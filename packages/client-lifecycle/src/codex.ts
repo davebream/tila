@@ -1,10 +1,12 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { type CodexDaemonConnection, connectCodexDaemon } from "./codex-daemon";
 
 /** Live observation uses the existing daemon; credential probes use isolated stdio. */
 export class CodexObserver {
   private child?: ChildProcessWithoutNullStreams;
+  private daemon?: CodexDaemonConnection;
   private nextId = 0;
   private pending = new Map<
     number,
@@ -18,41 +20,63 @@ export class CodexObserver {
   ) {}
   private connect(): Promise<void> {
     if (this.ready) return this.ready;
-    const child = spawn(
-      this.executable,
-      ["app-server", this.purpose === "credentials" ? "--stdio" : "proxy"],
-      {
-        stdio: "pipe",
-        env: this.env,
-      },
-    );
-    this.child = child;
-    child.stderr.resume();
-    const lines = createInterface({ input: child.stdout });
-    lines.on("line", (line) => {
-      try {
-        const response = JSON.parse(line);
-        const pending = this.pending.get(response.id);
-        if (!pending) return;
-        this.pending.delete(response.id);
-        if (response.error)
-          pending.reject(new Error("Codex status request failed"));
-        else pending.resolve(response.result);
-      } catch {
-        /* Ignore non-response notifications; never persist conversation content. */
-      }
-    });
+    const receive = (response: {
+      id: number;
+      error?: unknown;
+      result?: unknown;
+    }) => {
+      const pending = this.pending.get(response.id);
+      if (!pending) return;
+      this.pending.delete(response.id);
+      if (response.error)
+        pending.reject(new Error("Codex status request failed"));
+      else pending.resolve(response.result);
+    };
     const fail = () => {
       for (const pending of this.pending.values())
         pending.reject(new Error("Codex observer disconnected"));
       this.pending.clear();
       this.ready = undefined;
       this.child = undefined;
-      lines.close();
+      this.daemon = undefined;
     };
+    if (this.purpose === "observation") {
+      this.ready = connectCodexDaemon(
+        this.executable,
+        this.env,
+        (message) =>
+          receive(message as { id: number; error?: unknown; result?: unknown }),
+        fail,
+      ).then(async (daemon) => {
+        this.daemon = daemon;
+        await this.initialize();
+      });
+      return this.ready;
+    }
+    const child = spawn(this.executable, ["app-server", "--stdio"], {
+      stdio: "pipe",
+      env: this.env,
+    });
+    this.child = child;
+    child.stderr.resume();
+    const lines = createInterface({ input: child.stdout });
+    lines.on("line", (line) => {
+      try {
+        receive(JSON.parse(line));
+      } catch {
+        /* Ignore malformed native output. */
+      }
+    });
     child.on("error", fail);
-    child.on("exit", fail);
-    this.ready = this.request("initialize", {
+    child.on("exit", () => {
+      lines.close();
+      fail();
+    });
+    this.ready = this.initialize();
+    return this.ready;
+  }
+  private initialize(): Promise<void> {
+    return this.request("initialize", {
       clientInfo: { name: "tila-lifecycle", version: "1" },
       capabilities: {},
     }).then((result) => {
@@ -65,9 +89,15 @@ export class CodexObserver {
         )
           throw new Error("Codex credential probe used a different profile");
       }
-      child.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
+      this.write({ method: "initialized" });
     });
-    return this.ready;
+  }
+  private write(
+    message: unknown,
+    callback?: (error?: Error | null) => void,
+  ): void {
+    if (this.daemon) this.daemon.send(message, callback);
+    else this.child?.stdin.write(`${JSON.stringify(message)}\n`, callback);
   }
   private request(method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
@@ -86,16 +116,13 @@ export class CodexObserver {
           reject(error);
         },
       });
-      this.child?.stdin.write(
-        `${JSON.stringify({ id, method, params })}\n`,
-        (error) => {
-          if (error) {
-            clearTimeout(timer);
-            this.pending.delete(id);
-            reject(error);
-          }
-        },
-      );
+      this.write({ id, method, params }, (error) => {
+        if (error) {
+          clearTimeout(timer);
+          this.pending.delete(id);
+          reject(error);
+        }
+      });
     });
   }
   async alive(sessionId: string): Promise<boolean> {
@@ -126,6 +153,7 @@ export class CodexObserver {
       : null;
   }
   close(): void {
+    this.daemon?.close();
     this.child?.kill();
   }
 }
