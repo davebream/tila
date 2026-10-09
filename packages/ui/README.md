@@ -21,7 +21,7 @@ opening control, or the room heading for a direct link.
 
 Deploy the compatible conversation server before this bundle. Browser previews and
 component fixtures are UI validation, not evidence of native account isolation or
-Mac/Linux acceptance. See [the acceptance record](../../docs/evidence/issue-283-acceptance-v1.json).
+Mac/Linux acceptance. See [the acceptance record](../../docs/evidence/issue-283-acceptance-v2.json).
 
 ## Development
 

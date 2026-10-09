@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Profile verification
+
+- Verify plain Codex CLI credentials through a read-only stdio account probe without requiring a background daemon; reject a mismatched reported profile home before reading the account. Live session observation continues to use the existing daemon.
+
 ### Conversation dashboard (#283, slice 5)
 
 - Add project rooms, thread panels, agent status and deep-linkable delivery inspection.

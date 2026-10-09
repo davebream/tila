@@ -111,6 +111,13 @@ those actions. There is no terminal-injection fallback, including dedicated pane
 The [versioned evidence](../../docs/evidence/issue-283-herdr-0-9-3-v1.json) separates
 isolated runtime/plugin probes from unproven native behavior. In the Mac probe,
 headless restart launched a resume command but reached login/welcome, so no original
-conversation restoration was established. Linux test-host authentication and the
-three isolated Claude profiles plus Codex profile remain prerequisites. Do not flip
-the support gate based on fixtures or process launch alone.
+conversation restoration was established. The amended acceptance scope uses two
+independent Claude accounts and plain Codex. Selected macOS profiles now pass native
+account verification; Linux test-host access and live session gates remain open.
+See the [updated acceptance record](../../docs/evidence/issue-283-acceptance-v2.json).
+Do not flip the support gate based on fixtures or process launch alone.
+
+Codex profile enrollment reads account metadata through a short-lived stdio
+app-server and verifies its reported home before reading the account. It neither
+requires nor starts a background daemon and never creates or resumes a thread.
+Live session discovery and wake still require the existing native daemon proxy.

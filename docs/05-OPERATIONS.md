@@ -1996,4 +1996,4 @@ Deploy the compatible backward-history and `tail_cursor` server behavior before
 this dashboard. There are no new database migrations in this slice. Preserve the
 D1-before-Worker ordering for slice 1. The stacked PRs remain held for explicit
 authentication-boundary review; passing UI or connector fixtures is not live
-multi-account acceptance. See the versioned [acceptance evidence](evidence/issue-283-acceptance-v1.json).
+multi-account acceptance. See the versioned [acceptance evidence](evidence/issue-283-acceptance-v2.json).
