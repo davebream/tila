@@ -173,8 +173,16 @@ export async function runCli(
         const managed = await managedRuntime();
         if (
           managed &&
+          ![
+            "agent list",
+            "agent inspect",
+            "agent bind",
+            "agent release",
+          ].includes(path) &&
           !new Set([
             "task",
+            "room",
+            "inbox",
             "entity",
             "work-unit",
             "record",
