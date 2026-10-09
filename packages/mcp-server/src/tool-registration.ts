@@ -105,6 +105,25 @@ export function recoveryFor(error: unknown, readOnly = false): McpRecovery {
   let retry_safety: McpRecovery["retry_safety"] = readOnly ? "safe" : "unknown";
   if (
     [
+      "stale-binding",
+      "no-active-binding",
+      "runtime-required",
+      "profile-mismatch",
+      "unsupported-capability",
+    ].includes(code)
+  ) {
+    return {
+      code,
+      message,
+      retry_safety: "after_recovery",
+      recovery_action:
+        code === "unsupported-capability"
+          ? "Use a Cloudflare project and a client/runtime that supports this capability."
+          : "Inspect the agent and selected profile. Start an authorized run and attach using the current binding epoch before retrying.",
+    };
+  }
+  if (
+    [
       "stale-fence",
       "no-fence",
       "renew-failed",

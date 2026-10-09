@@ -12,6 +12,7 @@ import {
   policyContains,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { expireAgentBindings } from "../lib/agent-authority";
 import { zodValidationError } from "../lib/validation";
 import { denied, scopedPolicy } from "../middleware/capability";
 import { stepUpGuard } from "../middleware/protected-operation";
@@ -75,6 +76,9 @@ serviceAccountRoutes.delete("/:principalId", async (c) => {
     c.req.param("principalId"),
     { principalId: principalIdFor(token), tokenId: token.tokenId },
   );
+  await expireAgentBindings(c.env, c.get("projectId"), {
+    principal_id: c.req.param("principalId"),
+  });
   return c.json({ ok: true });
 });
 serviceAccountRoutes.get("/:principalId/workload-bindings", async (c) =>
@@ -130,6 +134,10 @@ serviceAccountRoutes.delete(
       c.req.param("bindingId"),
       { principalId: principalIdFor(token), tokenId: token.tokenId },
     );
+    if (revoked)
+      await expireAgentBindings(c.env, c.get("projectId"), {
+        workload_binding_id: c.req.param("bindingId"),
+      });
     return c.json({ ok: revoked }, revoked ? 200 : 404);
   },
 );

@@ -1183,6 +1183,32 @@ export function runMigration0029(storage: MigrationStorage): void {
   installTransferGuards(storage, ["artifact_reviews"]);
 }
 
+export const MIGRATION_0030 = `
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_principal_id TEXT NOT NULL,
+  bind_policy TEXT NOT NULL, binding_epoch INTEGER NOT NULL DEFAULT 0 CHECK(binding_epoch >= 0),
+  archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_bindings (
+  consumer_binding_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL REFERENCES agents(id),
+  run_id TEXT NOT NULL, binding_epoch INTEGER NOT NULL CHECK(binding_epoch > 0),
+  enrollment_id TEXT, workload_binding_id TEXT, principal_id TEXT NOT NULL,
+  participant_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('active','replaced','released','expired')),
+  attachment_json TEXT NOT NULL, lease_expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_bindings_run ON agent_bindings(agent_id, run_id);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_bindings_active ON agent_bindings(agent_id) WHERE state = 'active';
+`;
+function runMigration0030(storage: MigrationStorage): void {
+  if (!columnExists(storage, "_project_transfer_state", "agent_epochs_json"))
+    storage.sql.exec(
+      "ALTER TABLE _project_transfer_state ADD COLUMN agent_epochs_json TEXT NOT NULL DEFAULT '{}'",
+    );
+  storage.sql.exec(MIGRATION_0030);
+  installTransferGuards(storage, ["agents", "agent_bindings"]);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1213,4 +1239,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 27, run: runMigration0027 },
   { version: 28, run: runMigration0028 },
   { version: 29, run: runMigration0029 },
+  { version: 30, run: runMigration0030 },
 ];

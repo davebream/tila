@@ -61,6 +61,9 @@ export function routeCapability(
       .replace(/\/$/, "") || "/";
   const read = method === "GET" || method === "HEAD";
   const patterns: Array<[string, RegExp, Capability]> = [
+    ["GET", /^\/agents(?:\/[^/]+)?$/, "agents:read"],
+    ["POST", /^\/agents$/, "agents:manage"],
+    ["POST", /^\/agents\/[^/]+\/(?:bind|release)$/, "agent-bindings:attach"],
     [
       "GET",
       /^\/tasks(?:\/ready|\/relationships|\/[^/]+(?:\/artifact-refs)?)?$/,
@@ -373,9 +376,19 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
       }),
     );
     c.set("authorizationChecked", true);
-    c.header("Cache-Control", "no-store");
+    c.header(
+      "Cache-Control",
+      /^\/projects\/[^/]+\/agents(?:\/|$)/.test(c.req.path)
+        ? "private, no-store"
+        : "no-store",
+    );
     await next();
-    c.header("Cache-Control", "no-store");
+    c.header(
+      "Cache-Control",
+      /^\/projects\/[^/]+\/agents(?:\/|$)/.test(c.req.path)
+        ? "private, no-store"
+        : "no-store",
+    );
   };
 }
 

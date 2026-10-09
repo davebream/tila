@@ -1,3 +1,4 @@
+import { selectedProfile } from "@tila/client-lifecycle";
 import {
   SessionStore,
   brokerReference,
@@ -28,7 +29,12 @@ export async function managedRuntime() {
     ]);
     const key =
       process.env.TILA_LIFECYCLE_KEY ??
-      sessionKey(namespace, "codex", process.env.CODEX_THREAD_ID ?? "");
+      sessionKey(
+        namespace,
+        "codex",
+        process.env.CODEX_THREAD_ID ?? "",
+        selectedProfile(),
+      );
     const state = new SessionStore().read(key);
     if (
       !state ||

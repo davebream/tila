@@ -1,6 +1,6 @@
 import { RuntimeDenied, RuntimeStore } from "@tila/backend-d1";
 import {
-  CREDENTIAL_PRESETS,
+  RUNTIME_RUN_CEILING,
   canonicalizeHtu,
   effectiveCredentialPolicy,
   intersectCredentialPolicies,
@@ -73,9 +73,9 @@ export function runtimeCeiling(c: RuntimeHttpContext) {
   const token = c.get("tokenResult");
   const policy = "policy" in token ? token.policy : undefined;
   return policy
-    ? intersectCredentialPolicies(CREDENTIAL_PRESETS.worker, policy)
+    ? intersectCredentialPolicies(RUNTIME_RUN_CEILING, policy)
     : effectiveCredentialPolicy(
-        CREDENTIAL_PRESETS.worker,
+        RUNTIME_RUN_CEILING,
         c.get("effectiveRole") ?? "owner",
       );
 }

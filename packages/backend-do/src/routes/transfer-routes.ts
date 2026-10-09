@@ -1,4 +1,8 @@
-import { type ProjectBackupTable, projectTransferOps } from "@tila/ops-sqlite";
+import {
+  type ProjectBackupTable,
+  agentBindingOps,
+  projectTransferOps,
+} from "@tila/ops-sqlite";
 import { type Context, Hono } from "hono";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
@@ -92,7 +96,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({
       digest,
       journal,
-      migrationVersion: 29,
+      migrationVersion: 30,
       tables: projectTransferOps.PROJECT_BACKUP_TABLES,
     });
   });
@@ -112,9 +116,10 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
         409,
       );
     }
-    const result = deps.ctx.storage.transactionSync(() =>
-      projectTransferOps.prepareSnapshotRestore(sql, body.sessionId),
-    );
+    const result = deps.ctx.storage.transactionSync(() => {
+      agentBindingOps.preserveRestoreEpochs(deps.db);
+      return projectTransferOps.prepareSnapshotRestore(sql, body.sessionId);
+    });
     return c.json({ ok: true, replayed: result === "replayed" });
   });
 
@@ -178,7 +183,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     projectTransferOps.finalizeSnapshotRestore(sql, body.journalNextSequence);
     const actual = await projectTransferOps.semanticDigest(
       sql,
-      body.migrationVersion ?? 29,
+      body.migrationVersion ?? 30,
     );
     if (actual !== body.semanticDigest) {
       return jsonError(
@@ -188,7 +193,10 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
         409,
       );
     }
-    projectTransferOps.finishTransfer(sql, body.sessionId);
+    deps.ctx.storage.transactionSync(() => {
+      agentBindingOps.invalidateRestoredBindings(deps.db);
+      projectTransferOps.finishTransfer(sql, body.sessionId);
+    });
     return c.json({ ok: true, semanticDigest: actual });
   });
 

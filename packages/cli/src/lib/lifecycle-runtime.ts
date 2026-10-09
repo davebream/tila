@@ -2,15 +2,18 @@ import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { selectedProfile } from "@tila/client-lifecycle";
 import {
   CodexObserver,
   Lifecycle,
+  ProfileStore,
   SessionStore,
   clientOwner,
   connectRuntimeBroker,
   environmentMetadata,
   processAlive,
   processIdentity,
+  profileEnvironment,
   sessionKey,
 } from "@tila/client-lifecycle";
 import {
@@ -128,7 +131,12 @@ export async function runLifecycleHook(
   const event = LifecycleEventSchema.parse(input);
   process.chdir(event.cwd);
   const { lifecycle, close } = runtime();
-  const key = sessionKey(lifecycle.namespace, client, event.session_id);
+  const key = sessionKey(
+    lifecycle.namespace,
+    client,
+    event.session_id,
+    selectedProfile(),
+  );
   try {
     if (event.hook_event_name === "SessionStart") {
       const owner = clientOwner(client);
@@ -228,6 +236,11 @@ export async function runLifecycleWorker(
     throw new Error("An existing run cannot be resumed after helper loss");
   const config = findConfig();
   if (!config?.worker_url) throw new Error("Remote configuration is required");
+  const profileStore = new ProfileStore();
+  const profile = initial.profile
+    ? profileStore.get(initial.profile.id, initial.profile.revision)
+    : undefined;
+  if (profile) await profileStore.verify(profile.id, profile.revision);
   const managed = await startEnrolledRun({
     deployment: new URL(config.worker_url).origin,
     projectId: config.project_id,
@@ -253,7 +266,10 @@ export async function runLifecycleWorker(
     throw error;
   }
   const { lifecycle, close } = runtime(store);
-  const observer = new CodexObserver();
+  const observer = new CodexObserver(
+    profile?.harness === "codex" ? profile.launcher : undefined,
+    profile ? profileEnvironment(profile) : undefined,
+  );
   let closingSince: number | undefined;
   try {
     for (;;) {
@@ -264,6 +280,7 @@ export async function runLifecycleWorker(
         state.worker?.pid !== process.pid
       )
         return;
+      if (profile) await profileStore.verify(profile.id, profile.revision);
       let alive = processAlive(state.owner);
       if (state.client === "codex" && state.phase === "active") {
         try {

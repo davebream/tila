@@ -390,6 +390,8 @@ export const runtimeInvitations = sqliteTable("_runtime_invitations", {
   expires_at: integer("expires_at").notNull(),
 });
 export const runtimeRuns = sqliteTable("_runtime_runs", {
+  agent_id: text("agent_id"),
+  run_role: text("run_role").notNull().default("acting"),
   run_id: text("run_id").primaryKey(),
   project_id: text("project_id").notNull(),
   enrollment_id: text("enrollment_id"),

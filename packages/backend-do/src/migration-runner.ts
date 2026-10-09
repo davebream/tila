@@ -54,6 +54,22 @@ export async function runMigrationsWithPitrRollback(
 }
 
 const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
+  agents: [
+    "id",
+    "owner_principal_id",
+    "bind_policy",
+    "binding_epoch",
+    "archived",
+  ],
+  agent_bindings: [
+    "consumer_binding_id",
+    "agent_id",
+    "run_id",
+    "binding_epoch",
+    "state",
+    "attachment_json",
+    "lease_expires_at",
+  ],
   _migrations: ["version", "applied_at"],
   _schema_history: [
     "version",

@@ -14,7 +14,7 @@ import { copyFile, mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { projectTransferOps } from "@tila/ops-sqlite";
+import { agentBindingOps, projectTransferOps } from "@tila/ops-sqlite";
 import {
   ArtifactCommitRecordSchema,
   ArtifactLifecycleRecordSchema,
@@ -37,7 +37,7 @@ import { SDK_VERSION } from "../version";
 export const SUPPORTED_BACKUP_FEATURES = new Set<string>([
   "artifact-review-v1",
 ]);
-export const MAX_SUPPORTED_DO_MIGRATION = 29;
+export const MAX_SUPPORTED_DO_MIGRATION = 30;
 
 export type LocalBackupEndpoint = {
   backend: "local";
@@ -643,6 +643,7 @@ async function extractLocalArchive(
       throw new Error(
         "Restored SQLite semantic digest does not match the backup",
       );
+    agentBindingOps.invalidateRestoredBindings(connection.db);
   } finally {
     connection.close();
   }

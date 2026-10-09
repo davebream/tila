@@ -1,5 +1,8 @@
 import { z } from "zod";
+import { AgentIdSchema } from "./agent";
+import { AgentRunRoleSchema } from "./agent-binding";
 import { CredentialPolicySchema } from "./capability";
+import { CredentialPolicyReadSchema } from "./capability";
 import { ParticipantIdSchema } from "./identity";
 
 export const RUNTIME_PROTOCOL = 1;
@@ -32,6 +35,8 @@ export const RuntimeRedeemRequestSchema = RuntimeEnrollmentRequestSchema.extend(
 );
 export const RuntimeRunRequestSchema = z
   .object({
+    agent_id: AgentIdSchema.optional(),
+    run_role: AgentRunRoleSchema.optional(),
     operation_id: z.string().uuid(),
     jkt: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
     policy: CredentialPolicySchema.optional(),
@@ -50,24 +55,28 @@ export const RuntimeEnrollmentSchema = z.object({
   kind: z.enum(["personal", "shared"]),
   principal_id: z.string(),
   sponsor_id: z.string().nullable(),
-  policy: CredentialPolicySchema,
+  policy: CredentialPolicyReadSchema,
   created_at: z.number(),
   revoked_at: z.number().nullable(),
 });
 export const RuntimeRunSchema = z.object({
+  agent_id: AgentIdSchema.nullable().optional(),
+  run_role: AgentRunRoleSchema.optional(),
   run_id: z.string().uuid(),
   project_id: z.string(),
   enrollment_id: z.string().uuid().nullable(),
   workload_binding_id: z.string().nullable(),
   principal_id: z.string(),
   participant_id: ParticipantIdSchema,
-  policy: CredentialPolicySchema,
+  policy: CredentialPolicyReadSchema,
   state: z.enum(["active", "closed", "revoked", "expired"]),
   lease_expires_at: z.number(),
   created_at: z.number(),
   current_token_id: z.string().uuid(),
 });
 export const RuntimeContextSchema = z.object({
+  agent_id: AgentIdSchema.nullable().optional(),
+  run_role: AgentRunRoleSchema.optional(),
   ok: z.literal(true),
   protocol: z.literal(RUNTIME_PROTOCOL),
   instance_id: z.string().uuid(),
@@ -78,7 +87,7 @@ export const RuntimeContextSchema = z.object({
   workload_binding_id: z.string().nullable(),
   run_id: z.string().uuid().nullable(),
   participant_id: ParticipantIdSchema.nullable(),
-  policy: CredentialPolicySchema,
+  policy: CredentialPolicyReadSchema,
   token_id: z.string().uuid(),
   expires_at: z.number().nullable(),
   lease_expires_at: z.number().nullable(),

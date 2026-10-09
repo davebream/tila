@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { CredentialPolicySchema } from "./capability";
+import {
+  CredentialPolicyReadSchema,
+  CredentialPolicySchema,
+} from "./capability";
 import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
 import { AUTHORIZATION_VERSION, GitHubActionsContextSchema } from "./workload";
 
@@ -116,7 +119,7 @@ export const GitHubExchangeResponseSchema = z.object({
   principal_id: z.string().optional(),
   credential_id: z.string().optional(),
   token_id: z.string().optional(),
-  policy: CredentialPolicySchema.optional(),
+  policy: CredentialPolicyReadSchema.optional(),
   ok: z.literal(true),
   session_token: z.string(),
   expires_at: z.number().int(),
@@ -150,7 +153,7 @@ export const OidcExchangeResponseSchema = z.object({
   principal_id: z.string().optional(),
   credential_id: z.string().optional(),
   token_id: z.string().optional(),
-  policy: CredentialPolicySchema.optional(),
+  policy: CredentialPolicyReadSchema.optional(),
   ok: z.literal(true),
   session_token: z.string(),
   expires_at: z.number().int(),
@@ -201,6 +204,11 @@ export const OidcExchangeRequestSchema = z.object({
   runtime: z
     .object({
       operation_id: z.string().uuid(),
+      agent_id: z
+        .string()
+        .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/)
+        .optional(),
+      run_role: z.enum(["acting", "relay"]).optional(),
       policy: CredentialPolicySchema.optional(),
     })
     .strict()

@@ -4,15 +4,21 @@ import {
   RuntimeStore,
 } from "@tila/backend-d1";
 import {
-  CredentialPolicySchema,
+  CREDENTIAL_PRESETS,
+  CredentialPolicyReadSchema,
   RuntimeEnrollmentRequestSchema,
   RuntimeInvitationRequestSchema,
   RuntimeRedeemRequestSchema,
   RuntimeRenewRequestSchema,
   RuntimeRunRequestSchema,
+  intersectCredentialPolicies,
   policyContains,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import {
+  agentRunAuthorizer,
+  expireAgentBindings,
+} from "../lib/agent-authority";
 import { hashToken } from "../lib/hash";
 import {
   runtimeAuthority,
@@ -58,7 +64,7 @@ runtimeRoutes.post("/projects/:projectId/runtime/redeem", async (c) => {
     invite.project_id,
     input,
     null,
-    CredentialPolicySchema.parse(JSON.parse(invite.policy_json)),
+    CredentialPolicyReadSchema.parse(JSON.parse(invite.policy_json)),
     secret,
     hash,
   );
@@ -94,6 +100,13 @@ runtimeRoutes.post("/projects/:projectId/runtime/enrollments", async (c) => {
   if (denied) return denied;
   const parsed = RuntimeEnrollmentRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return zodValidationError(c, parsed.error);
+  if (
+    parsed.data.policy &&
+    !policyContains(CREDENTIAL_PRESETS.worker, parsed.data.policy)
+  ) {
+    const ownerDenied = await runtimeOperator(c, true);
+    if (ownerDenied) return ownerDenied;
+  }
   await runtimeProof(
     c,
     parsed.data.jkt,
@@ -117,7 +130,9 @@ runtimeRoutes.post("/projects/:projectId/runtime/invitations", async (c) => {
   if (denied) return denied;
   const parsed = RuntimeInvitationRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return zodValidationError(c, parsed.error);
-  const policy = parsed.data.policy ?? runtimeCeiling(c);
+  const policy =
+    parsed.data.policy ??
+    intersectCredentialPolicies(runtimeCeiling(c), CREDENTIAL_PRESETS.worker);
   if (!policyContains(runtimeCeiling(c), policy))
     throw new RuntimeDenied(
       "runtime-policy-denied",
@@ -161,6 +176,9 @@ runtimeRoutes.post(
       row.enrollment_id,
       principalIdFor(c.get("tokenResult")),
     );
+    await expireAgentBindings(c.env, c.get("projectId"), {
+      enrollment_id: row.enrollment_id,
+    });
     return c.json({ ok: true });
   },
 );
@@ -174,11 +192,11 @@ runtimeRoutes.post("/projects/:projectId/runtime/runs", async (c) => {
   const parsed = RuntimeRunRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const { token, secret } = await runtimeSecret(c);
-  const context = await new RuntimeStore(c.env.DB).start(
-    authority.enrollment_id,
-    parsed.data,
-    secret,
-  );
+  const context = await new RuntimeStore(
+    c.env.DB,
+    undefined,
+    agentRunAuthorizer(c.env),
+  ).start(authority.enrollment_id, parsed.data, secret);
   return c.json({ ok: true, token, context });
 });
 runtimeRoutes.get("/projects/:projectId/runtime/runs", async (c) => {
@@ -232,6 +250,9 @@ runtimeRoutes.post(
       principalIdFor(c.get("tokenResult")),
       "closed",
     );
+    await expireAgentBindings(c.env, c.get("projectId"), {
+      run_id: c.req.param("runId"),
+    });
     return c.json({ ok: true });
   },
 );
@@ -249,6 +270,9 @@ runtimeRoutes.post(
       principalIdFor(c.get("tokenResult")),
       "revoked",
     );
+    await expireAgentBindings(c.env, c.get("projectId"), {
+      run_id: run.run_id,
+    });
     return c.json({ ok: true });
   },
 );

@@ -5,7 +5,10 @@ import {
 } from "./artifact";
 import { ArtifactTrustFieldsSchema } from "./artifact-review";
 import { ArtifactRevisionSchema } from "./artifact-version";
-import { CredentialPolicySchema } from "./capability";
+import {
+  CredentialPolicyReadSchema,
+  CredentialPolicySchema,
+} from "./capability";
 import { ClaimModeSchema } from "./claim";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
@@ -506,7 +509,7 @@ export const WhoamiResponseSchema = z.object({
   membership_sources: z.array(MembershipSourceSchema).optional(),
   /** GitHub repository id the mirrored role was derived from, when applicable. */
   mirrored_repo_id: z.number().int().optional(),
-  policy: CredentialPolicySchema.optional(),
+  policy: CredentialPolicyReadSchema.optional(),
   legacy: z.boolean().optional(),
   github_login: z.string().optional(),
   permission: z.string().optional(),
@@ -664,7 +667,7 @@ export const TokenIssueResponseSchema = z.object({
   token_id: z.string().optional(),
   credential_id: z.string().optional(),
   principal_id: z.string().optional(),
-  policy: CredentialPolicySchema.optional(),
+  policy: CredentialPolicyReadSchema.optional(),
   expires_at: z.number().int().nullable().optional(),
   legacy: z.boolean().optional(),
   ok: z.literal(true),
@@ -687,8 +690,8 @@ export const TokenListItemSchema = z.object({
   token_id: z.string().optional(),
   credential_id: z.string().optional(),
   principal_id: z.string().optional(),
-  policy: CredentialPolicySchema.optional(),
-  effective_policy: CredentialPolicySchema.nullable().optional(),
+  policy: CredentialPolicyReadSchema.optional(),
+  effective_policy: CredentialPolicyReadSchema.nullable().optional(),
   status: z.enum(["active", "revoked", "expired", "disabled"]).optional(),
   expires_at: z.number().int().nullable().optional(),
   legacy: z.boolean().optional(),

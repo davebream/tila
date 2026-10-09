@@ -5,6 +5,11 @@
  * strings returned by the worker and DO layers.
  */
 export const TILA_ERRORS = {
+  STALE_BINDING: "stale-binding",
+  NO_ACTIVE_BINDING: "no-active-binding",
+  RUNTIME_REQUIRED: "runtime-required",
+  PROFILE_MISMATCH: "profile-mismatch",
+  UNSUPPORTED_CAPABILITY: "unsupported-capability",
   RUNTIME_PROOF_REPLAYED: "runtime-proof-replayed",
   RUNTIME_PURPOSE_DENIED: "runtime-purpose-denied",
   RUNTIME_BINDING_MISMATCH: "runtime-binding-mismatch",

@@ -58,6 +58,7 @@ export * as sweepOps from "./sweep-ops";
 export * as readyOps from "./ready-ops";
 export * as gateOps from "./gate-ops";
 export * as signalOps from "./signal-ops";
+export * as agentBindingOps from "./agent-binding-ops";
 export * as recordOps from "./record-ops";
 export * as doIdempotencyOps from "./do-idempotency-ops";
 export {

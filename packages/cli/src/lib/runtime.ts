@@ -271,6 +271,7 @@ async function enrollMachineUnlocked(
 export async function startEnrolledRun(
   selection: RuntimeSelection,
   policy?: CredentialPolicy,
+  identity: { agent_id?: string; run_role?: "acting" | "relay" } = {},
 ) {
   const reference = await enrollmentReference(selection);
   if (!reference)
@@ -310,7 +311,12 @@ export async function startEnrolledRun(
     selection.deployment,
     runtimeEndpointPolicy(selection.projectId, "run"),
   );
-  const operation = { operation_id: randomUUID(), jkt: binding.jkt, policy };
+  const operation = {
+    operation_id: randomUUID(),
+    jkt: binding.jkt,
+    policy,
+    ...identity,
+  };
   let value: Awaited<ReturnType<RuntimeClient["start"]>> | undefined;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -336,6 +342,8 @@ export async function startEnrolledRun(
     instance_id: reference.instanceId,
     project_id: selection.projectId,
     purpose: "run",
+    agent_id: identity.agent_id ?? null,
+    run_role: identity.run_role ?? "acting",
     enrollment_id: reference.enrollmentId,
   });
   const runId = value.context.run_id;
@@ -394,6 +402,7 @@ export async function enrollMachine(
 export async function startOidcRun(
   selection: RuntimeSelection,
   policy?: CredentialPolicy,
+  identity: { agent_id?: string; run_role?: "acting" | "relay" } = {},
 ) {
   const operationId = randomUUID();
   const ordinary = runtimeEndpointPolicy(selection.projectId, "run");
@@ -437,6 +446,8 @@ export async function startOidcRun(
       baseUrl: selection.deployment,
       projectId: selection.projectId,
       operationId,
+      agentId: identity.agent_id,
+      runRole: identity.run_role,
       assertion: body.value,
       binding,
       policy,

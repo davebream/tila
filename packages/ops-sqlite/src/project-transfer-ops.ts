@@ -13,6 +13,8 @@ export interface ProjectSqlStorage {
 }
 
 export const PROJECT_BACKUP_TABLES = [
+  "agents",
+  "agent_bindings",
   "entities",
   "artifact_pointers",
   "artifact_lineages",
@@ -51,6 +53,8 @@ export const PROJECT_BACKUP_TABLES = [
 export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
+  agents: ["id"],
+  agent_bindings: ["consumer_binding_id"],
   entities: ["id"],
   artifact_pointers: ["r2_key"],
   artifact_lineages: ["id"],
@@ -166,10 +170,15 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
 
 export async function semanticDigest(
   sql: ProjectSqlStorage,
-  migrationVersion = 29,
+  migrationVersion = 30,
 ): Promise<string> {
   const sections: string[] = [];
   for (const table of PROJECT_BACKUP_TABLES) {
+    if (
+      migrationVersion < 30 &&
+      (table === "agents" || table === "agent_bindings")
+    )
+      continue;
     if (
       migrationVersion < 28 &&
       [

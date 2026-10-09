@@ -110,6 +110,7 @@ import {
   SignalGroupIdSchema,
   okEnvelope,
 } from "@tila/schemas";
+import { createUnsupportedAgentMethods } from "../agents";
 import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
 import type { CreateHandoffOptions } from "../continuity";
@@ -1223,6 +1224,7 @@ export function buildLocalResources(
   artifacts: EmbeddedArtifactBackend,
 ) {
   return {
+    agents: createUnsupportedAgentMethods(),
     tasks: createLocalTaskMethods(project),
     records: createLocalRecordMethods(project),
     claims: createLocalClaimMethods(project),
@@ -1289,6 +1291,7 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   Omit<TilaFacade, "close">
 > = {
   tasks: true,
+  agents: true,
   records: true,
   claims: true,
   artifacts: true,

@@ -1,3 +1,4 @@
+import { selectedProfile } from "@tila/client-lifecycle";
 /**
  * Global pre-dispatch flag parser and singleton for CLI.
  *
@@ -50,7 +51,8 @@ export function resolveParticipantId(): {
         config.project_id,
       ]);
       const state = new SessionStore().read(
-        storedKey || sessionKey(namespace, "codex", nativeId as string),
+        storedKey ||
+          sessionKey(namespace, "codex", nativeId as string, selectedProfile()),
       );
       if (
         state?.phase === "active" &&

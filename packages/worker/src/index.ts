@@ -25,6 +25,7 @@ import { tokenEstimateMiddleware } from "./middleware/token-estimate";
 import { versionCheckMiddleware } from "./middleware/version-check";
 import { admin } from "./routes/admin";
 import { adminRoster } from "./routes/admin-roster";
+import { agents } from "./routes/agents";
 import { artifacts } from "./routes/artifacts";
 import { authGithub } from "./routes/auth-github";
 import { authOidc } from "./routes/auth-oidc";
@@ -242,6 +243,7 @@ projectRoutes.use("/*", async (c, next) => {
   }
   return next();
 });
+projectRoutes.route("/agents", agents);
 projectRoutes.use("/*", createIdempotencyMiddleware());
 projectRoutes.use("/*", createCacheMiddleware());
 projectRoutes.route("/service-accounts", serviceAccountRoutes);

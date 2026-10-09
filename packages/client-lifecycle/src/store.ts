@@ -69,9 +69,16 @@ export function sessionKey(
   namespace: string,
   client: LifecycleClient,
   sessionId: string,
+  profile?: { id: string; revision: number },
 ): string {
   return createHash("sha256")
-    .update(JSON.stringify([namespace, client, sessionId]))
+    .update(
+      JSON.stringify(
+        profile
+          ? [namespace, client, sessionId, profile.id, profile.revision]
+          : [namespace, client, sessionId],
+      ),
+    )
     .digest("hex");
 }
 export class SessionStore {
