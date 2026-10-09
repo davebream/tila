@@ -62,3 +62,16 @@ claims, and cursor limits. The Codex
 observer test uses a protocol fixture. CLI installer and MCP adapter tests live in
 their consuming packages. These tests do not launch a model-backed conversation
 or certify every upstream client release.
+
+## Credential profiles
+
+`ProfileStore` owns host-local profile registration, atomic locked updates,
+monotonic revisions, owner/mode/symlink checks and keyed account references.
+`profileEnvironment` builds an allowlist environment and pins a provider home;
+`selectedProfile` validates per-process selection. Profile-specific lifecycle keys
+include the ID and revision while legacy keys remain unchanged. Codex account and
+liveness observers receive that profile's launcher/environment. Verification
+reports only declared account isolation and rejects changed accounts/revisions.
+Provider profiles do not form a security boundary between processes under one OS
+user. See the [operations guide](../../docs/05-OPERATIONS.md#agent-bindings-and-account-profiles)
+for CLI usage and deployment order.
