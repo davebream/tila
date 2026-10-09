@@ -165,7 +165,7 @@ export async function readProfileAccount(
       return null;
     }
   }
-  const observer = new CodexObserver(profile.launcher, env);
+  const observer = new CodexObserver(profile.launcher, env, "credentials");
   try {
     return await observer.account();
   } catch {

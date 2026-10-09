@@ -1,7 +1,8 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 
-/** Read-only observer. The proxy connects to the existing daemon; it never starts one. */
+/** Live observation uses the existing daemon; credential probes use isolated stdio. */
 export class CodexObserver {
   private child?: ChildProcessWithoutNullStreams;
   private nextId = 0;
@@ -13,13 +14,18 @@ export class CodexObserver {
   constructor(
     private readonly executable = "codex",
     private readonly env?: NodeJS.ProcessEnv,
+    private readonly purpose: "observation" | "credentials" = "observation",
   ) {}
   private connect(): Promise<void> {
     if (this.ready) return this.ready;
-    const child = spawn(this.executable, ["app-server", "proxy"], {
-      stdio: "pipe",
-      env: this.env,
-    });
+    const child = spawn(
+      this.executable,
+      ["app-server", this.purpose === "credentials" ? "--stdio" : "proxy"],
+      {
+        stdio: "pipe",
+        env: this.env,
+      },
+    );
     this.child = child;
     child.stderr.resume();
     const lines = createInterface({ input: child.stdout });
@@ -49,7 +55,16 @@ export class CodexObserver {
     this.ready = this.request("initialize", {
       clientInfo: { name: "tila-lifecycle", version: "1" },
       capabilities: {},
-    }).then(() => {
+    }).then((result) => {
+      if (this.purpose === "credentials") {
+        const home = (result as { codexHome?: unknown } | null)?.codexHome;
+        if (
+          typeof home !== "string" ||
+          !this.env?.CODEX_HOME ||
+          realpathSync(home) !== realpathSync(this.env.CODEX_HOME)
+        )
+          throw new Error("Codex credential probe used a different profile");
+      }
       child.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
     });
     return this.ready;
@@ -84,6 +99,8 @@ export class CodexObserver {
     });
   }
   async alive(sessionId: string): Promise<boolean> {
+    if (this.purpose === "credentials")
+      throw new Error("Credential probes cannot observe live sessions");
     try {
       await this.connect();
     } catch (error) {
