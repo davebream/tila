@@ -31,6 +31,7 @@ export default defineConfig({
         d1Databases: ["DB"],
         r2Buckets: ["ARTIFACTS"],
         bindings: {
+          HASH_PEPPER: "runtime-test-conversation-pepper",
           TEST_MIGRATIONS: await readD1Migrations(
             resolve(root, "packages/worker/migrations/global"),
           ),

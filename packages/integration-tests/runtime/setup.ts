@@ -9,6 +9,7 @@ export const bindings = env as unknown as {
   ARTIFACTS: R2Bucket;
   TEST_MIGRATIONS: D1Migration[];
   GITHUB_SESSION_HMAC_KEY: string;
+  HASH_PEPPER: string;
 };
 
 beforeEach(async () => {

@@ -154,7 +154,7 @@ it("lists exactly six default tools, validates real calls, and preserves the exp
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(55);
+  expect((await all.listTools()).tools).toHaveLength(63);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -532,7 +532,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(57);
+  expect(listed).toHaveLength(65);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -714,6 +714,46 @@ title = "Evidence"
     resource: "T-template",
     fence: alias.fence,
   });
+  const unsupportedConversationCalls: Record<
+    string,
+    Record<string, unknown>
+  > = {
+    tila_room_list: {},
+    tila_room_history: { room: "general" },
+    tila_room_publish: {
+      room: "general",
+      client_op_id: "local-op",
+      body: "content",
+    },
+    tila_inbox_fetch: { agent: "worker" },
+    tila_inbox_watch: { agent: "worker", timeout_ms: 0 },
+    tila_inbox_explain: { agent: "worker", delivery_id: crypto.randomUUID() },
+    tila_inbox_ack: {
+      agent: "worker",
+      delivery_id: crypto.randomUUID(),
+      consumer_binding_id: crypto.randomUUID(),
+      binding_epoch: 1,
+      disposition: "declined",
+    },
+    tila_agent_bind: {
+      agent: "worker",
+      expected_epoch: 0,
+      harness: "fixture",
+      capability_report: {
+        protocol: 1,
+        adapter_version: "fixture",
+        capabilities: {},
+      },
+    },
+  };
+  for (const [name, args] of Object.entries(unsupportedConversationCalls)) {
+    called.add(name);
+    const response = await client.callTool({ name, arguments: args });
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toMatchObject({
+      error: { code: "unsupported-capability", retry_safety: "after_recovery" },
+    });
+  }
   expect([...called].sort()).toEqual(listed.map((t) => t.name).sort());
   expect(
     listed
