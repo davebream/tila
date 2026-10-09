@@ -1,8 +1,8 @@
 # Distributed agent conversations
 
-Status: implementation in progress, 2026-10-09. Slices 1–2 implement identity,
-profiles and durable conversations. Host connectors, native wake, Herdr and the
-dashboard remain future slices. It supplements the current [architecture](02-ARCHITECTURE.md) and
+Status: implementation in progress, 2026-10-09. The PR stack implements identity,
+profiles, durable conversations, a standalone connector and the dashboard. Herdr
+activation and live distributed acceptance remain unfinished. It supplements the current [architecture](02-ARCHITECTURE.md) and
 [roadmap](03-ROADMAP.md). Existing identity, membership, and fencing guarantees
 remain in force during migration.
 
@@ -11,8 +11,8 @@ remain in force during migration.
 This revision implements durable agent registration, run-pinned agent/role identity,
 the consumer-binding ledger, host-local credential profiles, rooms, threads,
 messages, offline recipient snapshots, inbox acknowledgement and dispatch leases.
-CLI, SDK and MCP access work without a host connector. Native wake, Herdr and
-dashboard delivery remain future slices.
+CLI, SDK and MCP access work without a host connector. Later sections record the
+standalone connector, gated Herdr evaluation and dashboard implementation.
 Assignments, task attempts and durable questions are outside #283.
 
 An acting run holds a mailbox binding. A relay can attach an authenticated acting
@@ -592,3 +592,21 @@ gates have not passed. [Versioned evidence](evidence/issue-283-herdr-0-9-3-v1.js
 records isolated Mac runtime/plugin observations without substituting them for live
 acceptance. Activating Herdr attachment/restoration remains unfinished work under
 #283; no supervisor or terminal fallback is introduced.
+
+
+## Dashboard implementation — slice 5
+
+Rooms and thread panels use separate backward history and forward tail queries,
+room sequence deduplication and at most 200 rendered messages. Plain-text bodies
+carry peer-content labels. Announcements are optional; closing drawers restores
+keyboard focus. Agent status and delivery-ID inspection provide shareable URLs.
+The dashboard never consumes or acknowledges an agent mailbox.
+
+Replies persist frozen operation IDs and payloads across retry and step-up sign-in.
+A newer draft revision survives late responses, including after reopening the
+composer. Drafts are isolated by principal, project, room and thread.
+
+The [acceptance record](evidence/issue-283-acceptance-v1.json) is explicitly incomplete.
+Fixture UI/transport tests do not prove native account isolation, busy drafts or
+unattended restoration. Herdr register/open remains unsupported and #283 remains
+open until the Mac/Linux live matrix passes.

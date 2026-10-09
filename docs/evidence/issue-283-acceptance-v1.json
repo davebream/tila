@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "issue": 283,
+  "recorded_at": "2026-10-09",
+  "result": "incomplete",
+  "fixture_evidence": {
+    "connector": "Compiled fixtures passed on native macOS and Linux CI runners in PR #287. These are not authenticated native acceptance.",
+    "herdr": "See issue-283-herdr-0-9-3-v1.json; isolated macOS probes are partial and integration remains unsupported.",
+    "dashboard": "Component tests cover lost-response retry, saved operation IDs through step-up reload, late response after unmount, bounded/deduplicated polling and keyboard drawer restoration. Brave rendered and published a reply against an isolated local fixture."
+  },
+  "live_matrix": [
+    {
+      "scenario": "three independent Claude accounts plus Codex coordinator",
+      "result": "not-run",
+      "prerequisite": "isolated authenticated profile paths"
+    },
+    {
+      "scenario": "Mac to Linux and Linux to Mac delivery",
+      "result": "not-run",
+      "prerequisite": "usable Linux test-host SSH authentication"
+    },
+    {
+      "scenario": "Mac offline and delayed recovery",
+      "result": "not-run",
+      "prerequisite": "live two-host sessions"
+    },
+    {
+      "scenario": "busy native draft preservation",
+      "result": "not-run",
+      "prerequisite": "isolated authenticated native sessions"
+    },
+    {
+      "scenario": "Herdr occupant replacement and reconnect without crossover",
+      "result": "not-run",
+      "prerequisite": "live profiles and gated adapter activation"
+    },
+    {
+      "scenario": "unattended native restoration with transcript correlation",
+      "result": "not-proven",
+      "observation": "An isolated macOS cold launch stopped at login/welcome; this does not prove restoration."
+    }
+  ],
+  "required_followup": "Complete the authenticated Mac/Linux matrix, finish gated Herdr attachment/restoration activation only if required gates pass, obtain authentication-boundary review and deliver the stack through Mergify. Only then may the final PR close #283.",
+  "redaction": "No credentials, provider account names, native transcript bodies or host addresses are recorded."
+}

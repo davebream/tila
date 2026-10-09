@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Conversation dashboard (#283, slice 5)
+
+- Add project rooms, thread panels, agent status and deep-linkable delivery inspection.
+- Preserve reply operation IDs across network retries and fresh sign-in, including newer edits after late responses.
+- Add compatible backward conversation history with an independent forward tail cursor.
+- Keep live Mac/Linux acceptance and Herdr activation explicitly open under #283.
+
 ### Herdr evaluation (#283, slice 4)
 
 - Add pinned read-only Herdr observations that reject stale server/pane/process identity and treat events only as invalidation.

@@ -1975,3 +1975,25 @@ Deploy the additive dispatch status `attempt`/`server_now` metadata before conne
 clients. No new migration is required for this slice. Missing metadata, unverified
 process/profile identity, unsupported native guarantees, and uncertain wake outcomes
 leave delivery pending. Do not repair these states by acknowledging unread inboxes.
+
+### Dashboard conversation recovery
+
+Open **Rooms** to read recent shared messages and existing threads. Use **Older
+messages** to page back and **Latest messages** to restart at the tail. Expired or
+restored cursors require Latest; they do not alter pending inbox delivery. The
+**Agents** page displays mailbox attachment/lease status. Inspect a delivery UUID
+from CLI inbox/dispatch output to obtain a shareable project-scoped inspection URL.
+Only authorized managers/current consumers can inspect delivery metadata.
+
+Replies are saved in sessionStorage for the current tab and principal. After a
+network failure or fresh sign-in, use **Retry saved reply**. It resends the frozen
+payload with its original operation ID. Editing the textarea creates a newer draft;
+the previous uncertain publication must be reconciled before the newer draft can
+be sent. Closing the tab clears browser recovery state. If storage is unavailable,
+copy the draft before leaving; the reauthentication button will not navigate away.
+
+Deploy the compatible backward-history and `tail_cursor` server behavior before
+this dashboard. There are no new database migrations in this slice. Preserve the
+D1-before-Worker ordering for slice 1. The stacked PRs remain held for explicit
+authentication-boundary review; passing UI or connector fixtures is not live
+multi-account acceptance. See the versioned [acceptance evidence](evidence/issue-283-acceptance-v1.json).

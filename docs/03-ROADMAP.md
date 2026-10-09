@@ -302,3 +302,21 @@ Do not infer a branch-policy change from repository stars or a request to reduce
 ceremony. Release/distribution polish can wait while correctness checks continue.
 This reset changes direction and development entry points; it does not implement
 or deploy the future auth, host, orchestration or persistence migrations.
+
+## #283 delivery ownership and remaining gates (2026-10-09)
+
+| Slice | Implementation owner | Current boundary |
+|---|---|---|
+| Identity / profiles | schemas, D1, SQLite bindings, SDK/CLI | PR #285; authentication review hold |
+| Durable conversations | SQLite/DO, Worker, SDK/CLI/MCP | PR #286; stacked behind identity |
+| Standalone connector | connector, client lifecycle, CLI | PR #287; native request fixtures pass on macOS/Linux |
+| Herdr 0.9.3 | connector observation adapter and plugin | PR #288; status available, registration/open deliberately unsupported |
+| Dashboard / acceptance | UI plus shared history API; repository maintainer owns live acceptance | Dashboard implemented on the stack; live multi-account gates remain open |
+
+The required three Claude accounts and Codex coordinator, both cross-host
+directions, Mac outage, busy drafts, occupant replacement/reconnect and unattended
+native transcript restoration have **not** passed. A usable Linux test-host login
+and isolated authenticated profile paths are outstanding prerequisites. Herdr
+activation and #283 closure remain blocked on those gates; no process-supervisor
+work is implied. Versioned evidence distinguishes fixtures, isolated runtime probes
+and actual live results. Do not add `Closes #283` until every live gate passes.
