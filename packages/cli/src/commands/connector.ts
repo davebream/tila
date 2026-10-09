@@ -54,6 +54,7 @@ export default defineCommand({
     description: "Host-local native wake delivery for enrolled sessions",
   },
   subCommands: {
+    herdr: () => import("./connector-herdr").then((module) => module.default),
     open: defineCommand({
       args: {
         ...globalFlagArgs,

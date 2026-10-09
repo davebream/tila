@@ -1,0 +1,27 @@
+id = "tila.conversations"
+name = "Tila Conversations"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Inspect durable mailbox delivery through the local Tila host connector"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["tila", "connector", "herdr", "reconcile", "--json"]
+
+[[actions]]
+id = "status"
+title = "Tila connector status"
+contexts = ["workspace", "pane"]
+command = ["tila", "connector", "herdr", "status", "--json"]
+
+[[actions]]
+id = "register"
+title = "Register native Tila session"
+contexts = ["pane"]
+command = ["tila", "connector", "herdr", "register", "--json"]
+
+[[actions]]
+id = "open"
+title = "Open native Tila session"
+contexts = ["pane"]
+command = ["tila", "connector", "herdr", "open", "--json"]
