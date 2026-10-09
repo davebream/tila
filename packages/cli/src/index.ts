@@ -65,6 +65,7 @@ const main = defineCommand({
     inbox: () => load(() => import("./commands/inbox")),
     machine: () => load(() => import("./commands/machine")),
     run: () => load(() => import("./commands/run")),
+    connector: () => load(() => import("./commands/connector")),
     lifecycle: () => load(() => import("./commands/lifecycle")),
     task: () => load(() => import("./commands/task")),
     // @deprecated -- both "entity" and "work-unit" are deprecated aliases; use "task"

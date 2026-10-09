@@ -118,6 +118,7 @@ export class Lifecycle {
       participantId: string;
       reference: NonNullable<LifecycleState["runtime"]>;
       profile?: { id: string; revision: number };
+      inherited?: boolean;
     },
   ): Promise<{ state: LifecycleState; text: string }> {
     const profile = runtime?.profile ?? selectedProfile();
@@ -127,6 +128,14 @@ export class Lifecycle {
       if (old?.phase === "closing")
         throw new Error(
           "Previous shutdown is incomplete; run tila lifecycle status before resuming",
+        );
+      if (
+        old?.phase === "active" &&
+        runtime &&
+        old.runtime?.runId !== runtime.reference.runId
+      )
+        throw new Error(
+          "Native session is already attached to a different run",
         );
       const resumed = old && old.phase !== "active";
       const state: LifecycleState =
@@ -145,6 +154,7 @@ export class Lifecycle {
                   ? randomUUID()
                   : (old?.participantId ?? `tila-${key}`)),
               runtime: runtime?.reference,
+              runtimeInherited: runtime?.inherited,
               cwd: event.cwd,
               environment,
               generation: randomUUID(),
@@ -220,6 +230,7 @@ export class Lifecycle {
       if (!state || (state.phase !== "active" && state.phase !== "crashed"))
         return;
       state.phase = "closing";
+      state.nativeMessaging = undefined;
       // Persist immutable intent BEFORE sending. The exact UUID/body survives ambiguous delivery.
       state.pendingHandoff = {
         id: randomUUID(),
@@ -265,6 +276,7 @@ export class Lifecycle {
         return false;
       if (state.phase === "active" && !alive) {
         state.phase = "crashed";
+        state.nativeMessaging = undefined;
         state.degraded =
           "Client runtime is no longer available. No cleanup was attempted; claims expire normally.";
         this.store.write(state);

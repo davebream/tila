@@ -499,3 +499,5 @@ export * from "./workload";
 export * from "./runtime";
 
 export * from "./conversation";
+
+export * from "./connector";

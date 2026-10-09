@@ -56,7 +56,7 @@ export default defineCommand({
           new SessionStore()
             .list()
             .filter((state) => state.namespace === namespace)
-            .map(({ runtime, ...state }) => ({
+            .map(({ runtime, nativeMessaging, ...state }) => ({
               ...state,
               runId: runtime?.runId,
             })),

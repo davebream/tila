@@ -39,6 +39,14 @@ export const LifecycleStateSchema = z.object({
       runId: z.string().uuid(),
     })
     .optional(),
+  runtimeInherited: z.boolean().optional(),
+  nativeMessaging: z
+    .object({
+      socket: z.string(),
+      token: z.string().optional(),
+      idle: z.boolean(),
+    })
+    .optional(),
   cwd: z.string(),
   environment: EnvironmentMetadataSchema,
   generation: z.string().uuid(),
