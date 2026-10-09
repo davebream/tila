@@ -24,6 +24,11 @@ schemas from source. Production package exports, declaration builds and packagin
 tests remain separate. Deployed hosts must use identifiable immutable revisions.
 Client/server API compatibility must be negotiated independently of release versions.
 
+The [distributed agent conversations proposal](distributed-agent-conversations.md)
+specifies future multi-account, cross-host communication and composable standalone
+CLI/Herdr adapters. It includes dated probe evidence and unimplemented acceptance
+gates; it does not change the shipped API or authentication contract.
+
 ---
 
 ## Section 0: Implementation stack
