@@ -1,133 +1,47 @@
 # tila-mcp-server
 
-MCP (Model Context Protocol) server for [tila](https://github.com/davebream/tila). Exposes tila's coordination API as MCP tools, resources, and prompts for AI coding agents.
-
-## Prerequisites
-
-A tila project (Cloudflare or local). Auth is configured automatically if your project uses GitHub auth (`[auth] mode = "github-repo"` in `.tila/config.toml`). For token-based auth, set `TILA_API_TOKEN`.
+Tila MCP provides project workflows using short-lived run credentials. Tila CLI remains the operator interface for projects, memberships, credentials, and administration. Version 0.4.0 requires runtime protocol 1 on the shared backend.
 
 ## Setup
 
-### Recommended: one command
+Authorize each installation once using an existing human login, then generate client configuration:
 
 ```sh
-tila mcp init
+tila --instance https://tila.example.com --project my-project machine enroll
+tila --instance https://tila.example.com --project my-project mcp init
 ```
 
-Auto-detects your editor (Claude Code, Cursor, VS Code) and writes the config file.
+For native Claude Code/Codex hooks, run setup in a directory configured for the same remote project. Other supported editors get one MCP process per run. Setup validates configuration before provisioning, preserves unrelated settings, and pins the MCP package to the installed CLI release. Noninteractive setup requires an existing enrollment and sufficient instance/project inputs.
 
-### Manual config
+Enrollment secrets and signing keys remain in the installation helper. The default store is the OS secret store. Headless Linux must explicitly select a private directory with `machine enroll --file-store /absolute/private/directory`; unavailable keychain storage never silently falls back to files. Repository configuration contains no enrollment secrets.
 
-> If your project uses GitHub auth, omit the `TILA_API_TOKEN` env var — the server reads credentials from `.tila/config.toml` automatically.
+To launch a single process manually after enrollment:
 
-**Claude Code** — add to `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "tila": {
-      "command": "npx",
-      "args": ["-y", "tila-mcp-server"],
-      "env": {
-        "TILA_API_TOKEN": "your-api-token"
-      }
-    }
-  }
-}
+```sh
+tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.4.0
 ```
 
-**Cursor** — add to `.cursor/mcp.json` (same shape as above).
+The parent supplies a run-specific socket capability. MCP never reads personal sessions, owner tokens, the ambient keychain, or a private SQLite database. `TILA_API_TOKEN`, `TILA_TOKEN`, `TILA_BACKEND=local`, `TILA_DB_PATH`, and `TILA_ARTIFACTS_PATH` are rejected. There is no compatibility switch. CLI/SDK local functionality and operator authentication are retained.
 
-**VS Code Copilot** — add to `.vscode/mcp.json`:
+## Authentication and lifetime
 
-```json
-{
-  "servers": {
-    "tila": {
-      "command": "npx",
-      "args": ["-y", "tila-mcp-server"],
-      "env": {
-        "TILA_API_TOKEN": "your-api-token"
-      }
-    }
-  }
-}
-```
+An enrollment has one canonical service membership; every run gets a different participant and credential. Personal enrollments remain capped by their sponsor’s current project authority. Shared installations require an owner invitation and retain their own project authorization if the authorizing owner leaves.
 
-If your project has a `.tila/config.toml`, the server reads `worker_url` and `project_id` from it automatically. Otherwise, set them via environment variables (`TILA_API_URL`, `TILA_PROJECT_ID`).
+Run credentials last at most 15 minutes and renew two minutes before expiry with jitter. A heartbeat runs every minute; missing heartbeats expire the lease after five minutes. Revocation, closure, expiry, or loss of authority stops access, including cached/retried operations. Temporary failures retry only while authorization remains valid. No stronger credential fallback exists.
 
-One participant UUID is generated per MCP server process and reused by every tool call. Set `TILA_PARTICIPANT_ID` to preserve that identity across server restarts. Hostname and Git context are sent only as untrusted environment metadata.
+MCP authenticates tools, resources, prompts, and discovery on every request. Reconnects reuse an active run. Native shared clients must provide an unambiguous session mapping; Codex uses request metadata `sessionId` or `threadId`, and Claude Code uses a verified native process mapping. Unsupported or missing metadata fails closed. Use one MCP process per run where reliable mapping is unavailable.
 
-## Local mode (embedded SQLite, no network)
+The `worker` preset covers the six default workflows. It excludes deletion, governance, credentials, infrastructure, and gate resolution. Selecting extra tool groups changes visibility, never authority; denied operations return permission errors.
 
-The server runs against an embedded SQLite database + on-disk artifacts instead of a
-Cloudflare Worker when the backend is `local`. It runs under **plain Node** (no Bun
-required) via `tila-sdk/local`. No token and no `worker_url` are needed.
+Session shutdown saves a handoff, acknowledges observed events, and releases exact captured claims before closing authentication. Cleanup has a five-minute limit and reports incomplete work. Claims still obey their original lease/fence rules. `tila_close` only performs coordination cleanup; it does not terminate authentication. A replacement session gets a new run and participant and recovers through a handoff.
 
-Set the backend in `.tila/config.toml`:
+This helper is not an OS sandbox. An unrestricted process under the same OS account may reach that account’s secrets. Hostile-process isolation is the responsibility of the host runtime.
 
-```toml
-backend = "local"
-project_id = "my-project"
-
-[local]
-db_path = ".tila/project.db"
-artifacts_path = ".tila/artifacts"
-org = "my-org"            # optional; defaults to the OS username
-```
-
-Or configure it entirely via environment variables (see below). Then point your MCP
-client at the server:
-
-```json
-{
-  "mcpServers": {
-    "tila": {
-      "command": "npx",
-      "args": ["-y", "tila-mcp-server"],
-      "env": {
-        "TILA_BACKEND": "local",
-        "TILA_PROJECT_ID": "my-project",
-        "TILA_DB_PATH": ".tila/project.db",
-        "TILA_ARTIFACTS_PATH": ".tila/artifacts"
-      }
-    }
-  }
-}
-```
-
-> **`better-sqlite3` driver:** local mode lazily loads `better-sqlite3`, declared as an
-> `optionalDependency`. `npx -y tila-mcp-server` (and a normal `npm i`) pulls it
-> automatically, so local mode works out of the box. If the native build is skipped or
-> fails on your platform, install it manually (`npm i better-sqlite3`) for local mode;
-> remote mode never touches it.
-
-### Local-mode environment variables
-
-For each value, precedence is **config value > environment variable > default**.
-`db_path` and `artifacts_path` are required in local mode (config or env); `org`
-defaults to the OS username.
-
-| Variable | Config key | Required | Default |
-|----------|-----------|----------|---------|
-| `TILA_PROJECT_ID` | `project_id` | Yes | — |
-| `TILA_DB_PATH` | `local.db_path` | Yes | — |
-| `TILA_ARTIFACTS_PATH` | `local.artifacts_path` | Yes | — |
-| `TILA_ORG` | `local.org` | No | OS username |
-
-### Remote-only tools in local mode
-
-Some tools have no local equivalent and require a remote (cloudflare) backend. In
-local mode they are still registered (so clients can discover them) but reject at
-invocation time with a clear error:
-
-| Tool | Local alternative |
-|------|-------------------|
-| `tila_artifact_put` (binary/base64 multipart upload to R2) | `tila_artifact_write_text` (content-addressed text artifacts) |
+See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
 ## Tools (61)
 
-The default catalog contains **six workflow tools**. Existing primitive tools are opt-in with
+The default catalog contains **six workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
 `workflow,artifacts`. Empty/unset selects `workflow`; compatibility aliases remain opt-in.
 
@@ -280,115 +194,25 @@ Artifact results expose provenance and review state; a matching hash does not es
 
 ### Dynamic record resources
 
-Record types with `mcp_resource = true` in the project schema are exposed as MCP resources at `tila://records/{type}/{key}`. These are registered at server startup by fetching the project schema.
+Record types with `mcp_resource = true` in the project schema are exposed as MCP resources at `tila://records/{type}/{key}`. The generic resource template is registered without reading project data. Each read authenticates its run, fetches that project’s current schema, and checks that the record type is exposed.
 
-## Auth Modes
+## Runtime configuration
 
-The server supports two auth modes, configured via `.tila/config.toml`:
+| Variable | Meaning |
+| --- | --- |
+| `TILA_RUN_SOCKET`, `TILA_RUN_CAPABILITY` | Ephemeral run access supplied by the parent helper; never persist in repository configuration |
+| `TILA_LIFECYCLE_CLIENT` | Native session integration selected by setup |
+| `TILA_API_URL`, `TILA_PROJECT_ID` | Non-secret native integration binding; must match the run |
+| `TILA_MCP_TOOLS` | Default `workflow`; optional primitive groups or `all` |
 
-| Mode | Config | How it works |
-|------|--------|-------------|
-| `tila-token` (default) | `TILA_API_TOKEN` env var or `.tila/.env` | Static API token |
-| `github-repo` | `[auth] mode = "github-repo"` in config.toml | Session cache with OIDC token exchange via GitHub App |
+Participant identity is assigned by the server. Environment metadata is descriptive. Conflicting participant/project/credential overrides are rejected.
 
-For `github-repo` mode, the `[github]` section (owner, repo) and `worker_url` must be set in `.tila/config.toml`.
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TILA_BACKEND` | No | Backend mode: `"local"` or `"cloudflare"`. Overrides config.toml `backend`; default `cloudflare`. Lets local mode be selected with no `.tila/config.toml` present. Invalid values error. |
-| `TILA_API_TOKEN` | Only for `tila-token` mode | API token for authentication (remote) |
-| `TILA_API_URL` | No | Worker URL (overrides config.toml `worker_url`) (remote) |
-| `TILA_PROJECT_ID` | No | Project ID (overrides config.toml `project_id`) |
-| `TILA_DB_PATH` | Local mode only | SQLite DB path (config `local.db_path` wins) |
-| `TILA_ARTIFACTS_PATH` | Local mode only | Artifacts dir (config `local.artifacts_path` wins) |
-| `TILA_ORG` | No | Org slug for local mode (config `local.org` wins; defaults to OS username) |
-| `TILA_PARTICIPANT_ID` | No | Stable participant identity for this MCP server process; defaults to a generated UUID |
-
-
-### Session continuity
-
-The `continuity` tool group is included in `core` and `all`; the default workflow uses the same continuity APIs.
-`tila_reentry` is read-only: it never acknowledges journal events or signals,
-renews claims, or sends a heartbeat. Continue journal pages with `next_after_seq`
-and the original `through_seq`, then use `tila_journal_acknowledge` after processing.
-A saved cursor belongs to the authenticated principal and participant, not the machine.
-
-Use `handoff_id` or `resource` to consume another participant's handoff. Without
-those selectors, re-entry selects your participant's latest handoff. Resource
-selectors use `task:<id>`, `record:<type>:<key>`, `artifact:<key>`, or the exact
-claim resource. They select the handoff, not a filtered journal. Keep a stable UUID
-when retrying `tila_handoff_create`; the same ID and content returns the original
-snapshot, while changed content fails with `handoff-conflict`. Record facts and
-unresolved questions, never private reasoning. Historical claim snapshots do not
-confer permission to write or transfer a lease.
-
-
-Artifact reviews are explicit writer decisions; matching SHA-256 hashes do not
-establish content safety. Any project writer may trust, reject, supersede, or revoke
-a review, including their own artifacts. Supply `expected_review_revision` (0 for
-an artifact with no review history); stale decisions fail instead of overwriting
-newer reviews. Revocation returns the artifact to unreviewed state. Text reads
-return a metadata block followed by artifact content, including when truncated.
-Participant and environment metadata are client-supplied. Local reviews use the
-configured local identity and do not imply remote authentication.
-
-## Workflow evaluation
-
-Reproduce the paired smoke comparison from the repository root after building:
+## Verification
 
 ```sh
-pnpm exec turbo build --filter=tila-mcp-server...
-python3 packages/mcp-server/evaluation/run.py
-node packages/mcp-server/evaluation/score.mjs
+pnpm --filter tila-mcp-server test
+pnpm --filter @tila/worker test -- --run runtime-auth.integration runtime-subprocess
+pnpm test:runtime
 ```
 
-The runner requires installed, authenticated `claude` and `codex` clients. It runs
-five scenarios for each client and each profile (`workflow` and `all`): task
-completion, stale-lease recovery, context-loss re-entry, contention with another
-participant, and an artifact handoff. Each run uses a separate local database and
-artifact directory. The other participant is a fixture, not a second model run.
-The clients retain their CLI-default model choice throughout the paired run.
-Only the fixture MCP server is configured; writes to it are explicitly enabled
-for the unattended comparison. Client lifecycle hooks are disabled in these runs;
-lifecycle request isolation is tested separately. No production credentials or project are used.
-
-Outputs go under `.context/mcp-evaluation`: prompts, protocol transcripts, client
-usage, fixture state, and `results.json`. Run directories are unique; the scorer
-selects the latest completed run of each client/profile/scenario, evaluating lease
-expiry at the recorded end of that run so delayed rescoring is stable. Re-entry starts
-a fresh client with a saved handoff: this simulates context loss and does not
-certify a client's native compaction behavior.
-
-The scorer checks final database state, claim ownership, handoff references,
-participant-targeted delivery, artifact attribution, and that acknowledged
-sequences were actually returned as a contiguous journal prefix. Selection
-accuracy is the fraction of calls with no unsupported-operation or unexpected
-error; expected claim contention counts as a correct selection. Transcript review
-checks that selected operations fit the requested task. These are smoke metrics,
-not a statistical claim about model reliability.
-
-Measured on 2026-10-07, Apple Silicon/macOS, one run per scenario/profile/client:
-
-| Client | Profile | Tasks completed | Tool calls | Selection accuracy | Processed tokens |
-|--------|---------|-----------------|------------|--------------------|------------------|
-| Claude Code 2.1.293 (`claude-opus-4-8`) | workflow | 5/5 | 19 | 100% | 275,236 |
-| Claude Code 2.1.293 (`claude-opus-4-8`) | all | 5/5 | 23 | 100% | 472,645 |
-| Codex CLI 0.160.1 (CLI default) | workflow | 5/5 | 26 | 100% | 912,888 |
-| Codex CLI 0.160.1 (CLI default) | all | 5/5 | 30 | 96.7% | 1,644,858 |
-
-The six-tool profile used 41.8% fewer tokens for Claude Code and 44.5% fewer for
-Codex in this suite. Both profiles completed every task. The primitive Codex run
-selected the remote-only binary upload once, received an actionable local-backend
-error, and recovered with text publication. No protected task or successor claim
-was overwritten.
-
-Processed tokens include cached input: Claude's input + cache creation + cache
-reads + output, and Codex's input + output (its input already includes cache
-reads). These are actual client-reported usage totals, not dollar costs or tool
-schema byte estimates. Codex's JSONL did not report a resolved model identifier;
-no model override was used. Absolute counts also include client instructions and
-conversation history, so compare profiles within each client rather than clients
-against each other. Cloudflare correctness is covered separately by backend,
-HTTP-facade and Worker tests; this model-backed comparison uses the local backend.
+Protocol tests interleave tools, resources, prompts, and discovery from separate sessions. CLI subprocess tests use isolated homes and real protected file storage. Required Cloudflare runtime tests exercise D1, DO SQLite, R2, proof binding, renewal, and revocation. The previous private-SQLite MCP evaluation harness was removed at the 0.4.0 cutover.

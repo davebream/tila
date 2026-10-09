@@ -83,14 +83,14 @@ describe("mcp init command — instanceKey resolution", () => {
     vi.restoreAllMocks();
   });
 
-  it("passes instanceKey to runMcpInit when getCurrentContext resolves with a key", async () => {
+  it("uses setup without consulting ambient operator keychain", async () => {
     mockGetCurrentContext.mockResolvedValue("inst-abc123");
 
     await invokeInit();
 
     expect(mockRunMcpInit).toHaveBeenCalledOnce();
     const callArgs = mockRunMcpInit.mock.calls[0] as [Record<string, unknown>];
-    expect(callArgs[0].instanceKey).toBe("inst-abc123");
+    expect(callArgs[0].instanceKey).toBeUndefined();
   });
 
   it("R4 degradation: passes instanceKey: undefined when getCurrentContext rejects (not logged in)", async () => {

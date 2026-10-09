@@ -64,3 +64,9 @@ export {
   resolveActionsPolicy,
   resolveActionsMembership,
 } from "./workload-policy";
+export {
+  RuntimeStore,
+  RuntimeDenied,
+  RUNTIME_TOKEN_MARKER,
+  type RuntimeSecret,
+} from "./runtime-store";

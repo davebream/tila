@@ -69,3 +69,6 @@ packages/bench/results/*
 
 # Prepared release artifacts (never credentials or runtime state)
 /.release/
+
+# Isolated contributor enrollment credentials
+.tila/dev-auth/

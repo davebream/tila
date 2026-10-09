@@ -65,12 +65,15 @@ export function createIdempotencyMiddleware(deps?: {
 
     const projectId = c.get("projectId");
     // Identity-scoped: participants sharing one credential cannot replay one
-    // another's mutation result.
+    // another's mutation result. Runtime renewal must preserve that identity;
+    // using a credential-version ID here would duplicate ambiguous writes.
+    const token = c.get("tokenResult");
+    const runtime = token?.kind === "d1-token" ? token.runtime : undefined;
     const caller = JSON.stringify([
       c.get("principalId"),
       c.get("participantId"),
       ...(c.get("credentialPolicy")
-        ? [c.get("tokenResult").tokenId, c.get("credentialPolicy")]
+        ? [runtime?.run_id ?? token.tokenId, c.get("credentialPolicy")]
         : []),
     ]);
     const key = `dp:${projectId}:${caller}:${c.req.method}:${c.req.path}:${clientKey}`;

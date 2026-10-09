@@ -1,7 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { findConfig } from "../config";
+import { VERSION } from "../version";
+import { configureLifecycle } from "./lifecycle-install";
+import { currentOutput } from "./output";
 import * as p from "./prompts";
+import {
+  enrollMachine,
+  enrollmentReference,
+  runtimeSelection,
+} from "./runtime";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -32,7 +39,6 @@ export interface RunMcpInitOptions {
   targets: string[];
   dryRun: boolean;
   cwd: string;
-  instanceKey?: string;
 }
 
 // ─── Static definitions ──────────────────────────────────────────────────────
@@ -75,39 +81,30 @@ export const TARGET_DEFS: TargetDef[] = [
   },
 ];
 
-const VALID_SLUGS = new Set(TARGET_DEFS.map((t) => t.slug));
-
 // ─── Pure functions ──────────────────────────────────────────────────────────
 
-/**
- * Build canonical MCP server entry for the tila server.
- * Uses placeholder strings when no concrete config is available.
- * When authMode is "github-repo", TILA_API_TOKEN is omitted from env
- * (the MCP server resolves tokens via session cache or OIDC).
- */
+/** Each generic client gets one managed MCP process per run. */
 export function buildMcpEntry(config?: {
   apiUrl?: string;
   projectId?: string;
-  authMode?: "tila-token" | "github-repo";
-  instanceKey?: string | null;
 }): McpServerEntry {
-  const env: Record<string, string> = {
-    TILA_API_URL: config?.apiUrl ?? "${TILA_API_URL}",
-    TILA_PROJECT_ID: config?.projectId ?? "${TILA_PROJECT_ID}",
-  };
-
-  if (config?.instanceKey) {
-    // Pointer mode: write the non-secret instance identifier; omit TILA_API_TOKEN
-    // so a pre-existing baked token cannot silently shadow the keychain path.
-    env.TILA_INSTANCE = config.instanceKey;
-  } else if (config?.authMode !== "github-repo") {
-    env.TILA_API_TOKEN = "${TILA_API_TOKEN}";
-  }
-
+  if (!config?.apiUrl || !config.projectId)
+    throw new Error("MCP setup requires a selected deployment and project");
   return {
-    command: "npx",
-    args: ["-y", "tila-mcp-server"],
-    env,
+    command: "tila",
+    args: [
+      "--instance",
+      config.apiUrl,
+      "--project",
+      config.projectId,
+      "run",
+      "exec",
+      "--",
+      "npx",
+      "-y",
+      `tila-mcp-server@${VERSION}`,
+    ],
+    env: {},
   };
 }
 
@@ -251,112 +248,66 @@ export async function runMcpInit({
   targets,
   dryRun,
   cwd,
-  instanceKey,
 }: RunMcpInitOptions): Promise<void> {
-  // Load config once upfront
-  const tilaConfig = findConfig(cwd);
-  const entry = buildMcpEntry({
-    apiUrl: tilaConfig?.worker_url,
-    projectId: tilaConfig?.project_id,
-    authMode: tilaConfig?.auth?.mode,
-    instanceKey,
+  const selection = await runtimeSelection(cwd);
+  const names = targets.length
+    ? targets
+    : detectEditors(cwd).map((target) => target.slug);
+  if (!names.length)
+    throw new Error(
+      "Specify an editor target: claude-code, codex-cli, cursor, vscode-copilot, or cline",
+    );
+  const defs = names.map((name) => {
+    const target = TARGET_DEFS.find((item) => item.slug === name);
+    if (!target) throw new Error(`Unsupported editor target: ${name}`);
+    return target;
   });
-
-  if (instanceKey) {
-    p.log.info(
-      "TILA_INSTANCE is a non-secret instance identifier — the credential stays in your keychain.",
-    );
+  const entry = buildMcpEntry({
+    apiUrl: selection.deployment,
+    projectId: selection.projectId,
+  });
+  // Validate every destination before creating remote authority.
+  for (const def of defs) {
+    if (def.slug === "claude-code" || def.slug === "codex-cli")
+      configureLifecycle(
+        def.slug === "codex-cli" ? "codex" : "claude-code",
+        "install",
+        true,
+        cwd,
+      );
+    else if (!def.printSnippetOnly)
+      mergeMcpEntry(join(cwd, def.configPath), def.topLevelKey, entry, true);
   }
-
-  let warnedPlaceholder = false;
-  if (!tilaConfig) {
-    p.log.info(
-      "No .tila/config.toml found — writing placeholder values for TILA_API_URL and TILA_PROJECT_ID",
-    );
-    warnedPlaceholder = true;
+  if (!dryRun && !(await enrollmentReference(selection))) {
+    if (!process.stdin.isTTY || currentOutput()?.nonInteractive)
+      throw new Error(
+        "Installation is not enrolled. Run tila machine enroll first; noninteractive setup never opens login.",
+      );
+    await enrollMachine();
   }
-
-  // Resolve targets
-  let resolvedDefs: TargetDef[];
-  if (targets.length === 0) {
-    const detected = detectEditors(cwd);
-    if (detected.length === 0) {
-      p.log.info("No supported editor config detected in this directory.");
-      return;
-    }
-    const labels = detected.map((d) =>
-      d.printSnippetOnly ? `${d.slug} (snippet only)` : d.slug,
-    );
-    p.log.info(`Detected editors: ${labels.join(", ")}`);
-    const confirmed = await p.confirm({ message: "Configure these editors?" });
-    if (p.isCancel(confirmed) || !confirmed) {
-      return;
-    }
-    resolvedDefs = detected;
-  } else {
-    resolvedDefs = [];
-    for (const slug of targets) {
-      if (!VALID_SLUGS.has(slug)) {
-        p.log.info(
-          `Unknown target: ${slug}. Valid targets: ${[...VALID_SLUGS].join(", ")}`,
-        );
-        continue;
-      }
-      const def = TARGET_DEFS.find((t) => t.slug === slug);
-      if (def) resolvedDefs.push(def);
-    }
-  }
-
-  // Process each target
-  for (const def of resolvedDefs) {
-    if (def.printSnippetOnly) {
-      const snippet = {
-        mcpServers: {
-          tila: entry,
-        },
-      };
+  for (const def of defs) {
+    if (def.slug === "claude-code" || def.slug === "codex-cli") {
+      configureLifecycle(
+        def.slug === "codex-cli" ? "codex" : "claude-code",
+        "install",
+        dryRun,
+        cwd,
+      );
+    } else if (def.printSnippetOnly)
       p.note(
-        JSON.stringify(snippet, null, 2),
-        `${def.slug} — add to your MCP config manually`,
+        JSON.stringify({ mcpServers: { tila: entry } }, null, 2),
+        `${def.slug} configuration`,
       );
-      continue;
-    }
-
-    const filePath = join(cwd, def.configPath);
-
-    // Warn about placeholders once (only if not already warned)
-    if (!tilaConfig && !warnedPlaceholder) {
-      p.log.info(
-        "No .tila/config.toml found — writing placeholder values for TILA_API_URL and TILA_PROJECT_ID",
+    else {
+      const result = mergeMcpEntry(
+        join(cwd, def.configPath),
+        def.topLevelKey,
+        entry,
+        dryRun,
       );
-      warnedPlaceholder = true;
-    }
-
-    try {
-      const result = mergeMcpEntry(filePath, def.topLevelKey, entry, dryRun);
-      switch (result.status) {
-        case "written":
-          p.log.success(`${def.slug}: written to ${def.configPath}`);
-          break;
-        case "already-configured":
-          p.log.success(`${def.slug}: already configured`);
-          break;
-        case "dry-run":
-          p.note(
-            result.content ?? "",
-            `[dry-run] ${def.slug}: would write to ${def.configPath}`,
-          );
-          break;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("is not valid JSON after stripping comments")) {
-        p.log.warn(`${msg} Skipping ${def.slug}.`);
-      } else {
-        p.log.warn(
-          `Error writing ${def.configPath}: ${msg}. Check permissions.`,
-        );
-      }
+      if (result.status === "dry-run")
+        p.note(result.content, `${def.slug} preview`);
+      else p.log.success(`${def.slug}: ${result.status}`);
     }
   }
 }

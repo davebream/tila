@@ -5,65 +5,40 @@ import { parse } from "smol-toml";
 import type { TilaFacade } from "tila-sdk";
 import { toMcpError } from "../errors";
 
-/**
- * Register opt-in record resources based on mcp_resource = true in the project schema.
- * Fetches the schema at startup; failure is non-fatal (server starts without record resources).
- */
+/** Resolve schema inside the authenticated request, never during registration. */
 async function registerRecordResources(
   server: McpServer,
   facade: TilaFacade,
 ): Promise<void> {
-  try {
-    const schemaResult = (await facade.schema.get()) as {
-      ok: boolean;
-      schema: { definition?: string } | null;
-    };
-
-    const toml = schemaResult?.schema?.definition;
-    if (!toml) return;
-
-    const parsed = TilaSchemaTomlSchema.safeParse(parse(toml));
-    if (!parsed.success) return;
-
-    const schema = parsed.data;
-
-    for (const [type, def] of Object.entries(schema.records ?? {})) {
-      if (!def.mcp_resource) continue;
-
-      const template = new ResourceTemplate(`tila://records/${type}/{key}`, {
-        list: undefined,
-      });
-
-      server.resource(
-        `record-${type}`,
-        template,
-        {
-          description: `Record of type "${type}" -- opt-in MCP resource (mcp_resource = true in schema)`,
-          mimeType: "application/json",
-        },
-        async (uri, variables) => {
-          const rawKey = variables.key as string;
-          try {
-            const result = await facade.records.get(type, rawKey);
-            return {
-              contents: [
-                {
-                  uri: uri.href,
-                  mimeType: "application/json",
-                  text: JSON.stringify(result),
-                },
-              ],
-            };
-          } catch (err) {
-            throw toMcpError(err);
-          }
-        },
+  server.resource(
+    "project-record",
+    new ResourceTemplate("tila://records/{type}/{key}", { list: undefined }),
+    {
+      description: "Read a record type explicitly enabled as an MCP resource",
+      mimeType: "application/json",
+    },
+    async (uri, variables) => {
+      const type = String(variables.type);
+      const key = String(variables.key);
+      const result = (await facade.schema.get()) as {
+        schema: { definition?: string } | null;
+      };
+      const schema = TilaSchemaTomlSchema.parse(
+        parse(result.schema?.definition ?? ""),
       );
-    }
-  } catch {
-    // Schema fetch failure is non-fatal -- server starts without record resources.
-    // Errors are swallowed intentionally per design decision.
-  }
+      if (!schema.records?.[type]?.mcp_resource)
+        throw new Error("Record type is not exposed as a resource");
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(await facade.records.get(type, key)),
+          },
+        ],
+      };
+    },
+  );
 }
 
 export async function registerAllResources(
@@ -174,6 +149,6 @@ export async function registerAllResources(
     },
   );
 
-  // Register opt-in record resources (async -- fetches schema at startup)
+  // Register a generic template; schema authorization happens on each read.
   await registerRecordResources(server, facade);
 }

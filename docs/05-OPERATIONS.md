@@ -1463,18 +1463,105 @@ simulates SQLite loss or multi-day retention expiry: local lifecycle and recover
 tests cover those cases. Record deployment/version metadata alongside behavioral
 results; health output alone does not identify the deployed source revision.
 
+## Runtime enrollment and unattended runs
+
+Version 0.4.0 separates operator credentials, installation authorization, and run access. CLI operators retain existing human authentication and administrative commands. MCP accepts only a shared-server project run. No compatibility adapter or automatic authentication fallback is provided.
+
+### Installation authorization
+
+| Kind | Initial authorization | Ongoing authority |
+| --- | --- | --- |
+| Personal | Authenticated human with participant-or-higher project membership | Initial worker ceiling intersected with service membership and the sponsor’s current project authority |
+| Shared | Owner creates a restricted invitation | Project-owned service membership; independent of the authorizing owner’s later membership |
+| OIDC job | Existing provider, audience, repository policy and workload binding | Original binding/ceiling/proof key and current workload restrictions |
+
+Each enrollment reuses one canonical service membership. Every run has its own participant, initial ceiling, credential versions, and lease. Installation IDs identify enrollments, not physical hardware. Names and environment metadata grant no authority.
+
+```sh
+# Personal installation; use the normal human login first.
+tila --instance https://tila.example.com --project my-project machine enroll
+
+# Owner side: capture this one-use invitation securely; validity is ten minutes.
+tila --instance https://tila.example.com --project my-project machine authorize --name runner --json
+
+# Runner side: deliver the invitation through stdin, not command arguments.
+# Select file storage explicitly for a headless Linux account.
+tila --instance https://tila.example.com --project my-project machine enroll --invitation-stdin --file-store /absolute/private/tila-runtime
+
+# Thereafter no owner credential or interactive login is needed.
+tila --instance https://tila.example.com --project my-project run exec -- your-command
+```
+
+The invitation response is intentionally secret. Enrollment output contains references only. The OS secret store is the default; an explicit file store requires a private directory and files owned by the current account (0700/0600). Storage errors stop setup. Runtime storage is separate from operator credentials and does not change general CI/keychain-write restrictions.
+
+Setup persists its operation ID and installation proof key before provisioning. Rerunning interrupted setup with the original human authorization or invitation recovers the existing enrollment and replaces its authenticator; it does not create another service identity. Keep the private store and non-secret runtime references together when recovering a setup. If the key is lost, authorize a new installation and revoke the old one; there is no secret-recovery bypass. A revoked enrollment cannot be revived. Use a new isolated runtime home for replacement enrollment, or remove that revoked enrollment’s local reference/secret after checking its ID. Never delete another active installation’s state.
+
+### Runtime and CI
+
+`run exec` creates one run, supplies its local socket capability to the command, renews automatically, and closes access after cleanup. Managed CLI commands share the same participant and reject credential, deployment, project, or participant overrides. Ordinary CLI invocations outside a managed session continue to support administration.
+
+GitHub Actions jobs with an existing service workload binding can use:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+steps:
+  - run: tila --instance https://tila.example.com --project my-project run exec --oidc -- your-command
+```
+
+The helper fetches fresh Actions assertions automatically. The audience is the deployment origin; configure the existing provider/repository policy accordingly. Renewals cannot change workload binding, repository context, proof key, or the original run ceiling. Upstream assertion expiry can shorten the normal credential lifetime. Other pipelines use enrolled shared runners. The typed SDK also exposes runtime OIDC exchange for callers that supply fresh assertions from supported configured providers.
+
+| Timing | Behavior |
+| --- | --- |
+| Credential | At most 15 minutes, capped by upstream authorization |
+| Renewal | Two minutes before expiry, jitter, one request in flight |
+| Heartbeat / lease | Every 60 seconds / expires after five minutes |
+| Replacement overlap | At most 60 seconds; closure/revocation overrides it |
+| Normal shutdown | At most five minutes of handoff/cursor/exact-claim cleanup, then access closes |
+
+The broker keeps installation credentials and keys out of child environments. Its socket capability is limited to a single run and bound deployment/endpoints. Temporary failures use bounded retry while authorization remains valid. Expired, closed, or revoked runs cannot be renewed into existence. After helper loss, start a replacement session and recover through a handoff. Task attempts and authentication runs remain separate concepts.
+
+The broker does not isolate hostile processes sharing an OS account. Use separate OS accounts or host-runtime isolation where that boundary is required.
+
+### Inspection, revocation, and diagnostics
+
+```sh
+tila machine list --json
+tila machine inspect ENROLLMENT_ID --json
+tila machine revoke ENROLLMENT_ID
+tila run list --json
+tila run inspect RUN_ID --json
+tila run revoke RUN_ID
+```
+
+Pass explicit instance/project flags when the directory does not select the intended deployment. Members see/manage their personal installations; owners can inspect shared infrastructure and revoke any enrollment/run. Enrollment revocation blocks all descendants; run revocation affects only that run. Already-authorized in-flight requests can finish. Project restore revokes runtime access along with existing credentials and cannot resurrect it.
+
+`GET /api/runtime/context` is authoritative and separate from best-effort identity diagnostics. It includes deployment UUID, project, purpose, principal, run, participant, effective policy and expiry. Missing runtime protocol support produces an upgrade error. Authorization-store failures deny access before project reads, cached responses, or write replay.
+
+Credential events record creation, replacement, closure, revocation, and denied escalation with trusted identity links. Request analytics record failure codes, including `runtime-purpose-denied`, `runtime-binding-mismatch`, `runtime-proof-replayed`, `enrollment-revoked`, `run-closed`, `run-expired`, and `runtime-authorization-unavailable`. Run inspection exposes active/closed/revoked/expired states. Lifecycle status and stderr report incomplete cleanup. Never log bearer credentials, invitations, socket capabilities, private keys, or proofs. Scheduled maintenance prunes expired proof/assertion replay records.
+
+### Coordinated 0.4.0 cutover
+
+1. Complete authentication-boundary review and isolated deployment validation. Keep the PR outside the merge queue until that review is satisfied.
+2. Apply additive D1 migration `0030_runtime_credentials.sql`, then deploy the compatible backend. Preserve project data, canonical memberships, and recoverable owner access.
+3. Upgrade CLI, SDK and MCP together to 0.4.0. Enroll installations and regenerate client settings with `tila mcp init`; settings pin the compatible MCP version.
+4. Restart coding sessions under new run credentials and verify concurrent members/machines, revocation isolation, renewal and cleanup. Remove superseded MCP credentials/configuration.
+5. Retain additive schema changes during rollback. Rollback is an explicit operator action; requests never retry with an older or stronger credential.
+
+`pnpm dev:setup` also provisions a runtime enrollment for the local Cloudflare Worker in an isolated development auth home. Stop the existing development server before setup; it already clears local fixture state. Contributor MCP templates wrap the source MCP command in source `run exec` and require no repository secrets.
+
 ## Coding-client lifecycle integration
 
 The opt-in lifecycle adapters support **Claude Code CLI and Codex CLI on macOS
-and Linux**, using a configured Cloudflare-backed Tila project. Existing manual
-CLI/MCP use and local mode remain available. Desktop clients, Conductor-managed
+and Linux**, using a configured Cloudflare-backed Tila project. Operator CLI use and CLI/SDK local mode remain available; MCP requires runtime access. Desktop clients, Conductor-managed
 sessions, Windows, and independent subagent participants are outside this initial
 integration. Tila never takes control of client execution.
 
 ### Install and remove
 
 Use a CLI and MCP server build that both include lifecycle support. From the
-project root, with normal Tila authentication already configured:
+project root, after `tila machine enroll`:
 
 ```sh
 tila lifecycle install claude-code --dry-run
@@ -1503,7 +1590,7 @@ verify hook support, configuration, and trust in the client. See the supported
 
 The installer preserves other hook commands and MCP entries. It adds
 `TILA_LIFECYCLE_CLIENT` only to the Tila MCP entry. If no Tila entry exists, it
-creates `npx -y tila-mcp-server`; source checkouts should configure their existing
+creates `npx -y tila-mcp-server@0.4.0`; source checkouts should configure their existing
 source MCP command first. It records ownership under the private `$TILA_HOME/client-lifecycle/installations`
 directory (default `~/.tila/client-lifecycle/installations`) and refuses to
 replace a Tila MCP entry subsequently edited by the user. JSON/TOML formatting and
@@ -1512,7 +1599,7 @@ Dry-run reports affected files without exposing configuration secrets.
 
 ```sh
 tila lifecycle status
-tila lifecycle retry                 # Retry incomplete clean shutdowns
+tila lifecycle retry                 # Retry only while the original helper/run is active
 tila lifecycle remove claude-code
 tila lifecycle remove codex
 ```
@@ -1527,17 +1614,15 @@ Lifecycle state remains available for diagnosis and retry.
 Each native session gets a stable participant scoped to Worker URL, project, and
 client. The adapters attach machine, repository, worktree, branch, commit, client,
 and version metadata. Claude shell commands inherit the participant through
-`CLAUDE_ENV_FILE`; Codex shell commands resolve their `CODEX_THREAD_ID`. Explicit
-CLI participant overrides retain precedence. MCP tool calls resolve identity for
+`CLAUDE_ENV_FILE`; Codex shell commands resolve their `CODEX_THREAD_ID`. Conflicting
+CLI participant or credential overrides are rejected. MCP tool calls resolve identity for
 each request, so one Codex daemon connection can serve concurrent sessions safely.
-Codex subagent MCP calls use their parent session's identity. MCP resources and
-prompts retain their existing read-only connection identity.
+Codex subagent MCP calls use their parent session's identity. MCP resources, prompts, and discovery resolve the same per-request run mapping.
 
 Startup/resume supplies a bounded re-entry page containing summary, changes,
 active claims, pending signals, and the latest work handoff (or latest shutdown
 snapshot when no work handoff exists). Later hooks confirm the observed cursor.
-Presence updates run every 15 seconds while client liveness is
-verified. Claim leases are not automatically renewed.
+Presence updates run while client liveness is verified; authentication heartbeats run every 60 seconds. Claim leases are not automatically renewed.
 
 A clean SessionEnd queues a `kind: "shutdown"` handoff containing coordination
 facts only, then acknowledges observed journal events and releases eligible claims. Owner claims
@@ -1549,9 +1634,7 @@ not merely when a terminal disappears.
 
 Network failures do not block local work. Hook stderr and `tila lifecycle status`
 report degradation; the next prompt retries re-entry. If the Codex observer cannot
-verify thread status, heartbeats pause. Failed clean shutdowns remain `closing`
-with retryable intent; repair connectivity/authentication and run `tila lifecycle
-retry` before resuming that session. A killed local lock holder may take ten
+verify thread status, heartbeats pause. Incomplete shutdown intent remains recorded, but cleanup stops after five minutes and runtime access closes. Retry during the original active helper lifetime; after closure, recover in a new run through a handoff. A killed local lock holder may take ten
 seconds to become recoverable. Never delete a live session's state to force cleanup.
 
 The implementation drives actual CLI hooks and detached helpers for two concurrent

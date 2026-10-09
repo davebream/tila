@@ -349,18 +349,18 @@ The Cloudflare path serializes writes via the Durable Object's single-threaded e
 
 **Fencing tokens** are monotonically incrementing integers, same as the DO path. First-writer-wins is preserved: stale fence -> `FenceError` from `@tila/core`'s `assertFence`.
 
-### 1.6a Embedded local persistence (CLI + Node SDK/MCP)
+### 1.6a Embedded local persistence (CLI + Node SDK)
 
 Local mode is implemented by `@tila/backend-embedded` — a **runtime-agnostic** embedded SQLite core (`EmbeddedProject` + `EmbeddedArtifactBackend` + a `BlobStore` seam) that contains no `bun:*` / `node:*` runtime imports. Two host wrappers inject the concrete driver and primitives:
 
 - `@tila/backend-local` — the **Bun** host (`bun:sqlite`), used by the `tila` CLI.
-- `tila-sdk/local` — the **plain-Node** host (`better-sqlite3` + `node:fs`), used by the TypeScript SDK (`createTila({ backend: "local" })` / `createTilaLocal`) and by the `tila-mcp-server` when `backend = "local"`.
+- `tila-sdk/local` — the **plain-Node** host (`better-sqlite3` + `node:fs`), used by the TypeScript SDK (`createTila({ backend: "local" })` / `createTilaLocal`).
 
 Local mode therefore now runs under **plain Node**, not just Bun. There is no ADR file for this seam in the repo; this section is the canonical description.
 
-**Cross-runtime schema identity.** Both hosts run the *same* `EMBEDDED_MIGRATIONS` from `@tila/backend-embedded`, which reuse the canonical `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` *verbatim* (not a copy that can drift). Both apply the same ordered `EMBEDDED_PRAGMAS` (`busy_timeout=5000`, then `journal_mode=WAL`, then `foreign_keys=ON`) and the same network-filesystem matcher. The result: a Bun (CLI)-created DB file and a Node (SDK/MCP)-created DB file are byte-for-byte schema-identical, so **a DB file is portable between the CLI and a Node SDK/MCP consumer** (proven by a cross-runtime interop test: bun writes, node reads). Applied versions are tracked in the **`_migrations` table**, not `PRAGMA user_version`.
+**Cross-runtime schema identity.** Both hosts run the *same* `EMBEDDED_MIGRATIONS` from `@tila/backend-embedded`, which reuse the canonical `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` *verbatim* (not a copy that can drift). Both apply the same ordered `EMBEDDED_PRAGMAS` (`busy_timeout=5000`, then `journal_mode=WAL`, then `foreign_keys=ON`) and the same network-filesystem matcher. The result: a Bun (CLI)-created DB file and a Node (SDK)-created DB file are byte-for-byte schema-identical, so **a DB file is portable between the CLI and a Node SDK consumer** (proven by a cross-runtime interop test: bun writes, node reads). Applied versions are tracked in the **`_migrations` table**, not `PRAGMA user_version`.
 
-**Schema versioning & cross-version compatibility.** The embedded migration set reuses every canonical migration except v21 (`_do_idempotency`, which is DO-only), including v15 (journal archive watermark), v23 (canonical identity), and v24 (project transfer lock). It adds the embedded-only idempotency table at version `1000`. Sharing the watermark and transfer state is required for cloud/local backup compatibility and for maintenance triggers to block every SQLite mutation during a snapshot. Because both hosts share one migration set keyed by version in `_migrations`, a CLI and an SDK/MCP of different releases apply only missing versions in ascending order.
+**Schema versioning & cross-version compatibility.** The embedded migration set reuses every canonical migration except v21 (`_do_idempotency`, which is DO-only), including v15 (journal archive watermark), v23 (canonical identity), and v24 (project transfer lock). It adds the embedded-only idempotency table at version `1000`. Sharing the watermark and transfer state is required for cloud/local backup compatibility and for maintenance triggers to block every SQLite mutation during a snapshot. Because both hosts share one migration set keyed by version in `_migrations`, a CLI and an SDK of different releases apply only missing versions in ascending order.
 
 **Idempotency is accepted but not honored locally — a known divergence.** The embedded `_idempotency` table (v`1000`) and `EmbeddedProject.checkIdempotency` / `storeIdempotency` exist, but no local resource adapter currently calls them: in local mode an `idempotency_key` (e.g. on `claims.acquire`) is **accepted but not honored**. Remote dedups retries via D1; local relies on **primary-key-level dedup** instead — a retried create of an existing id fails rather than duplicating. Full idempotency wiring is single-machine-low-risk and remains **remote-only**; the table + methods are kept available-but-unwired so a future wiring has the storage already in place. (Mirrored in the SDK README local-divergence list.)
 
@@ -1956,21 +1956,19 @@ Surface modules: `client.entities`, `client.records`, `client.artifacts`, `clien
 
 ### 9.4 The MCP server
 
-`tila-mcp-server` exposes tila as a Model Context Protocol server that agents can connect to directly without going through the CLI or the SDK. The MCP server runs as a separate process; agents configure it as an MCP endpoint and gain access to tila tools.
+`tila-mcp-server` is a shared-server project workflow interface. The CLI remains the comprehensive operator interface, constrained by the caller’s authority. MCP runs under one restricted authentication run, supplied through a local credential broker or resolved from a native host session mapping on each request.
 
-The server exposes MCP tools for the same operations the SDK and CLI surface:
+The default tools are `tila_session`, `tila_inspect`, `tila_claim`, `tila_publish`, `tila_signal`, and `tila_close`. Primitive groups remain explicitly opt-in. Tool discovery grants no backend permissions. The worker preset supports those workflows while excluding administration, deletion, infrastructure, credential management, and gate resolution.
 
-- `tila_entity_*` (and `tila_work_unit_*` aliases when the public rename ships) for work-unit operations.
-- `tila_record_get`, `tila_record_set`, `tila_record_patch`, `tila_record_list`, `tila_record_archive`, `tila_record_unarchive`, `tila_record_history`.
-- `tila_artifact_*` for artifact upload, download, list, and search.
-- `tila_claim_*` for resource claim acquire, renew, release.
-- `tila_gate_*` for gate satisfaction queries and transitions.
-- `tila_signal_*` for signal emission and subscription.
-- `tila_summary_*` for project-level state summaries.
+An installation enrollment reuses one canonical service membership. Personal enrollments are capped by the enrolling human’s current project authority; shared installations use owner-authorized project membership. Each invocation creates its own run, participant, proof key, lease, and short-lived credential versions. The effective policy intersects the enrollment/workload ceiling, current membership and sponsor authority, initial run ceiling, and current workload restrictions.
 
-In addition to tools, the MCP server exposes select content as MCP **resources**. Record types declared with `mcp_resource = true` in `tila.schema.toml` are exposed under URI template `tila://records/{type}/{key}`. The default is tools only; resource exposure is opt-in per record type. Rationale: automatically injecting all records into agent context would flood it. Critical record types such as agent policies or pipeline configs can opt in; everything else is pulled on demand via the `tila_record_get` tool.
+D1 stores enrollment authenticators, run metadata, credential versions, one-use invitations, and proof/assertion replay state. Credentials are hashed. The strict `/api/runtime/context` endpoint returns the authenticated deployment, project, purpose, principal, participant, run, policy and expiry. Every request revalidates runtime authority before project reads or idempotency replay. Project restore revokes these authorizations.
 
-Keys containing slashes are percent-encoded in resource URIs. The MCP server decodes the final URI segment with `decodeURIComponent` before lookup.
+The local helper holds enrollment secrets outside child environments and exposes a run-specific socket capability. Credentials expire after at most 15 minutes, renew two minutes before expiry, and overlap for at most 60 seconds. Heartbeats occur every minute; five minutes without one expires the run. Terminal states cannot be renewed. Session shutdown saves a handoff and releases exact captured claims before closing access, with a five-minute cleanup limit. `tila_close` itself does not close authentication.
+
+MCP rejects personal/owner tokens, ambient keychain authentication, and local SQLite configuration. CLI/SDK local functionality remains available. Tools, resources, prompts and discovery share the authenticated per-request run scope. Generic record resources at `tila://records/{type}/{key}` check the current project schema and `mcp_resource = true` at read time; startup does not fetch schema under enrollment authority. Missing host session mappings fail closed; clients without reliable mappings use one process per run.
+
+See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for storage, recovery, supported session contracts, OIDC, and the coordinated 0.4.0 cutover. The broker is not an OS sandbox; hostile processes under one account require host-runtime isolation.
 
 ---
 
@@ -2067,7 +2065,7 @@ Supported via per-shell `CLOUDFLARE_ACCOUNT_ID` env var that tila sets implicitl
 Acme Corp may enforce: R2 jurisdiction (EU only), custom Worker subdomain (`tila.acme.com`), retention policy overrides, restricted Worker permissions. These are configured at the Cloudflare account level and at `wrangler.toml`. tila's `.tila/config.toml` supports `[cloudflare] worker_subdomain`, `jurisdiction`, and `custom_domain` flags. Org admins publish these defaults in their org's onboarding docs; engineers run `tila project create` and apply the org's configuration overrides.
 
 ### 10.32 Service account / CI token usage
-For automation (CI, scheduled jobs, server-side autopilots): runtime operations use a dedicated project API token issued via `tila token issue --name=ci-prod`. The token is stored in CI secrets as `TILA_API_TOKEN`. Provisioning from CI (rare) uses a Cloudflare API token (not OAuth) scoped to the specific account, stored as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. tila and wrangler both honor these env vars; no interactive login is required.
+For unattended coding runs, use an enrolled shared runner with `tila run exec`, or supported runtime OIDC exchange. MCP requires these restricted run credentials. Operator automation can still use a dedicated project API token issued via `tila token issue --name=ci-prod`, stored in CI secrets as `TILA_API_TOKEN`. Provisioning from CI (rare) uses a Cloudflare API token (not OAuth) scoped to the specific account, stored as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. tila and wrangler both honor these env vars; no interactive login is required.
 
 ### 10.33 Creating a child of a leaf-type work unit
 Schema declares `[hierarchy] levels = ["epic", "issue", "task"]`. User runs `tila task new --parent=<task-id>`. tila rejects: `task` is the last level in the hierarchy and therefore a leaf. Returns `409 hierarchy-leaf-child`: "cannot create a work unit as a child of leaf-type 'task'. Declare a deeper hierarchy level in tila.schema.toml or attach as a non-hierarchical relationship instead."

@@ -1,10 +1,15 @@
-import { resolveActionsPolicy } from "@tila/backend-d1";
+import {
+  RuntimeDenied,
+  RuntimeStore,
+  resolveActionsPolicy,
+} from "@tila/backend-d1";
 import {
   CredentialConflict,
   CredentialDenied,
   CredentialStore,
 } from "@tila/backend-d1";
 import {
+  type CredentialPolicy,
   type GitHubActionsContext,
   delegablePolicy,
   effectiveCredentialPolicy,
@@ -13,11 +18,14 @@ import { CredentialPolicySchema, roleToPermission } from "@tila/schemas";
 import type { Context } from "hono";
 import type { Env, HonoVariables } from "../types";
 import { generateToken, hashToken } from "./hash";
+import { runtimeProof } from "./runtime-access";
 
 /** Called only after upstream signature, issuer, audience and provider policy validation. */
 async function exchangeScopedWorkloadUnchecked(
   c: Context<{ Bindings: Env; Variables: HonoVariables }>,
   input: {
+    runtime?: { operation_id: string; policy?: CredentialPolicy };
+    assertion?: string;
     projectId: string;
     provider: "github-actions" | "oidc";
     issuer: string;
@@ -37,7 +45,14 @@ async function exchangeScopedWorkloadUnchecked(
     input.issuer,
     input.subject,
   );
-  if (!binding) return null;
+  if (!binding) {
+    if (input.runtime)
+      throw new RuntimeDenied(
+        "runtime-binding-mismatch",
+        "Runtime exchange requires an active workload binding",
+      );
+    return null;
+  }
   if (binding.revoked_at !== null)
     return c.json(
       {
@@ -85,6 +100,41 @@ async function exchangeScopedWorkloadUnchecked(
     `${binding.binding_id}:${input.assertionId}`,
     undefined,
   );
+  if (input.runtime) {
+    if (!input.jkt || !input.assertion)
+      throw new RuntimeDenied(
+        "runtime-binding-mismatch",
+        "Runtime workloads require a run proof key",
+      );
+    await runtimeProof(c, input.jkt, input.assertion);
+    const runtime = new RuntimeStore(c.env.DB);
+    await runtime.consumeAssertion(
+      digest,
+      binding.binding_id,
+      input.runtime.operation_id,
+      input.expiresAt,
+    );
+    const plaintext = await generateToken();
+    const context = await runtime.startWithPolicy(
+      input.projectId,
+      binding.principal_id,
+      { ...input.runtime, jkt: input.jkt },
+      issuedPolicy,
+      {
+        id: crypto.randomUUID(),
+        hash: await hashToken(plaintext, c.env.HASH_PEPPER),
+      },
+      {
+        workload_binding_id: binding.binding_id,
+        workload_context_json: input.workloadContext
+          ? JSON.stringify(input.workloadContext)
+          : undefined,
+      },
+      input.expiresAt,
+    );
+    c.header("Cache-Control", "no-store");
+    return c.json({ ok: true, token: plaintext, context });
+  }
   const name = `workload-${digest}`;
   // An assertion is exchanged once. No bearer secret is persisted in a replay
   // cache; concurrent/retried exchanges receive a conflict rather than re-mint.
@@ -157,6 +207,14 @@ export async function exchangeScopedWorkload(
   try {
     return await exchangeScopedWorkloadUnchecked(c, input);
   } catch (error) {
+    if (error instanceof RuntimeDenied)
+      return c.json(
+        {
+          ok: false,
+          error: { code: error.code, message: error.message, retryable: false },
+        },
+        error.status,
+      );
     if (
       error instanceof CredentialConflict ||
       (error instanceof Error &&

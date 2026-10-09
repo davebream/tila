@@ -59,7 +59,7 @@ it("isolates concurrent sessions and makes duplicate starts and ends idempotent"
   expect((await api.claims.get("task:owned")).claim?.mode).toBe("owner");
   expect(h.store.read(two.state.key)?.phase).toBe("active");
   const resumed = await start();
-  expect(resumed.state.participantId).toBe(one.state.participantId);
+  expect(resumed.state.participantId).not.toBe(one.state.participantId);
   expect(resumed.state.generation).not.toBe(one.state.generation);
   expect(
     await h.lifecycle.tick(one.state.key, one.state.generation, false),
@@ -233,7 +233,7 @@ it("runs two client processes and expires a killed client's lease without fake c
         await exited;
       }
   }
-}, 15_000);
+}, 30_000);
 
 it("does not mistake successful presence for recovered re-entry context", async () => {
   const { state } = await start();

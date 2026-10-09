@@ -9,7 +9,6 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import type { TilaProjectConfig } from "@tila/schemas";
 import { TilaApiError, type TilaFacade, createTila } from "tila-sdk";
 import { afterEach, expect, it, vi } from "vitest";
-import { guardRemoteOnlyTools } from "../remote-only";
 import { registerAllTools } from "../tools/index";
 
 // Real SQLite connections and JSON Schema compilation can contend with the full monorepo suite.
@@ -65,12 +64,7 @@ async function fixture() {
 }
 async function connect(facade: TilaFacade, groups?: string[]) {
   const server = new McpServer({ name: "test", version: "1" });
-  registerAllTools(
-    guardRemoteOnlyTools(server, "local"),
-    facade,
-    "workflow",
-    groups,
-  );
+  registerAllTools(server, facade, "workflow", groups);
   const client = new Client(
     { name: "test", version: "1" },
     { jsonSchemaValidator: validator },

@@ -1,12 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { hostname } from "node:os";
-import {
-  type EnvironmentMetadata,
-  ParticipantIdSchema,
-  type TilaProjectConfig,
-} from "@tila/schemas";
+import type { EnvironmentMetadata, TilaProjectConfig } from "@tila/schemas";
 import { type TilaFacade, createTila } from "tila-sdk";
 import type { McpServerConfig } from "./config";
 
@@ -16,10 +11,6 @@ const require = createRequire(import.meta.url);
 export const MCP_VERSION: string = (
   require("../package.json") as { version: string }
 ).version;
-
-const MCP_PARTICIPANT_ID = ParticipantIdSchema.parse(
-  process.env.TILA_PARTICIPANT_ID?.trim() || randomUUID(),
-);
 
 function gitMetadata(...args: string[]): string | undefined {
   try {
@@ -45,61 +36,23 @@ const MCP_ENVIRONMENT: EnvironmentMetadata = {
   client_version: MCP_VERSION,
 };
 
-/**
- * Build the uniform {@link TilaFacade} data layer from a resolved server config.
- *
- * Both branches go through `createTila`, so local and remote tools share ONE
- * code path:
- *  - `mode === "local"`: constructs a synthetic `backend: "local"` config and
- *    lets `createTila` DYNAMICALLY import `tila-sdk/local` (better-sqlite3 +
- *    node:fs). No token is needed.
- *  - `mode === "remote"`: constructs a `backend: "cloudflare"` config from the
- *    resolved apiUrl/projectId and the auth token, wiring the HTTP backend, and
- *    attributes traffic as `mcp-server/<version>` via `X-Tila-Source`.
- *
- * `schema_version` / `tila_version` / `created_at` are required by the
- * `TilaProjectConfig` schema but unused by `createTila`; they are filled with
- * inert placeholders.
- */
+/** Build an HTTP facade only after the run broker establishes authority. */
 export async function buildFacade(
   config: McpServerConfig,
-  identity?: { participantId: string; environment: EnvironmentMetadata },
+  meta?: Record<string, unknown>,
 ): Promise<TilaFacade> {
-  if (config.mode === "local") {
-    const tilaConfig: TilaProjectConfig = {
-      project_id: config.projectId,
-      backend: "local",
-      local: {
-        db_path: config.dbPath,
-        artifacts_path: config.artifactsPath,
-        org: config.org,
-      },
-      schema_version: 0,
-      tila_version: MCP_VERSION,
-      created_at: new Date(0).toISOString(),
-    };
-    return createTila(tilaConfig, undefined, {
-      participantId: identity?.participantId ?? MCP_PARTICIPANT_ID,
-      environment: identity?.environment ?? MCP_ENVIRONMENT,
-    });
-  }
-
-  const token = await config.getToken();
+  const run = await config.resolveRun(meta);
   const tilaConfig: TilaProjectConfig = {
-    project_id: config.projectId,
+    project_id: run.context.project_id,
     backend: "cloudflare",
-    worker_url: config.apiUrl,
+    worker_url: run.deployment,
     schema_version: 0,
     tila_version: MCP_VERSION,
     created_at: new Date(0).toISOString(),
   };
-  // Attribute remote MCP traffic as mcp-server/<version> (the same value/format
-  // the pre-facade TilaClient used via extraHeaders). The repo standardizes on
-  // X-Tila-Source for client attribution, so this preserves the MCP's identity
-  // on the remote path. Local mode makes no HTTP requests, so no header applies.
-  return createTila(tilaConfig, token, {
+  return createTila(tilaConfig, run.provider, {
     extraHeaders: { "X-Tila-Source": `mcp-server/${MCP_VERSION}` },
-    participantId: identity?.participantId ?? MCP_PARTICIPANT_ID,
-    environment: identity?.environment ?? MCP_ENVIRONMENT,
+    participantId: run.context.participant_id,
+    environment: MCP_ENVIRONMENT,
   });
 }

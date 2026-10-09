@@ -2,11 +2,22 @@
   "mcpServers": {
     "tila-dev": {
       "command": "pnpm",
-      "args": ["--silent", "dev:mcp"],
+      "args": [
+        "--silent",
+        "dev:cli",
+        "--instance",
+        "http://localhost:8787",
+        "--project",
+        "dev-project",
+        "run",
+        "exec",
+        "--",
+        "pnpm",
+        "--silent",
+        "dev:mcp"
+      ],
       "env": {
-        "TILA_API_TOKEN": "tila_dev_token_localonly",
-        "TILA_API_URL": "http://localhost:8787",
-        "TILA_PROJECT_ID": "dev-project"
+        "TILA_HOME": ".tila/dev-auth"
       }
     }
   }

@@ -39,6 +39,7 @@ export interface Env {
 export type { TokenResult };
 
 export interface ScopedAuth {
+  runtime?: import("@tila/schemas").RuntimeContext;
   principalId?: string;
   credentialId?: string;
   policy?: CredentialPolicy;

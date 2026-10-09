@@ -134,6 +134,18 @@ export function requireToken(): string {
  * Supports both sync (tila-token) and async (github-repo) modes.
  */
 export async function requireTokenAsync(): Promise<string> {
+  if (
+    process.env.TILA_RUN_SOCKET ||
+    process.env.TILA_RUN_CAPABILITY ||
+    process.env.TILA_LIFECYCLE_KEY ||
+    process.env.CODEX_THREAD_ID
+  )
+    throw Object.assign(
+      new Error(
+        "Managed commands must use the runtime broker; operator credential fallback is forbidden",
+      ),
+      { code: "runtime-purpose-denied" },
+    );
   const inline = getGlobalFlags().token;
   if (inline !== undefined) return inline;
   const config = findConfig();

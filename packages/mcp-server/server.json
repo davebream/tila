@@ -6,7 +6,7 @@
     "source": "github",
     "subfolder": "packages/mcp-server"
   },
-  "version": "0.3.0",
+  "version": "0.4.0",
   "packages": [
     {
       "registryType": "npm",
@@ -18,26 +18,20 @@
   ],
   "environmentVariables": [
     {
-      "name": "TILA_API_TOKEN",
-      "description": "API token for authenticating with the tila server",
-      "isRequired": true,
+      "name": "TILA_RUN_SOCKET",
+      "description": "Run-specific local broker socket provided by tila run exec; use tila mcp init to configure supported client lifecycles",
+      "isRequired": false,
+      "isSecret": false
+    },
+    {
+      "name": "TILA_RUN_CAPABILITY",
+      "description": "Run-specific socket capability supplied by the helper; never put this in editor configuration",
+      "isRequired": false,
       "isSecret": true
     },
     {
-      "name": "TILA_API_URL",
-      "description": "Base URL of the tila worker (e.g. https://tila.example.workers.dev)",
-      "isRequired": false,
-      "isSecret": false
-    },
-    {
-      "name": "TILA_PROJECT_ID",
-      "description": "tila project ID to scope all operations",
-      "isRequired": false,
-      "isSecret": false
-    },
-    {
       "name": "TILA_MCP_TOOLS",
-      "description": "Comma-separated tool groups to register. Unset = all groups. Recommended lean profile for coordination-only agents: 'core' (tasks, claims, gates, signals, summary, presence, journal - 20 tools, ~47% fewer always-on tokens). Valid groups: tasks, claims, gates, signals, artifacts, records, presence, journal, schema, templates, summary, core.",
+      "description": "Optional primitive groups; defaults to six workflow tools: tila_session, tila_inspect, tila_claim, tila_publish, tila_signal, tila_close. Additional tool visibility never grants backend permissions.",
       "isRequired": false,
       "isSecret": false
     }

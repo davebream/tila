@@ -20,7 +20,7 @@ bound to its own deployment identity.
 
 The practical consequence: **"multi-instance" is a client-side registry problem, not a
 server-federation problem.** The server side is deliberately simple — one deployment knows nothing
-about another. The complexity lives in the client (the `tila` CLI and the MCP server), which must
+about another. The complexity lives in the client (the operator `tila` CLI), which must
 track *which* deployment a given command is talking to and present the right credential for it.
 That client-side registry is the `~/.tila` store described below.
 
@@ -225,3 +225,7 @@ for navigational completeness.)
 - [`docs/10-AUTH-IMPLEMENTATION.md`](10-AUTH-IMPLEMENTATION.md) — server-side implementation: the three auth paths, instance-id binding, subject revocation, tiered TTL, OIDC principals, and D1 schema.
 - [`docs/01-DECISIONS.md`](01-DECISIONS.md) — the settled decisions behind per-deployment sovereignty and revocation semantics.
 - [`docs/05-OPERATIONS.md`](05-OPERATIONS.md) — operational runbooks for revocation and `HASH_PEPPER` rotation.
+
+## MCP runtime binding (0.4.0)
+
+MCP does not use the operator credential-resolution chain described above. Its broker reference or native host session mapping selects one authenticated project run. Deployment, project, participant, run, and initial authority are pinned; missing mappings or conflicting overrides fail closed. See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs).

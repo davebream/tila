@@ -1,6 +1,7 @@
 import { LruTtlCache } from "./lru-ttl-cache";
 
 export interface TokenClaims {
+  runtime?: import("@tila/schemas").RuntimeContext;
   principalId?: string;
   credentialId?: string;
   policy?: import("@tila/schemas").CredentialPolicy;

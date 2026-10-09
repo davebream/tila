@@ -41,6 +41,9 @@ const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 const mockRateLimitRecordFailure = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@tila/backend-d1", async () => ({
+  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
+    "@tila/backend-d1",
+  )),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {

@@ -94,7 +94,26 @@ export function requestIdentityMiddleware(): MiddlewareHandler<{
     }
 
     const rawParticipant = c.req.header("X-Tila-Participant-Id");
-    const parsedParticipant = ParticipantIdSchema.safeParse(rawParticipant);
+    const authenticated = c.get("tokenResult");
+    const bound =
+      authenticated.kind === "d1-token"
+        ? authenticated.runtime?.participant_id
+        : null;
+    if (bound && rawParticipant !== undefined && rawParticipant !== bound)
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "runtime-binding-mismatch",
+            message: "Participant must match the authenticated run",
+            retryable: false,
+          },
+        },
+        403,
+      );
+    const parsedParticipant = ParticipantIdSchema.safeParse(
+      bound ?? rawParticipant,
+    );
     // Schema preview is read-only even though it uses POST.
     const isMutation =
       MUTATING_METHODS.has(c.req.method) &&

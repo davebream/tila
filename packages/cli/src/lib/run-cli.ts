@@ -14,6 +14,7 @@ import {
   sharedArgs,
 } from "./command-registry";
 import { setGlobalFlags } from "./global-flags";
+import { managedRuntime } from "./managed-runtime";
 import {
   failWithCliError,
   outputText,
@@ -167,6 +168,35 @@ export async function runCli(
           });
         else outputText(await renderUsage(prepared));
         return;
+      }
+      if (path !== "lifecycle hook" && path !== "lifecycle worker") {
+        const managed = await managedRuntime();
+        if (
+          managed &&
+          !new Set([
+            "task",
+            "entity",
+            "work-unit",
+            "record",
+            "artifact",
+            "presence",
+            "signal",
+            "summary",
+            "gate",
+            "schema",
+            "journal",
+            "search",
+            "index",
+            "template",
+            "state",
+          ]).has(path.split(" ")[0])
+        )
+          throw Object.assign(
+            new Error(
+              "Managed runs cannot perform operator or installation administration",
+            ),
+            { code: "runtime-purpose-denied" },
+          );
       }
       await runCommand(prepared, { rawArgs: rest });
     };

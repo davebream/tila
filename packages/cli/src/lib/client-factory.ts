@@ -1,5 +1,5 @@
 import type { EnvironmentMetadata, TilaProjectConfig } from "@tila/schemas";
-import { TilaClient } from "tila-sdk";
+import { TilaClient, type TokenProvider } from "tila-sdk";
 import { VERSION as CLI_VERSION } from "../version";
 
 const CLI_SOURCE_HEADERS: Record<string, string> = {
@@ -17,7 +17,7 @@ const CLI_SOURCE_HEADERS: Record<string, string> = {
  */
 export function createCliClient(
   baseUrl: string,
-  token: string,
+  token: string | TokenProvider,
   dpopSigner?: (htm: string, htu: string) => Promise<string>,
   identity?: { participantId: string; environment: EnvironmentMetadata },
 ): TilaClient {
@@ -43,7 +43,7 @@ export function createCliClient(
  */
 export function createCliClientFromConfig(
   config: TilaProjectConfig,
-  token: string,
+  token: string | TokenProvider,
   dpopSigner?: (htm: string, htu: string) => Promise<string>,
   identity?: { participantId: string; environment: EnvironmentMetadata },
 ): TilaClient {

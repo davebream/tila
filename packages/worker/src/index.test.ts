@@ -16,6 +16,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tila/backend-d1", () => ({
+  RuntimeStore: class {
+    async pruneReplayState() {}
+  },
   D1ProjectRegistry: vi.fn(),
   D1SessionStore: vi.fn(),
   D1RateLimitStore: vi.fn(),
@@ -78,8 +81,8 @@ describe("scheduled() — crash-safe sweep", () => {
 
     // The work scheduled via waitUntil must RESOLVE (be caught), not reject —
     // a rejected waitUntil is the silent-abort bug PR17 fixes.
-    expect(settled).toHaveLength(1);
-    await expect(settled[0]).resolves.not.toThrow();
+    expect(settled).toHaveLength(2);
+    for (const work of settled) await expect(work).resolves.not.toThrow();
 
     errSpy.mockRestore();
   });

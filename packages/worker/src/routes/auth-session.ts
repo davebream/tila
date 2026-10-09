@@ -115,7 +115,7 @@ authSessionExchange.post("/", async (c) => {
     );
   }
 
-  if (tokenResult.cnfJkt)
+  if (tokenResult.cnfJkt || tokenResult.scopes === "runtime-v1")
     return c.json(
       {
         ok: false,

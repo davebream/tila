@@ -9,7 +9,7 @@ Coordination primitives that prevent races.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.3.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Upgrading from v0.2.x requires coordinated client/Worker updates; read the [upgrade notes](CHANGELOG.md#030---2026-10-08) before deploying.
+> **Status:** v0.4.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Upgrading from v0.2.x requires coordinated client/Worker updates; read the [upgrade notes](CHANGELOG.md#030---2026-10-08) before deploying.
 
 </div>
 
@@ -166,18 +166,20 @@ The `tila-mcp-server` and `tila-sdk` packages are published on npm (see [latest 
 tila mcp init
 ```
 
-**2. Manual config**
-`.mcp.json` (Claude Code): `{ "mcpServers": { "tila": { "command": "npx", "args": ["-y", "tila-mcp-server"] } } }`
-`.cursor/mcp.json` (Cursor) — same shape. `.vscode/mcp.json` (VS Code) — use `"servers"` instead of `"mcpServers"`.
+**2. Explicit managed launch** (after enrollment)
+```sh
+tila --instance https://tila.example.com --project my-project machine enroll
+tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.4.0
+```
 
-> If your project uses GitHub auth (`[auth] mode = "github-repo"` in `.tila/config.toml`), no `TILA_API_TOKEN` is needed — the server reads credentials automatically. For token-based auth, add `"env": { "TILA_API_TOKEN": "<token>" }` to the config above.
+MCP uses a single project run through a local credential helper. It rejects owner/personal credentials and local SQLite configuration. Generated editor settings contain only non-secret references. CLI administration and SDK local mode remain available.
 
 **3. TypeScript SDK**
 ```sh
 npm install tila-sdk
 ```
 
-Full setup (auth modes, env vars, resources): [`packages/mcp-server/README.md`](packages/mcp-server/README.md)
+Full setup (enrollment, run lifecycle, resources): [`packages/mcp-server/README.md`](packages/mcp-server/README.md)
 
 ---
 
@@ -251,7 +253,7 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 ## 📄 Documentation
 
 - [CLI Reference](packages/cli/README.md): all commands and workflows
-- [MCP Server](packages/mcp-server/README.md): 42 tools, auth modes, resources
+- [MCP Server](packages/mcp-server/README.md): six default workflows, restricted runs, resources
 - [TypeScript SDK](packages/sdk/README.md): client API, claims, artifacts, error handling
 - [Getting Started Tutorial](docs/tutorial-getting-started.md): from `tila init` to the UI dashboard
 - [Architecture](docs/02-ARCHITECTURE.md): full technical spec

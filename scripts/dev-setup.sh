@@ -76,6 +76,9 @@ if ! pnpm --filter @tila/worker exec wrangler d1 execute tila-global \
 fi
 
 echo ""
+echo "→ Provisioning isolated runtime enrollment"
+node scripts/dev-runtime-setup.mjs
+
 echo "=== Ready ==="
 echo ""
 echo "Start the Worker and UI:"

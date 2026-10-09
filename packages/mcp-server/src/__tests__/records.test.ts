@@ -310,7 +310,7 @@ describe("registerAllResources (record resources)", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers a resource for mcp_resource = true record type", async () => {
+  it("fetches schema inside a record resource request", async () => {
     const schemaDef = [
       "schema_version = 1",
       "[records.pipeline_config]",
@@ -330,16 +330,25 @@ describe("registerAllResources (record resources)", () => {
     // 4 static resources + 1 record resource
     const resourceCalls = server.resource.mock.calls;
     const recordResourceCall = resourceCalls.find(
-      (call: unknown[]) => call[0] === "record-pipeline_config",
+      (call: unknown[]) => call[0] === "project-record",
     );
 
     expect(recordResourceCall).toBeDefined();
+    expect(facade.schema.get).not.toHaveBeenCalled();
+    const handler = recordResourceCall?.at(-1) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    await handler(new URL("tila://records/pipeline_config/key"), {
+      type: "pipeline_config",
+      key: "key",
+    });
+    expect(facade.records.get).toHaveBeenCalledWith("pipeline_config", "key");
     // Second argument should be a ResourceTemplate instance
     expect(recordResourceCall?.[1]).toBeDefined();
     expect(typeof recordResourceCall?.[1]).toBe("object");
   });
 
-  it("does NOT register a resource for mcp_resource = false (default)", async () => {
+  it("denies unexposed record types at request time", async () => {
     const schemaDef = [
       "schema_version = 1",
       "[records.internal_state]",
@@ -357,14 +366,22 @@ describe("registerAllResources (record resources)", () => {
 
     const resourceCalls = server.resource.mock.calls;
     const recordResourceCall = resourceCalls.find(
-      (call: unknown[]) =>
-        typeof call[0] === "string" && call[0].startsWith("record-"),
+      (call: unknown[]) => call[0] === "project-record",
     );
 
-    expect(recordResourceCall).toBeUndefined();
+    const handler = recordResourceCall?.at(-1) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    await expect(
+      handler(new URL("tila://records/internal_state/key"), {
+        type: "internal_state",
+        key: "key",
+      }),
+    ).rejects.toThrow("not exposed");
+    expect(facade.records.get).not.toHaveBeenCalled();
   });
 
-  it("silently handles schema fetch failure", async () => {
+  it("does not fetch schema during registration", async () => {
     facade.schema.get.mockRejectedValue(new Error("Network error"));
 
     // Should not throw -- schema fetch failure is non-fatal
@@ -379,7 +396,7 @@ describe("registerAllResources (record resources)", () => {
     expect(resourceNames).toContain("project-summary");
   });
 
-  it("silently handles null schema", async () => {
+  it("registers without project schema access", async () => {
     facade.schema.get.mockResolvedValue({
       ok: true,
       schema: null,

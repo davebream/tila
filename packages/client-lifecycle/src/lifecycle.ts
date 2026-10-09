@@ -55,9 +55,10 @@ export function environmentMetadata(
     branch: command("git", ["branch", "--show-current"]),
     commit: command("git", ["rev-parse", "HEAD"]),
     client_name: client,
-    client_version: command(client === "codex" ? "codex" : "claude", [
-      "--version",
-    ]),
+    client_version:
+      client === "cli"
+        ? undefined
+        : command(client === "codex" ? "codex" : "claude", ["--version"]),
   };
 }
 
@@ -112,6 +113,10 @@ export class Lifecycle {
     event: LifecycleEvent,
     owner: ProcessIdentity | null,
     environment: EnvironmentMetadata,
+    runtime?: {
+      participantId: string;
+      reference: NonNullable<LifecycleState["runtime"]>;
+    },
   ): Promise<{ state: LifecycleState; text: string }> {
     const key = sessionKey(this.namespace, client, event.session_id);
     return this.store.locked(key, async () => {
@@ -130,7 +135,12 @@ export class Lifecycle {
               namespace: this.namespace,
               client,
               sessionId: event.session_id,
-              participantId: old?.participantId ?? `tila-${key}`,
+              participantId:
+                runtime?.participantId ??
+                (resumed
+                  ? randomUUID()
+                  : (old?.participantId ?? `tila-${key}`)),
+              runtime: runtime?.reference,
               cwd: event.cwd,
               environment,
               generation: randomUUID(),
@@ -142,6 +152,9 @@ export class Lifecycle {
               lastHeartbeat: null,
               degraded: null,
               reentryPending: true,
+              resumeHandoffId:
+                old?.resumeHandoffId ??
+                (old?.handoffSaved ? old.pendingHandoff?.id : null),
               pendingHandoff: null,
               handoffSaved: false,
               cursorSaved: false,
@@ -158,6 +171,9 @@ export class Lifecycle {
         state.observedSeq = Math.max(state.observedSeq, cursor.seq);
         const response = await api.reentry({
           after_seq: state.observedSeq,
+          ...(state.resumeHandoffId
+            ? { handoff_id: state.resumeHandoffId }
+            : {}),
           limit: 20,
         });
         const context = reentryContext(
@@ -166,6 +182,7 @@ export class Lifecycle {
           state.participantId,
         );
         // The next supported hook confirms that execution continued after context delivery.
+        state.resumeHandoffId = response.handoff?.id ?? state.resumeHandoffId;
         state.offeredSeq = context.seq;
         state.reentryPending = false;
         state.degraded = null;
@@ -215,6 +232,17 @@ export class Lifecycle {
         references: [],
       };
       this.store.write(state);
+      try {
+        const api = await this.facade(state);
+        const response = await api.reentry({
+          after_seq: state.observedSeq,
+          limit: 1,
+        });
+        state.resumeHandoffId = response.handoff?.id ?? state.resumeHandoffId;
+        this.store.write(state);
+      } catch {
+        /* Preserve shutdown intent and recover via its eventual snapshot. */
+      }
     });
   }
   async tick(
@@ -257,6 +285,7 @@ export class Lifecycle {
                   claim.mode !== "owner",
               )
               .map(({ resource, fence }) => ({ resource, fence }));
+            state.resumeHandoffId ??= handoff.id;
             state.handoffSaved = true;
             state.degraded = null;
             this.store.write(state);

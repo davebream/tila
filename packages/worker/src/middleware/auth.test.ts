@@ -146,6 +146,9 @@ let mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
 // back to `() => ({...})` arrows — Biome's useArrowFunction would also rewrite a
 // plain `function` expression to an arrow, so `class` + cast is the stable form.
 vi.mock("@tila/backend-d1", async () => ({
+  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
+    "@tila/backend-d1",
+  )),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {

@@ -1,4 +1,9 @@
-import { resolveActionsMembership } from "@tila/backend-d1";
+import {
+  RUNTIME_TOKEN_MARKER,
+  RuntimeDenied,
+  RuntimeStore,
+  resolveActionsMembership,
+} from "@tila/backend-d1";
 import { CredentialStore, SCOPED_TOKEN_MARKER } from "@tila/backend-d1";
 import {
   D1RateLimitStore,
@@ -39,6 +44,7 @@ import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
 import { hashToken } from "../lib/hash-token";
 import { parseCookieHeader } from "../lib/parse-cookie";
+import { consumeRuntimeProof } from "../lib/runtime-proof-replay";
 import { measurePhase } from "../lib/server-timing";
 import {
   getSessionFromCache,
@@ -426,6 +432,7 @@ async function enforceDpop(
   c: Context,
   expectedJkt: string,
   accessToken: string,
+  requireAth = false,
 ): Promise<Response | null> {
   const proofJwt = c.req.header("DPoP");
 
@@ -448,6 +455,7 @@ async function enforceDpop(
   const htu = canonicalizeHtu(c.req.url);
 
   const result = await verifyDpopProof({
+    requireAth,
     proofJwt,
     expectedJkt,
     accessToken,
@@ -1268,7 +1276,31 @@ export function createAuthMiddleware(
             }
           : null;
       }
-    } catch {
+      if (claims?.scopes === RUNTIME_TOKEN_MARKER) {
+        const runtime = await new RuntimeStore(c.env.DB).context(
+          claims.tokenId,
+        );
+        claims = {
+          ...claims,
+          principalId: runtime.principal_id,
+          policy: runtime.policy,
+          expiresAt: runtime.expires_at,
+          runtime,
+        };
+      }
+    } catch (error) {
+      if (error instanceof RuntimeDenied)
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message,
+              retryable: false,
+            },
+          },
+          error.status,
+        );
       return c.json(
         {
           ok: false,
@@ -1308,10 +1340,94 @@ export function createAuthMiddleware(
     // proof for this request. Absent binding ⇒ skip (legacy/unbound accept).
     //
     if (claims?.cnfJkt) {
-      const dpopResult = await enforceDpop(c, claims.cnfJkt, rawToken);
+      const dpopResult = await enforceDpop(
+        c,
+        claims.cnfJkt,
+        rawToken,
+        !!claims.runtime,
+      );
       if (dpopResult !== null) return dpopResult;
+      if (claims.runtime) {
+        try {
+          await consumeRuntimeProof(
+            c.env.DB,
+            claims.cnfJkt,
+            c.req.header("DPoP") ?? "",
+            c.req.raw,
+          );
+        } catch (error) {
+          const denied = error instanceof RuntimeDenied;
+          return c.json(
+            {
+              ok: false,
+              error: {
+                code: denied ? error.code : "runtime-authorization-unavailable",
+                message: denied
+                  ? error.message
+                  : "Runtime authorization state is unavailable",
+                retryable: !denied,
+              },
+            },
+            denied ? error.status : 503,
+          );
+        }
+      }
     }
 
+    if (claims.runtime) {
+      const path = new URL(c.req.url).pathname;
+      const runtime = claims.runtime;
+      const participant = c.req.header("X-Tila-Participant-Id");
+      if (
+        runtime.participant_id &&
+        participant !== undefined &&
+        participant !== runtime.participant_id
+      )
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "runtime-binding-mismatch",
+              message: "Participant conflicts with the authenticated run",
+              retryable: false,
+            },
+          },
+          403,
+        );
+      const context = path === "/api/runtime/context";
+      const control = path.startsWith(
+        `/projects/${encodeURIComponent(runtime.project_id)}/runtime/`,
+      );
+      const selfControl =
+        runtime.workload_binding_id &&
+        runtime.run_id &&
+        c.req.method === "POST" &&
+        ["heartbeat", "close"].some(
+          (action) =>
+            path ===
+            `/projects/${encodeURIComponent(runtime.project_id)}/runtime/runs/${runtime.run_id}/${action}`,
+        );
+      const project = path.startsWith(
+        `/projects/${encodeURIComponent(runtime.project_id)}/`,
+      );
+      if (
+        (!context && runtime.purpose === "enrollment" && !control) ||
+        (!context &&
+          runtime.purpose === "run" &&
+          (!project || (control && !selfControl)))
+      )
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "runtime-purpose-denied",
+              message: "Credential cannot authorize this operation",
+              retryable: false,
+            },
+          },
+          403,
+        );
+    }
     // 6. Debounced last_used_at write (fire-and-forget)
     const lastWrite = lastWriteMap.get(tokenHash) ?? 0;
     if (now - lastWrite > DEBOUNCE_MS) {

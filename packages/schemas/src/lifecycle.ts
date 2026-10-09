@@ -2,7 +2,7 @@ import { z } from "zod";
 import { HandoffCreateRequestSchema } from "./continuity";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 
-export const LifecycleClientSchema = z.enum(["claude-code", "codex"]);
+export const LifecycleClientSchema = z.enum(["claude-code", "codex", "cli"]);
 export type LifecycleClient = z.infer<typeof LifecycleClientSchema>;
 export const LifecycleEventSchema = z.object({
   session_id: z.string().min(1).max(512),
@@ -29,6 +29,13 @@ export const LifecycleStateSchema = z.object({
   client: LifecycleClientSchema,
   sessionId: z.string(),
   participantId: ParticipantIdSchema,
+  runtime: z
+    .object({
+      socket: z.string(),
+      capability: z.string(),
+      runId: z.string().uuid(),
+    })
+    .optional(),
   cwd: z.string(),
   environment: EnvironmentMetadataSchema,
   generation: z.string().uuid(),
@@ -40,6 +47,7 @@ export const LifecycleStateSchema = z.object({
   lastHeartbeat: z.number().nullable(),
   degraded: z.string().nullable(),
   reentryPending: z.boolean(),
+  resumeHandoffId: z.string().uuid().nullable().optional(),
   pendingHandoff: HandoffCreateRequestSchema.nullable(),
   handoffSaved: z.boolean(),
   cursorSaved: z.boolean(),

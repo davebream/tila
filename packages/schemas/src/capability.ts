@@ -165,6 +165,31 @@ export function effectiveCredentialPolicy(
 }
 
 export const CREDENTIAL_PRESETS = {
+  worker: {
+    role: "participant",
+    capabilities: [
+      "tasks:read",
+      "tasks:write",
+      "records:read",
+      "records:write",
+      "artifacts:read",
+      "artifacts:write",
+      "claims:read",
+      "claims:acquire",
+      "claims:renew",
+      "claims:release",
+      "signals:read",
+      "signals:send",
+      "signals:ack",
+      "presence:read",
+      "presence:heartbeat",
+      "gates:read",
+      "schema:read",
+      "search:read",
+      "journal:read",
+      "summary:read",
+    ],
+  },
   "read-only": {
     role: "viewer",
     capabilities: CAPABILITIES.filter(

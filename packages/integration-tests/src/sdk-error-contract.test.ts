@@ -23,6 +23,8 @@ function collectEmittedCodesFromContent(content: string): string[] {
   const codes: string[] = [];
   const patterns = [
     /OidcVerificationError\(\s*"([a-z][a-z0-9-]*)"/g,
+    /RuntimeDenied\(\s*"([a-z][a-z0-9-]*)"/g,
+    /this\.deny\(\s*"([a-z][a-z0-9-]*)"/g,
     /ContinuityError\(\s*"([a-z][a-z0-9-]*)"/g,
     /ArtifactVersionError\(\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
     /code:\s*"([a-z][a-z0-9-]*)"/g,
@@ -68,6 +70,7 @@ function collectServerEmittedCodes(): Set<string> {
     OPS_SQLITE_SRC_DIR,
     BACKEND_DO_SRC_DIR,
     CORE_SRC_DIR,
+    join(__dirname, "../../backend-d1/src"),
   ]) {
     for (const code of collectWorkerEmittedCodes(dir)) {
       codes.add(code);
@@ -91,6 +94,17 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   ]);
 
   const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "runtime-purpose-denied",
+    "runtime-binding-mismatch",
+    "runtime-proof-replayed",
+    "runtime-policy-denied",
+    "runtime-renewal-conflict",
+    "runtime-conflict",
+    "runtime-authorization-unavailable",
+    "enrollment-revoked",
+    "run-closed",
+    "run-expired",
+    "invitation-invalid",
     "workload-revoked",
     "workload-already-exchanged",
     "auth-unavailable",

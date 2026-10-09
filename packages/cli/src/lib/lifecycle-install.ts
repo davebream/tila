@@ -12,7 +12,8 @@ import { SessionStore, sessionKey } from "@tila/client-lifecycle";
 import type { LifecycleClient } from "@tila/schemas";
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
-import { findTilaDir } from "../config";
+import { findConfig, findTilaDir } from "../config";
+import { VERSION } from "../version";
 import {
   cliInvocation,
   lifecycleNamespace,
@@ -69,12 +70,15 @@ export function configureLifecycle(
   client: LifecycleClient,
   action: "install" | "remove",
   dryRun = false,
+  cwd = process.cwd(),
 ): void {
-  if (action === "install") lifecycleNamespace();
-  const tilaDir = findTilaDir();
+  if (client === "cli")
+    throw new Error("Use tila run exec for CLI session lifecycle");
+  if (action === "install") lifecycleNamespace(cwd);
+  const tilaDir = findTilaDir(cwd);
   if (!tilaDir && action === "install")
     throw new Error("No Tila project found");
-  const root = tilaDir ? dirname(tilaDir) : process.cwd();
+  const root = tilaDir ? dirname(tilaDir) : cwd;
   // Prior MCP settings can include credentials; keep ownership outside the repo.
   const manifest = join(
     new SessionStore().root,
@@ -118,12 +122,15 @@ export function configureLifecycle(
   const invocation = cliInvocation().map(shellQuote).join(" ");
   const command = `${invocation} lifecycle hook --client ${client}`;
   const commands = previous?.commands ?? [command];
-  const installedMcp = previous?.installedMcp ?? {
-    ...(definitions.tila ?? {
-      command: "npx",
-      args: ["-y", "tila-mcp-server"],
-    }),
-    env: { ...(definitions.tila?.env ?? {}), TILA_LIFECYCLE_CLIENT: client },
+  const config = findConfig(cwd);
+  const installedMcp = {
+    command: "npx",
+    args: ["-y", `tila-mcp-server@${VERSION}`],
+    env: {
+      TILA_LIFECYCLE_CLIENT: client,
+      TILA_API_URL: config?.worker_url ?? "",
+      TILA_PROJECT_ID: config?.project_id ?? "",
+    },
   };
   if (
     previous &&
@@ -189,7 +196,7 @@ export function configureLifecycle(
     );
     return;
   }
-  if (action === "install" && !previous) {
+  if (action === "install") {
     // Write ownership before configuration so interrupted installs can be repaired safely.
     const original =
       client === "codex"
@@ -203,9 +210,10 @@ export function configureLifecycle(
         {
           version: 1,
           commands,
-          previousMcp:
-            z.record(McpEntrySchema).parse((original as Json)[table] ?? {})
-              .tila ?? null,
+          previousMcp: previous
+            ? previous.previousMcp
+            : (z.record(McpEntrySchema).parse((original as Json)[table] ?? {})
+                .tila ?? null),
           installedMcp,
           hooksFile,
           mcpFile,
