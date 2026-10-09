@@ -1,6 +1,6 @@
 {
   "name": "tila-cli-linux-x64-musl",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Linux x64 musl binary for tila-cli",
   "os": ["linux"],
   "cpu": ["x64"],

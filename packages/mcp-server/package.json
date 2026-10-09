@@ -1,6 +1,6 @@
 {
   "name": "tila-mcp-server",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "description": "MCP server for tila — enables Claude Code, Cursor, and VS Code Copilot integration",
   "keywords": [
@@ -38,17 +38,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "@napi-rs/keyring": "^2.1.0",
     "smol-toml": "^1.8.0",
     "tila-sdk": "workspace:*",
     "zod": "^3.24.0",
     "proper-lockfile": "^4.1.2"
   },
-  "optionalDependencies": {
-    "better-sqlite3": ">=11.0.0 <14.0.0"
-  },
   "devDependencies": {
-    "@tila/auth-store": "workspace:*",
     "@tila/backend-embedded": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
@@ -56,6 +51,7 @@
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9",
-    "@tila/client-lifecycle": "workspace:*"
+    "@tila/client-lifecycle": "workspace:*",
+    "better-sqlite3": ">=11.0.0 <14.0.0"
   }
 }

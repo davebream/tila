@@ -269,28 +269,28 @@ importers:
   packages/cli:
     optionalDependencies:
       tila-cli-darwin-arm64:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-darwin-arm64
       tila-cli-darwin-x64:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-darwin-x64
       tila-cli-linux-arm64:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-linux-arm64
       tila-cli-linux-arm64-musl:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-linux-arm64-musl
       tila-cli-linux-x64:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-linux-x64
       tila-cli-linux-x64-musl:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-linux-x64-musl
       tila-cli-windows-arm64:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-windows-arm64
       tila-cli-windows-x64:
-        specifier: 0.3.0
+        specifier: 0.4.0
         version: link:../cli-windows-x64
     devDependencies:
       '@bomb.sh/tab':
@@ -518,9 +518,6 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.1
         version: 1.32.1(zod@3.25.76)
-      '@napi-rs/keyring':
-        specifier: ^2.1.0
-        version: 2.1.0
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
@@ -533,14 +530,7 @@ importers:
       zod:
         specifier: ^3.24.0
         version: 3.25.76
-    optionalDependencies:
-      better-sqlite3:
-        specifier: '>=11.0.0 <14.0.0'
-        version: 13.0.3
     devDependencies:
-      '@tila/auth-store':
-        specifier: workspace:*
-        version: link:../auth-store
       '@tila/backend-embedded':
         specifier: workspace:*
         version: link:../backend-embedded
@@ -556,6 +546,9 @@ importers:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
+      better-sqlite3:
+        specifier: '>=11.0.0 <14.0.0'
+        version: 13.0.3
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.26)(tsx@4.23.15)(typescript@5.9.3)(yaml@2.9.1)
