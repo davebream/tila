@@ -130,3 +130,47 @@ it("limits long polls to two waiters and wakes registered waiters on publication
   );
   expect(await timeout.json()).toMatchObject({ ok: true, changed: false });
 });
+
+it("separates backward history from forward tail cursors across publication and authorization", async () => {
+  const publish = async (body: string) =>
+    ops.publish(
+      f.db,
+      "general",
+      PublishMessageSchema.parse({ client_op_id: crypto.randomUUID(), body }),
+      owner,
+    );
+  for (const body of ["one", "two", "three"]) await publish(body);
+  const get = async (query: string, a = owner) =>
+    app.request(`/rooms/general/messages?${query}`, { headers: headers(a) });
+  const initial = (await (await get("direction=backward&limit=2")).json()) as {
+    messages: { body: string }[];
+    cursor: string;
+    tail_cursor: string;
+    has_more: boolean;
+  };
+  expect(initial.messages.map((row) => row.body)).toEqual(["two", "three"]);
+  expect(initial.has_more).toBe(true);
+  await publish("four");
+  const older = (await (
+    await get(
+      `direction=backward&limit=2&cursor=${encodeURIComponent(initial.cursor)}`,
+    )
+  ).json()) as typeof initial;
+  expect(older.messages.map((row) => row.body)).toEqual(["one"]);
+  const tail = (await (
+    await get(`cursor=${encodeURIComponent(initial.tail_cursor)}`)
+  ).json()) as typeof initial;
+  expect(tail.messages.map((row) => row.body)).toEqual(["four"]);
+  expect(
+    (await get(`cursor=${encodeURIComponent(initial.cursor)}`)).status,
+  ).toBe(400);
+  expect(
+    (
+      await get(
+        `direction=backward&cursor=${encodeURIComponent(initial.cursor)}`,
+        { ...owner, principal_id: "other", can_manage: false },
+      )
+    ).status,
+  ).toBe(400);
+  expect((await get("direction=invalid")).status).toBe(400);
+});
