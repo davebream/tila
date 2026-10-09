@@ -589,7 +589,7 @@ multi-account acceptance remain unproven until their separate live gates pass.
 The pinned 0.9.3 adapter is read-only and the plugin exposes authenticated host
 connector status/reconciliation. Register/open remain explicitly unsupported because
 required native multi-account, draft-preservation, Linux, and authenticated restoration
-gates have not passed. [Versioned evidence](evidence/issue-283-herdr-0-9-3-v1.json)
+gates have not passed. [Versioned evidence](evidence/issue-283-herdr-0-9-3-v2.json)
 records isolated Mac runtime/plugin observations without substituting them for live
 acceptance. Activating Herdr attachment/restoration remains unfinished work under
 #283; no supervisor or terminal fallback is introduced.
@@ -607,7 +607,7 @@ Replies persist frozen operation IDs and payloads across retry and step-up sign-
 A newer draft revision survives late responses, including after reopening the
 composer. Drafts are isolated by principal, project, room and thread.
 
-The [acceptance record](evidence/issue-283-acceptance-v2.json) is explicitly incomplete.
+The [acceptance record](evidence/issue-283-acceptance-v3.json) is explicitly incomplete.
 Fixture UI/transport tests do not prove native account isolation, busy drafts or
 unattended restoration. Herdr register/open remains unsupported and #283 remains
 open until the Mac/Linux live matrix passes. The selected macOS credential profiles

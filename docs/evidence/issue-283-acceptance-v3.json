@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "issue": 283,
+  "recorded_at": "2026-10-09",
+  "result": "incomplete",
+  "fixture_evidence": {
+    "connector": "Compiled fixtures passed on native macOS and Linux CI runners in PR #287. These are not authenticated native acceptance.",
+    "herdr": "See issue-283-herdr-0-9-3-v2.json; isolated runtime probes pass on both hosts, but native restoration/attachment acceptance remains incomplete.",
+    "dashboard": "Component tests cover lost-response retry, saved operation IDs through step-up reload, late response after unmount, bounded/deduplicated polling and keyboard drawer restoration. Brave rendered and published a reply against an isolated local fixture."
+  },
+  "live_matrix": [
+    {
+      "scenario": "two independent Claude accounts plus plain Codex coordinator",
+      "result": "not-run",
+      "prerequisite": "Selected account credentials and Linux access are verified; full authenticated live routing remains to be run."
+    },
+    {
+      "scenario": "Mac to Linux and Linux to Mac delivery",
+      "result": "not-run",
+      "prerequisite": "Run-owned cross-host project, native sessions and isolated service endpoint; SSH access is now verified."
+    },
+    {
+      "scenario": "Mac offline and delayed recovery",
+      "result": "not-run",
+      "prerequisite": "live two-host sessions"
+    },
+    {
+      "scenario": "busy native draft preservation",
+      "result": "not-run",
+      "prerequisite": "isolated authenticated native sessions"
+    },
+    {
+      "scenario": "Herdr occupant replacement and reconnect without crossover",
+      "result": "not-run",
+      "prerequisite": "live profiles and gated adapter activation"
+    },
+    {
+      "scenario": "unattended native restoration with transcript correlation",
+      "result": "not-proven",
+      "observation": "An isolated macOS cold launch stopped at login/welcome; this does not prove restoration."
+    }
+  ],
+  "required_followup": "Complete the authenticated Mac/Linux matrix using the selected two Claude accounts plus plain Codex, finish gated Herdr attachment/restoration only if required gates pass, obtain authentication-boundary review and deliver the stack through Mergify. Only then may the final PR close #283.",
+  "redaction": "No credentials, provider account names, native transcript bodies or host addresses are recorded.",
+  "evidence_revision": 3,
+  "supersedes": "issue-283-acceptance-v2.json",
+  "scope_amendment": {
+    "date": "2026-10-09",
+    "authority": "Maintainer selected two independent Claude accounts through existing CCS contexts and the plain Codex CLI.",
+    "claude_accounts": 2,
+    "codex_coordinators": 1,
+    "unchanged_gates": "Both host directions, offline recovery, busy drafts, Herdr replacement/reconnect and authenticated unattended restoration remain required."
+  },
+  "credential_prerequisites": {
+    "platform": "macos-arm64",
+    "result": "passed",
+    "registered_profiles": 3,
+    "claude_accounts_distinct": true,
+    "native_claude_auth_status": true,
+    "native_codex_account_read": true,
+    "profile_store_verification": true,
+    "configuration_directories": "Existing isolated CCS instances and the plain Codex home; all verified owner-only. No credential material copied.",
+    "codex_probe": "Short-lived native app-server stdio initialize followed by account/read with refreshToken=false; matching returned home required; no thread creation or resume.",
+    "limits": "Account metadata verification does not prove native wake, durable message exchange, draft preservation or restoration.",
+    "compiled_macos_cli_verification": true,
+    "claude_native_response_probe": {
+      "result": "passed-for-both-accounts",
+      "method": "One fixed response requested through each selected native Claude CLI context with safe mode, no tools, strict MCP configuration and no session persistence.",
+      "limits": "This proves authenticated provider response availability, not Tila routing, native wake, drafts or restoration."
+    }
+  },
+  "native_transport_observations": {
+    "codex_existing_daemon_proxy": "Confirmed bug: the native proxy tunnels WebSocket bytes, while the original connector sent JSON lines. A WebSocket upgrade over the same subprocess pipes successfully initialized and read account metadata from the existing Linux daemon.",
+    "compiled_linux_connector": "Passed actual CodexProxy account/read with refreshToken=false and matching returned profile home. No thread requests, daemon restart or configuration overrides.",
+    "compiled_macos_fixture": "Passed the WebSocket upgrade and account-only request shape in a Bun-compiled executable.",
+    "packaging": "Use the npm ws implementation through an alias because the Bun built-in shim does not honor the custom pipe connection. Keep that dependency external and declared in the Node MCP package.",
+    "protocol_source": "https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-transport/src/transport/unix_socket.rs"
+  },
+  "linux_access": {
+    "result": "passed",
+    "resolution": "The system SSH client accessed the existing private-key passphrase through macOS keychain integration. The earlier Homebrew SSH failure was a local credential-access limitation, not a rejected remote key.",
+    "host_configuration_changed": false
+  },
+  "linux_native_prerequisites": {
+    "claude_accounts_distinct": true,
+    "both_claude_native_responses": "passed with safe mode, no tools, strict MCP configuration and no session persistence",
+    "codex_chatgpt_login": true,
+    "codex_cli_version": "0.160.1",
+    "claude_cli_version": "2.1.295",
+    "ccs_version": "8.10.0",
+    "herdr_version": "0.9.3",
+    "codex_profile_registration": "Not performed: existing CODEX_HOME mode is 0775; the profile guard requires owner-only access. Existing remote permissions were preserved. The coordinator can use the already verified macOS profile."
+  },
+  "linux_safety": {
+    "preexisting_native_process_identities_preserved": true,
+    "isolated_herdr_control_socket_closed": true,
+    "credentials_copied": false,
+    "global_service_restarts_installs_or_permission_changes": false,
+    "test_owned_processes_remaining": 0,
+    "temporary_test_directory_removed": true
+  }
+}

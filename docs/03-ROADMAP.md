@@ -318,7 +318,8 @@ The required two Claude accounts and plain Codex coordinator, both cross-host
 directions, Mac outage, busy drafts, occupant replacement/reconnect and unattended
 native transcript restoration have **not** passed. The selected macOS profiles
 now verify against native account metadata, including distinct Claude accounts.
-A usable Linux test-host login remains outstanding. Herdr
+Linux SSH access, account readiness and read-only native transport probes now pass.
+Full cross-host routing and native session acceptance remain outstanding. Herdr
 activation and #283 closure remain blocked on those gates; no process-supervisor
 work is implied. Versioned evidence distinguishes fixtures, isolated runtime probes
 and actual live results. Do not add `Closes #283` until every live gate passes.

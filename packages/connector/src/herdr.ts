@@ -18,7 +18,7 @@ export const HERDR_SUPPORT = {
   supported: false,
   reason:
     "Native multi-account discovery, draft preservation and authenticated cold restoration have not passed on macOS and Linux",
-  evidence: "docs/evidence/issue-283-herdr-0-9-3-v1.json",
+  evidence: "docs/evidence/issue-283-herdr-0-9-3-v2.json",
 } as const;
 export function requireHerdrSupport(): void {
   if (!HERDR_SUPPORT.supported)
