@@ -16,6 +16,12 @@ test(
   () => {
     const root = mkdtempSync(join(tmpdir(), "tila-connector-native-"));
     try {
+      const version = spawnSync(
+        process.execPath,
+        [resolve("scripts/generate-version.mjs"), "sdk"],
+        { encoding: "utf8", timeout: 10_000 },
+      );
+      assert.equal(version.status, 0, version.stderr);
       const source = join(root, "fixture.ts");
       const binary = join(root, "connector-test");
       writeFileSync(
