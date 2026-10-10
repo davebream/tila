@@ -1,12 +1,26 @@
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { useAuth } from "@/hooks/use-auth";
+import { useTimeTick } from "@/hooks/use-time-tick";
 import { inspectDelivery, listAgents } from "@/lib/api";
+import { deriveBindingView, leaseCountdown } from "@/lib/lease";
+import { formatTime } from "@/lib/time";
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
+const BINDING_LABEL = {
+  none: "No binding",
+  attached: "Attached",
+  expired: "Expired",
+  replaced: "Replaced",
+  released: "Released",
+} as const;
+
 export function AgentsPage() {
+  // Re-render every second so lease expiry is recomputed even when polling fails.
+  useTimeTick(1000);
+  const now = Date.now();
   const { projectId } = useAuth();
   const { agentId, deliveryId } = useParams();
   const navigate = useNavigate();
@@ -28,7 +42,13 @@ export function AgentsPage() {
         </p>
       </header>
       {agents.isPending && <p>Loading agents…</p>}
-      {agents.error && <p role="alert">{agents.error.message}</p>}
+      {agents.error && (
+        <p role="alert">
+          {agents.error.message}
+          {agents.data &&
+            ` Showing data last observed at ${formatTime(agents.dataUpdatedAt)}; leases are recomputed locally.`}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-left text-sm" aria-label="Agents">
           <thead className="bg-card">
@@ -43,31 +63,43 @@ export function AgentsPage() {
             </tr>
           </thead>
           <tbody>
-            {agents.data?.agents.map(({ agent: row, binding }) => (
-              <tr key={row.id} className="border-t border-border">
-                <th className="p-3 font-medium" scope="row">
-                  {row.name}
-                  <span className="block text-xs text-muted-foreground">
-                    {row.id}
-                  </span>
-                </th>
-                <td className="p-3">
-                  {row.archived
-                    ? "Archived"
-                    : binding?.state === "active" &&
-                        binding.lease_expires_at > Date.now()
-                      ? "Attached"
-                      : "Offline"}
-                </td>
-                <td className="p-3 font-mono">{row.binding_epoch}</td>
-                <td className="p-3">{binding?.mechanism ?? "None"}</td>
-                <td className="p-3">
-                  {binding
-                    ? new Date(binding.lease_expires_at).toLocaleString()
-                    : "—"}
-                </td>
-              </tr>
-            ))}
+            {agents.data?.agents.map(({ agent: row, binding }) => {
+              const view = deriveBindingView(binding, now);
+              return (
+                <tr key={row.id} className="border-t border-border">
+                  <th className="p-3 font-medium" scope="row">
+                    {row.name}
+                    <span className="block text-xs text-muted-foreground">
+                      {row.id}
+                    </span>
+                  </th>
+                  <td className="p-3">
+                    {row.archived ? "Archived" : BINDING_LABEL[view.kind]}
+                    {view.kind !== "none" && view.redacted && (
+                      <span className="block text-xs text-muted-foreground">
+                        Details hidden
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-3 font-mono">{row.binding_epoch}</td>
+                  <td className="p-3">{binding?.mechanism ?? "None"}</td>
+                  <td className="p-3">
+                    {view.kind === "none" ? (
+                      "—"
+                    ) : (
+                      <>
+                        {new Date(view.expiresAtMs).toLocaleString()}
+                        <span className="block text-xs text-muted-foreground">
+                          {view.kind === "attached" || view.kind === "expired"
+                            ? `${view.kind === "attached" ? "Expires" : "Expired"} ${leaseCountdown(view.expiresAtMs, now)}`
+                            : `Lease ${view.kind}`}
+                        </span>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

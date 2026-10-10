@@ -14,13 +14,10 @@ import { TableSkeleton } from "@/components/ui/table-skeleton";
 import { usePresence } from "@/hooks/use-api";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
+import { heartbeatFresh } from "@/lib/lease";
 import { relativeTime } from "@/lib/time";
 import { useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router";
-
-function deriveStatus(active: boolean): "active" | "idle" | "lost" {
-  return active ? "active" : "idle";
-}
 
 function parseSortPresence(
   raw: string | null,
@@ -147,7 +144,7 @@ export function PresencePage() {
                   dir={sort?.key === "last_seen" ? sort.dir : null}
                   onSort={() => toggleSort("last_seen")}
                   className="text-right"
-                  title="Most recent heartbeat from this participant"
+                  title="Most recent heartbeat. Freshness only: it does not show whether the participant is working or finished."
                 >
                   Last Seen
                 </SortableHead>
@@ -155,7 +152,8 @@ export function PresencePage() {
             </TableHeader>
             <TableBody>
               {sorted.map((participant, idx) => {
-                const status = deriveStatus(participant.active);
+                // Heartbeat freshness only; it says nothing about working or idle.
+                const fresh = heartbeatFresh(participant, Date.now());
                 return (
                   <TableRow
                     key={`${participant.principal_id}:${participant.participant_id}`}
@@ -164,7 +162,10 @@ export function PresencePage() {
                     }
                   >
                     <TableCell>
-                      <PresenceDot status={status} />
+                      <PresenceDot
+                        status={fresh ? "active" : "lost"}
+                        label={fresh ? "Heartbeat fresh" : "Heartbeat stale"}
+                      />
                     </TableCell>
                     <TableCell className="text-fg-strong">
                       <div className="font-mono text-xs">
@@ -181,6 +182,9 @@ export function PresencePage() {
                     </TableCell>
                     <TableCell className="tila-num text-right text-muted-foreground">
                       {relativeTime(participant.last_seen)}
+                      <span className="block text-[10px] text-fg-faint">
+                        {fresh ? "Heartbeat fresh" : "Heartbeat stale"}
+                      </span>
                     </TableCell>
                   </TableRow>
                 );

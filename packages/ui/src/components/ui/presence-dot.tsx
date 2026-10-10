@@ -2,6 +2,8 @@ import { cn } from "@/lib/utils";
 
 type PresenceDotProps = {
   status: "active" | "idle" | "lost";
+  /** Accessible name; defaults to the status. Use for non-workflow meanings. */
+  label?: string;
   pulse?: boolean;
   className?: string;
 };
@@ -15,6 +17,7 @@ const statusColor = {
 export function PresenceDot({
   status,
   pulse = status === "active",
+  label,
   className,
 }: PresenceDotProps) {
   return (
@@ -25,7 +28,7 @@ export function PresenceDot({
         className,
       )}
       role="img"
-      aria-label={status}
+      aria-label={label ?? status}
     >
       {pulse && (
         <span

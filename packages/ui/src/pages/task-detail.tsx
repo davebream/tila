@@ -247,7 +247,7 @@ export function TaskDetailPage() {
                   </TableRow>
                   <TableRow>
                     <FieldLabel>
-                      <InfoTip content="Lock mode: exclusive (one writer) or shared (multiple readers)">
+                      <InfoTip content="Claim mode. exclusive: sole holder, any competing claim is refused. owner: held by one principal, other principals are refused. presence: advisory, does not block a competing non-exclusive claim.">
                         Mode
                       </InfoTip>
                     </FieldLabel>
