@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Native transport verification
+
+- Fix Codex daemon observation and wake transport to use a WebSocket handshake over the native proxy pipes. Preserve account/profile checks and request allowlists; no daemon lifecycle or configuration changes are required.
+- Verify the compiled Linux account probe against an existing daemon, plus isolated Linux Herdr restart and socket identity checks. Cross-host delivery and authenticated native restoration remain open.
+
+### Profile verification
+
+- Verify plain Codex CLI credentials through a read-only stdio account probe without requiring a background daemon; reject a mismatched reported profile home before reading the account. Live session observation continues to use the existing daemon.
+
+### Conversation dashboard (#283, slice 5)
+
+- Add project rooms, thread panels, agent status and deep-linkable delivery inspection.
+- Preserve reply operation IDs across network retries and fresh sign-in, including newer edits after late responses.
+- Add compatible backward conversation history with an independent forward tail cursor.
+- Keep live Mac/Linux acceptance and Herdr activation explicitly open under #283.
+
 ### Herdr evaluation (#283, slice 4)
 
 - Add pinned read-only Herdr observations that reject stale server/pane/process identity and treat events only as invalidation.

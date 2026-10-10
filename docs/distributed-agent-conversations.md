@@ -1,8 +1,8 @@
 # Distributed agent conversations
 
-Status: implementation in progress, 2026-10-09. Slices 1–2 implement identity,
-profiles and durable conversations. Host connectors, native wake, Herdr and the
-dashboard remain future slices. It supplements the current [architecture](02-ARCHITECTURE.md) and
+Status: implementation in progress, 2026-10-09. The PR stack implements identity,
+profiles, durable conversations, a standalone connector and the dashboard. Herdr
+activation and live distributed acceptance remain unfinished. It supplements the current [architecture](02-ARCHITECTURE.md) and
 [roadmap](03-ROADMAP.md). Existing identity, membership, and fencing guarantees
 remain in force during migration.
 
@@ -11,8 +11,8 @@ remain in force during migration.
 This revision implements durable agent registration, run-pinned agent/role identity,
 the consumer-binding ledger, host-local credential profiles, rooms, threads,
 messages, offline recipient snapshots, inbox acknowledgement and dispatch leases.
-CLI, SDK and MCP access work without a host connector. Native wake, Herdr and
-dashboard delivery remain future slices.
+CLI, SDK and MCP access work without a host connector. Later sections record the
+standalone connector, gated Herdr evaluation and dashboard implementation.
 Assignments, task attempts and durable questions are outside #283.
 
 An acting run holds a mailbox binding. A relay can attach an authenticated acting
@@ -87,21 +87,22 @@ provider accounts, and coding tools. People continue working in their native
 coding interfaces. Tila's optional dashboard exposes shared rooms, threads,
 delivery state, questions, and human replies through the same service API.
 
-The design must accommodate this scenario from its first implementation:
+The acceptance scope was amended on 2026-10-09 to two independent Claude accounts
+plus a plain Codex CLI coordinator. Run both standalone and Herdr cases for the
+Claude sessions, and vary coordinator placement to cover both host directions:
 
 | Project member | Native interface | Login context | Host |
 |---|---|---|---|
 | Implementation worker | Standalone Claude Code | Claude subscription A | Mac |
-| Second worker | Claude Code inside Herdr | Claude subscription B | Mac |
-| Reviewer | Claude Code inside Herdr | Claude subscription C | Linux VPS |
-| Coordinator | Standalone Codex CLI | OpenAI account D | Linux VPS |
+| Reviewer | Claude Code inside Herdr or standalone | Claude subscription B | Linux VPS |
+| Coordinator | Standalone Codex CLI | OpenAI account C | Mac / Linux VPS |
 | Human | Native terminal, optional Tila view | Tila human credential | Any client |
 
-All four sessions can publish to the same project room. A Codex session can
+All three sessions can publish to the same project room. A Codex session can
 address a Claude session and receive its reply; the reverse direction uses the
 same contract. Provider, account, machine, runtime, and run role are independent
-dimensions. Three subscriptions are three selectable account contexts, not three
-different provider integrations.
+dimensions. The two Claude subscriptions are separate selectable account contexts
+within one provider integration. More profiles remain supported by the design.
 
 The VPS must keep participating while the Mac and every dashboard are offline.
 Cross-machine execution is a first-release acceptance condition. A local-only
@@ -509,11 +510,11 @@ or provider-account labels. Provide explicit registration/mapping for migration.
 
 | Slice | Deliverable | Acceptance gate |
 |---|---|---|
-| Contracts and profiles | Versioned identities, capabilities, bindings and local profile resolver | Three same-provider contexts coexist; account mismatch and stale bindings fail safely |
+| Contracts and profiles | Versioned identities, capabilities, bindings and local profile resolver | Two independent same-provider contexts coexist; account mismatch and stale bindings fail safely |
 | Durable conversations | Rooms, threads, offline inboxes, outbox, acknowledgements and auth | Retry/duplicate, revocation, retention and cursor recovery tests through the actual Cloudflare runtime |
 | Standalone connectors | Claude and Codex attach/publish/fetch/wake | Both directions, busy sessions, native drafts, restart and unsupported capabilities |
 | Herdr adapter/plugin | Same protocol with discovery and plugin entrypoints | Existing/manual sessions, replacement occupants, reconnect and mixed standalone/Herdr operation |
-| Distributed workflow and view | Mac + Linux project conversation with optional human UI | VPS continues without Mac; three Claude accounts plus Codex remain correctly addressed |
+| Distributed workflow and view | Mac + Linux project conversation with optional human UI | VPS continues without Mac; two Claude accounts plus Codex remain correctly addressed |
 
 Before declaring the architecture validated, run the full mixed scenario from
 §1. Include identical pane aliases on two hosts, two profiles using the same
@@ -555,7 +556,7 @@ All owned servers, shells and native sessions were stopped. Process absence and
 closed sockets were checked independently on both hosts; owned native registry
 entries were also gone. No existing project was used.
 
-Three independently authenticated subscriptions, complete Tila cross-host routing,
+The selected two Claude accounts plus Codex, complete Tila cross-host routing,
 and unattended native restoration are separate acceptance gates; synthetic profile
 fixtures alone cannot establish them.
 
@@ -588,7 +589,29 @@ multi-account acceptance remain unproven until their separate live gates pass.
 The pinned 0.9.3 adapter is read-only and the plugin exposes authenticated host
 connector status/reconciliation. Register/open remain explicitly unsupported because
 required native multi-account, draft-preservation, Linux, and authenticated restoration
-gates have not passed. [Versioned evidence](evidence/issue-283-herdr-0-9-3-v1.json)
+gates have not passed. [Versioned evidence](evidence/issue-283-herdr-0-9-3-v2.json)
 records isolated Mac runtime/plugin observations without substituting them for live
 acceptance. Activating Herdr attachment/restoration remains unfinished work under
 #283; no supervisor or terminal fallback is introduced.
+
+
+## Dashboard implementation — slice 5
+
+Rooms and thread panels use separate backward history and forward tail queries,
+room sequence deduplication and at most 200 rendered messages. Plain-text bodies
+carry peer-content labels. Announcements are optional; closing drawers restores
+keyboard focus. Agent status and delivery-ID inspection provide shareable URLs.
+The dashboard never consumes or acknowledges an agent mailbox.
+
+Replies persist frozen operation IDs and payloads across retry and step-up sign-in.
+A newer draft revision survives late responses, including after reopening the
+composer. Drafts are isolated by principal, project, room and thread.
+
+The [acceptance record](evidence/issue-283-acceptance-v3.json) is explicitly incomplete.
+Fixture UI/transport tests do not prove native account isolation, busy drafts or
+unattended restoration. Herdr register/open remains unsupported and #283 remains
+open until the Mac/Linux live matrix passes. The selected macOS credential profiles
+now pass native account verification; this establishes a prerequisite, not live
+message delivery or restoration. Codex credential checks use a short-lived stdio
+account probe, verify the returned profile home and never create or resume threads.
+Live discovery and wake continue to use the existing native daemon.

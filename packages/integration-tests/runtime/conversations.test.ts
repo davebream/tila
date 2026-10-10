@@ -296,6 +296,24 @@ it("exchanges durable peer messages between authenticated SDK runs and rejects r
   expect(JSON.stringify(metadata)).not.toContain("Please review");
   expect(metadata.server_now).toEqual(expect.any(Number));
   expect(metadata.attempt).toBeNull();
+  const latest = await one.rooms.history("general", {
+    direction: "backward",
+    limit: 1,
+  });
+  expect(latest.messages).toHaveLength(1);
+  expect(latest.messages[0].id).toBe(reply.message.id);
+  expect(latest.tail_cursor).toBeTypeOf("string");
+  const older = await one.rooms.history("general", {
+    direction: "backward",
+    cursor: latest.cursor,
+  });
+  expect(older.messages.map((message) => message.id)).toContain(
+    sent.message.id,
+  );
+  expect(
+    (await one.rooms.history("general", { cursor: latest.tail_cursor }))
+      .messages,
+  ).toHaveLength(0);
   const history = await one.rooms.history("general", { limit: 1 });
   expect(history.has_more).toBe(true);
   expect(

@@ -8,7 +8,15 @@ import { useLocation, useNavigate } from "react-router";
  * Shown when a mutation was rejected with `step-up-required`. Sends the user
  * through sign-in again and arranges for the panel to be reopened afterwards.
  */
-export function StepUpBanner({ onDismiss }: { onDismiss: () => void }) {
+export function StepUpBanner({
+  onDismiss,
+  description,
+  onBeforeSignIn,
+}: {
+  onDismiss: () => void;
+  description?: string;
+  onBeforeSignIn?: () => boolean;
+}) {
   const { projectId, capabilities } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -18,7 +26,7 @@ export function StepUpBanner({ onDismiss }: { onDismiss: () => void }) {
   );
 
   function reauthenticate() {
-    if (!projectId) return;
+    if (!projectId || onBeforeSignIn?.() === false) return;
     stashStepUpResume({
       projectId,
       returnTo: `${location.pathname}${location.search}${location.hash}`,
@@ -38,9 +46,8 @@ export function StepUpBanner({ onDismiss }: { onDismiss: () => void }) {
       <div className="space-y-0.5">
         <p className="text-sm text-foreground">Re-authenticate to continue</p>
         <p className="text-xs text-muted-foreground">
-          Membership and credential changes require a sign-in newer than{" "}
-          {minutes} minute{minutes === 1 ? "" : "s"}. Your change was not
-          applied.
+          {description ??
+            `Membership and credential changes require a sign-in newer than ${minutes} minute${minutes === 1 ? "" : "s"}. Your change was not applied.`}
         </p>
       </div>
       <div className="flex items-center gap-1">

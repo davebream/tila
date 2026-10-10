@@ -38,20 +38,21 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "proper-lockfile": "^4.1.2",
     "smol-toml": "^1.8.0",
     "tila-sdk": "workspace:*",
-    "zod": "^3.24.0",
-    "proper-lockfile": "^4.1.2"
+    "ws-node": "npm:ws@8.21.1",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@tila/backend-embedded": "workspace:*",
+    "@tila/client-lifecycle": "workspace:*",
     "@tila/schemas": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.5",
+    "better-sqlite3": ">=11.0.0 <14.0.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.9",
-    "@tila/client-lifecycle": "workspace:*",
-    "better-sqlite3": ">=11.0.0 <14.0.0"
+    "vitest": "^4.1.9"
   }
 }

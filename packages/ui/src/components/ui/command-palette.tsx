@@ -52,6 +52,18 @@ export function CommandPalette({
 
     const pages: PaletteItem[] = [
       {
+        id: "nav:rooms",
+        label: "Go to Rooms",
+        group: "navigation",
+        href: `${prefix}/rooms`,
+      },
+      {
+        id: "nav:agents",
+        label: "Go to Agents",
+        group: "navigation",
+        href: `${prefix}/agents`,
+      },
+      {
         id: "nav:tasks",
         label: "Go to Tasks",
         group: "navigation",

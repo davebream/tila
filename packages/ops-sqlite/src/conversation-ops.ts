@@ -16,11 +16,13 @@ import {
 import {
   and,
   count,
+  desc,
   eq,
   gt,
   gte,
   inArray,
   isNull,
+  lt,
   lte,
   or,
   sql,
@@ -304,6 +306,7 @@ export function history(
   after = 0,
   limit = 50,
   thread?: string,
+  direction: "forward" | "backward" = "forward",
 ) {
   roomAccess(db, id, a);
   const rows = db
@@ -312,15 +315,19 @@ export function history(
     .where(
       and(
         eq(s.messages.room_id, id),
-        gt(s.messages.seq, after),
+        direction === "backward"
+          ? lt(s.messages.seq, after || Number.MAX_SAFE_INTEGER)
+          : gt(s.messages.seq, after),
         thread ? eq(s.messages.thread_id, thread) : undefined,
       ),
     )
-    .orderBy(s.messages.seq)
+    .orderBy(direction === "backward" ? desc(s.messages.seq) : s.messages.seq)
     .limit(Math.min(100, Math.max(1, limit)) + 1)
     .all();
+  const selected = rows.slice(0, limit);
+  if (direction === "backward") selected.reverse();
   return {
-    messages: rows.slice(0, limit).map((r) => MessageSchema.parse(r.message)),
+    messages: selected.map((r) => MessageSchema.parse(r.message)),
     has_more: rows.length > limit,
   };
 }

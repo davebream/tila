@@ -16,6 +16,9 @@ export default defineConfig({
     "@modelcontextprotocol/sdk",
     "smol-toml",
     "proper-lockfile",
+    // Keep the lifecycle daemon transport's CommonJS implementation external
+    // for Node ESM consumers; the alias also avoids Bun's built-in ws shim.
+    "ws-node",
     "zod",
     "tila-sdk",
   ],

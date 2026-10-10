@@ -1,12 +1,11 @@
-import {
-  type ChildProcessWithoutNullStreams,
-  execFileSync,
-  spawn,
-} from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
-import { profileEnvironment } from "@tila/client-lifecycle";
+import {
+  type CodexDaemonConnection,
+  connectCodexDaemon,
+  profileEnvironment,
+} from "@tila/client-lifecycle";
 import type { CredentialProfile } from "@tila/schemas";
 import { type WakeOutcome, wakeNotice } from "./claude";
 import { privateDirectory } from "./store";
@@ -58,7 +57,7 @@ export interface CodexRpc {
 }
 /** Only attaches to the profile's existing daemon; never starts one implicitly. */
 export class CodexProxy implements CodexRpc {
-  private child?: ChildProcessWithoutNullStreams;
+  private connection?: CodexDaemonConnection;
   private ready?: Promise<void>;
   private id = 0;
   private pending = new Map<
@@ -73,37 +72,25 @@ export class CodexProxy implements CodexRpc {
   private connect(): Promise<void> {
     if (this.ready) return this.ready;
     this.ready = (async () => {
-      this.child = spawn(this.profile.launcher, ["app-server", "proxy"], {
-        env: profileEnvironment(this.profile),
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      this.child.stderr.resume();
-      const lines = createInterface({ input: this.child.stdout });
-      lines.on("line", (line) => {
-        if (Buffer.byteLength(line) > 4 * 1024 * 1024) {
-          this.close();
-          return;
-        }
-        try {
-          const message = JSON.parse(line);
+      this.connection = await connectCodexDaemon(
+        this.profile.launcher,
+        profileEnvironment(this.profile),
+        (response) => {
+          const message = response as {
+            id: number;
+            error?: unknown;
+            result?: unknown;
+          };
           const pending = this.pending.get(message.id);
-          if (!pending) return; // Never persist server notifications or transcript content.
+          if (!pending) return; // Never persist native notifications or transcript content.
           this.pending.delete(message.id);
           clearTimeout(pending.timer);
           if (message.error)
             pending.reject(new Error("Codex request rejected"));
           else pending.resolve(message.result);
-        } catch {
-          this.close();
-        }
-      });
-      const child = this.child;
-      child.on("error", () => {
-        if (this.child === child) this.close();
-      });
-      child.on("exit", () => {
-        if (this.child === child) this.close();
-      });
+        },
+        () => this.close(),
+      );
       const initialized = (await this.send("initialize", {
         clientInfo: { name: "tila-connector", version: "1" },
         capabilities: {},
@@ -116,7 +103,7 @@ export class CodexProxy implements CodexRpc {
         this.close();
         throw new Error("Codex daemon profile mismatch");
       }
-      this.child?.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
+      this.connection?.send({ method: "initialized" });
     })();
     return this.ready;
   }
@@ -128,12 +115,9 @@ export class CodexProxy implements CodexRpc {
         reject(new Error("Codex request outcome unknown"));
       }, 3000);
       this.pending.set(id, { resolve, reject, timer });
-      this.child?.stdin.write(
-        `${JSON.stringify({ id, method, params })}\n`,
-        (error) => {
-          if (error) this.close();
-        },
-      );
+      this.connection?.send({ id, method, params }, (error) => {
+        if (error) this.close();
+      });
     });
   }
   async request(method: string, params: unknown): Promise<unknown> {
@@ -147,9 +131,9 @@ export class CodexProxy implements CodexRpc {
     return this.send(method, params);
   }
   close(): void {
-    const child = this.child;
-    this.child = undefined;
-    child?.kill();
+    const connection = this.connection;
+    this.connection = undefined;
+    connection?.close();
     this.ready = undefined;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);

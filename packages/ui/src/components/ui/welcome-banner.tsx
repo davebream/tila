@@ -40,8 +40,8 @@ export function WelcomeBanner() {
       className="mx-6 mt-4 flex items-center justify-between gap-4 rounded-lg border border-border bg-card px-5 py-3"
     >
       <p className="text-sm text-muted-foreground">
-        Read-only view of your project's coordination state. Press <Kbd>⌘K</Kbd>{" "}
-        to search, navigate, or look up concepts.
+        Your project's coordination state and shared conversations. Press{" "}
+        <Kbd>⌘K</Kbd> to search, navigate, or look up concepts.
       </p>
       <button
         type="button"

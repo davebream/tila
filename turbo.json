@@ -39,6 +39,11 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"],
       "env": ["VITE_API_URL"]
+    },
+    "@tila/worker#test": {
+      "dependsOn": ["^build", "build", "tila-cli#build"],
+      "inputs": ["$TURBO_DEFAULT$", "!src/version.ts"],
+      "env": ["CI", "VITEST_MAX_WORKERS"]
     }
   },
   "globalDependencies": [

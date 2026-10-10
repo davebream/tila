@@ -198,6 +198,7 @@ export const RoomHistoryResponseSchema = z.object({
   messages: z.array(MessageSchema),
   has_more: z.boolean(),
   cursor: z.string(),
+  tail_cursor: z.string().optional(),
 });
 export const ConversationInboxResponseSchema = z.object({
   ok: z.literal(true),

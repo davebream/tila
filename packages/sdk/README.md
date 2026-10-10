@@ -760,3 +760,9 @@ fetch/ack observations. It never returns bodies or stamps deliveries as fetched.
 `dispatch.lease` and `dispatch.report` require the current binding and enrollment;
 old reports cannot quiet newer publications. Native wake transport is a separate
 host-connector integration.
+
+History defaults to forward pagination. Dashboards can open recent history with
+`conversations.history(room, { direction: "backward", limit: 50 })`, then use its
+`cursor` with the same direction for older pages. Use `tail_cursor` with the default
+forward direction to poll new messages independently. Cursors are reader/room/thread
+scoped, expire after three days, and are invalidated by restore.

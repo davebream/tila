@@ -32,11 +32,12 @@ writes and transactional entity/claim changes remain requirements during the res
 
 Delivery is split into five dependent changes: identity/bindings/profiles;
 durable conversations and CLI/MCP; standalone connector/native wake; narrow Herdr
-evaluation/plugin; dashboard and distributed acceptance. This revision implements
-the first two slices, stacked for review; authentication-boundary changes remain
-held for explicit review. Connector, Herdr and dashboard/live-acceptance slices
-remain open. Only the final change may close #283 after live Mac/Linux acceptance
-with three independent Claude accounts and a Codex coordinator. Fixture results
+evaluation/plugin; dashboard and distributed acceptance. All five slices have
+stacked PRs, with the dashboard and standalone connector implemented. Herdr
+registration/open and authenticated native restoration remain unfinished;
+authentication-boundary changes remain held for explicit review. Only the final
+change may close #283 after live Mac/Linux acceptance with the two independent
+Claude accounts and plain Codex coordinator selected on 2026-10-09. Fixture results
 do not satisfy those live gates. Task assignments, attempts and durable questions
 retain separate roadmap ownership.
 
@@ -302,3 +303,23 @@ Do not infer a branch-policy change from repository stars or a request to reduce
 ceremony. Release/distribution polish can wait while correctness checks continue.
 This reset changes direction and development entry points; it does not implement
 or deploy the future auth, host, orchestration or persistence migrations.
+
+## #283 delivery ownership and remaining gates (2026-10-09)
+
+| Slice | Implementation owner | Current boundary |
+|---|---|---|
+| Identity / profiles | schemas, D1, SQLite bindings, SDK/CLI | PR #285; authentication review hold |
+| Durable conversations | SQLite/DO, Worker, SDK/CLI/MCP | PR #286; stacked behind identity |
+| Standalone connector | connector, client lifecycle, CLI | PR #287; native request fixtures pass on macOS/Linux |
+| Herdr 0.9.3 | connector observation adapter and plugin | PR #288; status available, registration/open deliberately unsupported |
+| Dashboard / acceptance | UI plus shared history API; repository maintainer owns live acceptance | Dashboard implemented on the stack; live multi-account gates remain open |
+
+The required two Claude accounts and plain Codex coordinator, both cross-host
+directions, Mac outage, busy drafts, occupant replacement/reconnect and unattended
+native transcript restoration have **not** passed. The selected macOS profiles
+now verify against native account metadata, including distinct Claude accounts.
+Linux SSH access, account readiness and read-only native transport probes now pass.
+Full cross-host routing and native session acceptance remain outstanding. Herdr
+activation and #283 closure remain blocked on those gates; no process-supervisor
+work is implied. Versioned evidence distinguishes fixtures, isolated runtime probes
+and actual live results. Do not add `Closes #283` until every live gate passes.

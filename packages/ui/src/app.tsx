@@ -4,12 +4,14 @@ import {
 } from "@/components/admin/step-up-resume";
 import { Layout } from "@/components/layout";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { AgentsPage } from "@/pages/agents";
 import { ArtifactsPage } from "@/pages/artifacts";
 import { AuthResultPage } from "@/pages/auth-result";
 import { JournalPage } from "@/pages/journal";
 import { LoginPage } from "@/pages/login";
 import { PresencePage } from "@/pages/presence";
 import { RecordsPage } from "@/pages/records";
+import { RoomsPage } from "@/pages/rooms";
 import { SettingsPage } from "@/pages/settings";
 import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
@@ -101,6 +103,13 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route path="journal" element={<JournalPage />} />
       <Route path="presence" element={<PresencePage />} />
       <Route path="signals" element={<SignalsPage />} />
+      <Route path="rooms" element={<RoomsPage />} />
+      <Route path="rooms/:roomId" element={<RoomsPage />} />
+      <Route path="agents" element={<AgentsPage />} />
+      <Route
+        path="agents/:agentId/deliveries/:deliveryId"
+        element={<AgentsPage />}
+      />
       <Route path="settings" element={<SettingsPage />} />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />

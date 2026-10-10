@@ -108,9 +108,20 @@ works with the existing connector. Register/open return `unsupported-capability`
 this package does not yet activate Herdr attachment or native restoration through
 those actions. There is no terminal-injection fallback, including dedicated panes.
 
-The [versioned evidence](../../docs/evidence/issue-283-herdr-0-9-3-v1.json) separates
+The [versioned evidence](../../docs/evidence/issue-283-herdr-0-9-3-v2.json) separates
 isolated runtime/plugin probes from unproven native behavior. In the Mac probe,
 headless restart launched a resume command but reached login/welcome, so no original
-conversation restoration was established. Linux test-host authentication and the
-three isolated Claude profiles plus Codex profile remain prerequisites. Do not flip
-the support gate based on fixtures or process launch alone.
+conversation restoration was established. The amended acceptance scope uses two
+independent Claude accounts and plain Codex. The selected account contexts now pass
+native account verification on both hosts. Linux access and the compiled Codex daemon
+account probe now pass; live session delivery/restoration gates remain open.
+See the [updated acceptance record](../../docs/evidence/issue-283-acceptance-v3.json).
+Do not flip the support gate based on fixtures or process launch alone.
+
+Codex profile enrollment reads account metadata through a short-lived stdio
+app-server and verifies its reported home before reading the account. It neither
+requires nor starts a background daemon and never creates or resumes a thread.
+Live session discovery and wake still require the existing native daemon proxy.
+The proxy carries WebSocket frames: Tila performs the HTTP upgrade over its pipes
+before exchanging JSON-RPC messages. It opens no TCP port or fallback endpoint.
+See the [native Unix transport contract](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-transport/src/transport/unix_socket.rs).

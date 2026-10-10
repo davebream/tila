@@ -162,14 +162,20 @@ export function createConversationRoutes(deps: RouterDeps) {
     const a = c.get("authority");
     const room = c.req.param("room");
     const thread = c.req.query("thread_id");
-    const scope = JSON.stringify([
+    const direction = z
+      .enum(["forward", "backward"])
+      .parse(c.req.query("direction") ?? "forward");
+    const scopeParts = [
       "history",
       room,
       thread ?? null,
       a.principal_id,
       a.participant_id,
       a.runtime?.agent_id ?? null,
-    ]);
+    ];
+    const scope = JSON.stringify(
+      direction === "forward" ? scopeParts : [...scopeParts, "backward"],
+    );
     const generation = ops.cursorGeneration(deps.db);
     const cursor = c.req.query("cursor");
     const after = cursor
@@ -198,14 +204,31 @@ export function createConversationRoutes(deps: RouterDeps) {
       .min(1)
       .max(100)
       .parse(c.req.query("limit") ?? 50);
-    const result = ops.history(deps.db, room, a, after, limit, thread);
-    const tail = result.messages.at(-1)?.seq ?? after;
+    const result = ops.history(
+      deps.db,
+      room,
+      a,
+      after,
+      limit,
+      thread,
+      direction,
+    );
+    const tail =
+      result.messages.at(-1)?.seq ?? (direction === "backward" ? 0 : after);
+    const boundary =
+      direction === "backward" ? (result.messages[0]?.seq ?? after) : tail;
     return c.json({
       ok: true,
       ...result,
       cursor: await signConversationCursor(
         c.get("cursorKey"),
         scope,
+        generation,
+        boundary,
+      ),
+      tail_cursor: await signConversationCursor(
+        c.get("cursorKey"),
+        JSON.stringify(scopeParts),
         generation,
         tail,
       ),

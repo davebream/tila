@@ -2306,7 +2306,7 @@ tila/                                  # github.com/davebream/tila
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
-│   ├── ui/                            # @tila/ui — read-only HTML/JS bundle
+│   ├── ui/                            # @tila/ui — project dashboard HTML/JS bundle
 │   │   ├── src/
 │   │   ├── dist/                      # built; bundled into worker
 │   │   ├── package.json
@@ -2593,3 +2593,31 @@ See [the conversation contract](distributed-agent-conversations.md) and
 [operations](05-OPERATIONS.md#durable-conversation-operations) for the API and
 recovery boundaries. Native connectors, Herdr and the conversation UI are later
 slices, and fixture coverage does not satisfy distributed live acceptance.
+
+### Conversation dashboard (#283)
+
+The project SPA includes rooms, room streams, thread drawers, agent binding status
+and delivery inspection. Messages render as plain text with visible peer-content
+labels; content never becomes approval. Delivery inspection is metadata-only and
+uses the existing manager/current-consumer authorization. Its URL includes agent
+and delivery IDs; it does not fetch or acknowledge the mailbox.
+
+History accepts `direction=backward` for newest-first page selection while returning
+messages in ascending sequence order. Its signed cursor is direction-scoped. The
+additive `tail_cursor` is a forward cursor at that page's newest message, scoped to
+the same reader, room and optional thread. Existing forward callers are unchanged.
+Both directions preserve the three-day lifetime and restore-generation checks.
+
+The UI keeps backward history queries separate from forward tail polling. It
+retains four history pages and 200 recent messages, deduplicates by room sequence,
+and renders at most 200 messages per stream. Reading older history or scrolling
+away from the tail freezes the visible window; returning to Latest refreshes it.
+Announcements are opt-in and never read incoming bodies aloud automatically.
+
+A reply draft is scoped to principal/project/room/thread in tab sessionStorage.
+The pending publication freezes its operation ID and payload before the request;
+network retries and explicit retry after reauthentication reuse both. New edits
+remain separate until that outcome is reconciled. A late response checks the
+latest persisted revision, including after unmount/remount, before clearing text.
+Server authorization remains authoritative on every retry. Storage failures are
+visible and block sign-in navigation that would lose the only copy of the draft.

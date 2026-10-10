@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "issue": 283,
+  "recorded_at": "2026-10-09",
+  "component": "herdr",
+  "contract": {
+    "version": "0.9.3",
+    "commit": "7b116c05bfda646af39d2524c54e70c751f57ee8",
+    "tag_object": "7eaf574ba6362c36c3d8fe89f411bb7d5bb34660",
+    "repository": "https://github.com/herdrdev/herdr",
+    "macos_arm64_asset_sha256": "5173a3e0ae42d5d1ab7ebfa5d5e6329f7c3d23f8e1a3677c7ce3231da2884157",
+    "linux_x86_64_asset_sha256": "18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7"
+  },
+  "supported": false,
+  "observations": [
+    {
+      "platform": "macos-arm64",
+      "kind": "isolated-runtime-probe",
+      "result": "partial",
+      "verified": [
+        "Release tag resolves to the approved commit; downloaded asset matches the published digest.",
+        "Headless server starts under isolated HOME, XDG config and state directories.",
+        "Snapshots and foreground process discovery work over protected Unix sockets.",
+        "Native session metadata can be reported, but it does not prove that the foreground shell is that native session.",
+        "A cold restart rotates the socket and terminal identities while retaining reported native session metadata.",
+        "Cold restart launches claude --resume without a viewer, but the isolated client shows a login/welcome prompt. This is only launch evidence, not authenticated transcript restoration.",
+        "The plugin manifest links on the pinned runtime and exposes status/register/open actions.",
+        "The status action authenticates to the existing host connector; register returns unsupported-capability.",
+        "After isolated server restart, the startup reconciliation hook authenticates to the same host connector and retains unsupported status."
+      ],
+      "not_proven": [
+        "Independent authenticated provider profiles and actual native session identity",
+        "Busy native draft preservation",
+        "Authenticated restoration correlated with the original transcript",
+        "Standalone and Herdr sessions sharing one connector without duplicate dispatch"
+      ]
+    },
+    {
+      "platform": "linux-x86_64",
+      "kind": "isolated-runtime-probe",
+      "result": "partial",
+      "verified": [
+        "Installed binary hash matches the published pinned 0.9.3 Linux asset.",
+        "A separate server under owner-only temporary HOME/XDG directories passes snapshots, process observation and reconnect.",
+        "Cold restart restores the workspace. Linux reused the socket inode, but the compiled Tila socket identity changed because its timestamp fields changed.",
+        "All preexisting native process identities survived the probe. The isolated server exited and its control socket disappeared."
+      ],
+      "not_proven": [
+        "Native multi-account attachment and replacement",
+        "Busy draft preservation",
+        "Authenticated unattended native restoration with transcript correlation",
+        "Standalone and Herdr sessions sharing one connector without duplicate dispatch"
+      ]
+    }
+  ],
+  "credential_prerequisites": {
+    "selected_accounts": "Two independent Claude accounts plus plain Codex, as amended by the maintainer on 2026-10-09.",
+    "macos": "Three Tila profiles verified; both Claude native response probes passed.",
+    "linux": "Distinct Claude account metadata and both native response probes passed; Codex native daemon account read passed. No global Tila profiles were added.",
+    "limits": "Account readiness is not native session attachment or restoration."
+  },
+  "decision": "Keep integration unsupported. Status and startup reconciliation may authenticate to the existing host connector; register/open actions fail with unsupported-capability. No terminal injection or custom supervisor is introduced.",
+  "limitations": "Runtime probes and fixtures cannot satisfy the live native acceptance gates. This evidence does not close issue 283.",
+  "evidence_revision": 2,
+  "supersedes": "issue-283-herdr-0-9-3-v1.json"
+}
