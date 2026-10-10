@@ -83,3 +83,40 @@ export const LaunchIntentSchema = z.object({
   exitCode: z.number().nullable().optional(),
 });
 export type LaunchIntent = z.infer<typeof LaunchIntentSchema>;
+
+export const HerdrPaneSchema = z.object({
+  pane_id: z.string(),
+  terminal_id: z.string(),
+  agent: z.string().optional(),
+  agent_status: z.string(),
+  agent_session: z
+    .object({
+      source: z.string(),
+      agent: z.string(),
+      kind: z.enum(["id", "path"]),
+      value: z.string(),
+    })
+    .optional(),
+  revision: z.number().int().nonnegative(),
+});
+export const HerdrSnapshotSchema = z.object({
+  version: z.string(),
+  protocol: z.number().int(),
+  panes: z.array(HerdrPaneSchema).max(4096),
+});
+export const HerdrProcessInfoSchema = z.object({
+  pane_id: z.string(),
+  shell_pid: z.number().int().positive().optional(),
+  foreground_processes: z
+    .array(z.object({ pid: z.number().int().positive(), name: z.string() }))
+    .max(256),
+});
+export const HerdrObservationSchema = z.object({
+  server_ref: z.string().uuid(),
+  server_instance: z.string(),
+  pane_id: z.string(),
+  terminal_id: z.string(),
+  native_session_id: z.string(),
+  owner: ProcessIdentitySchema,
+});
+export type HerdrObservation = z.infer<typeof HerdrObservationSchema>;

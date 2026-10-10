@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Herdr evaluation (#283, slice 4)
+
+- Add pinned read-only Herdr observations that reject stale server/pane/process identity and treat events only as invalidation.
+- Add plugin status/startup reconciliation through the authenticated host connector. Register/open fail with `unsupported-capability` until the required native gates pass; no terminal fallback is enabled.
+- Record redacted, versioned isolated-runtime evidence and the outstanding live Linux, profile, draft and restoration prerequisites. This does not complete #283 or establish supported Herdr combinations.
+
 ### Native host connector (#283, slice 3)
 
 - Add an authenticated host connector with private JSON recovery state, bounded relay registrations, verified native session/profile discovery, and body-free Claude/Codex notices.

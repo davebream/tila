@@ -92,3 +92,25 @@ compiled-runtime tests do not establish those guarantees.
 separation, wake request shapes, profile/occupant failure handling, launch ambiguity,
 and dispatch reconciliation. `node --test scripts/connector-native.test.mjs` runs
 compiled Bun behavior on macOS/Linux; CI includes both native runner platforms.
+
+
+## Herdr evaluation and gated plugin
+
+Herdr support is **unsupported pending live gates**, pinned to 0.9.3 at
+`7b116c05bfda646af39d2524c54e70c751f57ee8`. The read-only adapter obtains fresh
+snapshots after reconnect and compares native session IDs, foreground PID/start time,
+terminal identity, and socket incarnation. Pane labels do not grant authority.
+Events invalidate observations; they never transfer mailbox ownership.
+
+The manifest in `herdr-plugin/herdr-plugin.toml` exposes status/register/open and
+runs authenticated connector status reconciliation after server startup. Status
+works with the existing connector. Register/open return `unsupported-capability`;
+this package does not yet activate Herdr attachment or native restoration through
+those actions. There is no terminal-injection fallback, including dedicated panes.
+
+The [versioned evidence](../../docs/evidence/issue-283-herdr-0-9-3-v1.json) separates
+isolated runtime/plugin probes from unproven native behavior. In the Mac probe,
+headless restart launched a resume command but reached login/welcome, so no original
+conversation restoration was established. Linux test-host authentication and the
+three isolated Claude profiles plus Codex profile remain prerequisites. Do not flip
+the support gate based on fixtures or process launch alone.
