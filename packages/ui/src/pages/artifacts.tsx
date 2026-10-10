@@ -4,6 +4,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Input } from "@/components/ui/input";
 import { LastRefreshed } from "@/components/ui/last-refreshed";
 import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
+import { QuerySection } from "@/components/ui/query-section";
 import { SortableHead, useSort } from "@/components/ui/sortable-head";
 import {
   Table,
@@ -20,6 +21,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
+import { type SectionState, deriveSectionState } from "@/lib/query-state";
 import { relativeTime } from "@/lib/time";
 import { encodeArtifactKey, formatBytes, parseArtifactKey } from "@/lib/utils";
 import type { ArtifactReviewSummary } from "@tila/schemas";
@@ -103,9 +105,12 @@ export function ArtifactsPage() {
     refetch,
     dataUpdatedAt,
   } = useArtifacts();
-  const { data: searchData } = useArtifactSearch({
+  const searchQuery = useArtifactSearch({
     q: debouncedQuery,
     kind: kindFilter.length > 0 ? kindFilter : undefined,
+  });
+  const searchState = deriveSectionState(searchQuery, {
+    isEmpty: (d) => d.results.length === 0,
   });
 
   const liveArtifacts = useMemo(
@@ -198,9 +203,10 @@ export function ArtifactsPage() {
 
       {isSearchMode ? (
         <SearchResults
-          data={searchData}
+          state={searchState}
           query={debouncedQuery}
           projectId={projectId}
+          onRetry={() => void searchQuery.refetch()}
         />
       ) : isError ? (
         <TableError error={error} onRetry={() => refetch()} />
@@ -386,31 +392,32 @@ function ArtifactList({
   );
 }
 
+type SearchData = {
+  results: Array<{
+    review?: ArtifactReviewSummary;
+    r2_key: string;
+    kind: string;
+    resource: string | null;
+    produced_at: number;
+    snippet: string | null;
+  }>;
+};
+
 function SearchResults({
-  data,
+  state,
   query,
   projectId,
+  onRetry,
 }: {
   projectId: string | null;
-  data:
-    | {
-        results: Array<{
-          review?: ArtifactReviewSummary;
-          r2_key: string;
-          kind: string;
-          resource: string | null;
-          produced_at: number;
-          snippet: string | null;
-        }>;
-      }
-    | undefined;
+  state: SectionState<SearchData>;
   query: string;
+  onRetry: () => void;
 }) {
-  if (!data) {
-    return <p className="text-muted-foreground">Searching...</p>;
-  }
-
-  if (data.results.length === 0) {
+  // A fresh, successful empty search keeps its own fuller explanation. Anything
+  // else (pending, failed, or empty-but-stale) goes through the shared states so
+  // "no results" is never claimed without a successful search behind it.
+  if (state.phase === "ready" && state.empty && !state.stale) {
     return (
       <div className="py-12 text-center">
         <p className="text-muted-foreground">
@@ -424,6 +431,25 @@ function SearchResults({
     );
   }
 
+  return (
+    <QuerySection
+      state={state}
+      label="search results"
+      empty={`No results for '${query}'.`}
+      onRetry={onRetry}
+    >
+      {(data) => <SearchResultsTable data={data} projectId={projectId} />}
+    </QuerySection>
+  );
+}
+
+function SearchResultsTable({
+  data,
+  projectId,
+}: {
+  data: SearchData;
+  projectId: string | null;
+}) {
   return (
     <div className="overflow-hidden rounded-lg border border-border">
       <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
