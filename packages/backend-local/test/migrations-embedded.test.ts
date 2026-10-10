@@ -126,6 +126,7 @@ describe("retroactive v14 upgrade of an existing local DB (Step 4b / R6)", () =>
     }
   });
 
+  // Three full migration passes exceed Bun's 5s default on loaded CI runners.
   it("applies v14 retroactively, records version 14, and is idempotent on re-run", () => {
     // 1. Build a fully-migrated DB, then simulate a DB written by a CLI that
     //    shipped the embedded set MINUS v14: drop the v14 columns and delete the
@@ -175,7 +176,7 @@ describe("retroactive v14 upgrade of an existing local DB (Step 4b / R6)", () =>
     expect(appliedVersions(raw).filter((v) => v === 14).length).toBe(1);
 
     raw.close();
-  });
+  }, 20_000);
 });
 
 describe("OLD-style local DB version-reshuffle (Step 4c — KNOWN LIMITATION)", () => {

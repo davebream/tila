@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "release": "0.4.0",
+  "date": "2026-10-10",
+  "worker_source_revision": "f516b3b7b4ce5be803da47867d520d8bd8541e73",
+  "benchmark_revision": "9c6c1368c0b7cd539be040bde03cc21f721a10c8",
+  "environment": {
+    "isolated": true,
+    "existing_service_modified": false,
+    "d1_migration_watermark": "0031_runtime_agents.sql",
+    "observed_location": "WAW/local-WAW"
+  },
+  "persistence": {
+    "passed": true,
+    "tests": 3
+  },
+  "conversations": {
+    "passed": true,
+    "transport": "SDK HTTP and in-memory MCP client/server over the deployed HTTP backend",
+    "source_test": "packages/integration-tests/runtime/conversations.test.ts",
+    "native_sessions": false
+  },
+  "benchmarks": [
+    {
+      "run_id": "20261010-071251-y0ba",
+      "scenario": "claims-uncontended",
+      "operations": 1023,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "no conflicts on disjoint resources",
+          "ok": true
+        },
+        {
+          "name": "no stale fences",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071251-y0ba",
+      "scenario": "claims-contended",
+      "operations": 1091,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "journal fences never regress per resource",
+          "ok": true,
+          "detail": "0 regressions in 130 acquires"
+        },
+        {
+          "name": "outcome classes sum to ops",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071251-y0ba",
+      "scenario": "fenced-writes",
+      "operations": 1011,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "stale fences were rejected",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071251-y0ba",
+      "scenario": "presence-signals",
+      "operations": 1067,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "every sent signal was acknowledged after drain",
+          "ok": true,
+          "detail": "312/312"
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071251-y0ba",
+      "scenario": "journal-replay",
+      "operations": 1037,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "replay pages are strictly increasing",
+          "ok": true
+        },
+        {
+          "name": "no sequence gaps inside pages",
+          "ok": true,
+          "detail": "0 gaps"
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071251-y0ba",
+      "scenario": "artifacts",
+      "operations": 750,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "metadata byte counts match uploads",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071832-pb72",
+      "scenario": "claims-contended",
+      "operations": 1613,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "journal fences never regress per resource",
+          "ok": true,
+          "detail": "0 regressions in 834 acquires"
+        },
+        {
+          "name": "outcome classes sum to ops",
+          "ok": true
+        },
+        {
+          "name": "owner mode: same-principal takeovers observed",
+          "ok": true,
+          "detail": "43 takeovers"
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071910-u3h3",
+      "scenario": "claims-uncontended",
+      "operations": 360,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "no conflicts on disjoint resources",
+          "ok": true
+        },
+        {
+          "name": "no stale fences",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "run_id": "20261010-071945-qcsc",
+      "scenario": "cold-start",
+      "operations": 25,
+      "unexpected_errors": 0,
+      "invariants": [
+        {
+          "name": "no errors",
+          "ok": true
+        },
+        {
+          "name": "DO answered after every restart",
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "remaining_issue_283_gates": [
+    "native cross-host delivery",
+    "busy draft preservation",
+    "Herdr registration/opening",
+    "authenticated unattended restoration"
+  ],
+  "cleanup": {
+    "project_store_wiped": true,
+    "worker_deleted": true,
+    "d1_deleted": true,
+    "r2_deleted": true,
+    "resource_absence_verified": true
+  }
+}

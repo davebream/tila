@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-10
+
+### Release notes
+
+- Upgrade the backend before clients: apply additive D1 migrations through 0031 and deploy the compatible Worker. MCP now requires a managed shared-project run; direct credentials and local SQLite MCP mode are removed.
+- Durable conversations and the dashboard are included. Herdr registration/opening, busy native draft guarantees and unattended restoration remain unsupported pending #283 acceptance gates.
+- Validate packed MCP initialization and tool discovery through an isolated authenticated run broker, including denial after run access ends.
+
 ### Native transport verification
 
 - Fix Codex daemon observation and wake transport to use a WebSocket handshake over the native proxy pipes. Preserve account/profile checks and request allowlists; no daemon lifecycle or configuration changes are required.
@@ -191,7 +199,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/davebream/tila/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/davebream/tila/compare/v0.2.7...v0.3.0
 [0.2.7]: https://github.com/davebream/tila/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/davebream/tila/compare/v0.2.5...v0.2.6

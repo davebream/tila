@@ -1824,10 +1824,9 @@ eleven public npm packages. `manifest.json` records the revision, version, compi
 commit timestamp, target inventory, tarball integrity and every file checksum.
 
 Clean-directory consumers install the tarballs and check SDK ESM/CommonJS local
-SQLite persistence, MCP stdio initialization/tool discovery, and the npm CLI.
+SQLite persistence, MCP stdio initialization/tool discovery through a private managed-run broker, and the npm CLI. The MCP probe also checks that discovery fails after broker access is revoked.
 Node 22/24 consumers exercise both SQLite 12.10.0 and 13.0.3. Each SDK/MCP package
-must resolve the selected driver; the smoke test opens a native database and loads
-the MCP keyring addon without accessing credentials.
+must resolve the selected driver; the smoke test opens a native database and resolves the shipped WebSocket dependency. MCP no longer ships the keyring addon or accepts local SQLite configuration; the broker fixture uses no real credentials or native sessions.
 Native Linux, macOS and Windows x64/arm64 runners also test packed SDK/MCP consumers
 with SQLite 13.0.3, execute the binaries and run local installer fixtures; both musl binaries run in native-architecture Alpine containers.
 The POSIX installer detects musl and selects that target. SDK private implementation

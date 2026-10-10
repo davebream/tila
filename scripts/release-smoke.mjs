@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import {
   chmodSync,
   mkdirSync,
@@ -13,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { binaryName, digest, run, targets } from "./release-common.mjs";
+import { mcpSmoke } from "./release-mcp-smoke.mjs";
 import { verifyRelease } from "./release-verify.mjs";
 
 const directory = resolve(process.argv[2] || ".release");
@@ -70,66 +69,6 @@ function cliSmoke(command, prefix = []) {
   assert.match(fetched, /release-task/);
   assert.match(fetched, /Release persistence/);
 }
-async function mcpSmoke(cwd) {
-  localConfig(cwd);
-  const child = spawn(
-    process.execPath,
-    [join(cwd, "node_modules/tila-mcp-server/dist/index.js")],
-    { cwd, env: cleanEnv, stdio: ["pipe", "pipe", "pipe"] },
-  );
-  let buffer = "";
-  let stderr = "";
-  const pending = new Map();
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  child.stdout.on("data", (chunk) => {
-    buffer += chunk;
-    while (buffer.includes("\n")) {
-      const newline = buffer.indexOf("\n");
-      const line = buffer.slice(0, newline);
-      buffer = buffer.slice(newline + 1);
-      try {
-        const message = JSON.parse(line);
-        pending.get(message.id)?.(message);
-      } catch {
-        /* diagnostics are not protocol replies */
-      }
-    }
-  });
-  const send = (value) => child.stdin.write(`${JSON.stringify(value)}\n`);
-  const request = (id, method, params) =>
-    new Promise((resolveRequest, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`MCP ${method} timed out: ${stderr}`));
-      }, 30_000);
-      pending.set(id, (message) => {
-        clearTimeout(timer);
-        pending.delete(id);
-        message.error
-          ? reject(new Error(JSON.stringify(message.error)))
-          : resolveRequest(message.result);
-      });
-      send({ jsonrpc: "2.0", id, method, params });
-    });
-  try {
-    const result = await request(1, "initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "release-smoke", version: manifest.version },
-    });
-    assert.ok(result.serverInfo);
-    send({ jsonrpc: "2.0", method: "notifications/initialized" });
-    const tools = await request(2, "tools/list", {});
-    assert.ok(tools.tools.some((tool) => tool.name === "tila_task_create"));
-  } finally {
-    const closed = once(child, "close");
-    child.kill();
-    await closed;
-  }
-}
-
 async function installerSmoke(binary) {
   const assets = join(directory, "binaries");
   const home = join(temporary, "installer-home");
@@ -237,12 +176,12 @@ try {
       );
     }
     // Resolve through each shipped package so an incompatible nested driver
-    // cannot silently escape coverage. Loading keyring checks the native binary
-    // without reading or writing the runner's credential store.
+    // cannot silently escape coverage. MCP no longer ships the keyring addon;
+    // verify its aliased WebSocket dependency without accessing native sessions.
     const nativeSmoke = join(cwd, "native-smoke.mjs");
     writeFileSync(
       nativeSmoke,
-      `import assert from 'node:assert/strict'; import {createRequire} from 'node:module'; const require=createRequire(import.meta.url); for(const name of ['tila-sdk','tila-mcp-server']) { const consumer=createRequire(require.resolve(name)); assert.equal(consumer('better-sqlite3/package.json').version,${JSON.stringify(sqliteVersion)},name+' SQLite version'); const db=new (consumer('better-sqlite3'))(':memory:'); assert.equal(db.prepare('select 42 as value').get().value,42); db.close(); if(name==='tila-mcp-server') assert.equal(typeof consumer('@napi-rs/keyring').Entry,'function'); }\n`,
+      `import assert from 'node:assert/strict'; import {createRequire} from 'node:module'; const require=createRequire(import.meta.url); for(const name of ['tila-sdk','tila-mcp-server']) { const consumer=createRequire(require.resolve(name)); assert.equal(consumer('better-sqlite3/package.json').version,${JSON.stringify(sqliteVersion)},name+' SQLite version'); const db=new (consumer('better-sqlite3'))(':memory:'); assert.equal(db.prepare('select 42 as value').get().value,42); db.close(); if(name==='tila-mcp-server') assert.equal(typeof consumer('ws-node').WebSocket,'function'); }\n`,
     );
     run(process.execPath, [nativeSmoke], {
       cwd,
@@ -255,7 +194,12 @@ try {
       `import assert from 'node:assert/strict'; import {createRequire} from 'node:module'; import {join} from 'node:path'; import * as esm from 'tila-sdk'; const cjs=createRequire(import.meta.url)('tila-sdk'); for(const [name,mod] of [['esm',esm],['cjs',cjs]]) { assert.equal(typeof mod.createTila,'function'); const config={project_id:'release',backend:'local',local:{db_path:join(process.cwd(),name+'.db'),artifacts_path:join(process.cwd(),name+'-artifacts'),org:'release'},schema_version:1,tila_version:${JSON.stringify(manifest.version)},created_at:'2026-01-01T00:00:00Z'}; let api=await mod.createTila(config); await api.tasks.create(name,'task',{title:name}); api.close(); api=await mod.createTila(config); assert.equal((await api.tasks.get(name)).entity.data.title,name); api.close(); }\n`,
     );
     run(process.execPath, [smoke], { cwd, env: cleanEnv, timeout: 60_000 });
-    await mcpSmoke(cwd);
+    await mcpSmoke({
+      entry: join(cwd, "node_modules/tila-mcp-server/dist/index.js"),
+      cwd,
+      env: cleanEnv,
+      version: manifest.version,
+    });
     cliSmoke(process.execPath, [
       join(cwd, "node_modules/tila-cli/bin/tila.cjs"),
     ]);
