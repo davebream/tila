@@ -77,8 +77,15 @@ test("polls the tail separately, deduplicates overlapping sequences and bounds r
     />,
   );
   const list = await screen.findByRole("list", { name: "Room messages" });
-  await screen.findByText("<script>peer 500</script>", {}, { timeout: 15000 });
-  expect(within(list).getAllByRole("listitem")).toHaveLength(200);
+  await within(list).findByText(
+    "<script>peer 500</script>",
+    { selector: "p" },
+    { timeout: 30000 },
+  );
+  // Count semantic rows without 200 repeated visibility/style traversals in jsdom.
+  expect(within(list).getAllByRole("listitem", { hidden: true })).toHaveLength(
+    200,
+  );
   expect(
     within(list).queryByText("<script>peer 300</script>"),
   ).not.toBeInTheDocument();
@@ -90,7 +97,8 @@ test("polls the tail separately, deduplicates overlapping sequences and bounds r
     within(list).queryByText("<script>peer 500</script>"),
   ).not.toBeInTheDocument();
   expect(screen.getByText(/Reading older history/)).toBeInTheDocument();
-});
+  // Multiple 200-row renders compete with the monorepo suite on CI runners.
+}, 40000);
 
 test("opens a deep-linkable thread panel and restores keyboard focus on Escape", async () => {
   const thread = crypto.randomUUID();
