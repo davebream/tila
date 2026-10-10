@@ -1,4 +1,5 @@
 import type { ArtifactProvenance } from "@tila/schemas";
+import type { Agent } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -11,6 +12,45 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 // --- entities ---
+export const agents = sqliteTable("agents", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  owner_principal_id: text("owner_principal_id").notNull(),
+  bind_policy: text("bind_policy", { mode: "json" })
+    .$type<Agent["bind_policy"]>()
+    .notNull(),
+  binding_epoch: integer("binding_epoch").notNull().default(0),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  created_at: integer("created_at").notNull(),
+  updated_at: integer("updated_at").notNull(),
+});
+export const agentBindings = sqliteTable(
+  "agent_bindings",
+  {
+    consumer_binding_id: text("consumer_binding_id").primaryKey(),
+    agent_id: text("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    run_id: text("run_id").notNull(),
+    binding_epoch: integer("binding_epoch").notNull(),
+    enrollment_id: text("enrollment_id"),
+    workload_binding_id: text("workload_binding_id"),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    state: text("state").notNull(),
+    attachment_json: text("attachment_json").notNull(),
+    lease_expires_at: integer("lease_expires_at").notNull(),
+    created_at: integer("created_at").notNull(),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("agent_bindings_run").on(table.agent_id, table.run_id),
+    uniqueIndex("agent_bindings_active")
+      .on(table.agent_id)
+      .where(sql`${table.state} = 'active'`),
+  ],
+);
+
 export const entities = sqliteTable(
   "entities",
   {
@@ -599,6 +639,7 @@ export const projectTransferState = sqliteTable("_project_transfer_state", {
   updated_at: integer("updated_at").notNull(),
   expires_at: integer("expires_at"),
   applying: integer("applying").notNull().default(0),
+  agent_epochs_json: text("agent_epochs_json").notNull().default("{}"),
 });
 
 export const projectTransferChunks = sqliteTable(

@@ -23,6 +23,7 @@ import {
   TokenProviderError,
 } from "./token-provider";
 export { TilaApiError, isTilaApiError } from "./errors";
+import { createAgentMethods } from "./agents";
 import { createGateMethods } from "./gates";
 import { createIndexMethods } from "./indexes";
 import { createJournalMethods } from "./journal";
@@ -395,7 +396,7 @@ export interface RequestOptions<T = unknown> {
   signal?: AbortSignal;
   idempotencyKey?: string;
   query?: Record<string, string | undefined>;
-  schema?: z.ZodType<T>;
+  schema?: z.ZodType<T, z.ZodTypeDef, unknown>;
   validate?: boolean;
 }
 
@@ -480,6 +481,7 @@ export async function exchangeGitHubToken(
  * backend (HTTP-only — D1 global token store).
  */
 export interface TilaFacade {
+  agents: ReturnType<typeof createAgentMethods>;
   handoffs: ReturnType<typeof createHandoffMethods>;
   reentry: ReturnType<typeof createReentryMethod>;
   tasks: ReturnType<typeof createTaskMethods>;
@@ -508,6 +510,7 @@ export interface TilaFacade {
 /** Build the HTTP-backed facade from a configured `TilaClient`. */
 function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
   return {
+    agents: createAgentMethods(client, projectId),
     tasks: createTaskMethods(client, projectId),
     records: createRecordMethods(client, projectId),
     claims: createClaimMethods(client, projectId),

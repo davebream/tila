@@ -7,6 +7,9 @@ import {
 import { RecordKeySchema, RecordTypeSchema } from "./record";
 
 export const CAPABILITIES = [
+  "agents:read",
+  "agents:manage",
+  "agent-bindings:attach",
   "tasks:read",
   "tasks:write",
   "tasks:delete",
@@ -138,6 +141,7 @@ export function capabilityRole(capability: Capability): ProjectRole {
     [
       "schema:write",
       "signals:manage",
+      "agents:manage",
       "search:reindex",
       "journal:archive",
     ].includes(capability)
@@ -218,6 +222,31 @@ export const CREDENTIAL_PRESETS = {
     capabilities: ["artifacts:read", "artifacts:write"],
   },
 } satisfies Record<string, CredentialPolicy>;
+
+/** Maximum runtime authority; enrollment defaults intentionally stay worker. */
+export const RUNTIME_RUN_CEILING: CredentialPolicy = {
+  role: "participant",
+  capabilities: [
+    ...CREDENTIAL_PRESETS.worker.capabilities,
+    "agents:read",
+    "agent-bindings:attach",
+  ],
+};
+
+/** Read stored/newer policies without granting authority to unknown strings. */
+export const CredentialPolicyReadSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const policy = value as Record<string, unknown>;
+  if (!Array.isArray(policy.capabilities)) return value;
+  return {
+    ...policy,
+    capabilities: policy.capabilities.filter(
+      (cap) =>
+        typeof cap !== "string" ||
+        (CAPABILITIES as readonly string[]).includes(cap),
+    ),
+  };
+}, CredentialPolicySchema);
 
 export function permitsTask(
   restrictions: NamespaceRestrictions | undefined,

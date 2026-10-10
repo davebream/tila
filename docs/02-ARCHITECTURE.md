@@ -31,6 +31,21 @@ gates; it does not change the shipped API or authentication contract.
 
 ---
 
+### Agent identity foundation (#283, slice 1)
+
+D1 runtime rows now optionally pin an agent ID and acting/relay role. A Worker-only
+DO request authorizes selection before issuance. The per-project DO owns `agents`
+and `agent_bindings`, including binding-epoch high-water marks and immutable
+session/profile evidence. Authenticated run context travels separately from
+client-shaped identity metadata. Agent routes pass membership, capability and
+transfer guards before reaching the DO, and bypass D1 response replay/shared cache.
+
+The shared client-lifecycle package owns local profile resolution and account
+checks. CLI and SDK expose registration, binding and inspection; embedded clients
+reject these operations explicitly. This foundation does not implement rooms,
+message deliveries or a host connector. See the
+[conversation specification](distributed-agent-conversations.md#implementation-boundary--issue-283-slice-1).
+
 ## Section 0: Implementation stack
 
 The languages, frameworks, and libraries this is built with. Decisions are made; deviations require justification.

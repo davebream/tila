@@ -8,6 +8,8 @@ import type * as schema from "./schema";
  * `_schema_history` is excluded from the domain set and returned separately as a diagnostic.
  */
 export const DOMAIN_TABLE_NAMES = [
+  "agent_bindings",
+  "agents",
   "entities",
   "entity_relationships",
   "artifact_pointers",
@@ -76,6 +78,8 @@ export function countStoreRows(
 ): StoreCountsResult {
   return {
     domain: {
+      agents: countTable(db, "agents"),
+      agent_bindings: countTable(db, "agent_bindings"),
       entities: countTable(db, "entities"),
       entity_relationships: countTable(db, "entity_relationships"),
       artifact_pointers: countTable(db, "artifact_pointers"),

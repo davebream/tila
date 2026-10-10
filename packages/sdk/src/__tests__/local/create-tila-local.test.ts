@@ -38,6 +38,17 @@ describe("createTilaLocal — full local round-trip", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("reports unsupported agent operations in embedded mode", async () => {
+    const agents = buildLocalResources(local.project, local.artifacts).agents;
+    await expect(agents.list()).rejects.toMatchObject({
+      code: "unsupported-capability",
+      retryable: false,
+    });
+    await expect(agents.get("worker")).rejects.toMatchObject({
+      code: "unsupported-capability",
+    });
+  });
+
   it("exposes version history, metadata and append-only restore under Node", async () => {
     const claim = await local.project.acquire(
       "artifact:report",

@@ -11,6 +11,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { adminCacheKey } from "../lib/admin-cache-key";
 import { archiveJournal, revokeSession } from "../lib/admin-ops";
+import { expirePrincipalAgentBindings } from "../lib/agent-authority";
 import { destroyProjectResources } from "../lib/destroy-project";
 import { forwardToDO } from "../lib/do-forward";
 import { nowMs, nowSeconds } from "../lib/time";
@@ -128,6 +129,7 @@ admin.post("/principals/revoke", requireProjectAdmin, async (c) => {
     nowSecValue: nowSeconds(),
   });
 
+  await expirePrincipalAgentBindings(c.env, projectId, canonical.principalId);
   revokeSubjectInCache(
     projectId,
     canonical.identityHost,
@@ -428,6 +430,11 @@ admin.post("/principals/:id/revoke", requireProjectAdmin, async (c) => {
   }
 
   // Cache-prime in THIS isolate AFTER the batch commits (never before).
+  await expirePrincipalAgentBindings(
+    c.env,
+    projectId,
+    canonicalTarget.principalId,
+  );
   revokeSubjectInCache(projectId, host, idNum, result.revokedBefore);
   // Use the literal "github.com" host + numeric id — byte-identical to the
   // verifier's admin-grant cache write (require-project-admin.ts) and the

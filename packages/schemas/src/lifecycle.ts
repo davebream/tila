@@ -28,6 +28,9 @@ export const LifecycleStateSchema = z.object({
   namespace: z.string(),
   client: LifecycleClientSchema,
   sessionId: z.string(),
+  profile: z
+    .object({ id: z.string(), revision: z.number().int().positive() })
+    .optional(),
   participantId: ParticipantIdSchema,
   runtime: z
     .object({

@@ -6,6 +6,40 @@ shipped. It supplements the current [architecture](02-ARCHITECTURE.md) and
 [roadmap](03-ROADMAP.md). Existing identity, membership, and fencing guarantees
 remain in force during migration.
 
+## Implementation boundary — issue #283, slice 1
+
+This revision implements durable agent registration, run-pinned agent/role identity,
+the consumer-binding ledger, and host-local credential profiles. Rooms, messages,
+inbox consumption, native wake, Herdr and dashboard delivery remain future slices.
+Assignments, task attempts and durable questions are outside #283.
+
+An acting run holds a mailbox binding. A relay can attach an authenticated acting
+run from the same enrollment but cannot become the holder. Agent selection is
+checked against the agent's owner or explicit principal/agent grants before D1
+issues the run. Renewal and operation retries preserve that selection and role.
+The Worker derives the internal authority envelope from current authentication;
+client headers and identity fields do not grant binding authority.
+
+Bindings use the agent row's monotonic epoch. An identical attach by the current
+run refreshes only the lease hint; changed profile/session evidence is rejected.
+A replaced, released or expired run cannot attach again. Conditional replacement
+requires the current epoch and either the same enrollment, owner/manage authority,
+or a Worker-verified terminal previous run. Run validity comes from D1 on each
+request; the DO's copied lease is a hint and cannot renew authority.
+
+Agent and binding APIs bypass response replay and shared caching. Holders, owners
+and agent managers receive full binding details; other authorized readers and
+relay attachment responses receive a summary without native-session or account
+references. Restore expires copied bindings and advances epochs past both the
+archive and destination high-water marks. Local SDK/CLI calls report
+`unsupported-capability`; embedded storage still carries the shared migrations.
+
+Profiles select local executable/configuration paths, environment allowlists and
+host-keyed account references. A profile revision is immutable for a running
+session. Verification can establish only `declared` isolation: profiles under one
+OS account are not a process security boundary. See the
+[operations procedure](05-OPERATIONS.md#agent-bindings-and-account-profiles).
+
 ## 1. Product boundary and required scenario
 
 Tila provides durable project communication and coordination across machines,

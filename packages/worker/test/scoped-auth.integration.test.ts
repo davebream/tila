@@ -724,6 +724,19 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
         JSON.stringify({ role: "owner", capabilities: ["*"] }),
         key.credential_id,
       );
+    // Unknown strings are ignored on reads, so this policy grants nothing.
+    expect(
+      (await request(server, "/projects/p/records/config", key.plaintext))
+        .status,
+    ).toBe(403);
+    f.sqlite
+      .prepare(
+        "UPDATE _credentials SET policy_json = ? WHERE credential_id = ?",
+      )
+      .run(
+        JSON.stringify({ role: "owner", capabilities: [5] }),
+        key.credential_id,
+      );
     expect(
       (await request(server, "/projects/p/records/config", key.plaintext))
         .status,

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Agent identity foundation (#283, slice 1)
+
+- Add optional immutable agent/role pins to authenticated runs, conditional DO consumer bindings, redacted inspection, and revocation/restore invalidation.
+- Add SDK/CLI agent operations, local credential profiles, profile-qualified lifecycle keys, and `run exec --agent --profile` with an environment allowlist and account checks.
+- Apply additive global D1 migration 0031 before the Worker; shared DO/embedded migration 30 follows automatically. Existing unpinned runs and default worker authority remain compatible. Local agent operations return `unsupported-capability`. Conversations and host connectors are subsequent slices.
+
 ### 0.4.0 breaking cutover
 
 - **Strict project MCP:** MCP requires a managed run backed by the shared server. Direct personal/owner credentials, ambient keychain lookup, and private SQLite MCP mode are removed without fallback. Operator CLI authentication and CLI/SDK local functionality remain available.

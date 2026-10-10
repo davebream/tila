@@ -148,3 +148,14 @@ tila mcp init              # Auto-detect editor and write MCP config
 ```
 
 See [`packages/mcp-server/README.md`](../mcp-server/README.md) for manual configuration and the full tool list.
+
+## Agent identity and profiles
+
+`tila agent register|list|inspect|bind|release` manages server-owned mailboxes and
+conditional consumer bindings. `tila profile add|list|verify|remove` manages
+host-local provider account selection. `tila run exec --agent <id> --profile <id>
+-- claude` (or `codex`) pins selection and launches the profile's local executable
+with an environment allowlist. Enrollment and run policies must explicitly grant
+attachment authority; the worker preset stays unchanged. These commands do not
+yet provide message delivery or native wake. See the
+[operations guide](../../docs/05-OPERATIONS.md#agent-bindings-and-account-profiles).

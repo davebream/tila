@@ -28,6 +28,17 @@ Existing schema guarantees remain: `default_for_legacy` values are materialized
 lazily on read rather than eagerly rewriting stored rows. Claims/fences, validated
 writes and transactional entity/claim changes remain requirements during the reset.
 
+### Distributed conversations — #283
+
+Delivery is split into five sequential changes: identity/bindings/profiles;
+durable conversations and CLI/MCP; standalone connector/native wake; narrow Herdr
+evaluation/plugin; dashboard and distributed acceptance. This revision implements
+the first slice and requires authentication-boundary review. Subsequent slices
+remain open. Only the final change may close #283 after live Mac/Linux acceptance
+with three independent Claude accounts and a Codex coordinator. Fixture results
+do not satisfy those live gates. Task assignments, attempts and durable questions
+retain separate roadmap ownership.
+
 ## 2. Herdr research: reuse the runtime before building one
 
 **Assessment: strong candidate for execution and terminal supervision; not yet a

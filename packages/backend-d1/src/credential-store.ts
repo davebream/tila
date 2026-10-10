@@ -1,5 +1,6 @@
 import {
   type CredentialPolicy,
+  CredentialPolicyReadSchema,
   CredentialPolicySchema,
   GITHUB_ACTIONS_ISSUER,
   type GitHubActionsContext,
@@ -423,7 +424,7 @@ export class CredentialStore {
       row.credential.principal_id,
     );
     if (!membership) return null;
-    let policy = CredentialPolicySchema.parse(
+    let policy = CredentialPolicyReadSchema.parse(
       JSON.parse(row.credential.policy_json),
     );
     if (row.credential.workload_binding_id) {
@@ -461,7 +462,7 @@ export class CredentialStore {
       }
       policy = intersectCredentialPolicies(
         policy,
-        CredentialPolicySchema.parse(JSON.parse(binding.policy_json)),
+        CredentialPolicyReadSchema.parse(JSON.parse(binding.policy_json)),
       );
     }
     return {
@@ -617,7 +618,9 @@ export class CredentialStore {
       name,
       created_at: now,
       expires_at: old.version.expires_at,
-      policy: CredentialPolicySchema.parse(JSON.parse(credential.policy_json)),
+      policy: CredentialPolicyReadSchema.parse(
+        JSON.parse(credential.policy_json),
+      ),
       legacy: false as const,
     };
   }
@@ -730,7 +733,7 @@ export class CredentialStore {
           name: row.name,
           note: row.note,
           scopes: SCOPED_TOKEN_MARKER,
-          policy: CredentialPolicySchema.parse(JSON.parse(row.policy_json)),
+          policy: CredentialPolicyReadSchema.parse(JSON.parse(row.policy_json)),
           effective_policy: effective?.policy ?? null,
           status,
           expires_at:
@@ -855,7 +858,7 @@ export class CredentialStore {
       .all();
     return rows.map(({ policy_json, ...row }) => ({
       ...row,
-      policy: CredentialPolicySchema.parse(JSON.parse(policy_json)),
+      policy: CredentialPolicyReadSchema.parse(JSON.parse(policy_json)),
     }));
   }
   async findBinding(

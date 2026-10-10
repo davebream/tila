@@ -22,6 +22,8 @@ export async function exchangeRuntimeWorkload(options: {
   baseUrl: string;
   projectId: string;
   operationId: string;
+  agentId?: string;
+  runRole?: "acting" | "relay";
   assertion: string;
   binding: DpopBinding;
   policy?: CredentialPolicy;
@@ -49,7 +51,12 @@ export async function exchangeRuntimeWorkload(options: {
       project_id: options.projectId,
       oidc_token: options.assertion,
       jkt: options.binding.jkt,
-      runtime: { operation_id: options.operationId, policy: options.policy },
+      runtime: {
+        operation_id: options.operationId,
+        policy: options.policy,
+        agent_id: options.agentId,
+        run_role: options.runRole,
+      },
     }),
   });
   if (!response.ok) throw await readApiError(response);
@@ -199,8 +206,22 @@ export function assertRuntimeContext(
     "run_id",
     "participant_id",
     "principal_id",
+    "agent_id",
+    "run_role",
   ] as const) {
-    if (expected[key] !== undefined && context[key] !== expected[key])
+    const actualValue =
+      key === "agent_id"
+        ? (context.agent_id ?? null)
+        : key === "run_role"
+          ? (context.run_role ?? "acting")
+          : context[key];
+    const expectedValue =
+      key === "agent_id"
+        ? (expected.agent_id ?? null)
+        : key === "run_role"
+          ? (expected.run_role ?? "acting")
+          : expected[key];
+    if (expectedValue !== undefined && actualValue !== expectedValue)
       throw new TokenProviderError(
         "runtime-binding-mismatch",
         `Runtime ${key} changed`,

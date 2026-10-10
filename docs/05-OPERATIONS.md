@@ -1551,6 +1551,85 @@ Credential events record creation, replacement, closure, revocation, and denied 
 
 `pnpm dev:setup` also provisions a runtime enrollment for the local Cloudflare Worker in an isolated development auth home. Stop the existing development server before setup; it already clears local fixture state. Contributor MCP templates wrap the source MCP command in source `run exec` and require no repository secrets.
 
+## Agent bindings and account profiles
+
+Issue #283 slice 1 adds agent identity and binding management. Durable messages,
+inbox commands and automatic wake arrive in later slices.
+
+Apply `0031_runtime_agents.sql` to global D1 before deploying this Worker. The DO
+and embedded stores apply shared migration 30. Deploy the compatible backend
+before upgrading clients. Existing unpinned runs and the default `worker` policy
+keep their existing authority. Read paths ignore unknown capability strings;
+issuance rejects unknown names.
+
+| Operation | Required authority |
+|---|---|
+| Register agent | `agents:manage`, maintainer or higher |
+| List/inspect agents | `agents:read`, viewer or higher; binding details are redacted |
+| Attach acting run | `agent-bindings:attach`, explicit agent grant, agent-pinned current run |
+| Replace binding | Current epoch plus same enrollment, owner/manage, or terminal previous run |
+| Release binding | Current epoch plus holder or owner/manage authority |
+
+The owner explicitly authorizes an enrollment policy containing `agents:read` and
+`agent-bindings:attach` before runs can request those capabilities. Obtain its
+service principal from `tila machine inspect`. Register that principal in the
+agent's grants with `tila agent register worker --name Worker
+--allow-principals service:<uuid>`. Registration is retry-safe for identical input;
+a conflicting registration fails. Agent grants are registration-time configuration
+in this slice.
+
+`--capabilities` replaces a preset. Keep the worker capabilities needed by the
+session and add the two agent capabilities to both enrollment and run policy.
+A relay requests only `agent-bindings:attach` in this slice. It supplies
+`acting_run_id` to the SDK/HTTP bind operation; D1 verifies that acting run belongs
+to the same enrollment and agent. Relay credentials cannot list agents or act as
+the mailbox consumer.
+
+Profiles are local to one host and never selected through shared hook or MCP
+configuration. Create a separate owner-only config directory for each account,
+authenticate the provider using that directory, then register the trusted local
+launcher and the expected account email:
+
+```sh
+tila profile add claude-one --harness claude-code --launcher /absolute/path/to/claude --config-dir /absolute/private/claude-one --credential-store file --account one@example.com
+tila profile verify claude-one
+tila profile list
+# Add --capabilities with the explicitly authorized run policy when binding.
+tila run exec --agent worker --profile claude-one -- claude
+# From the resulting managed session:
+tila agent inspect worker
+tila agent bind worker --harness claude-code --expected-epoch 0
+```
+
+`profile add` replaces an existing profile with a higher revision. Removing and
+adding the same ID cannot reuse an old revision. Config directories require mode
+0700; profile files require 0600. Launchers must be executable regular files owned
+by this user or root without group/other writes. Symlinked profile files and config
+directories fail closed. The launcher is resolved locally at registration.
+
+The child environment contains a small base allowlist plus explicit profile
+`env_allowlist` names. Tila credentials, Actions assertions and conflicting provider
+home variables are excluded. `TILA_PROFILE_ID` and `TILA_PROFILE_REVISION` pin the
+selection. Codex observers use the selected launcher and `CODEX_HOME`; Claude uses
+`CLAUDE_CONFIG_DIR`. Account references are HMACs under a private host key; raw
+account emails are not persisted by Tila. Keyring/auto stores and Claude Console
+logins can share credentials: verification reports `declared`, never verified
+account isolation.
+
+`run exec` checks the selected account before launch and every 30 seconds while
+running. A mismatch closes run access and requests child termination. Native
+lifecycle helpers check their profile while monitoring liveness. Profile changes
+require a new session. The profile revision qualifies lifecycle keys without
+rewriting older unprofiled identities.
+
+Revocation first blocks access in D1 and then expires the DO binding projection.
+A failed projection update logs a metadata-only warning; subsequent authentication
+still rejects the run. An already-authorized in-flight request can complete, and
+inspection may show a stale binding until replacement or reconciliation. Do not
+treat the copied DO lease as authorization. Backup restore invalidates all copied
+bindings and bumps epochs; fresh runs must attach again. Local mode explicitly
+returns `unsupported-capability` for agent operations.
+
 ## Coding-client lifecycle integration
 
 The opt-in lifecycle adapters support **Claude Code CLI and Codex CLI on macOS

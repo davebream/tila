@@ -10,11 +10,15 @@ export class CodexObserver {
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >();
   private ready?: Promise<void>;
-  constructor(private readonly executable = "codex") {}
+  constructor(
+    private readonly executable = "codex",
+    private readonly env?: NodeJS.ProcessEnv,
+  ) {}
   private connect(): Promise<void> {
     if (this.ready) return this.ready;
     const child = spawn(this.executable, ["app-server", "proxy"], {
       stdio: "pipe",
+      env: this.env,
     });
     this.child = child;
     child.stderr.resume();
@@ -93,6 +97,16 @@ export class CodexObserver {
     const status = result.thread?.status?.type;
     if (!status) throw new Error("Codex did not return session status");
     return status === "active" || status === "idle";
+  }
+  async account(): Promise<string | null> {
+    await this.connect();
+    const result = (await this.request("account/read", {
+      refreshToken: false,
+    })) as { account?: { type?: string; email?: string } | null };
+    return result.account?.type === "chatgpt" &&
+      typeof result.account.email === "string"
+      ? result.account.email
+      : null;
   }
   close(): void {
     this.child?.kill();

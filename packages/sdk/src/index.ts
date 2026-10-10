@@ -48,6 +48,11 @@ export { createPresenceMethods } from "./presence";
 export { createRecordMethods } from "./records";
 export { createSchemaMethods } from "./schema";
 export { createSignalMethods } from "./signals";
+export {
+  createAgentMethods,
+  createUnsupportedAgentMethods,
+  UnsupportedCapabilityError,
+} from "./agents";
 export { createGateMethods } from "./gates";
 export { createTemplateMethods } from "./templates";
 export { createIndexMethods } from "./indexes";

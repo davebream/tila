@@ -1,5 +1,8 @@
 // --- DO SQLite row schemas ---
 export { EntitySchema, type Entity } from "./entity";
+export * from "./agent";
+export * from "./agent-binding";
+export * from "./profile";
 export {
   ClaimModeSchema,
   type ClaimMode,

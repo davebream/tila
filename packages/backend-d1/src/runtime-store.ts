@@ -1,11 +1,13 @@
 import {
   CREDENTIAL_PRESETS,
   type CredentialPolicy,
+  CredentialPolicyReadSchema,
   CredentialPolicySchema,
   GitHubActionsContextSchema,
   INVITATION_TTL_SECONDS,
   PROJECT_ROLE_RANK,
   RUNTIME_PROTOCOL,
+  RUNTIME_RUN_CEILING,
   RUN_LEASE_SECONDS,
   RUN_OVERLAP_SECONDS,
   RUN_TOKEN_TTL_SECONDS,
@@ -64,6 +66,11 @@ export class RuntimeStore {
   constructor(
     private binding: D1Database,
     private clock = () => Math.floor(Date.now() / 1000),
+    private authorizeAgent?: (
+      project: string,
+      principal: string,
+      agent: string,
+    ) => Promise<void>,
   ) {
     this.db = drizzle(binding);
   }
@@ -137,7 +144,7 @@ export class RuntimeStore {
     if (!service || !account || account.revoked_at !== null)
       this.deny("enrollment-revoked", "Installation membership is inactive");
     let policy = effectiveCredentialPolicy(
-      CredentialPolicySchema.parse(JSON.parse(row.policy_json)),
+      CredentialPolicyReadSchema.parse(JSON.parse(row.policy_json)),
       service.role,
     );
     if (row.sponsor_id) {
@@ -201,7 +208,7 @@ export class RuntimeStore {
       this.deny("run-closed", "Run is closed or revoked");
     if (row.lease_expires_at <= this.clock())
       this.deny("run-expired", "Run lease expired; start a new run");
-    let policy = CredentialPolicySchema.parse(JSON.parse(row.policy_json));
+    let policy = CredentialPolicyReadSchema.parse(JSON.parse(row.policy_json));
     if (row.enrollment_id) {
       const enrollment = await this.enrollment(row.enrollment_id);
       if (
@@ -242,7 +249,7 @@ export class RuntimeStore {
       policy = intersectCredentialPolicies(
         policy,
         effectiveCredentialPolicy(
-          CredentialPolicySchema.parse(JSON.parse(binding.policy_json)),
+          CredentialPolicyReadSchema.parse(JSON.parse(binding.policy_json)),
           member.role,
         ),
       );
@@ -365,7 +372,7 @@ export class RuntimeStore {
       intersectCredentialPolicies(CREDENTIAL_PRESETS.worker, ceiling);
     if (
       !policyContains(ceiling, policy) ||
-      !policyContains(CREDENTIAL_PRESETS.worker, policy)
+      !policyContains(RUNTIME_RUN_CEILING, policy)
     ) {
       await this.recordDenial(
         project,
@@ -375,7 +382,7 @@ export class RuntimeStore {
       );
       this.deny(
         "runtime-policy-denied",
-        "Enrollment exceeds the worker or caller ceiling",
+        "Enrollment exceeds the runtime or caller ceiling",
       );
     }
     if (existing) {
@@ -424,7 +431,7 @@ export class RuntimeStore {
           invite.project_id !== project ||
           invite.expires_at <= this.clock() ||
           !policyContains(
-            CredentialPolicySchema.parse(JSON.parse(invite.policy_json)),
+            CredentialPolicyReadSchema.parse(JSON.parse(invite.policy_json)),
             policy,
           )
         )
@@ -515,12 +522,29 @@ export class RuntimeStore {
     },
     expiresAt = this.clock() + RUN_TOKEN_TTL_SECONDS,
   ) {
+    const agent = input.agent_id ?? null;
+    const role = input.run_role ?? "acting";
+    if (role === "relay" && !agent)
+      this.deny(
+        "runtime-binding-mismatch",
+        "A relay run must be pinned to an agent",
+      );
+    if (agent) {
+      if (!this.authorizeAgent)
+        this.deny(
+          "runtime-policy-denied",
+          "Agent authorization is required before issuing a run",
+        );
+      await this.authorizeAgent(project, principal, agent);
+    }
     const policy =
       input.policy ??
       intersectCredentialPolicies(ceiling, CREDENTIAL_PRESETS.worker);
     if (
       !policyContains(ceiling, policy) ||
-      !policyContains(CREDENTIAL_PRESETS.worker, policy)
+      !policyContains(RUNTIME_RUN_CEILING, policy) ||
+      (role === "relay" &&
+        policy.capabilities.some((cap) => cap !== "agent-bindings:attach"))
     ) {
       await this.recordDenial(
         project,
@@ -536,6 +560,8 @@ export class RuntimeStore {
         existing.project_id !== project ||
         existing.principal_id !== principal ||
         existing.jkt !== input.jkt ||
+        existing.agent_id !== agent ||
+        existing.run_role !== role ||
         existing.enrollment_id !== (origin.enrollment_id ?? null) ||
         existing.workload_binding_id !== (origin.workload_binding_id ?? null) ||
         existing.workload_context_json !==
@@ -555,6 +581,8 @@ export class RuntimeStore {
     const expiry = Math.min(expiresAt, this.clock() + RUN_TOKEN_TTL_SECONDS);
     await this.db.batch([
       this.db.insert(runtimeRuns).values({
+        agent_id: agent,
+        run_role: role,
         run_id: input.operation_id,
         project_id: project,
         ...origin,
@@ -728,7 +756,7 @@ export class RuntimeStore {
         ...row
       }) => ({
         ...row,
-        policy: CredentialPolicySchema.parse(JSON.parse(policy_json)),
+        policy: CredentialPolicyReadSchema.parse(JSON.parse(policy_json)),
       }),
     );
   }
@@ -755,7 +783,7 @@ export class RuntimeStore {
             row.state === "active" && row.lease_expires_at <= this.clock()
               ? "expired"
               : row.state,
-          policy: CredentialPolicySchema.parse(JSON.parse(policy_json)),
+          policy: CredentialPolicyReadSchema.parse(JSON.parse(policy_json)),
         }),
       );
   }
@@ -820,6 +848,8 @@ export class RuntimeStore {
       enrollment_id: version.enrollment_id,
       workload_binding_id: run?.workload_binding_id ?? null,
       run_id: run?.run_id ?? null,
+      agent_id: run?.agent_id ?? null,
+      run_role: run?.run_role ?? "acting",
       participant_id: run?.participant_id ?? null,
       policy,
       token_id: tokenId,

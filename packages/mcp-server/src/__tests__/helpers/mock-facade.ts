@@ -62,6 +62,7 @@ function fns<const N extends string>(...names: N[]): Record<N, Mock> {
  * the mock lacks.
  */
 export type MockFacadeShape = {
+  agents: Record<"list" | "get" | "register" | "bind" | "release", Mock>;
   tasks: Record<
     | "create"
     | "get"
@@ -146,6 +147,7 @@ export type MockFacadeShape = {
  */
 export function createMockFacade(): MockFacadeShape {
   return {
+    agents: fns("list", "get", "register", "bind", "release"),
     tasks: fns(
       "create",
       "get",
@@ -250,6 +252,7 @@ type _MockMatchesFacade = {
 };
 
 const _assertMockMatchesFacade: _MockMatchesFacade = {
+  agents: true,
   tasks: true,
   records: true,
   claims: true,

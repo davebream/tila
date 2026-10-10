@@ -10,6 +10,7 @@ import type {
   ReentryResponse,
 } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
+import { selectedProfile } from "./profiles";
 import { type ProcessIdentity, type SessionStore, sessionKey } from "./store";
 
 export type LifecycleFacade = Pick<
@@ -116,9 +117,11 @@ export class Lifecycle {
     runtime?: {
       participantId: string;
       reference: NonNullable<LifecycleState["runtime"]>;
+      profile?: { id: string; revision: number };
     },
   ): Promise<{ state: LifecycleState; text: string }> {
-    const key = sessionKey(this.namespace, client, event.session_id);
+    const profile = runtime?.profile ?? selectedProfile();
+    const key = sessionKey(this.namespace, client, event.session_id, profile);
     return this.store.locked(key, async () => {
       const old = this.store.read(key);
       if (old?.phase === "closing")
@@ -135,6 +138,7 @@ export class Lifecycle {
               namespace: this.namespace,
               client,
               sessionId: event.session_id,
+              profile,
               participantId:
                 runtime?.participantId ??
                 (resumed

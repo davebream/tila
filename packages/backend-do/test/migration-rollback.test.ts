@@ -157,6 +157,22 @@ describe("runMigrationsWithPitrRollback", () => {
               const match = /PRAGMA\s+table_info\((\w+)\)/i.exec(statement);
               const tableName = match?.[1] ?? "";
               const columnsByTable: Record<string, string[]> = {
+                agents: [
+                  "id",
+                  "owner_principal_id",
+                  "bind_policy",
+                  "binding_epoch",
+                  "archived",
+                ],
+                agent_bindings: [
+                  "consumer_binding_id",
+                  "agent_id",
+                  "run_id",
+                  "binding_epoch",
+                  "state",
+                  "attachment_json",
+                  "lease_expires_at",
+                ],
                 _migrations: ["version", "applied_at"],
                 _schema_history: [
                   "version",

@@ -14,9 +14,10 @@ import {
   delegablePolicy,
   effectiveCredentialPolicy,
 } from "@tila/schemas";
-import { CredentialPolicySchema, roleToPermission } from "@tila/schemas";
+import { CredentialPolicyReadSchema, roleToPermission } from "@tila/schemas";
 import type { Context } from "hono";
 import type { Env, HonoVariables } from "../types";
+import { agentRunAuthorizer } from "./agent-authority";
 import { generateToken, hashToken } from "./hash";
 import { runtimeProof } from "./runtime-access";
 
@@ -24,7 +25,12 @@ import { runtimeProof } from "./runtime-access";
 async function exchangeScopedWorkloadUnchecked(
   c: Context<{ Bindings: Env; Variables: HonoVariables }>,
   input: {
-    runtime?: { operation_id: string; policy?: CredentialPolicy };
+    runtime?: {
+      operation_id: string;
+      policy?: CredentialPolicy;
+      agent_id?: string;
+      run_role?: "acting" | "relay";
+    };
     assertion?: string;
     projectId: string;
     provider: "github-actions" | "oidc";
@@ -82,7 +88,7 @@ async function exchangeScopedWorkloadUnchecked(
     await store.servicePolicy(
       input.projectId,
       binding.principal_id,
-      CredentialPolicySchema.parse(JSON.parse(binding.policy_json)),
+      CredentialPolicyReadSchema.parse(JSON.parse(binding.policy_json)),
     ),
   );
   if (input.provider === "github-actions") {
@@ -107,7 +113,11 @@ async function exchangeScopedWorkloadUnchecked(
         "Runtime workloads require a run proof key",
       );
     await runtimeProof(c, input.jkt, input.assertion);
-    const runtime = new RuntimeStore(c.env.DB);
+    const runtime = new RuntimeStore(
+      c.env.DB,
+      undefined,
+      agentRunAuthorizer(c.env),
+    );
     await runtime.consumeAssertion(
       digest,
       binding.binding_id,

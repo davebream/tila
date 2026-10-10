@@ -2,10 +2,12 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   Lifecycle,
+  ProfileStore,
   SessionStore,
   connectRuntimeBroker,
   environmentMetadata,
   processIdentity,
+  profileEnvironment,
 } from "@tila/client-lifecycle";
 import { defineCommand } from "citty";
 import { createTila } from "tila-sdk";
@@ -37,6 +39,15 @@ export default defineCommand({
         ...globalFlagArgs,
         ...credentialPolicyArgs,
         oidc: { type: "boolean", default: false },
+        agent: {
+          type: "string",
+          description: "Agent ID pinned for the lifetime of this run",
+        },
+        profile: {
+          type: "string",
+          description:
+            "Host-local provider profile; launches its registered executable",
+        },
         preset: { ...credentialPolicyArgs.preset, default: "worker" },
       },
       async run({ args, rawArgs }) {
@@ -46,10 +57,25 @@ export default defineCommand({
           throw new Error("Usage: tila run exec -- <command> [arguments]");
         if (process.env.TILA_RUN_SOCKET || process.env.TILA_RUN_CAPABILITY)
           throw new Error("Managed runs cannot create descendant runs");
+        const profiles = new ProfileStore();
+        const profile = args.profile ? profiles.get(args.profile) : undefined;
+        if (profile) {
+          await profiles.verify(profile.id, profile.revision);
+          if (
+            command[0] !== profile.launcher &&
+            command[0] !== (profile.harness === "codex" ? "codex" : "claude")
+          )
+            throw new Error(
+              "The command must match the selected profile launcher",
+            );
+          command[0] = profile.launcher;
+        }
         const selection = await runtimeSelection();
         const { broker, reference } = await (args.oidc
           ? startOidcRun
-          : startEnrolledRun)(selection, policyFromArgs(args));
+          : startEnrolledRun)(selection, policyFromArgs(args), {
+          agent_id: args.agent,
+        });
         try {
           const connected = await connectRuntimeBroker(reference);
           const api = await createTila(
@@ -84,23 +110,15 @@ export default defineCommand({
               environmentMetadata("cli", process.cwd()),
               {
                 participantId: broker.context.participant_id,
+                profile: profile
+                  ? { id: profile.id, revision: profile.revision }
+                  : undefined,
                 reference: { ...reference, runId: broker.context.run_id },
               },
             );
             state = started.state;
-            const env = { ...process.env };
-            for (const key of [
-              "TILA_API_TOKEN",
-              "TILA_TOKEN",
-              "TILA_INSTANCE",
-              "TILA_ENROLLMENT_TOKEN",
-              "TILA_PARTICIPANT_ID",
-              "TILA_RUN_SOCKET",
-              "TILA_RUN_CAPABILITY",
-              "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-              "ACTIONS_ID_TOKEN_REQUEST_URL",
-            ])
-              delete env[key];
+            const env = profileEnvironment(profile);
+            env.TILA_HOME = profiles.root;
             env.TILA_RUN_SOCKET = reference.socket;
             env.TILA_RUN_CAPABILITY = reference.capability;
             env.TILA_PARTICIPANT_ID = broker.context.participant_id;
@@ -115,6 +133,24 @@ export default defineCommand({
             const sigterm = () => forward("SIGTERM");
             process.on("SIGINT", sigint);
             process.on("SIGTERM", sigterm);
+            let profileFailure: unknown;
+            let checking = false;
+            const profileCheck = profile
+              ? setInterval(() => {
+                  if (checking) return;
+                  checking = true;
+                  void profiles
+                    .verify(profile.id, profile.revision)
+                    .catch((error) => {
+                      profileFailure = error;
+                      child.kill("SIGTERM");
+                      void broker.close();
+                    })
+                    .finally(() => {
+                      checking = false;
+                    });
+                }, 30_000)
+              : undefined;
             const heartbeat = setInterval(() => {
               if (state)
                 void lifecycle
@@ -132,9 +168,11 @@ export default defineCommand({
               );
             } finally {
               clearInterval(heartbeat);
+              if (profileCheck) clearInterval(profileCheck);
               process.off("SIGINT", sigint);
               process.off("SIGTERM", sigterm);
             }
+            if (profileFailure) throw profileFailure;
           } finally {
             try {
               if (state) {

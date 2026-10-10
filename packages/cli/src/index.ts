@@ -59,6 +59,8 @@ const main = defineCommand({
       },
       run() {},
     }),
+    profile: () => load(() => import("./commands/profile")),
+    agent: () => load(() => import("./commands/agent")),
     machine: () => load(() => import("./commands/machine")),
     run: () => load(() => import("./commands/run")),
     lifecycle: () => load(() => import("./commands/lifecycle")),
