@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Dashboard resilience (#295)
+
+- Task detail, settings, record history, artifact search and record types no longer present a pending, failed or forbidden request as "none": claims, artifacts, relationships, repositories, membership changes, history and search results each show loading, access denied, unavailable (with retry), or the last good data with its last-success time and the refresh failure. A failed section no longer erases other sections or typed input, and the membership policy select no longer reads "explicit" before the policy is known.
+- `GET /records/_types` now reports `incomplete` (`declared_types`: `unavailable` or `invalid`; `in_use_types`: `unavailable`) when the schema or the in-use listing could not be read, instead of returning an empty list. The field is additive and omitted when nothing failed; it is never sent to credentials with namespace restrictions. A project with no schema is still a complete, empty answer.
+
 ## [0.4.0] - 2026-10-10
 
 ### Release notes
