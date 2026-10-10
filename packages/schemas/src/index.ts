@@ -323,6 +323,8 @@ export {
   type RecordHistoryItem,
   RecordHistoryResponseSchema,
   type RecordHistoryResponse,
+  RecordTypesIncompleteSchema,
+  type RecordTypesIncomplete,
   RecordTypesResponseSchema,
   type RecordTypesResponse,
   RecordSearchResultSchema,

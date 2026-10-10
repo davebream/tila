@@ -1416,9 +1416,29 @@ export const RecordHistoryResponseSchema = z.object({
 
 export type RecordHistoryResponse = z.infer<typeof RecordHistoryResponseSchema>;
 
+/**
+ * Present on a types listing only when part of it could not be produced, so a
+ * short list is not mistaken for a complete one. Keys mirror the arrays they
+ * qualify. Absent means complete; "no schema configured" is complete, with an
+ * empty `declared_types`, and is not reported here.
+ *
+ * Never sent to credentials with namespace restrictions.
+ */
+export const RecordTypesIncompleteSchema = z.object({
+  /** `unavailable`: the schema could not be fetched. `invalid`: it was fetched but does not parse or validate. */
+  declared_types: z.enum(["unavailable", "invalid"]).optional(),
+  /** The in-use types could not be listed. */
+  in_use_types: z.literal("unavailable").optional(),
+});
+
+export type RecordTypesIncomplete = z.infer<typeof RecordTypesIncompleteSchema>;
+
 export const RecordTypesResponseSchema = z.object({
   ok: z.literal(true),
   types: z.array(z.string()),
+  declared_types: z.array(z.string()).optional(),
+  in_use_types: z.array(z.string()).optional(),
+  incomplete: RecordTypesIncompleteSchema.optional(),
 });
 
 export type RecordTypesResponse = z.infer<typeof RecordTypesResponseSchema>;
