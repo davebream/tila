@@ -237,6 +237,8 @@ export const DeliveryExplainResponseSchema = z.object({
 });
 export const DispatchStatusResponseSchema = z.object({
   ok: z.literal(true),
+  server_now: z.number().optional(),
+  attempt: DispatchAttemptSchema.nullable().optional(),
   binding: z.object({
     consumer_binding_id: z.string().uuid(),
     binding_epoch: z.number().int(),

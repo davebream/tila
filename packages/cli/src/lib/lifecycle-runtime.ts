@@ -90,6 +90,7 @@ export async function ensureWorker(
     const latest = store.read(state.key);
     if (
       !latest ||
+      latest.runtimeInherited ||
       latest.phase === "closed" ||
       latest.phase === "crashed" ||
       processAlive(latest.worker)
@@ -140,12 +141,47 @@ export async function runLifecycleHook(
   try {
     if (event.hook_event_name === "SessionStart") {
       const owner = clientOwner(client);
+      let inherited: Parameters<Lifecycle["start"]>[4];
+      if (process.env.TILA_RUN_SOCKET && process.env.TILA_RUN_CAPABILITY) {
+        const reference = {
+          socket: process.env.TILA_RUN_SOCKET,
+          capability: process.env.TILA_RUN_CAPABILITY,
+        };
+        const connected = await connectRuntimeBroker(reference);
+        if (
+          lifecycle.namespace !==
+          JSON.stringify([connected.deployment, connected.context.project_id])
+        )
+          throw new Error("Managed run project does not match native session");
+        inherited = {
+          participantId: connected.context.participant_id,
+          reference: { ...reference, runId: connected.context.run_id },
+          profile: selectedProfile(),
+          inherited: true,
+        };
+      }
       let { state, text } = await lifecycle.start(
         client,
         event,
         owner,
         environmentMetadata(client, event.cwd),
+        inherited,
       );
+      await lifecycle.store.locked(key, async () => {
+        const current = lifecycle.store.read(key);
+        if (current?.generation !== state.generation) return;
+        if (
+          client === "claude-code" &&
+          process.env.CLAUDE_CODE_MESSAGING_SOCKET
+        ) {
+          current.nativeMessaging = {
+            socket: process.env.CLAUDE_CODE_MESSAGING_SOCKET,
+            token: process.env.CLAUDE_CODE_MESSAGING_TOKEN,
+            idle: true,
+          };
+          lifecycle.store.write(current);
+        }
+      });
       await ensureWorker(lifecycle.store, state);
       const deadline = Date.now() + 8000;
       while (
@@ -190,8 +226,17 @@ export async function runLifecycleHook(
     } else if (event.hook_event_name === "SessionEnd") {
       await lifecycle.end(key);
       const state = lifecycle.store.read(key);
-      if (state) await ensureWorker(lifecycle.store, state);
+      if (state?.runtimeInherited)
+        await lifecycle.tick(key, state.generation, false);
+      else if (state) await ensureWorker(lifecycle.store, state);
     } else {
+      await lifecycle.store.locked(key, async () => {
+        const current = lifecycle.store.read(key);
+        if (current?.phase === "active" && current.nativeMessaging) {
+          current.nativeMessaging.idle = event.hook_event_name === "Stop";
+          lifecycle.store.write(current);
+        }
+      });
       await lifecycle.observe(key);
       const state = lifecycle.store.read(key);
       if (state?.phase === "active") await ensureWorker(lifecycle.store, state);

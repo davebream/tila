@@ -268,11 +268,7 @@ async function enrollMachineUnlocked(
   await store.save({ ...secret, token: result.token });
   return reference;
 }
-export async function startEnrolledRun(
-  selection: RuntimeSelection,
-  policy?: CredentialPolicy,
-  identity: { agent_id?: string; run_role?: "acting" | "relay" } = {},
-) {
+export async function enrolledRuntimeClient(selection: RuntimeSelection) {
   const reference = await enrollmentReference(selection);
   if (!reference)
     throw new TokenProviderError(
@@ -306,13 +302,23 @@ export async function startEnrolledRun(
     purpose: "enrollment",
     enrollment_id: reference.enrollmentId,
   });
+  return { api, reference };
+}
+
+export async function startEnrolledRun(
+  selection: RuntimeSelection,
+  policy?: CredentialPolicy,
+  identity: { agent_id?: string; run_role?: "acting" | "relay" } = {},
+  operationId: string = randomUUID(),
+) {
+  const { api, reference } = await enrolledRuntimeClient(selection);
   const binding = await runtimeBinding(
     await generateRuntimeKey(),
     selection.deployment,
     runtimeEndpointPolicy(selection.projectId, "run"),
   );
   const operation = {
-    operation_id: randomUUID(),
+    operation_id: operationId,
     jkt: binding.jkt,
     policy,
     ...identity,

@@ -558,3 +558,26 @@ entries were also gone. No existing project was used.
 Three independently authenticated subscriptions, complete Tila cross-host routing,
 and unattended native restoration are separate acceptance gates; synthetic profile
 fixtures alone cannot establish them.
+
+
+## Standalone connector implementation (slice 3)
+
+The private `@tila/connector` package provides a single authenticated host control
+socket, atomic JSON recovery ledger, bounded relay registrations, native discovery,
+and body-free Claude/Codex wake adapters. The acting run remains the mailbox holder;
+relay runs receive only dispatch and attachment authority. Native lifecycle hooks
+inherit a managed run instead of silently issuing another run. Claude socket tokens
+are host-local and excluded from status output.
+
+See [connector operations and supported behavior](../packages/connector/README.md).
+Dispatch status now includes optional server time and attempt metadata so recovery
+can compare fetch evidence without depending on host clock synchronization. This
+is additive and requires no D1 or SQLite migration. Deploy the compatible Worker
+before this connector. Missing recovery metadata leaves uncertain work pending.
+
+Automatic Codex delivery does not claim a queue guarantee absent from the installed
+protocol. Idle start requires explicit opt-in. Ordinary busy delivery stays pending;
+urgent adapter requests require an observed turn ID and never override configuration.
+Explicit native restoration records a stable operation before spawning and requires
+an attended terminal. Unattended restoration, Herdr integration, and actual Mac/Linux
+multi-account acceptance remain unproven until their separate live gates pass.

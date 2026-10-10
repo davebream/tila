@@ -342,10 +342,21 @@ describe("durable conversations", () => {
       acting,
       now + 1,
     );
-    expect(
-      ops.dispatchStatus(f.db, "worker", relay, now + 2, lease.lease_token)
-        .deliveries[0].state,
-    ).toBe("acked");
+    const status = ops.dispatchStatus(
+      f.db,
+      "worker",
+      relay,
+      now + 2,
+      lease.lease_token,
+    );
+    expect(status.deliveries[0].state).toBe("acked");
+    expect(status.server_now).toBe(now + 2);
+    expect(status.attempt).toMatchObject({
+      created_at: now,
+      lease_token: lease.lease_token,
+      consumer_binding_id: b.consumer_binding_id,
+      binding_epoch: b.binding_epoch,
+    });
   });
   it("enforces byte limits and leaves budget-suppressed work pending", async () => {
     expect(

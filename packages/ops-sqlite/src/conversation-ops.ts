@@ -856,6 +856,8 @@ export function dispatchStatus(
     fail("stale-binding", "Lease does not belong to the current binding", 409);
   // Deliberately does not join messages, return content, or stamp fetched_at.
   return {
+    server_now: now,
+    attempt: attempt ? DispatchAttemptSchema.parse(attempt) : null,
     binding: {
       consumer_binding_id: b.consumer_binding_id,
       binding_epoch: b.binding_epoch,

@@ -65,6 +65,7 @@
     "@tila/backend-embedded": "workspace:*",
     "@tila/backend-local": "workspace:*",
     "@tila/client-lifecycle": "workspace:*",
+    "@tila/connector": "workspace:*",
     "@tila/core": "workspace:*",
     "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",

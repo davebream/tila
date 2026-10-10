@@ -311,6 +311,9 @@ importers:
       '@tila/client-lifecycle':
         specifier: workspace:*
         version: link:../client-lifecycle
+      '@tila/connector':
+        specifier: workspace:*
+        version: link:../connector
       '@tila/core':
         specifier: workspace:*
         version: link:../core
@@ -399,6 +402,34 @@ importers:
 
   packages/client-lifecycle:
     dependencies:
+      '@tila/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      proper-lockfile:
+        specifier: ^4.1.2
+        version: 4.1.2
+      tila-sdk:
+        specifier: workspace:*
+        version: link:../sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/proper-lockfile':
+        specifier: ^4.1.4
+        version: 4.1.4
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.11(@types/node@22.20.5)(jsdom@30.1.2)(msw@2.15.0(@types/node@22.20.5)(typescript@5.9.3))(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/connector:
+    dependencies:
+      '@tila/client-lifecycle':
+        specifier: workspace:*
+        version: link:../client-lifecycle
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
