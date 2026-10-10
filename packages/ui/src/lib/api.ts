@@ -34,6 +34,7 @@ import type {
   RecordGetResponse,
   RecordHistoryResponse,
   RecordListResponse,
+  RecordTypesResponse,
   SignalGroupsResponse,
   SignalHistoryResponse,
   StateListResponse,
@@ -43,12 +44,7 @@ import { encodeArtifactKey } from "./utils";
 
 export type { ArtifactSearchResponse };
 
-export type RecordTypesResponse = {
-  ok: true;
-  types: string[];
-  declared_types: string[];
-  in_use_types: string[];
-};
+export type { RecordTypesResponse };
 
 export class ApiError extends Error {
   constructor(
