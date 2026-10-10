@@ -25,7 +25,7 @@ it("enrolls, runs workflows, renews and revokes through real Worker, D1, DO SQLi
   const owner = `tila_${crypto.randomUUID()}${crypto.randomUUID()}`;
   await new D1TokenStore(bindings.DB).issue({
     projectId: project,
-    tokenHash: await hashToken(owner, undefined),
+    tokenHash: await hashToken(owner, bindings.HASH_PEPPER),
     name: "owner",
     createdBy: "fixture",
     createdAt: 0,

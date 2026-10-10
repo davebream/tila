@@ -12,6 +12,11 @@ import { TilaApiError } from "tila-sdk";
 import { z } from "zod";
 
 const reads = new Set([
+  "tila_room_list",
+  "tila_room_history",
+  "tila_inbox_fetch",
+  "tila_inbox_watch",
+  "tila_inbox_explain",
   "tila_task_list",
   "tila_task_show",
   "tila_task_ready",
@@ -43,6 +48,7 @@ const reads = new Set([
   "tila_inspect",
 ]);
 const additive = new Set([
+  "tila_room_publish",
   "tila_task_create",
   "tila_artifact_put",
   "tila_artifact_write_text",
@@ -52,6 +58,8 @@ const additive = new Set([
   "tila_gate_create",
 ]);
 const idempotent = new Set([
+  "tila_room_publish",
+  "tila_inbox_ack",
   "tila_journal_acknowledge",
   "tila_handoff_create",
   "tila_signal_ack",
@@ -62,7 +70,10 @@ export function toolAnnotations(name: string): ToolAnnotations {
     readOnlyHint,
     destructiveHint: !readOnlyHint && !additive.has(name),
     idempotentHint: readOnlyHint || idempotent.has(name),
-    openWorldHint: name === "tila_signal" || name === "tila_signal_send",
+    openWorldHint:
+      name === "tila_signal" ||
+      name === "tila_signal_send" ||
+      name === "tila_room_publish",
   };
 }
 
@@ -103,6 +114,23 @@ export function recoveryFor(error: unknown, readOnly = false): McpRecovery {
     ? "Retry the read. If it fails again, inspect project connectivity."
     : "Inspect current state before retrying; the mutation may already have committed.";
   let retry_safety: McpRecovery["retry_safety"] = readOnly ? "safe" : "unknown";
+  const conversationRecovery: Record<string, string> = {
+    "unsupported-protocol":
+      "Negotiate conversation_protocols from /api/runtime/info and use a supported conversation protocol; runtime protocol is separate.",
+    "cursor-expired":
+      "Restart history from a fresh cursor. Fetch the inbox without a cursor to recover pending deliveries; do not infer acknowledgement from history.",
+    "delivery-expired":
+      "Inspect delivery history. Do not act on this expired delivery; ask the publisher for a new message if work is still needed.",
+    "body-too-large":
+      "Store large content as an artifact and publish its reference with a body of at most 64 KB.",
+  };
+  if (Object.hasOwn(conversationRecovery, code))
+    return {
+      code,
+      message,
+      retry_safety: "after_recovery",
+      recovery_action: conversationRecovery[code],
+    };
   if (
     [
       "stale-binding",

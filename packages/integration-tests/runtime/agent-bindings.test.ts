@@ -51,6 +51,7 @@ it("restores real DO snapshots without resurrecting bindings or rewinding epochs
   await post("/agents", { id: "worker", name: "Worker" });
   const attach = {
     harness: "cli",
+    mechanism: "native-peer",
     capability_report: {
       protocol: 1,
       adapter_version: "fixture",
@@ -58,6 +59,68 @@ it("restores real DO snapshots without resurrecting bindings or rewinding epochs
     },
   };
   await post("/agents/worker/bind", { ...attach, expected_epoch: 0 });
+  const conversationAuthority = {
+    principal_id: principal,
+    participant_id: "fixture",
+    can_manage: true,
+    runtime: null,
+  };
+  async function conversation(path: string, body?: unknown) {
+    const response = await stub.fetch(`https://project${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tila-Conversation-Authority": JSON.stringify(conversationAuthority),
+        "X-Tila-Conversation-Cursor-Key": "restore-test-key",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+    return response;
+  }
+  await conversation("/rooms", { id: "general", name: "General" });
+  const joined = await stub.fetch(
+    "https://project/rooms/general/members/agent:worker",
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tila-Conversation-Authority": JSON.stringify(conversationAuthority),
+        "X-Tila-Conversation-Cursor-Key": "restore-test-key",
+      },
+      body: JSON.stringify({ wake: true }),
+    },
+  );
+  expect(joined.status).toBe(200);
+  await conversation("/rooms/general/messages", {
+    client_op_id: "restore-message",
+    body: "Retain history",
+    targets: [{ kind: "room" }],
+  });
+  const historyBefore = await (
+    await conversation("/rooms/general/messages")
+  ).json<{ cursor: string }>();
+  const leaseResponse = await stub.fetch(
+    "https://project/dispatch/worker/lease",
+    {
+      method: "POST",
+      headers: {
+        "X-Tila-Conversation-Authority": JSON.stringify({
+          ...conversationAuthority,
+          runtime: {
+            ...runtime,
+            run_id: crypto.randomUUID(),
+            run_role: "relay",
+          },
+        }),
+        "X-Tila-Conversation-Cursor-Key": "restore-test-key",
+      },
+    },
+  );
+  expect(leaseResponse.status).toBe(200);
+  expect(await leaseResponse.json()).toMatchObject({
+    lease: { lease_token: expect.any(String) },
+  });
   const meta = await (
     await stub.fetch("https://project/admin/transfer/meta")
   ).json<{
@@ -66,7 +129,7 @@ it("restores real DO snapshots without resurrecting bindings or rewinding epochs
     journal: { nextSequence: number };
     tables: string[];
   }>();
-  expect(meta.migrationVersion).toBe(30);
+  expect(meta.migrationVersion).toBe(31);
   const snapshot = new Map<string, Record<string, unknown>[]>();
   for (const table of meta.tables) {
     const { rows } = await (
@@ -121,6 +184,32 @@ it("restores real DO snapshots without resurrecting bindings or rewinding epochs
     agent: { binding_epoch: 3 },
     binding: null,
   });
+  const oldHistory = await stub.fetch(
+    `https://project/rooms/general/messages?cursor=${encodeURIComponent(historyBefore.cursor)}`,
+    {
+      headers: {
+        "X-Tila-Conversation-Authority": JSON.stringify(conversationAuthority),
+        "X-Tila-Conversation-Cursor-Key": "restore-test-key",
+      },
+    },
+  );
+  expect(oldHistory.status).toBe(410);
+  const restoredOutbox = await (
+    await stub.fetch(
+      "https://project/admin/transfer/snapshot/dispatch_outbox?limit=250",
+    )
+  ).json<{
+    rows: { lease_token: string | null; lease_until: number | null }[];
+  }>();
+  expect(
+    restoredOutbox.rows.every(
+      (row) => row.lease_token === null && row.lease_until === null,
+    ),
+  ).toBe(true);
+  const retained = await (await conversation("/rooms/general/messages")).json<{
+    messages: { body: string }[];
+  }>();
+  expect(retained.messages[0].body).toBe("Retain history");
   await post(
     "/agents/worker/bind",
     { ...attach, expected_epoch: 3 },
@@ -144,7 +233,7 @@ it("authorizes agent selection and binding against current credentials before an
   const owner = `tila_${crypto.randomUUID()}${crypto.randomUUID()}`;
   await new D1TokenStore(bindings.DB).issue({
     projectId: project,
-    tokenHash: await hashToken(owner, undefined),
+    tokenHash: await hashToken(owner, bindings.HASH_PEPPER),
     name: "owner",
     createdBy: "fixture",
     createdAt: 0,

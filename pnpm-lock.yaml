@@ -446,6 +446,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261008.1
         version: 5.20261008.1
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.32.1
+        version: 1.32.1(zod@3.25.76)
       '@tila/backend-d1':
         specifier: workspace:*
         version: link:../backend-d1

@@ -62,6 +62,20 @@ function fns<const N extends string>(...names: N[]): Record<N, Mock> {
  * the mock lacks.
  */
 export type MockFacadeShape = {
+  conversations: Record<
+    | "list"
+    | "create"
+    | "get"
+    | "join"
+    | "leave"
+    | "threads"
+    | "createThread"
+    | "history"
+    | "publish",
+    Mock
+  >;
+  inbox: Record<"fetch" | "ack" | "watch" | "explain" | "resume", Mock>;
+  dispatch: Record<"status" | "lease" | "report", Mock>;
   agents: Record<"list" | "get" | "register" | "bind" | "release", Mock>;
   tasks: Record<
     | "create"
@@ -147,6 +161,19 @@ export type MockFacadeShape = {
  */
 export function createMockFacade(): MockFacadeShape {
   return {
+    conversations: fns(
+      "list",
+      "create",
+      "get",
+      "join",
+      "leave",
+      "threads",
+      "createThread",
+      "history",
+      "publish",
+    ),
+    inbox: fns("fetch", "ack", "watch", "explain", "resume"),
+    dispatch: fns("status", "lease", "report"),
     agents: fns("list", "get", "register", "bind", "release"),
     tasks: fns(
       "create",
@@ -252,6 +279,9 @@ type _MockMatchesFacade = {
 };
 
 const _assertMockMatchesFacade: _MockMatchesFacade = {
+  conversations: true,
+  inbox: true,
+  dispatch: true,
   agents: true,
   tasks: true,
   records: true,

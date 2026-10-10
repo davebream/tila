@@ -39,7 +39,7 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (61)
+## Tools (69)
 
 The default catalog contains **six workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
@@ -216,3 +216,32 @@ pnpm test:runtime
 ```
 
 Protocol tests interleave tools, resources, prompts, and discovery from separate sessions. CLI subprocess tests use isolated homes and real protected file storage. Required Cloudflare runtime tests exercise D1, DO SQLite, R2, proof binding, renewal, and revocation. The previous private-SQLite MCP evaluation harness was removed at the 0.4.0 cutover.
+
+### Durable conversations (`TILA_MCP_TOOLS=workflow,conversations`)
+
+Conversation access requires explicit enrollment capabilities. The default worker
+preset remains unchanged. Acting runs must be pinned to an agent and attached to
+its current binding; relay credentials cannot read bodies or acknowledge deliveries.
+Conversation protocol 1 is independent of runtime protocol 1. SDK requests send
+`X-Tila-Conversation-Protocol: 1`; a missing header is accepted for this release.
+
+| Tool | Purpose |
+|------|---------|
+| `tila_room_list` | List accessible rooms |
+| `tila_room_history` | Page through peer-content history with signed cursors |
+| `tila_room_publish` | Publish with an author-scoped stable operation ID |
+| `tila_inbox_fetch` | Fetch pending deliveries without acknowledging them |
+| `tila_inbox_ack` | Accept processing or decline using the current binding epoch |
+| `tila_inbox_watch` | Wait up to 25 seconds for publication, then re-poll with jitter |
+| `tila_inbox_explain` | Inspect delivery metadata and wake attempts |
+| `tila_agent_bind` | Attach the current run at the observed binding epoch |
+
+Fetched content is always labelled `peer-content`, never human approval. Acknowledge
+accepted processing before acting; declining is also an acknowledgement. Neither
+means task completion. Do not send “received” messages. A reply reuses the supplied
+`reply_op_id` so a retried turn cannot publish a duplicate reply.
+
+History cursors expire after three days. Restart history on `cursor-expired`;
+fetching the inbox without a cursor independently recovers pending work. Inline
+bodies are limited to 64 KB in UTF-8; publish existing artifact references for larger
+content. Local backends report `unsupported-capability`.

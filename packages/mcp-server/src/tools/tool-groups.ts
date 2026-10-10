@@ -3,6 +3,7 @@ import type { TilaFacade } from "tila-sdk";
 import { registerArtifactTools } from "./artifacts";
 import { registerClaimTools } from "./claims";
 import { registerContinuityTools } from "./continuity";
+import { registerConversationTools } from "./conversations";
 import { registerEntityTools } from "./entities";
 import { registerGateTools } from "./gates";
 import { registerJournalTools } from "./journal";
@@ -30,6 +31,7 @@ export const GROUP_MAP: Record<string, RegisterFn> = {
   claims: registerClaimTools,
   gates: registerGateTools,
   signals: registerSignalTools,
+  conversations: registerConversationTools,
   artifacts: registerArtifactTools,
   records: registerRecordTools,
   presence: registerPresenceTools,

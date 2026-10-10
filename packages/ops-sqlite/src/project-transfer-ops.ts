@@ -15,6 +15,16 @@ export interface ProjectSqlStorage {
 export const PROJECT_BACKUP_TABLES = [
   "agents",
   "agent_bindings",
+  "rooms",
+  "room_members",
+  "threads",
+  "messages",
+  "message_recipients",
+  "dispatch_outbox",
+  "dispatch_attempts",
+  "conversation_context",
+  "_conversation_state",
+
   "entities",
   "artifact_pointers",
   "artifact_lineages",
@@ -53,6 +63,15 @@ export const PROJECT_BACKUP_TABLES = [
 export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
+  rooms: ["id"],
+  room_members: ["room_id", "member"],
+  threads: ["id"],
+  messages: ["id"],
+  message_recipients: ["id"],
+  dispatch_outbox: ["agent_id"],
+  dispatch_attempts: ["id"],
+  conversation_context: ["consumer_binding_id"],
+  _conversation_state: ["singleton"],
   agents: ["id"],
   agent_bindings: ["consumer_binding_id"],
   entities: ["id"],
@@ -170,10 +189,25 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
 
 export async function semanticDigest(
   sql: ProjectSqlStorage,
-  migrationVersion = 30,
+  migrationVersion = 31,
 ): Promise<string> {
   const sections: string[] = [];
   for (const table of PROJECT_BACKUP_TABLES) {
+    if (
+      migrationVersion < 31 &&
+      [
+        "rooms",
+        "room_members",
+        "threads",
+        "messages",
+        "message_recipients",
+        "dispatch_outbox",
+        "dispatch_attempts",
+        "conversation_context",
+        "_conversation_state",
+      ].includes(table)
+    )
+      continue;
     if (
       migrationVersion < 30 &&
       (table === "agents" || table === "agent_bindings")

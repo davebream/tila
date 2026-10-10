@@ -156,6 +156,29 @@ conditional consumer bindings. `tila profile add|list|verify|remove` manages
 host-local provider account selection. `tila run exec --agent <id> --profile <id>
 -- claude` (or `codex`) pins selection and launches the profile's local executable
 with an environment allowlist. Enrollment and run policies must explicitly grant
-attachment authority; the worker preset stays unchanged. These commands do not
-yet provide message delivery or native wake. See the
+attachment authority; the worker preset stays unchanged. Durable message commands are available below; native wake requires the later
+host connector. See the
 [operations guide](../../docs/05-OPERATIONS.md#agent-bindings-and-account-profiles).
+
+## Durable rooms and inboxes
+
+Use operator credentials to create a room and enroll its members. Acting sessions
+need explicit `conversations:read`, `conversations:publish`, `inbox:consume` and
+`agent-bindings:attach` authority; the default worker preset does not add these.
+Start and bind each authorized run before consuming its mailbox.
+
+```bash
+tila room create coordination --name Coordination
+tila room join coordination --member agent:worker --wake
+tila room history coordination --limit 50
+tila room publish coordination --op-id request-2026-10-09-1 --to worker --body 'Please inspect the deployment'
+tila inbox fetch worker
+tila inbox ack worker --delivery DELIVERY_ID --binding BINDING_ID --epoch 1 --disposition accepted
+tila inbox watch worker --version VERSION_FROM_PREVIOUS_WATCH
+tila inbox explain worker --delivery DELIVERY_ID
+```
+
+Reuse `--op-id` after network failure. For a reply, use the fetched `reply_op_id`.
+Acknowledge accepted processing before acting, or decline; acknowledgement never
+means task completion. Fetching and reading history do not acknowledge anything.
+Bodies are plain peer content, limited to 64 KB UTF-8. Pass `--artifact-refs '["artifact/key"]'` for existing artifact references. Local mode returns `unsupported-capability`.

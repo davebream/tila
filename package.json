@@ -21,7 +21,7 @@
     "dev:mcp": "node scripts/generate-version.mjs sdk && tsx --tsconfig tsconfig.json packages/mcp-server/src/index.ts",
     "bench": "tsx --tsconfig tsconfig.json packages/bench/src/cli.ts",
     "bench:report": "tsx --tsconfig tsconfig.json packages/bench/src/cli.ts report",
-    "test:runtime": "node scripts/generate-version.mjs backend-do && node scripts/check-test-quality.mjs && pnpm --filter @tila/integration-tests test:runtime && node scripts/check-runtime-report.mjs"
+    "test:runtime": "node scripts/generate-version.mjs backend-do && node scripts/generate-version.mjs sdk && node scripts/check-test-quality.mjs && pnpm --filter @tila/integration-tests test:runtime && node scripts/check-runtime-report.mjs"
   },
   "pnpm": {
     "overrides": {

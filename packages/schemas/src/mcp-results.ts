@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentBindingResponseSchema } from "./agent-binding";
 import * as api from "./api";
 import {
   ArtifactReviewResponseSchema,
@@ -16,6 +17,7 @@ import {
   JournalReplayResponseSchema,
   ReentryResponseSchema,
 } from "./continuity";
+import * as conversations from "./conversation";
 import { GateResponseSchema } from "./gate";
 import { McpRecoverySchema } from "./mcp-workflow";
 import * as signals from "./signal";
@@ -108,6 +110,14 @@ const templates = ok.extend({
   ),
 });
 export const McpPrimitiveResults = {
+  tila_room_list: conversations.RoomListResponseSchema,
+  tila_room_history: conversations.RoomHistoryResponseSchema,
+  tila_room_publish: conversations.MessagePublishResponseSchema,
+  tila_inbox_fetch: conversations.ConversationInboxResponseSchema,
+  tila_inbox_ack: conversations.InboxAckResponseSchema,
+  tila_inbox_watch: conversations.InboxWatchResponseSchema,
+  tila_inbox_explain: conversations.DeliveryExplainResponseSchema,
+  tila_agent_bind: AgentBindingResponseSchema,
   tila_task_create: api.EntityResponseSchema,
   tila_task_list: z.union([
     api.CompactEntityListResponseSchema.extend(pagination),

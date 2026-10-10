@@ -1209,6 +1209,125 @@ function runMigration0030(storage: MigrationStorage): void {
   installTransferGuards(storage, ["agents", "agent_bindings"]);
 }
 
+export const MIGRATION_0031 = `
+CREATE TABLE IF NOT EXISTS rooms (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  history_policy TEXT NOT NULL CHECK(history_policy IN ('members','project')),
+  delivery_ttl_seconds INTEGER NOT NULL CHECK(delivery_ttl_seconds BETWEEN 60 AND 604800),
+  budgets TEXT NOT NULL,
+  archived INTEGER NOT NULL DEFAULT 0,
+  next_seq INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS room_members (
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  member TEXT NOT NULL,
+  wake INTEGER NOT NULL,
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY(room_id, member)
+);
+CREATE TABLE IF NOT EXISTS threads (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+  ordinal INTEGER NOT NULL UNIQUE,
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  thread_id TEXT REFERENCES threads(id),
+  seq INTEGER NOT NULL,
+  author_key TEXT NOT NULL,
+  client_op_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  message TEXT NOT NULL,
+  author_agent TEXT ,
+  chain_id TEXT NOT NULL,
+  hop INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS message_recipients (
+  ordinal INTEGER NOT NULL,
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL REFERENCES messages(id),
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  target_binding_id TEXT ,
+  target_epoch INTEGER CHECK((target_binding_id IS NULL) = (target_epoch IS NULL)),
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','acked','expired')),
+  fetched_at INTEGER ,
+  fetched_binding_id TEXT ,
+  fetched_epoch INTEGER ,
+  acked_at INTEGER ,
+  acked_binding_id TEXT ,
+  acked_epoch INTEGER ,
+  disposition TEXT CHECK(disposition IN ('accepted','declined')),
+  wake_suppressed TEXT ,
+  rewakes INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dispatch_outbox (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','quiet')),
+  publish_gen INTEGER NOT NULL DEFAULT 0,
+  lease_token TEXT ,
+  lease_until INTEGER ,
+  lease_gen INTEGER ,
+  lease_binding_id TEXT ,
+  lease_epoch INTEGER ,
+  next_attempt_at INTEGER NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dispatch_attempts (
+  room_ids TEXT NOT NULL, delivery_ids TEXT NOT NULL,
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  lease_token TEXT NOT NULL,
+  consumer_binding_id TEXT NOT NULL,
+  binding_epoch INTEGER NOT NULL,
+  publish_gen INTEGER NOT NULL,
+  outcome TEXT NOT NULL CHECK(outcome IN ('leased','accepted','rejected','deferred','unknown')),
+  created_at INTEGER NOT NULL,
+  reported_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS conversation_context (
+  consumer_binding_id TEXT PRIMARY KEY,
+  delivery_id TEXT NOT NULL REFERENCES message_recipients(id),
+  opened_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS _conversation_state (
+  singleton INTEGER PRIMARY KEY,
+  generation TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS messages_operation ON messages(author_key, client_op_id);
+CREATE UNIQUE INDEX IF NOT EXISTS recipients_target ON message_recipients(message_id, agent_id, COALESCE(target_binding_id, ''));
+CREATE INDEX IF NOT EXISTS recipients_inbox ON message_recipients(agent_id, state, ordinal, id);
+CREATE INDEX IF NOT EXISTS recipients_expiry ON message_recipients(state, expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS dispatch_lease ON dispatch_attempts(lease_token);
+CREATE INDEX IF NOT EXISTS dispatch_budget ON dispatch_attempts(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS dispatch_window ON dispatch_attempts(created_at);
+CREATE INDEX IF NOT EXISTS messages_author_window ON messages(author_agent, created_at);
+`;
+function runMigration0031(storage: MigrationStorage): void {
+  storage.sql.exec(MIGRATION_0031);
+  installTransferGuards(storage, [
+    "rooms",
+    "room_members",
+    "threads",
+    "messages",
+    "message_recipients",
+    "dispatch_outbox",
+    "dispatch_attempts",
+    "conversation_context",
+    "_conversation_state",
+  ]);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1240,4 +1359,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 28, run: runMigration0028 },
   { version: 29, run: runMigration0029 },
   { version: 30, run: runMigration0030 },
+  { version: 31, run: runMigration0031 },
 ];

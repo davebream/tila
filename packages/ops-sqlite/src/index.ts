@@ -147,3 +147,5 @@ export * as summaryOps from "./summary-ops";
 export * as artifactLifecycleOps from "./artifact-lifecycle-ops";
 export * as artifactReviewOps from "./artifact-review-ops";
 export { ArtifactReviewError } from "./artifact-review-ops";
+
+export * as conversationOps from "./conversation-ops";

@@ -114,6 +114,11 @@ import { createUnsupportedAgentMethods } from "../agents";
 import type { ArtifactUploadOpts } from "../artifacts";
 import { TilaApiError, type TilaFacade } from "../client";
 import type { CreateHandoffOptions } from "../continuity";
+import {
+  createUnsupportedConversationMethods,
+  createUnsupportedDispatchMethods,
+  createUnsupportedInboxMethods,
+} from "../conversations";
 
 /**
  * Thrown when a consumer calls a facade method that has no local equivalent
@@ -1225,6 +1230,9 @@ export function buildLocalResources(
 ) {
   return {
     agents: createUnsupportedAgentMethods(),
+    conversations: createUnsupportedConversationMethods(),
+    inbox: createUnsupportedInboxMethods(),
+    dispatch: createUnsupportedDispatchMethods(),
     tasks: createLocalTaskMethods(project),
     records: createLocalRecordMethods(project),
     claims: createLocalClaimMethods(project),
@@ -1292,6 +1300,9 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
 > = {
   tasks: true,
   agents: true,
+  conversations: true,
+  inbox: true,
+  dispatch: true,
   records: true,
   claims: true,
   artifacts: true,

@@ -157,6 +157,48 @@ describe("runMigrationsWithPitrRollback", () => {
               const match = /PRAGMA\s+table_info\((\w+)\)/i.exec(statement);
               const tableName = match?.[1] ?? "";
               const columnsByTable: Record<string, string[]> = {
+                rooms: ["id", "history_policy", "budgets", "next_seq"],
+                room_members: ["room_id", "member", "wake"],
+                threads: ["id", "room_id"],
+                messages: [
+                  "id",
+                  "ordinal",
+                  "room_id",
+                  "seq",
+                  "author_key",
+                  "client_op_id",
+                  "request_hash",
+                  "message",
+                ],
+                message_recipients: [
+                  "id",
+                  "ordinal",
+                  "message_id",
+                  "agent_id",
+                  "state",
+                  "target_binding_id",
+                  "target_epoch",
+                  "fetched_at",
+                  "acked_at",
+                  "wake_suppressed",
+                ],
+                dispatch_outbox: [
+                  "agent_id",
+                  "state",
+                  "publish_gen",
+                  "lease_token",
+                  "lease_gen",
+                  "lease_epoch",
+                ],
+                dispatch_attempts: [
+                  "id",
+                  "lease_token",
+                  "publish_gen",
+                  "room_ids",
+                  "delivery_ids",
+                ],
+                conversation_context: ["consumer_binding_id", "delivery_id"],
+                _conversation_state: ["singleton", "generation"],
                 agents: [
                   "id",
                   "owner_principal_id",

@@ -8,6 +8,10 @@ import {
 } from "@tila/schemas";
 import { and, eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import {
+  invalidateRestoredConversations,
+  rearm,
+} from "./conversation-state-ops";
 import { canonicalJson } from "./project-transfer-ops";
 import * as schema from "./schema";
 
@@ -305,6 +309,7 @@ export function attach(
       updated_at: now,
     };
     tx.insert(schema.agentBindings).values(row).run();
+    rearm(tx, id, now, false);
     return binding(row);
   });
 }
@@ -426,6 +431,7 @@ export function invalidateRestoredBindings(db: DB, now = Date.now()) {
     tx.update(schema.agentBindings)
       .set({ state: "expired", updated_at: now })
       .run();
+    invalidateRestoredConversations(tx, now);
     if (state)
       tx.update(schema.projectTransferState)
         .set({ applying: state.applying })

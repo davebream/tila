@@ -66,7 +66,7 @@ describe("MCP README tool-table parity", () => {
     );
     const registeredSet = new Set(registeredNames);
 
-    expect(registeredNames.length).toBe(61);
+    expect(registeredNames.length).toBe(69);
 
     // 2. Parse README
     const readme = await readFile(README_PATH, "utf8");
@@ -74,7 +74,7 @@ describe("MCP README tool-table parity", () => {
     const readmeCount = parseReadmeToolCount(readme);
 
     // 3. Stated count covers publicly documented tools
-    expect(readmeCount).toBe(61);
+    expect(readmeCount).toBe(69);
 
     // 4. No phantom tools in README (tools listed that aren't registered)
     const phantoms = [...readmeNames].filter((n) => !registeredSet.has(n));

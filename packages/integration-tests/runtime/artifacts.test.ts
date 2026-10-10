@@ -26,7 +26,7 @@ it("returns a readable 410 envelope for deleted revision content through the Wor
     "INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)",
   )
     .bind(
-      await hashToken(token, undefined),
+      await hashToken(token, bindings.HASH_PEPPER),
       projectId,
       "init",
       "full",
