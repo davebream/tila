@@ -1,5 +1,7 @@
 import { Badge } from "@/components/ui/badge";
+import { QuerySection } from "@/components/ui/query-section";
 import type { MembershipRepo } from "@/lib/api";
+import type { SectionState } from "@/lib/query-state";
 import { formatDateTime } from "@/lib/time";
 import type {
   ProjectMembership,
@@ -9,7 +11,8 @@ import type {
 
 interface MirroredAccessPanelProps {
   mode: ProjectMembershipMode | undefined;
-  repos: MembershipRepo[];
+  repos: SectionState<{ repos: MembershipRepo[] }>;
+  onRetryRepos: () => void;
   me: WhoamiResponse | undefined;
   ownMembership: ProjectMembership | undefined;
 }
@@ -38,14 +41,18 @@ function modeSummary(mode: ProjectMembershipMode | undefined): string {
 export function MirroredAccessPanel({
   mode,
   repos,
+  onRetryRepos,
   me,
   ownMembership,
 }: MirroredAccessPanelProps) {
   const showRepos = mode === "github-mirrored" || mode === "hybrid";
   const sources = me?.membership_sources ?? [];
-  const mirroredRepo = repos.find(
-    (r) => r.github_repo_id === me?.mirrored_repo_id,
-  );
+  // Repository names come from the repos request; if it has not succeeded the
+  // source line falls back to the repo id rather than guessing.
+  const mirroredRepo =
+    repos.phase === "ready"
+      ? repos.data.repos.find((r) => r.github_repo_id === me?.mirrored_repo_id)
+      : undefined;
 
   return (
     <section
@@ -59,37 +66,46 @@ export function MirroredAccessPanel({
 
       {showRepos && (
         <div className="space-y-2">
-          {repos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No repositories are linked to this project, so nothing is
-              mirrored.
-            </p>
-          ) : (
-            <table className="w-full text-xs" aria-label="Linked repositories">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="py-1 pr-3 font-normal">Repository</th>
-                  <th className="py-1 pr-3 font-normal">Mirroring</th>
-                  <th className="py-1 font-normal">Role cap</th>
-                </tr>
-              </thead>
-              <tbody>
-                {repos.map((r) => (
-                  <tr key={`${r.github_host}:${r.github_repo_id}`}>
-                    <td className="py-1 pr-3 font-mono text-fg-strong">
-                      {r.owner}/{r.repo}
-                    </td>
-                    <td className="py-1 pr-3">
-                      <Badge variant={r.membership_enabled ? "green" : "gray"}>
-                        {r.membership_enabled ? "on" : "off"}
-                      </Badge>
-                    </td>
-                    <td className="py-1 font-mono">{r.membership_role_cap}</td>
+          <QuerySection
+            state={repos}
+            label="linked repositories"
+            empty="No repositories are linked to this project, so nothing is mirrored."
+            onRetry={onRetryRepos}
+          >
+            {({ repos: rows }) => (
+              <table
+                className="w-full text-xs"
+                aria-label="Linked repositories"
+              >
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-1 pr-3 font-normal">Repository</th>
+                    <th className="py-1 pr-3 font-normal">Mirroring</th>
+                    <th className="py-1 font-normal">Role cap</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={`${r.github_host}:${r.github_repo_id}`}>
+                      <td className="py-1 pr-3 font-mono text-fg-strong">
+                        {r.owner}/{r.repo}
+                      </td>
+                      <td className="py-1 pr-3">
+                        <Badge
+                          variant={r.membership_enabled ? "green" : "gray"}
+                        >
+                          {r.membership_enabled ? "on" : "off"}
+                        </Badge>
+                      </td>
+                      <td className="py-1 font-mono">
+                        {r.membership_role_cap}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </QuerySection>
           <p className="text-xs text-muted-foreground">
             Collaborators get viewer, participant or maintainer according to
             their repository permission, capped per repository. GitHub never

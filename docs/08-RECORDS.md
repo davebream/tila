@@ -1092,6 +1092,48 @@ because record types must start with a lowercase letter. `~` is a reserved
 sentinel segment. It cannot collide with a valid key because `~` is excluded by
 key validation.
 
+### Types Response
+
+```http
+GET /projects/:id/records/_types
+```
+
+```json
+{
+  "ok": true,
+  "types": ["deploy-config", "feature-flags"],
+  "declared_types": ["deploy-config", "feature-flags"],
+  "in_use_types": ["deploy-config"]
+}
+```
+
+`types` is the sorted union of the schema's declared types and the types that
+have records. The route always answers 200 with whatever it could produce. When
+one source could not be read, the response adds `incomplete`, keyed by the list
+it qualifies, so a short list is not mistaken for a complete one:
+
+```json
+{
+  "ok": true,
+  "types": ["runtime-flags"],
+  "declared_types": [],
+  "in_use_types": ["runtime-flags"],
+  "incomplete": { "declared_types": "unavailable" }
+}
+```
+
+| Key | Value | Meaning |
+|---|---|---|
+| `declared_types` | `unavailable` | The schema could not be fetched. Retrying may help. |
+| `declared_types` | `invalid` | The schema was fetched but does not parse or validate. |
+| `in_use_types` | `unavailable` | The in-use types could not be listed. Retrying may help. |
+
+`incomplete` is omitted when nothing failed, so a healthy response is unchanged.
+A project with no schema is complete: `declared_types` is `[]` and nothing is
+reported. Clients that ignore `incomplete` keep working and see the same lists
+as before. Credentials with namespace restrictions never receive `incomplete`;
+they cannot read the schema, so its fetch and parse state is not reported to them.
+
 ### Create Request
 
 ```http

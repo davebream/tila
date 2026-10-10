@@ -34,6 +34,7 @@ import type {
   RecordGetResponse,
   RecordHistoryResponse,
   RecordListResponse,
+  RecordTypesResponse,
   SignalGroupsResponse,
   SignalHistoryResponse,
   StateListResponse,
@@ -43,12 +44,7 @@ import { encodeArtifactKey } from "./utils";
 
 export type { ArtifactSearchResponse };
 
-export type RecordTypesResponse = {
-  ok: true;
-  types: string[];
-  declared_types: string[];
-  in_use_types: string[];
-};
+export type { RecordTypesResponse };
 
 export class ApiError extends Error {
   constructor(
@@ -56,6 +52,8 @@ export class ApiError extends Error {
     message: string,
     /** Structured `error.details` from the server, when present. */
     public readonly details?: unknown,
+    /** HTTP status of the failed response; absent for network failures. */
+    public readonly status?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -87,7 +85,7 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
   }
   if (response.status === 429) code = "rate-limited";
   if (response.status === 401) code = "not-configured";
-  return new ApiError(code, message, details);
+  return new ApiError(code, message, details, response.status);
 }
 
 const PARTICIPANT_KEY = "tila.participantId";

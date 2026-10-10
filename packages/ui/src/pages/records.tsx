@@ -2,6 +2,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LastRefreshed } from "@/components/ui/last-refreshed";
+import {
+  SectionFailure,
+  SectionNotice,
+  StaleNotice,
+} from "@/components/ui/query-section";
 import { SortableHead, useSort } from "@/components/ui/sortable-head";
 import {
   Table,
@@ -18,6 +23,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
+import { deriveSectionState } from "@/lib/query-state";
 import { relativeTime } from "@/lib/time";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -62,13 +68,27 @@ export function RecordsPage() {
     parseSort(searchParams.get("sort")) ?? { key: "updated", dir: "desc" },
   );
 
-  const {
-    data: typesData,
-    isLoading: typesLoading,
-    isError: typesError,
-    refetch: refetchTypes,
-  } = useRecordTypes();
+  const typesQuery = useRecordTypes();
+  const typesState = deriveSectionState(typesQuery);
+  // After a 403/404 refresh the query still holds the old list; only a
+  // currently readable listing is used.
+  const typesData = typesState.phase === "ready" ? typesState.data : undefined;
   const types = typesData?.types ?? [];
+  const typesIncomplete = typesData?.incomplete;
+  const incompleteReasons = [
+    typesIncomplete?.declared_types === "unavailable"
+      ? "the schema could not be read"
+      : typesIncomplete?.declared_types === "invalid"
+        ? "the schema is invalid"
+        : null,
+    typesIncomplete?.in_use_types === "unavailable"
+      ? "types in use could not be listed"
+      : null,
+  ].filter((reason): reason is string => reason !== null);
+  // "Invalid" will not fix itself on retry; "unavailable" might.
+  const incompleteRetryable =
+    typesIncomplete?.declared_types === "unavailable" ||
+    typesIncomplete?.in_use_types === "unavailable";
 
   useEffect(() => {
     if (!selectedType && types.length > 0) {
@@ -171,34 +191,60 @@ export function RecordsPage() {
         <LastRefreshed dataUpdatedAt={dataUpdatedAt} />
       </div>
 
-      {typesLoading && (
-        <p className="text-sm text-muted-foreground">Loading types...</p>
+      {typesState.phase === "pending" && (
+        <output className="block text-sm text-muted-foreground">
+          Loading types…
+        </output>
       )}
 
-      {typesError && (
-        <TableError
-          error="Failed to load record types"
-          onRetry={() => refetchTypes()}
+      {typesState.phase === "failed" && (
+        <SectionFailure
+          kind={typesState.kind}
+          error={typesState.error}
+          label="record types"
+          onRetry={() => void typesQuery.refetch()}
         />
       )}
 
-      {!typesLoading && !typesError && types.length === 0 && (
-        <div className="py-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            No record types defined.
-          </p>
-          <p className="mt-1 text-xs text-fg-faint">
-            Add a{" "}
-            <code className="rounded bg-card px-1 py-0.5 font-mono text-[11px]">
-              [records.&lt;type&gt;]
-            </code>{" "}
-            section to tila.schema.toml, then run{" "}
-            <code className="rounded bg-card px-1 py-0.5 font-mono text-[11px]">
-              tila schema apply
-            </code>
-          </p>
-        </div>
+      {typesState.phase === "ready" && typesState.stale && (
+        <StaleNotice
+          label="record types"
+          updatedAt={typesState.updatedAt}
+          stale={typesState.stale}
+          onRetry={() => void typesQuery.refetch()}
+        />
       )}
+
+      {incompleteReasons.length > 0 && (
+        <SectionNotice
+          onRetry={
+            incompleteRetryable ? () => void typesQuery.refetch() : undefined
+          }
+        >
+          Some record types may be missing: {incompleteReasons.join("; ")}.
+        </SectionNotice>
+      )}
+
+      {typesState.phase === "ready" &&
+        !typesState.stale &&
+        incompleteReasons.length === 0 &&
+        types.length === 0 && (
+          <div className="py-12 text-center">
+            <p className="text-sm text-muted-foreground">
+              No record types defined.
+            </p>
+            <p className="mt-1 text-xs text-fg-faint">
+              Add a{" "}
+              <code className="rounded bg-card px-1 py-0.5 font-mono text-[11px]">
+                [records.&lt;type&gt;]
+              </code>{" "}
+              section to tila.schema.toml, then run{" "}
+              <code className="rounded bg-card px-1 py-0.5 font-mono text-[11px]">
+                tila schema apply
+              </code>
+            </p>
+          </div>
+        )}
 
       {types.length > 0 && (
         <>

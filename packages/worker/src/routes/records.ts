@@ -5,10 +5,12 @@ import {
   RecordPatchRequestSchema,
   RecordPutRequestSchema,
   RecordSetRequestSchema,
+  type RecordTypesIncomplete,
   RecordUnarchiveRequestSchema,
   RecordValueSchema,
   canonicalJson,
   canonicalJsonSha256,
+  hasNamespaceRestrictions,
   parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
@@ -133,8 +135,16 @@ async function writeCanonicalSnapshot(
 
 // GET /records/_types -> merge declared schema types + DO in-use types
 // CRITICAL: must be registered BEFORE any /:type route to avoid "_types" matching as :type
+//
+// Always 200 with whatever could be produced. A part that could not be produced
+// is named in `incomplete` (omitted when nothing failed, so a healthy response is
+// unchanged) so a short list is not mistaken for a complete one. "No schema
+// configured" is complete, not incomplete. Credentials with namespace
+// restrictions never get `incomplete`: they cannot read the schema, so its
+// fetch/parse state is not theirs to learn.
 records.get("/_types", async (c) => {
   const stub = c.get("doStub");
+  const incomplete: RecordTypesIncomplete = {};
 
   // 1. Fetch in-use types from DO
   let inUseTypes: string[] = [];
@@ -150,11 +160,13 @@ records.get("/_types", async (c) => {
       undefined,
       analyticsCtxFrom(c),
     );
-    if (inUseRes.ok && inUseBody.ok) {
+    if (inUseRes.ok && inUseBody.ok && Array.isArray(inUseBody.types)) {
       inUseTypes = inUseBody.types;
+    } else {
+      incomplete.in_use_types = "unavailable";
     }
   } catch {
-    // Fail open -- inUseTypes stays empty
+    incomplete.in_use_types = "unavailable";
   }
 
   // 2. Fetch declared types from schema TOML (via per-isolate cache — no extra DO round-trip)
@@ -162,10 +174,14 @@ records.get("/_types", async (c) => {
   const schemaResult = await getValidatedSchema(stub, c.get("projectId"));
   if (schemaResult.ok) {
     declaredTypes = Object.keys(schemaResult.schema.records ?? {}).sort();
+  } else if (schemaResult.reason === "fetch-error") {
+    incomplete.declared_types = "unavailable";
+  } else if (schemaResult.reason !== "no-schema") {
+    incomplete.declared_types = "invalid";
   }
-  // schema absent, parse error, or validate error: declaredTypes stays empty (permissive)
 
-  const rules = scopedPolicy(c)?.restrictions?.records;
+  const policy = scopedPolicy(c);
+  const rules = policy?.restrictions?.records;
   if (rules !== undefined) {
     const allowed = new Set(
       rules
@@ -181,11 +197,16 @@ records.get("/_types", async (c) => {
   // 3. Merge, deduplicate, sort
   const types = [...new Set([...declaredTypes, ...inUseTypes])].sort();
 
+  const reportIncomplete =
+    Object.keys(incomplete).length > 0 &&
+    !(policy !== undefined && hasNamespaceRestrictions(policy));
+
   return c.json({
     ok: true,
     types,
     declared_types: declaredTypes,
     in_use_types: inUseTypes,
+    ...(reportIncomplete ? { incomplete } : {}),
   });
 });
 

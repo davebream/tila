@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { LastRefreshed } from "@/components/ui/last-refreshed";
-import { TableError } from "@/components/ui/table-error";
+import { SectionFailure, StaleNotice } from "@/components/ui/query-section";
 import {
   isStepUpRequired,
   useAdminCapabilities,
@@ -26,6 +26,7 @@ import {
   useWhoami,
 } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
+import { type SectionState, deriveSectionState } from "@/lib/query-state";
 import type {
   ProjectMembership,
   ProjectMembershipMode,
@@ -40,20 +41,41 @@ const MODES: ProjectMembershipMode[] = [
   "service-only",
 ];
 
-const UNAVAILABLE_CODES = new Set([
-  "membership-unavailable",
-  "auth-unavailable",
-  "credential-unavailable",
-  "permission-recheck-unavailable",
-]);
-
-function isUnavailable(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    UNAVAILABLE_CODES.has(String((error as { code: unknown }).code))
-  );
+/**
+ * Failure block for a section with no usable data, or the amber stale notice
+ * when the last refresh failed but earlier data is still shown. Renders nothing
+ * for a healthy or still-loading section.
+ */
+function SectionStatus<T>({
+  state,
+  label,
+  onRetry,
+}: {
+  state: SectionState<T>;
+  label: string;
+  onRetry: () => void;
+}) {
+  if (state.phase === "failed") {
+    return (
+      <SectionFailure
+        kind={state.kind}
+        error={state.error}
+        label={label}
+        onRetry={onRetry}
+      />
+    );
+  }
+  if (state.phase === "ready" && state.stale) {
+    return (
+      <StaleNotice
+        label={label}
+        updatedAt={state.updatedAt}
+        stale={state.stale}
+        onRetry={onRetry}
+      />
+    );
+  }
+  return null;
 }
 
 export function SettingsPage() {
@@ -201,7 +223,7 @@ function MembersSection({
   }
 
   function requestMode(mode: ProjectMembershipMode) {
-    if (mode === policy.data?.mode) return;
+    if (!policy.data || mode === policy.data.mode) return;
     if (policy.data?.mode === "explicit" && mode !== "service-only") {
       // Leaving explicit mode widens access to GitHub collaborators.
       setPendingMode(mode);
@@ -225,7 +247,18 @@ function MembersSection({
     }
   }
 
-  const listError = memberships.error ?? policy.error;
+  const membershipsState = deriveSectionState(memberships);
+  const policyState = deriveSectionState(policy);
+  const reposState = deriveSectionState(repos, {
+    isEmpty: (d) => d.repos.length === 0,
+  });
+  const eventsState = deriveSectionState(events, {
+    isEmpty: (d) => d.events.length === 0,
+  });
+  const retryList = () => {
+    void memberships.refetch();
+    void policy.refetch();
+  };
   const pendingId =
     (updateRole.isPending ? updateRole.variables?.membershipId : null) ??
     (revoke.isPending ? revoke.variables : null) ??
@@ -250,13 +283,19 @@ function MembersSection({
           Policy mode
           <select
             id={modeId}
-            value={policy.data?.mode ?? "explicit"}
+            value={policy.data?.mode ?? ""}
             disabled={!policy.data || setMode.isPending}
             onChange={(e) =>
               requestMode(e.target.value as ProjectMembershipMode)
             }
             className="h-7 rounded-md border border-input bg-transparent px-2 font-mono text-xs text-foreground"
           >
+            {/* Never show a mode the server has not told us. */}
+            {!policy.data && (
+              <option value="" disabled>
+                {policyState.phase === "failed" ? "Unavailable" : "Loading…"}
+              </option>
+            )}
             {MODES.map((mode) => (
               <option key={mode} value={mode}>
                 {mode}
@@ -272,11 +311,17 @@ function MembersSection({
         </p>
       )}
 
-      {listError && isUnavailable(listError) ? (
-        <TableError error={listError} onRetry={() => memberships.refetch()} />
-      ) : listError ? (
-        <TableError error={listError} onRetry={() => memberships.refetch()} />
-      ) : (
+      <SectionStatus
+        state={membershipsState}
+        label="members"
+        onRetry={retryList}
+      />
+      <SectionStatus
+        state={policyState}
+        label="membership policy"
+        onRetry={() => void policy.refetch()}
+      />
+      {membershipsState.phase !== "failed" && (
         <>
           <MembersTable
             memberships={rows}
@@ -298,15 +343,15 @@ function MembersSection({
           />
           <MirroredAccessPanel
             mode={policy.data?.mode}
-            repos={repos.data?.repos ?? []}
+            repos={reposState}
+            onRetryRepos={() => void repos.refetch()}
             me={me.data}
             ownMembership={ownMembership}
           />
           <MembershipEvents
             projectId={projectId}
-            events={events.data?.events ?? []}
-            nextCursor={events.data?.next_cursor ?? null}
-            isLoading={events.isLoading}
+            state={eventsState}
+            onRetry={() => void events.refetch()}
           />
         </>
       )}
@@ -339,6 +384,7 @@ function CredentialsSection({ track }: { track: Track }) {
   const serviceAccounts = useServiceAccounts();
   const revoke = useRevokeToken();
   const list = tokens.data?.tokens ?? [];
+  const tokensState = deriveSectionState(tokens);
 
   return (
     <section aria-labelledby="credentials-heading" className="space-y-4">
@@ -356,9 +402,12 @@ function CredentialsSection({ track }: { track: Track }) {
         )}
         <LastRefreshed dataUpdatedAt={tokens.dataUpdatedAt} />
       </div>
-      {tokens.error ? (
-        <TableError error={tokens.error} onRetry={() => tokens.refetch()} />
-      ) : (
+      <SectionStatus
+        state={tokensState}
+        label="credentials"
+        onRetry={() => void tokens.refetch()}
+      />
+      {tokensState.phase !== "failed" && (
         <CredentialsTable
           tokens={list}
           serviceAccounts={serviceAccounts.data?.service_accounts ?? []}

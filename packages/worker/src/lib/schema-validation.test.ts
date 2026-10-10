@@ -115,6 +115,30 @@ describe("getValidatedSchema returns parsed schema", () => {
     expect(result.reason).toBe("no-schema");
   });
 
+  it("returns ok=false with reason=fetch-error when the DO schema fetch fails", async () => {
+    const { stub } = makeFakeStub({ ok: false }, 500);
+
+    const result = await getValidatedSchema(stub, PROJECT_ID);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected ok=false");
+    expect(result.reason).toBe("fetch-error");
+  });
+
+  it("returns ok=false with reason=fetch-error when the DO stub throws", async () => {
+    const stub = {
+      fetch: vi.fn(async () => {
+        throw new Error("DO unreachable");
+      }),
+    } as unknown as DurableObjectStub;
+
+    const result = await getValidatedSchema(stub, PROJECT_ID);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected ok=false");
+    expect(result.reason).toBe("fetch-error");
+  });
+
   it("returns ok=false with reason=parse-error when TOML is invalid", async () => {
     const { stub } = makeFakeStub({
       ok: true,

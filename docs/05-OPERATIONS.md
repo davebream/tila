@@ -1223,7 +1223,10 @@ effective policy, status, expiry and version retirement deadlines, without secre
 Absent namespace restrictions mean unrestricted; empty arrays grant nothing.
 Task types match exactly. Record prefix `team/a` permits that key and descendants
 such as `team/a/config`, but excludes `team/ab`. Lists filter before counts and
-pagination. Restricted keys cannot use project-wide search, journal, summary,
+pagination, so a restricted listing that is empty cannot be told apart from one
+that was filtered; `GET /records/_types` likewise never reports `incomplete`
+(schema fetch or parse failures) to a restricted key. Restricted keys cannot use
+project-wide search, journal, summary,
 exports, artifact access or global maintenance. Unsafe derived task views are
 also denied, including journal replay, handoffs, and re-entry. Unrestricted
 handoff access requires journal, task, record, artifact, and claim read capabilities;

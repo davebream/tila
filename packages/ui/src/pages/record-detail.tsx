@@ -2,6 +2,11 @@ import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Drawer } from "@/components/ui/drawer";
 import {
+  QuerySection,
+  SectionFailure,
+  StaleNotice,
+} from "@/components/ui/query-section";
+import {
   Table,
   TableBody,
   TableCell,
@@ -9,11 +14,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { TableError } from "@/components/ui/table-error";
 import { InfoTip } from "@/components/ui/tooltip";
 import { useRecord, useRecordHistory, useRecords } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
+import { deriveSectionState } from "@/lib/query-state";
 import { formatDateTime, relativeTime } from "@/lib/time";
 import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -58,14 +63,8 @@ export function RecordDetailPage() {
   const type = params.type ?? "";
   const key = params["*"] ?? "";
 
-  const {
-    data: recordData,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useRecord(type, key);
-  const { data: historyData } = useRecordHistory(type, key, { limit: 20 });
+  const recordQuery = useRecord(type, key);
+  const historyQuery = useRecordHistory(type, key, { limit: 20 });
   const { data: listData } = useRecords(type);
 
   const siblings = useMemo(() => {
@@ -105,9 +104,16 @@ export function RecordDetailPage() {
   }, [siblings, navigate, projectId]);
 
   const [expanded, setExpanded] = useState(false);
+  const recordState = deriveSectionState(recordQuery);
+  const historyState = deriveSectionState(historyQuery, {
+    isEmpty: (d) => d.items.length === 0,
+  });
+  // Only a record that is currently readable is shown: after a 403/404 refresh
+  // the query still holds the old record, which must not keep rendering.
+  const recordData =
+    recordState.phase === "ready" ? recordState.data : undefined;
   const record = recordData?.record;
   const fence = recordData?.fence;
-  const historyItems = historyData?.items ?? [];
 
   return (
     <Drawer
@@ -180,11 +186,29 @@ export function RecordDetailPage() {
       }
     >
       <div className="space-y-6 px-6 py-4">
-        {isLoading && (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+        {recordState.phase === "pending" && (
+          <output className="block text-sm text-muted-foreground">
+            Loading record…
+          </output>
         )}
 
-        {isError && <TableError error={error} onRetry={() => refetch()} />}
+        {recordState.phase === "failed" && (
+          <SectionFailure
+            kind={recordState.kind}
+            error={recordState.error}
+            label="record"
+            onRetry={() => void recordQuery.refetch()}
+          />
+        )}
+
+        {recordState.phase === "ready" && recordState.stale && (
+          <StaleNotice
+            label="record"
+            updatedAt={recordState.updatedAt}
+            stale={recordState.stale}
+            onRetry={() => void recordQuery.refetch()}
+          />
+        )}
 
         {record && (
           <>
@@ -305,46 +329,49 @@ export function RecordDetailPage() {
 
             <section>
               <SectionLabel>Revision History</SectionLabel>
-              {historyItems.length === 0 ? (
-                <p className="py-2 text-sm text-muted-foreground">
-                  No history available
-                </p>
-              ) : (
-                <Table aria-label="Revision history">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Revision</TableHead>
-                      <TableHead>Operation</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Message</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {historyItems.map((item) => (
-                      <TableRow key={item.revision}>
-                        <TableCell className="font-mono text-xs tabular-nums">
-                          {item.revision}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={operationVariant(item.operation)}>
-                            {item.operation}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {item.actor}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {relativeTime(item.created_at)}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {item.message || "—"}
-                        </TableCell>
+              <QuerySection
+                state={historyState}
+                label="revision history"
+                empty="No history available"
+                onRetry={() => void historyQuery.refetch()}
+              >
+                {({ items }) => (
+                  <Table aria-label="Revision history">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Revision</TableHead>
+                        <TableHead>Operation</TableHead>
+                        <TableHead>Actor</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Message</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((item) => (
+                        <TableRow key={item.revision}>
+                          <TableCell className="font-mono text-xs tabular-nums">
+                            {item.revision}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={operationVariant(item.operation)}>
+                              {item.operation}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {item.actor}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {relativeTime(item.created_at)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {item.message || "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </QuerySection>
             </section>
           </>
         )}

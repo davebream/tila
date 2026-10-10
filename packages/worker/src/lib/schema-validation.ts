@@ -12,7 +12,9 @@
  *   - artifacts.ts  /relationship    → relationship-type validation (allow-through on failure)
  *   - entities.ts   /artifact-refs   → slot validation (allow-through on failure)
  *   - records.ts    resolveRecordHistoryMode → history mode (returns "revision" on failure)
- *   - records.ts    GET /_types      → declared record types (empty list on failure)
+ *   - records.ts    GET /_types      → declared record types (empty list on failure;
+ *                                       reports `fetch-error` and `parse-error`/`validate-error`
+ *                                       separately from `no-schema`)
  */
 import { type TilaSchemaToml, TilaSchemaTomlSchema } from "@tila/schemas";
 import TOML from "smol-toml";
@@ -20,7 +22,10 @@ import { getCurrentSchema } from "./schema-cache";
 
 export type SchemaValidationResult =
   | { ok: true; schema: TilaSchemaToml }
-  | { ok: false; reason: "no-schema" | "parse-error" | "validate-error" };
+  | {
+      ok: false;
+      reason: "no-schema" | "fetch-error" | "parse-error" | "validate-error";
+    };
 
 /**
  * Fetch and validate the current schema for a project.
@@ -31,6 +36,8 @@ export type SchemaValidationResult =
  * Returns:
  *   - `{ ok: true, schema }` — schema parsed and validated successfully
  *   - `{ ok: false, reason: "no-schema" }` — no schema configured for this project
+ *   - `{ ok: false, reason: "fetch-error" }` — the schema could not be fetched (DO error);
+ *     says nothing about whether a schema exists
  *   - `{ ok: false, reason: "parse-error" }` — TOML.parse threw
  *   - `{ ok: false, reason: "validate-error" }` — TilaSchemaTomlSchema.safeParse failed
  *
@@ -44,8 +51,9 @@ export async function getValidatedSchema(
   try {
     schemaBody = await getCurrentSchema(stub, projectId);
   } catch {
-    // DO fetch error — propagate as no-schema (caller falls back permissively)
-    return { ok: false, reason: "no-schema" };
+    // DO fetch error — distinct from "no schema configured". Callers that only
+    // test `.ok` fall back permissively exactly as before.
+    return { ok: false, reason: "fetch-error" };
   }
 
   if (!schemaBody?.definition) {

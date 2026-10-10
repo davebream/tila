@@ -38,7 +38,7 @@ export function renderWithProviders(
     );
   }
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[route]}>
         <AuthProvider>{ui}</AuthProvider>
@@ -46,4 +46,6 @@ export function renderWithProviders(
     </QueryClientProvider>,
     renderOptions,
   );
+  // Exposed so tests can force a refetch (`invalidateQueries`) deterministically.
+  return { ...result, queryClient };
 }
