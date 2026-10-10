@@ -53,6 +53,29 @@ function staleReason({ kind, error }: StaleInfo): string {
   return error instanceof Error ? error.message : "request failed";
 }
 
+/** "Showing {label} from HH:MM:SS. Refresh failed: …" for last-good data. */
+export function StaleNotice({
+  label,
+  updatedAt,
+  stale,
+  onRetry,
+}: {
+  label: string;
+  updatedAt: number;
+  stale: StaleInfo;
+  onRetry?: () => void;
+}) {
+  return (
+    <SectionNotice onRetry={onRetry}>
+      Showing {label} from{" "}
+      <time dateTime={new Date(updatedAt).toISOString()} className="font-mono">
+        {formatTime(updatedAt)}
+      </time>
+      . Refresh failed: {staleReason(stale)}.
+    </SectionNotice>
+  );
+}
+
 /** Failure with no usable data. Forbidden and not-found are not retryable. */
 export function SectionFailure({
   kind,
@@ -164,16 +187,12 @@ export function QuerySection<T>({
     body = (
       <>
         {stale ? (
-          <SectionNotice onRetry={retry}>
-            Showing {label} from{" "}
-            <time
-              dateTime={new Date(state.updatedAt).toISOString()}
-              className="font-mono"
-            >
-              {formatTime(state.updatedAt)}
-            </time>
-            . Refresh failed: {staleReason(stale)}.
-          </SectionNotice>
+          <StaleNotice
+            label={label}
+            updatedAt={state.updatedAt}
+            stale={stale}
+            onRetry={retry}
+          />
         ) : null}
         {state.empty ? (
           <Muted>{stale ? `Last known: ${empty}` : empty}</Muted>
