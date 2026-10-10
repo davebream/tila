@@ -139,7 +139,9 @@ describe("TaskDetailPage claim state", () => {
       expect(screen.getByText("test-user")).toBeInTheDocument(),
     );
 
-    const claimTable = screen.getByRole("table", { name: "Claim state" });
+    const claimTable = await screen.findByRole("table", {
+      name: "Claim state",
+    });
     expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
     expect(
       within(claimTable).getByText("token:test-token"),
@@ -167,7 +169,9 @@ describe("TaskDetailPage claim state", () => {
       expect(screen.getByText("test-user")).toBeInTheDocument(),
     );
 
-    const claimTable = screen.getByRole("table", { name: "Claim state" });
+    const claimTable = await screen.findByRole("table", {
+      name: "Claim state",
+    });
     expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
   });
 
@@ -184,7 +188,9 @@ describe("TaskDetailPage claim state", () => {
       expect(screen.getByText("test-user")).toBeInTheDocument(),
     );
 
-    const claimTable = screen.getByRole("table", { name: "Claim state" });
+    const claimTable = await screen.findByRole("table", {
+      name: "Claim state",
+    });
     expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
   });
 
@@ -201,7 +207,9 @@ describe("TaskDetailPage claim state", () => {
       expect(screen.getByText("test-user")).toBeInTheDocument(),
     );
 
-    const claimTable = screen.getByRole("table", { name: "Claim state" });
+    const claimTable = await screen.findByRole("table", {
+      name: "Claim state",
+    });
     expect(within(claimTable).getByText("agent-sonnet")).toBeInTheDocument();
   });
 
@@ -210,12 +218,8 @@ describe("TaskDetailPage claim state", () => {
 
     renderDrawer("/p/test-project/tasks/task.ingest-worker");
 
-    // Gate on the positive signal first — "Not claimed." is also the pre-auth render.
-    await waitFor(() =>
-      expect(screen.getByText("test-user")).toBeInTheDocument(),
-    );
-
-    expect(screen.getByText("Not claimed.")).toBeInTheDocument();
+    // "Not claimed." only appears once the claims request has succeeded empty.
+    expect(await screen.findByText("Not claimed.")).toBeInTheDocument();
     expect(
       screen.queryByRole("table", { name: "Claim state" }),
     ).not.toBeInTheDocument();
