@@ -81,4 +81,40 @@ describe("agent SDK contracts", () => {
     expect(() => agents.get("../other")).toThrow();
     expect(fetch).toHaveBeenCalledTimes(3);
   });
+
+  it("requests the bounded runtime view and validates its contract", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const client = new TilaClient({
+      baseUrl: "https://example.test",
+      token: "fixture",
+      participantId: "participant",
+      fetch,
+    });
+    const agents = createAgentMethods(client, "project");
+    const view = {
+      ok: true,
+      server_now: 1000,
+      sources: {
+        agents: "ok",
+        runs: "unavailable",
+        enrollments: "ok",
+        presence: "forbidden",
+      },
+      rows: [],
+      next_cursor: null,
+    };
+    fetch.mockResolvedValueOnce(Response.json(view));
+    expect(await agents.runtimeView({ limit: 5, agent: "worker" })).toEqual(
+      view,
+    );
+    const url = new URL(String(fetch.mock.calls[0][0]));
+    expect(url.pathname).toBe("/projects/project/runtime-view");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      limit: "5",
+      agent: "worker",
+    });
+    expect(() => agents.runtimeView({ limit: 51 })).toThrow();
+    fetch.mockResolvedValueOnce(Response.json({ ...view, rows: [{}] }));
+    await expect(agents.runtimeView()).rejects.toThrow();
+  });
 });

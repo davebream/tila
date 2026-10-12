@@ -80,7 +80,10 @@ export type MockFacadeShape = {
     Mock
   >;
   dispatch: Record<"status" | "lease" | "report", Mock>;
-  agents: Record<"list" | "get" | "register" | "bind" | "release", Mock>;
+  agents: Record<
+    "list" | "get" | "register" | "bind" | "release" | "runtimeView",
+    Mock
+  >;
   tasks: Record<
     | "create"
     | "get"
@@ -179,7 +182,7 @@ export function createMockFacade(): MockFacadeShape {
     ),
     inbox: fns("fetch", "ack", "watch", "explain", "resume", "deliveries"),
     dispatch: fns("status", "lease", "report"),
-    agents: fns("list", "get", "register", "bind", "release"),
+    agents: fns("list", "get", "register", "bind", "release", "runtimeView"),
     tasks: fns(
       "create",
       "get",
