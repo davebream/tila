@@ -27,6 +27,15 @@ tila implements a unified authentication system with three distinct auth paths, 
 
 ### When Each Path is Used
 
+Browser GitHub OAuth requires explicit per-instance opt-in via the Worker secret
+`GITHUB_LOGIN_ENABLED="true"`, together with nonblank OAuth client ID, client
+secret, and session HMAC key. Existing credentials alone do not enable browser
+login. `GET /api/auth/github/login-config` exposes only the effective `enabled`
+boolean. The UI, login routes, and all callback branches share that decision;
+existing sessions and non-browser authentication paths remain independent.
+See [GitHub browser login operations](05-OPERATIONS.md#github-browser-login-explicit-opt-in)
+for setup, disabling, and upgrade behavior.
+
 | Auth Path | Client | Use Case | Lifetime | Revocation |
 |-----------|--------|----------|----------|------------|
 | D1 API Token | Operator CLI, SDK | Long-lived machine access | Indefinite (until revoked) | Explicit (via `/api/tokens/:tokenId` DELETE) |

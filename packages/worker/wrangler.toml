@@ -50,6 +50,13 @@ not_found_handling = "single-page-application"
 run_worker_first = ["/api/*", "/auth/*", "/projects/*", "/_internal/*"]
 
 # --- Required secrets (set via: wrangler secret put <NAME>) ---
+# GITHUB_LOGIN_ENABLED — optional browser OAuth opt-in; only "true" enables it.
+#   Requires GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_SESSION_HMAC_KEY.
+#   Store as a Worker secret so generated deployment configs preserve the setting.
+#   Unset or "false" disables new browser logins, including reauthentication.
+#   Existing sessions, CLI exchanges, OIDC, and repository integration are unaffected.
+#   Set: wrangler secret put GITHUB_LOGIN_ENABLED --name <worker-name>
+#
 # GITHUB_SESSION_HMAC_KEY — 32-byte base64url-encoded HMAC key for session token signing
 #   Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 #   Set: wrangler secret put GITHUB_SESSION_HMAC_KEY

@@ -307,7 +307,55 @@ Export the token before running any `tila init` command:
 export CLOUDFLARE_API_TOKEN=<your-token>
 ```
 
-### GitHub Session Auth (Default)
+### GitHub browser login (explicit opt-in)
+
+Browser login is **off by default**, including on existing installations that
+already have GitHub App credentials. Provisioning and deployment never opt an
+instance in automatically. API-token login remains available.
+
+To enable browser login, configure all three Worker secrets:
+`GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and
+`GITHUB_SESSION_HMAC_KEY` (a base64url-encoded session signing key). Configure
+the GitHub App OAuth callback URL as
+`https://<instance-host>/api/auth/github/oauth/callback`. Then set the separate
+switch on that same Worker:
+
+```bash
+wrangler secret put GITHUB_LOGIN_ENABLED --name <worker-name>
+# At the prompt, enter exactly: true
+```
+
+Store the switch as a **Worker secret**, even though its value is not sensitive.
+Normal `tila deploy` and `tila infra provision --force-redeploy` preserve secrets;
+their generated configuration removes unmanaged plain Worker variables.
+For local development, use `GITHUB_LOGIN_ENABLED=true` in the Worker's `.dev.vars`
+alongside the required credentials.
+
+To disable it, set the secret to `false` with the same command, or delete it:
+
+```bash
+wrangler secret delete GITHUB_LOGIN_ENABLED --name <worker-name>
+```
+
+Only the exact string `true` enables the switch. An absent switch or any other
+value disables browser login. Blank or missing required credentials also hide
+the option. No credentials are returned by the public
+`GET /api/auth/github/login-config` endpoint, which responds with
+`{ "ok": true, "enabled": false }` (or `true`) and `Cache-Control: no-store`.
+
+The login page and GitHub reauthentication action appear only after the instance
+reports availability. Both login URLs and every OAuth callback branch enforce
+the same check: disabled requests return `404` / `github-login-disabled`, and
+opted-in but incomplete configurations return `503` / `not-configured`, before
+creating cookies, contacting GitHub, or writing sessions. Disabling during an
+OAuth flow also blocks its callback.
+
+Disabling this switch does not revoke existing sessions or change CLI GitHub
+exchanges, GitHub Actions OIDC, repository integration, or API-token login.
+Existing GitHub sessions cannot reauthenticate while browser login is disabled;
+the dashboard directs those users to the instance administrator.
+
+### GitHub Session Auth (CLI)
 
 Uses GitHub repository permissions as the authorization source. The CLI exchanges a GitHub token for a short-lived (1-hour) tila session token signed with HMAC-SHA256. This is the recommended auth path for all new projects.
 
