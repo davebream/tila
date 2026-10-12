@@ -1,7 +1,15 @@
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
-import { useTaskIndex } from "@/hooks/use-api";
+import {
+  TASK_SEARCH_MIN_LENGTH,
+  useRecentTasks,
+  useTaskSearch,
+  useWorkCatalog,
+} from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { useDebouncedValue } from "@/hooks/use-debounce";
+import { catalogIndex, taskTitle } from "@/lib/presentation";
+import { classifyApiError } from "@/lib/query-state";
 import { Dialog } from "radix-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -9,11 +17,15 @@ import { useNavigate } from "react-router";
 interface PaletteItem {
   id: string;
   label: string;
+  /** Secondary mono text, e.g. the task id when the label is its title. */
+  detail?: string;
   meta?: string;
   group: string;
   href: string;
   badge?: { text: string; variant: "default" | "green" | "amber" | "gray" };
 }
+
+const SEARCH_LIMIT = 20;
 
 export function CommandPalette({
   open,
@@ -22,31 +34,64 @@ export function CommandPalette({
   const { projectId } = useAuth();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // Highlight is tracked by item id so it survives results refreshing.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { data: taskData } = useTaskIndex();
-  const entities = taskData?.entities ?? [];
+  const trimmed = query.trim();
+  const debounced = useDebouncedValue(trimmed, 200);
+  const wantsSearch = trimmed.length >= TASK_SEARCH_MIN_LENGTH;
+
+  const recentQuery = useRecentTasks({ enabled: open });
+  const catalogQuery = useWorkCatalog({ enabled: open });
+  const searchQuery = useTaskSearch(
+    { q: debounced, limit: SEARCH_LIMIT },
+    { enabled: open && wantsSearch },
+  );
+  const searchFailed =
+    wantsSearch && searchQuery.isError && searchQuery.data === undefined;
+  // A credential that may not search simply gets no task results.
+  const searchForbidden =
+    searchFailed && classifyApiError(searchQuery.error) === "forbidden";
 
   const items = useMemo(() => {
-    const q = query.toLowerCase().trim();
+    const q = trimmed.toLowerCase();
     const result: PaletteItem[] = [];
     const prefix = projectId ? `/p/${projectId}` : "";
+    const entries = catalogIndex(catalogQuery.data?.types);
 
-    for (const e of entities) {
-      if (
-        q &&
-        !e.id.toLowerCase().includes(q) &&
-        !e.type.toLowerCase().includes(q)
-      )
-        continue;
+    if (!q) {
+      for (const e of recentQuery.data?.entities ?? []) {
+        const title = taskTitle(e.data, entries.get(e.type));
+        result.push({
+          id: `task:${e.id}`,
+          label: title ?? e.id,
+          detail: title ? e.id : undefined,
+          group: "recent tasks",
+          href: `${prefix}/tasks/${e.id}`,
+          badge: { text: e.type, variant: "gray" },
+        });
+      }
+    } else if (wantsSearch && !searchFailed) {
+      // Results for an older query stay visible while the new one loads.
+      const showResults =
+        debounced.length >= TASK_SEARCH_MIN_LENGTH && searchQuery.data;
+      for (const r of showResults ? searchQuery.data.results : []) {
+        if (r.type !== "entity") continue;
+        result.push({
+          id: `task:${r.entity_id}`,
+          label: r.name ?? r.entity_id,
+          detail: r.name ? r.entity_id : undefined,
+          group: "tasks",
+          href: `${prefix}/tasks/${r.entity_id}`,
+          badge: { text: r.entity_type, variant: "gray" },
+        });
+      }
       result.push({
-        id: e.id,
-        label: e.id,
-        meta: e.type,
+        id: "search-all-tasks",
+        label: `Search all tasks for “${trimmed}”`,
         group: "tasks",
-        href: `${prefix}/tasks/${e.id}`,
-        badge: { text: e.type, variant: "gray" },
+        href: `${prefix}/tasks?q=${encodeURIComponent(trimmed)}`,
       });
     }
 
@@ -196,7 +241,16 @@ export function CommandPalette({
     }
 
     return result;
-  }, [entities, query, projectId]);
+  }, [
+    trimmed,
+    debounced,
+    wantsSearch,
+    searchFailed,
+    projectId,
+    recentQuery.data,
+    searchQuery.data,
+    catalogQuery.data,
+  ]);
 
   const groups = useMemo(() => {
     const map = new Map<string, PaletteItem[]>();
@@ -209,11 +263,13 @@ export function CommandPalette({
   }, [items]);
 
   const flatItems = items;
+  const foundIndex = flatItems.findIndex((item) => item.id === selectedId);
+  const selectedIndex = foundIndex === -1 ? 0 : foundIndex;
 
   useEffect(() => {
     if (open) {
       setQuery("");
-      setSelectedIndex(0);
+      setSelectedId(null);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
@@ -221,8 +277,13 @@ export function CommandPalette({
   const prevQueryRef = useRef(query);
   if (prevQueryRef.current !== query) {
     prevQueryRef.current = query;
-    setSelectedIndex(0);
+    setSelectedId(null);
   }
+
+  const selectAt = (index: number) => {
+    const item = flatItems[index];
+    if (item) setSelectedId(item.id);
+  };
 
   const go = useCallback(
     (item: PaletteItem) => {
@@ -242,10 +303,10 @@ export function CommandPalette({
       onClose();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelectedIndex((i) => Math.min(i + 1, flatItems.length - 1));
+      selectAt(Math.min(selectedIndex + 1, flatItems.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSelectedIndex((i) => Math.max(i - 1, 0));
+      selectAt(Math.max(selectedIndex - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
       const item = flatItems[selectedIndex];
@@ -300,6 +361,18 @@ export function CommandPalette({
               role="listbox"
               aria-label="Search results"
             >
+              {searchFailed && !searchForbidden && (
+                <div className="flex items-center gap-3 px-3.5 py-2 font-mono text-[12px] text-muted-foreground">
+                  <span>Search unavailable</span>
+                  <button
+                    type="button"
+                    onClick={() => void searchQuery.refetch()}
+                    className="cursor-pointer rounded-sm text-signal-blue hover:text-signal-blue-hover focus-visible:outline-2 focus-visible:outline-signal-blue"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
               {flatItems.length === 0 ? (
                 <div className="px-3.5 py-6 text-center font-mono text-[12px] text-muted-foreground">
                   No results
@@ -328,7 +401,7 @@ export function CommandPalette({
                           }}
                           onClick={() => go(item)}
                           onKeyDown={(e) => e.key === "Enter" && go(item)}
-                          onMouseEnter={() => setSelectedIndex(idx)}
+                          onMouseEnter={() => setSelectedId(item.id)}
                         >
                           <span
                             className="flex-1 font-mono text-[12px]"
@@ -340,6 +413,11 @@ export function CommandPalette({
                           >
                             {item.label}
                           </span>
+                          {item.detail && (
+                            <span className="font-mono text-[11px] text-fg-faint">
+                              {item.detail}
+                            </span>
+                          )}
                           {item.badge && (
                             <Badge variant={item.badge.variant}>
                               {item.badge.text}

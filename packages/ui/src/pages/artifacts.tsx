@@ -22,19 +22,12 @@ import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { type SectionState, deriveSectionState } from "@/lib/query-state";
+import { sanitizeSnippet } from "@/lib/snippet";
 import { relativeTime } from "@/lib/time";
 import { encodeArtifactKey, formatBytes, parseArtifactKey } from "@/lib/utils";
 import type { ArtifactReviewSummary } from "@tila/schemas";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-
-import DOMPurify from "dompurify";
-
-function sanitizeSnippet(snippet: string): string {
-  return DOMPurify.sanitize(snippet, {
-    ALLOWED_TAGS: ["b", "strong"],
-  });
-}
 
 export function ArtifactsPage() {
   useTimeTick();

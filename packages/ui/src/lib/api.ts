@@ -42,6 +42,8 @@ import type {
   SignalGroupsResponse,
   SignalHistoryResponse,
   StateListResponse,
+  UnifiedSearchResponse,
+  WorkCatalogResponse,
 } from "@tila/schemas";
 import { GitHubLoginConfigResponseSchema } from "@tila/schemas";
 import { API_BASE_URL } from "./config";
@@ -50,6 +52,8 @@ import { encodeArtifactKey } from "./utils";
 export type { ArtifactSearchResponse };
 
 export type { RecordTypesResponse };
+
+export type { UnifiedSearchResponse, WorkCatalogResponse };
 
 export class ApiError extends Error {
   constructor(
@@ -163,7 +167,7 @@ async function requestAbsolute<T>(path: string): Promise<T> {
 async function request<T>(
   projectId: string,
   path: string,
-  params?: Record<string, string | undefined>,
+  params?: Record<string, string | string[] | undefined>,
 ): Promise<T> {
   const url = new URL(
     projectPath(projectId, path),
@@ -171,7 +175,12 @@ async function request<T>(
   );
   if (params) {
     for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== "") url.searchParams.set(k, v);
+      if (Array.isArray(v)) {
+        // Repeated params (`?resource=a&resource=b`), not a comma list.
+        for (const item of v) if (item !== "") url.searchParams.append(k, item);
+      } else if (v !== undefined && v !== "") {
+        url.searchParams.set(k, v);
+      }
     }
   }
   const conversation = /^\/(rooms|inbox|deliveries)(\/|$)/.test(path);
@@ -248,10 +257,12 @@ export async function listTasks(
     parent?: string;
     archived?: string;
     compact?: boolean;
-    sort?: "created_at" | "updated_at" | "type" | "title" | "status";
+    sort?: TaskListSort;
     order?: "asc" | "desc";
     limit?: number;
     offset?: number;
+    /** Opaque keyset cursor from a previous page's `next_cursor`. */
+    cursor?: string;
   },
 ): Promise<EntityListResponse | PaginatedEntityListResponse> {
   const stringParams: Record<string, string | undefined> = {};
@@ -272,11 +283,45 @@ export async function listTasks(
   if (params?.order) stringParams.order = params.order;
   if (params?.limit !== undefined) stringParams.limit = String(params.limit);
   if (params?.offset !== undefined) stringParams.offset = String(params.offset);
+  if (params?.cursor) stringParams.cursor = params.cursor;
   return request<EntityListResponse | PaginatedEntityListResponse>(
     projectId,
     "/tasks",
     stringParams,
   );
+}
+
+export type TaskListSort =
+  | "created_at"
+  | "updated_at"
+  | "type"
+  | "title"
+  | "status"
+  | "id";
+
+/** Every task type the caller may read, with counts and declared definitions. */
+export async function getWorkCatalog(
+  projectId: string,
+): Promise<WorkCatalogResponse> {
+  return request<WorkCatalogResponse>(projectId, "/tasks/~/types");
+}
+
+/**
+ * Server-ranked task search over the unified search endpoint. `literal` syntax
+ * treats the query as plain words, so user input never trips FTS5 operators.
+ */
+export async function searchTasks(
+  projectId: string,
+  params: { q: string; type?: string[]; cursor?: string; limit?: number },
+): Promise<UnifiedSearchResponse> {
+  return request<UnifiedSearchResponse>(projectId, "/search", {
+    q: params.q,
+    kind: "task",
+    syntax: "literal",
+    type: params.type?.length ? params.type.join(",") : undefined,
+    cursor: params.cursor,
+    limit: params.limit === undefined ? undefined : String(params.limit),
+  });
 }
 
 export async function getTaskDetail(
