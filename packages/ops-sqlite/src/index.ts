@@ -161,3 +161,5 @@ export { QueueError } from "./queue-internals";
 export * as queueOps from "./queue-ops";
 
 export { isManagedTask } from "./managed-work";
+
+export * as attemptRecoveryOps from "./attempt-recovery-ops";

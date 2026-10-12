@@ -229,3 +229,48 @@ export type QueueEntryView = z.infer<typeof QueueEntryViewSchema>;
 export type QueueCounts = z.infer<typeof QueueCountsSchema>;
 export type QueueInspection = z.infer<typeof QueueInspectionSchema>;
 export type QueueClaimResult = z.infer<typeof QueueClaimResultSchema>;
+
+export const AttemptSuspendCommandSchema = AttemptAuthorityCommandSchema.extend(
+  {
+    execution_quiescent: z.literal(true),
+    checkpoint: z.record(z.string(), z.unknown()),
+  },
+);
+export const AttemptResumeCommandSchema = QueueRevisionCommandSchema.extend({
+  capabilities: CapabilitiesSchema.default([]),
+});
+export const AttemptReconcileCommandSchema = QueueRevisionCommandSchema.extend({
+  observation: z.enum(["unknown", "running", "stopped"]),
+  reason: z.string().min(1),
+  session: AttemptSessionSchema.optional(),
+  outcome: AttemptOutcomeSchema.optional(),
+});
+export const AttemptRebindCommandSchema = QueueRevisionCommandSchema.extend({
+  reason: z.string().min(1),
+  principal_id: z.string().min(1),
+  participant_id: z.string().min(1),
+  session: AttemptSessionSchema,
+});
+export const AttemptForceCommandSchema = QueueRevisionCommandSchema.extend({
+  reason: z.string().min(1),
+});
+export const AttemptRetryCommandSchema = QueueRevisionCommandSchema.extend({
+  reason: z.string().min(1),
+});
+export const AttemptResumeResultSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("granted"), ...AttemptViewSchema.shape }),
+  z.object({
+    kind: z.literal("no_grant"),
+    reason: z.enum(["disabled", "paused", "blocked", "execution_capacity"]),
+    ...AttemptViewSchema.shape,
+  }),
+]);
+export type AttemptSuspendCommand = z.infer<typeof AttemptSuspendCommandSchema>;
+export type AttemptResumeCommand = z.input<typeof AttemptResumeCommandSchema>;
+export type AttemptReconcileCommand = z.infer<
+  typeof AttemptReconcileCommandSchema
+>;
+export type AttemptRebindCommand = z.infer<typeof AttemptRebindCommandSchema>;
+export type AttemptForceCommand = z.infer<typeof AttemptForceCommandSchema>;
+export type AttemptRetryCommand = z.infer<typeof AttemptRetryCommandSchema>;
+export type AttemptResumeResult = z.infer<typeof AttemptResumeResultSchema>;

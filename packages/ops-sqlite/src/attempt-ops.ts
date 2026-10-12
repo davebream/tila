@@ -3,6 +3,7 @@ import {
   AttemptAuthorityCommandSchema,
   type AttemptFinishCommand,
   AttemptFinishCommandSchema,
+  type AttemptOutcome,
   type AttemptStartedCommand,
   AttemptStartedCommandSchema,
   type AttemptView,
@@ -56,7 +57,11 @@ export function list(
           : undefined,
       ),
     )
-    .orderBy(desc(schema.workAttempts.created_at), desc(schema.workAttempts.id))
+    .orderBy(
+      desc(schema.workAttempts.fence),
+      desc(schema.workAttempts.created_at),
+      desc(schema.workAttempts.id),
+    )
     .limit(Math.max(1, Math.min(options.limit ?? 100, 500)))
     .offset(Math.max(0, options.offset ?? 0))
     .all();
@@ -166,7 +171,7 @@ export function change(
     .run();
   return get(tx, attempt.id);
 }
-function transitionTask(
+export function transitionTask(
   tx: ProjectTransaction,
   attempt: WorkAttempt,
   origin: RequestOrigin,
@@ -345,9 +350,28 @@ export function expireInTransaction(
         },
         now,
       );
-      tx.delete(schema.executionReservations)
-        .where(eq(schema.executionReservations.task_id, attempt.task_id))
-        .run();
+      if (
+        attempt.predecessor_id &&
+        tx
+          .select()
+          .from(schema.workAttempts)
+          .where(
+            and(
+              eq(schema.workAttempts.entry_id, attempt.entry_id),
+              sql`${schema.workAttempts.accepted_at} IS NOT NULL`,
+            ),
+          )
+          .get()
+      ) {
+        tx.update(schema.executionReservations)
+          .set({ execution_held: false, updated_at: now })
+          .where(eq(schema.executionReservations.task_id, attempt.task_id))
+          .run();
+      } else {
+        tx.delete(schema.executionReservations)
+          .where(eq(schema.executionReservations.task_id, attempt.task_id))
+          .run();
+      }
       tx.update(schema.queueEntries)
         .set({
           state: "queued",
@@ -388,7 +412,11 @@ function execute(
   expire(db, now);
   return db.transaction((tx) => {
     const attempt = get(tx, id);
-    assertOwner(attempt, origin, input.fence);
+    assertOwner(
+      attempt,
+      origin,
+      attempt.state === "terminal" ? undefined : input.fence,
+    );
     command(
       tx,
       `${operation}:${id}`,
@@ -424,6 +452,11 @@ export function accept(
         throw new QueueError(
           "queue-invalid-state",
           "Only a reservation can be accepted",
+        );
+      if (attempt.cancellation_requested)
+        throw new QueueError(
+          "queue-invalid-state",
+          "Cancellation requested before acceptance",
         );
       transitionTask(tx, attempt, origin, "start", now);
       change(tx, attempt, { state: "starting", accepted_at: now }, now);
@@ -526,10 +559,14 @@ export function finish(
     "finish",
     input,
     origin,
-    (tx, attempt) => {
+    (tx, original) => {
+      let attempt = original;
       // Competing valid terminal commands observe the first committed outcome.
       if (attempt.state === "terminal") return;
-      assertAuthority(tx, attempt, input, origin, now);
+      if (attempt.state === "suspended" || attempt.state === "resume_pending") {
+        checkRevision(attempt.revision, input.expected_revision);
+        attempt = refence(tx, attempt, origin, now);
+      } else assertAuthority(tx, attempt, input, origin, now);
       if (attempt.accepted_at === null)
         throw new QueueError(
           "queue-invalid-state",
@@ -544,38 +581,155 @@ export function finish(
           "queue-invalid-state",
           "Completion requires stopped execution; abandonment requires authorized force recovery",
         );
-      transitionTask(tx, attempt, origin, input.outcome.status, now);
-      change(
-        tx,
-        attempt,
-        {
-          state: "terminal",
-          outcome: input.outcome,
-          finished_at: now,
-          lease_expires_at: null,
-        },
-        now,
-      );
-      revoke(tx, attempt);
-      tx.delete(schema.executionReservations)
-        .where(eq(schema.executionReservations.task_id, attempt.task_id))
-        .run();
-      tx.update(schema.queueEntries)
-        .set({
-          state: "finished",
-          revision: sql`${schema.queueEntries.revision} + 1`,
-          updated_at: now,
-        })
-        .where(eq(schema.queueEntries.id, attempt.entry_id))
-        .run();
-      event(
-        tx,
-        "attempt.finished",
-        attempt.resource,
-        origin,
-        { attempt_id: id, outcome: input.outcome },
-        attempt.fence,
-      );
+      finishInTransaction(tx, attempt, input.outcome, origin, now);
+    },
+    now,
+  );
+}
+
+/** Caller has established execution authority or a confirmed stopped observation. */
+export function finishInTransaction(
+  tx: ProjectTransaction,
+  attempt: WorkAttempt,
+  outcome: AttemptOutcome,
+  origin: RequestOrigin,
+  now: number,
+  allowRetry = true,
+): void {
+  transitionTask(tx, attempt, origin, outcome.status, now);
+  change(
+    tx,
+    attempt,
+    { state: "terminal", outcome, finished_at: now, lease_expires_at: null },
+    now,
+  );
+  revoke(tx, attempt);
+  tx.delete(schema.executionReservations)
+    .where(eq(schema.executionReservations.task_id, attempt.task_id))
+    .run();
+  tx.update(schema.queueEntries)
+    .set({
+      state: "finished",
+      revision: sql`${schema.queueEntries.revision} + 1`,
+      updated_at: now,
+    })
+    .where(eq(schema.queueEntries.id, attempt.entry_id))
+    .run();
+  event(
+    tx,
+    "attempt.finished",
+    attempt.resource,
+    origin,
+    { attempt_id: attempt.id, outcome },
+    attempt.fence,
+  );
+  const entry = tx
+    .select()
+    .from(schema.queueEntries)
+    .where(eq(schema.queueEntries.id, attempt.entry_id))
+    .get();
+  const count =
+    tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.workAttempts)
+      .where(eq(schema.workAttempts.entry_id, attempt.entry_id))
+      .get()?.n ?? 0;
+  if (
+    allowRetry &&
+    outcome.status === "failure" &&
+    outcome.execution_stopped &&
+    !outcome.unresolved_external_execution &&
+    !attempt.cancellation_requested &&
+    entry?.retry_policy.retry_safe &&
+    count < entry.retry_policy.max_attempts
+  ) {
+    const backoff = Math.min(
+      entry.retry_policy.max_backoff_ms,
+      entry.retry_policy.initial_backoff_ms * 2 ** Math.max(0, count - 1),
+    );
+    scheduleRetryInTransaction(
+      tx,
+      attempt,
+      origin,
+      now,
+      now + backoff,
+      "Configured retry-safe failure",
+    );
+  }
+}
+export function scheduleRetryInTransaction(
+  tx: ProjectTransaction,
+  attempt: WorkAttempt,
+  origin: RequestOrigin,
+  now: number,
+  availableAt: number,
+  reason: string,
+): void {
+  tx.update(schema.queueEntries)
+    .set({
+      state: "queued",
+      available_at: availableAt,
+      revision: sql`${schema.queueEntries.revision} + 1`,
+      updated_at: now,
+    })
+    .where(eq(schema.queueEntries.id, attempt.entry_id))
+    .run();
+  tx.insert(schema.executionReservations)
+    .values({
+      task_id: attempt.task_id,
+      entry_id: attempt.entry_id,
+      attempt_id: attempt.id,
+      execution_held: false,
+      wip_held: true,
+      updated_at: now,
+    })
+    .run();
+  event(
+    tx,
+    "attempt.retried",
+    attempt.resource,
+    origin,
+    {
+      attempt_id: attempt.id,
+      entry_id: attempt.entry_id,
+      available_at: availableAt,
+      reason,
+    },
+    attempt.fence,
+  );
+}
+
+/** Internal grant used only inside this transaction. A stopped-result path revokes it before commit. */
+export function refence(
+  tx: ProjectTransaction,
+  attempt: WorkAttempt,
+  owner: RequestOrigin,
+  now: number,
+): WorkAttempt {
+  revoke(tx, attempt);
+  const grant = acquireInTransaction(
+    tx,
+    attempt.resource,
+    owner,
+    "exclusive",
+    tx.select().from(schema.queuePolicy).get()?.lease_ms ?? 60_000,
+    { attempt_id: attempt.id },
+    now,
+  );
+  if (!grant.acquired)
+    throw new QueueError(
+      "queue-conflict",
+      "Another live claim prevents recovery",
+    );
+  return change(
+    tx,
+    attempt,
+    {
+      state: "running",
+      fence: grant.fence,
+      lease_expires_at: grant.expires_at,
+      principal_id: owner.principalId,
+      participant_id: owner.participantId,
     },
     now,
   );
