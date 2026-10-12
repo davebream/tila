@@ -703,6 +703,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/schema` | — | `{ version, schema_toml }` |
 | POST | `/schema/apply` | `{ schema_toml, strategy?, dry_run? }` | `{ ok, new_version, changes, warnings }` |
 | GET | `/entities` | query: `type`, `status`, `parent`, `limit`, `cursor` | `{ entities: [], cursor? }` |
+| GET | `/tasks/~/types` | — | `{ ok, types: [{ type, declaration, count, archived_count, definition? }], scope, incomplete? }` — the work type catalog (§14.7) |
 | POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` |
 | GET | `/entities/:id` | — | `{ entity, claim?, recent_journal }` |
 | PATCH | `/entities/:id` | `{ patch, idempotency_key }` | `{ entity }` |
@@ -1283,6 +1284,44 @@ added_in_version = 2
 required = true
 default_for_legacy = "medium"
 ```
+
+#### Presentation metadata (#300)
+
+A work unit or record definition may name which declared fields clients show
+as its title, summary or description. The keys are optional and display-only:
+they never change validation, storage, fencing or coordination.
+
+```toml
+[work_units.story]
+fields = [
+  { name = "headline", type = "string" },
+  { name = "body", type = "text" },
+]
+presentation = { title = "headline", description = "body" }
+
+[records.deploy-config]
+fields = [{ name = "service", type = "string" }]
+presentation = { title = "service", kind = "configuration" }
+```
+
+| Key | Applies to | Meaning |
+|---|---|---|
+| `title`, `summary` | work units, records | Declared `string`, `text` or `enum` field to show as the title or summary |
+| `description` | work units | Declared text field to show as the long description |
+| `kind` | records | `configuration` or `content`. Unset means the definition makes no claim |
+
+- **Validation:** a slot must name a declared `string`, `text` or `enum` field,
+  or the schema is rejected (the same rule as `lifecycle.field`). A record
+  definition that relies on `schema_ref` with no local fields is not checked.
+- **Fallback:** with an explicit `title`, an empty value stays empty and clients
+  show the id; they never borrow another field. Without presentation metadata
+  the title is `data.title`, then `data.name`, then the id. Clients never invent
+  a placeholder such as "Untitled". `presentedTitle` in `@tila/schemas` is the
+  shared implementation.
+- **Classification:** whether a record is configuration or content comes only
+  from `kind`. Clients must not infer it from the type name.
+- **Evolution:** a presentation-only change is a non-destructive
+  `definition-changed` and applies without a strategy.
 
 ### 6.2 Structural constraints tila enforces from the schema
 
@@ -2908,6 +2947,28 @@ Source audit anchors: [shared schema inventory](../packages/schemas/src/index.ts
 [current Settings](../packages/ui/src/pages/settings.tsx). The inventory includes
 declared fields even when current enforcement/editor coverage is incomplete;
 implementation must verify the shared operation, not infer behavior from a label.
+
+### 14.7 Work catalogs and presentation (#300)
+
+A type catalog lists every task or record type the caller may read without
+reading any page of rows. `GET /tasks/~/types` serves tasks, and the `entries`
+field of `GET /records/_types` serves records. Each entry carries:
+
+| Field | Meaning |
+|---|---|
+| `declaration` | `declared` (in the current schema, possibly with no rows), `undeclared` (rows exist but the schema does not declare the type: never declared, renamed or retired) or `unknown` (the schema could not be read) |
+| `count`, `archived_count` | Non-archived and archived rows visible to the caller |
+| `definition` | Declared fields in declaration order, the lifecycle, and presentation metadata (§6.1). Only for declared types |
+
+- **Retired types stay visible.** A type with stored rows is listed even after
+  its declaration is removed, so its content remains readable.
+- **Scope is stated.** `scope.restricted` is true when namespace restrictions
+  narrowed both the types and the counts. A restricted caller never sees a
+  declared type it may not read, and never receives `incomplete`.
+- **Partial failure is explicit.** When the schema or the counts cannot be read,
+  `incomplete` names the missing half, mirroring the records types response.
+- **Display only.** Catalog definitions and presentation metadata guide clients;
+  they grant nothing. Authorization stays on the server.
 
 ## Managed execution foundations
 
