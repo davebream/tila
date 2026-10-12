@@ -1080,6 +1080,20 @@ Stubs for v0.2+:
 
 ### 5.3 ArtifactBackend
 
+Artifact uploads and resource filters accept either a task's bare ID (for example,
+`task.api-routes`) or its matching `<type>:<id>` claim alias
+(`task:task.api-routes`). Resolution checks the database, with an exact ID match
+taking precedence over alias parsing. Stored and returned artifact resources use
+the bare ID; claim resources remain typed. Text, multipart, and versioned uploads
+share this behavior, as do list, latest, search, and grep filters.
+
+Generated legacy Worker blob keys and resource metadata use the bare ID, so both
+spellings deduplicate to the same artifact. Existing blob keys and caller-supplied
+keys are preserved. Missing or mismatched upload resources return non-retryable
+`400 validation-error`; unknown read filters retain empty/not-found results.
+Idempotency keys still require identical request bodies: changing only the alias
+spelling with the same idempotency key remains a conflict.
+
 ```typescript
 interface ArtifactBackend {
   put(input: ArtifactPutInput): Promise<ArtifactPutResult>;
