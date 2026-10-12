@@ -18,6 +18,7 @@ import { createEntityRoutes } from "./routes/entity-routes";
 import { installProjectErrorHandlers } from "./routes/errors";
 import { createGateRoutes } from "./routes/gate-routes";
 import { createJournalArchiveRoutes } from "./routes/journal-archive-routes";
+import { createQuestionRoutes } from "./routes/question-routes";
 import { createQueueRoutes } from "./routes/queue-routes";
 import { createRecordRoutes } from "./routes/record-routes";
 import { createSchemaRoutes } from "./routes/schema-routes";
@@ -102,6 +103,8 @@ export function createProjectRouter(deps: RouterDeps) {
           "/queue/inspect",
           "/attempts/get",
           "/attempts/list",
+          "/questions/get",
+          "/questions/list",
         ].includes(c.req.path));
     if (transferRoute || (state.mode === "export" && readOnly)) return next();
     return c.json(
@@ -123,6 +126,7 @@ export function createProjectRouter(deps: RouterDeps) {
   app.route("/", createEntityRoutes(deps));
   app.route("/", createQueueRoutes(deps));
   app.route("/", createAttemptRoutes(deps));
+  app.route("/", createQuestionRoutes(deps));
   app.route("/", createArtifactRoutes(deps));
   app.route("/", createArtifactVersionRoutes(deps));
   app.route("/", createCoordinationRoutes(deps));

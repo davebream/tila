@@ -1,3 +1,4 @@
+import type { QuestionBackend } from "@tila/core";
 import type { AttemptBackend, QueueBackend } from "@tila/core";
 import {
   type EnvironmentMetadata,
@@ -18,6 +19,7 @@ import { providerProof } from "./dpop";
 import { createTaskMethods } from "./entities";
 import { toTilaErrorCode } from "./error-codes";
 import { TilaApiError, isTilaApiError, readApiError } from "./errors";
+import { RemoteQuestionBackend, questionFacade } from "./questions";
 import { attemptFacade, queueFacade } from "./queue-commands";
 import {
   CredentialManager,
@@ -496,6 +498,7 @@ export async function exchangeGitHubToken(
 export interface TilaFacade {
   queue: QueueBackend;
   attempts: AttemptBackend;
+  questions: QuestionBackend;
   agents: ReturnType<typeof createAgentMethods>;
   conversations: ReturnType<typeof createConversationMethods>;
   inbox: ReturnType<typeof createInboxMethods>;
@@ -530,6 +533,7 @@ function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
   return {
     queue: queueFacade(new RemoteQueueBackend(client, projectId)),
     attempts: attemptFacade(new RemoteAttemptBackend(client, projectId)),
+    questions: questionFacade(new RemoteQuestionBackend(client, projectId)),
     agents: createAgentMethods(client, projectId),
     conversations: createConversationMethods(client, projectId),
     inbox: createInboxMethods(client, projectId),

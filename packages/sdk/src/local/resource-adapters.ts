@@ -122,6 +122,7 @@ import {
   createUnsupportedInboxMethods,
 } from "../conversations";
 import { toTilaErrorCode } from "../error-codes";
+import { questionFacade } from "../questions";
 import { attemptFacade, queueFacade } from "../queue-commands";
 import type { SearchOptions } from "../search";
 import { localQueueErrors } from "./queue";
@@ -1290,6 +1291,7 @@ export function buildLocalResources(
   return {
     queue: queueFacade(localQueueErrors(project.queue)),
     attempts: attemptFacade(localQueueErrors(project.attempts)),
+    questions: questionFacade(localQueueErrors(project.questions)),
     agents: createUnsupportedAgentMethods(),
     conversations: createUnsupportedConversationMethods(),
     inbox: createUnsupportedInboxMethods(),
@@ -1361,6 +1363,7 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
 > = {
   queue: true,
   attempts: true,
+  questions: true,
   tasks: true,
   agents: true,
   conversations: true,

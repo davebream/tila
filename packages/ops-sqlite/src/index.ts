@@ -168,3 +168,5 @@ export { isManagedTask } from "./managed-work";
 export * as attemptRecoveryOps from "./attempt-recovery-ops";
 
 export * as queueBackupOps from "./queue-backup-ops";
+
+export * as questionOps from "./question-ops";

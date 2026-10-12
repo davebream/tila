@@ -61,6 +61,12 @@ export function routeCapability(
       .replace(/\/$/, "") || "/";
   const read = method === "GET" || method === "HEAD";
   const patterns: Array<[string, RegExp, Capability]> = [
+    ["GET", /^\/questions(?:\/[^/]+)?$/, "tasks:read"],
+    [
+      "POST",
+      /^\/questions(?:\/[^/]+\/(?:answer|escalate|cancel|link-discussion))?$/,
+      "tasks:write",
+    ],
     ["GET", /^\/queue(?:\/policy)?$/, "tasks:read"],
     ["POST", /^\/queue\/configure$/, "schema:write"],
     ["POST", /^\/queue\/claim$/, "claims:acquire"],
@@ -395,7 +401,7 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
       // The listed surfaces cannot safely project their cross-resource data.
       // Exact `/search` filters each kind inside the DO (#300).
       if (
-        !/^\/(tasks|records|claims|templates|queue|attempts)(\/|$)/.test(
+        !/^\/(tasks|records|claims|templates|queue|attempts|questions)(\/|$)/.test(
           path,
         ) &&
         path !== "/search"

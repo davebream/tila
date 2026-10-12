@@ -235,3 +235,6 @@ export type {
   AttemptSession,
   AttemptOutcome,
 } from "@tila/schemas";
+
+export type { QuestionBackend } from "@tila/core";
+export { RemoteQuestionBackend, executeQuestionRequest } from "./questions";

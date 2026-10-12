@@ -32,3 +32,5 @@ export { withBusyRetry } from "./retry";
 export * from "./journal-archive-reader";
 
 export { EmbeddedQueueBackend, EmbeddedAttemptBackend } from "./embedded-queue";
+
+export { EmbeddedQuestionBackend } from "./embedded-questions";
