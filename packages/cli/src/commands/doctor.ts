@@ -422,7 +422,9 @@ export default defineCommand({
       addCheck(
         "worker-reachable",
         "pass",
-        `Worker reachable (version: ${health.version})`,
+        `Worker reachable (version: ${health.version}${
+          health.commit ? `, commit: ${health.commit.slice(0, 12)}` : ""
+        })`,
       );
     } catch (err) {
       addCheck(

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { toolchain } from "./toolchain.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const revision = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+const revision = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: root,
   encoding: "utf8",
 }).trim();
