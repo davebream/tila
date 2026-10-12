@@ -3,10 +3,12 @@ import {
   ApiError,
   type ArtifactListResponse,
   type RecordTypesResponse,
+  type TaskListSort,
   getArtifactHistory,
   getRecord,
   getRecordHistory,
   getTaskDetail,
+  getWorkCatalog,
   listArtifacts,
   listClaims,
   listJournal,
@@ -18,10 +20,16 @@ import {
   listTaskArtifactRefs,
   listTasks,
   searchArtifacts,
+  searchTasks,
 } from "@/lib/api";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 import type {
   ArtifactSearchResponse,
+  PaginatedEntityListResponse,
   RecordGetResponse,
   RecordHistoryResponse,
   RecordListResponse,
@@ -38,7 +46,7 @@ export function useTasks(params?: {
   parent?: string;
   archived?: string;
   compact?: boolean;
-  sort?: "created_at" | "updated_at" | "type" | "title" | "status";
+  sort?: TaskListSort;
   order?: "asc" | "desc";
   limit?: number;
   offset?: number;
@@ -52,19 +60,87 @@ export function useTasks(params?: {
   });
 }
 
-export function useTaskIndex() {
+/** Task types the caller may read, independent of any page of rows. */
+export function useWorkCatalog(options?: { enabled?: boolean }) {
   const { projectId } = useAuth();
   return useQuery({
-    queryKey: ["task-index", projectId],
+    queryKey: ["work-catalog", projectId],
+    queryFn: () => getWorkCatalog(requireProjectId(projectId)),
+    enabled: Boolean(projectId) && (options?.enabled ?? true),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+}
+
+export type TaskPageParams = {
+  type: string[];
+  /** Include archived tasks. The default page excludes them. */
+  archived: boolean;
+  sort: TaskListSort;
+  order: "asc" | "desc";
+  limit: number;
+  cursor?: string;
+};
+
+/**
+ * One keyset page of the full task list. The previous page stays on screen
+ * while the next one loads, so paging does not flash an empty table.
+ */
+export function useTaskPage(
+  params: TaskPageParams,
+  options?: { enabled?: boolean },
+) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["task-page", projectId, params],
     queryFn: () =>
       listTasks(requireProjectId(projectId), {
-        compact: true,
-        limit: 200,
+        type: params.type.length > 0 ? params.type : undefined,
+        archived: params.archived ? undefined : "0",
+        sort: params.sort,
+        order: params.order,
+        limit: params.limit,
+        cursor: params.cursor,
+      }) as Promise<PaginatedEntityListResponse>,
+    enabled: Boolean(projectId) && (options?.enabled ?? true),
+    placeholderData: keepPreviousData,
+    refetchInterval: 5000,
+  });
+}
+
+/** Minimum query length before task search is sent to the server. */
+export const TASK_SEARCH_MIN_LENGTH = 2;
+
+export function useTaskSearch(
+  params: { q: string; type?: string[]; cursor?: string; limit?: number },
+  options?: { enabled?: boolean },
+) {
+  const { projectId } = useAuth();
+  const q = params.q.trim();
+  return useQuery({
+    queryKey: ["task-search", projectId, { ...params, q }],
+    queryFn: () => searchTasks(requireProjectId(projectId), { ...params, q }),
+    enabled:
+      Boolean(projectId) &&
+      q.length >= TASK_SEARCH_MIN_LENGTH &&
+      (options?.enabled ?? true),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The most recently updated non-archived tasks, for quick navigation. */
+export function useRecentTasks(options?: { enabled?: boolean }) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["recent-tasks", projectId],
+    queryFn: () =>
+      listTasks(requireProjectId(projectId), {
+        limit: 10,
         sort: "updated_at",
         order: "desc",
+        archived: "0",
       }),
-    enabled: Boolean(projectId),
-    refetchInterval: 15000,
+    enabled: Boolean(projectId) && (options?.enabled ?? true),
     staleTime: 5000,
   });
 }
