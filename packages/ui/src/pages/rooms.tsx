@@ -38,12 +38,20 @@ export function RoomsPage() {
     enabled: !!projectId,
     refetchInterval: 10000,
   });
+  // Distinct from an empty room list or a network failure: the deployment
+  // lacks the conversation signing secret. Polling continues, so the page
+  // recovers once an operator sets it.
+  const conversationsOff =
+    rooms.error instanceof ApiError &&
+    rooms.error.code === "config-unavailable";
   return (
     <div className="grid gap-6 p-4 md:grid-cols-[220px_minmax(0,1fr)] md:p-6">
       <aside>
         <h1 className="mb-4 font-logo text-2xl">Rooms</h1>
         {rooms.isPending && <p>Loading rooms…</p>}
-        {rooms.error && <p role="alert">{rooms.error.message}</p>}
+        {rooms.error && !conversationsOff && (
+          <p role="alert">{rooms.error.message}</p>
+        )}
         <nav aria-label="Conversation rooms" className="space-y-1">
           {rooms.data?.rooms.map((room) => (
             <Link
@@ -64,7 +72,9 @@ export function RoomsPage() {
           </p>
         )}
       </aside>
-      {projectId && roomId ? (
+      {conversationsOff ? (
+        <ConversationsNotConfigured error={rooms.error} />
+      ) : projectId && roomId ? (
         <RoomDetail
           key={`${projectId}:${roomId}`}
           project={projectId}
@@ -76,6 +86,49 @@ export function RoomsPage() {
         </p>
       )}
     </div>
+  );
+}
+/**
+ * The server only includes `details.reason` for callers that can manage
+ * conversations, so remediation steps are shown to exactly those callers.
+ */
+function ConversationsNotConfigured({ error }: { error: unknown }) {
+  const details =
+    error instanceof ApiError ? (error.details as { reason?: unknown }) : null;
+  const reason = details?.reason;
+  return (
+    <section
+      aria-labelledby="conversations-off"
+      className="rounded-lg border border-border bg-card p-4"
+    >
+      <h2 id="conversations-off" className="font-logo text-xl">
+        Conversations are not configured
+      </h2>
+      {reason === "missing" || reason === "cursor-key-too-short" ? (
+        <div className="mt-2 space-y-2 text-sm">
+          <p>
+            {reason === "missing"
+              ? "This deployment has no conversation signing secret."
+              : "The CONVERSATION_CURSOR_KEY secret is shorter than 32 characters."}{" "}
+            Set a random key on the Worker to enable rooms and inboxes:
+          </p>
+          <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs">
+            openssl rand -base64 32 | wrangler secret put
+            CONVERSATION_CURSOR_KEY
+          </pre>
+          <p className="text-muted-foreground">
+            This does not change token hashing, so existing tokens and sessions
+            keep working. Do not set HASH_PEPPER for this.
+          </p>
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Rooms and inboxes are unavailable on this deployment. Ask a project
+          maintainer to enable conversations. Tasks, records and settings are
+          not affected.
+        </p>
+      )}
+    </section>
   );
 }
 function RoomDetail({ project, room }: { project: string; room: string }) {
