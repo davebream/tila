@@ -5,7 +5,14 @@ import {
 } from "@tila/schemas";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as ops from "../../../ops-sqlite/src/agent-binding-ops";
+import * as questionOps from "../../../ops-sqlite/src/question-ops";
 import * as schema from "../../../ops-sqlite/src/schema";
+import {
+  correlation,
+  prepare,
+  responder,
+  worker,
+} from "../../../ops-sqlite/test/question-contract";
 import { createAgentRoutes } from "../../src/do/routes/agent-routes";
 import type { RouterDeps } from "../../src/do/routes/types";
 import { createTestDb } from "./helpers/create-test-db";
@@ -55,6 +62,55 @@ describe("agent binding authority and epochs", () => {
     );
   });
   afterEach(() => f.sqlite.close());
+
+  it("supersedes worker questions on session replacement before attempt rebinding", () => {
+    const fixture = prepare(f.db);
+    const runtime = run({
+      principal_id: "worker",
+      participant_id: "worker-process",
+      lease_expires_at: Math.floor(Date.now() / 1000) + 300,
+    });
+    ops.register(
+      f.db,
+      AgentRegistrationSchema.parse({
+        id: "question-worker",
+        name: "Worker",
+        bind_policy: [{ principal_id: "worker", agent_id: "question-worker" }],
+      }),
+      owner,
+    );
+    runtime.agent_id = "question-worker";
+    ops.attach(f.db, "question-worker", input(), authority(runtime));
+    const questionAuthority = {
+      ...worker,
+      conversation: { ...worker.conversation, runtime },
+    };
+    const question = questionOps.ask(
+      f.db,
+      {
+        ...fixture.command,
+        id: crypto.randomUUID(),
+        idempotency_key: "bound-question",
+      },
+      questionAuthority,
+    ).question;
+    expect(question.requester_binding?.binding_epoch).toBe(1);
+    ops.attach(
+      f.db,
+      "question-worker",
+      input(1),
+      authority({ ...runtime, run_id: crypto.randomUUID() }),
+    );
+    expect(questionOps.get(f.db, question.id).state).toBe("superseded");
+    expect(() =>
+      questionOps.answer(
+        f.db,
+        question.id,
+        { ...correlation(question), text: "yes" },
+        responder,
+      ),
+    ).toThrow();
+  });
 
   it("requires a current agent-pinned run even for an owner", () => {
     expect(() => ops.attach(f.db, "worker", input(), owner, now)).toThrow(

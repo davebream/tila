@@ -106,12 +106,13 @@ async function call(
   expect(response.isError, JSON.stringify(response)).not.toBe(true);
   return JSON.parse(JSON.stringify(response.structuredContent)).result;
 }
-it("lists exactly eight default tools, validates real calls, and preserves the explicit primitive catalog", async () => {
+it("lists exactly nine default tools, validates real calls, and preserves the explicit primitive catalog", async () => {
   vi.stubEnv("TILA_MCP_TOOLS", "");
   const { a } = await fixture();
   const client = await connect(a);
   const { tools } = await client.listTools();
   expect(tools.map((t) => t.name)).toEqual([
+    "tila_question",
     "tila_queue",
     "tila_attempt",
     "tila_session",
@@ -156,7 +157,7 @@ it("lists exactly eight default tools, validates real calls, and preserves the e
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(66);
+  expect((await all.listTools()).tools).toHaveLength(67);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -166,7 +167,7 @@ it("lists exactly eight default tools, validates real calls, and preserves the e
     JSON.parse(JSON.stringify(legacy.structuredContent)).result,
   );
   const both = await connect(a, ["workflow", "artifacts", "workflow"]);
-  expect((await both.listTools()).tools).toHaveLength(20);
+  expect((await both.listTools()).tools).toHaveLength(21);
   const unavailable = await all.callTool({
     name: "tila_artifact_put",
     arguments: { content: "aGk=", kind: "log" },
@@ -534,7 +535,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(68);
+  expect(listed).toHaveLength(69);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -551,13 +552,18 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
       expect(result.artifact_metadata).toEqual(
         JSON.parse(texts[0].text).artifact_metadata,
       );
-    } else if (name === "tila_queue" || name === "tila_attempt")
+    } else if (
+      name === "tila_queue" ||
+      name === "tila_attempt" ||
+      name === "tila_question"
+    )
       expect(result).toEqual(JSON.parse(texts[0].text).result);
     else expect(result).toEqual(JSON.parse(texts[0].text));
     return result;
   }
   await primitive("tila_queue", { request: { action: "inspect" } });
   await primitive("tila_attempt", { request: { action: "list" } });
+  await primitive("tila_question", { request: { action: "list" } });
   await primitive("tila_schema_preview", { definition: "schema_version = 1" });
   await primitive("tila_schema_update", {
     definition: `schema_version = 1
@@ -922,6 +928,39 @@ values = ["open", "done"]
   });
   attempt = accepted.attempt;
   expect(accepted.grant_valid).toBe(true);
+  const asked = await call(client, "tila_question", {
+    action: "ask",
+    command: {
+      id: crypto.randomUUID(),
+      idempotency_key: "ask-question",
+      attempt_id: attempt.id,
+      expected_revision: attempt.revision,
+      fence: attempt.fence,
+      text: "Proceed?",
+      responder_principal_id: "local:test",
+    },
+  });
+  const question = asked.question;
+  const answerCommand = {
+    question_id: question.id,
+    idempotency_key: "answer-question",
+    expected_revision: question.revision,
+    attempt_id: question.attempt_id,
+    attempt_revision: question.attempt_revision,
+    attempt_fence: question.attempt_fence,
+    text: "Proceed",
+  };
+  await b.questions.answer(question.id, answerCommand);
+  const recovered = await call(client, "tila_question", {
+    action: "get",
+    id: question.id,
+  });
+  expect(recovered.answer_applicable).toBe(true);
+  expect(recovered.question.answer.text).toBe("Proceed");
+  expect(
+    (await b.questions.answer(question.id, answerCommand)).question.answer.text,
+  ).toBe("Proceed");
+
   expect((await b.queue.inspect()).counts).toMatchObject({
     execution: 1,
     wip: 1,
