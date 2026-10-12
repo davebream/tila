@@ -149,6 +149,41 @@ presentation = { title = "headline" }
     ]);
   });
 
+  it("re-indexes existing titles when presentation.title changes", () => {
+    const base = `schema_version = 1
+
+[work_units.story]
+fields = [{ name = "title", type = "string" }, { name = "headline", type = "string" }]
+`;
+    schemaOps.applySchema(testDb.db, base, "test");
+    createEntity(testDb.db, {
+      id: "st-2",
+      type: "story",
+      data: { title: "Old words", headline: "Fresh words" },
+    });
+    const find = (q: string) =>
+      ids(
+        searchPage(testDb.db, {
+          q,
+          syntax: "literal",
+          kinds: ["task"],
+          limit: 5,
+        }).results,
+      );
+    expect(find("fresh")).toEqual([]);
+
+    schemaOps.applySchema(
+      testDb.db,
+      `${base}presentation = { title = "headline" }\n`,
+      "test",
+    );
+    expect(find("fresh")).toEqual(["st-2"]);
+    expect(find("old")).toEqual([]);
+
+    schemaOps.applySchema(testDb.db, base, "test");
+    expect(find("old")).toEqual(["st-2"]);
+  });
+
   it("never matches tasks or records outside the caller's restrictions", async () => {
     createEntity(testDb.db, {
       id: "e-1",
