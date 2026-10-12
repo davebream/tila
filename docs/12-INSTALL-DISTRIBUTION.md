@@ -195,13 +195,14 @@ fall back to raw assets only on HTTP 404. Server errors, missing checksums,
 mismatches and invalid archives abort without replacing the installed binary.
 Raw assets remain the npm platform-package payload; npm retains OIDC provenance.
 
-`scripts/package-binaries.mjs` consumes each Bun metafile and the embedded Worker's
-esbuild metafile. It resolves actual bundled package manifests, including
+`scripts/package-binaries.mjs` consumes each Bun metafile, the esbuild metafile of
+the Worker bundle embedded in the deploy payload, and the runtime dependencies of
+the embedded UI build. It resolves actual bundled package manifests, including
 `@tila/client-lifecycle`, and includes the Bun runtime version. Each binary gets
 an SPDX 2.3 document (`<binary>.spdx.json`) with its digest and package CONTAINS
 relationships. The inventory describes bundled packages, not all development
-dependencies or Bun's internal native components individually. Missing compiler
-or sidecar metadata fails packaging.
+dependencies or Bun's internal native components individually. Missing compiler,
+Worker or UI metadata fails packaging.
 
 Pinned GitHub actions create build-provenance and SPDX attestations for all raw
 binary and archive digests. Both predicate types are verified for all 16 digests

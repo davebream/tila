@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockDeployWorkerWithAssets = vi.fn();
+const mockDescribeDeployPayload = vi.fn();
 vi.mock("../../lib/deploy", async (importActual) => {
   const actual = await importActual<typeof import("../../lib/deploy")>();
   return {
     deployWorkerWithAssets: (...args: unknown[]) =>
       mockDeployWorkerWithAssets(...args),
+    describeDeployPayload: () => mockDescribeDeployPayload(),
     // Keep pure helpers real — they drive messaging.
     describeUiOutcome: actual.describeUiOutcome,
     resolveDeployConfig: vi.fn(),
@@ -88,7 +90,7 @@ let exitSpy: any;
 
 async function invokeDeploy(
   skipUi = false,
-  extra: { json?: boolean; migrate?: boolean } = {},
+  extra: { json?: boolean; migrate?: boolean; dryRun?: boolean } = {},
 ): Promise<void> {
   const mod = await import("../../commands/deploy");
   const cmd = mod.default;
@@ -98,6 +100,7 @@ async function invokeDeploy(
       "skip-ui": skipUi,
       json: extra.json ?? false,
       migrate: extra.migrate ?? true,
+      "dry-run": extra.dryRun ?? false,
     },
   });
 }
@@ -150,6 +153,62 @@ describe("deploy command", () => {
       expect.stringContaining("tila.workers.dev"),
       "Deploy complete",
     );
+  });
+
+  describe("--dry-run", () => {
+    const summary = {
+      version: "0.5.0",
+      source: "embedded",
+      overrides: [],
+      worker: "/cache/worker/index.js",
+      ui: { dir: "/cache/ui/dist", files: 12, indexHtml: true },
+      migrations: {
+        dir: "/cache/migrations/global",
+        count: 29,
+        latest: "0029_x.sql",
+      },
+    };
+
+    beforeEach(() => {
+      mockDescribeDeployPayload.mockReturnValue(summary);
+      mockLoadInfraConfig.mockImplementation(() => {
+        throw new Error("no infra.toml");
+      });
+      mockResolveCfApiToken.mockReturnValue(null);
+    });
+
+    it("reports the payload without infra.toml, a token or Cloudflare calls", async () => {
+      await invokeDeploy(false, { dryRun: true, json: true });
+
+      expect(mockPrintJson).toHaveBeenCalledWith(summary);
+      expect(mockLoadInfraConfig).not.toHaveBeenCalled();
+      expect(mockCreateCloudflareClient).not.toHaveBeenCalled();
+      expect(mockApplyD1Migrations).not.toHaveBeenCalled();
+      expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+    });
+
+    it("prints a human summary", async () => {
+      await invokeDeploy(false, { dryRun: true });
+
+      expect(mockNote).toHaveBeenCalledWith(
+        expect.stringContaining("29 migrations, latest 0029_x.sql"),
+        "Deploy payload OK (dry run, nothing deployed)",
+      );
+    });
+
+    it("fails with DEPLOY_PAYLOAD_INVALID when the payload is unusable", async () => {
+      mockDescribeDeployPayload.mockImplementation(() => {
+        throw new Error("manifest.json is missing.");
+      });
+
+      await expect(
+        invokeDeploy(false, { dryRun: true, json: true }),
+      ).rejects.toThrow("printJsonError");
+      expect(mockPrintJsonError).toHaveBeenCalledWith(
+        expect.stringContaining("manifest.json is missing."),
+        "DEPLOY_PAYLOAD_INVALID",
+      );
+    });
   });
 
   it("skips UI when --skip-ui is set", async () => {

@@ -226,6 +226,9 @@ jobs:
       - name: Verify compiled host connector
         if: runner.os != 'Windows'
         run: node --test scripts/connector-native.test.mjs
+      - name: Verify compiled CLI deploy payload
+        if: runner.os != 'Windows'
+        run: node --test scripts/deploy-payload-native.test.mjs
 
   benchmark:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.benchmark }}
