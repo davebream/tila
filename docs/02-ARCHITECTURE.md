@@ -2987,7 +2987,7 @@ many rows share a timestamp. With a `limit`, the response carries an opaque
 - `total` counts every row matching the filter and the caller's restrictions.
   `scope.restricted` says restrictions applied; `scope.archived` says whether
   archived rows were excluded (`archived=0`) or included (no `archived` filter).
-- Migration 33 adds `(created_at, id)`, `(updated_at, id)` and `(type, id)`
+- Migration 35 adds `(created_at, id)`, `(updated_at, id)` and `(type, id)`
   indexes. `title` and `status` sorts read `data.title` and `data.status`
   directly (not presentation metadata) and are not indexed.
 
@@ -3004,7 +3004,7 @@ corpus and may drift under concurrent writes. Each kind stops at depth 1000.
 | `syntax` | `fts` (default): FTS5 query syntax. `literal`: plain words, each quoted, the last prefix-matched |
 | `cursor` | `next_cursor` from the previous page |
 
-- **Task ids are searchable.** Migration 33 indexes `entity_id` beside the title,
+- **Task ids are searchable.** Migration 35 indexes `entity_id` beside the title,
   weighted below it, so `task-251` or `251` finds the task.
 - **Titles follow presentation.** The indexed title is the declared
   `presentation.title` field, else `data.title`, else `data.name`. Applying a
