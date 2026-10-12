@@ -938,6 +938,14 @@ and UI. A migration error stops deployment. The completion summary includes the
 latest applied migration filename; `--json` includes it in
 `migrations.watermark`, alongside the applied/skipped counts and applied names.
 
+Release binaries carry the Worker, UI and D1 migrations they deploy. On first
+use the CLI verifies them against the embedded manifest and stages them under
+`~/.tila/cache/deploy-payload/<version>-<digest>/`, so the deployed Worker always
+matches the CLI version. `tila deploy --dry-run` checks that payload and reports
+what would be uploaded without contacting Cloudflare. `TILA_WORKER_DIST`,
+`TILA_UI_DIST` and `TILA_MIGRATIONS_DIR` override individual parts. From a source
+checkout the CLI uses `packages/worker` and builds `packages/ui` instead.
+
 For pipelines that apply migrations separately, use `tila deploy --no-migrate`.
 It reads both tila's `_d1_migrations` tracker and Wrangler's `d1_migrations`
 tracker without changing the database. If any bundled migrations are pending,
@@ -1916,8 +1924,11 @@ local runtime validation does not replace them.
 
 The pipeline runs full lint/version, typecheck, Node/Bun package tests, root script
 tests, local runtime tests and audit. It builds a fresh workspace with no restored
-Turbo output, generates one Worker sidecar, compiles eight binaries and packs all
-eleven public npm packages. `manifest.json` records the revision, version, compiler,
+Turbo output, generates one Worker bundle and deploy payload, compiles eight
+binaries and packs all eleven public npm packages. Each binary embeds the deploy
+payload (Worker bundle, a UI build made with an empty `VITE_API_URL`, and the D1
+migrations) with `bun build --compile --asset`, so an installed CLI can run
+`tila deploy` and `tila infra provision` without a source checkout. `manifest.json` records the revision, version, compiler,
 commit timestamp, target inventory, tarball integrity and every file checksum.
 
 Clean-directory consumers install the tarballs and check SDK ESM/CommonJS local
@@ -1926,6 +1937,9 @@ Node 22/24 consumers exercise both SQLite 12.10.0 and 13.0.3. Each SDK/MCP packa
 must resolve the selected driver; the smoke test opens a native database and resolves the shipped WebSocket dependency. MCP no longer ships the keyring addon or accepts local SQLite configuration; the broker fixture uses no real credentials or native sessions.
 Native Linux, macOS and Windows x64/arm64 runners also test packed SDK/MCP consumers
 with SQLite 13.0.3, execute the binaries and run local installer fixtures; both musl binaries run in native-architecture Alpine containers.
+The raw binary, the installer-installed copy and the npm CLI each run
+`tila deploy --dry-run --json`, which must report the release version, an embedded
+payload, at least one D1 migration and a UI `index.html`.
 The POSIX installer detects musl and selects that target. SDK private implementation
 packages are bundled build dependencies, never unpublished npm runtime dependencies.
 
