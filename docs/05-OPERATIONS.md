@@ -2185,3 +2185,30 @@ and retain completion/reconciliation endpoints. Do not downgrade to a version
 that ignores managed-task guards or remove queue tables. The repository adapter,
 queue UI and broader live coding-runtime acceptance are delivered separately from
 this backend contract.
+
+### Queue dashboard
+
+Open **Queue** in the project navigation or **View or enroll in queue** from a
+work item's detail. Enrollment is explicit. The dashboard never starts coding
+processes: repository wrappers obtain and accept their own grants.
+
+The view pages through all matching entries and separates execution occupancy
+from work in progress. Filter backlog, active, suspended, uncertain or terminal
+work, with optional type, priority, target principal and capability filters.
+Queue settings control admission and limits; pausing preserves running work's
+completion and reconciliation access. Limits below current occupancy prevent
+additional grants without evicting existing execution.
+
+Attempt details link task, provider session, host/worktree and result evidence.
+Cancellation, suspension and resume buttons record intent. Only confirmed stopped
+execution or safe quiescence releases the applicable reservation. Maintainers
+can record verified observations, rebind the same recorded execution, or force
+recovery with a reason. Force recovery records unresolved external execution;
+it does not kill a process.
+
+Actions follow current role and credential capabilities. When permission queries
+are unavailable, the queue remains visible but actions are disabled. Failed
+refreshes show the last known state with a stale notice. Revision conflicts retain
+form input: inspect the updated state, choose **Use latest revision**, and submit
+again. Task links keep their existing URLs, and a task-scoped queue link works
+regardless of which list page contains its enrollment.
