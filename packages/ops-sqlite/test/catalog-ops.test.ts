@@ -191,9 +191,19 @@ describe("buildWorkCatalog", () => {
       counts: [{ type: "story", count: 1, archived_count: 0 }],
       restrictions: { task_types: ["story"] },
     });
-    expect(catalog.types.map((t) => t.type)).toEqual(["story"]);
+    expect(catalog.types).toEqual([
+      { type: "story", declaration: "undeclared", count: 1, archived_count: 0 },
+    ]);
     expect(catalog.scope).toEqual({ restricted: true });
     expect(catalog.incomplete).toBeUndefined();
+    // An invalid schema looks the same as an unavailable one to this caller.
+    expect(
+      buildWorkCatalog({
+        schema: { state: "invalid" },
+        counts: [{ type: "story", count: 1, archived_count: 0 }],
+        restrictions: { task_types: ["story"] },
+      }),
+    ).toEqual(catalog);
 
     const declared = buildWorkCatalog({
       schema: { state: "ok", schema: SCHEMA },
