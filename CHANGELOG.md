@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `tila project create` now hashes the first project token with `TILA_HASH_PEPPER` (environment or `~/.tila/.env`) when it is set, matching a Worker that uses `HASH_PEPPER`. Previously it always wrote a plain SHA-256 digest, so on a peppered Worker the new token never authenticated.
 
+### Conversation cursor key (#307)
+
+- Conversation routes no longer require `HASH_PEPPER`. Set the new `CONVERSATION_CURSOR_KEY` Worker secret (at least 32 random characters) to enable them without touching credential hashing; tokens and sessions keep working. When it is unset, cursors are still derived from `HASH_PEPPER` exactly as before, so peppered deployments keep their outstanding cursors. With neither secret, routes still fail closed with `config-unavailable`; callers that can manage conversations now also get `details.reason`.
+
 ## [0.5.0] - 2026-10-12
 
 ### Upgrade notes
