@@ -14,6 +14,7 @@ import {
   GateFenceError,
   GateNotFoundError,
 } from "./gate-ops";
+import { QueueError } from "./queue-internals";
 import {
   RecordAlreadyExistsError,
   RecordInvalidStateError,
@@ -172,11 +173,28 @@ export function mapProjectError(err: Error): {
   retryable: boolean;
   extras?: Record<string, unknown>;
 } | null {
+  if (err instanceof QueueError)
+    return {
+      status:
+        err.code === "queue-not-found"
+          ? 404
+          : err.code === "queue-authority-lost"
+            ? 403
+            : err.code === "queue-precondition"
+              ? 412
+              : 409,
+      code: err.code,
+      retryable: false,
+    };
   if (err instanceof SchemaWriteError)
     return { status: 422, code: "constraint-violation", retryable: false };
   if (err instanceof SchemaPreconditionError)
     return {
-      status: err.code === "schema-review-required" ? 428 : 412,
+      status:
+        err.code === "schema-review-required" ||
+        err.code === "schema-revision-required"
+          ? 428
+          : 412,
       code: err.code,
       retryable: false,
       extras: { revision: err.revision },

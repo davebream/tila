@@ -62,6 +62,7 @@ const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
     "wip_limit",
     "lease_ms",
     "revision",
+    "revision_required",
   ],
   queue_entries: [
     "id",

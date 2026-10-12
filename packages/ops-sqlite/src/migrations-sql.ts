@@ -1411,6 +1411,20 @@ function runMigration0032(storage: MigrationStorage): void {
   ]);
 }
 
+export const MIGRATION_0033 = `
+ALTER TABLE queue_policy ADD COLUMN revision_required INTEGER NOT NULL DEFAULT 0 CHECK(revision_required IN (0,1));
+UPDATE queue_policy SET revision_required = 1 WHERE enabled = 1;
+`;
+
+function runMigration0033(storage: MigrationStorage): void {
+  if (!columnExists(storage, "queue_policy", "revision_required"))
+    storage.sql.exec(MIGRATION_0033);
+  else
+    storage.sql.exec(
+      "UPDATE queue_policy SET revision_required = 1 WHERE enabled = 1",
+    );
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1444,4 +1458,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 30, run: runMigration0030 },
   { version: 31, run: runMigration0031 },
   { version: 32, run: runMigration0032 },
+  { version: 33, run: runMigration0033 },
 ];

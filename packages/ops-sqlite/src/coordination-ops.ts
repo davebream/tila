@@ -9,6 +9,7 @@ import {
   resolveEntityResource,
 } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
+import { assertUnmanagedClaim } from "./managed-work";
 import * as schema from "./schema";
 
 export interface AcquireResult {
@@ -29,6 +30,7 @@ export function acquire(
   idempotency?: DoIdempotency<AcquireResult>,
 ): AcquireResult {
   return db.transaction((tx) => {
+    assertUnmanagedClaim(tx, resource);
     // Dedup the fence-bumping acquire inside this transaction (audit B1). Only a
     // successful acquire is stored (shouldStore); a failed acquire must not be
     // replayed as success. A replay returns the original fence, not a new bump.
@@ -177,6 +179,7 @@ export function renew(
   idempotency?: DoIdempotency<RenewResult>,
 ): RenewResult {
   return db.transaction((tx) => {
+    assertUnmanagedClaim(tx, resource);
     // Dedup the renew inside this transaction (audit B1). Only a successful
     // renew is stored; a failed renew must re-evaluate live state on retry.
     return withDoIdempotency<RenewResult>(
@@ -245,6 +248,7 @@ export function release(
   idempotency?: DoIdempotency<{ released: boolean }>,
 ): void {
   db.transaction((tx) => {
+    assertUnmanagedClaim(tx, resource);
     // Dedup the release inside this transaction (audit B1). Release is already
     // intrinsically idempotent (a second release finds no claim and no-ops), so
     // we only store the actual-release outcome; no-op paths are not stored.

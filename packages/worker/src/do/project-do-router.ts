@@ -17,6 +17,7 @@ import { createEntityRoutes } from "./routes/entity-routes";
 import { installProjectErrorHandlers } from "./routes/errors";
 import { createGateRoutes } from "./routes/gate-routes";
 import { createJournalArchiveRoutes } from "./routes/journal-archive-routes";
+import { createQueueRoutes } from "./routes/queue-routes";
 import { createRecordRoutes } from "./routes/record-routes";
 import { createSchemaRoutes } from "./routes/schema-routes";
 import { createSignalRoutes } from "./routes/signal-routes";
@@ -112,6 +113,7 @@ export function createProjectRouter(deps: RouterDeps) {
   app.route("/", createAgentRoutes(deps));
   app.route("/", createConversationRoutes(deps));
   app.route("/", createEntityRoutes(deps));
+  app.route("/", createQueueRoutes(deps));
   app.route("/", createArtifactRoutes(deps));
   app.route("/", createArtifactVersionRoutes(deps));
   app.route("/", createCoordinationRoutes(deps));

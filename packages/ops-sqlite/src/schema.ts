@@ -838,6 +838,9 @@ export const conversationState = sqliteTable("_conversation_state", {
 
 // Managed work execution. These rows outlive expiring claims and generic receipts.
 export const queuePolicy = sqliteTable("queue_policy", {
+  revision_required: integer("revision_required", { mode: "boolean" })
+    .notNull()
+    .default(false),
   singleton: integer("singleton").primaryKey(),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
   paused: integer("paused", { mode: "boolean" }).notNull().default(true),
