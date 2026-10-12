@@ -279,6 +279,9 @@ function sortExpression(sort: TaskListSort): SQL | null {
       return sql`json_extract(${schema.entities.data}, '$.status')`;
     case "id":
       return null;
+    default:
+      // Unvalidated callers fall back to the documented default order.
+      return sql`${schema.entities.created_at}`;
   }
 }
 
