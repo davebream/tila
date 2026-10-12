@@ -87,12 +87,18 @@ function buildCatalog<Definition, Entry>(
   const declaredTypes = Object.keys(declared).filter(permitted);
   const names = [...new Set([...declaredTypes, ...counts.keys()])].sort();
 
+  // A restricted caller must not learn the schema's fetch/parse state, so for
+  // them an unreadable schema reads exactly like "nothing declared" (the
+  // records types response has always behaved this way).
+  const restricted = hasRestrictions(input.restrictions);
+  const schemaUnreadable =
+    input.schema.state === "unavailable" || input.schema.state === "invalid";
   const types = names.map((type) => {
     const definition = Object.hasOwn(declared, type)
       ? declared[type]
       : undefined;
     const declaration: TypeDeclaration =
-      input.schema.state === "unavailable" || input.schema.state === "invalid"
+      schemaUnreadable && !restricted
         ? "unknown"
         : definition !== undefined
           ? "declared"
@@ -101,8 +107,7 @@ function buildCatalog<Definition, Entry>(
     return toEntry(type, declaration, count, definition);
   });
 
-  const reportIncomplete =
-    Object.keys(incomplete).length > 0 && !hasRestrictions(input.restrictions);
+  const reportIncomplete = Object.keys(incomplete).length > 0 && !restricted;
   return {
     types,
     scope: { restricted: restrictedKind },
