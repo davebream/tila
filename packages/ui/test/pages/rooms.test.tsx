@@ -226,3 +226,87 @@ test.each([
     `/projects/test-project/rooms/general/messages/${row.id}/deliveries`,
   ]);
 });
+
+describe("conversation prerequisites", () => {
+  function renderRooms() {
+    renderWithProviders(
+      <Routes>
+        <Route path="/p/:projectId/rooms" element={<RoomsPage />} />
+      </Routes>,
+      { route: "/p/test-project/rooms" },
+    );
+  }
+  const notConfigured = (details?: { reason: string }) =>
+    http.get("*/projects/test-project/rooms", () =>
+      HttpResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "config-unavailable",
+            message: details
+              ? "Conversations require the CONVERSATION_CURSOR_KEY Worker secret"
+              : "Conversations are not configured on this deployment",
+            retryable: false,
+            ...(details ? { details } : {}),
+          },
+        },
+        { status: 503 },
+      ),
+    );
+
+  test("shows managers how to enable conversations", async () => {
+    server.use(notConfigured({ reason: "missing" }));
+    renderRooms();
+    expect(
+      await screen.findByRole("heading", {
+        name: "Conversations are not configured",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/wrangler secret put CONVERSATION_CURSOR_KEY/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No accessible rooms/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  test("names a too-short key", async () => {
+    server.use(notConfigured({ reason: "cursor-key-too-short" }));
+    renderRooms();
+    expect(
+      await screen.findByText(/shorter than 32 characters/),
+    ).toBeInTheDocument();
+  });
+
+  test("tells other callers to ask a maintainer without operator detail", async () => {
+    server.use(notConfigured());
+    renderRooms();
+    expect(
+      await screen.findByText(/Ask a project maintainer/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/wrangler/)).not.toBeInTheDocument();
+  });
+
+  test("keeps an empty room list distinct", async () => {
+    server.use(
+      http.get("*/projects/test-project/rooms", () =>
+        HttpResponse.json({ ok: true, rooms: [] }),
+      ),
+    );
+    renderRooms();
+    expect(await screen.findByText(/No accessible rooms/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Conversations are not configured"),
+    ).not.toBeInTheDocument();
+  });
+
+  test("keeps a network failure distinct", async () => {
+    server.use(
+      http.get("*/projects/test-project/rooms", () => HttpResponse.error()),
+    );
+    renderRooms();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Conversations are not configured"),
+    ).not.toBeInTheDocument();
+  });
+});
