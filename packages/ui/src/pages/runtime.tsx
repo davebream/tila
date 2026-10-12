@@ -492,8 +492,8 @@ function OccupantDetail({
           <RunCell occupant={occupant} now={now} />
         )}
         <p className="text-xs text-muted-foreground">
-          Work attempt: none linked. Attempts are not tracked yet and are never
-          inferred from a run.
+          Work attempt: none linked. This view does not link attempts yet and
+          never infers one from a run.
         </p>
       </Section>
       <Section title="Host">
