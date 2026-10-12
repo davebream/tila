@@ -7,8 +7,10 @@ import {
 } from "../lib/cloudflare-resources";
 import type { MigrationResult } from "../lib/d1-migrations";
 import {
+  type DeployPayloadSummary,
   type DeployResult,
   deployWorkerWithAssets,
+  describeDeployPayload,
   describeUiOutcome,
 } from "../lib/deploy";
 import { loadGithubAppCredentials } from "../lib/github-app-setup";
@@ -42,6 +44,12 @@ export default defineCommand({
         "Apply pending D1 migrations before deployment (--no-migrate checks only and refuses pending files)",
       default: true,
     },
+    "dry-run": {
+      type: "boolean",
+      description:
+        "Check the Worker, UI and D1 migrations a deploy would upload, without contacting Cloudflare",
+      default: false,
+    },
     ...jsonArg,
   },
   async run({ args }) {
@@ -52,6 +60,28 @@ export default defineCommand({
       if (json) printJsonError(message, code);
       p.cancel(message);
       exit(1);
+    }
+
+    if (args["dry-run"]) {
+      let summary: DeployPayloadSummary;
+      try {
+        summary = describeDeployPayload();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        fatal(`Deploy payload check failed: ${msg}`, "DEPLOY_PAYLOAD_INVALID");
+      }
+      if (json) {
+        printJson(summary);
+        return;
+      }
+      p.note(
+        `Version:    ${summary.version} (${summary.source})\n` +
+          `Worker:     ${summary.worker}\n` +
+          `UI:         ${summary.ui.indexHtml ? `${summary.ui.files} files` : "built during deploy"} (${summary.ui.dir})\n` +
+          `D1:         ${summary.migrations.count} migrations, latest ${summary.migrations.latest}`,
+        "Deploy payload OK (dry run, nothing deployed)",
+      );
+      return;
     }
 
     let infraConfig: ReturnType<typeof loadInfraConfig>;

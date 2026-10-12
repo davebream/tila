@@ -34,6 +34,7 @@ vi.mock("../../lib/deploy", async (importActual) => {
   return {
     deployWorkerWithAssets: (...args: unknown[]) =>
       mockDeployWorkerWithAssets(...args),
+    describeDeployPayload: vi.fn(),
     describeUiOutcome: actual.describeUiOutcome,
   };
 });

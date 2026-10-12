@@ -13,7 +13,11 @@ import {
   queryD1,
   setWorkerSecrets,
 } from "../../lib/cloudflare-resources";
-import { deployWorkerWithAssets, describeUiOutcome } from "../../lib/deploy";
+import {
+  deployWorkerWithAssets,
+  describeDeployPayload,
+  describeUiOutcome,
+} from "../../lib/deploy";
 import { ensureInfraAdminToken } from "../../lib/ensure-infra-admin-token";
 import {
   discoverInstallation,
@@ -271,6 +275,16 @@ export default defineCommand({
           "MISSING_SLUG",
         );
       }
+    }
+
+    // Fail before touching Cloudflare when this CLI cannot deploy the Worker.
+    try {
+      describeDeployPayload();
+    } catch (err) {
+      const msg = `Deploy payload check failed: ${err instanceof Error ? err.message : String(err)}`;
+      if (args.headless) printJsonError(msg, "DEPLOY_PAYLOAD_INVALID");
+      p.cancel(msg);
+      exit(1);
     }
 
     if (args["force-redeploy"]) {
