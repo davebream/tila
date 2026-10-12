@@ -3024,3 +3024,62 @@ Schema or gate conflicts roll back the entire result/recovery transaction.
 These operations share the SQLite domain implementation and embedded facade.
 Public transport, backup restore protections and advertised capability remain
 gated on the complete backend interface milestone.
+
+### Managed queue public contract
+
+The SDK exposes `queue` and `attempts` alongside the existing task facade. The
+conversation `dispatch` namespace remains independent. HTTP uses project-scoped
+`/queue` and `/attempts`; CLI uses `tila queue` and `tila attempt`; MCP exposes
+`tila_queue` and `tila_attempt` in the default workflow catalog and the optional
+`queue` group. All surfaces delegate transitions to the same SQLite operations.
+`GET /health` advertises `managed-queue-v1`; project activation remains explicit.
+
+| Surface | Inspection | Mutations |
+| --- | --- | --- |
+| Queue HTTP | `GET /queue`, `GET /queue/policy` | `POST /queue/configure`, `/enroll`, `/claim`, `/entries/:id/edit`, `/entries/:id/withdraw` |
+| Attempt HTTP | `GET /attempts`, `GET /attempts/:id` | `POST /attempts/:id/<action>` |
+| SDK queue | `policy`, `inspect` | `configure`, `enroll`, `edit`, `withdraw`, `claimNext` |
+| SDK attempts | `get`, `list` | `accept`, `started`, `heartbeat`, `finish`, `requestSuspension`, `confirmSuspension`, `requestResume`, `claimResume`, `requestCancellation`, `reconcile`, `rebind`, `retry`, `forceRecovery` |
+
+HTTP attempt actions use kebab case. Mutation bodies carry `idempotency_key` and,
+where applicable, `expected_revision` and `fence`. If supplied, the HTTP
+`Idempotency-Key` header must match the body. Queue/attempt commands bypass D1
+response caching: current authentication, membership and resource permissions are
+checked before the permanent project-local receipt. Receipt replay returns
+current state and grant validity. An old claim or acceptance fence cannot become
+valid again after resume, rebind, expiry or restore. Read responses are not cached.
+
+Queue inspection supports state, type, priority, target and capability filters,
+plus `limit` (1–500) and `offset`. Attempt inspection supports task, enrollment and
+state filters with the same pagination bounds. Resource restrictions apply before
+pagination; restricted predecessors are not disclosed in block diagnostics.
+Scheduling capabilities are declared compatibility metadata, not authorization.
+A valid denial (`no_grant`: disabled, paused, empty, blocked or capacity exhausted)
+is distinct from transport failure and conflict errors.
+
+The CLI accepts operation JSON through `--data` or `--file`, including stable
+idempotency keys. For example:
+
+```bash
+tila queue policy --json
+tila queue configure --data '{"idempotency_key":"enable-1","expected_revision":0,"enabled":true,"paused":false,"execution_limit":20}' --json
+tila queue enroll --data '{"idempotency_key":"enroll-ticket-1","task_id":"ticket-1"}' --json
+tila queue claim --participant-id worker-1 --data '{"idempotency_key":"poll-1","capabilities":["coding"]}' --json
+```
+
+Only a successfully accepted, currently valid grant authorizes launch. Keep the
+same participant identity for subsequent attempt operations. CLI list output
+uses the existing `{ "ok": true, "result": { "items": [...] } }` collection
+envelope. SDK methods return typed results directly. MCP wraps results in its
+structured `result` envelope. Explicit local MCP mode requires local paths and
+rejects mixed remote credentials; separate local databases are never distributed.
+
+Migration 34 adds destination queue fence watermarks to transfer bookkeeping.
+Backups now contain policy, enrollment, attempts, reservations and permanent
+receipts and declare `managed-queue-v1`. Older compatible archives remain readable.
+After digest verification, restore pauses dispatch, raises fences above both
+snapshot and destination values, removes copied claims, and marks every saved
+nonterminal attempt uncertain. This includes suspended snapshots: the source
+process may have resumed after export. Confirmed quiescent reconciliation can
+return such an attempt to suspended while retaining WIP. Terminal history and
+receipts remain intact. Never interpret restoring a database as stopping a process.

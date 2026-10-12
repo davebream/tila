@@ -2124,3 +2124,40 @@ this dashboard. There are no new database migrations in this slice. Preserve the
 D1-before-Worker ordering for slice 1. The stacked PRs remain held for explicit
 authentication-boundary review; passing UI or connector fixtures is not live
 multi-account acceptance. See the versioned [acceptance evidence](evidence/issue-283-acceptance-v3.json).
+
+## Managed queue backend activation and recovery
+
+Managed dispatch is disabled and paused by default. Install lifecycle metadata
+for each dispatched work type before enrolling work. Read the current schema and
+queue revisions, then enable a fixture project with an explicit positive execution
+limit. WIP is uncapped unless configured. Once enabled, configuration writes must
+remain revision-aware even if the queue is subsequently disabled.
+
+Use `tila queue inspect --json` for occupancy, oldest waiting age, blocked work
+and policy revision. `tila attempt list --data '{"state":"uncertain"}' --json`
+locates executions requiring reconciliation. Journal domain events retain grant
+denials, expiry, suspension, recovery and terminal outcomes. Queue/attempt history
+and safety-critical receipts are included in backup and are not removed by the
+seven-day generic deduplication sweep.
+
+Pausing blocks new grants and resumed execution. Existing accepted work can finish;
+heartbeats, cancellation and reconciliation remain available. Lowering capacity
+does not evict work. Cancellation is a request until the adapter reports stopped
+execution or another valid terminal outcome. Do not manually delete reservations
+to free slots while execution may still exist.
+
+For uncertain execution, inspect the recorded provider session first. Reconnect
+or rebind a confirmed live session; reconcile a confirmed stopped session with an
+explicit outcome. An unreachable session remains uncertain even when the work was
+declared retry-safe. Maintainer force recovery requires a reason and records
+abandonment with unresolved external execution; it cannot kill an unreachable
+process. Reconcile restored suspended sessions with `observation: "suspended"`,
+`execution_quiescent: true`, their matching session and checkpoint before releasing
+execution occupancy.
+
+Restored projects stay paused and invalidate old authority. Reconcile every saved
+execution before enabling admission. Rollback is to pause, preserve durable state,
+and retain completion/reconciliation endpoints. Do not downgrade to a version
+that ignores managed-task guards or remove queue tables. The repository adapter,
+queue UI and broader live coding-runtime acceptance are delivered separately from
+this backend contract.
