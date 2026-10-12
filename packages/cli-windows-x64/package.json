@@ -1,6 +1,6 @@
 {
   "name": "tila-cli-windows-x64",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Windows x64 binary for tila-cli",
   "os": ["win32"],
   "cpu": ["x64"],

@@ -9,7 +9,7 @@ Coordination primitives that prevent races.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.5.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Apply D1 migration 0032 and deploy the Worker before upgrading clients; read the [upgrade notes](CHANGELOG.md#050---2026-10-12) before deploying.
+> **Status:** v0.6.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Deploy the Worker before upgrading clients; the SDK now requires zod 4. Read the [upgrade notes](CHANGELOG.md#060---2026-10-12) before deploying.
 
 </div>
 
