@@ -565,20 +565,33 @@ export async function listRecords(
   params?: {
     tag?: string;
     "include-archived"?: string;
-    limit?: string;
+    limit?: string | number;
+    /** Opaque keyset cursor from a previous page's `meta.next_cursor`. */
+    cursor?: string;
+    sort?: RecordListSort;
+    order?: "asc" | "desc";
+    /** Case-insensitive key substring, at most 200 characters. */
+    key_contains?: string;
   },
 ): Promise<RecordListResponse> {
   const stringParams: Record<string, string | undefined> = {};
   if (params?.tag) stringParams.tag = params.tag;
   if (params?.["include-archived"])
     stringParams["include-archived"] = params["include-archived"];
-  if (params?.limit) stringParams.limit = params.limit;
+  if (params?.limit !== undefined) stringParams.limit = String(params.limit);
+  if (params?.cursor) stringParams.cursor = params.cursor;
+  if (params?.sort) stringParams.sort = params.sort;
+  if (params?.order) stringParams.order = params.order;
+  if (params?.key_contains)
+    stringParams.key_contains = params.key_contains.slice(0, 200);
   return request<RecordListResponse>(
     projectId,
     `/records/${type}`,
     stringParams,
   );
 }
+
+export type RecordListSort = "key" | "updated_at" | "revision";
 
 export async function getRecord(
   projectId: string,
@@ -595,10 +608,11 @@ export async function getRecordHistory(
   projectId: string,
   type: string,
   key: string,
-  params?: { limit?: number; values?: boolean },
+  params?: { limit?: number; values?: boolean; cursor?: string },
 ): Promise<RecordHistoryResponse> {
   const stringParams: Record<string, string | undefined> = {};
   if (params?.limit !== undefined) stringParams.limit = String(params.limit);
+  if (params?.cursor) stringParams.cursor = params.cursor;
   if (params?.values !== undefined) stringParams.values = String(params.values);
   return request<RecordHistoryResponse>(
     projectId,

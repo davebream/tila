@@ -2,6 +2,7 @@ import { useAuth } from "@/hooks/use-auth";
 import {
   ApiError,
   type ArtifactListResponse,
+  type RecordListSort,
   type RecordTypesResponse,
   type TaskListSort,
   getArtifactHistory,
@@ -296,16 +297,39 @@ export function useRecordTypes() {
   });
 }
 
-export function useRecords(
+export type RecordPageParams = {
+  /** Include archived records. The default page excludes them. */
+  archived: boolean;
+  sort: RecordListSort;
+  order: "asc" | "desc";
+  /** Key substring filter; empty means no filter. */
+  keyContains: string;
+  limit: number;
+  cursor?: string;
+};
+
+/**
+ * One keyset page of a record type. The previous page stays on screen while
+ * the next one loads. The drawer reads the same page for sibling navigation.
+ */
+export function useRecordPage(
   type: string | undefined,
-  params?: { tag?: string; "include-archived"?: string },
+  params: RecordPageParams,
 ) {
   const { projectId } = useAuth();
   return useQuery<RecordListResponse>({
-    queryKey: ["records", projectId, type, params],
+    queryKey: ["record-page", projectId, type, params],
     queryFn: () =>
-      listRecords(requireProjectId(projectId), type as string, params),
+      listRecords(requireProjectId(projectId), type as string, {
+        "include-archived": params.archived ? "true" : undefined,
+        sort: params.sort,
+        order: params.order,
+        key_contains: params.keyContains || undefined,
+        limit: params.limit,
+        cursor: params.cursor,
+      }),
     enabled: Boolean(projectId) && Boolean(type),
+    placeholderData: keepPreviousData,
     refetchInterval: 5000,
   });
 }
@@ -321,21 +345,25 @@ export function useRecord(type: string | undefined, key: string | undefined) {
   });
 }
 
+/** Revision history, newest first, one cursor page at a time. */
 export function useRecordHistory(
   type: string | undefined,
   key: string | undefined,
   params?: { limit?: number },
 ) {
   const { projectId } = useAuth();
-  return useQuery<RecordHistoryResponse>({
+  return useInfiniteQuery({
     queryKey: ["recordHistory", projectId, type, key, params],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       getRecordHistory(
         requireProjectId(projectId),
         type as string,
         key as string,
-        params,
+        { ...params, cursor: pageParam },
       ),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: RecordHistoryResponse) =>
+      last.meta.next_cursor ?? undefined,
     enabled: Boolean(projectId) && Boolean(type) && Boolean(key),
     refetchInterval: 10000,
   });
