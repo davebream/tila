@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw";
+import { pagedRecordsHandler, recordTypesHandler } from "./records";
 import {
   catalogHandler,
   declaredEntry,
@@ -34,6 +35,10 @@ export const handlers = [
       created_by: "another-user",
     }),
   ]),
+
+  // Record types catalog and lists: empty by default
+  recordTypesHandler([]),
+  pagedRecordsHandler([]),
 
   // Unified search: no matches by default
   searchHandler([]),
