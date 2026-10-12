@@ -1,8 +1,9 @@
 # tila — Active Roadmap
 
-Updated 2026-09-20 against `a294fee1` and the 19 open issues listed below.
-This replaces the earlier version-number roadmap; its history remains in git.
-Issue dispositions and replacement bodies here are **drafts, not posted changes**.
+Issue dispositions reconciled with GitHub on 2026-10-12 for #293; the product
+direction dates from 2026-09-20. This replaces the earlier version-number roadmap;
+its history remains in git. Proposed wording for #194 below is **not a posted
+issue change**. Closed foundations are reused, not reopened.
 
 ## 1. Product direction
 
@@ -32,14 +33,13 @@ writes and transactional entity/claim changes remain requirements during the res
 
 Delivery is split into five dependent changes: identity/bindings/profiles;
 durable conversations and CLI/MCP; standalone connector/native wake; narrow Herdr
-evaluation/plugin; dashboard and distributed acceptance. All five slices have
-stacked PRs, with the dashboard and standalone connector implemented. Herdr
-registration/open and authenticated native restoration remain unfinished;
-authentication-boundary changes remain held for explicit review. Only the final
-change may close #283 after live Mac/Linux acceptance with the two independent
-Claude accounts and plain Codex coordinator selected on 2026-10-09. Fixture results
-do not satisfy those live gates. Task assignments, attempts and durable questions
-retain separate roadmap ownership.
+evaluation/plugin; dashboard and distributed acceptance. All five slices merged
+in PRs #285–#289 on 2026-10-10, including the dashboard and standalone connector.
+Herdr registration/open and full authenticated native restoration acceptance remain
+unfinished. #283 stays open until live Mac/Linux acceptance passes with the two
+independent Claude accounts and plain Codex coordinator selected on 2026-10-09.
+Fixture results do not satisfy those live gates. #303/#304 own durable attempts
+and correlated decisions; they do not reopen the completed coordination epics.
 
 ## 2. Herdr research: reuse the runtime before building one
 
@@ -145,149 +145,68 @@ The first live workflow must meet all five conditions:
 5. Host, server, protocol and adapter revisions are recorded. No source change
    silently alters an already-deployed host; no runtime update silently kills work.
 
-## 4. Existing issue dispositions
+## 4. Existing issue dispositions — GitHub review 2026-10-12
 
-The membership implementation in #184 was merged by #218. Keep it closed and keep
-its schema, role model, audit and last-owner protections. Existing projects migrated
-to hybrid mode; new projects default to explicit. Native key principals are still
-missing, and full bootstrap tokens still carry owner access.
+Status below is GitHub issue state, not a claim of production activation. Links
+provide the source of each disposition. The old replacement drafts for closed
+issues have been retired; remaining product work has explicit ownership.
 
-### Workflow foundation
+### Completed foundations
 
-| Issue | Draft disposition |
+| Issue(s) / observed state | Reuse and remaining boundary |
 |---|---|
-| #190 | Rewrite as the first orchestrator/worker umbrella; remove the blanket exclusion of execution |
-| #180 | Keep priority: durable cursors and handoffs tied to pending-work recovery; drop local parity requirement |
-| #195 | Keep priority: direct participant addressing/acknowledgement first; defer group/broadcast complexity |
-| #181 | Adapt to runtime/provider session lifecycle behind one host boundary; evaluate Herdr first |
-| #189 | Narrow MCP tools to the first complete workflow; defer broad surface polish |
+| [#184](https://github.com/davebream/tila/issues/184), [#218](https://github.com/davebream/tila/pull/218) — closed / merged | Canonical memberships, roles, audit and last-owner protection remain authoritative. Existing projects migrated to hybrid; new projects default to explicit. No second UI roster. |
+| [#179](https://github.com/davebream/tila/issues/179), [#180](https://github.com/davebream/tila/issues/180), [#181](https://github.com/davebream/tila/issues/181), [#190](https://github.com/davebream/tila/issues/190), [#195](https://github.com/davebream/tila/issues/195) — closed | Participant identity, durable cursors/handoffs, client lifecycle and addressed signals are foundations. #283 owns native conversation delivery; #303/#304 add assignment/attempt/question semantics. Do not rewrite #190 as a new umbrella or reimplement #181. |
+| [#182](https://github.com/davebream/tila/issues/182), [#183](https://github.com/davebream/tila/issues/183), [#185](https://github.com/davebream/tila/issues/185), [#186](https://github.com/davebream/tila/issues/186), [#187](https://github.com/davebream/tila/issues/187), [#191](https://github.com/davebream/tila/issues/191) — closed | OIDC policy, role ceilings, service/capability credentials, token providers, live authorization and access decoupling are delivered foundations. Native key-only onboarding and auth retirement remain separate future migrations. |
+| [#102](https://github.com/davebream/tila/issues/102), [#173](https://github.com/davebream/tila/issues/173), [#174](https://github.com/davebream/tila/issues/174), [#175](https://github.com/davebream/tila/issues/175), [#176](https://github.com/davebream/tila/issues/176), [#177](https://github.com/davebream/tila/issues/177), [#188](https://github.com/davebream/tila/issues/188) — closed | Preserve membership/credential UI, immutable artifact revisions, lifecycle/recovery, history and provenance/reviews. #173 no longer awaits closure. Individual history views remain read-only; the whole dashboard is not. |
+| [#178](https://github.com/davebream/tila/issues/178), [#189](https://github.com/davebream/tila/issues/189), [#192](https://github.com/davebream/tila/issues/192), [#193](https://github.com/davebream/tila/issues/193) — closed | Reuse CLI contracts, compact MCP workflow tools, full backup/recovery and benchmark harness. Configuration export (#299) does not replace #192; #194 measures product use rather than restating benchmark claims. |
 
-### Auth simplification
+### Current product delivery
 
-| Issue | Draft disposition |
+The [settings/lifecycle contract](02-ARCHITECTURE.md#section-14-editable-settings-and-entity-lifecycle-contract-293)
+is the reference for editor coverage, current permissions and future API gaps.
+
+| Issue(s) / observed state | Ownership and dependency boundary |
 |---|---|
-| #191 | Complete the existing access-decoupling contract: separate Actions identity, enforce live credential ceilings, preserve bootstrap authority, and unify browser/bearer membership. Keep auth retirement separate. |
-| #185 | Scoped service identities, capability credentials, namespace restrictions, rotation, revocation and workload exchange |
-| #187 | Completed fail-closed permission revalidation; preserve these checks while current auth remains supported |
-| #186 | Refreshable SDK token providers, scoped OIDC workload exchange, and compatible token-bound DPoP verification |
-| #102 | Completed owner membership/credential panel; preserve access for explicit owners without App installations |
+| [#292](https://github.com/davebream/tila/issues/292), [#293](https://github.com/davebream/tila/issues/293) — open | Product epic and this documentation contract. Definitions, stable identity, durable work, runtime observations and evidence are distinct; server state is authoritative. |
+| [#294](https://github.com/davebream/tila/issues/294), [#295](https://github.com/davebream/tila/issues/295) — closed | Lease/presence display and query-failure truth are completed prerequisites. Preserve their regression coverage; unavailable must not become empty/offline. |
+| [#296](https://github.com/davebream/tila/issues/296), [#297](https://github.com/davebream/tila/issues/297), [#298](https://github.com/davebream/tila/issues/298), [#299](https://github.com/davebream/tila/issues/299), [#300](https://github.com/davebream/tila/issues/300) — open | Revision-safe service writes before definition/identity editors and explicit imports; schema-aware work catalogs can progress independently of a complete workflow engine. All ordinary settings need browser paths. |
+| [#301](https://github.com/davebream/tila/issues/301), [#302](https://github.com/davebream/tila/issues/302), [#303](https://github.com/davebream/tila/issues/303), [#304](https://github.com/davebream/tila/issues/304), [#305](https://github.com/davebream/tila/issues/305) — open | Runtime and delivery projections reuse #283. #303 owns attempts/assignments/results, #304 correlated questions/decisions, #305 browser work actions; attempts precede decisions. Read projections can ship before attempt links. |
+| [#306](https://github.com/davebream/tila/issues/306), [#307](https://github.com/davebream/tila/issues/307), [#308](https://github.com/davebream/tila/issues/308), [#283](https://github.com/davebream/tila/issues/283), [#194](https://github.com/davebream/tila/issues/194) — open | Navigation/attention, operational readiness, three-scenario validation, live native transport and measured dogfooding retain distinct owners. #307 does not authorize silent production credential rotation; #308 cannot substitute fixtures for #283 live proof. |
 
-### Artifact and distribution work
+## 5. Remaining boundaries and proposed #194 alignment
 
-| Issue | Draft disposition |
+These are ownership notes and one proposed issue amendment, not new implementation
+claims or requests to reopen closed issues.
+
+| Work | Owner / boundary |
 |---|---|
-| #173 | All four implementation slices merged; parent epic tracking still awaits closure |
-| #174 | Implemented: journal enrichment ([#221](https://github.com/davebream/tila/pull/221)) and explicit lineages, numbered immutable revisions, and commit-record recovery ([#228](https://github.com/davebream/tila/pull/228)) |
-| #175 | Implemented: history/meta/restore across HTTP, SDK, CLI, and embedded backends, plus read-only MCP history ([#230](https://github.com/davebream/tila/pull/230)) |
-| #176 | Implemented: version-aware retention, protected live heads, durable deletion recovery, and exemption from the legacy R2 backstop ([#231](https://github.com/davebream/tila/pull/231)); the prerequisite for public version API documentation is satisfied |
-| #177 | Implemented: read-only, paginated version history and revision navigation in the artifact drawer ([#237](https://github.com/davebream/tila/pull/237)) |
-| #188 | Implement immutable producer provenance, explicit writer reviews, and opt-in trusted-reference task transitions; preserve the read-only UI |
-| #178 | Split useful CLI JSON contract from binary packaging/signing polish; defer the latter |
+| Runtime evaluation and native restoration | #283, including pinned Herdr adapter proof and isolated account/host tests; no custom supervisor or live bot takeover implied. |
+| Durable assignments, attempts, results, questions and decisions | #303/#304; replace the old unfiled drafts with these issues and preserve existing generic task/runtime APIs. |
+| Key-only auth and standalone local persistence retirement | Separate future migration work; inventory clients/data/ownership and prove export/recovery before any removal. No retirement is part of #292/#293. |
+| Configuration editors/import/export | #296–#299; one server authority, explicit revisions, per-resource permission checks and non-secret references. No Git/file synchronization. |
+| Product evidence | #308 executes S1–S3 and feeds #194; record failures, setup/diagnosis/recovery cost and exact evidence provenance. |
 
-### Evidence and positioning
+### Proposed replacement positioning for #194 — not applied to GitHub
 
-| Issue | Draft disposition |
-|---|---|
-| #194 | Replace public case-study prerequisite with first-project migration and acceptance evidence |
-| #193 | Implemented: `packages/bench` harness with in-process CI smoke, local and deployed http tiers, soak mode; baselines in `docs/benchmarks/` |
+#194 currently requires documentation to say Tila does not launch agents, assign
+work or schedule execution. That blanket exclusion conflicts with amended
+Decisions §0 and #292's first orchestrator/worker workflow. Preserve #194's measured
+case-study ownership and evidence requirements; replace that exclusion with:
 
-## 5. Copyable issue drafts
+> Tila is one self-hosted development-management product with a reusable shared
+> state and coordination core. Its first workflow assigns durable work to an
+> orchestrator and workers, correlates questions and explicit results, and uses
+> supported host adapters for execution. Runtime/process supervision and provider
+> retries remain behind the host boundary; Tila does not infer completion from
+> terminal state or promise unsupported adapter operations. Generic scheduling,
+> additional topologies and native clients are later work.
 
-These are bounded replacement/new-issue drafts. Check duplicates and current branch
-ownership before publication. The acceptance criteria here do not close an issue.
-
-### Replace #190 — first orchestrator and workers
-
-Build one complete flow: assignment, worker question, orchestrator answer or owner
-escalation, explicit result, restart recovery. Reuse core identities, journal,
-signals and memberships. Tasks, attempts and provider sessions must be distinct.
-Start with one topology; allow future policies without inventing a generic topology
-language now. Depends on the runtime evaluation, #185, #180, #195 and #181.
-Acceptance is the five-condition matrix in §3, including Mac/VPS execution.
-
-### #191 — complete the current authorization contract
-
-The linked implementations (#182–#187, #95 and #102) are closed. The remaining
-composition fixes separate GitHub Actions from its triggering human, enforce
-repository policy on issued workload credentials, reserve root operations to
-bootstrap/infra credentials, and share canonical membership admission across
-browser and bearer access. Migration 0029 and the authorization-version cutover
-are documented in the GitHub auth guide. Close the epic only after regression
-and runtime validation, security review, and confirmed integration into main.
-
-### Future follow-up — project keys and GitHub auth retirement
-
-Key-only provisioning/onboarding and removal of GitHub/OIDC routes, secrets and
-UI are separate future work. Migrate existing ownership first, preserve a
-recoverable owner, and fail closed on revoked access. The current compatibility
-fixes do not retire any authentication method or delete canonical memberships.
-
-### #185 — scoped service accounts and capability credentials
-
-Deliver the broader integration contract: stable project service principals with
-canonical memberships; explicit capability and role ceilings; task-type and record
-namespace restrictions; expiring, rotatable and revocable credential versions;
-short-lived GitHub Actions and generic OIDC workload exchange; and preserved DPoP
-binding. Revalidate current D1 authority on every request, before cached responses
-or retry replay. Keep process participants separate from authentication identities.
-
-Maintain existing GitHub authentication, human-session compatibility and legacy
-`full` keys. Deprecate new legacy issuance without scheduling removal. Provide SDK,
-CLI and owner token-management APIs for #102; its token panel stays separate. Apply
-the backward-compatible D1 migration before deploying the Worker or clients and
-leave authentication-boundary changes for explicit merge/deployment review.
-
-### Adapt #181 — runtime and provider lifecycle boundary
-
-Record host, runtime occupant and native provider session separately from the Tila
-participant and attempt. Use the Herdr pilot to choose the smallest adapter that
-supports launch, observation, reconnect and replacement. Do not derive completed
-work solely from screen state. Test stale occupants and both Mac↔VPS directions;
-retain a terminal-independent service contract. One provider/runtime combination
-first, with unsupported combinations reported explicitly.
-
-### Replace #194 — first-project migration evidence
-
-Move one active project's orchestrator/worker exchange to the chosen runtime and
-Tila contracts incrementally. Record what existing tooling is retired, what remains,
-and its rollback path. Prove unresolved questions survive cold start, owner replies
-reach the correct attempt, and the VPS continues without the Mac. Use an isolated
-Telegram bot/group for integration tests before changing a live routing owner.
-Public promotion and broad performance comparisons are not acceptance requirements.
-
-### New — evaluate Herdr and its Telegram extension
-
-Compare a pinned Herdr build and pinned Telegram plugin with the first milestone.
-Use isolated state and fixture workspaces; no live bot takeover. Test Mac cmux/tmux
-as outer terminals, VPS tmux, disconnect, process replacement, restart, duplicate
-prompts and mixed client/server capabilities. Check stale question buttons and two
-same-directory sessions. Separate direct owner control from orchestrator escalation.
-Record exact versions, pass/fail evidence and the smallest remaining adapter. Stop
-short of a fork, native client or custom supervisor implementation.
-
-### New — durable attempts and assignments
-
-Add an attempt identity independent of task and provider session. Persist assignment,
-acceptance, cancellation and explicit result with idempotency keys. Require current
-participant/fence before accepting a result. Test retries, ambiguous delivery and
-replacement sessions; a second attempt must not inherit the first one's authority.
-Runtime status may inform the UI but cannot declare domain completion.
-
-### New — durable worker questions and decisions
-
-Persist question text, question ID, task/attempt, requesting participant and answer
-correlation. Support several questions after acceptance and orchestrator-first
-routing, with owner escalation explicit. Durable pending queries plus cursor replay
-must recover offline answers. Reject stale/mismatched replies and make duplicate
-submission harmless. CLI, MCP and later native clients share the same lifecycle.
-
-### New — retire standalone local persistence safely
-
-Inventory public local entry points, data export/restore and compatibility consumers.
-Provide a verified migration to Cloudflare before removing supported local commands,
-SDK/MCP entry points and packaging. Keep `ops-sqlite`, local fixtures/probes and
-execution caches where still used. Remove redundant parity/distribution checks only
-with their retired surface, not before. No silent deletion of local data.
+Keep the predeclared scenario/evaluation rubric, non-secret reproducible evidence,
+failures and limitations, and measured operator effort for setup, diagnosis and
+recovery. Feed the three #292 journeys and #283 live evidence into that case study.
+Public promotion is not a gate on shipping the settings contract. This proposal
+does not silently change #194's published scope or mark its evidence complete.
 
 ## 6. Development, pinning and repository policy
 
@@ -304,15 +223,15 @@ ceremony. Release/distribution polish can wait while correctness checks continue
 This reset changes direction and development entry points; it does not implement
 or deploy the future auth, host, orchestration or persistence migrations.
 
-## #283 delivery ownership and remaining gates (2026-10-09)
+## #283 delivery ownership and remaining gates (reviewed 2026-10-12)
 
 | Slice | Implementation owner | Current boundary |
 |---|---|---|
-| Identity / profiles | schemas, D1, SQLite bindings, SDK/CLI | PR #285; authentication review hold |
-| Durable conversations | SQLite/DO, Worker, SDK/CLI/MCP | PR #286; stacked behind identity |
-| Standalone connector | connector, client lifecycle, CLI | PR #287; native request fixtures pass on macOS/Linux |
-| Herdr 0.9.3 | connector observation adapter and plugin | PR #288; status available, registration/open deliberately unsupported |
-| Dashboard / acceptance | UI plus shared history API; repository maintainer owns live acceptance | Dashboard implemented on the stack; live multi-account gates remain open |
+| Identity / profiles | schemas, D1, SQLite bindings, SDK/CLI | [PR #285 merged](https://github.com/davebream/tila/pull/285); current authority checks remain required |
+| Durable conversations | SQLite/DO, Worker, SDK/CLI/MCP | [PR #286 merged](https://github.com/davebream/tila/pull/286); durable rooms/mailboxes |
+| Standalone connector | connector, client lifecycle, CLI | [PR #287 merged](https://github.com/davebream/tila/pull/287); native request fixtures pass on macOS/Linux |
+| Herdr 0.9.3 | connector observation adapter and plugin | [PR #288 merged](https://github.com/davebream/tila/pull/288); status available, registration/open deliberately unsupported |
+| Dashboard / acceptance | UI plus shared history API; repository maintainer owns live acceptance | [PR #289 merged](https://github.com/davebream/tila/pull/289); live multi-account gates remain open |
 
 The required two Claude accounts and plain Codex coordinator, both cross-host
 directions, Mac outage, busy drafts, occupant replacement/reconnect and unattended
