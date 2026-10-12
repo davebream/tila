@@ -165,7 +165,7 @@ vi.mock("@tila/backend-d1", async () => ({
 }));
 
 // Import after mocks are set up
-const { authGithub } = await import("./auth-github");
+const { authGithub, githubLoginAlias } = await import("./auth-github");
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 
@@ -213,6 +213,7 @@ function createApp(): Hono<AppEnv> {
     await next();
   });
   app.route("/api/auth/github", authGithub);
+  app.get("/auth/github/login", githubLoginAlias);
   return app;
 }
 
@@ -1133,6 +1134,128 @@ describe("POST /api/auth/github/exchange (App path)", () => {
   });
 });
 
+describe("browser GitHub login availability", () => {
+  const configuredEnv: Env = {
+    ...testEnv,
+    GITHUB_LOGIN_ENABLED: "true",
+    GITHUB_APP_CLIENT_ID: "Iv1.browser",
+    GITHUB_APP_CLIENT_SECRET: "browser-secret",
+  };
+  const browserPaths = [
+    "/api/auth/github/login",
+    "/auth/github/login",
+    "/api/auth/github/oauth/callback?code=code&state=state",
+    "/api/auth/github/oauth/callback?setup_action=install&code=unused",
+    "/api/auth/github/oauth/callback",
+    "/api/auth/github/oauth/callback?code=code",
+    "/api/auth/github/oauth/callback?state=state",
+  ];
+
+  beforeEach(() => vi.clearAllMocks());
+
+  async function expectUnavailable(env: Env, status: number, code: string) {
+    const app = createApp();
+    const capability = await app.request(
+      "/api/auth/github/login-config",
+      {},
+      env,
+    );
+    expect(capability.status).toBe(200);
+    expect(capability.headers.get("Cache-Control")).toBe("no-store");
+    expect(await capability.json()).toEqual({ ok: true, enabled: false });
+
+    for (const path of browserPaths) {
+      const res = await app.request(path, {}, env);
+      expect(res.status, path).toBe(status);
+      expect(res.headers.get("Location"), path).toBeNull();
+      expect(res.headers.get("Set-Cookie"), path).toBeNull();
+      expect(res.headers.get("Cache-Control"), path).toBe("no-store");
+      expect(await res.json()).toMatchObject({ ok: false, error: { code } });
+    }
+    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
+    expect(mockGetAuthenticatedUser).not.toHaveBeenCalled();
+    expect(mockMintAppJwt).not.toHaveBeenCalled();
+    expect(mockD1SessionCreate).not.toHaveBeenCalled();
+  }
+
+  it.each([undefined, "", "false", "TRUE", "1", " true "])(
+    "requires exact opt-in despite complete credentials (flag: %s)",
+    async (flag) => {
+      await expectUnavailable(
+        { ...configuredEnv, GITHUB_LOGIN_ENABLED: flag },
+        404,
+        "github-login-disabled",
+      );
+    },
+  );
+
+  describe.each([
+    "GITHUB_APP_CLIENT_ID",
+    "GITHUB_APP_CLIENT_SECRET",
+    "GITHUB_SESSION_HMAC_KEY",
+  ] as const)("incomplete %s", (key) => {
+    it.each([undefined, "", " \t "])(
+      "rejects missing/blank value %j",
+      async (value) => {
+        await expectUnavailable(
+          { ...configuredEnv, [key]: value },
+          503,
+          "not-configured",
+        );
+      },
+    );
+  });
+
+  it("reports only availability without authentication or exposing credentials", async () => {
+    const res = await createApp().request(
+      "/api/auth/github/login-config",
+      {},
+      configuredEnv,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Set-Cookie")).toBeNull();
+    expect(await res.json()).toEqual({ ok: true, enabled: true });
+    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
+    expect(mockD1SessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("preserves the enabled browser alias redirect", async () => {
+    const res = await createApp().request(
+      "/auth/github/login",
+      {},
+      configuredEnv,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("/api/auth/github/login");
+  });
+
+  it("rejects valid in-flight OAuth state if the instance disables login", async () => {
+    const app = createApp();
+    const login = await app.request(
+      "/api/auth/github/login",
+      {},
+      configuredEnv,
+    );
+    expect(login.status).toBe(302);
+    const state = new URL(login.headers.get("Location") ?? "").searchParams.get(
+      "state",
+    );
+    const callback = await app.request(
+      `/api/auth/github/oauth/callback?code=valid-code&state=${state}`,
+      { headers: { Cookie: `tila_oauth_state=${state}` } },
+      { ...configuredEnv, GITHUB_LOGIN_ENABLED: "false" },
+    );
+    expect(callback.status).toBe(404);
+    expect(await callback.json()).toMatchObject({
+      error: { code: "github-login-disabled" },
+    });
+    expect(callback.headers.get("Set-Cookie")).toBeNull();
+    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
+    expect(mockD1SessionCreate).not.toHaveBeenCalled();
+  });
+});
+
 describe("GET /api/auth/github/login", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1142,6 +1265,8 @@ describe("GET /api/auth/github/login", () => {
     const app = createApp();
     const envWithApp = {
       ...testEnv,
+      GITHUB_LOGIN_ENABLED: "true",
+      GITHUB_APP_CLIENT_SECRET: "secret123",
       GITHUB_APP_CLIENT_ID: "Iv1.abc123def456",
     } as unknown as Env;
 
@@ -1162,6 +1287,8 @@ describe("GET /api/auth/github/login", () => {
     const app = createApp();
     const envWithApp = {
       ...testEnv,
+      GITHUB_LOGIN_ENABLED: "true",
+      GITHUB_APP_CLIENT_SECRET: "secret123",
       GITHUB_APP_CLIENT_ID: "Iv1.abc123def456",
     } as unknown as Env;
 
@@ -1179,25 +1306,31 @@ describe("GET /api/auth/github/login", () => {
     expect(setCookie).toContain("HttpOnly");
   });
 
-  it("returns 500 with NOT_CONFIGURED when GITHUB_APP_CLIENT_ID is missing", async () => {
+  it("returns 503 with NOT_CONFIGURED when GITHUB_APP_CLIENT_ID is missing", async () => {
     const app = createApp();
     // testEnv does not have GITHUB_APP_CLIENT_ID
 
     const res = await app.request(
       "/api/auth/github/login",
       { method: "GET" },
-      testEnv,
+      {
+        ...testEnv,
+        GITHUB_LOGIN_ENABLED: "true",
+        GITHUB_APP_CLIENT_SECRET: "secret123",
+      },
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("not-configured");
   });
 
-  it("returns 500 with NOT_CONFIGURED when GITHUB_SESSION_HMAC_KEY is missing", async () => {
+  it("returns 503 with NOT_CONFIGURED when GITHUB_SESSION_HMAC_KEY is missing", async () => {
     const app = createApp();
     const envWithoutHmac = {
       ...testEnv,
+      GITHUB_LOGIN_ENABLED: "true",
+      GITHUB_APP_CLIENT_SECRET: "secret123",
       GITHUB_APP_CLIENT_ID: "Iv1.abc123def456",
       GITHUB_SESSION_HMAC_KEY: undefined,
     } as unknown as Env;
@@ -1208,7 +1341,7 @@ describe("GET /api/auth/github/login", () => {
       envWithoutHmac,
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("not-configured");
   });
@@ -1614,6 +1747,7 @@ async function buildOAuthState(
 describe("GET /api/auth/github/oauth/callback", () => {
   const envWithOAuth = {
     ...testEnv,
+    GITHUB_LOGIN_ENABLED: "true",
     GITHUB_APP_CLIENT_ID: "Iv1.abc123",
     GITHUB_APP_CLIENT_SECRET: "secret123",
   } as unknown as Env;

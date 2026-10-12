@@ -2,6 +2,7 @@ import {
   ApiError,
   getArtifactBlob,
   getArtifactHistory,
+  githubLoginConfig,
   githubUserLookup,
   listTasks,
   mutate,
@@ -9,6 +10,32 @@ import {
 } from "@/lib/api";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
+
+describe("GitHub browser login capability", () => {
+  test("requests fresh public configuration without exposing credentials", async () => {
+    let request: Request | undefined;
+    server.use(
+      http.get("*/api/auth/github/login-config", ({ request: incoming }) => {
+        request = incoming;
+        return HttpResponse.json({ ok: true, enabled: true });
+      }),
+    );
+    expect(await githubLoginConfig()).toEqual({ ok: true, enabled: true });
+    expect(request?.cache).toBe("no-store");
+    expect(request?.headers.get("Authorization")).toBeNull();
+  });
+
+  test.each([
+    { ok: true },
+    { ok: true, enabled: "true" },
+    { ok: false, enabled: true },
+  ])("rejects malformed configuration %j", async (body) => {
+    server.use(
+      http.get("*/api/auth/github/login-config", () => HttpResponse.json(body)),
+    );
+    await expect(githubLoginConfig()).rejects.toThrow();
+  });
+});
 
 describe("listTasks URL params", () => {
   let capturedParams: URLSearchParams | null = null;

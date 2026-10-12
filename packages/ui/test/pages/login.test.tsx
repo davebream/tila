@@ -3,9 +3,106 @@ import { LoginPage } from "@/pages/login";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
-import { renderWithProviders, screen, waitFor } from "../test-utils";
+import { act, renderWithProviders, screen, waitFor } from "../test-utils";
 
 describe("LoginPage", () => {
+  beforeEach(() => localStorage.clear());
+  test("offers GitHub only after the instance confirms availability", async () => {
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("*/api/auth/github/login-config", async () => {
+        await pending;
+        return HttpResponse.json({ ok: true, enabled: true });
+      }),
+    );
+    renderWithProviders(<LoginPage />, { authenticated: false });
+
+    expect(
+      screen.queryByRole("button", { name: "Connect with GitHub" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("or use API token")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled();
+
+    await act(async () => release());
+    expect(
+      await screen.findByRole("button", { name: "Connect with GitHub" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("or use API token")).toBeInTheDocument();
+    expect(
+      screen.getByText(/or use Connect with GitHub above/),
+    ).toBeInTheDocument();
+  });
+
+  test.each([
+    ["disabled", () => HttpResponse.json({ ok: true, enabled: false })],
+    ["unavailable endpoint", () => HttpResponse.json({}, { status: 404 })],
+    ["server error", () => HttpResponse.json({}, { status: 503 })],
+    ["network error", () => HttpResponse.error()],
+    ["missing enabled", () => HttpResponse.json({ ok: true })],
+    [
+      "non-boolean enabled",
+      () => HttpResponse.json({ ok: true, enabled: "true" }),
+    ],
+    [
+      "unsuccessful envelope",
+      () => HttpResponse.json({ ok: false, enabled: true }),
+    ],
+    ["invalid JSON", () => HttpResponse.text("invalid")],
+  ])(
+    "keeps API-token login usable when availability is %s",
+    async (_name, response) => {
+      const user = userEvent.setup();
+      const availability = vi.fn(response);
+      const exchange = vi.fn(() => HttpResponse.json({ ok: true }));
+      server.use(
+        http.get("*/api/auth/github/login-config", availability),
+        http.post("*/auth/session", exchange),
+      );
+      renderWithProviders(<LoginPage />, { authenticated: false });
+      await user.type(screen.getByLabelText("Project ID"), "test-project");
+      await user.type(screen.getByLabelText("API Token"), "tila_test_token");
+      await user.click(screen.getByRole("button", { name: "Connect" }));
+      await waitFor(() => expect(exchange).toHaveBeenCalledOnce());
+      expect(availability).toHaveBeenCalledOnce();
+      expect(
+        screen.queryByRole("button", { name: "Connect with GitHub" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("or use API token")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/when GitHub is unavailable/),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Ask your project admin for a token."),
+      ).toBeInTheDocument();
+    },
+  );
+
+  test("rechecks availability on remount without retaining a previous enabled result", async () => {
+    server.use(
+      http.get("*/api/auth/github/login-config", () =>
+        HttpResponse.json({ ok: true, enabled: true }),
+      ),
+    );
+    const first = renderWithProviders(<LoginPage />, { authenticated: false });
+    await screen.findByRole("button", { name: "Connect with GitHub" });
+    first.unmount();
+    const availability = vi.fn(() =>
+      HttpResponse.json({ ok: true, enabled: false }),
+    );
+    server.use(http.get("*/api/auth/github/login-config", availability));
+    renderWithProviders(<LoginPage />, { authenticated: false });
+    expect(
+      screen.queryByRole("button", { name: "Connect with GitHub" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(availability).toHaveBeenCalledOnce());
+    expect(
+      screen.queryByRole("button", { name: "Connect with GitHub" }),
+    ).not.toBeInTheDocument();
+  });
+
   test("renders form and submits on button click", async () => {
     const user = userEvent.setup();
 
@@ -58,6 +155,7 @@ describe("LoginPage", () => {
     const errorAlert = await screen.findByRole("alert");
     expect(errorAlert).toBeInTheDocument();
     expect(errorAlert.textContent).toMatch(/Invalid token/i);
+    expect(errorAlert.textContent).not.toMatch(/GitHub/);
   });
 
   test("AuthGate renders login page when not authenticated", async () => {
