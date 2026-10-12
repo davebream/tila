@@ -18,6 +18,11 @@ run(process.execPath, ["scripts/generate-version.mjs", "worker"], {
 run("pnpm", ["--filter", "tila-cli", "run", "build:worker-sidecar"], {
   stdio: "inherit",
 });
+// Every binary embeds the Worker bundle, UI build and D1 migrations so an
+// installed CLI can deploy without a source checkout.
+run(process.execPath, ["scripts/build-deploy-payload.mjs"], {
+  stdio: "inherit",
+});
 const cwd = resolve("packages/cli");
 mkdirSync(resolve(cwd, "dist/binaries"), { recursive: true });
 mkdirSync(resolve(cwd, "dist/metadata"), { recursive: true });
@@ -33,6 +38,8 @@ for (const target of compileTargets) {
       `--metafile=dist/metadata/${name}.json`,
       "--target",
       `bun-${target}`,
+      "--asset",
+      "deploy-payload",
       "src/index.ts",
       "--outfile",
       `dist/binaries/${name}`,

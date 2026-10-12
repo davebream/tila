@@ -14,6 +14,19 @@ test("all eight assets round-trip, have exact checksums and bundle-derived SBOMs
     await mkdir(directory, { recursive: true });
     await mkdir(join(root, "dist/metadata"), { recursive: true });
     await mkdir(join(root, "lifecycle"));
+    await mkdir(join(root, "ui/node_modules/react"), { recursive: true });
+    await writeFile(
+      join(root, "ui/package.json"),
+      JSON.stringify({
+        name: "@tila/ui",
+        version: "0.0.0",
+        dependencies: { react: "^19.0.0" },
+      }),
+    );
+    await writeFile(
+      join(root, "ui/node_modules/react/package.json"),
+      JSON.stringify({ name: "react", version: "19.3.0", license: "MIT" }),
+    );
     await mkdir(join(root, "worker"));
     await writeFile(
       join(root, "worker/bundle-meta.json"),
@@ -44,7 +57,7 @@ test("all eight assets round-trip, have exact checksums and bundle-derived SBOMs
         JSON.stringify({ inputs: { "lifecycle/index.ts": { bytes: 100 } } }),
       );
     }
-    await packageBinaries(directory, root, "1.2.3", 1234);
+    await packageBinaries(directory, root, "1.2.3", 1234, join(root, "ui"));
     const first = await readFile(join(directory, "checksums.txt"), "utf8");
     for (const line of first.trim().split("\n")) {
       const [hash, name] = line.split("  ");
@@ -68,7 +81,13 @@ test("all eight assets round-trip, have exact checksums and bundle-derived SBOMs
         (pkg) => pkg.name === "bun" && pkg.versionInfo === "1.2.3",
       ),
     );
-    await packageBinaries(directory, root, "1.2.3", 1234);
+    assert.ok(
+      sbom.packages.some(
+        (pkg) => pkg.name === "react" && pkg.versionInfo === "19.3.0",
+      ),
+      "SBOM lists the embedded UI's runtime dependencies",
+    );
+    await packageBinaries(directory, root, "1.2.3", 1234, join(root, "ui"));
     assert.equal(
       await readFile(join(directory, "checksums.txt"), "utf8"),
       first,
