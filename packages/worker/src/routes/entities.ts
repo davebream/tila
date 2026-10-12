@@ -6,6 +6,7 @@ import {
   CreateEntityRequestSchema,
   DeleteEntityRelationshipRequestSchema,
   ListEntityRelationshipsRequestSchema,
+  TaskListQuerySchema,
   type TypeCount,
   UpdateEntityRequestSchema,
   parseTagFilter,
@@ -202,7 +203,15 @@ entities.get("/:id", async (c) => {
 // GET /projects/:projectId/entities -> DO GET /entity/list
 entities.get("/", async (c) => {
   const stub = c.get("doStub");
+  const paging = TaskListQuerySchema.safeParse({
+    cursor: c.req.query("cursor"),
+    offset: c.req.query("offset"),
+    sort: c.req.query("sort"),
+    order: c.req.query("order"),
+  });
+  if (!paging.success) return zodValidationError(c, paging.error);
   const query: Record<string, string> = {};
+  if (paging.data.cursor) query.cursor = paging.data.cursor;
   const type = c.req.query("type");
   if (type) query.type = type;
   const archived = c.req.query("archived");

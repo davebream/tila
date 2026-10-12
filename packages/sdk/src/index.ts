@@ -58,7 +58,7 @@ export { createTemplateMethods } from "./templates";
 export { createIndexMethods } from "./indexes";
 export type { IndexCreateOpts } from "./indexes";
 export { createSummaryMethods } from "./summary";
-export { createSearchMethods } from "./search";
+export { createSearchMethods, type SearchOptions } from "./search";
 
 // Namespace coexistence convention
 export { createNamespace } from "./namespace";

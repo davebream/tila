@@ -1,14 +1,27 @@
 import { applyLegacyDefaults } from "@tila/core";
-import type { NamespaceRestrictions, TypeCount } from "@tila/schemas";
+import type {
+  NamespaceRestrictions,
+  TypeCount,
+  WorkPresentation,
+} from "@tila/schemas";
 import type {
   ArtifactSearchResult,
   CompactEntity,
   Entity,
   RecordSearchResult,
 } from "@tila/schemas";
-import { TagsSchema } from "@tila/schemas";
+import { TagsSchema, presentedTitle } from "@tila/schemas";
 import type { TilaSchemaToml } from "@tila/schemas";
-import { type SQL, and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import {
+  type SQL,
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  sql,
+} from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
   SearchQueryError,
@@ -30,6 +43,12 @@ import {
 } from "./fence-ops";
 import { checkPendingGates } from "./gate-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
+import {
+  InvalidCursorError,
+  decodeCursor,
+  encodeCursor,
+  fingerprint,
+} from "./list-cursor";
 import { assertUnmanagedArchive, checkManagedWrite } from "./managed-work";
 import { searchRecords } from "./record-ops";
 import * as schema from "./schema";
@@ -140,7 +159,7 @@ export function create(
     input.tags !== undefined ? (TagsSchema.parse(input.tags) as string[]) : [];
 
   return db.transaction((tx) => {
-    assertCurrentEntityWrite(tx, input.type, input.data);
+    const current = assertCurrentEntityWrite(tx, input.type, input.data);
     assertArtifactReviewPolicy(tx, input.id, input.type, input.data.status);
     try {
       tx.insert(schema.entities)
@@ -181,8 +200,11 @@ export function create(
       sourceVersion: origin.sourceVersion,
     });
 
-    // FTS5: index entity for full-text search (data.title, fallback data.name -- issue #412)
-    const entityName = entitySearchText(input.data as Record<string, unknown>);
+    // FTS5: index entity for full-text search (presentation title, else data.title, then data.name -- #412, #300)
+    const entityName = entitySearchText(
+      input.data as Record<string, unknown>,
+      current?.work_units[input.type]?.presentation,
+    );
     tx.run(
       sql`INSERT OR REPLACE INTO entity_search_docs(
         entity_id, entity_type, name, indexed_at
@@ -234,6 +256,57 @@ export function get(
   return enrichEntity(entity, cache, enrichOpts);
 }
 
+export type TaskListSort =
+  | "created_at"
+  | "updated_at"
+  | "type"
+  | "title"
+  | "status"
+  | "id";
+
+/** SQL expression each sort key orders by. `id` is always the tie-break. */
+function sortExpression(sort: TaskListSort): SQL | null {
+  switch (sort) {
+    case "created_at":
+      return sql`${schema.entities.created_at}`;
+    case "updated_at":
+      return sql`${schema.entities.updated_at}`;
+    case "type":
+      return sql`${schema.entities.type}`;
+    case "title":
+      return sql`json_extract(${schema.entities.data}, '$.title')`;
+    case "status":
+      return sql`json_extract(${schema.entities.data}, '$.status')`;
+    case "id":
+      return null;
+  }
+}
+
+/**
+ * Rows strictly after (`dir` asc) or before (`dir` desc) the cursor position
+ * in `(expr, id)` order. SQLite sorts NULL first ascending and last
+ * descending, so a NULL key needs its own branch.
+ */
+function keysetCondition(
+  expr: SQL | null,
+  last: { k: unknown; id: string },
+  dir: "asc" | "desc",
+): SQL {
+  const id = schema.entities.id;
+  const idAfter =
+    dir === "asc" ? sql`${id} > ${last.id}` : sql`${id} < ${last.id}`;
+  if (expr === null) return idAfter;
+  if (last.k === null) {
+    return dir === "asc"
+      ? sql`((${expr} IS NULL AND ${idAfter}) OR ${expr} IS NOT NULL)`
+      : sql`(${expr} IS NULL AND ${idAfter})`;
+  }
+  const value = last.k as string | number;
+  return dir === "asc"
+    ? sql`(${expr} > ${value} OR (${expr} = ${value} AND ${idAfter}))`
+    : sql`(${expr} < ${value} OR (${expr} = ${value} AND ${idAfter}) OR ${expr} IS NULL)`;
+}
+
 export function list(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   filter?: {
@@ -241,15 +314,18 @@ export function list(
     restrictions?: NamespaceRestrictions;
     archived?: 0 | 1;
     dataFilter?: Record<string, unknown>;
-    sort?: "created_at" | "updated_at" | "type" | "title" | "status";
+    /** Defaults to `created_at`. Every order is tie-broken by `id`. */
+    sort?: TaskListSort;
     order?: "asc" | "desc";
     limit?: number;
     offset?: number;
+    /** Opaque keyset cursor from a previous page's `next_cursor`. */
+    cursor?: string;
     tag?: string;
     tagFilter?: string[];
   },
   enrichOpts?: EnrichOpts,
-): { entities: Entity[]; total: number } {
+): { entities: Entity[]; total: number; next_cursor: string | null } {
   const conditions: SQL[] = [];
   const restricted = taskRestrictionCondition(db, filter?.restrictions);
   if (restricted) conditions.push(restricted);
@@ -296,7 +372,7 @@ export function list(
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  // COUNT(*) for total -- same WHERE conditions, no ORDER/LIMIT
+  // COUNT(*) for total -- same WHERE conditions, no keyset/ORDER/LIMIT
   const countResult = db
     .select({ count: sql<number>`count(*)` })
     .from(schema.entities)
@@ -304,47 +380,70 @@ export function list(
     .get();
   const total = countResult?.count ?? 0;
 
-  // Build the main query
-  let query = db.select().from(schema.entities).where(whereClause).$dynamic();
+  const sort: TaskListSort = filter?.sort ?? "created_at";
+  const dir = filter?.order === "desc" ? "desc" : "asc";
+  const expr = sortExpression(sort);
+  const binding = fingerprint({
+    type:
+      filter?.type === undefined ? null : [filter.type].flat().slice().sort(),
+    archived: filter?.archived ?? null,
+    dataFilter: filter?.dataFilter ?? null,
+    tag: filter?.tag ?? null,
+    tagFilter: filter?.tagFilter?.map((t) => t.toLowerCase()).sort() ?? null,
+    sort,
+    order: dir,
+  });
 
-  // ORDER BY
-  if (filter?.sort) {
-    const sortColumnMap: Record<
-      string,
-      | SQL
-      | typeof schema.entities.created_at
-      | typeof schema.entities.updated_at
-      | typeof schema.entities.type
-    > = {
-      created_at: schema.entities.created_at,
-      updated_at: schema.entities.updated_at,
-      type: schema.entities.type,
-      title: sql`json_extract(${schema.entities.data}, '$.title')`,
-      status: sql`json_extract(${schema.entities.data}, '$.status')`,
-    };
-    const sortCol = sortColumnMap[filter.sort];
-    if (sortCol) {
-      const orderFn = filter.order === "desc" ? desc : asc;
-      query = query.orderBy(orderFn(sortCol as Parameters<typeof asc>[0]));
-    } else {
-      console.warn(
-        `[tila] Unknown sort field "${filter.sort}", defaulting to created_at`,
-      );
-      const orderFn = filter.order === "desc" ? desc : asc;
-      query = query.orderBy(orderFn(schema.entities.created_at));
-    }
+  const pageConditions = [...conditions];
+  if (filter?.cursor) {
+    if (filter.offset !== undefined && filter.offset > 0)
+      throw new InvalidCursorError("cursor and offset cannot be combined");
+    const position = decodeCursor(filter.cursor, binding);
+    const k = position.k;
+    if (
+      typeof position.id !== "string" ||
+      !(k === null || typeof k === "string" || typeof k === "number")
+    )
+      throw new InvalidCursorError();
+    pageConditions.push(keysetCondition(expr, { k, id: position.id }, dir));
   }
 
-  // LIMIT / OFFSET
+  const orderFn = dir === "desc" ? desc : asc;
+  let query = db
+    .select({
+      ...getTableColumns(schema.entities),
+      sort_key: expr ?? sql`NULL`,
+    })
+    .from(schema.entities)
+    .where(pageConditions.length > 0 ? and(...pageConditions) : undefined)
+    .orderBy(
+      ...(expr ? [orderFn(expr as unknown as Parameters<typeof asc>[0])] : []),
+      orderFn(schema.entities.id),
+    )
+    .$dynamic();
+
+  // LIMIT+1 probes for a next page without a second query.
   if (filter?.limit !== undefined) {
-    query = query.limit(filter.limit);
+    query = query.limit(filter.limit + 1);
   }
-  if (filter?.offset !== undefined && filter.offset > 0) {
+  if (!filter?.cursor && filter?.offset !== undefined && filter.offset > 0) {
     query = query.offset(filter.offset);
   }
 
-  const rows = query.all();
-  const entities = rows.map(rowToEntity);
+  const fetched = query.all();
+  const hasNext = filter?.limit !== undefined && fetched.length > filter.limit;
+  const rows = hasNext ? fetched.slice(0, filter?.limit) : fetched;
+  const last = rows.at(-1);
+  const next_cursor =
+    hasNext && last
+      ? encodeCursor(binding, {
+          k: expr ? (last.sort_key ?? null) : null,
+          id: last.id,
+        })
+      : null;
+  const entities = rows.map(({ sort_key: _sortKey, ...row }) =>
+    rowToEntity(row),
+  );
 
   // Batch tag enrichment: single IN query over all returned entities (no N+1)
   if (entities.length > 0) {
@@ -368,11 +467,12 @@ export function list(
     }
   }
 
-  if (!enrichOpts) return { entities, total };
+  if (!enrichOpts) return { entities, total, next_cursor };
   const cache = new Map<number, TilaSchemaToml | null>();
   return {
     entities: entities.map((e) => enrichEntity(e, cache, enrichOpts)),
     total,
+    next_cursor,
   };
 }
 
@@ -415,6 +515,7 @@ export function compactEntity(
     participant_id: string;
   }>,
   stats: CompactEntityStats,
+  presentation?: WorkPresentation,
 ): CompactEntity {
   const data = entity.data as Record<string, unknown>;
   const resource = `${entity.type}:${entity.id}`;
@@ -425,7 +526,7 @@ export function compactEntity(
   return {
     id: entity.id,
     type: entity.type,
-    title: (data.title as string | undefined) ?? null,
+    title: presentedTitle(data, presentation),
     status: (data.status as string | undefined) ?? null,
     claimed_by: claim?.participant_id ?? null,
     blockers,
@@ -565,7 +666,7 @@ export function updateInTransaction(
   // Merge data: spread existing + new fields (passthrough preservation)
   const existingData = JSON.parse(existing.data) as Record<string, unknown>;
   const mergedData = { ...existingData, ...data };
-  assertCurrentEntityWrite(tx, existing.type, mergedData);
+  const current = assertCurrentEntityWrite(tx, existing.type, mergedData);
   if (mergedData.status !== existingData.status)
     assertArtifactReviewPolicy(tx, id, existing.type, mergedData.status);
 
@@ -597,8 +698,11 @@ export function updateInTransaction(
     sourceVersion: origin.sourceVersion,
   });
 
-  // FTS5: re-index entity for full-text search (data.title, fallback data.name -- issue #412)
-  const updatedName = entitySearchText(mergedData as Record<string, unknown>);
+  // FTS5: re-index entity for full-text search (presentation title, else data.title, then data.name -- #412, #300)
+  const updatedName = entitySearchText(
+    mergedData as Record<string, unknown>,
+    current?.work_units[existing.type]?.presentation,
+  );
   tx.run(
     sql`INSERT OR REPLACE INTO entity_search_docs(
     entity_id, entity_type, name, indexed_at
@@ -735,14 +839,20 @@ export function searchEntities(
   query: {
     q: string;
     entity_type?: string;
+    /** Restrict matches to these task types. */
+    entity_types?: string[];
     limit?: number;
+    /** Rows to skip in `(bm25, entity_id)` order. */
+    offset?: number;
     tagFilter?: string[];
+    /** Caller's namespace restrictions; forbidden tasks never match. */
+    restrictions?: NamespaceRestrictions;
     /** Internal: skip validation when the caller (searchAll) has already validated. */
     _skipValidation?: boolean;
   },
 ): EntitySearchResult[] {
   if (!query._skipValidation) validateFtsQuery(query.q);
-  const limit = Math.min(query.limit ?? 20, 100);
+  const limit = Math.min(query.limit ?? 20, 101);
 
   const tagConditions = query.tagFilter?.length
     ? tagExistsConditions(
@@ -751,6 +861,14 @@ export function searchEntities(
         query.tagFilter.map((t) => t.toLowerCase()),
       )
     : [];
+  // The join is unaliased so the shared restriction condition, which renders
+  // against "entities", applies here exactly as it does to task lists.
+  const restricted = taskRestrictionCondition(db, query.restrictions);
+  const types = query.entity_types?.length
+    ? query.entity_types
+    : query.entity_type
+      ? [query.entity_type]
+      : undefined;
 
   try {
     const rows = db.all<{
@@ -765,16 +883,25 @@ export function searchEntities(
         d.entity_type,
         d.name,
         d.indexed_at,
-        snippet(entity_search_docs_fts, 0, '<b>', '</b>', '...', 10) AS snippet
+        snippet(entity_search_docs_fts, -1, '<b>', '</b>', '...', 10) AS snippet
       FROM entity_search_docs_fts fts
       JOIN entity_search_docs d ON d.rowid = fts.rowid
-      JOIN entities e ON e.id = d.entity_id
+      JOIN entities ON entities.id = d.entity_id
       WHERE entity_search_docs_fts MATCH ${query.q}
-        AND e.archived = 0
-        ${query.entity_type ? sql`AND d.entity_type = ${query.entity_type}` : sql``}
+        AND entities.archived = 0
+        ${
+          types
+            ? sql`AND d.entity_type IN (${sql.join(
+                types.map((t) => sql`${t}`),
+                sql.raw(", "),
+              )})`
+            : sql``
+        }
+        ${restricted ? sql`AND ${restricted}` : sql``}
         ${tagConditions.length ? sql`AND ${sql.join(tagConditions, sql.raw(" AND "))}` : sql``}
-      ORDER BY bm25(entity_search_docs_fts)
+      ORDER BY bm25(entity_search_docs_fts, 10.0, 1.0), d.entity_id
       LIMIT ${limit}
+      ${query.offset ? sql`OFFSET ${query.offset}` : sql``}
     `);
 
     return rows.map((r) => ({

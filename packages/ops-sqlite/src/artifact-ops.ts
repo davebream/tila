@@ -731,13 +731,15 @@ export function searchArtifacts(
     resource?: string;
     source_only?: boolean;
     limit?: number;
+    /** Rows to skip in `(bm25, artifact_key)` order. */
+    offset?: number;
     tagFilter?: string[];
     /** Internal: skip validation when the caller (searchAll) has already validated. */
     _skipValidation?: boolean;
   },
 ): ArtifactSearchResult[] {
   if (!query._skipValidation) validateFtsQuery(query.q);
-  const limit = Math.min(query.limit ?? 20, 100);
+  const limit = Math.min(query.limit ?? 20, 101);
 
   // Build dynamic WHERE conditions using Drizzle sql tagged templates
   const conditions: SQL[] = [
@@ -801,8 +803,9 @@ export function searchArtifacts(
       JOIN artifact_search_docs d ON d.rowid = fts.rowid
       INNER JOIN artifact_pointers ap ON ap.r2_key = d.artifact_key
       WHERE ${whereClause}
-      ORDER BY bm25(artifact_search_docs_fts)
+      ORDER BY bm25(artifact_search_docs_fts), d.artifact_key
       LIMIT ${limit}
+      ${query.offset ? sql`OFFSET ${query.offset}` : sql``}
     `);
 
     return enrichArtifacts(db, rows);
