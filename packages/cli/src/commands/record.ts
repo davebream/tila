@@ -358,7 +358,10 @@ export default defineCommand({
           ],
         );
 
-        if (page.next_cursor !== null) {
+        // Servers before #300 sent the "truncated" placeholder instead of a cursor.
+        if (page.next_cursor === "truncated") {
+          outputText(`(results truncated at ${args.limit ?? page.total})`);
+        } else if (page.next_cursor !== null) {
           outputText(
             `(showing ${page.items.length} of ${page.total}; next page: --cursor ${page.next_cursor})`,
           );
@@ -640,7 +643,10 @@ export default defineCommand({
               cursor,
             });
             items.push(...page.items);
-            cursor = page.next_cursor ?? undefined;
+            cursor =
+              page.next_cursor && page.next_cursor !== "truncated"
+                ? page.next_cursor
+                : undefined;
           } while (cursor);
 
           for (const item of items) {
