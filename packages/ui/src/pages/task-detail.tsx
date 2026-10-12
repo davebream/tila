@@ -201,6 +201,12 @@ export function TaskDetailPage() {
       }
     >
       <div className="space-y-8 p-6">
+        <Link
+          className={dataLinkClass}
+          to={`/p/${projectId}/queue?task_id=${encodeURIComponent(id ?? "")}`}
+        >
+          View or enroll in queue
+        </Link>
         <TaskSection title="Fields">
           <QuerySection
             state={fieldsState}

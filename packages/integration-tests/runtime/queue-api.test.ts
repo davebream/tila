@@ -72,6 +72,49 @@ const authority = (attempt: { revision: number; fence: number }) => ({
   fence: attempt.fence,
 });
 
+it("allows participant-less inspection without granting execution authority", async () => {
+  const { project, token, http, queue } = await fixture();
+  await queue.configure({
+    ...revision({ revision: 0 }),
+    enabled: true,
+    paused: false,
+    execution_limit: 1,
+  });
+  await http("/tasks", {
+    id: "read-only",
+    type: "issue",
+    data: { phase: "todo" },
+  });
+  await queue.enroll({
+    idempotency_key: "enroll-reader",
+    task_id: "read-only",
+  });
+  const grantResponse = await http(
+    "/queue/claim",
+    { idempotency_key: "claim-reader" },
+    "queue-read-only",
+  );
+  const grant = (await grantResponse.json()) as {
+    result: { attempt: { id: string } };
+  };
+  for (const path of [
+    "/queue",
+    "/queue/policy",
+    "/attempts",
+    `/attempts/${grant.result.attempt.id}`,
+  ]) {
+    const response = await SELF.fetch(
+      `https://worker/projects/${project}${path}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    if (path.endsWith(grant.result.attempt.id))
+      expect(await response.json()).toMatchObject({
+        result: { grant_valid: false },
+      });
+  }
+});
+
 it("executes the complete queue lifecycle through authenticated HTTP and the SDK, with safe replay", async () => {
   const { http, queue, attempts } = await fixture();
   expect((await queue.policy()).enabled).toBe(false);

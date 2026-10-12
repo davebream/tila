@@ -17,13 +17,20 @@ import type { Env, HonoVariables } from "../types";
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 function envelope(c: Context<AppEnv>, command: unknown, id?: string) {
   return {
-    ...identityPayload(c),
+    ...(c.req.method === "GET" && !c.get("participantId")
+      ? {
+          principal_id: c.get("principalId"),
+          participant_id: "queue-read-only",
+          environment: {},
+          actor_token_id: null,
+        }
+      : identityPayload(c)),
     authorized_role: c.get("effectiveRole") ?? "viewer",
     command,
     id,
   };
 }
-function forward(
+async function forward(
   c: Context<AppEnv>,
   family: "queue" | "attempts",
   action: string,
@@ -31,7 +38,7 @@ function forward(
   id?: string,
 ) {
   c.header("Cache-Control", "private, no-store");
-  return forwardToDO(
+  const response = await forwardToDO(
     c.get("doStub"),
     `/${family}/${action}`,
     "POST",
@@ -39,6 +46,21 @@ function forward(
     undefined,
     analyticsCtxFrom(c),
   );
+  // Inspection without a worker identity never constitutes execution authority,
+  // even if a worker happens to use the internal read-only participant label.
+  if (
+    response.ok &&
+    family === "attempts" &&
+    action === "get" &&
+    !c.get("participantId")
+  ) {
+    const body = (await response.json()) as {
+      result: { grant_valid: boolean };
+    };
+    body.result.grant_valid = false;
+    return new Response(JSON.stringify(body), response);
+  }
+  return response;
 }
 function query(c: Context<AppEnv>) {
   const result: Record<string, unknown> = { ...c.req.query() };

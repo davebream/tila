@@ -352,6 +352,7 @@ export function Layout() {
           <nav className="flex items-center gap-1 overflow-x-auto">
             {[
               "Tasks",
+              "Queue",
               "Records",
               "Journal",
               "Presence",
