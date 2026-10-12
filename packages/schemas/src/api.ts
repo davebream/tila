@@ -9,6 +9,11 @@ import {
   CredentialPolicyReadSchema,
   CredentialPolicySchema,
 } from "./capability";
+import {
+  CatalogIncompleteSchema,
+  RecordCatalogEntrySchema,
+  ResultScopeSchema,
+} from "./catalog";
 import { ClaimModeSchema } from "./claim";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
@@ -1461,12 +1466,7 @@ export type RecordHistoryResponse = z.infer<typeof RecordHistoryResponseSchema>;
  *
  * Never sent to credentials with namespace restrictions.
  */
-export const RecordTypesIncompleteSchema = z.object({
-  /** `unavailable`: the schema could not be fetched. `invalid`: it was fetched but does not parse or validate. */
-  declared_types: z.enum(["unavailable", "invalid"]).optional(),
-  /** The in-use types could not be listed. */
-  in_use_types: z.literal("unavailable").optional(),
-});
+export const RecordTypesIncompleteSchema = CatalogIncompleteSchema;
 
 export type RecordTypesIncomplete = z.infer<typeof RecordTypesIncompleteSchema>;
 
@@ -1476,6 +1476,9 @@ export const RecordTypesResponseSchema = z.object({
   declared_types: z.array(z.string()).optional(),
   in_use_types: z.array(z.string()).optional(),
   incomplete: RecordTypesIncompleteSchema.optional(),
+  /** Per-type catalog entries with declaration status and visible counts. */
+  entries: z.array(RecordCatalogEntrySchema).optional(),
+  scope: ResultScopeSchema.optional(),
 });
 
 export type RecordTypesResponse = z.infer<typeof RecordTypesResponseSchema>;

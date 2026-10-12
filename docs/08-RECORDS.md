@@ -1134,6 +1134,30 @@ reported. Clients that ignore `incomplete` keep working and see the same lists
 as before. Credentials with namespace restrictions never receive `incomplete`;
 they cannot read the schema, so its fetch and parse state is not reported to them.
 
+The response also carries `entries` and `scope` (#300). `entries` has one
+catalog entry per permitted type, using the shape in architecture §14.7:
+
+```json
+{
+  "type": "deploy-config",
+  "declaration": "declared",
+  "count": 3,
+  "archived_count": 1,
+  "definition": {
+    "fields": [{ "name": "service", "type": "string", "required": true }],
+    "format": "json",
+    "history": "revision",
+    "presentation": { "title": "service", "kind": "configuration" }
+  }
+}
+```
+
+A declared type with no records has `count: 0`. A type with stored records that
+the schema does not declare has `declaration: "undeclared"` and no `definition`.
+`definition.presentation.kind` is the only source for telling configuration
+records from content records; clients must not infer it from the type name.
+`scope.restricted` is true when namespace restrictions narrowed the list.
+
 ### Create Request
 
 ```http

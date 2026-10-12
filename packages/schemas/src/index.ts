@@ -103,7 +103,12 @@ export {
   type TilaProjectConfig,
   TilaSchemaTomlSchema,
   type TilaSchemaToml,
+  FieldDeclarationSchema,
   type FieldDeclaration,
+  WorkPresentationSchema,
+  type WorkPresentation,
+  RecordPresentationSchema,
+  type RecordPresentation,
   type WorkUnit,
   type ReferenceSlot,
   type ArtifactKind,
@@ -523,3 +528,5 @@ export {
 } from "./readiness";
 
 export * from "./queue";
+export * from "./catalog";
+export { presentedTitle, presentedText } from "./presentation";

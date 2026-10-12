@@ -652,6 +652,52 @@ describe("diffSchemas", () => {
       expect(result.autoApplicable).toBe(false);
     });
 
+    it("treats presentation-only changes as auto-applicable", () => {
+      const service = recordBaseSchema.records?.service;
+      if (!service) throw new Error("fixture must declare service");
+      const next: TilaSchemaToml = {
+        ...recordBaseSchema,
+        schema_version: 2,
+        records: {
+          service: {
+            ...service,
+            presentation: { title: "name", kind: "configuration" },
+          },
+        },
+      };
+      const result = diffSchemas(recordBaseSchema, next);
+      expect(result.changes).toContainEqual({
+        kind: "definition-changed",
+        path: "records.service.presentation",
+        destructive: false,
+      });
+      expect(
+        result.changes.some((c) => "path" in c && c.path === "records.service"),
+      ).toBe(false);
+      expect(result.autoApplicable).toBe(true);
+    });
+
+    it("treats work unit presentation changes as auto-applicable", () => {
+      const next: TilaSchemaToml = {
+        ...testSchema,
+        work_units: {
+          task: {
+            ...testSchema.work_units.task,
+            presentation: { title: "title", summary: "owner" },
+          },
+        },
+      };
+      const result = diffSchemas(testSchema, next);
+      expect(result.changes).toEqual([
+        {
+          kind: "definition-changed",
+          path: "work_units.task.presentation",
+          destructive: false,
+        },
+      ]);
+      expect(result.autoApplicable).toBe(true);
+    });
+
     it("handles schema with no records diffed against schema with records", () => {
       const prev: TilaSchemaToml = {
         schema_version: 1,

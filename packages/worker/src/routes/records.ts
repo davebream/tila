@@ -1,15 +1,15 @@
+import { catalogOps } from "@tila/ops-sqlite";
 import {
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
   RecordPatchRequestSchema,
   RecordPutRequestSchema,
   RecordSetRequestSchema,
-  type RecordTypesIncomplete,
   RecordUnarchiveRequestSchema,
   RecordValueSchema,
+  type TypeCount,
   canonicalJson,
   canonicalJsonSha256,
-  hasNamespaceRestrictions,
   parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
@@ -17,7 +17,10 @@ import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
-import { getValidatedSchema } from "../lib/schema-validation";
+import {
+  getCatalogSchemaState,
+  getValidatedSchema,
+} from "../lib/schema-validation";
 import { zodValidationError } from "../lib/validation";
 import { scopedPolicy } from "../middleware/capability";
 import { requirePermission } from "../middleware/permission";
@@ -142,16 +145,22 @@ async function writeCanonicalSnapshot(
 // configured" is complete, not incomplete. Credentials with namespace
 // restrictions never get `incomplete`: they cannot read the schema, so its
 // fetch/parse state is not theirs to learn.
+//
+// `entries` (#300) carries one catalog entry per permitted type: declared or
+// not, its visible counts, and its definition. The legacy arrays are derived
+// from the same permitted set so they never disagree with `entries`.
 records.get("/_types", async (c) => {
   const stub = c.get("doStub");
-  const incomplete: RecordTypesIncomplete = {};
+  const policy = scopedPolicy(c);
 
-  // 1. Fetch in-use types from DO
-  let inUseTypes: string[] = [];
+  // 1. In-use types and visible counts from the DO (restrictions applied there).
+  let inUseTypes: string[] | null = null;
+  let counts: TypeCount[] | null = null;
   try {
     const { response: inUseRes, json: inUseBody } = await forwardTypedDO<{
       ok: boolean;
       types: string[];
+      counts?: TypeCount[];
     }>(
       stub,
       DO_PATHS.recordTypesInUse,
@@ -162,51 +171,43 @@ records.get("/_types", async (c) => {
     );
     if (inUseRes.ok && inUseBody.ok && Array.isArray(inUseBody.types)) {
       inUseTypes = inUseBody.types;
-    } else {
-      incomplete.in_use_types = "unavailable";
+      // Worker and DO deploy together, so counts are always present on a
+      // healthy response; a body without them is reported as unavailable.
+      if (Array.isArray(inUseBody.counts)) counts = inUseBody.counts;
     }
   } catch {
-    incomplete.in_use_types = "unavailable";
+    inUseTypes = null;
   }
 
-  // 2. Fetch declared types from schema TOML (via per-isolate cache — no extra DO round-trip)
-  let declaredTypes: string[] = [];
-  const schemaResult = await getValidatedSchema(stub, c.get("projectId"));
-  if (schemaResult.ok) {
-    declaredTypes = Object.keys(schemaResult.schema.records ?? {}).sort();
-  } else if (schemaResult.reason === "fetch-error") {
-    incomplete.declared_types = "unavailable";
-  } else if (schemaResult.reason !== "no-schema") {
-    incomplete.declared_types = "invalid";
-  }
+  // 2. Declared types from the schema (per-isolate cache, no extra DO round-trip).
+  const schemaState = await getCatalogSchemaState(stub, c.get("projectId"));
+  const restrictions = policy?.restrictions;
+  const catalog = catalogOps.buildRecordCatalog({
+    schema: schemaState,
+    counts,
+    restrictions,
+  });
 
-  const policy = scopedPolicy(c);
-  const rules = policy?.restrictions?.records;
-  if (rules !== undefined) {
-    const allowed = new Set(
-      rules
-        .filter(
-          (rule) =>
-            rule.key_prefixes === undefined || rule.key_prefixes.length > 0,
-        )
-        .map((rule) => rule.type),
-    );
-    declaredTypes = declaredTypes.filter((type) => allowed.has(type));
-    inUseTypes = inUseTypes.filter((type) => allowed.has(type));
-  }
-  // 3. Merge, deduplicate, sort
-  const types = [...new Set([...declaredTypes, ...inUseTypes])].sort();
-
-  const reportIncomplete =
-    Object.keys(incomplete).length > 0 &&
-    !(policy !== undefined && hasNamespaceRestrictions(policy));
+  // 3. Legacy arrays: the same permitted types, without counts.
+  const permitted = (type: string) =>
+    catalogOps.permitsRecordType(restrictions, type);
+  const declaredTypes =
+    schemaState.state === "ok"
+      ? Object.keys(schemaState.schema.records ?? {})
+          .filter(permitted)
+          .sort()
+      : [];
+  const visibleInUse = (inUseTypes ?? []).filter(permitted);
+  const types = [...new Set([...declaredTypes, ...visibleInUse])].sort();
 
   return c.json({
     ok: true,
     types,
     declared_types: declaredTypes,
-    in_use_types: inUseTypes,
-    ...(reportIncomplete ? { incomplete } : {}),
+    in_use_types: visibleInUse,
+    ...(catalog.incomplete ? { incomplete: catalog.incomplete } : {}),
+    entries: catalog.types,
+    scope: catalog.scope,
   });
 });
 

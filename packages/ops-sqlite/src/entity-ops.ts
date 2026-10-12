@@ -1,5 +1,5 @@
 import { applyLegacyDefaults } from "@tila/core";
-import type { NamespaceRestrictions } from "@tila/schemas";
+import type { NamespaceRestrictions, TypeCount } from "@tila/schemas";
 import type {
   ArtifactSearchResult,
   CompactEntity,
@@ -374,6 +374,32 @@ export function list(
     entities: entities.map((e) => enrichEntity(e, cache, enrichOpts)),
     total,
   };
+}
+
+/**
+ * Count stored tasks per type, split by archived state. Rows the caller may
+ * not read (including children of forbidden parents) are not counted.
+ */
+export function countByType(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  restrictions?: NamespaceRestrictions,
+): TypeCount[] {
+  return db
+    .select({
+      type: schema.entities.type,
+      count: sql<number>`coalesce(sum(case when ${schema.entities.archived} = 0 then 1 else 0 end), 0)`,
+      archived_count: sql<number>`coalesce(sum(case when ${schema.entities.archived} = 0 then 0 else 1 end), 0)`,
+    })
+    .from(schema.entities)
+    .where(taskRestrictionCondition(db, restrictions))
+    .groupBy(schema.entities.type)
+    .orderBy(asc(schema.entities.type))
+    .all()
+    .map((row) => ({
+      type: row.type,
+      count: Number(row.count),
+      archived_count: Number(row.archived_count),
+    }));
 }
 
 /**

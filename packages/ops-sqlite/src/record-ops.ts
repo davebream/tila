@@ -6,11 +6,12 @@ import {
   type RecordListItem,
   type RecordRow,
   type RecordSearchResult,
+  type TypeCount,
   canonicalJson,
   canonicalJsonSha256,
   formatRecordResource,
 } from "@tila/schemas";
-import { type SQL, and, desc, eq, or, sql } from "drizzle-orm";
+import { type SQL, and, asc, desc, eq, or, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { SearchQueryError, validateFtsQuery } from "./artifact-ops";
 import { recordRestrictionCondition } from "./credential-policy";
@@ -1557,6 +1558,32 @@ export function listRecordTypesInUse(
     )
     .all();
   return rows.map((r) => r.type).sort();
+}
+
+/**
+ * Count stored records per type, split by archived state, within the caller's
+ * restrictions.
+ */
+export function countRecordTypes(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  restrictions?: NamespaceRestrictions,
+): TypeCount[] {
+  return db
+    .select({
+      type: schema.records.type,
+      count: sql<number>`coalesce(sum(case when ${schema.records.archived} = 0 then 1 else 0 end), 0)`,
+      archived_count: sql<number>`coalesce(sum(case when ${schema.records.archived} = 0 then 0 else 1 end), 0)`,
+    })
+    .from(schema.records)
+    .where(recordRestrictionCondition(restrictions))
+    .groupBy(schema.records.type)
+    .orderBy(asc(schema.records.type))
+    .all()
+    .map((row) => ({
+      type: row.type,
+      count: Number(row.count),
+      archived_count: Number(row.archived_count),
+    }));
 }
 
 // ---------------------------------------------------------------------------

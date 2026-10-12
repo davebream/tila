@@ -65,7 +65,7 @@ function arrayToRecord(val: unknown): unknown {
   return Object.fromEntries(entries);
 }
 
-const FieldDeclarationSchema = z.object({
+export const FieldDeclarationSchema = z.object({
   type: z.string(),
   required: z.boolean().default(false),
   default: z.unknown().optional(),
@@ -75,6 +75,48 @@ const FieldDeclarationSchema = z.object({
 });
 
 export type FieldDeclaration = z.infer<typeof FieldDeclarationSchema>;
+
+// Presentation metadata is display-only: it names which declared fields a
+// client should show as the title, summary, or description. It never changes
+// validation, storage, or coordination semantics.
+export const WorkPresentationSchema = z.object({
+  title: z.string().min(1).optional(),
+  summary: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+});
+export type WorkPresentation = z.infer<typeof WorkPresentationSchema>;
+
+export const RecordPresentationSchema = z.object({
+  title: z.string().min(1).optional(),
+  summary: z.string().min(1).optional(),
+  // Business classification declared by the definition. Unset means the
+  // definition makes no claim; clients must not infer it from the type name.
+  kind: z.enum(["configuration", "content"]).optional(),
+});
+export type RecordPresentation = z.infer<typeof RecordPresentationSchema>;
+
+const PRESENTABLE_FIELD_TYPES = new Set(["string", "text", "enum"]);
+
+function checkPresentationFields(
+  presentation: Record<string, unknown> | undefined,
+  slots: readonly string[],
+  fields: Record<string, FieldDeclaration>,
+  ctx: z.RefinementCtx,
+): void {
+  if (!presentation) return;
+  for (const slot of slots) {
+    const name = presentation[slot];
+    if (typeof name !== "string") continue;
+    const field = fields[name];
+    if (!field || !PRESENTABLE_FIELD_TYPES.has(field.type)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["presentation", slot],
+        message: `presentation.${slot} must reference a declared string, text, or enum field`,
+      });
+    }
+  }
+}
 
 const ReferenceSlotSchema = z.object({
   require_trusted_for_statuses: z.array(z.string().min(1)).optional(),
@@ -111,8 +153,15 @@ const WorkUnitSchema = z
     parents: z.array(z.string()).default([]),
     required_parent: z.boolean().default(false),
     references: z.array(ReferenceSlotSchema).optional(),
+    presentation: WorkPresentationSchema.optional(),
   })
   .superRefine((unit, ctx) => {
+    checkPresentationFields(
+      unit.presentation,
+      ["title", "summary", "description"],
+      unit.fields,
+      ctx,
+    );
     const lifecycle = unit.lifecycle;
     if (!lifecycle) return;
     const issue = (message: string) =>
@@ -184,15 +233,29 @@ const RecordDefinitionFieldsSchema = z
   .preprocess(arrayToRecord, z.record(z.string(), FieldDeclarationSchema))
   .default({});
 
-export const RecordDefinitionSchema = z.object({
-  format: z.enum(["json", "yaml"]).default("json"),
-  history: z.enum(["revision", "snapshot"]).default("revision"),
-  key_description: z.string().optional(),
-  writers: z.array(z.enum(["human", "agent"])).optional(),
-  mcp_resource: z.boolean().default(false),
-  schema_ref: z.string().optional(),
-  fields: RecordDefinitionFieldsSchema,
-});
+export const RecordDefinitionSchema = z
+  .object({
+    format: z.enum(["json", "yaml"]).default("json"),
+    history: z.enum(["revision", "snapshot"]).default("revision"),
+    key_description: z.string().optional(),
+    writers: z.array(z.enum(["human", "agent"])).optional(),
+    mcp_resource: z.boolean().default(false),
+    schema_ref: z.string().optional(),
+    fields: RecordDefinitionFieldsSchema,
+    presentation: RecordPresentationSchema.optional(),
+  })
+  .superRefine((definition, ctx) => {
+    // A definition validated by an external schema_ref has no local field
+    // list to check presentation references against.
+    if (definition.schema_ref && Object.keys(definition.fields).length === 0)
+      return;
+    checkPresentationFields(
+      definition.presentation,
+      ["title", "summary"],
+      definition.fields,
+      ctx,
+    );
+  });
 
 export type RecordDefinition = z.infer<typeof RecordDefinitionSchema>;
 

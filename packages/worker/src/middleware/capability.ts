@@ -107,7 +107,7 @@ export function routeCapability(
     ["POST", /^\/agents\/[^/]+\/(?:bind|release)$/, "agent-bindings:attach"],
     [
       "GET",
-      /^\/tasks(?:\/ready|\/relationships|\/[^/]+(?:\/artifact-refs)?)?$/,
+      /^\/tasks(?:\/ready|\/relationships|\/~\/types|\/[^/]+(?:\/artifact-refs)?)?$/,
       "tasks:read",
     ],
     [

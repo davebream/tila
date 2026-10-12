@@ -45,7 +45,12 @@ function json(body: unknown, status = 200): Response {
 const schemaOk = (definition = VALID_TOML) =>
   json({ ok: true, schema: { definition }, version: 1 });
 const schemaAbsent = () => json({ ok: true, schema: null, version: null });
-const inUseOk = (types: string[]) => json({ ok: true, types });
+const inUseOk = (types: string[]) =>
+  json({
+    ok: true,
+    types,
+    counts: types.map((type) => ({ type, count: 1, archived_count: 0 })),
+  });
 const doError = () =>
   json(
     {
@@ -121,7 +126,7 @@ beforeEach(() => {
 });
 
 describe("GET /records/_types", () => {
-  it("returns the exact legacy shape, with no `incomplete`, when nothing failed", async () => {
+  it("returns the legacy arrays plus catalog entries, with no `incomplete`, when nothing failed", async () => {
     const app = createApp(
       makeStub({
         schema: () => schemaOk(),
@@ -138,6 +143,29 @@ describe("GET /records/_types", () => {
         types: ["deploy-config", "feature-flags", "runtime-flags"],
         declared_types: ["deploy-config", "feature-flags"],
         in_use_types: ["deploy-config", "runtime-flags"],
+        entries: [
+          {
+            type: "deploy-config",
+            declaration: "declared",
+            count: 1,
+            archived_count: 0,
+            definition: { fields: [], format: "json", history: "revision" },
+          },
+          {
+            type: "feature-flags",
+            declaration: "declared",
+            count: 0,
+            archived_count: 0,
+            definition: { fields: [], format: "json", history: "revision" },
+          },
+          {
+            type: "runtime-flags",
+            declaration: "undeclared",
+            count: 1,
+            archived_count: 0,
+          },
+        ],
+        scope: { restricted: false },
       }),
     );
   });
@@ -313,6 +341,10 @@ describe("GET /records/_types for credentials with namespace restrictions", () =
     expect(body.declared_types).toEqual(["deploy-config"]);
     expect(body.in_use_types).toEqual(["deploy-config"]);
     expect(body).not.toHaveProperty("incomplete");
+    expect(body.entries.map((e: { type: string }) => e.type)).toEqual([
+      "deploy-config",
+    ]);
+    expect(body.scope).toEqual({ restricted: true });
   });
 
   it("does not use an unrestricted scoped credential's policy to hide failures", async () => {
