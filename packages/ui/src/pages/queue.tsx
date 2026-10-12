@@ -99,6 +99,13 @@ export function QueuePage() {
           )}
         </div>
       </div>
+      {!!data.diagnostics?.expired_execution_leases && (
+        <SectionNotice>
+          {data.diagnostics.expired_execution_leases} execution leases have
+          expired. Capacity remains reserved; inspect the recorded sessions and
+          reconcile before further execution.
+        </SectionNotice>
+      )}
       <PolicyForm
         project={project}
         policy={data.policy}
@@ -150,6 +157,14 @@ export function QueuePage() {
                   {attempt && entry.state === "admitted"
                     ? attempt.state
                     : entry.state}
+                  {attempt?.accepted_at !== null &&
+                    attempt?.lease_expires_at != null &&
+                    attempt.lease_expires_at <= Date.now() &&
+                    attempt.state !== "terminal" && (
+                      <p className="text-xs text-status-amber">
+                        Authority expired — reconciliation required
+                      </p>
+                    )}
                   {block_reasons.map((reason, index) => (
                     <p
                       key={`${reason.code}:${index}`}

@@ -18,7 +18,7 @@ import {
   QueueRevisionCommandSchema,
   type WorkAttempt,
 } from "@tila/schemas";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import * as attempts from "./attempt-ops";
 import { resolveCurrentSchema } from "./constraint-ops";
 import type { RequestOrigin } from "./journal-ops";
@@ -414,10 +414,13 @@ export function claimNext(
         input,
         () => {
           const current = policy(tx);
-          const denied = (reason: keyof typeof noGrantMessages) => ({
-            reason,
-            policy_revision: current.revision,
-          });
+          const denied = (reason: keyof typeof noGrantMessages) => {
+            event(tx, "queue.grant_denied", "queue", origin, {
+              reason,
+              policy_revision: current.revision,
+            });
+            return { reason, policy_revision: current.revision };
+          };
           if (!current.enabled) return denied("disabled");
           if (current.paused) return denied("paused");
           const counts = occupancy(tx);
@@ -535,6 +538,68 @@ function group(
   if (attempt?.state === "uncertain") return "uncertain";
   return "active";
 }
+/** Project-wide operational totals in the retained journal's last 24 hours. */
+export function diagnostics(db: ProjectDatabase, now = Date.now()) {
+  const since = now - 86_400_000;
+  const rows = db
+    .select({
+      kind: schema.journal.kind,
+      detail: sql<string>`CASE WHEN ${schema.journal.kind} = 'queue.grant_denied' THEN json_extract(${schema.journal.data}, '$.reason') WHEN ${schema.journal.kind} = 'attempt.finished' THEN json_extract(${schema.journal.data}, '$.outcome.status') ELSE '' END`,
+      total: sql<number>`count(*)`,
+    })
+    .from(schema.journal)
+    .where(
+      and(
+        gte(schema.journal.t, since),
+        sql`${schema.journal.t} <= ${now}`,
+        inArray(schema.journal.kind, [
+          "queue.grant_denied",
+          "attempt.expired",
+          "attempt.uncertain",
+          "attempt.rebound",
+          "attempt.retried",
+          "attempt.finished",
+        ]),
+      ),
+    )
+    .groupBy(schema.journal.kind, sql`2`)
+    .all();
+  const count = (kind: string) =>
+    rows
+      .filter((row) => row.kind === kind)
+      .reduce((sum, row) => sum + row.total, 0);
+  const expired =
+    db
+      .select({ total: sql<number>`count(*)` })
+      .from(schema.workAttempts)
+      .where(
+        and(
+          inArray(schema.workAttempts.state, ["starting", "running"]),
+          sql`${schema.workAttempts.lease_expires_at} <= ${now}`,
+        ),
+      )
+      .get()?.total ?? 0;
+  return {
+    since,
+    until: now,
+    source: "retained_journal" as const,
+    grant_denials: Object.fromEntries(
+      rows
+        .filter((row) => row.kind === "queue.grant_denied")
+        .map((row) => [row.detail, row.total]),
+    ),
+    expired_reservations: count("attempt.expired"),
+    uncertainty_events: count("attempt.uncertain"),
+    reconciliations: count("attempt.rebound"),
+    retries: count("attempt.retried"),
+    forced_abandonments: rows
+      .filter(
+        (row) => row.kind === "attempt.finished" && row.detail === "abandoned",
+      )
+      .reduce((sum, row) => sum + row.total, 0),
+    expired_execution_leases: expired,
+  };
+}
 export function inspect(
   db: ProjectDatabase,
   raw: QueueListQuery = {},
@@ -596,6 +661,7 @@ export function inspect(
     );
     return {
       policy: policy(tx),
+      diagnostics: diagnostics(tx, now),
       counts,
       total: filtered.length,
       limit: query.limit,

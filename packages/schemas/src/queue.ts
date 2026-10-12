@@ -190,7 +190,20 @@ export const QueueCountsSchema = z.object({
   wip: z.number().int(),
   oldest_waiting_age_ms: z.number().int().nullable(),
 });
+export const QueueDiagnosticsSchema = z.object({
+  since: z.number().int(),
+  until: z.number().int(),
+  source: z.literal("retained_journal"),
+  grant_denials: z.record(z.string(), z.number().int().nonnegative()),
+  expired_reservations: z.number().int().nonnegative(),
+  uncertainty_events: z.number().int().nonnegative(),
+  reconciliations: z.number().int().nonnegative(),
+  retries: z.number().int().nonnegative(),
+  forced_abandonments: z.number().int().nonnegative(),
+  expired_execution_leases: z.number().int().nonnegative(),
+});
 export const QueueInspectionSchema = z.object({
+  diagnostics: QueueDiagnosticsSchema.optional(),
   policy: QueuePolicySchema,
   counts: QueueCountsSchema,
   entries: z.array(QueueEntryViewSchema),
