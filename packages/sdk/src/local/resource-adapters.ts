@@ -123,8 +123,8 @@ import {
 } from "../conversations";
 import { toTilaErrorCode } from "../error-codes";
 import { attemptFacade, queueFacade } from "../queue-commands";
-import { localQueueErrors } from "./queue";
 import type { SearchOptions } from "../search";
+import { localQueueErrors } from "./queue";
 
 /**
  * Thrown when a consumer calls a facade method that has no local equivalent
