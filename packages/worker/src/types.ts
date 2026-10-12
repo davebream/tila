@@ -23,6 +23,9 @@ export interface Env {
   // Optional secret: when set, bearer/session tokens are hashed with keyed
   // HMAC-SHA-256 instead of plain SHA-256 (see lib/hash-token.ts).
   HASH_PEPPER?: string;
+  // Optional secret (at least 32 characters) that signs conversation cursors.
+  // See lib/conversation-cursor-key.ts for the fallback sources.
+  CONVERSATION_CURSOR_KEY?: string;
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_CLIENT_ID?: string;
