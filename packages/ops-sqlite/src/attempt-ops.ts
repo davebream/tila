@@ -17,6 +17,7 @@ import { resolveCurrentSchema } from "./constraint-ops";
 import { acquireInTransaction } from "./coordination-ops";
 import { updateInTransaction } from "./entity-ops";
 import type { RequestOrigin } from "./journal-ops";
+import { invalidateQuestions } from "./question-state-ops";
 import {
   type ProjectDatabase,
   type ProjectTransaction,
@@ -622,6 +623,7 @@ export function finishInTransaction(
   allowRetry = true,
 ): void {
   transitionTask(tx, attempt, origin, outcome.status, now);
+  invalidateQuestions(tx, attempt.id, "attempt finished", origin, now);
   change(
     tx,
     attempt,
@@ -731,6 +733,13 @@ export function refence(
   owner: RequestOrigin,
   now: number,
 ): WorkAttempt {
+  invalidateQuestions(
+    tx,
+    attempt.id,
+    "execution authority replaced",
+    owner,
+    now,
+  );
   revoke(tx, attempt);
   const grant = acquireInTransaction(
     tx,

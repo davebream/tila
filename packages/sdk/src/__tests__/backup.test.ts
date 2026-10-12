@@ -210,10 +210,31 @@ values = ["open", "done", "cancelled"]
     fence: grant.attempt.fence,
   };
   const accepted = await resources.attempts.accept(grant.attempt.id, accept);
+  const { question } = await resources.questions.ask({
+    id: randomUUID(),
+    idempotency_key: "ask",
+    attempt_id: accepted.attempt.id,
+    expected_revision: accepted.attempt.revision,
+    fence: accepted.attempt.fence,
+    text: "Continue?",
+    responder_principal_id: "local:local",
+  });
+  const answer = {
+    question_id: question.id,
+    idempotency_key: "answer",
+    expected_revision: question.revision,
+    attempt_id: question.attempt_id,
+    attempt_revision: question.attempt_revision,
+    attempt_fence: question.attempt_fence,
+    text: "yes",
+  };
+  await resources.questions.answer(question.id, answer);
+
   local.close();
   const archive = join(root, "queue.tila-backup");
   const manifest = await exportProjectBackup({ source, output: archive });
   expect(manifest.required_features).toContain("managed-queue-v1");
+  expect(manifest.required_features).toContain("work-questions-v1");
   await expect(
     importProjectBackup({ archive, destination: source, replace: true }),
   ).rejects.toThrow("quiescent destination");
@@ -240,6 +261,12 @@ values = ["open", "done", "cancelled"]
   resources = buildLocalResources(local.project, local.artifacts);
   try {
     expect((await resources.queue.policy()).paused).toBe(true);
+    const restoredQuestion = await resources.questions.get(question.id);
+    expect(restoredQuestion.question.answer?.text).toBe("yes");
+    expect(restoredQuestion.answer_applicable).toBe(false);
+    expect(
+      (await resources.questions.answer(question.id, answer)).answer_applicable,
+    ).toBe(false);
     const restored = await resources.attempts.get(accepted.attempt.id);
     expect(restored.attempt.state).toBe("uncertain");
     expect(restored.grant_valid).toBe(false);

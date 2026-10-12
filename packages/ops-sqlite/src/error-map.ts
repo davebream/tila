@@ -1,6 +1,8 @@
 import { ContinuityError, FenceError } from "@tila/core";
+import { AgentBindingError } from "./agent-binding-ops";
 import { ArtifactReviewError } from "./artifact-review-ops";
 import { SchemaWriteError } from "./constraint-ops";
+import { ConversationError } from "./conversation-ops";
 import { DoIdempotencyConflictError } from "./do-idempotency-ops";
 import { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
 import {
@@ -15,6 +17,7 @@ import {
   GateNotFoundError,
 } from "./gate-ops";
 import { InvalidCursorError } from "./list-cursor";
+import { QuestionError } from "./question-ops";
 import { QueueError } from "./queue-internals";
 import {
   RecordAlreadyExistsError,
@@ -182,6 +185,10 @@ export function mapProjectError(err: Error): {
   retryable: boolean;
   extras?: Record<string, unknown>;
 } | null {
+  if (err instanceof ConversationError || err instanceof AgentBindingError)
+    return { status: err.status, code: err.code, retryable: false };
+  if (err instanceof QuestionError)
+    return { status: err.status, code: err.code, retryable: false };
   if (err instanceof QueueError)
     return {
       status:

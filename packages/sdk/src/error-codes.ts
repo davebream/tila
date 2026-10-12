@@ -6,6 +6,12 @@
  */
 export const TILA_ERRORS = {
   SCHEMA_REVISION_REQUIRED: "schema-revision-required",
+  QUESTION_NOT_FOUND: "question-not-found",
+  QUESTION_CONFLICT: "question-conflict",
+  QUESTION_INVALID_STATE: "question-invalid-state",
+  QUESTION_CORRELATION_CONFLICT: "question-correlation-conflict",
+  QUESTION_IDEMPOTENCY_CONFLICT: "question-idempotency-conflict",
+  QUESTION_PRECONDITION: "question-precondition",
   QUEUE_MANAGED_WORK: "queue-managed-work",
   QUEUE_NOT_FOUND: "queue-not-found",
   QUEUE_CONFLICT: "queue-conflict",

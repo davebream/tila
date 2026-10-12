@@ -2712,7 +2712,7 @@ does not change an API, permission, migration or deployment.
 |---|---|---|
 | Definitions and policies | Applied work/record definitions, templates, hierarchy and artifact policy in project DO SQLite | Persisted settings; validate changes, preview impact and retain revision history. A file is an input format. |
 | Stable identities and access | DO agents, rooms, groups; D1 principals, memberships and credential policy; host-owned profile definitions | Managed identity/access lifecycle. Archive or revoke without erasing referenced work or evidence. |
-| Durable work and content | DO tasks, records, messages; artifact metadata in DO and bytes in R2; planned attempts/questions/results | Explicit domain transitions; survive browsers, runtime runs and provider sessions. A record's business definition determines whether it is configuration or content. |
+| Durable work and content | DO tasks, records, messages; artifact metadata in DO and bytes in R2; managed attempts/results and correlated questions | Explicit domain transitions; survive browsers, runtime runs and provider sessions. A record's business definition determines whether it is configuration or content. |
 | Runtime observations and commands | D1 runtime runs; DO bindings, claims, presence and delivery leases; host observations | Persisted observations can expire. Show freshness, unknown/redacted/unavailable states; use supported commands to change runtime state. |
 | Historical evidence | Schema history, journal/cursor archives, record/artifact revisions, provenance/reviews, message and delivery evidence | Permission-aware history and retention. Restore creates new validated state; an audit reference does not guarantee retained payload bytes. |
 
@@ -2732,8 +2732,8 @@ principal --membership + credential ceiling--> authorized project operations
 principal --owns / binding grant--> durable agent --current epoch--> runtime binding
 runtime binding --holder--> runtime run --identifies--> participant
 runtime binding --observes--> host + native session + profile revision
-task --has many (planned #303)--> attempt --assigned to--> durable agent
-attempt --correlates (planned #304)--> question / decision --discussed in--> room message
+task --has many--> attempt --assigned to--> durable agent
+attempt --correlates--> question / decision --discussed in--> room message
 room --contains--> thread / message --snapshots recipients--> delivery / wake attempt
 schema / identity / work / runtime operation --records evidence--> history / journal
 ```
@@ -2891,8 +2891,9 @@ not reconstruct completion from presence or terminal state. #303 owns controlled
 attachment of a replacement session to an existing attempt versus a new attempt;
 both require fresh authority, and a stale result/answer must be rejected. A later
 hotfix links a new task/attempt to the original result instead of rewriting it.
-Attempt cancellation must explicitly supersede pending decisions (#304) while
-retaining discussion. These workflow transitions remain planned.
+Attempt cancellation supersedes pending questions (#304) transactionally while
+retaining discussion and existing answer evidence. Replacement execution requires
+a linked question and fresh confirmation; see Durable questions and decisions.
 
 No atomic Settings save spans DO, D1, R2 and a host. A multi-resource UI must report
 individual committed revisions and failures; retries use the owning service's
@@ -3197,3 +3198,53 @@ nonterminal attempt uncertain. This includes suspended snapshots: the source
 process may have resumed after export. Confirmed quiescent reconciliation can
 return such an attempt to suspended while retaining WIP. Terminal history and
 receipts remain intact. Never interpret restoring a database as stopping a process.
+
+### Durable questions and decisions (#304)
+
+Questions belong to accepted work attempts. Each has an independent UUID, text,
+requester principal/participant, attempt ID, captured attempt revision and fence,
+initial session/binding provenance, designated responder, question revision,
+routing history, optional discussion references, and immutable answer evidence.
+An answer is an explicit operation; conversation messages remain peer content.
+
+| Transition | Behavior |
+|---|---|
+| Ask | Current attempt holder with a valid claim supplies `expected_revision`, `fence`, `attempt_id`, a caller-generated question `id`, and a responder principal. |
+| Answer | Current designated responder supplies `question_id`, `expected_revision` (question revision), `attempt_id`, `attempt_revision` (captured at ask), `attempt_fence`, `text`, and `idempotency_key`. |
+| Escalate | Designated responder or maintainer names a current project owner and a reason. The question remains open with a new revision and routing entry. |
+| Cancel | Current requester, responder, or maintainer closes the question with a reason. |
+| Attempt cancellation/result | Open questions become superseded in the same transaction. Existing answers remain historical and lose applicability. |
+| Lease expiry | Questions remain answerable as evidence. Execution authority is not restored by an answer. |
+| Replacement fence/agent binding | Pending questions become superseded; answered questions retain evidence. Ask a new question with `predecessor_id` for fresh confirmation. |
+
+Initial provider-session attachment and ordinary heartbeats do not invalidate the
+saved question context. A new execution fence does. `answer_applicable` is
+computed for the requesting caller's live attempt authority on every read and
+receipt replay. It is a point-in-time observation, not a transferable execution
+grant; subsequent work must still validate its fence. Questions never pause or
+resume execution and do not release queue capacity.
+
+All mutations use durable operation receipts scoped to principal, participant,
+operation, and key. Identical retries return the saved operation result with
+fresh applicability; changed payloads conflict. Read the question again for its
+latest revision. Authorization is evaluated before returning a receipt.
+
+The Worker rechecks responder membership and capability at answer time, including
+bootstrap credentials. Escalated answers require the named principal's current
+owner role. Runtime callers must have a current acting agent binding; relay or
+replaced runs cannot read or mutate questions. Task restrictions apply to both
+individual reads and list pages. Embedded backends use the existing trusted
+local-process authority model, retaining identity, correlation, and fence checks;
+they do not reproduce D1 membership administration.
+
+Existing room publication supplies discussion transport. Link references only
+when the message is readable and its `task_id`, `attempt_id`, and `correlation_id`
+match the question. References never copy message bodies or grant room access.
+Local conversation publication remains unsupported; local references must resolve
+to rows already present in that database.
+
+Recover open questions with the question list API. Recover changes through the
+existing journal replay and acknowledgment cursor. Journal events contain the
+question ID and revision; fetch the durable record for content. Process by
+question/revision and acknowledge only after processing. A retry may replay an
+event; this guarantees one persisted answer, not exactly-once external execution.

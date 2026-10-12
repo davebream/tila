@@ -67,7 +67,7 @@ function bodyAccess(a: ConversationAuthority) {
       "Relay credentials cannot access conversation bodies",
     );
 }
-function activeBinding(
+export function activeBinding(
   db: DB,
   agent: string,
   a: ConversationAuthority,

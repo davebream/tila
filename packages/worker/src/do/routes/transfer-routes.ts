@@ -113,7 +113,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({
       digest,
       journal,
-      migrationVersion: 34,
+      migrationVersion: 36,
       tables: projectTransferOps.PROJECT_BACKUP_TABLES,
     });
   });

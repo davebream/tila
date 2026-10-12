@@ -965,3 +965,49 @@ export const queueOperationReceipts = sqliteTable("queue_operation_receipts", {
   attempt_id: text("attempt_id").references(() => workAttempts.id),
   created_at: integer("created_at").notNull(),
 });
+
+export const workQuestions = sqliteTable(
+  "work_questions",
+  {
+    id: text("id").primaryKey(),
+    task_id: text("task_id")
+      .notNull()
+      .references(() => entities.id),
+    attempt_id: text("attempt_id")
+      .notNull()
+      .references(() => workAttempts.id),
+    requester_principal_id: text("requester_principal_id").notNull(),
+    responder_principal_id: text("responder_principal_id").notNull(),
+    state: text("state")
+      .$type<import("@tila/schemas").Question["state"]>()
+      .notNull(),
+    snapshot: text("snapshot", { mode: "json" })
+      .$type<import("@tila/schemas").Question>()
+      .notNull(),
+  },
+  (t) => [
+    index("work_questions_task").on(t.task_id, t.state, t.id),
+    index("work_questions_requester").on(
+      t.requester_principal_id,
+      t.state,
+      t.id,
+    ),
+    index("work_questions_attempt").on(t.attempt_id, t.state, t.id),
+    index("work_questions_responder").on(
+      t.responder_principal_id,
+      t.state,
+      t.id,
+    ),
+  ],
+);
+export const questionReceipts = sqliteTable("question_receipts", {
+  key: text("key").primaryKey(),
+  request: text("request").notNull(),
+  question_id: text("question_id")
+    .notNull()
+    .references(() => workQuestions.id),
+  result: text("result", { mode: "json" })
+    .$type<import("@tila/schemas").Question>()
+    .notNull(),
+  created_at: integer("created_at").notNull(),
+});
