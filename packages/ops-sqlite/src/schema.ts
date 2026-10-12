@@ -65,7 +65,7 @@ export const entities = sqliteTable(
   },
   (table) => [
     index("idx_entities_type").on(table.type),
-    // Keyset paging (MIGRATION_0033): every list order is tie-broken by id.
+    // Keyset paging (MIGRATION_0035): every list order is tie-broken by id.
     index("idx_entities_created_id").on(table.created_at, table.id),
     index("idx_entities_updated_id").on(table.updated_at, table.id),
     index("idx_entities_type_id").on(table.type, table.id),
