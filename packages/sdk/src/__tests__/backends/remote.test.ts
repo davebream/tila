@@ -61,6 +61,26 @@ describe("RemoteBackend", () => {
     client = createMockClient();
   });
 
+  it("forwards journal sequence and inspection filters", async () => {
+    client.get.mockResolvedValue({ ok: true, events: [] });
+    const backend = await createBackend(client);
+    await backend.listJournal({
+      after_seq: 12,
+      event_name: "pipeline.tests_passed",
+      correlation_id: "run-one",
+    });
+    expect(client.get).toHaveBeenCalledWith(
+      "/projects/proj-test/journal",
+      expect.objectContaining({
+        query: expect.objectContaining({
+          after_seq: "12",
+          event_name: "pipeline.tests_passed",
+          correlation_id: "run-one",
+        }),
+      }),
+    );
+  });
+
   describe("EntityBackend", () => {
     it("create() unwraps entity from envelope", async () => {
       const entity = {

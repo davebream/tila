@@ -61,4 +61,53 @@ describe("createJournalMethods — outgoing request shape", () => {
     expect(u.searchParams.has("kind")).toBe(false);
     expect(u.searchParams.has("after_seq")).toBe(false);
   });
+
+  it("appends with the explicit retry key and parses the authenticated receipt", async () => {
+    const input = {
+      event_name: "pipeline.tests_passed",
+      event_version: 1,
+      target: { kind: "project" as const },
+      data: {},
+    };
+    const receipt = {
+      ok: true,
+      event: {
+        seq: 7,
+        t: 100,
+        kind: "custom.reported",
+        resource: "project:proj-1",
+        principal_id: "principal",
+        participant_id: "participant",
+        environment: {},
+        token_id: "token",
+        fence: null,
+        data: input,
+      },
+      dedup_expires_at: 604800100,
+    };
+    mockFetch.mockResolvedValueOnce(ok(receipt));
+    expect(await journal().append(input, { idempotencyKey: "stable" })).toEqual(
+      receipt,
+    );
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(new URL(url).pathname).toBe("/projects/proj-1/journal");
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("stable");
+    expect(JSON.parse(init.body)).toEqual(input);
+  });
+
+  it("reports typed validation failures without making a network request", async () => {
+    const input = {
+      event_name: "pipeline.tests_passed",
+      event_version: 1,
+      target: { kind: "project" as const },
+      data: { text: "x".repeat(17_000) },
+    };
+    await expect(
+      journal().append(input, { idempotencyKey: "key" }),
+    ).rejects.toMatchObject({ code: "payload-too-large", status: 413 });
+    await expect(
+      journal().append({ ...input, data: {} }, { idempotencyKey: "" }),
+    ).rejects.toMatchObject({ code: "validation-error", status: 400 });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });

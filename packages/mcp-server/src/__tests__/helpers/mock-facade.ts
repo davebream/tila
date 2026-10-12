@@ -140,7 +140,10 @@ export type MockFacadeShape = {
   signals: Record<"inbox" | "send" | "ack" | "history", Mock> & {
     groups: Record<"list" | "get" | "set" | "delete", Mock>;
   };
-  journal: Record<"query" | "replay" | "getCursor" | "acknowledge", Mock>;
+  journal: Record<
+    "query" | "replay" | "getCursor" | "acknowledge" | "append",
+    Mock
+  >;
   handoffs: Record<"create" | "get" | "list", Mock>;
   reentry: Mock;
   presence: Record<"heartbeat" | "list" | "listAll", Mock>;
@@ -273,7 +276,7 @@ export function createMockFacade(): MockFacadeShape {
       ...fns("inbox", "send", "ack", "history"),
       groups: fns("list", "get", "set", "delete"),
     },
-    journal: fns("query", "replay", "getCursor", "acknowledge"),
+    journal: fns("query", "replay", "getCursor", "acknowledge", "append"),
     handoffs: fns("create", "get", "list"),
     reentry: vi.fn(),
     presence: fns("heartbeat", "list", "listAll"),

@@ -49,6 +49,26 @@ describe("createTilaLocal — full local round-trip", () => {
     });
   });
 
+  it("explicitly rejects authenticated report append locally without changing the journal", async () => {
+    const journal = buildLocalResources(local.project, local.artifacts).journal;
+    const before = await journal.query();
+    await expect(
+      journal.append(
+        {
+          event_name: "pipeline.tests_passed",
+          event_version: 1,
+          target: { kind: "project" },
+          data: {},
+        },
+        { idempotencyKey: "local" },
+      ),
+    ).rejects.toMatchObject({
+      code: "unsupported-capability",
+      retryable: false,
+    });
+    expect(await journal.query()).toEqual(before);
+  });
+
   it("previews, conditionally applies, replays and reads real configuration history", async () => {
     const { schema } = buildLocalResources(local.project, local.artifacts);
     const definition = "schema_version = 1\n[work_units.task]\n";

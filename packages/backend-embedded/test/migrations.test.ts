@@ -10,7 +10,7 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–31.
+ * Canonical shared versions present in the embedded set: 1–36.
  * The transactional receipts, archive watermark and transfer lock
  * are shared so cloud/local backups have identical recovery semantics.
  * The embedded-only idempotency overlay is appended

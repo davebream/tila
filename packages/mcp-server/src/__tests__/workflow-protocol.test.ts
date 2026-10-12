@@ -706,6 +706,23 @@ title = "Evidence"
   await primitive("tila_signal_history");
   await primitive("tila_summary");
   await primitive("tila_journal_list");
+  called.add("tila_journal_append");
+  const unsupportedReport = await client.callTool({
+    name: "tila_journal_append",
+    arguments: {
+      input: {
+        event_name: "pipeline.tests_passed",
+        event_version: 1,
+        target: { kind: "project" },
+        data: {},
+      },
+      idempotency_key: "report",
+    },
+  });
+  expect(unsupportedReport.isError).toBe(true);
+  expect(unsupportedReport.structuredContent).toMatchObject({
+    error: { code: "unsupported-capability" },
+  });
   const replay = await primitive("tila_journal_replay", { after_seq: 0 });
   await primitive("tila_journal_cursor_get");
   await primitive("tila_journal_acknowledge", { seq: replay.next_after_seq });

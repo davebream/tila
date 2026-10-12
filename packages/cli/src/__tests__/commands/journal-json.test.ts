@@ -2,6 +2,12 @@ import type { CommandDef, SubCommandsDef } from "citty";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockListJournal = vi.fn();
+const mockAppendJournal = vi.fn();
+const mockReadFile = vi.fn();
+vi.mock("node:fs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs")>()),
+  readFileSync: (...args: unknown[]) => mockReadFile(...args),
+}));
 
 vi.mock("../../context", () => ({
   requireClient: (ctx: { client: unknown }) => ctx.client,
@@ -25,7 +31,7 @@ vi.mock("../../context", () => ({
       listClaims: vi.fn(),
     },
     artifact: { put: vi.fn(), get: vi.fn(), list: vi.fn(), delete: vi.fn() },
-    journal: { listJournal: mockListJournal },
+    journal: { listJournal: mockListJournal, appendJournal: mockAppendJournal },
     gate: {
       createGate: vi.fn(),
       listGates: vi.fn(),
@@ -77,17 +83,72 @@ async function runCmd(
   });
 }
 
-describe("tila journal tail --json", () => {
+describe("tila journal --json", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockListJournal.mockReset();
+    mockAppendJournal.mockReset();
+    mockReadFile.mockReset();
   });
 
   afterEach(() => {
     logSpy.mockRestore();
   });
+
+  it.each(["-", "/tmp/report.json"])(
+    "appends structured JSON from %s and outputs the receipt",
+    async (file) => {
+      const input = {
+        event_name: "pipeline.tests_passed",
+        event_version: 1,
+        target: { kind: "project" },
+        data: { passed: 87 },
+      };
+      const receipt = {
+        ok: true,
+        event: { seq: 42, data: input },
+        dedup_expires_at: 1234,
+      };
+      mockReadFile.mockReturnValue(JSON.stringify(input));
+      mockAppendJournal.mockResolvedValue(receipt);
+      await runCmd(getSubCommand(await loadCommand(), "append"), {
+        file,
+        "idempotency-key": "key",
+        json: true,
+      });
+      expect(mockReadFile).toHaveBeenCalledWith(
+        file === "-" ? 0 : file,
+        "utf8",
+      );
+      expect(mockAppendJournal).toHaveBeenCalledWith(input, {
+        idempotencyKey: "key",
+      });
+      expect(JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string)).toEqual({
+        ok: true,
+        result: {
+          event: receipt.event,
+          dedup_expires_at: receipt.dedup_expires_at,
+        },
+      });
+    },
+  );
+
+  it.each(["{broken", JSON.stringify({ event_name: "bad" })])(
+    "rejects invalid report input before backend access",
+    async (body) => {
+      mockReadFile.mockReturnValue(body);
+      await expect(
+        runCmd(getSubCommand(await loadCommand(), "append"), {
+          file: "-",
+          "idempotency-key": "key",
+          json: true,
+        }),
+      ).rejects.toMatchObject({ code: "validation-error" });
+      expect(mockAppendJournal).not.toHaveBeenCalled();
+    },
+  );
 
   it("outputs events with ISO 8601 timestamps when --json", async () => {
     mockListJournal.mockResolvedValue([

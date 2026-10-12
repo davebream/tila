@@ -215,6 +215,12 @@ describe("OLD-style local DB version-reshuffle (Step 4c — KNOWN LIMITATION)", 
 
     // --- Reconstruct the OLD local schema (target-less artifact_relationships). ---
     raw.exec(`
+      CREATE TABLE journal (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, t INTEGER NOT NULL,
+        kind TEXT NOT NULL, resource TEXT NOT NULL, actor TEXT NOT NULL,
+        fence INTEGER, data TEXT NOT NULL DEFAULT '{}',
+        token_id TEXT, source TEXT, source_version TEXT
+      );
       CREATE TABLE entities (
         id TEXT PRIMARY KEY, type TEXT NOT NULL, schema_version INTEGER NOT NULL,
         data TEXT NOT NULL DEFAULT '{}', archived INTEGER NOT NULL DEFAULT 0,

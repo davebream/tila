@@ -157,6 +157,16 @@ describe("runMigrationsWithPitrRollback", () => {
               const match = /PRAGMA\s+table_info\((\w+)\)/i.exec(statement);
               const tableName = match?.[1] ?? "";
               const columnsByTable: Record<string, string[]> = {
+                journal_report_receipts: [
+                  "key",
+                  "project_id",
+                  "principal_id",
+                  "participant_id",
+                  "request_hash",
+                  "response",
+                  "expires_at",
+                ],
+                journal_report_rates: ["key", "window_start", "count"],
                 _project_transfer_state: ["singleton", "queue_fences_json"],
                 rooms: ["id", "history_policy", "budgets", "next_seq"],
                 room_members: ["room_id", "member", "wake"],
