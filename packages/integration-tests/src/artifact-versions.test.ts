@@ -183,6 +183,132 @@ async function write(content: string, key = crypto.randomUUID()) {
 }
 
 describe("artifact versions through Worker and DO", () => {
+  it("keeps namespace-restricted credentials out of the resource resolver", async () => {
+    const response = await doApp.request("/artifact/resolve-resource", {
+      ...json({ resource: "task:missing" }),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tila-Credential-Policy": JSON.stringify({
+          role: "participant",
+          capabilities: ["artifacts:write"],
+          restrictions: { task_types: ["task"] },
+        }),
+      },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "permission-denied", retryable: false },
+    });
+  });
+  it.each([false, true])(
+    "deduplicates typed and bare text/multipart resources (versioned=%s)",
+    async (versioned) => {
+      const created = await doApp.request(
+        "/entity/create",
+        json({
+          id: "task.api-routes",
+          type: "task",
+          created_by: "test",
+          data: { title: "API routes" },
+          ...identity,
+        }),
+      );
+      expect(created.status, await created.text()).toBe(200);
+      const claimed = await doApp.request(
+        "/coord/acquire",
+        json({
+          resource: "task:task.api-routes",
+          mode: "exclusive",
+          ttl_ms: 60000,
+          ...identity,
+        }),
+      );
+      const taskFence = ((await claimed.json()) as { fence: number }).fence;
+      const keys = [];
+      for (const resource of ["task:task.api-routes", "task.api-routes"]) {
+        const text = await app.request(
+          "/text",
+          json({
+            content: "hello aliases",
+            kind: "log",
+            mime_type: "text/plain",
+            resource,
+            fence: taskFence,
+            ...(versioned
+              ? { lineage_id: "report", lineage_fence: fence }
+              : {}),
+          }),
+          env,
+          executionCtx,
+        );
+        const body = (await text.json()) as {
+          key: string;
+          pointer: ArtifactRevision;
+        };
+        expect(text.status, JSON.stringify(body)).toBe(200);
+        expect(body.pointer.resource).toBe("task.api-routes");
+        keys.push(body.key);
+        const form = new FormData();
+        form.set(
+          "file",
+          new File(["hello aliases"], "log.txt", { type: "text/plain" }),
+        );
+        form.set("kind", "log");
+        form.set("resource", resource);
+        form.set("fence", String(taskFence));
+        if (versioned) {
+          form.set("lineage_id", "report");
+          form.set("lineage_fence", String(fence));
+        }
+        const multipart = await app.request(
+          "/",
+          { method: "POST", body: form },
+          env,
+          executionCtx,
+        );
+        const uploaded = await multipart.json();
+        expect(multipart.status, JSON.stringify(uploaded)).toBe(200);
+        expect(uploaded).toMatchObject({
+          key: body.key,
+          deduplicated: true,
+          pointer: { resource: "task.api-routes" },
+        });
+      }
+      expect(new Set(keys).size).toBe(1);
+      expect(objects.size).toBe(versioned ? 2 : 1);
+      if (!versioned) {
+        expect([...objects.values()][0].customMetadata["tila-task"]).toBe(
+          "task.api-routes",
+        );
+      }
+      expect(
+        db.sqlite.prepare("SELECT count(*) AS n FROM artifact_pointers").get(),
+      ).toEqual({ n: 1 });
+      expect(
+        db.sqlite
+          .prepare(
+            "SELECT count(*) AS n FROM journal WHERE kind = 'artifact.produced'",
+          )
+          .get(),
+      ).toEqual({ n: 1 });
+    },
+  );
+
+  it("rejects unresolved resources before writing any blob", async () => {
+    for (const resource of ["task:missing", "missing", ""]) {
+      const response = await app.request(
+        "/text",
+        json({ content: "invalid", kind: "log", resource, fence: 1 }),
+        env,
+        executionCtx,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "validation-error", retryable: false },
+      });
+    }
+    expect(objects.size).toBe(0);
+  });
   it("reviews exact revisions through the Worker, enforces permission and CAS, and exposes download state", async () => {
     const first = await write("review me");
     const path = `/~/reviews/${encodeURIComponent(first.key)}`;

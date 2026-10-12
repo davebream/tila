@@ -113,8 +113,13 @@ export { SearchQueryError, validateFtsQuery } from "./artifact-ops";
 export {
   ClaimOwnershipError,
   FenceNotFoundError,
+  resolveEntityReference,
   resolveEntityResource,
 } from "./fence-ops";
+export {
+  ArtifactResourceError,
+  resolveArtifactResource,
+} from "./artifact-resource";
 export {
   mapProjectError,
   projectErrorResponses,

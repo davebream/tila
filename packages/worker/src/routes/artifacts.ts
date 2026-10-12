@@ -120,10 +120,11 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     content,
     kind,
     mime_type: mimeType,
-    resource,
+    resource: rawResource,
     fence,
     tags,
   } = parsed.data;
+  let resource = rawResource;
 
   if (resource && fence === undefined) {
     return c.json(
@@ -160,6 +161,19 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     parsed.data.lineage_fence !== undefined
   ) {
     return writeVersionedArtifact(c, parsed.data, fileBytes.buffer);
+  }
+
+  if (resource !== undefined) {
+    const resolved = await forwardToDO(
+      c.get("doStub"),
+      "/artifact/resolve-resource",
+      "POST",
+      { resource },
+      undefined,
+      analyticsCtxFrom(c),
+    );
+    if (!resolved.ok) return resolved;
+    resource = ((await resolved.json()) as { resource: string }).resource;
   }
 
   const hashBuffer = await crypto.subtle.digest("SHA-256", fileBytes);
@@ -293,7 +307,7 @@ artifacts.post("/", requirePermission("write"), async (c) => {
     );
   }
 
-  const resource = formData.get("resource") as string | null;
+  let resource = formData.get("resource") as string | null;
   if (resource && isUnsafeArtifactResource(resource)) {
     return c.json(
       {
@@ -357,6 +371,19 @@ artifacts.post("/", requirePermission("write"), async (c) => {
       fileBytes,
     );
   }
+  if (resource !== null) {
+    const resolved = await forwardToDO(
+      c.get("doStub"),
+      "/artifact/resolve-resource",
+      "POST",
+      { resource },
+      undefined,
+      analyticsCtxFrom(c),
+    );
+    if (!resolved.ok) return resolved;
+    resource = ((await resolved.json()) as { resource: string }).resource;
+  }
+
   const hashBuffer = await crypto.subtle.digest("SHA-256", fileBytes);
   const sha256 = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, "0"))

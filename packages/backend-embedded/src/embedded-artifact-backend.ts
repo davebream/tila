@@ -24,6 +24,7 @@ import {
   artifactReviewOps,
   constraintOps,
   relationshipOps,
+  resolveArtifactResource,
   schema,
   artifactVersionOps as versions,
 } from "@tila/ops-sqlite";
@@ -377,6 +378,7 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
         "Versioned artifact keys require lineage options",
       );
     await this.flushRevisions();
+    const resource = resolveArtifactResource(this.db, options.resource ?? null);
     // 2. Write blob via the injected store
     const { bytes: written } = await this.blobs.write(options.key, bytes);
 
@@ -409,7 +411,7 @@ export class EmbeddedArtifactBackend implements ArtifactBackend {
         this.db,
         {
           r2_key: options.key,
-          resource: options.resource ?? null,
+          resource,
           kind,
           sha256: options.sha256,
           bytes: written,

@@ -1,6 +1,6 @@
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { artifactOps, type schema } from "../../../ops-sqlite/src";
+import { artifactOps, entityOps, type schema } from "../../../ops-sqlite/src";
 import { type TestDb, createTestDb } from "./helpers/create-test-db";
 
 const { upsertPointer } = artifactOps;
@@ -26,9 +26,17 @@ let rawDb: TestDb["sqlite"];
 let db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 
 beforeEach(() => {
-  testDb = createTestDb();
+  testDb = createTestDb({ foreignKeys: "on" });
   rawDb = testDb.sqlite;
   db = testDb.db;
+  for (const id of ["task-1", "task-2"]) {
+    entityOps.create(
+      db,
+      { id, type: "task", data: {}, created_by: "test" },
+      1,
+      { actor: "test" },
+    );
+  }
 });
 
 afterEach(() => {

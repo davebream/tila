@@ -38,13 +38,13 @@ export class ExpiredClaimError extends Error {
 }
 
 /**
- * Resolve the canonical `<type>:<id>` resource string for an entity.
+ * Resolve an entity ID and its canonical `<type>:<id>` claim resource.
  *
  * Performs an entity-existence lookup (not a separator heuristic) to handle
  * the two input forms:
- *   - Bare entity id (e.g. `"abc-123"`) → looks up entity, returns `"task:abc-123"`.
+ *   - Bare entity id (e.g. `"abc-123"`) → looks up its stored type.
  *   - Already-canonical typed form (e.g. `"task:abc-123"`) → extracts the id part,
- *     confirms it exists in entities with the expected type, returns as-is.
+ *     confirms it exists in entities with the expected type.
  *
  * Returns `null` when the resource is not an entity (records, arbitrary coordination
  * resources, etc.) — callers fall through to their own exact-match path.
@@ -53,10 +53,10 @@ export class ExpiredClaimError extends Error {
  * All code that constructs or validates entity claim/fence resources should
  * go through this helper rather than rolling its own colon/slash heuristic.
  */
-export function resolveEntityResource(
+export function resolveEntityReference(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   resource: string,
-): string | null {
+): { id: string; resource: string } | null {
   // Case 1: bare entity id — resource itself exists in entities
   const bareEntity = db
     .select({ type: schema.entities.type })
@@ -65,7 +65,7 @@ export function resolveEntityResource(
     .get();
 
   if (bareEntity) {
-    return `${bareEntity.type}:${resource}`;
+    return { id: resource, resource: `${bareEntity.type}:${resource}` };
   }
 
   // Case 2: typed entity resource `<type>:<id>` — extract the id suffix and
@@ -80,12 +80,20 @@ export function resolveEntityResource(
       .get();
 
     if (typedEntity && `${typedEntity.type}:${possibleId}` === resource) {
-      return resource; // already canonical
+      return { id: possibleId, resource }; // already canonical
     }
   }
 
   // Not an entity resource — record resources, arbitrary coordination keys, etc.
   return null;
+}
+
+/** Resolve the canonical claim resource without changing the coordination API. */
+export function resolveEntityResource(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  resource: string,
+): string | null {
+  return resolveEntityReference(db, resource)?.resource ?? null;
 }
 
 /**

@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { artifactOps, type schema } from "../../../ops-sqlite/src";
+import { artifactOps, entityOps, type schema } from "../../../ops-sqlite/src";
 import { createArtifactRoutes } from "../../src/do/routes/artifact-routes";
 import type { RouterDeps } from "../../src/do/routes/types";
 import { type TestDb, createTestDb } from "./helpers/create-test-db";
@@ -41,9 +41,17 @@ let db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 
 beforeEach(() => {
   counter = 0;
-  const testDb = createTestDb();
+  const testDb = createTestDb({ foreignKeys: "on" });
   rawDb = testDb.sqlite;
   db = testDb.db;
+  for (const id of ["task-1", "task-2"]) {
+    entityOps.create(
+      db,
+      { id, type: "task", data: {}, created_by: "test" },
+      1,
+      { actor: "test" },
+    );
+  }
 });
 
 afterEach(() => {

@@ -14,6 +14,135 @@ import { hashToken } from "../../worker/src/lib/hash-token";
 import { identity, post } from "./helpers";
 import { bindings } from "./setup";
 
+it("normalizes upload aliases and returns permanent resource errors through real R2 and DO SQLite", async () => {
+  const projectId = "runtime-artifact-aliases";
+  const token = "runtime-alias-token";
+  await bindings.DB.prepare(
+    "INSERT INTO _projects (project_id, display_name, created_at, created_by, cloudflare_account_id) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(projectId, projectId, Date.now(), "fixture", "local")
+    .run();
+  await bindings.DB.prepare(
+    "INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(
+      await hashToken(token, bindings.HASH_PEPPER),
+      projectId,
+      "init",
+      "full",
+      Date.now(),
+      "fixture",
+    )
+    .run();
+  const request = (path: string, body?: unknown, key?: string) =>
+    SELF.fetch(`https://worker/projects/${projectId}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Tila-Participant-Id": "runtime-worker",
+        "Content-Type": "application/json",
+        ...(key ? { "Idempotency-Key": key } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const created = await request("/tasks", {
+    id: "task.api-routes",
+    type: "task",
+    data: { title: "API routes" },
+  });
+  expect(created.status, await created.text()).toBe(200);
+  const claimed = await request("/claims/acquire", {
+    resource: "task:task.api-routes",
+    mode: "exclusive",
+    ttl_ms: 300000,
+  });
+  expect(claimed.status).toBe(200);
+  const { fence } = await claimed.json<{ fence: number }>();
+  const payload = {
+    content: "hello aliases",
+    kind: "log",
+    resource: "task:task.api-routes",
+    fence,
+  };
+  const written = await request("/artifacts/text", payload, "alias-write");
+  const body = await written.json<{
+    key: string;
+    pointer: { resource: string };
+  }>();
+  expect(written.status, JSON.stringify(body)).toBe(200);
+  expect(body.pointer.resource).toBe("task.api-routes");
+  expect(body.key.startsWith("produced/task.api-routes/")).toBe(true);
+  const duplicate = await request(
+    "/artifacts/text",
+    { ...payload, resource: "task.api-routes" },
+    "bare-write",
+  );
+  expect(duplicate.status).toBe(200);
+  expect(await duplicate.json()).toMatchObject({
+    key: body.key,
+    deduplicated: true,
+  });
+  const conflict = await request(
+    "/artifacts/text",
+    { ...payload, resource: "task.api-routes" },
+    "alias-write",
+  );
+  expect(conflict.status).toBe(422);
+  await conflict.text();
+  for (const resource of ["task.api-routes", "task:task.api-routes"]) {
+    const listed = await request(
+      `/artifacts?resource=${encodeURIComponent(resource)}`,
+    );
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({
+      pointers: [{ resource: "task.api-routes", r2_key: body.key }],
+    });
+  }
+  const beforeInvalid = (await bindings.ARTIFACTS.list()).objects.map(
+    (o) => o.key,
+  );
+  const invalid = await request("/artifacts/text", {
+    ...payload,
+    resource: "epic:task.api-routes",
+  });
+  expect(invalid.status).toBe(400);
+  expect(await invalid.json()).toMatchObject({
+    error: { code: "validation-error", retryable: false },
+  });
+  expect((await bindings.ARTIFACTS.list()).objects.map((o) => o.key)).toEqual(
+    beforeInvalid,
+  );
+
+  // Force an actual SQLite FK violation after resource resolution, inside the
+  // pointer transaction. The failed insert must roll back the trigger's delete.
+  const stub = bindings.PROJECT.get(bindings.PROJECT.idFromName(projectId));
+  await runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec(
+      "CREATE TRIGGER alias_test_remove_entity BEFORE INSERT ON artifact_pointers BEGIN DELETE FROM entities WHERE id = NEW.resource; END",
+    );
+  });
+  const failed = await request("/artifacts/text", {
+    ...payload,
+    content: "constraint failure",
+  });
+  expect(failed.status).toBe(400);
+  expect(await failed.json()).toMatchObject({
+    error: { code: "validation-error", retryable: false },
+  });
+  await runInDurableObject(stub, (_instance, state) => {
+    expect(
+      state.storage.sql
+        .exec("SELECT id FROM entities WHERE id = 'task.api-routes'")
+        .one(),
+    ).toMatchObject({ id: "task.api-routes" });
+    expect(
+      state.storage.sql
+        .exec("SELECT count(*) AS n FROM artifact_pointers")
+        .one().n,
+    ).toBe(1);
+  });
+});
+
 it("returns a readable 410 envelope for deleted revision content through the Worker", async () => {
   const projectId = "runtime-deleted-artifact";
   const token = "runtime-artifact-token";
