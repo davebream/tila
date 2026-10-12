@@ -76,8 +76,9 @@ Conversation protocol 1 is separate from runtime protocol 1. History uses signed
 reader-bound three-day cursors; pending inboxes are independent. Expired inbox page
 cursors restart the pending page and report `cursor_error`. Watches last at most
 25 seconds, allow two waiters per agent, and return `changed:false` on timeout.
-`HASH_PEPPER` is required for conversation routes; absent signing configuration
-fails closed. Restore clears leases and server-held reply contexts, rotates cursor
+Cursors are signed with a per-project key derived from `CONVERSATION_CURSOR_KEY`
+or, when that is unset, `HASH_PEPPER`. With neither, or a dedicated key shorter
+than 32 characters, conversation routes fail closed with `config-unavailable`. Restore clears leases and server-held reply contexts, rotates cursor
 generation and invalidates copied bindings. Delivery expiry preserves messages.
 
 ## 1. Product boundary and required scenario

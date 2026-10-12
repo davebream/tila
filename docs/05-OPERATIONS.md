@@ -2047,9 +2047,33 @@ security or consumer gates to make a dependency update pass.
 
 Deploy compatible server behavior before clients. Slice 2 needs shared DO/embedded
 migration 31 and the slice-1 D1 migration 0031; it adds no further D1 migration.
-Ensure the existing `HASH_PEPPER` secret is configured. Conversation routes fail
-with `config-unavailable` without it. Follow the existing token-hash migration
-procedure before introducing or changing this secret on an established deployment.
+Conversation cursors are signed with a per-project key derived from the first
+configured Worker secret:
+
+| Order | Secret | Notes |
+|-------|--------|-------|
+| 1 | `CONVERSATION_CURSOR_KEY` | Dedicated key, at least 32 random characters. A shorter value fails closed instead of falling back. |
+| 2 | `HASH_PEPPER` | Same derivation as 0.4.0, so deployments that already set a pepper keep outstanding cursors. |
+
+With neither, conversation routes return 503 `config-unavailable`. Callers that
+can manage conversations also get `details.reason` (`missing` or
+`cursor-key-too-short`); other callers get only the code. Tasks, records,
+artifacts and settings are unaffected.
+
+To enable conversations on a deployment without `HASH_PEPPER`:
+
+```bash
+openssl rand -base64 32 | wrangler secret put CONVERSATION_CURSOR_KEY
+```
+
+This changes no credential hash, so tokens and sessions keep working. Do not set
+or rotate `HASH_PEPPER` to enable conversations: it changes every stored
+credential hash; see [Rotate `HASH_PEPPER`](#rotate-hash_pepper).
+
+Adding, rotating or removing the winning secret invalidates outstanding
+conversation cursors only. History and inbox page requests that carry an old
+cursor get 400 `invalid-cursor`; restart them without a cursor. Pending
+deliveries, messages, credentials and sessions are unaffected.
 
 | Symptom | Recovery |
 |---------|----------|
