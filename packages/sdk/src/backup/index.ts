@@ -220,7 +220,7 @@ async function exportLocal(
 ): Promise<ProjectBackupManifest> {
   const startedAt = Date.now();
   const temporary = ensureOutputAvailable(options.output);
-  const { sql, close } = await createNodeConnection(options.source.dbPath, {
+  const { sql, db, close } = await createNodeConnection(options.source.dbPath, {
     skipFilesystemCheck: true,
   });
   const sessionId = control?.sessionId ?? randomUUID();
@@ -233,6 +233,7 @@ async function exportLocal(
       owner,
       ttlMs: 300_000,
     });
+    if (control?.keepLock) queueBackupOps.assertRestoreQuiescent(db);
     const pack = tar.pack();
     const file = createWriteStream(temporary, { flags: "wx", mode: 0o600 });
     const writing = pipeline(pack, file);
@@ -447,7 +448,12 @@ async function exportLocal(
       },
     };
   } finally {
-    if (!finished) rmSync(temporary, { force: true });
+    if (!finished) {
+      rmSync(temporary, { force: true });
+      const state = projectTransferOps.getTransferState(sql);
+      if (state?.session_id === sessionId && state.mode === "export")
+        projectTransferOps.finishTransfer(sql, sessionId);
+    }
     close();
   }
 }
@@ -800,6 +806,7 @@ async function importLocal(
       skipFilesystemCheck: true,
     });
     try {
+      queueBackupOps.assertRestoreQuiescent(destination.db);
       destinationFences = queueBackupOps.readFenceWatermarks(destination.db);
     } finally {
       destination.close();

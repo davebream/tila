@@ -3,7 +3,7 @@ import {
   QueuePolicySchema,
   WorkAttemptSchema,
 } from "@tila/schemas";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import * as attempts from "./attempt-ops";
 import { type ProjectDatabase, QueueError, event } from "./queue-internals";
@@ -42,8 +42,9 @@ export function validateQueueBackupRow(
       suspension_requested: boolean.parse(row.suspension_requested),
     });
     if (
-      (attempt.state === "terminal") !==
-      (attempt.outcome !== null && attempt.finished_at !== null)
+      attempt.state === "terminal"
+        ? attempt.outcome === null || attempt.finished_at === null
+        : attempt.outcome !== null || attempt.finished_at !== null
     )
       throw new Error("Attempt terminal history is incomplete");
   }
@@ -67,6 +68,26 @@ export function validateQueueBackupRow(
     z.record(z.string(), z.unknown()).parse(json(row.result));
   }
 }
+/** Call under the destination transfer lock, before any snapshot rows are cleared. */
+export function assertRestoreQuiescent(db: ProjectDatabase): void {
+  if (
+    db
+      .select({ id: schema.workAttempts.id })
+      .from(schema.workAttempts)
+      .where(ne(schema.workAttempts.state, "terminal"))
+      .limit(1)
+      .get() ||
+    db
+      .select({ id: schema.executionReservations.task_id })
+      .from(schema.executionReservations)
+      .limit(1)
+      .get()
+  )
+    throw new QueueError(
+      "queue-conflict",
+      "Restore requires a quiescent destination: reconcile and finish managed executions, including suspended work and pending retries, before replacing the database",
+    );
+}
 export function readFenceWatermarks(
   db: ProjectDatabase,
 ): Record<string, number> {
@@ -86,6 +107,7 @@ export function readFenceWatermarks(
 export function preserveRestoreFences(db: ProjectDatabase): void {
   const state = db.select().from(schema.projectTransferState).get();
   if (!state || state.applying) return;
+  assertRestoreQuiescent(db);
   db.update(schema.projectTransferState)
     .set({ queue_fences_json: JSON.stringify(readFenceWatermarks(db)) })
     .where(eq(schema.projectTransferState.singleton, 1))
