@@ -64,6 +64,12 @@ export function CommandPalette({
         href: `${prefix}/agents`,
       },
       {
+        id: "nav:runtime",
+        label: "Go to Runtime",
+        group: "navigation",
+        href: `${prefix}/runtime`,
+      },
+      {
         id: "nav:tasks",
         label: "Go to Tasks",
         group: "navigation",

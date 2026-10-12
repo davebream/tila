@@ -21,6 +21,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      "@tila/core": path.resolve(__dirname, "../core/src/index.ts"),
       "@tila/schemas": path.resolve(__dirname, "../schemas/src/index.ts"),
     },
   },

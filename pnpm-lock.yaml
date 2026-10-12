@@ -536,6 +536,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.104.1
         version: 5.104.1(react@19.3.0)
+      '@tila/core':
+        specifier: workspace:*
+        version: link:../core
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
