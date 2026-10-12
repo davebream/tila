@@ -101,3 +101,22 @@ describe("withBusyRetry (runtime-neutral, injected sleepSync)", () => {
     expect(sleeps).toBe(0);
   });
 });
+
+it("retries wrapped snapshot contention beyond the short default window when requested", () => {
+  let attempts = 0;
+  const delays: number[] = [];
+  const result = withBusyRetry(
+    () => {
+      if (++attempts < 8)
+        throw new Error("query failed", {
+          cause: new Error("SQLITE_BUSY_SNAPSHOT: database is locked"),
+        });
+      return "committed";
+    },
+    (ms) => delays.push(ms),
+    9,
+  );
+  expect(result).toBe("committed");
+  expect(delays).toHaveLength(7);
+  expect(delays.reduce((a, b) => a + b, 0)).toBeLessThan(13000);
+});

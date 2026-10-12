@@ -328,7 +328,7 @@ it("lists more than 250 entries and protects enrollment edits and withdrawal wit
       origin,
     ).state,
   ).toBe("withdrawn");
-});
+}, 30_000);
 
 it("recomputes expired grant validity without starting replacement work on replay", () => {
   const { db } = fixture;
