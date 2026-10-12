@@ -1,3 +1,10 @@
+const human = vi.hoisted(() => ({ get: vi.fn(), request: vi.fn() }));
+vi.mock("../../lib/human-login", () => ({
+  assertHumanCommand: vi.fn(),
+  humanSessionStore: () => ({ get: human.get }),
+  humanRequest: human.request,
+  loginWorkerUrl: (url: string) => url.replace(/\/$/, ""),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../config", () => ({
@@ -22,6 +29,7 @@ describe("tila open", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    human.get.mockResolvedValue(null);
     vi.resetModules();
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -70,6 +78,39 @@ describe("tila open", () => {
       expect.any(Function),
     );
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("uses the remembered login to print a single-use browser link", async () => {
+    const { findConfig } = await import("../../config");
+    vi.mocked(findConfig).mockReturnValue({
+      project_id: "test-proj",
+      schema_version: 1,
+      tila_version: "0.1.0",
+      created_at: "2026-05-21T00:00:00Z",
+      backend: "cloudflare",
+      worker_url: "https://test.workers.dev/",
+    });
+    human.get.mockResolvedValue({
+      token: "tila_u_device",
+      expiresAt: Date.now() + 60_000,
+    });
+    human.request.mockResolvedValue({
+      url: "https://test.workers.dev/handoff#single-use",
+    });
+    const command = await import("../../commands/open");
+    await runCmd(command.default, { print: true });
+    expect(human.request).toHaveBeenCalledWith(
+      "https://test.workers.dev",
+      "/handoff",
+      {},
+      "tila_u_device",
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      "https://test.workers.dev/handoff#single-use",
+    );
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("tila_u_device"),
+    );
   });
 
   it("prints URL to stdout and does not call execFile when --print flag is set", async () => {

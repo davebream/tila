@@ -32,6 +32,8 @@ export default defineConfig({
         r2Buckets: ["ARTIFACTS"],
         bindings: {
           HASH_PEPPER: "runtime-test-conversation-pepper",
+          AUTH_SECRET: "runtime-test-human-session-secret-at-least-32",
+          INFRA_ADMIN_TOKEN: "runtime-test-infra-owner",
           TEST_MIGRATIONS: await readD1Migrations(
             resolve(root, "packages/worker/migrations/global"),
           ),

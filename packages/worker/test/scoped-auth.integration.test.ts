@@ -1,3 +1,4 @@
+import { D1SessionStore } from "@tila/backend-d1";
 import {
   CAPABILITIES,
   type CredentialPolicy,
@@ -438,8 +439,19 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
       token: key.plaintext,
       project_id: "p",
     });
-    expect(exchange.status).toBe(200);
-    const cookie = exchange.headers.get("Set-Cookie")?.split(";")[0];
+    expect(exchange.status).toBe(410);
+    const raw = crypto.randomUUID();
+    await new D1SessionStore(f.db).create({
+      sessionHash: await hashToken(raw, env.HASH_PEPPER),
+      projectId: "p",
+      tokenHash: await hashToken(key.plaintext, env.HASH_PEPPER),
+      actorName: key.name,
+      principalId: key.principal_id,
+      scopes: "scoped-v1",
+      permission: "read",
+      expiresAt: Date.now() + 3600_000,
+    });
+    const cookie = `tila_session=${raw}`;
     expect(
       (
         await request(
@@ -492,7 +504,7 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
           project_id: "p",
         })
       ).status,
-    ).toBe(403);
+    ).toBe(410);
   });
   it("lets an owner create, rotate, list and revoke a scoped credential without revealing hashes", async () => {
     const owner = await issue({

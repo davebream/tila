@@ -132,185 +132,25 @@ beforeEach(() => {
 });
 
 describe("POST /auth/session", () => {
-  const VALID_TOKEN_RESULT = {
-    projectId: "test-project",
-    name: "test-token",
-    scopes: "full",
-    tokenId: "uuid-123",
-  };
-
-  it("valid token returns 200 with Set-Cookie header", async () => {
-    mockTokenValidate.mockResolvedValue(VALID_TOKEN_RESULT);
-    const app = makeExchangeApp();
-
-    const res = await app.request(
-      "/auth/session",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: "tila_test_token_123",
-          project_id: "test-project",
-        }),
-      },
-      testEnv,
-      mockCtx,
-    );
-
-    expect(res.status).toBe(200);
-    const setCookie = res.headers.get("Set-Cookie");
-    expect(setCookie).toContain("tila_session=");
-    expect(setCookie).toContain("HttpOnly");
-    // localhost = local dev → SameSite=Lax (SameSite=None requires Secure/HTTPS)
-    expect(setCookie).toContain("SameSite=Lax");
-    expect(setCookie).not.toContain("SameSite=Strict");
-    expect(setCookie).toContain("Path=/");
-    expect(setCookie).toContain("Max-Age=28800");
-
-    const body = (await res.json()) as { ok: boolean };
-    expect(body.ok).toBe(true);
-  });
-
-  it("invalid token returns 401", async () => {
-    mockTokenValidate.mockResolvedValue(null);
-    const app = makeExchangeApp();
-
-    const res = await app.request(
-      "/auth/session",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: "invalid_token",
-          project_id: "test-project",
-        }),
-      },
-      testEnv,
-      mockCtx,
-    );
-
-    expect(res.status).toBe(401);
-  });
-
-  it("missing body fields returns 400", async () => {
-    const app = makeExchangeApp();
-
-    const res = await app.request(
-      "/auth/session",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      },
-      testEnv,
-      mockCtx,
-    );
-
-    expect(res.status).toBe(400);
-  });
-
-  it("token for wrong project returns 401", async () => {
-    mockTokenValidate.mockResolvedValue({
-      ...VALID_TOKEN_RESULT,
-      projectId: "other-project",
-    });
-    const app = makeExchangeApp();
-
-    const res = await app.request(
-      "/auth/session",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: "tila_token",
-          project_id: "test-project",
-        }),
-      },
-      testEnv,
-      mockCtx,
-    );
-
-    expect(res.status).toBe(401);
-  });
-
-  it("rate limited IP returns 429", async () => {
-    mockRateLimitCheck.mockResolvedValue(true);
-    const app = makeExchangeApp();
-
-    const res = await app.request(
-      "/auth/session",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "CF-Connecting-IP": "1.2.3.4",
+  it.each(["tila_valid", "tila_invalid", ""])(
+    "rejects API-token browser login (%s)",
+    async (token) => {
+      const response = await makeExchangeApp().request(
+        "/auth/session",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, project_id: "test-project" }),
         },
-        body: JSON.stringify({
-          token: "tila_token",
-          project_id: "test-project",
-        }),
-      },
-      testEnv,
-      mockCtx,
-    );
-
-    expect(res.status).toBe(429);
-  });
-
-  it("WI-I: session exchange checks the shared exchange:${ip} counter (not bare ip)", async () => {
-    const app = makeExchangeApp();
-
-    await app.request(
-      "/auth/session",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "CF-Connecting-IP": "1.2.3.4",
-        },
-        body: JSON.stringify({
-          token: "tila_token",
-          project_id: "test-project",
-        }),
-      },
-      testEnv,
-      mockCtx,
-    );
-
-    expect(mockRateLimitCheck).toHaveBeenCalledWith(
-      "exchange:1.2.3.4",
-      expect.any(Number),
-      expect.any(Number),
-    );
-  });
-
-  it("WI-I: failed session exchange records a failure on the shared exchange:${ip} counter", async () => {
-    mockTokenValidate.mockResolvedValue(null); // invalid token → 401 + recordFailure
-    const app = makeExchangeApp();
-
-    const res = await app.request(
-      "/auth/session",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "CF-Connecting-IP": "1.2.3.4",
-        },
-        body: JSON.stringify({
-          token: "tila_bad",
-          project_id: "test-project",
-        }),
-      },
-      testEnv,
-      mockCtx,
-    );
-
-    expect(res.status).toBe(401);
-    expect(mockRateLimitRecordFailure).toHaveBeenCalledWith(
-      "exchange:1.2.3.4",
-      expect.any(Number),
-    );
-  });
+        testEnv,
+        mockCtx,
+      );
+      expect(response.status).toBe(410);
+      expect(response.headers.get("Set-Cookie")).toBeNull();
+      expect(mockTokenValidate).not.toHaveBeenCalled();
+      expect(mockSessionCreate).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("POST /auth/logout", () => {
@@ -357,7 +197,10 @@ describe("POST /auth/logout", () => {
       "/auth/logout",
       {
         method: "POST",
-        headers: { Cookie: "tila_session=some-session-uuid" },
+        headers: {
+          Cookie: "tila_session=some-session-uuid",
+          Origin: "http://localhost",
+        },
       },
       testEnv,
       mockCtx,
@@ -384,7 +227,10 @@ describe("POST /auth/logout", () => {
       "https://tila.example.workers.dev/auth/logout",
       {
         method: "POST",
-        headers: { Cookie: "tila_session=some-session-uuid" },
+        headers: {
+          Cookie: "tila_session=some-session-uuid",
+          Origin: "https://tila.example.workers.dev",
+        },
       },
       testEnv,
       mockCtx,
