@@ -19,7 +19,7 @@ import {
   listTasks,
   searchArtifacts,
 } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type {
   ArtifactSearchResponse,
   RecordGetResponse,
@@ -124,12 +124,18 @@ export function usePresence() {
   });
 }
 
+/** Unexpired signal history, newest first, paged with the server cursor. */
 export function useSignalHistory() {
   const { projectId } = useAuth();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ["signal-history", projectId],
-    queryFn: () =>
-      listSignalHistory(requireProjectId(projectId), { limit: 100 }),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      listSignalHistory(requireProjectId(projectId), {
+        limit: 50,
+        cursor: pageParam,
+      }),
+    getNextPageParam: (page) => page.next_cursor ?? undefined,
     enabled: Boolean(projectId),
     refetchInterval: 5000,
   });

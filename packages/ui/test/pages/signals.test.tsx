@@ -1,4 +1,5 @@
 import { SignalsPage } from "@/pages/signals";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, delay } from "msw";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor } from "../test-utils";
@@ -97,7 +98,13 @@ describe("SignalsPage", () => {
     expect(await screen.findByText("sig-1")).toBeInTheDocument();
     expect(screen.getByText("group reviewers")).toBeInTheDocument();
     expect(screen.getByText(/Alice · cli · mac-a/)).toBeInTheDocument();
-    expect(screen.getByText("1/1")).toBeInTheDocument();
+    expect(screen.getByText("1/1 acknowledged")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "task:T-1" })).toHaveAttribute(
+      "href",
+      "/p/test-project/tasks/T-1",
+    );
+    // Expiry is a live countdown; a few milliseconds may pass before render.
+    expect(screen.getByText(/^in (1m|5\ds)$/)).toBeInTheDocument();
     expect(screen.getByText(/acked: Bob · mcp · linux-b/)).toBeInTheDocument();
     expect(screen.getByText("principal-b")).toBeInTheDocument();
   });
@@ -120,8 +127,59 @@ describe("SignalsPage", () => {
     );
 
     renderWithProviders(<SignalsPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Requires maintainer role",
+    expect(
+      await screen.findByText(/Signal history requires admin access/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No unexpired signals.")).toBeNull();
+  });
+
+  test("shows payloads and pages through history with the server cursor", async () => {
+    const now = Date.now();
+    const identity = {
+      principal_id: "principal-a",
+      participant_id: "participant-a",
+      display_name: null,
+      environment: {},
+    };
+    const signal = (id: string, payload?: unknown) => ({
+      id,
+      target: { type: "broadcast" },
+      kind: "info",
+      ...(payload === undefined ? {} : { payload }),
+      sender: identity,
+      created_at: now - 1_000,
+      expires_at: now + 3_600_000,
+      deliveries: [
+        { recipient: identity, acknowledged_at: null, acknowledged_by: null },
+      ],
+    });
+    const cursors: (string | null)[] = [];
+    server.use(
+      http.get(historyUrl, ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        cursors.push(cursor);
+        return HttpResponse.json(
+          cursor
+            ? { ok: true, signals: [signal("sig-old")], next_cursor: null }
+            : {
+                ok: true,
+                signals: [signal("sig-new", { branch: "hotfix" })],
+                next_cursor: "page-2",
+              },
+        );
+      }),
+      http.get(groupsUrl, () => HttpResponse.json({ ok: true, groups: [] })),
     );
+
+    renderWithProviders(<SignalsPage />);
+    expect(await screen.findByText("sig-new")).toBeInTheDocument();
+    expect(screen.getByText(/"branch": "hotfix"/)).toBeInTheDocument();
+    expect(screen.getByText(/stored, pending/)).toBeInTheDocument();
+    expect(screen.getByText(/absence is not evidence/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("sig-old")).toBeInTheDocument();
+    expect(screen.getByText("No payload")).toBeInTheDocument();
+    expect(cursors).toContain("page-2");
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 });
