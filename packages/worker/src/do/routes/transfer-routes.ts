@@ -32,7 +32,12 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
         safetyArchive?: string;
         ttlMs?: number;
       }>();
-      const state = projectTransferOps.beginTransfer(sql, body);
+      const state = deps.ctx.storage.transactionSync(() => {
+        const existing = projectTransferOps.getTransferState(sql);
+        if (body.mode !== "export" && !existing)
+          queueBackupOps.assertRestoreQuiescent(deps.db);
+        return projectTransferOps.beginTransfer(sql, body);
+      });
       return c.json({ state });
     } catch (error) {
       if (error instanceof projectTransferOps.TransferConflictError) {
@@ -55,13 +60,24 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       archiveDigest: string;
       safetyArchive?: string;
     }>();
-    projectTransferOps.promoteTransfer(
-      sql,
-      body.sessionId,
-      body.mode,
-      body.archiveDigest,
-      body.safetyArchive ?? null,
-    );
+    try {
+      deps.ctx.storage.transactionSync(() => {
+        queueBackupOps.assertRestoreQuiescent(deps.db);
+        projectTransferOps.promoteTransfer(
+          sql,
+          body.sessionId,
+          body.mode,
+          body.archiveDigest,
+          body.safetyArchive ?? null,
+        );
+      });
+    } catch (error) {
+      // A rejected preflight must leave the destination available for reconciliation.
+      const state = projectTransferOps.getTransferState(sql);
+      if (state?.session_id === body.sessionId && state.mode === "export")
+        projectTransferOps.finishTransfer(sql, body.sessionId);
+      throw error;
+    }
     return c.json({ ok: true });
   });
 

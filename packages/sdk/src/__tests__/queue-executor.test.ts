@@ -255,3 +255,52 @@ describe("repository execution helper with real embedded queue", () => {
     await expect(other.step(f.id)).rejects.toThrow("another worker");
   });
 });
+
+it.each(["running", "unknown"] as const)(
+  "reconciles an expired accepted lease observed as %s without waiting for a sweep",
+  async (state) => {
+    const f = await fixture();
+    const running = await f.executor().step(f.id);
+    const now = vi
+      .spyOn(Date, "now")
+      .mockReturnValue((running.attempt.lease_expires_at ?? Date.now()) + 1);
+    try {
+      if (state === "unknown")
+        f.observe({ state, reason: "runtime disconnected" });
+      const recovered = await f.executor().step(f.id);
+      expect(recovered.attempt.state).toBe(
+        state === "running" ? "running" : "uncertain",
+      );
+      expect(recovered.grant_valid).toBe(state === "running");
+      if (state === "running")
+        expect(recovered.attempt.fence).toBeGreaterThan(running.attempt.fence);
+      expect(f.adapter.start).toHaveBeenCalledTimes(1);
+      expect((await f.backend.queue.inspect()).counts.execution).toBe(1);
+    } finally {
+      now.mockRestore();
+    }
+  },
+);
+
+it("releases an expired unaccepted reservation without launching", async () => {
+  const f = await fixture();
+  const before = await f.backend.attempts.get(f.id);
+  const now = vi
+    .spyOn(Date, "now")
+    .mockReturnValue((before.attempt.lease_expires_at ?? Date.now()) + 1);
+  try {
+    expect((await f.executor().step(f.id)).attempt).toMatchObject({
+      state: "terminal",
+      accepted_at: null,
+      outcome: { status: "abandoned", execution_stopped: true },
+    });
+    expect(f.adapter.start).not.toHaveBeenCalled();
+    expect((await f.backend.queue.inspect()).counts).toMatchObject({
+      execution: 0,
+      wip: 0,
+      backlog: 1,
+    });
+  } finally {
+    now.mockRestore();
+  }
+});

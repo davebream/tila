@@ -2149,7 +2149,7 @@ D1-before-Worker ordering for slice 1. The stacked PRs remain held for explicit
 authentication-boundary review; passing UI or connector fixtures is not live
 multi-account acceptance. See the versioned [acceptance evidence](evidence/issue-283-acceptance-v3.json).
 
-## Managed queue backend activation and recovery
+## Managed queue activation and recovery
 
 Managed dispatch is disabled and paused by default. Install lifecycle metadata
 for each dispatched work type before enrolling work. Read the current schema and
@@ -2182,9 +2182,10 @@ execution occupancy.
 Restored projects stay paused and invalidate old authority. Reconcile every saved
 execution before enabling admission. Rollback is to pause, preserve durable state,
 and retain completion/reconciliation endpoints. Do not downgrade to a version
-that ignores managed-task guards or remove queue tables. The repository adapter,
-queue UI and broader live coding-runtime acceptance are delivered separately from
-this backend contract.
+that ignores managed-task guards or remove queue tables. The SDK execution helper,
+CLI, MCP tools and Queue dashboard use this shared contract. Actual coding-provider
+and multi-host release evidence remains governed by #283; fixture processes do not
+satisfy those separate live-runtime obligations.
 
 ### Queue dashboard
 
@@ -2212,3 +2213,84 @@ refreshes show the last known state with a stale notice. Revision conflicts reta
 form input: inspect the updated state, choose **Use latest revision**, and submit
 again. Task links keep their existing URLs, and a task-scoped queue link works
 regardless of which list page contains its enrollment.
+
+
+### Queue rollout and diagnostics
+
+1. Deploy code with the queue disabled. Confirm `/api/health` advertises
+   `managed-queue-v1`. Existing task creation and un-enrolled claims keep their
+   previous behavior.
+2. Review and apply revision-aware lifecycle metadata. Explicitly distinguish
+   dependency success from cancellation/failure. Configure start/outcome mappings
+   only when Tila should change task status; otherwise the repository owns it.
+   A retry still needs a dispatchable task, so map failure/abandonment to an eligible
+   status if the project expects immediate replacement.
+3. Enable an isolated fixture project with a positive execution limit and optional
+   WIP limit. Enroll work explicitly. Run the SDK example in
+   `packages/sdk/examples/queue-worker/README.md` with an executable/argument array,
+   stable worker principal/participant and durable launch directory. Test stop,
+   restart, cancellation and unknown execution before connecting a real pipeline.
+4. Enable a real project explicitly after its adapter's duplicate detection and
+   session inspection have been verified. One orchestrator may enroll/target and
+   start wrappers; each wrapper obtains its own grant. Ten hosts with ten wrappers
+   share the same project capacity. Independent local database files do not.
+5. Roll back operationally by pausing admission. Keep completion, heartbeat,
+   cancellation and reconciliation endpoints available. Do not evict workers by
+   reducing limits, delete reservations or run old code that ignores managed work.
+
+`queue.inspect` (SDK), `tila queue inspect --json`, `tila_queue` with `inspect`,
+and the dashboard return the same policy, queue counts and eligibility reasons.
+The inspection's `diagnostics` object reports project-wide operational totals from
+retained journal rows in the last 24 hours: grant denials by reason, expired
+unaccepted reservations, uncertainty events, reconnections/stopped reconciliations,
+retries and forced abandonments. Receipt replay does not count another denial.
+These are retained-event totals, not lifetime counters; archival or restoration
+can reduce coverage. Current execution/WIP occupancy and expired accepted leases
+come from durable state and remain authoritative regardless of journal retention.
+A stored running attempt with an expired lease has no execution authority even
+before a sweep changes its state. The dashboard flags those leases, and admission
+and mutation paths reconcile expiry before granting authority.
+
+SDK helpers inspect a recorded session before external actions after a restart.
+Expired accepted work is reconciled to the same session with fresh authority or
+left uncertain; an unaccepted expired reservation is released without launching.
+A revision conflict causes another inspection, never a blind repeat of a launch.
+A lost authority signal cannot undo an external effect already performed.
+
+### Queue restore preflight
+
+Replacing a project requires a quiescent destination: no nonterminal attempts and
+no execution/WIP reservations, including suspended work and pending retries. The
+check runs under the transfer lock before deleting rows or swapping the local
+file. Rejected fresh imports and safety-export promotions preserve current state
+and release their lock so executions can finish. Inspect and reconcile existing
+sessions first; force recovery is not a way to prove they stopped and creates a
+replacement reservation that also blocks restore until resolved.
+
+Exports may contain active, suspended and uncertain source work. Importing those
+snapshots into an empty or quiescent destination preserves history and permanent
+receipts, advances fences beyond both source and destination, revokes old grants,
+marks unfinished executions uncertain and pauses dispatch. Confirm a checkpoint
+is still safely suspended before releasing its execution slot. Older compatible
+prequeue snapshots restore with dispatch disabled. A snapshot cannot reconstruct
+external work omitted from that snapshot: keep the verified safety backup and
+reconcile against the runtime's durable launch records before enabling work.
+
+### Queue acceptance evidence
+
+| Boundary | Repeatable evidence | What it proves |
+|---|---|---|
+| Shared contract | `packages/integration-tests/src/queue-conformance.ts`, invoked by embedded and required Worker runtime tests | Identical public operations for ordering, capability/target filtering, execution/WIP separation, pause/resume, cancellation, receipts and force recovery |
+| Distributed admission | `packages/integration-tests/runtime/queue.test.ts` and `queue-api.test.ts` | 100 concurrent consumers with limit 20, duplicate requests, real DO SQLite atomicity and eviction/cold-start persistence; authenticated D1 membership and scope checks |
+| Shared local file | `packages/ops-sqlite/test/queue-contention.test.ts` | Separate Node and Bun processes contend on one WAL database with embedded busy retries |
+| Recovery and compatibility | Queue/attempt operations, SDK executor, backup, upgrade and required `queue-restore.test.ts` suites | Expiry without timely sweeps, stale fences, outcomes, retries, active-destination restore rejection and prequeue restore/upgrade |
+| Client surfaces | CLI/MCP integration tests and `packages/ui/test/pages/queue.test.tsx` | Equivalent backend actions, >250 entries, permission/query failures and retained input after conflicts |
+| Foreground OS processes | `packages/sdk/examples/queue-worker/process-adapter.test.mjs` on macOS locally and Linux CI | Attempt-keyed launch deduplication, restart inspection, observed exits and cooperative cancellation using real OS processes |
+
+The authenticated browser fixture uses isolated local Worker/DO/D1 state with
+260 enrolled items. It exercises pagination, pause/resume, durable cancellation
+intent and a failed permission query while retaining queue data. Its execution
+records are simulated. The OS fixture launches Node foreground processes, not
+coding-provider sessions. Neither is evidence that an unreachable coding runtime
+was forcibly stopped. Broader issue acceptance stays open where these queue
+scenarios satisfy only one portion (#300/#305/#301, #308/#193 and #283).

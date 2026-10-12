@@ -126,7 +126,21 @@ export class QueueExecutor {
       throw new Error("This executor is already processing the attempt");
     this.busy.add(id);
     try {
-      return await this.advance(id, signal);
+      for (let retry = 0; ; retry++) {
+        try {
+          return await this.advance(id, signal);
+        } catch (error) {
+          // Expiry or an operator action can advance the revision between read
+          // and reconciliation. Inspect again; never repeat a runtime action blindly.
+          if (
+            retry < 2 &&
+            error instanceof TilaApiError &&
+            error.code === "queue-precondition"
+          )
+            continue;
+          throw error;
+        }
+      }
     } finally {
       this.busy.delete(id);
     }
@@ -142,6 +156,23 @@ export class QueueExecutor {
       throw new QueueAuthorityLostError("Attempt belongs to another worker");
     if (view.attempt.state === "terminal") return view;
     if (view.attempt.state === "reserved") {
+      if (!view.grant_valid) {
+        // Materialize safe preaccept expiry without authorizing a launch.
+        const input = { ...this.revision(view), fence: view.attempt.fence };
+        try {
+          await this.command(() => this.backend.attempts.heartbeat(id, input));
+        } catch (error) {
+          if (
+            !(error instanceof TilaApiError) ||
+            error.code !== "queue-authority-lost"
+          )
+            throw error;
+        }
+        const expired = await this.backend.attempts.get(id);
+        if (this.owned(expired.attempt) && expired.attempt.state === "terminal")
+          return expired;
+        throw new QueueAuthorityLostError();
+      }
       if (view.attempt.cancellation_requested) {
         const input = {
           ...this.authority(view),
@@ -184,9 +215,24 @@ export class QueueExecutor {
       );
     }
     // Reading execution is always safe. Reconciliation never invents a replacement.
-    if (observed.state === "stopped" || view.attempt.state === "uncertain") {
-      if (observed.state === "absent" || observed.state === "unknown")
-        return view;
+    if (
+      observed.state === "stopped" ||
+      view.attempt.state === "uncertain" ||
+      (!view.grant_valid &&
+        ["starting", "running"].includes(view.attempt.state))
+    ) {
+      if (observed.state === "absent" || observed.state === "unknown") {
+        if (view.attempt.state === "uncertain") return view;
+        const input = {
+          ...this.revision(view),
+          observation: "unknown" as const,
+          reason:
+            observed.state === "unknown"
+              ? observed.reason
+              : "Authority expired without a confirmed execution record",
+        };
+        return this.command(() => this.backend.attempts.reconcile(id, input));
+      }
       const input = {
         ...this.revision(view),
         reason: "Repository adapter inspected the durable execution record",

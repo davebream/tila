@@ -389,3 +389,30 @@ it("requires a recovery reason and keeps session identity when rebinding ownersh
     }),
   );
 });
+
+it("warns about expired execution authority while retaining occupied capacity", async () => {
+  current = attempt({ lease_expires_at: Date.now() - 1 });
+  data.entries[0].attempt = current;
+  data.entries[0].entry.state = "admitted";
+  data.counts.execution = 1;
+  data.diagnostics = {
+    since: 0,
+    until: Date.now(),
+    source: "retained_journal",
+    grant_denials: {},
+    expired_reservations: 0,
+    uncertainty_events: 0,
+    reconciliations: 0,
+    retries: 0,
+    forced_abandonments: 0,
+    expired_execution_leases: 1,
+  };
+  renderQueue();
+  expect(
+    await screen.findByText(/execution leases have expired/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Authority expired — reconciliation required"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("1 / 20")).toBeInTheDocument();
+});

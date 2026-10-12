@@ -698,7 +698,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/health` | — | `{ ok: true, version, commit, apiVersion, minCliVersion }` — product release and source commit of the deployed build; `apiVersion`/`minCliVersion` are protocol compatibility |
+| GET | `/api/health` | — | `{ ok: true, version, commit, apiVersion, minCliVersion }` — product release and source commit of the deployed build; `apiVersion`/`minCliVersion` are protocol compatibility |
 | GET | `/whoami` | — | `{ token_name, scopes }` |
 | GET | `/schema` | — | `{ version, schema_toml }` |
 | POST | `/schema/apply` | `{ schema_toml, strategy?, dry_run? }` | `{ ok, new_version, changes, warnings }` |
@@ -1882,7 +1882,7 @@ A DO instance is evicted (idle eviction, or Cloudflare-initiated migration):
 If a DO is wiped (Cloudflare incident, manual reset via `tila reset`, accidental DO deletion):
 
 ```
-1. CLI calls /health, gets a 5xx or empty state.
+1. CLI calls /api/health, gets a 5xx or empty state.
 2. CLI calls `tila doctor` which reports the DO is uninitialized/inaccessible.
 3. Recovery options:
    a. Restore the latest verified archive with
@@ -2122,7 +2122,7 @@ Fully supported. Each project has its own Worker, D1, R2 bucket, and DO namespac
 Every tila command makes at least one Worker call. On network failure: CLI prints "could not reach Worker at <url>; check connection. Use `tila doctor --offline` for diagnostics that don't require network." Exit code 2. No offline fallback; the tool requires network access to operate (consistent with the agentic-coding-needs-network premise).
 
 ### 10.20 D1 daily write quota approaching
-Worker tracks daily write count in a `_quota` table (cheap: one row updated per write, with day rollover). When usage exceeds 80% of free-tier (80K writes/day), `/health` includes a warning. CLI surfaces the warning on `tila status`. At 100%, Cloudflare returns 429; CLI prints a clear "free tier write limit hit; consider upgrading or waiting until UTC midnight" message.
+Worker tracks daily write count in a `_quota` table (cheap: one row updated per write, with day rollover). When usage exceeds 80% of free-tier (80K writes/day), `/api/health` includes a warning. CLI surfaces the warning on `tila status`. At 100%, Cloudflare returns 429; CLI prints a clear "free tier write limit hit; consider upgrading or waiting until UTC midnight" message.
 
 ### 10.21 Framework consumer uses the same Claude API token as the user's interactive sessions
 Acceptable. The framework's autopilot pulls `ANTHROPIC_API_KEY` from env at session start. Sub-agent invocations are independent API calls. No coordination with the user's interactive Claude Code session is needed; both call the same API with separate contexts. tila has no opinion or involvement here — LLM credentials never reach the Worker.
@@ -2197,7 +2197,7 @@ The Worker-driven sweep should keep these in sync, but if a manual R2 delete hap
 The artifact upload sequence guarantees that if R2 succeeds and the DO write fails, the R2 blob is orphaned but recoverable. `tila doctor --reconcile` walks R2 prefixes, finds blobs without pointer rows, synthesizes pointer rows from R2 object metadata (the metadata carries `x-amz-meta-tila-resource`, `-fence`, `-kind`, etc.), and emits `artifact.reconciled` journal events. Worst-case window: ~24h until the next reconcile cron run, configurable. The CLI returns an error to the caller in real time so they know not to assume success.
 
 ### 10.46 Worker Smart Placement disabled or unsupported
-Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region (Cloudflare's figures; tila does not measure the hop in isolation). `tila doctor` reports the placement mode and Worker→DO latency from a `/health` probe; the benchmark harness records the serving colo and `cf-placement` header with every deployed run.
+Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region (Cloudflare's figures; tila does not measure the hop in isolation). `tila doctor` reports the placement mode and Worker→DO latency from a `/api/health` probe; the benchmark harness records the serving colo and `cf-placement` header with every deployed run.
 
 ### 10.47 D1 token validation cache hit/miss
 The Worker caches token validation results in a per-isolate Map for 60 seconds after first validation. Cache miss = D1 lookup; cache hit = ~1ms. When `DELETE /api/tokens/:name` is called, D1 is updated immediately and the calling Worker isolate's in-memory cache entry is invalidated synchronously via `invalidate(tokenHash)`. Other isolates that have the token positively cached will continue accepting it until their cache entry expires (max 60 seconds TTL). The `tila token revoke` CLI output notes this propagation delay. Cross-isolate immediate invalidation (via a revocation marker or broadcast mechanism) is deferred to v0.2.
@@ -2276,7 +2276,7 @@ Note: D1 is shared across all tila projects in a Cloudflare account (one `tila-g
 2. Prompt user for the project's shared API token (or read from CI/secrets manager)
 3. Write .tila/.env locally
 4. Append .tila/.env to .gitignore (if not already)
-5. Test connection: GET <worker>/health
+5. Test connection: GET <worker>/api/health
 6. Print success
 ```
 

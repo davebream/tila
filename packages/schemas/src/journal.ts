@@ -3,6 +3,7 @@ import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 
 export const JournalEventKindSchema = z.enum([
   "queue.policy_changed",
+  "queue.grant_denied",
   "queue.enrolled",
   "queue.updated",
   "queue.withdrawn",

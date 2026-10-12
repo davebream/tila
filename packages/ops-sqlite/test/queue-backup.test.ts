@@ -160,3 +160,48 @@ it("rolls back restore normalization when enrollment history is inconsistent", (
   expect(db.select().from(schema.fences).all()).toEqual(before);
   expect(attempts.get(db, attempt.id)).toEqual(attempt);
 });
+
+it("refuses destructive restore while unfinished execution or retry reservations exist", () => {
+  const { db } = fixture;
+  let a = seedAttempt(db);
+  expect(() => backup.assertRestoreQuiescent(db)).toThrow(
+    "quiescent destination",
+  );
+  a = attempts.accept(db, a.id, authority(a), origin).attempt;
+  a = recovery.forceRecovery(
+    db,
+    a.id,
+    {
+      idempotency_key: "force",
+      expected_revision: a.revision,
+      reason: "Operator accepts unresolved execution",
+    },
+    origin,
+    true,
+  ).attempt;
+  expect(a.state).toBe("terminal");
+  expect(() => backup.assertRestoreQuiescent(db)).toThrow(
+    "quiescent destination",
+  );
+});
+it.each(["outcome", "finished_at"])(
+  "rejects a nonterminal backup with partial terminal history: %s",
+  (field) => {
+    seedAttempt(fixture.db);
+    const a = fixture.rawDb
+      .prepare("SELECT * FROM work_attempts")
+      .get() as Record<string, unknown>;
+    a[field] =
+      field === "finished_at"
+        ? Date.now()
+        : JSON.stringify({
+            status: "success",
+            execution_stopped: true,
+            unresolved_external_execution: false,
+            evidence: [],
+          });
+    expect(() => backup.validateQueueBackupRow("work_attempts", a)).toThrow(
+      "terminal history",
+    );
+  },
+);

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { QueueExecutor, createTila } from "tila-sdk";
+import { QueueExecutor, TilaApiError, createTila } from "tila-sdk";
 import { ProcessAdapter } from "./process-adapter.mjs";
 
 // Configuration is an explicit file. Secrets are read from the environment.
@@ -29,10 +29,19 @@ try {
     const pending = [];
     await Promise.all(
       ids.map(async (id) => {
-        const result = await executor.step(id, controller.signal);
-        console.log(JSON.stringify(result));
-        if (!["terminal", "uncertain"].includes(result.attempt.state))
-          pending.push(id);
+        try {
+          const result = await executor.step(id, controller.signal);
+          console.log(JSON.stringify(result));
+          if (!["terminal", "uncertain"].includes(result.attempt.state))
+            pending.push(id);
+        } catch (error) {
+          if (
+            error instanceof TilaApiError &&
+            error.code === "queue-precondition"
+          ) {
+            pending.push(id); // Concurrent intent changed: inspect again on the next poll.
+          } else throw error;
+        }
       }),
     );
     ids = pending;
