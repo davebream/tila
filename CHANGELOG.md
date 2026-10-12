@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-12
+
+### Upgrade notes
+
+- Deploy the Worker before upgrading clients. There is no new D1 migration. Shared DO/embedded migrations 32 to 35 apply on the first request after deploy. Migration 35 rebuilds each project's task search index once, so that first request waits for the rebuild.
+- `tila-sdk`, `tila-mcp-server` and the CLI now use zod 4. Code that mixes its own zod schemas with the SDK's exported schemas needs zod 4 too (see Zod 4 below).
+- `GET /tasks` rejects an unknown `sort` or `order` with 400 instead of falling back to `created_at`. `GET /search` now needs `records:read` and `artifacts:read` to return record and artifact results; `search:read` alone returns tasks only. Record lists default to key order and return a real `next_cursor` instead of `"truncated"`.
+- Installed CLIs can now run `tila deploy` and `tila infra provision`. Every earlier binary release failed with `ENOENT ... migrations/global`.
+- Conversations no longer need `HASH_PEPPER`. Set `CONVERSATION_CURSOR_KEY` to enable them without touching credential hashing.
+- The managed work queue ships disabled. Nothing is dispatched until a maintainer enables a project and sets a positive execution limit.
+
+### Managed work queue (#303)
+
+- Repository-owned pipelines can enroll tasks in a shared project queue and admit work atomically: one SQLite transaction checks policy, lifecycle eligibility, targeting, capabilities and separate execution/WIP capacity, then creates the claim, the execution attempt and a durable grant receipt.
+- Attempts support confirmed suspension and same-attempt resume, durable cancellation, reconciliation of uncertain execution, ownership rebinding, force recovery with a recorded reason, and opt-in bounded retry. An expired accepted execution stays uncertain and keeps its capacity; it never authorizes a duplicate.
+- The queue is available through HTTP, `tila-sdk` (`queue`, `attempts`), `tila queue` / `tila attempt` CLI commands, two MCP tools and local embedded mode. `QueueExecutor` runs queued work through a repository adapter; a foreground-process example for macOS and Linux shows restart recovery.
+- Backups include queue state (`managed-queue-v1`). Restore pauses dispatch, raises fences above both source and destination, requires reconciliation of saved executions, and refuses a destination that still has unfinished executions or retained WIP.
+- Roll back by pausing admission. Do not downgrade to code that ignores managed-task guards, and do not delete queue state.
+
+### Configuration revisions and lifecycle readiness
+
+- Schema/configuration writes can carry the revision the editor reviewed. Stale writes fail with 412, destructive writes without the reviewed definition fail with 428, and exact retries replay their receipt. History and preview work in remote and embedded SDKs, the CLI and MCP.
+- Work definitions can declare their lifecycle field, dispatchable, terminal and successful states. Readiness uses them and reports dependency, gate and cycle reasons; unconfigured types keep the old rules. The checked-in task definition now separates `done` from `cancelled`.
+
+### Catalogs, paging and search (#300)
+
+- `GET /tasks/~/types` lists every work type the caller can read, including declared types with no rows and undeclared types that still have rows, with counts and the type definition. `GET /records/_types` adds the same catalog as `entries`, plus `scope`.
+- Schemas can declare optional display-only `presentation` slots (`title`, `summary`, `description` for work; `title`, `summary`, `kind` for records).
+- `GET /tasks` adds a keyset cursor with a stable `id` tie-break; `GET /records/:type` and record history add cursors, `sort`, `order` and `key_contains`. A cursor reused with different filters returns `400 invalid-cursor`. `tila record list --cursor` continues a listing, and `tila record export` follows cursors instead of stopping at 200.
+- `GET /search` adds `kind`, `type`, `cursor`, `syntax=literal` and a `scope` that names the kinds searched and left out. Namespace-restricted credentials may now search.
+
+### Dashboard
+
+- Tasks page: server-side type filters, search and 100-row cursor paging with deep-linkable pages; titles and states come from the schema, never "Untitled". Task detail shows work content first, then fields, relationships, artifacts, the latest 20 history events and claim state, and each section fails on its own.
+- Records page uses the record catalog, pages through every record and marks types that are no longer declared.
+- New Queue view: filters, enrollment edits, withdrawal, pause/resume, capacity settings, and attempt details with cancel, suspend, resume, retry, reconcile, rebind and force recovery. The dashboard never launches or kills remote processes.
+- New Runtime tab (#301) shows which run, host, native session and account hold each agent mailbox, keeps the replaced occupant visible, and offers a staged Release command.
+- Message deliveries (#302): each room message shows delivery counts, and a Deliveries page and trace drawer show stored, wake, fetched, acknowledged and work result separately. Signals show payload, resource links, expiry countdown and recipient state, and page past 100.
+- Rooms show "Conversations are not configured" instead of a raw error when no cursor key is set.
+
 ### Zod 4
 
 - `tila-sdk`, `tila-mcp-server`, the CLI and the Worker now use zod 4 (`^4.6.6`). The schemas exported by `tila-sdk` (`CredentialPolicySchema`, `CapabilitySchema`, `NamespaceRestrictionsSchema`) are zod 4 schemas, and `RequestOptions.schema` takes a zod 4 `ZodType`. Code that combines them with its own zod schemas needs zod 4.
@@ -17,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Release identity (#307)
 
 - `GET /api/health` now reports the product release `version` and full source `commit` of the deployed build, generated at build time from the root release marker. It previously always reported `0.1.0`. `apiVersion` and `minCliVersion` remain the separate protocol compatibility fields; `commit` is optional in `HealthResponseSchema` so older Workers still validate.
+
+### Fixes
+
+- Release binaries now include their deploy payload (Worker, UI, D1 migrations), verified against an embedded manifest and staged under `~/.tila/cache/deploy-payload/`. `tila deploy --dry-run` checks it without contacting Cloudflare.
+- Every release binary now contains its own `@napi-rs/keyring` native addon. In 0.5.0, `tila auth setup` failed with "Cannot find native binding" on all targets except linux-x64 glibc.
+- Artifact uploads that name a task by its claim resource (`task:<id>`) no longer fail with a retryable 502; unknown resources are rejected before any blob is written.
+- The Worker allows `X-Tila-Conversation-Protocol` in CORS preflight, so Rooms work when the UI runs on another origin (local development).
+- `scripts/dev-seed.sh` works again on a fresh local stack.
 
 ### Bootstrap token hashing (#307)
 
@@ -241,7 +289,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/davebream/tila/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/davebream/tila/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/davebream/tila/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/davebream/tila/compare/v0.2.7...v0.3.0
