@@ -1754,7 +1754,14 @@ describe("listRecords", () => {
     const result = recordOps.listRecords(db, { type: "svc", limit: 2 });
     expect(result.items).toHaveLength(2);
     expect(result.total).toBe(3);
-    expect(result.next_cursor).toBe("truncated");
+    expect(result.next_cursor).toEqual(expect.any(String));
+    const rest = recordOps.listRecords(db, {
+      type: "svc",
+      limit: 2,
+      cursor: result.next_cursor ?? undefined,
+    });
+    expect(rest.items).toHaveLength(1);
+    expect(rest.next_cursor).toBeNull();
   });
 });
 
@@ -1870,7 +1877,7 @@ describe("listRecordHistory", () => {
     });
     expect(result.items).toHaveLength(3);
     expect(result.total).toBe(5);
-    expect(result.next_cursor).toBe("truncated");
+    expect(result.next_cursor).toEqual(expect.any(String));
   });
 });
 
