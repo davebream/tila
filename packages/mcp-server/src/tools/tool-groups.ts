@@ -8,6 +8,7 @@ import { registerEntityTools } from "./entities";
 import { registerGateTools } from "./gates";
 import { registerJournalTools } from "./journal";
 import { registerPresenceTools } from "./presence";
+import { registerQueueTools } from "./queue";
 import { registerRecordTools } from "./records";
 import { registerSchemaTools } from "./schema";
 import { registerSignalTools } from "./signals";
@@ -27,6 +28,7 @@ export type RegisterFn = (
  */
 export const GROUP_MAP: Record<string, RegisterFn> = {
   workflow: registerWorkflowTools,
+  queue: registerQueueTools,
   tasks: registerEntityTools,
   claims: registerClaimTools,
   gates: registerGateTools,
@@ -77,7 +79,7 @@ export function parseToolGroups(env?: string): string[] | undefined {
  * Throws an actionable error if any unknown group name is found.
  */
 export function resolveGroups(groups: string[]): RegisterFn[] {
-  const expanded: string[] = [];
+  const expanded: string[] = groups.includes("workflow") ? ["queue"] : [];
   for (const g of groups) {
     if (g === "all") {
       for (const name of Object.keys(GROUP_MAP).filter(

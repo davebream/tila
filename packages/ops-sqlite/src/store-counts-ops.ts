@@ -8,6 +8,11 @@ import type * as schema from "./schema";
  * `_schema_history` is excluded from the domain set and returned separately as a diagnostic.
  */
 export const DOMAIN_TABLE_NAMES = [
+  "queue_operation_receipts",
+  "execution_reservations",
+  "work_attempts",
+  "queue_entries",
+  "queue_policy",
   "_conversation_state",
   "conversation_context",
   "dispatch_attempts",
@@ -88,6 +93,11 @@ export function countStoreRows(
 ): StoreCountsResult {
   return {
     domain: {
+      queue_policy: countTable(db, "queue_policy"),
+      queue_entries: countTable(db, "queue_entries"),
+      work_attempts: countTable(db, "work_attempts"),
+      execution_reservations: countTable(db, "execution_reservations"),
+      queue_operation_receipts: countTable(db, "queue_operation_receipts"),
       rooms: countTable(db, "rooms"),
       room_members: countTable(db, "room_members"),
       threads: countTable(db, "threads"),

@@ -40,6 +40,8 @@ export const groups: Record<string, string[]> = {
     "run",
   ],
   "Work and Coordination": [
+    "queue",
+    "attempt",
     "task",
     "state",
     "presence",
@@ -94,6 +96,10 @@ export const sharedArgs = {
 
 // Audited read-only operations. Unknown/new commands remain mutating until reviewed.
 const readOnly = new Set([
+  "queue policy",
+  "queue inspect",
+  "attempt get",
+  "attempt list",
   "machine list",
   "machine inspect",
   "run list",

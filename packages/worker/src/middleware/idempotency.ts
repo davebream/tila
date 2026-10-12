@@ -76,7 +76,9 @@ export function createIdempotencyMiddleware(deps?: {
     const key = `dp:${projectId}:${caller}:${c.req.method}:${c.req.path}:${clientKey}`;
     if (
       c.get("credentialPolicy") ||
-      /^\/projects\/[^/]+\/schema(?:\/|$)/.test(c.req.path)
+      /^\/projects\/[^/]+\/(?:schema|queue|attempts|claims)(?:\/|$)/.test(
+        c.req.path,
+      )
     ) {
       // Let the DO authorize every resource before its transactional replay.
       // D1 response replay would skip those checks after resource state changes.

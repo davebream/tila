@@ -61,6 +61,21 @@ export function routeCapability(
       .replace(/\/$/, "") || "/";
   const read = method === "GET" || method === "HEAD";
   const patterns: Array<[string, RegExp, Capability]> = [
+    ["GET", /^\/queue(?:\/policy)?$/, "tasks:read"],
+    ["POST", /^\/queue\/configure$/, "schema:write"],
+    ["POST", /^\/queue\/claim$/, "claims:acquire"],
+    [
+      "POST",
+      /^\/queue\/(?:enroll|entries\/[^/]+\/(?:edit|withdraw))$/,
+      "tasks:write",
+    ],
+    ["GET", /^\/attempts(?:\/[^/]+)?$/, "tasks:read"],
+    ["POST", /^\/attempts\/[^/]+\/(?:rebind|force-recovery)$/, "schema:write"],
+    [
+      "POST",
+      /^\/attempts\/[^/]+\/(?:accept|started|heartbeat|finish|request-suspension|confirm-suspension|request-resume|claim-resume|request-cancellation|reconcile|retry)$/,
+      "claims:renew",
+    ],
     [
       "GET",
       /^\/rooms(?:\/[^/]+(?:\/(?:messages|threads))?)?$/,
@@ -378,7 +393,9 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
         if (body?.source_artifact_key) return denied(c);
       }
       // The listed surfaces cannot safely project their cross-resource data.
-      if (!/^\/(tasks|records|claims|templates)(\/|$)/.test(path))
+      if (
+        !/^\/(tasks|records|claims|templates|queue|attempts)(\/|$)/.test(path)
+      )
         return denied(c);
       if (/^\/tasks\/ready(?:\/|$)/.test(path) || /artifact-refs/.test(path))
         return denied(c);

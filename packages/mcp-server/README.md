@@ -21,7 +21,9 @@ To launch a single process manually after enrollment:
 tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.4.0
 ```
 
-The parent supplies a run-specific socket capability. MCP never reads personal sessions, owner tokens, the ambient keychain, or a private SQLite database. `TILA_API_TOKEN`, `TILA_TOKEN`, `TILA_BACKEND=local`, `TILA_DB_PATH`, and `TILA_ARTIFACTS_PATH` are rejected. There is no compatibility switch. CLI/SDK local functionality and operator authentication are retained.
+The parent supplies a run-specific socket capability. Remote MCP never reads personal sessions, owner tokens or the ambient keychain. `TILA_API_TOKEN` and `TILA_TOKEN` are rejected.
+
+Explicit local mode uses `TILA_MODE=local`, `TILA_PROJECT_ID`, and absolute `TILA_DB_PATH` and `TILA_ARTIFACTS_PATH` paths. Set a stable `TILA_PARTICIPANT_ID` to reconnect after restart. It cannot be combined with remote credentials, `TILA_API_URL` or run bindings. Independent local databases do not share a queue; processes sharing one local database use the same SQLite coordination rules.
 
 ## Authentication and lifetime
 
@@ -31,7 +33,7 @@ Run credentials last at most 15 minutes and renew two minutes before expiry with
 
 MCP authenticates tools, resources, prompts, and discovery on every request. Reconnects reuse an active run. Native shared clients must provide an unambiguous session mapping; Codex uses request metadata `sessionId` or `threadId`, and Claude Code uses a verified native process mapping. Unsupported or missing metadata fails closed. Use one MCP process per run where reliable mapping is unavailable.
 
-The `worker` preset covers the six default workflows. It excludes deletion, governance, credentials, infrastructure, and gate resolution. Selecting extra tool groups changes visibility, never authority; denied operations return permission errors.
+The `worker` preset covers the default work operations. Queue administration still requires maintainer authority. It excludes deletion, governance, credentials, infrastructure, and gate resolution. Selecting extra tool groups changes visibility, never authority; denied operations return permission errors.
 
 Session shutdown saves a handoff, acknowledges observed events, and releases exact captured claims before closing authentication. Cleanup has a five-minute limit and reports incomplete work. Claims still obey their original lease/fence rules. `tila_close` only performs coordination cleanup; it does not terminate authentication. A replacement session gets a new run and participant and recovers through a handoff.
 
@@ -39,11 +41,20 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (70)
+## Tools (72)
 
-The default catalog contains **six workflow tools**. Primitive tools are opt-in with
+The default catalog contains **eight workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
 `workflow,artifacts`. Empty/unset selects `workflow`; compatibility aliases remain opt-in.
+
+### Managed queue
+
+| Tool | Purpose |
+| --- | --- |
+| `tila_queue` | Inspect, configure, enroll, edit, withdraw and claim managed work. |
+| `tila_attempt` | Accept, start, heartbeat, finish, suspend, resume, cancel, reconcile and retry attempts. |
+
+Both are included in `workflow` and can be selected with `TILA_MCP_TOOLS=queue`. Each accepts a typed `request` with an `action`. Mutations require an idempotency key and current revision where applicable. A grant reserves capacity; acceptance must commit before launch. Cancellation requests do not stop processes. Replayed grants must have `grant_valid=true`.
 
 ### Default workflow
 

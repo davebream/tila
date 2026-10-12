@@ -41,6 +41,28 @@ export async function buildFacade(
   config: McpServerConfig,
   meta?: Record<string, unknown>,
 ): Promise<TilaFacade> {
+  if (config.mode === "local") {
+    if (!config.local) throw new Error("Local MCP configuration is incomplete");
+    return createTila(
+      {
+        backend: "local",
+        project_id: config.projectId,
+        schema_version: 0,
+        tila_version: MCP_VERSION,
+        created_at: new Date(0).toISOString(),
+        local: {
+          db_path: config.local.dbPath,
+          artifacts_path: config.local.artifactsPath,
+          org: config.local.org,
+        },
+      },
+      undefined,
+      {
+        participantId: config.local.participantId,
+        environment: MCP_ENVIRONMENT,
+      },
+    );
+  }
   const run = await config.resolveRun(meta);
   const tilaConfig: TilaProjectConfig = {
     project_id: run.context.project_id,

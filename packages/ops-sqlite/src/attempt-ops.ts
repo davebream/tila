@@ -3,6 +3,8 @@ import {
   AttemptAuthorityCommandSchema,
   type AttemptFinishCommand,
   AttemptFinishCommandSchema,
+  type AttemptListQuery,
+  AttemptListQuerySchema,
   type AttemptOutcome,
   type AttemptStartedCommand,
   AttemptStartedCommandSchema,
@@ -37,18 +39,18 @@ export function get(db: ProjectDatabase, id: string): WorkAttempt {
 }
 export function list(
   db: ProjectDatabase,
-  options: {
-    task_id?: string;
-    entry_id?: string;
-    limit?: number;
-    offset?: number;
-  } = {},
+  raw: AttemptListQuery = {},
+  allowsTask: (id: string) => boolean = () => true,
 ): WorkAttempt[] {
+  const options = AttemptListQuerySchema.parse(raw);
   return db
     .select()
     .from(schema.workAttempts)
     .where(
       and(
+        options.state
+          ? eq(schema.workAttempts.state, options.state)
+          : undefined,
         options.task_id
           ? eq(schema.workAttempts.task_id, options.task_id)
           : undefined,
@@ -62,9 +64,9 @@ export function list(
       desc(schema.workAttempts.created_at),
       desc(schema.workAttempts.id),
     )
-    .limit(Math.max(1, Math.min(options.limit ?? 100, 500)))
-    .offset(Math.max(0, options.offset ?? 0))
-    .all();
+    .all()
+    .filter((attempt) => allowsTask(attempt.task_id))
+    .slice(options.offset, options.offset + options.limit);
 }
 export function grantValid(
   db: ProjectDatabase,
@@ -412,11 +414,7 @@ function execute(
   expire(db, now);
   return db.transaction((tx) => {
     const attempt = get(tx, id);
-    assertOwner(
-      attempt,
-      origin,
-      attempt.state === "terminal" ? undefined : input.fence,
-    );
+    assertOwner(attempt, origin);
     command(
       tx,
       `${operation}:${id}`,
@@ -429,7 +427,11 @@ function execute(
       { entry_id: attempt.entry_id, attempt_id: id },
       now,
     );
-    return view(tx, id, origin, now);
+    const current = view(tx, id, origin, now);
+    return {
+      ...current,
+      grant_valid: current.grant_valid && current.attempt.fence === input.fence,
+    };
   });
 }
 export function accept(

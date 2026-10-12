@@ -329,7 +329,22 @@ export class RemoteBackend
     // Auto-acquire a fence using bare entity ID as the claim resource.
     // assertResourceFence in fence-ops.ts supports both bare-id and typed-resource
     // lookup, so the bare id is sufficient without an extra get() call to resolve type.
-    const acquired = await this.acquire(id, "exclusive", 30_000);
+    let acquired: Awaited<ReturnType<RemoteBackend["acquire"]>>;
+    try {
+      acquired = await this.acquire(id, "exclusive", 30_000);
+    } catch (error) {
+      if (
+        !(error instanceof TilaApiError) ||
+        error.code !== "queue-managed-work"
+      )
+        throw error;
+      const result = await this.client.patch(
+        `/projects/${this.projectId}/tasks/${encodeURIComponent(id)}`,
+        { data, fence: 0 },
+        { schema: EntityResponseSchema, validate: true },
+      );
+      return result.entity;
+    }
     try {
       const result = await this.client.patch(
         `/projects/${this.projectId}/tasks/${encodeURIComponent(id)}`,

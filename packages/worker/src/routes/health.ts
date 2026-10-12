@@ -14,5 +14,6 @@ health.get("/health", (c) => {
     commit: BUILD_COMMIT,
     apiVersion: API_VERSION,
     minCliVersion: MIN_CLI_VERSION,
+    features: ["managed-queue-v1"],
   });
 });

@@ -1425,6 +1425,14 @@ function runMigration0033(storage: MigrationStorage): void {
     );
 }
 
+export const MIGRATION_0034 = `
+ALTER TABLE _project_transfer_state ADD COLUMN queue_fences_json TEXT NOT NULL DEFAULT '{}';
+`;
+function runMigration0034(storage: MigrationStorage): void {
+  if (!columnExists(storage, "_project_transfer_state", "queue_fences_json"))
+    storage.sql.exec(MIGRATION_0034);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1459,4 +1467,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 31, run: runMigration0031 },
   { version: 32, run: runMigration0032 },
   { version: 33, run: runMigration0033 },
+  { version: 34, run: runMigration0034 },
 ];

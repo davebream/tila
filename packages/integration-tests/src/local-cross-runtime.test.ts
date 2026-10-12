@@ -1,3 +1,5 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 /**
  * Cross-runtime local-store interop — the capstone integration test.
  *
@@ -13,7 +15,7 @@
  *  2. Schema identity across the two drivers: normalized `sqlite_master` DDL +
  *     identical `_migrations` rows (NOT `user_version`, which both leave at 0).
  *  3. SDK-local-only round-trip (task / claim+fence / record / artifact / journal).
- *  4. The built MCP executable rejects removed private local mode.
+ *  4. The built MCP executable requires explicit, complete local configuration.
  *  5. Concurrent-writer: two `better-sqlite3` handles contend on one file; the
  *     injected `sleepSync` (the `withBusyRetry` second-layer retry) is PROVEN to
  *     fire, no `SQLITE_BUSY` escapes, and both writes land.
@@ -320,8 +322,8 @@ describe("SDK-local round-trip (tila-sdk/local under node)", () => {
 // 4. MCP-local round-trip: BUILT dist/index.js under plain node, over stdio
 // ---------------------------------------------------------------------------
 
-describe("MCP breaking cutover (built server under Node)", () => {
-  it("rejects removed local configuration without creating private state", () => {
+describe("MCP explicit local configuration (built server under Node)", () => {
+  it("rejects incomplete local configuration without creating private state", () => {
     const tmp = makeTmp();
     const result = spawnSync("node", [MCP_DIST], {
       cwd: tmp,
@@ -337,7 +339,7 @@ describe("MCP breaking cutover (built server under Node)", () => {
       timeout: 15_000,
     });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("private SQLite mode was removed");
+    expect(result.stderr).toContain("Local MCP requires TILA_PROJECT_ID");
   });
 });
 
@@ -699,3 +701,76 @@ describe("cross-runtime session continuity", () => {
     });
   });
 });
+
+it("built MCP process uses an explicitly shared local queue over stdio", async () => {
+  const root = makeTmp();
+  const dbPath = join(root, "mcp.db");
+  const artifactsPath = join(root, "artifacts");
+  const env: Record<string, string> = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (pair): pair is [string, string] => pair[1] !== undefined,
+    ),
+  );
+  Object.assign(env, {
+    TILA_MODE: "local",
+    TILA_PROJECT_ID: PROJECT,
+    TILA_DB_PATH: dbPath,
+    TILA_ARTIFACTS_PATH: artifactsPath,
+    TILA_PARTICIPANT_ID: "stdio-worker",
+    TILA_LOCAL_ORG: ORG,
+    TILA_API_URL: "",
+    TILA_API_TOKEN: "",
+    TILA_TOKEN: "",
+    TILA_RUN_SOCKET: "",
+    TILA_RUN_CAPABILITY: "",
+    CODEX_THREAD_ID: "",
+  });
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [MCP_DIST],
+    cwd: root,
+    env,
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "queue-fixture", version: "1" });
+  try {
+    await client.connect(transport);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toContain(
+      "tila_queue",
+    );
+    const configured = await client.callTool({
+      name: "tila_queue",
+      arguments: {
+        request: {
+          action: "configure",
+          command: {
+            idempotency_key: "enable",
+            expected_revision: 0,
+            enabled: true,
+            paused: true,
+            execution_limit: 2,
+          },
+        },
+      },
+    });
+    expect(configured.isError, JSON.stringify(configured)).not.toBe(true);
+    const local = await createTilaLocal({
+      dbPath,
+      artifactsPath,
+      org: ORG,
+      project: PROJECT,
+    });
+    try {
+      expect(await local.project.queue.policy()).toMatchObject({
+        enabled: true,
+        paused: true,
+        execution_limit: 2,
+      });
+    } finally {
+      local.close();
+    }
+  } finally {
+    await client.close();
+    await transport.close();
+  }
+}, 30000);

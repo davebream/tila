@@ -185,3 +185,46 @@ export {
 } from "./runtime";
 
 export * from "./conversations";
+
+export { RemoteQueueBackend, RemoteAttemptBackend } from "./backends/queue";
+export type { QueueBackend, AttemptBackend } from "@tila/core";
+export {
+  QueueMutationSchemas,
+  AttemptMutationSchemas,
+  QueueListQuerySchema,
+  AttemptListQuerySchema,
+} from "@tila/schemas";
+
+export { executeQueueRequest, executeAttemptRequest } from "./queue-commands";
+export type {
+  QueueRequest,
+  AttemptRequest,
+  QueueConfigureCommand,
+  QueueEnrollCommand,
+  QueueEditCommand,
+  QueueRevisionCommand,
+  QueueClaimCommand,
+  QueueListQuery,
+  QueueBlockReason,
+  QueueEntryView,
+  QueueCounts,
+  AttemptListQuery,
+  AttemptAuthorityCommand,
+  AttemptStartedCommand,
+  AttemptFinishCommand,
+  AttemptSuspendCommand,
+  AttemptResumeCommand,
+  AttemptReconcileCommand,
+  AttemptRebindCommand,
+  AttemptRetryCommand,
+  AttemptForceCommand,
+  QueuePolicy,
+  QueueEntry,
+  WorkAttempt,
+  AttemptView,
+  QueueClaimResult,
+  QueueInspection,
+  AttemptResumeResult,
+  AttemptSession,
+  AttemptOutcome,
+} from "@tila/schemas";

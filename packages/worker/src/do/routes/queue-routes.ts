@@ -20,7 +20,7 @@ import { originFromBody } from "./origin";
 import { jsonError } from "./responses";
 import type { RouterDeps } from "./types";
 
-const EnvelopeSchema = z.object({
+export const QueueEnvelopeSchema = z.object({
   principal_id: z.string().min(1),
   participant_id: ParticipantIdSchema,
   environment: EnvironmentMetadataSchema.default({}),
@@ -35,7 +35,7 @@ const EnvelopeSchema = z.object({
 export function createQueueRoutes(deps: RouterDeps) {
   const app = new Hono();
   app.post("/queue/:action", async (c) => {
-    const envelope = EnvelopeSchema.parse(await c.req.json());
+    const envelope = QueueEnvelopeSchema.parse(await c.req.json());
     const origin = originFromBody(envelope);
     const credential = readCredentialPolicy(
       c.req.header("X-Tila-Credential-Policy"),

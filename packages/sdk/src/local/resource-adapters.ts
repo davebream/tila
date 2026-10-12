@@ -121,6 +121,8 @@ import {
   createUnsupportedInboxMethods,
 } from "../conversations";
 import { toTilaErrorCode } from "../error-codes";
+import { attemptFacade, queueFacade } from "../queue-commands";
+import { localQueueErrors } from "./queue";
 
 /**
  * Thrown when a consumer calls a facade method that has no local equivalent
@@ -1278,6 +1280,8 @@ export function buildLocalResources(
   artifacts: EmbeddedArtifactBackend,
 ) {
   return {
+    queue: queueFacade(localQueueErrors(project.queue)),
+    attempts: attemptFacade(localQueueErrors(project.attempts)),
     agents: createUnsupportedAgentMethods(),
     conversations: createUnsupportedConversationMethods(),
     inbox: createUnsupportedInboxMethods(),
@@ -1347,6 +1351,8 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   ReturnType<typeof buildLocalResources>,
   Omit<TilaFacade, "close">
 > = {
+  queue: true,
+  attempts: true,
   tasks: true,
   agents: true,
   conversations: true,

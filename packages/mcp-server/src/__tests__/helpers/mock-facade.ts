@@ -62,6 +62,8 @@ function fns<const N extends string>(...names: N[]): Record<N, Mock> {
  * the mock lacks.
  */
 export type MockFacadeShape = {
+  queue: Record<keyof TilaFacade["queue"], Mock>;
+  attempts: Record<keyof TilaFacade["attempts"], Mock>;
   conversations: Record<
     | "list"
     | "create"
@@ -181,6 +183,32 @@ export function createMockFacade(): MockFacadeShape {
       "deliveries",
     ),
     inbox: fns("fetch", "ack", "watch", "explain", "resume", "deliveries"),
+    queue: fns(
+      "policy",
+      "inspect",
+      "configure",
+      "enroll",
+      "edit",
+      "withdraw",
+      "claimNext",
+    ),
+    attempts: fns(
+      "get",
+      "list",
+      "accept",
+      "started",
+      "heartbeat",
+      "finish",
+      "requestSuspension",
+      "confirmSuspension",
+      "requestResume",
+      "claimResume",
+      "requestCancellation",
+      "reconcile",
+      "rebind",
+      "retry",
+      "forceRecovery",
+    ),
     dispatch: fns("status", "lease", "report"),
     agents: fns("list", "get", "register", "bind", "release", "runtimeView"),
     tasks: fns(
@@ -289,6 +317,8 @@ type _MockMatchesFacade = {
 const _assertMockMatchesFacade: _MockMatchesFacade = {
   conversations: true,
   inbox: true,
+  queue: true,
+  attempts: true,
   dispatch: true,
   agents: true,
   tasks: true,

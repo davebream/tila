@@ -1,3 +1,4 @@
+import type { AttemptBackend, QueueBackend } from "@tila/core";
 import {
   type EnvironmentMetadata,
   EnvironmentMetadataSchema,
@@ -10,12 +11,14 @@ import {
 import type { z } from "zod";
 import { abortable } from "./abort";
 import { createArtifactMethods } from "./artifacts";
+import { RemoteAttemptBackend, RemoteQueueBackend } from "./backends/queue";
 import { createClaimMethods } from "./claims";
 import { createHandoffMethods, createReentryMethod } from "./continuity";
 import { providerProof } from "./dpop";
 import { createTaskMethods } from "./entities";
 import { toTilaErrorCode } from "./error-codes";
 import { TilaApiError, isTilaApiError, readApiError } from "./errors";
+import { attemptFacade, queueFacade } from "./queue-commands";
 import {
   CredentialManager,
   type TokenCredential,
@@ -491,6 +494,8 @@ export async function exchangeGitHubToken(
  * backend (HTTP-only — D1 global token store).
  */
 export interface TilaFacade {
+  queue: QueueBackend;
+  attempts: AttemptBackend;
   agents: ReturnType<typeof createAgentMethods>;
   conversations: ReturnType<typeof createConversationMethods>;
   inbox: ReturnType<typeof createInboxMethods>;
@@ -523,6 +528,8 @@ export interface TilaFacade {
 /** Build the HTTP-backed facade from a configured `TilaClient`. */
 function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
   return {
+    queue: queueFacade(new RemoteQueueBackend(client, projectId)),
+    attempts: attemptFacade(new RemoteAttemptBackend(client, projectId)),
     agents: createAgentMethods(client, projectId),
     conversations: createConversationMethods(client, projectId),
     inbox: createInboxMethods(client, projectId),

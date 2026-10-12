@@ -1,3 +1,4 @@
+import { queueBackupOps } from "@tila/ops-sqlite";
 import {
   type ProjectBackupTable,
   agentBindingOps,
@@ -96,7 +97,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({
       digest,
       journal,
-      migrationVersion: 31,
+      migrationVersion: 34,
       tables: projectTransferOps.PROJECT_BACKUP_TABLES,
     });
   });
@@ -118,6 +119,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     }
     const result = deps.ctx.storage.transactionSync(() => {
       agentBindingOps.preserveRestoreEpochs(deps.db);
+      queueBackupOps.preserveRestoreFences(deps.db);
       return projectTransferOps.prepareSnapshotRestore(sql, body.sessionId);
     });
     return c.json({ ok: true, replayed: result === "replayed" });
@@ -183,7 +185,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     projectTransferOps.finalizeSnapshotRestore(sql, body.journalNextSequence);
     const actual = await projectTransferOps.semanticDigest(
       sql,
-      body.migrationVersion ?? 31,
+      body.migrationVersion ?? 34,
     );
     if (actual !== body.semanticDigest) {
       return jsonError(
@@ -195,6 +197,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     }
     deps.ctx.storage.transactionSync(() => {
       agentBindingOps.invalidateRestoredBindings(deps.db);
+      queueBackupOps.invalidateRestoredExecutions(deps.db);
       projectTransferOps.finishTransfer(sql, body.sessionId);
     });
     return c.json({ ok: true, semanticDigest: actual });

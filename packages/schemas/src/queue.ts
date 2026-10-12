@@ -240,7 +240,9 @@ export const AttemptResumeCommandSchema = QueueRevisionCommandSchema.extend({
   capabilities: CapabilitiesSchema.default([]),
 });
 export const AttemptReconcileCommandSchema = QueueRevisionCommandSchema.extend({
-  observation: z.enum(["unknown", "running", "stopped"]),
+  observation: z.enum(["unknown", "running", "stopped", "suspended"]),
+  execution_quiescent: z.literal(true).optional(),
+  checkpoint: z.record(z.string(), z.unknown()).optional(),
   reason: z.string().min(1),
   session: AttemptSessionSchema.optional(),
   outcome: AttemptOutcomeSchema.optional(),
@@ -274,3 +276,144 @@ export type AttemptRebindCommand = z.infer<typeof AttemptRebindCommandSchema>;
 export type AttemptForceCommand = z.infer<typeof AttemptForceCommandSchema>;
 export type AttemptRetryCommand = z.infer<typeof AttemptRetryCommandSchema>;
 export type AttemptResumeResult = z.infer<typeof AttemptResumeResultSchema>;
+
+export const AttemptListQuerySchema = z.object({
+  task_id: z.string().optional(),
+  entry_id: z.string().optional(),
+  state: AttemptStateSchema.optional(),
+  limit: z.number().int().min(1).max(500).default(100),
+  offset: z.number().int().min(0).default(0),
+});
+export type AttemptListQuery = z.input<typeof AttemptListQuerySchema>;
+/** Shared transport contracts. Scheduling remains in the project backend. */
+export const QueueMutationSchemas = {
+  configure: QueueConfigureCommandSchema,
+  enroll: QueueEnrollCommandSchema,
+  edit: QueueEditCommandSchema,
+  withdraw: QueueRevisionCommandSchema,
+  claim: QueueClaimCommandSchema,
+} as const;
+export const AttemptMutationSchemas = {
+  accept: AttemptAuthorityCommandSchema,
+  started: AttemptStartedCommandSchema,
+  heartbeat: AttemptAuthorityCommandSchema,
+  finish: AttemptFinishCommandSchema,
+  "request-suspension": QueueRevisionCommandSchema,
+  "confirm-suspension": AttemptSuspendCommandSchema,
+  "request-resume": QueueRevisionCommandSchema,
+  "claim-resume": AttemptResumeCommandSchema,
+  "request-cancellation": QueueRevisionCommandSchema,
+  reconcile: AttemptReconcileCommandSchema,
+  rebind: AttemptRebindCommandSchema,
+  retry: AttemptRetryCommandSchema,
+  "force-recovery": AttemptForceCommandSchema,
+} as const;
+
+export const QueueRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("policy") }),
+  z.object({
+    action: z.literal("inspect"),
+    query: QueueListQuerySchema.prefault({}),
+  }),
+  z.object({
+    action: z.literal("configure"),
+    command: QueueConfigureCommandSchema,
+  }),
+  z.object({ action: z.literal("enroll"), command: QueueEnrollCommandSchema }),
+  z.object({
+    action: z.literal("edit"),
+    id: z.string().min(1),
+    command: QueueEditCommandSchema,
+  }),
+  z.object({
+    action: z.literal("withdraw"),
+    id: z.string().min(1),
+    command: QueueRevisionCommandSchema,
+  }),
+  z.object({ action: z.literal("claim"), command: QueueClaimCommandSchema }),
+]);
+export const AttemptRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("get"), id: z.string().min(1) }),
+  z.object({
+    action: z.literal("list"),
+    query: AttemptListQuerySchema.prefault({}),
+  }),
+  z.object({
+    action: z.literal("accept"),
+    id: z.string().min(1),
+    command: AttemptAuthorityCommandSchema,
+  }),
+  z.object({
+    action: z.literal("started"),
+    id: z.string().min(1),
+    command: AttemptStartedCommandSchema,
+  }),
+  z.object({
+    action: z.literal("heartbeat"),
+    id: z.string().min(1),
+    command: AttemptAuthorityCommandSchema,
+  }),
+  z.object({
+    action: z.literal("finish"),
+    id: z.string().min(1),
+    command: AttemptFinishCommandSchema,
+  }),
+  z.object({
+    action: z.literal("request-suspension"),
+    id: z.string().min(1),
+    command: QueueRevisionCommandSchema,
+  }),
+  z.object({
+    action: z.literal("confirm-suspension"),
+    id: z.string().min(1),
+    command: AttemptSuspendCommandSchema,
+  }),
+  z.object({
+    action: z.literal("request-resume"),
+    id: z.string().min(1),
+    command: QueueRevisionCommandSchema,
+  }),
+  z.object({
+    action: z.literal("claim-resume"),
+    id: z.string().min(1),
+    command: AttemptResumeCommandSchema,
+  }),
+  z.object({
+    action: z.literal("request-cancellation"),
+    id: z.string().min(1),
+    command: QueueRevisionCommandSchema,
+  }),
+  z.object({
+    action: z.literal("reconcile"),
+    id: z.string().min(1),
+    command: AttemptReconcileCommandSchema,
+  }),
+  z.object({
+    action: z.literal("rebind"),
+    id: z.string().min(1),
+    command: AttemptRebindCommandSchema,
+  }),
+  z.object({
+    action: z.literal("retry"),
+    id: z.string().min(1),
+    command: AttemptRetryCommandSchema,
+  }),
+  z.object({
+    action: z.literal("force-recovery"),
+    id: z.string().min(1),
+    command: AttemptForceCommandSchema,
+  }),
+]);
+export const QueueResultSchema = z.union([
+  QueuePolicySchema,
+  QueueInspectionSchema,
+  QueueEntrySchema,
+  QueueClaimResultSchema,
+]);
+export const AttemptResultSchema = z.union([
+  AttemptViewSchema,
+  WorkAttemptSchema.array(),
+  AttemptResumeResultSchema,
+]);
+export type QueueRequest = z.input<typeof QueueRequestSchema>;
+export type AttemptRequest = z.input<typeof AttemptRequestSchema>;

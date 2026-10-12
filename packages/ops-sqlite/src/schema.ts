@@ -640,6 +640,7 @@ export const projectTransferState = sqliteTable("_project_transfer_state", {
   expires_at: integer("expires_at"),
   applying: integer("applying").notNull().default(0),
   agent_epochs_json: text("agent_epochs_json").notNull().default("{}"),
+  queue_fences_json: text("queue_fences_json").notNull().default("{}"),
 });
 
 export const projectTransferChunks = sqliteTable(

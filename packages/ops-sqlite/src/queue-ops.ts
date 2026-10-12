@@ -486,6 +486,7 @@ export function claimNext(
             );
             return {
               attempt_id: attempt.id,
+              fence: attempt.fence,
               entry_id: entry.id,
               policy_revision: current.revision,
             };
@@ -506,6 +507,9 @@ export function claimNext(
           kind: "granted",
           entry: getEntry(tx, attempt.entry_id),
           ...attempts.view(tx, attempt.id, origin, now),
+          grant_valid:
+            result.fence === attempt.fence &&
+            attempts.grantValid(tx, attempt, origin, now),
           policy_revision: result.policy_revision,
         };
       }
@@ -611,7 +615,18 @@ export function inspect(
                   now,
                   undefined,
                   query.capabilities,
-                )
+                ).map((reason) => {
+                  // A blocked visible task must not disclose a restricted predecessor.
+                  const references = [reason.resource, ...(reason.path ?? [])];
+                  if (
+                    reason.code !== "gate-pending" &&
+                    references.some(
+                      (id) => id !== entry.task_id && !allowsTask(id),
+                    )
+                  )
+                    return { code: reason.code, resource: entry.task_id };
+                  return reason;
+                })
               : [],
         })),
     };
