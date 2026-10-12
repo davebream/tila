@@ -2102,6 +2102,10 @@ Acknowledged means accepted for processing, not finished work; Work result stays
 "Not reported" until an explicit result exists. Expired delivery metadata does not
 mean the message was never sent; room history keeps it. Trace URLs stay
 project-scoped and shareable, and opening one never fetches or acknowledges.
+The **Signals** page (admin) pages through unexpired signal history and shows each
+signal's resource, payload, expiry and per-recipient stored/acknowledged state.
+Signals have no wake stage. Swept (expired) signals are no longer listed, which is
+not evidence that they were never sent.
 
 Replies are saved in sessionStorage for the current tab and principal. After a
 network failure or fresh sign-in, use **Retry saved reply**. It resends the frozen
