@@ -84,7 +84,7 @@ export function appendJournal(
 export function listJournal(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   query: {
-    resource?: string;
+    resource?: string | string[];
     kind?: string | string[];
     client_name?: string | string[];
     after_seq?: number;
@@ -115,7 +115,9 @@ export function listJournal(
 
   const conditions: SQL[] = [];
 
-  if (query.resource) {
+  if (Array.isArray(query.resource)) {
+    conditions.push(inArray(schema.journal.resource, query.resource));
+  } else if (query.resource) {
     conditions.push(eq(schema.journal.resource, query.resource));
   }
   if (query.kind) {

@@ -12,8 +12,23 @@ export const journal = new Hono<{
 journal.get("/", async (c) => {
   const stub = c.get("doStub");
   const query: Record<string, string> = {};
-  const resource = c.req.query("resource");
-  if (resource) query.resource = resource;
+  // A task's history spans two journal resources (the bare id for task
+  // events, `<type>:<id>` for claims), so `resource` may repeat (max 10).
+  const resources = (c.req.queries("resource") ?? []).filter(Boolean);
+  if (resources.length > 10)
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: "At most 10 resource values are allowed",
+          retryable: false,
+        },
+      },
+      400,
+    );
+  if (resources.length === 1) query.resource = resources[0];
+  else if (resources.length > 1) query.resources = JSON.stringify(resources);
   const kind = c.req.query("kind");
   if (kind) query.kind = kind;
   const clientName = c.req.query("client_name");
