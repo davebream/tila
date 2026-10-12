@@ -214,6 +214,27 @@ values = ["open", "done", "cancelled"]
   const archive = join(root, "queue.tila-backup");
   const manifest = await exportProjectBackup({ source, output: archive });
   expect(manifest.required_features).toContain("managed-queue-v1");
+  await expect(
+    importProjectBackup({ archive, destination: source, replace: true }),
+  ).rejects.toThrow("quiescent destination");
+  local = await open();
+  resources = buildLocalResources(local.project, local.artifacts);
+  expect((await resources.attempts.get(accepted.attempt.id)).attempt).toEqual(
+    accepted.attempt,
+  );
+  // The failed preflight releases its lock, so the existing worker can finish.
+  await resources.attempts.finish(accepted.attempt.id, {
+    idempotency_key: "finish-before-restore",
+    expected_revision: accepted.attempt.revision,
+    fence: accepted.attempt.fence,
+    outcome: {
+      status: "success",
+      execution_stopped: true,
+      unresolved_external_execution: false,
+      evidence: [],
+    },
+  });
+  local.close();
   await importProjectBackup({ archive, destination: source, replace: true });
   local = await open();
   resources = buildLocalResources(local.project, local.artifacts);
