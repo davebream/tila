@@ -41,9 +41,9 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (72)
+## Tools (73)
 
-The default catalog contains **eight workflow tools**. Primitive tools are opt-in with
+The default catalog contains **nine workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
 `workflow,artifacts`. Empty/unset selects `workflow`; compatibility aliases remain opt-in.
 
@@ -52,6 +52,7 @@ The default catalog contains **eight workflow tools**. Primitive tools are opt-i
 | Tool | Purpose |
 | --- | --- |
 | `tila_queue` | Inspect, configure, enroll, edit, withdraw and claim managed work. |
+| `tila_question` | Ask, inspect, answer, escalate, cancel and link discussion for attempt questions; decisions never resume execution. |
 | `tila_attempt` | Accept, start, heartbeat, finish, suspend, resume, cancel, reconcile and retry attempts. |
 
 Both are included in `workflow` and can be selected with `TILA_MCP_TOOLS=queue`. Each accepts a typed `request` with an `action`. Mutations require an idempotency key and current revision where applicable. A grant reserves capacity; acceptance must commit before launch. Cancellation requests do not stop processes. Replayed grants must have `grant_valid=true`.
