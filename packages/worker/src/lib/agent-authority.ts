@@ -1,6 +1,12 @@
-import { type RuntimeContext, RuntimeIdentitySchema } from "@tila/schemas";
+import {
+  PROJECT_ROLE_RANK,
+  type RuntimeContext,
+  RuntimeIdentitySchema,
+} from "@tila/schemas";
+import type { Context } from "hono";
 import { RuntimeDenied, RuntimeStore } from "../d1";
-import type { Env } from "../types";
+import { principalIdFor } from "../middleware/request-identity";
+import type { Env, HonoVariables } from "../types";
 import { forwardToDO } from "./do-forward";
 
 export function runtimeIdentity(context: RuntimeContext | undefined) {
@@ -15,6 +21,32 @@ export function runtimeIdentity(context: RuntimeContext | undefined) {
     workload_binding_id: context.workload_binding_id,
     lease_expires_at: context.lease_expires_at,
   });
+}
+/** Server-derived agent authority sent to the DO. Never read from clients. */
+export function agentAuthorityFor(
+  c: Context<{ Bindings: Env; Variables: HonoVariables }>,
+) {
+  const token = c.get("tokenResult");
+  const policy = c.get("credentialPolicy");
+  const role = c.get("effectiveRole");
+  return {
+    principal_id: principalIdFor(token),
+    can_manage: policy
+      ? policy.capabilities.includes("agents:manage")
+      : (token.kind === "d1-token" && token.scopes === "full") ||
+        (role !== undefined &&
+          PROJECT_ROLE_RANK[role] >= PROJECT_ROLE_RANK.maintainer),
+    runtime: runtimeIdentity(
+      token.kind === "d1-token" ? token.runtime : undefined,
+    ),
+    acting_runtime: null as ReturnType<typeof runtimeIdentity>,
+    terminal_run_id: null as string | null,
+  };
+}
+export function agentAuthorityHeaders(
+  authority: ReturnType<typeof agentAuthorityFor>,
+) {
+  return { "X-Tila-Agent-Authority": JSON.stringify(authority) };
 }
 export function agentRunAuthorizer(env: Env) {
   return async (project: string, principal: string, agent: string) => {
