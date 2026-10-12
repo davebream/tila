@@ -36,6 +36,7 @@ export function createCorsMiddleware(): MiddlewareHandler<AppEnv> {
         "Content-Type",
         "X-Tila-Participant-Id",
         "X-Tila-Client-Name",
+        "X-Tila-Conversation-Protocol",
       ],
       exposeHeaders: [
         "Server-Timing",
