@@ -2971,3 +2971,56 @@ even after dispatch is disabled. Migration 33 preserves that marker. Internal
 DO transport and embedded facades share the same operations; public capability
 advertisement and rollout remain gated on completion of the recovery and public
 API contract.
+
+### Suspension, cancellation and recovery
+
+Suspension is a two-step protocol: a participant requests it, then the owning
+adapter confirms quiescent execution and supplies a checkpoint. A request alone
+keeps both reservations. Confirmation revokes the execution fence and releases
+execution capacity while retaining the task and its WIP reservation. Suspended
+attempts need no execution heartbeat. Adapters without safe suspension keep
+occupying execution capacity.
+
+Resume requests place the same attempt in `resume_pending`. Its owner must obtain
+a fresh execution grant after policy, capacity, capabilities, targeting,
+dependencies and gates have been checked. The task may be in its nonterminal
+working state; the initial dispatchable state is not required for continuation.
+A successful grant moves directly to `starting`, with a fresh fence. An earlier
+resume receipt cannot authorize a later grant. Paused projects do not resume new
+execution. Finishing or cancelling safely suspended work does not require a new
+external execution slot.
+
+Cancellation records intent and retains capacity. Acceptance rejects a reservation
+that was cancelled before launch. An explicit stopped result finalizes the
+attempt; cancellation and success racing to finish retain the first committed
+outcome. Results on expired execution require reconciliation, not an old fence.
+
+Reconciliation records an observed running, stopped or unknown execution. Running
+observations must match the recorded session and issue fresh authority without
+releasing occupied capacity. Unknown observations retain uncertainty and both
+reservations. A confirmed stopped observation can commit an explicit outcome.
+The owner may reconnect; changing execution ownership requires maintainer
+authority, a reason and the same recorded session. Membership and resource access
+are enforced by the authenticated transport, outside the project transaction.
+
+Automatic retries are opt-in through `retry_safe`, default to three total
+attempts, and use exponential backoff starting at five seconds and capped at
+five minutes. A failed, confirmed stopped execution can return its enrollment
+to the backlog while retaining WIP. Cancellation intent suppresses automatic
+retry. Every replacement receives a distinct attempt ID and predecessor link;
+a preaccept expiry of a replacement retains already-admitted WIP. Explicit retry
+requires a stopped unsuccessful outcome, current revision, available WIP and no
+newer attempt or unfinished enrollment. Attempt ordering uses the task fence,
+so same-millisecond completions cannot scramble predecessor history.
+
+Force recovery requires maintainer authority and a reason. It records abandonment
+with unresolved external execution, invalidates old authority and schedules a
+replacement while retaining WIP. It does not assert that the old process died.
+All replacements still require dispatchable lifecycle state: configure a failure
+or abandonment mapping when that transition should happen automatically. Absent
+mappings leave task status unchanged and can leave replacement work blocked.
+Schema or gate conflicts roll back the entire result/recovery transaction.
+
+These operations share the SQLite domain implementation and embedded facade.
+Public transport, backup restore protections and advertised capability remain
+gated on the complete backend interface milestone.
