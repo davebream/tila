@@ -2964,7 +2964,9 @@ field of `GET /records/_types` serves records. Each entry carries:
   its declaration is removed, so its content remains readable.
 - **Scope is stated.** `scope.restricted` is true when namespace restrictions
   narrowed both the types and the counts. A restricted caller never sees a
-  declared type it may not read, and never receives `incomplete`.
+  declared type it may not read, and never learns whether the schema could be
+  read: it receives no `incomplete`, and an unreadable schema reads as nothing
+  declared rather than `unknown`.
 - **Partial failure is explicit.** When the schema or the counts cannot be read,
   `incomplete` names the missing half, mirroring the records types response.
 - **Display only.** Catalog definitions and presentation metadata guide clients;
