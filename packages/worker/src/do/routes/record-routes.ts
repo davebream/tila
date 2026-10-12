@@ -541,12 +541,12 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
   });
 
   app.get("/record/types-in-use", (c) => {
-    const types = recordOps.listRecordTypesInUse(
-      deps.db,
-      readCredentialPolicy(c.req.header("X-Tila-Credential-Policy"))
-        ?.restrictions,
-    );
-    return c.json({ ok: true, types });
+    const restrictions = readCredentialPolicy(
+      c.req.header("X-Tila-Credential-Policy"),
+    )?.restrictions;
+    const types = recordOps.listRecordTypesInUse(deps.db, restrictions);
+    const counts = recordOps.countRecordTypes(deps.db, restrictions);
+    return c.json({ ok: true, types, counts });
   });
 
   app.get("/record/:type/list", (c) => {

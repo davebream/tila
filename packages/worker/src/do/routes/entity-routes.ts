@@ -144,6 +144,15 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     });
   });
 
+  app.get("/entity/type-counts", (c) => {
+    const counts = entityOps.countByType(
+      deps.db,
+      readCredentialPolicy(c.req.header("X-Tila-Credential-Policy"))
+        ?.restrictions,
+    );
+    return c.json({ ok: true, counts });
+  });
+
   app.get("/entity/list", (c) => {
     const { db } = deps;
 

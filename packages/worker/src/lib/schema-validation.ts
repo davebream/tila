@@ -16,6 +16,7 @@
  *                                       reports `fetch-error` and `parse-error`/`validate-error`
  *                                       separately from `no-schema`)
  */
+import type { catalogOps } from "@tila/ops-sqlite";
 import { type TilaSchemaToml, TilaSchemaTomlSchema } from "@tila/schemas";
 import TOML from "smol-toml";
 import { getCurrentSchema } from "./schema-cache";
@@ -73,4 +74,19 @@ export async function getValidatedSchema(
   }
 
   return { ok: true, schema: schemaDef.data };
+}
+
+/**
+ * What a type catalog may say about the current schema. "No schema" is a
+ * complete answer with nothing declared; fetch and parse failures are not.
+ */
+export async function getCatalogSchemaState(
+  stub: DurableObjectStub,
+  projectId: string,
+): Promise<catalogOps.CatalogSchemaState> {
+  const result = await getValidatedSchema(stub, projectId);
+  if (result.ok) return { state: "ok", schema: result.schema };
+  if (result.reason === "no-schema") return { state: "none" };
+  if (result.reason === "fetch-error") return { state: "unavailable" };
+  return { state: "invalid" };
 }

@@ -1,3 +1,4 @@
+import { catalogOps } from "@tila/ops-sqlite";
 import {
   AddEntityArtifactReferenceRequestSchema,
   ArchiveRequestSchema,
@@ -5,15 +6,21 @@ import {
   CreateEntityRequestSchema,
   DeleteEntityRelationshipRequestSchema,
   ListEntityRelationshipsRequestSchema,
+  type TypeCount,
   UpdateEntityRequestSchema,
   parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import { analyticsCtxFrom } from "../lib/analytics";
+import { DO_PATHS, forwardTypedDO } from "../lib/do-contract";
 import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
-import { getValidatedSchema } from "../lib/schema-validation";
+import {
+  getCatalogSchemaState,
+  getValidatedSchema,
+} from "../lib/schema-validation";
 import { zodValidationError } from "../lib/validation";
+import { scopedPolicy } from "../middleware/capability";
 import { requirePermission } from "../middleware/permission";
 import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
@@ -139,6 +146,38 @@ entities.get("/ready", async (c) => {
     query,
     analyticsCtxFrom(c),
   );
+});
+
+// GET /projects/:projectId/tasks/~/types -> work type catalog.
+// `~` is the reserved sentinel segment, so this never shadows a task id.
+// Declared types come from the schema; visible counts come from the DO and
+// already apply the caller's namespace restrictions.
+entities.get("/~/types", async (c) => {
+  const stub = c.get("doStub");
+  const policy = scopedPolicy(c);
+  const [schemaState, counts] = await Promise.all([
+    getCatalogSchemaState(stub, c.get("projectId")),
+    forwardTypedDO<{ ok: boolean; counts?: TypeCount[] }>(
+      stub,
+      DO_PATHS.entityTypeCounts,
+      "GET",
+      undefined,
+      undefined,
+      analyticsCtxFrom(c),
+    )
+      .then(({ response, json }) =>
+        response.ok && json.ok && Array.isArray(json.counts)
+          ? json.counts
+          : null,
+      )
+      .catch(() => null),
+  ]);
+  const catalog = catalogOps.buildWorkCatalog({
+    schema: schemaState,
+    counts,
+    restrictions: policy?.restrictions,
+  });
+  return c.json({ ok: true, ...catalog });
 });
 
 // GET /projects/:projectId/entities/:id -> DO GET /entity/get/:id

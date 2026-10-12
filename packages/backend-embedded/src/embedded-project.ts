@@ -41,9 +41,10 @@ import {
   type SignalRecord,
   type SummaryBackend,
   applyRecordLegacyDefaults,
+  parseSchemaToml,
 } from "@tila/core";
 import { isManagedTask } from "@tila/ops-sqlite";
-import { continuityOps, summaryOps } from "@tila/ops-sqlite";
+import { catalogOps, continuityOps, summaryOps } from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   SchemaCorruptError,
@@ -70,7 +71,7 @@ import type {
   ReentryRequest,
   ReentryResponse,
 } from "@tila/schemas";
-import type { TilaSchemaToml } from "@tila/schemas";
+import type { TilaSchemaToml, WorkCatalogResponse } from "@tila/schemas";
 import { EmbeddedAttemptBackend, EmbeddedQueueBackend } from "./embedded-queue";
 
 import {
@@ -1106,6 +1107,36 @@ export class EmbeddedProject
    */
   async listRecordTypesInUse(): Promise<string[]> {
     return recordOps.listRecordTypesInUse(this.db);
+  }
+
+  // ---------- Type catalogs (#300) ----------
+
+  private catalogSchemaState(): catalogOps.CatalogSchemaState {
+    const row = schemaOps.getCurrentSchema(this.db);
+    if (!row) return { state: "none" };
+    const parsed = parseSchemaToml(row.definition);
+    return parsed.ok
+      ? { state: "ok", schema: parsed.schema }
+      : { state: "invalid" };
+  }
+
+  /** Task types: declared by the schema and/or present in storage, with counts. */
+  async workCatalog(): Promise<WorkCatalogResponse> {
+    return {
+      ok: true,
+      ...catalogOps.buildWorkCatalog({
+        schema: this.catalogSchemaState(),
+        counts: entityOps.countByType(this.db),
+      }),
+    };
+  }
+
+  /** Record types: declared by the schema and/or present in storage, with counts. */
+  recordCatalog(): ReturnType<typeof catalogOps.buildRecordCatalog> {
+    return catalogOps.buildRecordCatalog({
+      schema: this.catalogSchemaState(),
+      counts: recordOps.countRecordTypes(this.db),
+    });
   }
 
   // ---------- Idempotency (C2: Drizzle, not raw $client) ----------

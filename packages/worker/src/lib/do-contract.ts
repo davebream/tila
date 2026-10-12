@@ -52,6 +52,7 @@ export const DO_PATHS = {
 
   // Entity routes
   entityCreate: "/entity/create",
+  entityTypeCounts: "/entity/type-counts",
   entityArtifactRef: "/entity/artifact-ref",
 
   // Coordination routes

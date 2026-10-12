@@ -184,6 +184,35 @@ describe("namespace isolation in shared SQLite operations", () => {
       ),
     ).toThrow(CredentialPolicyDenied);
   });
+  it("allows restricted type counts because the op applies the restriction", () => {
+    expect(() =>
+      assertCredentialRequest(
+        f.db,
+        policy,
+        "GET",
+        "/entity/type-counts",
+        new URLSearchParams(),
+        {},
+      ),
+    ).not.toThrow();
+    // Counts agree with the restricted list, so a child of a forbidden
+    // parent is excluded from both.
+    expect(entities.countByType(f.db, policy.restrictions)).toEqual([
+      {
+        type: "task",
+        count: entities.list(f.db, {
+          restrictions: policy.restrictions,
+          archived: 0,
+        }).total,
+        archived_count: 0,
+      },
+    ]);
+    expect(
+      entities.countByType(f.db).find((row) => row.type === "task")?.count,
+    ).toBeGreaterThan(
+      entities.countByType(f.db, policy.restrictions)[0]?.count ?? 0,
+    );
+  });
   it("rejects broad aggregates and templates without all mutation capabilities", () => {
     for (const path of [
       "/summary",

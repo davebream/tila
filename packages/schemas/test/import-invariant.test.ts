@@ -33,6 +33,8 @@ const GUARDED_FILES = [
   "refresh.ts",
   "infra-config.ts",
   "config.ts",
+  "catalog.ts",
+  "presentation.ts",
 ];
 
 function importedSpecifiers(source: string): string[] {
