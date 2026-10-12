@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { hostname } from "node:os";
+import type { QuestionBackend } from "@tila/core";
 import type {
   ArtifactBackend,
   AttemptBackend,
@@ -18,6 +19,7 @@ import type {
   IdentityContext,
   TilaProjectConfig,
 } from "@tila/schemas";
+import { RemoteQuestionBackend } from "tila-sdk";
 import {
   RemoteArtifactBackend,
   RemoteAttemptBackend,
@@ -59,6 +61,7 @@ export interface CommandContext {
   record: RecordBackend;
   queue: QueueBackend;
   attempts: AttemptBackend;
+  questions: QuestionBackend;
 }
 
 export function requireClient(ctx: CommandContext): TilaClient {
@@ -206,6 +209,7 @@ export async function runStartupChecks(
       record: localProject,
       queue: localProject.queue,
       attempts: localProject.attempts,
+      questions: localProject.questions,
     };
   }
 
@@ -261,6 +265,7 @@ export async function runStartupChecks(
     record: remoteRecord,
     queue: new RemoteQueueBackend(client, config.project_id),
     attempts: new RemoteAttemptBackend(client, config.project_id),
+    questions: new RemoteQuestionBackend(client, config.project_id),
   };
 }
 

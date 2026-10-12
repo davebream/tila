@@ -46,6 +46,7 @@ import { infra } from "./routes/infra";
 import { journal } from "./routes/journal";
 import { memberships } from "./routes/memberships";
 import { presence } from "./routes/presence";
+import { questionRoutes } from "./routes/questions";
 import { attemptRoutes, queueRoutes } from "./routes/queue";
 import { records } from "./routes/records";
 import { repos } from "./routes/repos";
@@ -264,6 +265,7 @@ projectRoutes.route("/work-units", entities); // @deprecated
 projectRoutes.route("/claims", claims);
 projectRoutes.route("/queue", queueRoutes);
 projectRoutes.route("/attempts", attemptRoutes);
+projectRoutes.route("/questions", questionRoutes);
 projectRoutes.route("/artifacts", artifacts);
 projectRoutes.route("/", continuity);
 projectRoutes.route("/journal", journal);

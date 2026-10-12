@@ -2,6 +2,13 @@ import { z } from "zod";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 
 export const JournalEventKindSchema = z.enum([
+  "question.asked",
+  "question.answered",
+  "question.escalated",
+  "question.cancelled",
+  "question.superseded",
+  "question.invalidated",
+  "question.discussion_linked",
   "queue.policy_changed",
   "queue.grant_denied",
   "queue.enrolled",

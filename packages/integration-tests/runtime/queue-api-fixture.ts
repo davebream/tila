@@ -54,5 +54,5 @@ export async function queueApiFixture(definition = lifecycleDefinition) {
     expected_revision: 0,
   });
   expect(schema.status, await schema.clone().text()).toBe(200);
-  return { project, token, issued, http, queue, attempts };
+  return { project, token, issued, http, queue, attempts, client };
 }

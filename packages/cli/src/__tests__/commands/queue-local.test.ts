@@ -98,6 +98,34 @@ values = ["open", "done"]
         fence: grant.attempt.fence,
       })
     ).attempt;
+    const q = command("question", "ask", {
+      id: crypto.randomUUID(),
+      idempotency_key: "question-ask",
+      attempt_id: attempt.id,
+      expected_revision: attempt.revision,
+      fence: attempt.fence,
+      text: "Continue?",
+      responder_principal_id: "local:fixture",
+    }).result.question;
+    const answer = {
+      question_id: q.id,
+      idempotency_key: "question-answer",
+      expected_revision: q.revision,
+      attempt_id: q.attempt_id,
+      attempt_revision: q.attempt_revision,
+      attempt_fence: q.attempt_fence,
+      text: "yes",
+    };
+    await sdk.questions.answer(q.id, answer);
+    expect(command("question", "get", {}, q.id).result.answer_applicable).toBe(
+      true,
+    );
+    expect(
+      command("question", "answer", answer, q.id).result.question.answer.text,
+    ).toBe("yes");
+    expect(
+      command("question", "list", { state: "answered" }).result.questions,
+    ).toHaveLength(1);
     attempt = command(
       "attempt",
       "request-cancellation",
@@ -122,6 +150,9 @@ values = ["open", "done"]
       attempt.id,
     );
     expect((await sdk.queue.inspect()).counts.execution).toBe(0);
+    expect(command("question", "get", {}, q.id).result.answer_applicable).toBe(
+      false,
+    );
     expect(command("attempt", "list").result.items).toHaveLength(1);
   } finally {
     sdk.close();

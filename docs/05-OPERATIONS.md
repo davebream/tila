@@ -2294,3 +2294,44 @@ records are simulated. The OS fixture launches Node foreground processes, not
 coding-provider sessions. Neither is evidence that an unreachable coding runtime
 was forcibly stopped. Broader issue acceptance stays open where these queue
 scenarios satisfy only one portion (#300/#305/#301, #308/#193 and #283).
+
+### Worker questions and owner decisions
+
+Use project-scoped `GET /questions` and `GET /questions/:id` to inspect durable
+question state. `POST /questions` asks; `POST /questions/:id/answer`, `/escalate`,
+`/cancel`, and `/link-discussion` perform explicit mutations. All mutations carry
+an `idempotency_key`; reuse the exact command after an ambiguous response. An
+optional `Idempotency-Key` header must match the command key.
+
+The CLI exposes `tila question ask|get|list|answer|escalate|cancel|link-discussion`
+with `--data` JSON or `--file`; `--json` returns a structured result. The SDK
+exposes `questions` and MCP exposes `tila_question` in the default queue group.
+These share the same contracts in remote and embedded modes.
+
+```sh
+tila question list --data '{"state":"open","responder_principal_id":"user:OWNER_ID","limit":100}' --json
+tila question get QUESTION_UUID --json
+```
+
+Asking requires `id` (UUID), `attempt_id`, `expected_revision` (current attempt),
+`fence`, `text`, and `responder_principal_id`. Answering requires `question_id`,
+`expected_revision` (current question), `attempt_id`, `attempt_revision` and
+`attempt_fence` from the saved question, plus `text`. Escalation replaces `text`
+with `responder_principal_id` and `reason`; cancellation supplies `reason`.
+Discussion linking supplies `discussion: {room_id, message_id}`. Each command
+also requires its stable operation key. Responder principals must have current
+project membership; escalated responders must be owners.
+
+List filters include task, attempt, requester principal, responder principal, and
+state. Continue a page with `after_id` equal to `next_after_id` and unchanged
+filters. Use journal replay with its fixed `through_seq` for recovery across
+concurrent writes; acknowledge only processed changes. Reads never acknowledge.
+
+If `answer_applicable` is false, keep the answer as evidence. Reconcile execution
+with the attempt API, then ask a new question referencing the old question through
+`predecessor_id`. Obtain fresh confirmation; do not copy an old answer into an
+execution command. A question answer never substitutes for a current claim fence.
+
+Deployment adds project migration 36 without changing generic task or attempt
+commands. Back up with a client supporting `work-questions-v1`; older clients
+must not export or restore the new schema as an older snapshot.

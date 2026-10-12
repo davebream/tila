@@ -64,11 +64,15 @@ export const PROJECT_BACKUP_TABLES = [
   "work_attempts",
   "execution_reservations",
   "queue_operation_receipts",
+  "work_questions",
+  "question_receipts",
 ] as const;
 
 export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
+  work_questions: ["id"],
+  question_receipts: ["key"],
   queue_policy: ["singleton"],
   queue_entries: ["id"],
   work_attempts: ["fence", "id"],
@@ -200,10 +204,15 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
 
 export async function semanticDigest(
   sql: ProjectSqlStorage,
-  migrationVersion = 34,
+  migrationVersion = 36,
 ): Promise<string> {
   const sections: string[] = [];
   for (const table of PROJECT_BACKUP_TABLES) {
+    if (
+      migrationVersion < 36 &&
+      ["work_questions", "question_receipts"].includes(table)
+    )
+      continue;
     if (
       migrationVersion < 34 &&
       [

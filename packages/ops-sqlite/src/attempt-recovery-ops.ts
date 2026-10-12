@@ -21,6 +21,7 @@ import {
 import { and, desc, eq, sql } from "drizzle-orm";
 import * as attempts from "./attempt-ops";
 import type { RequestOrigin } from "./journal-ops";
+import { invalidateQuestions } from "./question-state-ops";
 import {
   type ProjectDatabase,
   type ProjectTransaction,
@@ -108,6 +109,13 @@ export function requestCancellation(
     origin,
     (tx, attempt) => {
       if (attempt.state === "terminal") return;
+      invalidateQuestions(
+        tx,
+        attempt.id,
+        "attempt cancellation requested",
+        origin,
+        now,
+      );
       attempts.change(tx, attempt, { cancellation_requested: true }, now);
       event(
         tx,

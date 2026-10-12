@@ -15,6 +15,7 @@ import {
   rearm,
 } from "./conversation-state-ops";
 import { canonicalJson } from "./project-transfer-ops";
+import { invalidateAgentQuestions } from "./question-state-ops";
 import * as schema from "./schema";
 
 type DB = BaseSQLiteDatabase<"sync", unknown, typeof schema>;
@@ -288,6 +289,17 @@ export function attach(
           ),
         )
         .run();
+    invalidateAgentQuestions(
+      tx,
+      id,
+      {
+        principalId: authority.principal_id,
+        participantId: runtime.participant_id,
+        actor: authority.principal_id,
+        environment: {},
+      },
+      now,
+    );
     const epoch = value.binding_epoch + 1;
     tx.update(schema.agents)
       .set({ binding_epoch: epoch, updated_at: now })

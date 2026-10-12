@@ -38,8 +38,9 @@ import { SDK_VERSION } from "../version";
 export const SUPPORTED_BACKUP_FEATURES = new Set<string>([
   "artifact-review-v1",
   "managed-queue-v1",
+  "work-questions-v1",
 ]);
-export const MAX_SUPPORTED_DO_MIGRATION = 34;
+export const MAX_SUPPORTED_DO_MIGRATION = 36;
 
 export type LocalBackupEndpoint = {
   backend: "local";
@@ -406,7 +407,11 @@ async function exportLocal(
         do_migration_version: MAX_SUPPORTED_DO_MIGRATION,
         schema_version: options.source.schemaVersion ?? 1,
       },
-      required_features: ["artifact-review-v1", "managed-queue-v1"],
+      required_features: [
+        "artifact-review-v1",
+        "managed-queue-v1",
+        "work-questions-v1",
+      ],
       optional_sections: ["d1/project.jsonl"],
       entries,
       content_root: contentRoot(entries),
@@ -580,6 +585,16 @@ async function scanArchive(
           `Backup is missing safety-critical queue section ${table}`,
         );
     }
+  }
+  if (
+    manifest.source.do_migration_version >= 36 &&
+    !manifest.required_features.includes("work-questions-v1")
+  )
+    throw new Error("Question-aware backups must declare work-questions-v1");
+  if (manifest.required_features.includes("work-questions-v1")) {
+    for (const table of ["work_questions", "question_receipts"])
+      if (!manifest.entries.some((entry) => entry.path === `do/${table}.jsonl`))
+        throw new Error(`Backup is missing question section ${table}`);
   }
   const unknown = manifest.required_features.filter(
     (feature) => !SUPPORTED_BACKUP_FEATURES.has(feature),
@@ -1179,7 +1194,11 @@ async function exportCloud(
             }
           : {}),
       },
-      required_features: ["artifact-review-v1", "managed-queue-v1"],
+      required_features: [
+        "artifact-review-v1",
+        "managed-queue-v1",
+        ...(meta.migrationVersion >= 36 ? ["work-questions-v1"] : []),
+      ],
       optional_sections: [],
       entries,
       content_root: contentRoot(entries),
@@ -1259,6 +1278,18 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
       }),
     });
     newProject = bootstrap.created;
+  }
+  if (inspected.manifest.required_features.includes("work-questions-v1")) {
+    const target = await client.json<{ migrationVersion: number }>(
+      "/transfer/meta",
+    );
+    if (
+      !Number.isInteger(target.migrationVersion) ||
+      target.migrationVersion < 36
+    )
+      throw new Error(
+        "Destination does not support work-questions-v1; upgrade the Worker before restoring",
+      );
   }
   if (options.replace && !options.resume && !options.rollback) {
     safetyBackup = safetyPath(options.archive, destination.projectId);

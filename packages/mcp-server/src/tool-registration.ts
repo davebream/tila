@@ -61,6 +61,7 @@ const additive = new Set([
 const idempotent = new Set([
   "tila_queue",
   "tila_attempt",
+  "tila_question",
   "tila_room_publish",
   "tila_inbox_ack",
   "tila_journal_acknowledge",

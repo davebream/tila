@@ -1,3 +1,4 @@
+import { QuestionSchema } from "@tila/schemas";
 import {
   QueueEntrySchema,
   QueuePolicySchema,
@@ -6,6 +7,7 @@ import {
 import { eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import * as attempts from "./attempt-ops";
+import { invalidateQuestions } from "./question-state-ops";
 import { type ProjectDatabase, QueueError, event } from "./queue-internals";
 import * as schema from "./schema";
 
@@ -15,6 +17,28 @@ export function validateQueueBackupRow(
   table: string,
   row: Record<string, unknown>,
 ): void {
+  if (table === "work_questions") {
+    const q = QuestionSchema.parse(json(row.snapshot));
+    if (
+      q.id !== row.id ||
+      q.task_id !== row.task_id ||
+      q.attempt_id !== row.attempt_id ||
+      q.requester.principal_id !== row.requester_principal_id ||
+      q.responder_principal_id !== row.responder_principal_id ||
+      q.state !== row.state
+    )
+      throw new Error("Question projection does not match its snapshot");
+  }
+  if (table === "question_receipts") {
+    z.tuple([z.string(), z.string(), z.string(), z.string()]).parse(
+      json(row.key),
+    );
+    z.object({ idempotency_key: z.string().min(1) }).parse(json(row.request));
+    const q = QuestionSchema.parse(json(row.result));
+    if (q.id !== row.question_id)
+      throw new Error("Question receipt does not match its question");
+    z.number().int().parse(row.created_at);
+  }
   if (table === "queue_policy") {
     z.literal(1).parse(row.singleton);
     QueuePolicySchema.parse({
@@ -188,6 +212,30 @@ export function invalidateRestoredExecutions(
           );
       }
     }
+    for (const row of tx.select().from(schema.workQuestions).all()) {
+      const q = QuestionSchema.parse(row.snapshot);
+      const attempt = byAttempt.get(q.attempt_id);
+      if (
+        !attempt ||
+        q.task_id !== attempt.task_id ||
+        q.id !== row.id ||
+        q.task_id !== row.task_id ||
+        q.attempt_id !== row.attempt_id ||
+        q.state !== row.state ||
+        q.requester.principal_id !== row.requester_principal_id ||
+        q.responder_principal_id !== row.responder_principal_id
+      )
+        throw new Error("Restored question context is inconsistent");
+      if (q.predecessor_id) {
+        const prior = tx
+          .select()
+          .from(schema.workQuestions)
+          .where(eq(schema.workQuestions.id, q.predecessor_id))
+          .get();
+        if (!prior || prior.task_id !== q.task_id || prior.id === q.id)
+          throw new Error("Invalid question predecessor");
+      }
+    }
     for (const receipt of tx
       .select()
       .from(schema.queueOperationReceipts)
@@ -253,6 +301,18 @@ export function invalidateRestoredExecutions(
           "queue-conflict",
           "Restored execution resource is inconsistent",
         );
+      invalidateQuestions(
+        tx,
+        attempt.id,
+        "project restored",
+        {
+          principalId: "system:restore",
+          participantId: "restore",
+          actor: "restore",
+          environment: {},
+        },
+        now,
+      );
       if (attempt.state === "terminal") continue;
       if (entry.state !== "admitted")
         throw new QueueError(

@@ -305,3 +305,21 @@ recipient deliveries expired; it does not delete messages. Backup includes every
 table. Restore clears active leases/context, rotates cursor generation and advances
 agent epochs before releasing the project transfer lock. Embedded stores use the
 same migration while public local-mode conversation operations remain unsupported.
+
+### Work questions (#304, project migration 36)
+
+| Table | Persisted content |
+|---|---|
+| `work_questions` | Question snapshot including context, revision, routing history, answer, discussion references and invalidation reason; indexed projections for task/attempt, requester, responder and state. |
+| `question_receipts` | Canonical operation key/request and original question result, linked to the question; no time-based receipt eviction. |
+
+Questions reference existing tasks and attempts. Mutable projections and the
+snapshot change in one SQLite transaction with the receipt and journal event.
+Attempt cancellation, completion and replacement invalidate affected questions
+inside that same attempt transaction. Answer evidence is never overwritten.
+
+Migration 36 is additive and shared by DO SQLite, Node and Bun embedded stores.
+Backups declare `work-questions-v1` and include both tables. Older backups remain
+readable; unsupported feature versions fail closed. Restore validates question
+projections/correlation, retains decisions and discussion, and invalidates old
+execution applicability before releasing the transfer lock.

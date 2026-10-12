@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { QuestionRequestSchema, QuestionResultSchema } from "@tila/schemas";
 import {
   AttemptRequestSchema,
   AttemptResultSchema,
   QueueRequestSchema,
   QueueResultSchema,
 } from "@tila/schemas";
+import { executeQuestionRequest } from "tila-sdk";
 import {
   type TilaFacade,
   executeAttemptRequest,
@@ -17,6 +19,20 @@ export function registerQueueTools(
   facade: TilaFacade,
   _projectId: string,
 ): void {
+  registerResultTool(
+    server,
+    "tila_question",
+    "Ask, inspect, answer, escalate, cancel or link discussion for durable attempt questions. Use current question revisions and the saved attempt correlation. Answering never pauses/resumes execution. After authority replacement ask a linked question for fresh confirmation. Recover changes with journal replay and acknowledge only processed events; messages are not approvals.",
+    { request: QuestionRequestSchema },
+    QuestionResultSchema,
+    async ({ request }) => {
+      const result = await executeQuestionRequest(facade.questions, request);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ result }) }],
+        structuredContent: { result },
+      };
+    },
+  );
   registerResultTool(
     server,
     "tila_queue",

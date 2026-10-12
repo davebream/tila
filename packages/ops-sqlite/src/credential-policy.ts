@@ -138,7 +138,12 @@ export function assertCredentialRequest(
   )
     throw new CredentialPolicyDenied();
   // Queue transport checks capabilities and current task access before any replay.
-  if (path.startsWith("/queue/") || path.startsWith("/attempts/")) return;
+  if (
+    path.startsWith("/queue/") ||
+    path.startsWith("/attempts/") ||
+    path.startsWith("/questions/")
+  )
+    return;
   if (!restricted) return;
   if (path === "/schema/current" || path === "/admin/transfer/status") return; // Internal validation/status only, never returned by restricted public routes.
   if (path.startsWith("/record/")) {

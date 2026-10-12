@@ -165,3 +165,5 @@ export {
   type AssembleRuntimeViewInput,
 } from "./runtime-observation";
 export type { QueueBackend } from "./interfaces/queue-backend";
+
+export type { QuestionBackend } from "./interfaces/question-backend";

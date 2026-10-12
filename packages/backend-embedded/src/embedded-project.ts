@@ -82,6 +82,7 @@ import type {
   UnifiedSearchResponse,
   WorkCatalogResponse,
 } from "@tila/schemas";
+import { EmbeddedQuestionBackend } from "./embedded-questions";
 import { EmbeddedAttemptBackend, EmbeddedQueueBackend } from "./embedded-queue";
 
 import {
@@ -162,6 +163,7 @@ export class EmbeddedProject
   private readonly identity: IdentityContext;
   readonly queue: EmbeddedQueueBackend;
   readonly attempts: EmbeddedAttemptBackend;
+  readonly questions: EmbeddedQuestionBackend;
 
   // `org`/`project` are accepted in the constructor opts for symmetry with the
   // wrapper API (and with EmbeddedArtifactBackend, which DOES use them for key
@@ -186,6 +188,11 @@ export class EmbeddedProject
       (fn) => withBusyRetry(fn, this.sleepSync, 9),
     );
     this.attempts = new EmbeddedAttemptBackend(
+      this.db,
+      () => this.localOrigin(),
+      (fn) => withBusyRetry(fn, this.sleepSync, 9),
+    );
+    this.questions = new EmbeddedQuestionBackend(
       this.db,
       () => this.localOrigin(),
       (fn) => withBusyRetry(fn, this.sleepSync, 9),
