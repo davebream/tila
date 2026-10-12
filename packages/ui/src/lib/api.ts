@@ -350,14 +350,15 @@ export async function listClaims(
 export async function listJournal(
   projectId: string,
   params?: {
-    resource?: string;
+    /** One resource, or several sent as repeated `resource` params (max 10). */
+    resource?: string | string[];
     kind?: string | string[];
     client_name?: string[];
     after_seq?: number;
     limit?: number;
   },
 ): Promise<JournalResponse> {
-  const stringParams: Record<string, string | undefined> = {};
+  const stringParams: Record<string, string | string[] | undefined> = {};
   if (params?.resource) stringParams.resource = params.resource;
   if (params?.kind) {
     stringParams.kind = Array.isArray(params.kind)
