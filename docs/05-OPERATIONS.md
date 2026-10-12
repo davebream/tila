@@ -1859,8 +1859,8 @@ runner time; retain the baseline if none qualifies. Reports last seven days.
 ### Mergify scopes and batching
 
 Mergify processes one batch at a time, with up to three ready PRs and a maximum
-30-second wait to fill a batch. Apply `merge-ready` after the latest required
-`ci` succeeds. Keep GitHub's required `ci` check, but leave "Require branches to
+30-second wait to fill a batch. Apply `merge-ready` once the PR is pushed and
+validated locally; Mergify queues it and waits for `ci`. Keep GitHub's required `ci` check, but leave "Require branches to
 be up to date before merging" disabled: Mergify validates the combined changes
 against `main` on a temporary batch PR.
 
@@ -1985,8 +1985,8 @@ Major updates require approval on the Dependency Dashboard and remain separate
 migrations. Pre-1.0 minor upgrades also require approval because their APIs can
 break. npm releases wait three days before routine updates. Renovate does not
 enable GitHub auto-merge or apply `merge-ready`. After reviewing an update and
-completing local validation, wait for the latest required `ci` check to pass,
-then add `merge-ready`. Mergify validates serial batches of up to three PRs
+completing local validation, add `merge-ready`; Mergify waits for the required
+`ci` check. Mergify validates serial batches of up to three PRs
 against current `main`, then merges them;
 verify the actual queue state rather than treating the label as proof of admission.
 
