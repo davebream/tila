@@ -196,6 +196,13 @@ export {
 } from "@tila/schemas";
 
 export { executeQueueRequest, executeAttemptRequest } from "./queue-commands";
+export { QueueExecutor, QueueAuthorityLostError } from "./queue-executor";
+export type {
+  QueueExecutionAdapter,
+  QueueExecutorOptions,
+  ExecutionObservation,
+  ExecutionContext,
+} from "./queue-executor";
 export type {
   QueueRequest,
   AttemptRequest,

@@ -333,6 +333,24 @@ export function expireInTransaction(
     };
     revoke(tx, attempt);
     const unaccepted = attempt.accepted_at === null;
+    if (unaccepted && attempt.cancellation_requested) {
+      finishInTransaction(
+        tx,
+        refence(tx, attempt, origin, now),
+        {
+          status: "cancelled",
+          reason:
+            "Reservation expired after cancellation, before execution was authorized",
+          evidence: [],
+          execution_stopped: true,
+          unresolved_external_execution: false,
+        },
+        origin,
+        now,
+        false,
+      );
+      continue;
+    }
     if (unaccepted) {
       change(
         tx,
@@ -569,7 +587,12 @@ export function finish(
         checkRevision(attempt.revision, input.expected_revision);
         attempt = refence(tx, attempt, origin, now);
       } else assertAuthority(tx, attempt, input, origin, now);
-      if (attempt.accepted_at === null)
+      if (
+        attempt.accepted_at === null &&
+        !(
+          attempt.cancellation_requested && input.outcome.status === "cancelled"
+        )
+      )
         throw new QueueError(
           "queue-invalid-state",
           "Unaccepted execution cannot report a result",
