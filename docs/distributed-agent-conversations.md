@@ -615,3 +615,29 @@ now pass native account verification; this establishes a prerequisite, not live
 message delivery or restoration. Codex credential checks use a short-lived stdio
 account probe, verify the returned profile home and never create or resume threads.
 Live discovery and wake continue to use the existing native daemon.
+
+## Runtime view projection — #301
+
+`GET /projects/:id/runtime-view` (`agents:read`) answers which run, host,
+native session and account evidence holds each agent mailbox. It joins one page
+of DO agents (at most 50, opaque cursor) with D1 runs and enrollments and the
+holder's presence row. Each row has the active binding (`current`), the latest
+binding that no longer holds the mailbox (`previous`), `work_attempt: null` and
+the commands the caller may use.
+
+- D1 run state and lease decide occupancy. The binding lease is a snapshot that
+  only bind and inbox fetch refresh, so an active DO binding whose run is
+  closed, revoked, lease-lapsed or whose enrollment is revoked is `expired`.
+- When D1 lookups fail, `sources.runs`/`sources.enrollments` are `unavailable`
+  and active bindings are `unknown`, never `attached`. A DO failure fails the
+  request; it never becomes an empty list.
+- Redaction is a separate `detail` axis. Redacted rows carry the binding summary
+  and authority facts (run state, lease, enrollment revoked) but no run,
+  participant, session, account or host identities.
+- Host liveness (`online`, `stale`, `offline`, `unknown`) comes from presence
+  freshness, falling back to the run lease. It never describes task progress.
+- Release takes the expected epoch and is the only command. Reconnect and stop
+  are returned as `supported: false` with `no-host-adapter-command`.
+- Capability reports keep "not reported" (key absent) apart from "unsupported"
+  (`false`). Profile evidence is shown as declared or unknown; nothing in this
+  projection verifies an account.

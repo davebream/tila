@@ -8,6 +8,8 @@ import {
   AgentRegistrationSchema,
   type AttachAgentBinding,
   AttachAgentBindingSchema,
+  RuntimeViewQuerySchema,
+  RuntimeViewResponseSchema,
 } from "@tila/schemas";
 import { z } from "zod";
 import type { TilaClient } from "./client";
@@ -37,6 +39,24 @@ export function createAgentMethods(client: TilaClient, projectId: string) {
         { expected_epoch: z.number().int().positive().parse(expectedEpoch) },
         { schema: z.object({ ok: z.literal(true) }), validate: true },
       ),
+    /** Authorized runtime projection: bindings, runs, hosts and sessions. */
+    runtimeView: (
+      options: { limit?: number; cursor?: string; agent?: string } = {},
+    ) => {
+      const query = RuntimeViewQuerySchema.parse(options);
+      return client.get(
+        `/projects/${encodeURIComponent(projectId)}/runtime-view`,
+        {
+          query: {
+            limit: String(query.limit),
+            cursor: query.cursor,
+            agent: query.agent,
+          },
+          schema: RuntimeViewResponseSchema,
+          validate: true,
+        },
+      );
+    },
   };
 }
 
@@ -59,5 +79,6 @@ export function createUnsupportedAgentMethods(): ReturnType<
     register: unsupported,
     bind: unsupported,
     release: unsupported,
+    runtimeView: unsupported,
   };
 }

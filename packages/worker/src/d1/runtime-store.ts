@@ -19,7 +19,7 @@ import {
   permissionToRole,
   policyContains,
 } from "@tila/schemas";
-import { and, eq, gt, lte } from "drizzle-orm";
+import { and, eq, gt, inArray, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { D1DeploymentMetaStore } from "./deployment-meta";
 import {
@@ -788,6 +788,72 @@ export class RuntimeStore {
           policy: CredentialPolicyReadSchema.parse(JSON.parse(policy_json)),
         }),
       );
+  }
+  /** Raw run rows for a bounded ID list, without secrets or policy. */
+  async runsByIds(project: string, ids: string[]) {
+    const rows = await this.chunked(ids, (chunk) =>
+      this.db
+        .select({
+          run_id: runtimeRuns.run_id,
+          run_role: runtimeRuns.run_role,
+          enrollment_id: runtimeRuns.enrollment_id,
+          workload_binding_id: runtimeRuns.workload_binding_id,
+          principal_id: runtimeRuns.principal_id,
+          participant_id: runtimeRuns.participant_id,
+          state: runtimeRuns.state,
+          lease_expires_at: runtimeRuns.lease_expires_at,
+          created_at: runtimeRuns.created_at,
+        })
+        .from(runtimeRuns)
+        .where(
+          and(
+            eq(runtimeRuns.project_id, project),
+            inArray(runtimeRuns.run_id, chunk),
+          ),
+        ),
+    );
+    return rows.map((row) => ({
+      ...row,
+      run_role:
+        row.run_role === "relay" ? ("relay" as const) : ("acting" as const),
+    }));
+  }
+  /** Enrollment rows for a bounded ID list, without proof keys or policy. */
+  async enrollmentsByIds(project: string, ids: string[]) {
+    const rows = await this.chunked(ids, (chunk) =>
+      this.db
+        .select({
+          enrollment_id: runtimeEnrollments.enrollment_id,
+          installation_id: runtimeEnrollments.installation_id,
+          name: runtimeEnrollments.name,
+          kind: runtimeEnrollments.kind,
+          sponsor_id: runtimeEnrollments.sponsor_id,
+          created_at: runtimeEnrollments.created_at,
+          revoked_at: runtimeEnrollments.revoked_at,
+        })
+        .from(runtimeEnrollments)
+        .where(
+          and(
+            eq(runtimeEnrollments.project_id, project),
+            inArray(runtimeEnrollments.enrollment_id, chunk),
+          ),
+        ),
+    );
+    return rows.map((row) => ({
+      ...row,
+      kind: row.kind === "shared" ? ("shared" as const) : ("personal" as const),
+    }));
+  }
+  // D1 caps bound parameters per statement at 100; keep room for project_id.
+  private async chunked<T>(
+    ids: string[],
+    query: (chunk: string[]) => Promise<T[]>,
+  ): Promise<T[]> {
+    const unique = [...new Set(ids)];
+    const results: T[] = [];
+    for (let i = 0; i < unique.length; i += 90)
+      results.push(...(await query(unique.slice(i, i + 90))));
+    return results;
   }
   async context(tokenId: string) {
     const version = await this.db

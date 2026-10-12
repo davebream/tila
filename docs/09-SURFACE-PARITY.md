@@ -47,6 +47,7 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 | Token issue/list/revoke | Y | Y | - | - | Admin; not agent-facing |
 | Doctor/reconcile | Y | Y | - | - | Admin; not agent-facing |
 | Reset | Y | Y | - | - | Destructive admin |
+| Runtime view (agents, bindings, runs, hosts, sessions) | Y | - | Y | - | Operator view; dashboard Runtime tab |
 
 ## Surface-Specific Exceptions
 
@@ -59,6 +60,8 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 - **Claim state/renew** -- Admin operations for manual claim management.
 - **Task artifact-refs** -- Use `tila_artifact_put` with `resource` parameter to associate artifacts during upload.
 
+- **Runtime view** -- An operator projection of who holds each agent mailbox. Agents act on their own binding through `bind`/`release`, not through a fleet view.
+
 **SDK intentional gaps:**
 - **Token management** -- Admin surface only; SDK consumers authenticate with existing tokens.
 - **Doctor/reset** -- Infrastructure operations; not programmatic API surface.
@@ -66,3 +69,4 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 **CLI intentional gaps:**
 - **Task relationships (add/list)** -- Use `tila task show <id>` which includes relationships in its detail output.
 - **Claim renew** -- Admin operation; use `tila claim acquire` with longer TTL instead.
+- **Runtime view** -- Operators inspect it in the dashboard or through the SDK; a CLI table can follow if needed.
