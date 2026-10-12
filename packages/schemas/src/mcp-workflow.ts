@@ -30,13 +30,13 @@ export const SessionRequestSchema = z.discriminatedUnion("action", [
   z
     .object({
       action: action("open"),
-      ...ReentryRequestSchema.innerType().shape,
+      ...ReentryRequestSchema.shape,
     })
     .strict(),
   z
     .object({
       action: action("heartbeat"),
-      info: z.record(z.unknown()).default({}),
+      info: z.record(z.string(), z.unknown()).default({}),
     })
     .strict(),
   JournalAcknowledgeRequestSchema.extend({

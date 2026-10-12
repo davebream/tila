@@ -40,11 +40,13 @@ export function jsonError(
 
 export function formatZodIssues(
   issues: ReadonlyArray<{
-    path: readonly (string | number)[];
+    path: readonly PropertyKey[];
     message: string;
   }>,
 ): string {
-  return issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return issues
+    .map((i) => `${i.path.map(String).join(".")}: ${i.message}`)
+    .join("; ");
 }
 
 /**

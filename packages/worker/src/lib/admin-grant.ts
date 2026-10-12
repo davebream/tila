@@ -89,7 +89,7 @@ export async function applyAdminGrant(
       status: 400,
       code: "validation-error",
       message:
-        parsed.error.errors[0]?.message ??
+        parsed.error.issues[0]?.message ??
         "Provide exactly one of github_user_id or login",
     };
   }

@@ -26,7 +26,7 @@ export const EntityArtifactReferenceSchema = ArtifactTrustFieldsSchema.extend({
   entity_id: z.string(),
   artifact_key: z.string(),
   slot: z.string(),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   created_at: z.number().int(),
 });
 
@@ -53,7 +53,7 @@ export const ArtifactRelationshipSchema = z.object({
   to_key: z.string().nullable(),
   to_uri: z.string().nullable(),
   type: ArtifactRelationshipTypeSchema,
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   created_at: z.number().int(),
 });
 

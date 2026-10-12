@@ -36,10 +36,7 @@ export function loadConfigFile(filePath: string): TilaProjectConfig {
   const result = TilaProjectConfigSchema.safeParse(parsed);
   if (!result.success) {
     const issues = result.error.issues
-      .map(
-        (i: { path: (string | number)[]; message: string }) =>
-          `  - ${i.path.join(".")}: ${i.message}`,
-      )
+      .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
       .join("\n");
     throw new Error(
       `Invalid config at ${filePath}:\n${issues}\n\nSee docs/01-DECISIONS.md section 8 for the expected config shape.`,
@@ -61,10 +58,7 @@ export function writeConfigFile(
   const result = TilaProjectConfigSchema.safeParse(config);
   if (!result.success) {
     const issues = result.error.issues
-      .map(
-        (i: { path: (string | number)[]; message: string }) =>
-          `  - ${i.path.join(".")}: ${i.message}`,
-      )
+      .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
       .join("\n");
     throw new Error(`Invalid config:\n${issues}`);
   }

@@ -72,15 +72,14 @@ describe("DO installProjectErrorHandlers — FenceError → stale-fence", () => 
 
 describe("DO installProjectErrorHandlers — ZodError → retryable: false", () => {
   it("emits validation-error with retryable: false", async () => {
-    const { ZodError } = await import("zod");
-    const zodErr = new ZodError([
+    const { ZodRealError } = await import("zod");
+    const zodErr = new ZodRealError([
       {
         code: "invalid_type",
         expected: "string",
-        received: "number",
         path: ["name"],
         message: "Expected string",
-      } as Parameters<(typeof ZodError.prototype)["addIssue"]>[0],
+      },
     ]);
     const app = new Hono();
     installProjectErrorHandlers(app);

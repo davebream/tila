@@ -4,7 +4,7 @@ export const EntitySchema = z.object({
   id: z.string(),
   type: z.string(),
   schema_version: z.number().int(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   archived: z.number().int().default(0),
   created_at: z.number().int(),
   updated_at: z.number().int(),

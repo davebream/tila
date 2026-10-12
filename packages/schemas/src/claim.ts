@@ -14,7 +14,7 @@ export const ClaimSchema = z.object({
   fence: z.number().int(),
   acquired_at: z.number().int(),
   expires_at: z.number().int(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type Claim = z.infer<typeof ClaimSchema>;

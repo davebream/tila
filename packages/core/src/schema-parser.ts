@@ -33,11 +33,11 @@ export class SchemaParseException extends Error {
 // --- Internal helpers ---
 
 function zodIssuesToParseErrors(
-  issues: { message: string; path: (string | number)[] }[],
+  issues: { message: string; path: PropertyKey[] }[],
 ): SchemaParseError[] {
   return issues.map((issue) => ({
     message: issue.message,
-    path: issue.path.join("."),
+    path: issue.path.map(String).join("."),
   }));
 }
 

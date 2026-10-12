@@ -87,7 +87,7 @@ export type ReferenceSlot = z.infer<typeof ReferenceSlotSchema>;
 
 const WorkUnitSchema = z.object({
   fields: z
-    .preprocess(arrayToRecord, z.record(FieldDeclarationSchema))
+    .preprocess(arrayToRecord, z.record(z.string(), FieldDeclarationSchema))
     .default({}),
   parents: z.array(z.string()).default([]),
   required_parent: z.boolean().default(false),
@@ -110,7 +110,7 @@ export type ArtifactKind = z.infer<typeof ArtifactKindSchema>;
 const TemplateEntitySchema = z.object({
   id_suffix: z.string().default(""),
   type: z.string(),
-  data: z.record(z.unknown()).default({}),
+  data: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type TemplateEntity = z.infer<typeof TemplateEntitySchema>;
@@ -125,14 +125,14 @@ export type TemplateRelationship = z.infer<typeof TemplateRelationshipSchema>;
 
 const TemplateDefinitionSchema = z.object({
   description: z.string().optional(),
-  entities: z.record(TemplateEntitySchema),
+  entities: z.record(z.string(), TemplateEntitySchema),
   relationships: z.array(TemplateRelationshipSchema).default([]),
 });
 
 export type TemplateDefinition = z.infer<typeof TemplateDefinitionSchema>;
 
 const RecordDefinitionFieldsSchema = z
-  .preprocess(arrayToRecord, z.record(FieldDeclarationSchema))
+  .preprocess(arrayToRecord, z.record(z.string(), FieldDeclarationSchema))
   .default({});
 
 export const RecordDefinitionSchema = z.object({
@@ -149,14 +149,14 @@ export type RecordDefinition = z.infer<typeof RecordDefinitionSchema>;
 
 export const TilaSchemaTomlSchema = z.object({
   schema_version: z.number().int().positive(),
-  work_units: z.record(WorkUnitSchema).default({}),
+  work_units: z.record(z.string(), WorkUnitSchema).default({}),
   hierarchy: z
     .object({
       levels: z.array(z.string()).default([]),
       max_depth: z.number().int().positive().optional(),
     })
     .optional(),
-  artifacts: z.record(ArtifactKindSchema).optional(),
+  artifacts: z.record(z.string(), ArtifactKindSchema).optional(),
   artifact_relationships: z
     .object({
       types: z.array(z.string()).optional(),
@@ -167,8 +167,8 @@ export const TilaSchemaTomlSchema = z.object({
       slots: z.array(z.string()).optional(),
     })
     .optional(),
-  templates: z.record(TemplateDefinitionSchema).optional(),
-  records: z.record(RecordDefinitionSchema).default({}),
+  templates: z.record(z.string(), TemplateDefinitionSchema).optional(),
+  records: z.record(z.string(), RecordDefinitionSchema).default({}),
 });
 
 export type TilaSchemaToml = z.infer<typeof TilaSchemaTomlSchema>;

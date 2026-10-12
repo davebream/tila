@@ -17,7 +17,7 @@ export function registerPresenceTools(
     "Record a heartbeat for this MCP server participant. Call periodically (e.g. every 60s) to maintain presence visibility.",
     {
       info: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .default({})
         .describe("Optional metadata (e.g. current task ID, status)"),
     },

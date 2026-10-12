@@ -29,7 +29,7 @@ export const GateSchema = z.object({
   created_at: z.number().int(),
   created_by: z.string(),
   token_id: z.string().nullable().optional(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
 });
 export type Gate = z.infer<typeof GateSchema>;
 
@@ -38,7 +38,7 @@ export const CreateGateRequestSchema = z.object({
   await_type: GateAwaitTypeSchema,
   fence: z.number().int(),
   timeout_at: z.number().int().optional(),
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
 });
 export type CreateGateRequest = z.infer<typeof CreateGateRequestSchema>;
 

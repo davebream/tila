@@ -42,7 +42,7 @@
     "smol-toml": "^1.8.0",
     "tila-sdk": "workspace:*",
     "ws-node": "npm:ws@8.21.1",
-    "zod": "^3.24.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@tila/backend-embedded": "workspace:*",

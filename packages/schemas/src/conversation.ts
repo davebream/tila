@@ -16,7 +16,7 @@ export const CreateRoomSchema = z
     name: z.string().min(1).max(200),
     history_policy: z.enum(["members", "project"]).default("members"),
     delivery_ttl_seconds: z.number().int().min(60).max(604800).default(604800),
-    budgets: ConversationBudgetsSchema.default({}),
+    budgets: ConversationBudgetsSchema.prefault({}),
   })
   .strict();
 export const RoomSchema = CreateRoomSchema.extend({

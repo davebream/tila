@@ -34,7 +34,7 @@ export function registerGateTools(
           "Unix epoch milliseconds when the gate auto-resolves as timed_out",
         ),
       data: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .optional()
         .describe("Arbitrary metadata for the gate (e.g. CI run URL)"),
     },

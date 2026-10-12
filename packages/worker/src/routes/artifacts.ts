@@ -57,7 +57,7 @@ const ArtifactRelationshipRequestSchema = z.object({
   from_key: z.string().min(1),
   to_key: z.string().min(1),
   type: z.string().min(1),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const artifacts = new Hono<{

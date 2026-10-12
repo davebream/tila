@@ -153,7 +153,7 @@ const RecordTypesInternalSchema = z.object({
 
 const SchemaShowResponseSchema = z.object({
   ok: z.literal(true),
-  schema: z.record(z.unknown()).nullable(),
+  schema: z.record(z.string(), z.unknown()).nullable(),
   version: z.number().int().nullable(),
 });
 

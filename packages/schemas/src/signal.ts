@@ -51,7 +51,7 @@ export const SignalSchema = z.object({
   target: SignalTargetSchema,
   kind: SignalKindSchema,
   resource: z.string().nullish(),
-  payload: z.unknown(),
+  payload: z.unknown().optional(),
   sender: SignalIdentitySchema,
   created_at: z.number(),
   expires_at: z.number(),

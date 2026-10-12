@@ -406,7 +406,7 @@ export interface RequestOptions<T = unknown> {
   signal?: AbortSignal;
   idempotencyKey?: string;
   query?: Record<string, string | undefined>;
-  schema?: z.ZodType<T, z.ZodTypeDef, unknown>;
+  schema?: z.ZodType<T, unknown>;
   validate?: boolean;
 }
 

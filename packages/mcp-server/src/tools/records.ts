@@ -38,7 +38,9 @@ export function registerRecordTools(
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),
-      value: z.record(z.unknown()).describe("Complete JSON value to set"),
+      value: z
+        .record(z.string(), z.unknown())
+        .describe("Complete JSON value to set"),
       fence: z
         .number()
         .int()
@@ -65,7 +67,9 @@ export function registerRecordTools(
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key (e.g. 'prod' or 'env/staging')"),
-      value: z.record(z.unknown()).describe("Complete JSON value to write"),
+      value: z
+        .record(z.string(), z.unknown())
+        .describe("Complete JSON value to write"),
       tags: z
         .array(z.string())
         .optional()
@@ -95,7 +99,7 @@ export function registerRecordTools(
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),
       patch: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .describe("JSON Merge Patch object -- null values delete keys"),
       fence: z
         .number()
