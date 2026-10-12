@@ -622,6 +622,8 @@ export class RemoteBackend
           resource: query.resource,
           kind: query.kind,
           client_name: query.client_name,
+          after_seq:
+            query.after_seq !== undefined ? String(query.after_seq) : undefined,
           limit: query.limit !== undefined ? String(query.limit) : undefined,
         },
       },
