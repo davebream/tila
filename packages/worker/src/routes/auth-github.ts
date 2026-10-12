@@ -18,6 +18,7 @@ import {
   GitHubAppExchangeRequestSchema,
   GitHubAppInstallationConfigSchema,
   GitHubExchangeRequestSchema,
+  type GitHubLoginConfigResponse,
   type MembershipSource,
   OidcExchangeRequestSchema,
   PROJECT_ROLE_RANK,
@@ -47,6 +48,10 @@ import {
   getAuthenticatedUser,
   getRepoPermission,
 } from "../lib/github-client";
+import {
+  getGitHubLoginConfig,
+  githubLoginUnavailableResponse,
+} from "../lib/github-login-config";
 import {
   type GitHubOidcPolicyDenialReason,
   evaluateGitHubOidcPolicy,
@@ -816,27 +821,30 @@ authGithub.get("/app-info", (c) => {
   );
 });
 
+// This capability describes browser login only; /app-info also serves CLI clients.
+authGithub.get("/login-config", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    ok: true,
+    enabled: getGitHubLoginConfig(c.env).status === "enabled",
+  } satisfies GitHubLoginConfigResponse);
+});
+
+export function githubLoginAlias(c: Context<AppEnv>): Response {
+  const config = getGitHubLoginConfig(c.env);
+  if (config.status !== "enabled") {
+    return githubLoginUnavailableResponse(config.status);
+  }
+  return c.redirect("/api/auth/github/login", 302);
+}
+
 // GET /login -- Redirect to GitHub OAuth authorize URL with HMAC-signed state cookie
 authGithub.get("/login", async (c) => {
-  const clientId = c.env.GITHUB_APP_CLIENT_ID;
-  const hmacKey = c.env.GITHUB_SESSION_HMAC_KEY;
-
-  if (!clientId || !hmacKey) {
-    console.error(
-      "[login] GITHUB_APP_CLIENT_ID or GITHUB_SESSION_HMAC_KEY not configured",
-    );
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "not-configured",
-          message: "GitHub App is not configured on this server",
-          retryable: false,
-        },
-      },
-      500,
-    );
+  const config = getGitHubLoginConfig(c.env);
+  if (config.status !== "enabled") {
+    return githubLoginUnavailableResponse(config.status);
   }
+  const { clientId, hmacKey } = config;
 
   // Generate HMAC-signed state using jose
   const nonce = crypto.randomUUID();
@@ -914,6 +922,12 @@ const OAUTH_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours in ms
 
 // GET /oauth/callback -- Handle GitHub OAuth authorization code callback
 authGithub.get("/oauth/callback", async (c) => {
+  // Check before every callback branch, including installation acknowledgements.
+  const config = getGitHubLoginConfig(c.env);
+  if (config.status !== "enabled") {
+    return githubLoginUnavailableResponse(config.status);
+  }
+  const { clientId, clientSecret, hmacKey } = config;
   const { setup_action, code, state } = c.req.query();
 
   // UI_ORIGIN is a legacy secret for cross-origin Pages deployments. Under same-origin
@@ -939,20 +953,6 @@ authGithub.get("/oauth/callback", async (c) => {
       "Done",
       "You can close this window.",
       undefined,
-      uiOrigin,
-    );
-  }
-
-  // Check required config
-  const clientId = c.env.GITHUB_APP_CLIENT_ID;
-  const clientSecret = c.env.GITHUB_APP_CLIENT_SECRET;
-  const hmacKey = c.env.GITHUB_SESSION_HMAC_KEY;
-
-  if (!clientId || !clientSecret || !hmacKey) {
-    console.error("[oauth/callback] Required env vars not configured");
-    return oauthErrorRedirect(
-      "Configuration Error",
-      "GitHub OAuth is not configured on this server.",
       uiOrigin,
     );
   }

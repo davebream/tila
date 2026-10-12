@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { useGitHubLogin } from "@/hooks/use-github-login";
 import { API_BASE_URL } from "@/lib/config";
 import { stashStepUpResume } from "@/lib/step-up";
 import { useLocation, useNavigate } from "react-router";
@@ -18,6 +19,9 @@ export function StepUpBanner({
   onBeforeSignIn?: () => boolean;
 }) {
   const { projectId, capabilities } = useAuth();
+  const githubLogin = useGitHubLogin();
+  const tokenAuth = capabilities?.auth_method === "token";
+  const canSignIn = tokenAuth || githubLogin.enabled;
   const location = useLocation();
   const navigate = useNavigate();
   const minutes = Math.max(
@@ -26,12 +30,12 @@ export function StepUpBanner({
   );
 
   function reauthenticate() {
-    if (!projectId || onBeforeSignIn?.() === false) return;
+    if (!canSignIn || !projectId || onBeforeSignIn?.() === false) return;
     stashStepUpResume({
       projectId,
       returnTo: `${location.pathname}${location.search}${location.hash}`,
     });
-    if (capabilities?.auth_method === "token") {
+    if (tokenAuth) {
       navigate("/login");
       return;
     }
@@ -49,14 +53,22 @@ export function StepUpBanner({
           {description ??
             `Membership and credential changes require a sign-in newer than ${minutes} minute${minutes === 1 ? "" : "s"}. Your change was not applied.`}
         </p>
+        {!tokenAuth && !githubLogin.enabled && !githubLogin.isLoading && (
+          <p className="text-xs text-muted-foreground">
+            GitHub sign-in is unavailable on this instance. Contact your
+            instance administrator.
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-1">
         <Button variant="ghost" size="sm" onClick={onDismiss}>
           Dismiss
         </Button>
-        <Button size="sm" onClick={reauthenticate}>
-          Sign in again
-        </Button>
+        {canSignIn && (
+          <Button size="sm" onClick={reauthenticate}>
+            Sign in again
+          </Button>
+        )}
       </div>
     </div>
   );

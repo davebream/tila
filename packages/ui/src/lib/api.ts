@@ -39,6 +39,7 @@ import type {
   SignalHistoryResponse,
   StateListResponse,
 } from "@tila/schemas";
+import { GitHubLoginConfigResponseSchema } from "@tila/schemas";
 import { API_BASE_URL } from "./config";
 import { encodeArtifactKey } from "./utils";
 
@@ -188,6 +189,15 @@ async function request<T>(
 }
 
 // --- Session management ---
+
+export async function githubLoginConfig(signal?: AbortSignal) {
+  const response = await fetch(
+    absoluteUrl("/api/auth/github/login-config").toString(),
+    { signal, cache: "no-store", headers: { Accept: "application/json" } },
+  );
+  if (!response.ok) throw await parseErrorResponse(response);
+  return GitHubLoginConfigResponseSchema.parse(await response.json());
+}
 
 export async function sessionExchange(
   token: string,

@@ -439,7 +439,11 @@ export { errorEnvelope, okEnvelope } from "./envelope";
 export { TagSchema, type Tag, TagsSchema, type Tags } from "./tags";
 
 // --- GitHub validation constants ---
-export { GITHUB_LOGIN_REGEX } from "./github";
+export {
+  GITHUB_LOGIN_REGEX,
+  GitHubLoginConfigResponseSchema,
+  type GitHubLoginConfigResponse,
+} from "./github";
 
 // --- Canonical project membership ---
 export {

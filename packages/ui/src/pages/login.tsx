@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
+import { useGitHubLogin } from "@/hooks/use-github-login";
 import { ApiError } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
 import { type FormEvent, useEffect, useState } from "react";
@@ -13,7 +14,7 @@ const PROJECT_ID_KEY = "tila:last-project-id";
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.code === "http-401")
-      return "Invalid token. Check with your project admin or use Connect with GitHub.";
+      return "Invalid token. Check with your project admin.";
     if (err.code === "http-404")
       return "Project not found. Verify the project ID with your admin.";
     if (err.code === "http-429") return "Too many attempts, try again shortly.";
@@ -26,6 +27,7 @@ function errorMessage(err: unknown): string {
 
 export function LoginPage() {
   const auth = useAuth();
+  const { enabled: githubLoginEnabled } = useGitHubLogin();
   const navigate = useNavigate();
   const [projectId, setProjectId] = useState(() => {
     try {
@@ -84,35 +86,39 @@ export function LoginPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <Button
-            variant="outline"
-            className="w-full cursor-pointer"
-            onClick={() => {
-              if (isRedirecting) {
-                setIsRedirecting(false);
-                setError(null);
-              } else {
-                setIsRedirecting(true);
-                setError(null);
-                window.location.href = `${API_BASE_URL}/api/auth/github/login`;
-              }
-            }}
-          >
-            {isRedirecting ? "Cancel redirect" : "Connect with GitHub"}
-          </Button>
+          {githubLoginEnabled && (
+            <>
+              <Button
+                variant="outline"
+                className="w-full cursor-pointer"
+                onClick={() => {
+                  if (isRedirecting) {
+                    setIsRedirecting(false);
+                    setError(null);
+                  } else {
+                    setIsRedirecting(true);
+                    setError(null);
+                    window.location.href = `${API_BASE_URL}/api/auth/github/login`;
+                  }
+                }}
+              >
+                {isRedirecting ? "Cancel redirect" : "Connect with GitHub"}
+              </Button>
 
-          <div className="my-4 flex flex-col items-center gap-1">
-            <div className="flex w-full items-center gap-2">
-              <div className="h-px flex-1 bg-muted-foreground/20" />
-              <span className="text-xs text-muted-foreground">
-                or use API token
-              </span>
-              <div className="h-px flex-1 bg-muted-foreground/20" />
-            </div>
-            <span className="text-[11px] text-muted-foreground/60">
-              For CI, scripts, or when GitHub is unavailable
-            </span>
-          </div>
+              <div className="my-4 flex flex-col items-center gap-1">
+                <div className="flex w-full items-center gap-2">
+                  <div className="h-px flex-1 bg-muted-foreground/20" />
+                  <span className="text-xs text-muted-foreground">
+                    or use API token
+                  </span>
+                  <div className="h-px flex-1 bg-muted-foreground/20" />
+                </div>
+                <span className="text-[11px] text-muted-foreground/60">
+                  For CI, scripts, or when GitHub is unavailable
+                </span>
+              </div>
+            </>
+          )}
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
@@ -196,8 +202,9 @@ export function LoginPage() {
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Ask your project admin for a token, or use Connect with GitHub
-                above.
+                {githubLoginEnabled
+                  ? "Ask your project admin for a token, or use Connect with GitHub above."
+                  : "Ask your project admin for a token."}
               </p>
             </div>
             <div role="alert" aria-live="assertive" className="min-h-0">

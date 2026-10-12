@@ -15,6 +15,7 @@ export interface Env {
   ANALYTICS: AnalyticsEngineDataset;
   CORS_ALLOWED_ORIGINS?: string;
   UI_ORIGIN?: string;
+  GITHUB_LOGIN_ENABLED?: string;
   GITHUB_SESSION_HMAC_KEY?: string;
   // Optional secret: when set, bearer/session tokens are hashed with keyed
   // HMAC-SHA-256 instead of plain SHA-256 (see lib/hash-token.ts).
