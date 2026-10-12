@@ -190,6 +190,25 @@ export function useJournal(params?: {
   });
 }
 
+/**
+ * A task's journal history. Task events use the bare id and claim events the
+ * typed `<type>:<id>` form, so both resources are requested once the type is
+ * known.
+ */
+export function useTaskHistory(id: string, type: string | undefined) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["task-history", projectId, id, type],
+    queryFn: () =>
+      listJournal(requireProjectId(projectId), {
+        resource: [id, `${type}:${id}`],
+        limit: 20,
+      }),
+    enabled: Boolean(projectId) && Boolean(id) && Boolean(type),
+    refetchInterval: 10000,
+  });
+}
+
 export function usePresence() {
   const { projectId } = useAuth();
   return useQuery({

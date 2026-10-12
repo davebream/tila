@@ -5,6 +5,7 @@ import {
   getWorkCatalog,
   githubLoginConfig,
   githubUserLookup,
+  listJournal,
   listTasks,
   mutate,
   revokeMembership,
@@ -138,6 +139,25 @@ describe("task catalog and search requests", () => {
     expect(sent?.get("syntax")).toBe("literal");
     expect(sent?.get("type")).toBe("task,epic");
     expect(sent?.get("cursor")).toBe("c1");
+    expect(sent?.get("limit")).toBe("20");
+  });
+});
+
+describe("journal requests", () => {
+  test("sends several resources as repeated params", async () => {
+    let params: URLSearchParams | null = null;
+    server.use(
+      http.get("*/projects/*/journal", ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({ ok: true, events: [] });
+      }),
+    );
+    await listJournal("test-project", {
+      resource: ["job-1", "job:job-1"],
+      limit: 20,
+    });
+    const sent = params as URLSearchParams | null;
+    expect(sent?.getAll("resource")).toEqual(["job-1", "job:job-1"]);
     expect(sent?.get("limit")).toBe("20");
   });
 });
