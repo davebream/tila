@@ -626,7 +626,7 @@ describe("diffSchemas", () => {
       expect(result.autoApplicable).toBe(false);
     });
 
-    it("ignores format/history/writers/mcp_resource metadata changes", () => {
+    it("detects format/history/writers/mcp_resource metadata changes", () => {
       const next: TilaSchemaToml = {
         schema_version: 2,
         work_units: {},
@@ -644,8 +644,12 @@ describe("diffSchemas", () => {
         },
       };
       const result = diffSchemas(recordBaseSchema, next);
-      expect(result.changes).toEqual([]);
-      expect(result.autoApplicable).toBe(true);
+      expect(result.changes).toContainEqual({
+        kind: "definition-changed",
+        path: "records.service",
+        destructive: true,
+      });
+      expect(result.autoApplicable).toBe(false);
     });
 
     it("handles schema with no records diffed against schema with records", () => {
@@ -695,7 +699,7 @@ describe("diffSchemas", () => {
       };
       const result = diffSchemas(recordBaseSchema, next);
       expect(result.autoApplicable).toBe(true);
-      expect(result.changes.length).toBe(2);
+      expect(result.changes.length).toBe(3);
     });
   });
 });

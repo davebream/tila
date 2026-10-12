@@ -154,7 +154,7 @@ it("lists exactly six default tools, validates real calls, and preserves the exp
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(63);
+  expect((await all.listTools()).tools).toHaveLength(64);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -532,7 +532,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(65);
+  expect(listed).toHaveLength(66);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -552,6 +552,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
     } else expect(result).toEqual(JSON.parse(texts[0].text));
     return result;
   }
+  await primitive("tila_schema_preview", { definition: "schema_version = 1" });
   await primitive("tila_schema_update", {
     definition: `schema_version = 1
 [work_units.task]

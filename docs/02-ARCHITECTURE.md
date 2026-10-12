@@ -625,6 +625,12 @@ DDL migrations to either DO SQLite or D1 are explicit, require Cloudflare accoun
 
 Entity-level schema changes (adding `task`, removing `bug`, adding required field `priority`) use `tila schema apply` with `_schema_history` as the audit log. The DDL is unaffected — these changes only modify `data` interpretation rules.
 
+Configuration reads and previews return `revision` (zero before the first apply). This is the applied-definition history version, distinct from the format's `schema_version`. Send `expected_revision` on apply to reject stale edits atomically with HTTP 412 `schema-revision-conflict`. Destructive conditional writes also require `reviewed_definition` from preview and an explicit `relax` or `force` strategy. Tila compares parsed definitions, so whitespace changes are harmless; the review is a precondition, not an authorization credential.
+
+The SDK exposes `schema.preview(definition)`, `schema.apply(definition, strategy, { expected_revision, reviewed_definition, idempotency_key })` and paginated `schema.history({ limit, before })`. CLI users can save `tila schema diff --json` to a review file and pass it with `tila schema apply --review <file> --strategy force --idempotency-key <stable-key>`. MCP exposes `tila_schema_preview` and the same conditional fields on `tila_schema_update`. History is retained remotely and locally. Embedded databases now apply the previously skipped canonical migration 21 to add the transactional receipt table; the legacy local response-cache table remains intact. Legacy unconditional applies remain compatible; they do not provide stale-editor protection.
+
+Apply receipts commit with the configuration and journal in project SQLite. An exact retry returns the recorded result, even after the applied revision advances; a reused key with different input is rejected. Schema commands bypass D1 response replay so current authorization is checked before the receipt is read. Entity create/update validation reads the current definition inside its write transaction; Worker cache freshness is not a correctness boundary.
+
 ---
 
 ## Section 3: Durable Object internals
@@ -2012,13 +2018,13 @@ Journal event records the *intent* to produce an artifact. The pointer row in `a
 DO serialization handles this. The DO's single-threaded execution model means one acquire completes before the second begins to evaluate. The second sees the first's claim and returns 409.
 
 ### 10.5 Schema migration fails partway
-Applied definitions and their journal event commit in one project DO SQLite transaction. Failure inside that transaction leaves no partial revision. This is not a D1 transaction or an atomic update across stores; a lost response can still follow a successful commit. #296 owns revision-aware retry/reconciliation for settings writes.
+Applied definitions, operation receipts and their journal event commit in one project SQLite transaction. Failure inside that transaction leaves no partial revision. This is not a D1 transaction or an atomic update across stores. After a lost response, retry with the same idempotency key and input; the receipt distinguishes a committed apply from a stale new write.
 
 ### 10.6 User downgrades tila to an older version
 Product release, physical database migration, serialized schema-format version and applied definition revision are distinct. A high history revision does not by itself mean an older client cannot parse the format. Preserve existing compatibility checks; #296 owns the explicit settings-client transition, and #307 reports immutable release/protocol identity. Do not restore old definitions as a database downgrade.
 
 ### 10.7 User runs concurrent `tila schema apply` from two machines
-Current apply serializes the transaction in DO SQLite but accepts no expected revision; sequential transactions can still let a stale editor overwrite a newer definition. There is no schema claim in the current apply path. #296 adds an atomic expected-revision check; until delivered, do not advertise lost-update protection.
+Both callers send the revision they read as `expected_revision`. The first transaction commits; the second receives `schema-revision-conflict` and must read/preview again. Legacy callers that omit the precondition retain unconditional behavior. There is no schema claim or cross-store transaction in this path.
 
 ### 10.8 Lease TTL too short, agent loses lease mid-work
 Renew loop runs every TTL/3 (default: every 60s for a 180s lease, every 200s for a 600s lease). If three consecutive renews fail, the agent aborts its current critical section and surfaces the issue.

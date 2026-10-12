@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { diffSchemas, parseSchemaToml } from "@tila/core";
 import { type TilaSchemaToml, TilaSchemaTomlSchema } from "@tila/schemas";
 import { defineCommand } from "citty";
@@ -27,7 +28,7 @@ import { loadComposedSchema } from "../lib/schema-loader";
 function parseCurrentDefinition(definition: string | null): TilaSchemaToml {
   if (!definition) {
     // No schema applied yet → diff against an empty schema (everything is "added").
-    return TilaSchemaTomlSchema.parse({ schema_version: 0, work_units: {} });
+    return TilaSchemaTomlSchema.parse({ schema_version: 1, work_units: {} });
   }
   let raw: unknown;
   try {
@@ -121,6 +122,8 @@ export default defineCommand({
 
         if (args.json) {
           printJson({
+            revision: current.revision ?? current.version ?? 0,
+            reviewed_definition: definition,
             changes: result.changes,
             autoApplicable: result.autoApplicable,
           });
@@ -132,6 +135,9 @@ export default defineCommand({
           return;
         }
 
+        outputText(
+          `Configuration revision: ${current.revision ?? current.version ?? 0}`,
+        );
         outputText("Changes:");
         for (const rawChange of result.changes) {
           // `diffSchemas` returns a discriminated union; the renderer reads
@@ -254,6 +260,20 @@ export default defineCommand({
     apply: defineCommand({
       meta: { name: "apply", description: "Apply schema changes" },
       args: {
+        "expected-revision": {
+          type: "string",
+          description:
+            "Configuration revision from schema diff (0 for initial apply)",
+        },
+        review: {
+          type: "string",
+          description:
+            "JSON file saved from schema diff --json; binds revision and reviewed definition",
+        },
+        "idempotency-key": {
+          type: "string",
+          description: "Stable key when retrying this apply",
+        },
         strategy: {
           type: "string",
           description: "Strategy for destructive changes (relax|force)",
@@ -308,9 +328,31 @@ export default defineCommand({
           warning(`Schema composition warnings:\n${warningLines}`);
         }
 
+        const review = args.review
+          ? (JSON.parse(readFileSync(args.review, "utf8")) as {
+              revision: number;
+              reviewed_definition: string;
+            })
+          : undefined;
+        const expected =
+          args["expected-revision"] === undefined
+            ? review?.revision
+            : Number(args["expected-revision"]);
+        if (
+          expected !== undefined &&
+          (!Number.isSafeInteger(expected) || expected < 0)
+        )
+          throw new Error("expected-revision must be a nonnegative integer");
         const result = await schema.applySchema({
           definition,
           strategy: args.strategy as string | undefined,
+          ...(expected === undefined ? {} : { expected_revision: expected }),
+          ...(review === undefined
+            ? {}
+            : { reviewed_definition: review.reviewed_definition }),
+          ...(args["idempotency-key"] === undefined
+            ? {}
+            : { idempotency_key: args["idempotency-key"] }),
         });
 
         if (args.json) {
