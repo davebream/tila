@@ -19,7 +19,7 @@ import { formatDateTime, relativeTime } from "@/lib/time";
 import type { StateListResponse } from "@tila/schemas";
 import { ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 
 const dataLinkClass =
   "rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue";
@@ -117,7 +117,18 @@ export function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { projectId } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const entityId = id ?? "";
+  // The list behind the drawer is driven by the query string and page trail;
+  // keep both so closing returns to the same filtered page.
+  const listLink = {
+    pathname: `/p/${projectId}/tasks`,
+    search: location.search,
+  };
+  const taskLink = (taskId: string) => ({
+    pathname: `/p/${projectId}/tasks/${taskId}`,
+    search: location.search,
+  });
 
   const taskQuery = useTask(entityId);
   const claimsQuery = useClaims();
@@ -169,7 +180,7 @@ export function TaskDetailPage() {
 
   return (
     <Drawer
-      onClose={() => navigate(`/p/${projectId}/tasks`)}
+      onClose={() => navigate(listLink, { state: location.state })}
       expanded={expanded}
       headerActions={
         <button
@@ -184,7 +195,8 @@ export function TaskDetailPage() {
       title={
         <span className="flex items-center gap-1.5">
           <Link
-            to={`/p/${projectId}/tasks`}
+            to={listLink}
+            state={location.state}
             className="text-muted-foreground hover:text-foreground"
           >
             Tasks
@@ -427,7 +439,8 @@ export function TaskDetailPage() {
                             </TableCell>
                             <TableCell>
                               <Link
-                                to={`/p/${projectId}/tasks/${rel.from_id}`}
+                                to={taskLink(rel.from_id)}
+                                state={location.state}
                                 className={dataLinkClass}
                               >
                                 {rel.from_id}
@@ -435,7 +448,8 @@ export function TaskDetailPage() {
                             </TableCell>
                             <TableCell>
                               <Link
-                                to={`/p/${projectId}/tasks/${rel.to_id}`}
+                                to={taskLink(rel.to_id)}
+                                state={location.state}
                                 className={dataLinkClass}
                               >
                                 {rel.to_id}

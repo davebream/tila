@@ -6,7 +6,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ChevronDown } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 export interface FilterGroup {
   label: string;
@@ -20,6 +27,8 @@ interface MultiSelectFilterProps {
   onChange: (values: string[]) => void;
   disabled?: boolean;
   groups?: FilterGroup[];
+  /** Right-aligned muted detail for an option, e.g. a row count. */
+  optionMeta?: (option: string) => ReactNode;
 }
 
 export function MultiSelectFilter({
@@ -29,6 +38,7 @@ export function MultiSelectFilter({
   onChange,
   disabled,
   groups,
+  optionMeta,
 }: MultiSelectFilterProps) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -90,9 +100,17 @@ export function MultiSelectFilter({
           checked={checked}
           onCheckedChange={() => toggle(option)}
         />
-        <label htmlFor={id} className="font-mono text-foreground">
+        <label
+          htmlFor={id}
+          className="min-w-0 flex-1 truncate font-mono text-foreground"
+        >
           {option}
         </label>
+        {optionMeta && (
+          <span className="tila-num shrink-0 font-mono text-[11px] text-muted-foreground">
+            {optionMeta(option)}
+          </span>
+        )}
       </div>
     );
   }

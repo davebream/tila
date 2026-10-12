@@ -1,10 +1,15 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Input } from "@/components/ui/input";
 import { LastRefreshed } from "@/components/ui/last-refreshed";
-import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
-import { SortableHead, useSort } from "@/components/ui/sortable-head";
+import {
+  type FilterGroup,
+  MultiSelectFilter,
+} from "@/components/ui/multi-select-filter";
+import { SectionFailure } from "@/components/ui/query-section";
+import { SortableHead } from "@/components/ui/sortable-head";
 import {
   Table,
   TableBody,
@@ -15,128 +20,381 @@ import {
 } from "@/components/ui/table";
 import { TableError } from "@/components/ui/table-error";
 import { TableSkeleton } from "@/components/ui/table-skeleton";
-import { useTasks } from "@/hooks/use-api";
+import {
+  TASK_SEARCH_MIN_LENGTH,
+  useTaskPage,
+  useTaskSearch,
+  useWorkCatalog,
+} from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
+import { ApiError, type TaskListSort } from "@/lib/api";
+import { catalogIndex, taskState, taskTitle } from "@/lib/presentation";
+import { classifyApiError } from "@/lib/query-state";
+import { sanitizeSnippet } from "@/lib/snippet";
 import { relativeTime } from "@/lib/time";
-import type { PaginatedEntityListResponse } from "@tila/schemas";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useMatch, useNavigate, useSearchParams } from "react-router";
+import type { WorkCatalogEntry } from "@tila/schemas";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  Link,
+  useLocation,
+  useMatch,
+  useNavigate,
+  useSearchParams,
+} from "react-router";
 
-type Entity = {
-  id: string;
-  type: string;
-  schema_version: number;
-  data: Record<string, unknown> | null;
-  archived: number;
-  created_at: number;
-  updated_at: number;
-  created_by: string;
+const PAGE_SIZE = 100;
+
+type SortKey = "updated" | "type" | "id";
+type Sort = { key: SortKey; dir: "asc" | "desc" };
+
+const DEFAULT_SORT: Sort = { key: "updated", dir: "desc" };
+
+const SORT_FIELDS: Record<SortKey, TaskListSort> = {
+  updated: "updated_at",
+  type: "type",
+  id: "id",
 };
 
-function entityStatus(entity: Entity): string | null {
-  const s = (entity.data as Record<string, unknown> | null)?.status;
-  return typeof s === "string" ? s : null;
-}
-
-function statusVariant(
-  status: string,
-): "green" | "amber" | "red" | "gray" | "default" {
-  switch (status) {
-    case "done":
-    case "complete":
-    case "completed":
-    case "active":
-      return "green";
-    case "in-progress":
-    case "running":
-    case "claimed":
-      return "amber";
-    case "failed":
-    case "error":
-    case "blocked":
-      return "red";
-    default:
-      return "gray";
-  }
-}
-
-function parseSort(
-  raw: string | null,
-): { key: "updated" | "type" | "id"; dir: "asc" | "desc" } | null {
+function parseSort(raw: string | null): Sort | null {
   if (!raw) return null;
   const [k, d] = raw.split(":");
-  if (["updated", "type", "id"].includes(k) && (d === "asc" || d === "desc")) {
-    return { key: k as "updated" | "type" | "id", dir: d };
+  if (
+    (k === "updated" || k === "type" || k === "id") &&
+    (d === "asc" || d === "desc")
+  ) {
+    return { key: k, dir: d };
   }
   return null;
 }
 
+function parseList(raw: string | null): string[] {
+  return raw?.split(",").filter(Boolean) ?? [];
+}
+
+/**
+ * Cursors of the pages before the current one, kept in history state so
+ * "Previous" works without the server offering backward cursors. `fromStart`
+ * says the trail reaches page one, so the page number is known.
+ */
+type PageTrail = { cursors: (string | null)[]; fromStart: boolean };
+
+function readTrail(state: unknown): PageTrail | null {
+  if (!state || typeof state !== "object" || !("taskPages" in state)) {
+    return null;
+  }
+  const trail = (state as { taskPages?: unknown }).taskPages;
+  if (
+    !trail ||
+    typeof trail !== "object" ||
+    !Array.isArray((trail as PageTrail).cursors)
+  ) {
+    return null;
+  }
+  return trail as PageTrail;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+const linkClass =
+  "rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue";
+
+function RemoveIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    >
+      <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
+    </svg>
+  );
+}
+
+function TypeCell({
+  type,
+  entry,
+}: {
+  type: string;
+  entry: WorkCatalogEntry | undefined;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Badge variant="secondary">{type}</Badge>
+      {entry?.declaration === "undeclared" && (
+        <Badge
+          variant="amber"
+          title="The current schema does not declare this type"
+        >
+          Not in schema
+        </Badge>
+      )}
+    </span>
+  );
+}
+
+function Muted({ children }: { children: React.ReactNode }) {
+  return <span className="text-muted-foreground">{children}</span>;
+}
+
+type Row = {
+  id: string;
+  type: string;
+  title: string | null;
+  data?: Record<string, unknown> | null;
+  updated_at?: number;
+  created_by?: string;
+  snippet?: string | null;
+};
+
 export function TasksPage() {
   useTimeTick();
   const { projectId } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const detailMatch = useMatch(`/p/${projectId}/tasks/:id`);
   const selectedId = detailMatch?.params.id;
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [typeFilter, setTypeFilter] = useState<string[]>(
-    () => searchParams.get("type")?.split(",").filter(Boolean) ?? [],
-  );
-  const [idFilter, setIdFilter] = useState(() => searchParams.get("q") ?? "");
-  const [sort, toggleSort] = useSort<"updated" | "type" | "id">(
-    parseSort(searchParams.get("sort")) ?? { key: "updated", dir: "desc" },
-  );
+  const typeParam = searchParams.get("type");
+  const typeFilter = useMemo(() => parseList(typeParam), [typeParam]);
+  const urlQ = (searchParams.get("q") ?? "").trim();
+  const sort = parseSort(searchParams.get("sort")) ?? DEFAULT_SORT;
+  const includeArchived = searchParams.get("archived") === "1";
+  const after = searchParams.get("after") ?? undefined;
+  const trail = readTrail(location.state);
 
+  const archivedId = useId();
+  const searchMode = urlQ.length >= TASK_SEARCH_MIN_LENGTH;
+  const shortQuery = urlQ.length > 0 && !searchMode;
+
+  // Shown after an expired or foreign page link was dropped. Cleared by the
+  // next deliberate navigation.
+  const [cursorReset, setCursorReset] = useState(false);
+
+  // Filter, sort, query and archived changes start again from page one.
+  function updateParams(mutate: (p: URLSearchParams) => void) {
+    setCursorReset(false);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        mutate(next);
+        next.delete("after");
+        return next;
+      },
+      { replace: true },
+    );
+  }
+  const updateParamsRef = useRef(updateParams);
+  updateParamsRef.current = updateParams;
+
+  // The input is local while typing; the URL follows after a short debounce.
+  const [qInput, setQInput] = useState(urlQ);
+  const debouncedQ = useDebouncedValue(qInput);
+  const syncedQ = useRef(urlQ);
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (typeFilter.length > 0) params.set("type", typeFilter.join(","));
-    if (idFilter.trim()) params.set("q", idFilter.trim());
-    if (sort) params.set("sort", `${sort.key}:${sort.dir}`);
-    setSearchParams(params, { replace: true });
-  }, [typeFilter, idFilter, sort, setSearchParams]);
-
-  // Map UI sort key to server sort field; "id" is unsupported server-side so omit it
-  const serverSort =
-    sort?.key === "updated"
-      ? "updated_at"
-      : sort?.key === "type"
-        ? "type"
-        : undefined;
-
-  const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useTasks({
-    type: typeFilter.length > 0 ? typeFilter : undefined,
-    limit: 100,
-    sort: serverSort,
-    order: sort?.dir,
-  });
-  const allEntities = data?.entities ?? [];
-
-  const typeOptions = useMemo(
-    () => [...new Set(allEntities.map((e) => e.type))].sort(),
-    [allEntities],
-  );
-
-  const debouncedIdFilter = useDebouncedValue(idFilter);
-
-  const entities = useMemo(() => {
-    let filtered = allEntities;
-    if (debouncedIdFilter.trim()) {
-      const q = debouncedIdFilter.toLowerCase().trim();
-      filtered = allEntities.filter((e) => e.id.toLowerCase().includes(q));
+    // The URL changed from outside (e.g. the command palette): adopt it.
+    if (urlQ !== syncedQ.current) {
+      syncedQ.current = urlQ;
+      setQInput(urlQ);
     }
-    // Server already handles updated_at and type sort; client sort only for "id"
-    if (!sort || sort.key !== "id") return filtered;
-    const dir = sort.dir === "asc" ? 1 : -1;
-    return [...filtered].sort((a, b) => a.id.localeCompare(b.id) * dir);
-  }, [allEntities, debouncedIdFilter, sort]);
+  }, [urlQ]);
+  useEffect(() => {
+    const trimmed = debouncedQ.trim();
+    if (trimmed === syncedQ.current) return;
+    syncedQ.current = trimmed;
+    updateParamsRef.current((p) => {
+      if (trimmed) p.set("q", trimmed);
+      else p.delete("q");
+    });
+  }, [debouncedQ]);
 
-  const hasPaginationHint =
-    data !== undefined && "has_more" in data && data.has_more;
+  function setTypeFilter(values: string[]) {
+    updateParams((p) => {
+      if (values.length > 0) p.set("type", values.join(","));
+      else p.delete("type");
+    });
+  }
+
+  function toggleSort(key: SortKey) {
+    const next: Sort =
+      sort.key === key
+        ? { key, dir: sort.dir === "desc" ? "asc" : "desc" }
+        : { key, dir: "desc" };
+    updateParams((p) => {
+      if (next.key === DEFAULT_SORT.key && next.dir === DEFAULT_SORT.dir) {
+        p.delete("sort");
+      } else {
+        p.set("sort", `${next.key}:${next.dir}`);
+      }
+    });
+  }
+
+  function setIncludeArchived(include: boolean) {
+    updateParams((p) => {
+      if (include) p.set("archived", "1");
+      else p.delete("archived");
+    });
+  }
+
+  function resetFilters() {
+    syncedQ.current = "";
+    setQInput("");
+    updateParams((p) => {
+      p.delete("type");
+      p.delete("q");
+    });
+  }
+
+  function goToPage(cursor: string | null, nextTrail: PageTrail) {
+    setCursorReset(false);
+    const next = new URLSearchParams(searchParams);
+    if (cursor) next.set("after", cursor);
+    else next.delete("after");
+    const search = next.toString();
+    navigate(
+      { pathname: location.pathname, search: search ? `?${search}` : "" },
+      { state: { taskPages: nextTrail } },
+    );
+  }
+
+  function goNext(nextCursor: string) {
+    goToPage(
+      nextCursor,
+      after
+        ? {
+            cursors: [...(trail?.cursors ?? []), after],
+            fromStart: trail?.fromStart ?? false,
+          }
+        : { cursors: [null], fromStart: true },
+    );
+  }
+
+  const canGoPrevious = Boolean(after) && (trail?.cursors.length ?? 0) > 0;
+  function goPrevious() {
+    if (!trail || trail.cursors.length === 0) return;
+    goToPage(trail.cursors[trail.cursors.length - 1], {
+      cursors: trail.cursors.slice(0, -1),
+      fromStart: trail.fromStart,
+    });
+  }
+
+  function goFirst() {
+    goToPage(null, { cursors: [], fromStart: true });
+  }
+
+  // --- Data ---
+
+  const catalogQuery = useWorkCatalog();
+  const catalog = catalogQuery.data;
+  const entries = useMemo(() => catalogIndex(catalog?.types), [catalog]);
+
+  const listQuery = useTaskPage(
+    {
+      type: typeFilter,
+      archived: includeArchived,
+      sort: SORT_FIELDS[sort.key],
+      order: sort.dir,
+      limit: PAGE_SIZE,
+      cursor: after,
+    },
+    { enabled: !searchMode },
+  );
+  const searchQuery = useTaskSearch(
+    { q: urlQ, type: typeFilter, cursor: after, limit: PAGE_SIZE },
+    { enabled: searchMode },
+  );
+  const active = searchMode ? searchQuery : listQuery;
+
+  const invalidCursor =
+    active.error instanceof ApiError && active.error.code === "invalid-cursor";
+  useEffect(() => {
+    if (!invalidCursor || !after) return;
+    setCursorReset(true);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("after");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [invalidCursor, after, setSearchParams]);
+
+  const rows: Row[] = useMemo(() => {
+    if (searchMode) {
+      return (searchQuery.data?.results ?? []).flatMap((r) =>
+        r.type === "entity"
+          ? [
+              {
+                id: r.entity_id,
+                type: r.entity_type,
+                title: r.name,
+                snippet: r.snippet,
+              },
+            ]
+          : [],
+      );
+    }
+    return (listQuery.data?.entities ?? []).map((e) => ({
+      id: e.id,
+      type: e.type,
+      title: taskTitle(e.data, entries.get(e.type)),
+      data: e.data,
+      updated_at: e.updated_at,
+      created_by: e.created_by,
+    }));
+  }, [searchMode, searchQuery.data, listQuery.data, entries]);
+
+  const nextCursor = searchMode
+    ? (searchQuery.data?.next_cursor ?? null)
+    : (listQuery.data?.next_cursor ?? null);
+
+  // --- Type filter options: only from the catalog, never from rows ---
+
+  const catalogLoaded = catalog !== undefined;
+  // Selected types the catalog no longer lists (renamed, retired, or not
+  // visible to this credential). They stay selected and are still sent.
+  const missingTypes = useMemo(
+    () => (catalogLoaded ? typeFilter.filter((t) => !entries.has(t)) : []),
+    [catalogLoaded, typeFilter, entries],
+  );
+  const typeGroups: FilterGroup[] | undefined = useMemo(() => {
+    if (!catalog) return undefined;
+    const byDeclaration = (d: WorkCatalogEntry["declaration"]) =>
+      catalog.types.filter((e) => e.declaration === d).map((e) => e.type);
+    return [
+      { label: "Declared", options: byDeclaration("declared") },
+      { label: "Not in schema", options: byDeclaration("undeclared") },
+      { label: "Definitions unavailable", options: byDeclaration("unknown") },
+      { label: "Not available", options: missingTypes },
+    ].filter((g) => g.options.length > 0);
+  }, [catalog, missingTypes]);
+  const typeOptions = typeGroups
+    ? typeGroups.flatMap((g) => g.options)
+    : typeFilter;
+  const typeCount = (type: string) => {
+    const entry = entries.get(type);
+    if (!entry) return catalogLoaded ? "not available" : null;
+    return includeArchived ? entry.count + entry.archived_count : entry.count;
+  };
+
+  const catalogTotal = catalog
+    ? catalog.types.reduce((n, e) => n + e.count + e.archived_count, 0)
+    : null;
+
+  // --- Keyboard ---
 
   const searchRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (
@@ -154,64 +412,134 @@ export function TasksPage() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const navigate = useNavigate();
-  const tableRef = useRef<HTMLDivElement>(null);
+  // The drawer opens over the same list page: keep the query string and the
+  // page trail so closing it returns to exactly this page.
+  const taskLink = (id: string) => ({
+    pathname: `/p/${projectId}/tasks/${id}`,
+    search: location.search,
+  });
   const { focusIdx, handleKeyDown: handleTableKeyDown } = useTableKeyNav(
-    entities.length,
-    (idx) => navigate(`/p/${projectId}/tasks/${entities[idx].id}`),
+    rows.length,
+    (idx) => navigate(taskLink(rows[idx].id), { state: location.state }),
   );
+
+  // --- Copy ---
+
+  const restricted = searchMode
+    ? (searchQuery.data?.scope?.restricted ?? false)
+    : (listQuery.data?.scope?.restricted ?? false);
+  let summary: string | null = null;
+  let position: string | null = null;
+  if (searchMode && searchQuery.data) {
+    summary = `${plural(rows.length, "result", "results")} · ranked by relevance · non-archived tasks${restricted ? " visible to this credential" : ""}`;
+  } else if (!searchMode && listQuery.data) {
+    const total = listQuery.data.total ?? rows.length;
+    const archivedScope =
+      listQuery.data.scope?.archived ??
+      (includeArchived ? "included" : "excluded");
+    summary = `${plural(total, "task", "tasks")} · ${archivedScope === "included" ? "including" : "excluding"} archived${restricted ? " · visible to this credential" : ""}`;
+    const paged = Boolean(after) || nextCursor !== null;
+    if (paged && rows.length > 0) {
+      const pageIndex = !after
+        ? 0
+        : trail?.fromStart
+          ? trail.cursors.length
+          : null;
+      if (pageIndex !== null) {
+        const start = pageIndex * PAGE_SIZE + 1;
+        position = `${start}–${start + rows.length - 1} of ${total}`;
+      } else {
+        position = `Showing ${rows.length} of ${total}`;
+      }
+    }
+  }
+
+  const hasFilters = typeFilter.length > 0 || searchMode;
+  let emptyText: string;
+  if (searchMode) {
+    emptyText = `No tasks match “${urlQ}”.`;
+  } else if (hasFilters) {
+    emptyText = "No tasks match these filters.";
+  } else if (catalogTotal === 0 || (catalogTotal === null && includeArchived)) {
+    emptyText =
+      "No tasks in this project. Tasks appear when agents create or claim work units.";
+  } else if (!includeArchived) {
+    emptyText = "No tasks match these filters. Archived tasks are excluded.";
+  } else {
+    emptyText = "No tasks match these filters.";
+  }
+
+  const showPending = active.isPending || (invalidCursor && Boolean(after));
+  const showError = active.isError && !invalidCursor && !active.data;
 
   return (
     <div className="space-y-4 p-3 md:p-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-logo text-xl tracking-tight text-foreground">
           Tasks
         </h1>
-        {entities.length > 0 && (
-          <span className="tila-num rounded-full border border-border bg-card px-[7px] py-px font-mono text-[11px] text-fg-faint">
-            {entities.length}
-          </span>
+        {summary && (
+          <span className="font-mono text-[11px] text-fg-faint">{summary}</span>
         )}
-        {hasPaginationHint && (
-          <span className="font-mono text-[11px] text-fg-faint">
-            Showing first {(data as PaginatedEntityListResponse).limit ?? 100}{" "}
-            of {(data as PaginatedEntityListResponse).total}
-          </span>
-        )}
-        <LastRefreshed dataUpdatedAt={dataUpdatedAt} />
+        <LastRefreshed dataUpdatedAt={active.dataUpdatedAt} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Input
           ref={searchRef}
-          type="text"
-          placeholder="Filter by ID..."
-          aria-label="Filter tasks by ID"
-          value={idFilter}
-          onChange={(e) => setIdFilter(e.target.value)}
-          className="w-52"
+          type="search"
+          placeholder="Search tasks..."
+          aria-label="Search tasks"
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
+          className="w-64"
         />
         <MultiSelectFilter
           label="Type"
           options={typeOptions}
+          groups={typeGroups}
           selected={typeFilter}
           onChange={setTypeFilter}
+          optionMeta={typeCount}
         />
-        {(typeFilter.length > 0 || idFilter) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setTypeFilter([]);
-              setIdFilter("");
-            }}
-          >
+        {!searchMode && (
+          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <Checkbox
+              id={archivedId}
+              checked={includeArchived}
+              onCheckedChange={(checked) =>
+                setIncludeArchived(checked === true)
+              }
+            />
+            <label htmlFor={archivedId} className="cursor-pointer">
+              Include archived
+            </label>
+          </div>
+        )}
+        {(typeFilter.length > 0 || qInput) && (
+          <Button variant="ghost" size="sm" onClick={resetFilters}>
             Reset
           </Button>
         )}
       </div>
 
-      {(typeFilter.length > 0 || debouncedIdFilter) && (
+      {catalogQuery.isError && !catalog && (
+        <SectionFailure
+          kind={classifyApiError(catalogQuery.error)}
+          error={catalogQuery.error}
+          label="task types"
+          forbidden="Task types are not available to this credential."
+          onRetry={() => void catalogQuery.refetch()}
+        />
+      )}
+      {catalog?.incomplete?.declared_types && (
+        <p className="text-xs text-muted-foreground">
+          Schema definitions are unavailable. Types are listed without
+          declarations.
+        </p>
+      )}
+
+      {typeFilter.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           {typeFilter.map((t) => (
             <span
@@ -219,101 +547,62 @@ export function TasksPage() {
               className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue"
             >
               type: {t}
+              {missingTypes.includes(t) && (
+                <span className="text-muted-foreground">(not available)</span>
+              )}
               <button
                 type="button"
-                onClick={() =>
-                  setTypeFilter((prev) => prev.filter((x) => x !== t))
-                }
+                onClick={() => setTypeFilter(typeFilter.filter((x) => x !== t))}
                 className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
                 aria-label={`Remove type filter: ${t}`}
               >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  aria-hidden="true"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                >
-                  <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
-                </svg>
+                <RemoveIcon />
               </button>
             </span>
           ))}
-          {debouncedIdFilter && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue">
-              id: {debouncedIdFilter}
-              <button
-                type="button"
-                onClick={() => setIdFilter("")}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-                aria-label="Remove ID filter"
-              >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  aria-hidden="true"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                >
-                  <path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" />
-                </svg>
-              </button>
-            </span>
-          )}
-          <span className="text-[10px] text-fg-faint">
-            {entities.length} of {allEntities.length}
-          </span>
         </div>
       )}
 
-      {isError ? (
-        <TableError error={error} onRetry={() => refetch()} />
-      ) : isLoading ? (
+      {shortQuery && (
+        <p className="text-xs text-muted-foreground">
+          Type at least {TASK_SEARCH_MIN_LENGTH} characters to search.
+        </p>
+      )}
+      {cursorReset && (
+        <p className="text-xs text-muted-foreground">
+          That page link is no longer valid; showing the first page.
+        </p>
+      )}
+
+      {showError ? (
+        <TableError
+          error={active.error}
+          onRetry={() => void active.refetch()}
+        />
+      ) : showPending ? (
         <div className="overflow-hidden rounded-lg border border-border">
           <Table aria-label="Tasks">
             <TableHeader>
               <TableRow>
                 <TableHead>ID</TableHead>
+                <TableHead>Title</TableHead>
                 <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>State</TableHead>
                 <TableHead className="text-right">Updated</TableHead>
                 <TableHead>Created By</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableSkeleton rows={5} columns={5} />
+              <TableSkeleton rows={5} columns={6} />
             </TableBody>
           </Table>
         </div>
-      ) : entities.length === 0 ? (
+      ) : rows.length === 0 ? (
         <div className="py-12 text-center">
-          <p className="text-muted-foreground">
-            {allEntities.length === 0
-              ? "No tasks in this project. Tasks appear when agents create or claim work units."
-              : "No tasks match the current filters."}
-          </p>
-          {allEntities.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setTypeFilter([]);
-                setIdFilter("");
-              }}
-              className="mt-2 cursor-pointer text-sm text-signal-blue hover:text-signal-blue-hover"
-            >
-              Clear all filters
-            </button>
-          )}
+          <p className="text-muted-foreground">{emptyText}</p>
         </div>
       ) : (
         <div
-          ref={tableRef}
           className="overflow-hidden rounded-lg border border-border focus-visible:outline-none"
           // biome-ignore lint/a11y/noNoninteractiveTabindex: table container needs focus for keyboard row navigation
           // biome-ignore lint/a11y/useSemanticElements: div wraps a table, role="grid" enables keyboard nav
@@ -321,82 +610,119 @@ export function TasksPage() {
           role="grid"
           onKeyDown={handleTableKeyDown}
         >
-          <Table aria-label="Tasks" aria-rowcount={entities.length}>
+          <Table aria-label="Tasks" aria-rowcount={rows.length}>
             <TableHeader>
-              <TableRow>
-                <SortableHead
-                  sortKey="id"
-                  active={sort?.key === "id"}
-                  dir={sort?.key === "id" ? sort.dir : null}
-                  onSort={() => toggleSort("id")}
-                  title="Unique task identifier"
-                >
-                  ID
-                </SortableHead>
-                <SortableHead
-                  sortKey="type"
-                  active={sort?.key === "type"}
-                  dir={sort?.key === "type" ? sort.dir : null}
-                  onSort={() => toggleSort("type")}
-                  title="Task type defined by schema"
-                >
-                  Type
-                </SortableHead>
-                <TableHead title="Current lifecycle status from task data">
-                  Status
-                </TableHead>
-                <SortableHead
-                  sortKey="updated"
-                  active={sort?.key === "updated"}
-                  dir={sort?.key === "updated" ? sort.dir : null}
-                  onSort={() => toggleSort("updated")}
-                  className="text-right"
-                  title="Last modification time"
-                >
-                  Updated
-                </SortableHead>
-                <TableHead title="Agent or token that created this task">
-                  Created By
-                </TableHead>
-              </TableRow>
+              {searchMode ? (
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead title="Results are ranked by relevance">
+                    Match · Relevance
+                  </TableHead>
+                </TableRow>
+              ) : (
+                <TableRow>
+                  <SortableHead
+                    sortKey="id"
+                    active={sort.key === "id"}
+                    dir={sort.key === "id" ? sort.dir : null}
+                    onSort={() => toggleSort("id")}
+                    title="Unique task identifier"
+                  >
+                    ID
+                  </SortableHead>
+                  <TableHead title="Title as the task type presents it">
+                    Title
+                  </TableHead>
+                  <SortableHead
+                    sortKey="type"
+                    active={sort.key === "type"}
+                    dir={sort.key === "type" ? sort.dir : null}
+                    onSort={() => toggleSort("type")}
+                    title="Task type defined by schema"
+                  >
+                    Type
+                  </SortableHead>
+                  <TableHead title="Lifecycle state declared by the task type">
+                    State
+                  </TableHead>
+                  <SortableHead
+                    sortKey="updated"
+                    active={sort.key === "updated"}
+                    dir={sort.key === "updated" ? sort.dir : null}
+                    onSort={() => toggleSort("updated")}
+                    className="text-right"
+                    title="Last modification time"
+                  >
+                    Updated
+                  </SortableHead>
+                  <TableHead title="Agent or token that created this task">
+                    Created By
+                  </TableHead>
+                </TableRow>
+              )}
             </TableHeader>
             <TableBody>
-              {entities.map((entity, idx) => {
-                const status = entityStatus(entity);
+              {rows.map((row, idx) => {
+                const entry = entries.get(row.type);
                 const focused = idx === focusIdx;
+                const state = searchMode ? null : taskState(row.data, entry);
                 return (
                   <TableRow
-                    key={entity.id}
+                    key={row.id}
                     aria-rowindex={idx + 1}
-                    className={`group/row ${selectedId === entity.id ? "bg-tint-blue-08" : ""} ${focused ? "bg-[var(--color-row-hover)]" : ""}`}
+                    className={`group/row ${selectedId === row.id ? "bg-tint-blue-08" : ""} ${focused ? "bg-[var(--color-row-hover)]" : ""}`}
                   >
                     <TableCell>
                       <span className="inline-flex items-center gap-1.5">
                         <Link
-                          to={`/p/${projectId}/tasks/${entity.id}`}
-                          className="rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
+                          to={taskLink(row.id)}
+                          state={location.state}
+                          className={linkClass}
                         >
-                          {entity.id}
+                          {row.id}
                         </Link>
-                        <CopyButton value={entity.id} />
+                        <CopyButton value={row.id} />
                       </span>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{entity.type}</Badge>
+                    <TableCell className="max-w-[28ch] truncate font-sans text-foreground">
+                      {row.title ?? <Muted>—</Muted>}
                     </TableCell>
                     <TableCell>
-                      {status ? (
-                        <Badge variant={statusVariant(status)}>{status}</Badge>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      <TypeCell type={row.type} entry={entry} />
                     </TableCell>
-                    <TableCell className="tila-num text-right text-muted-foreground">
-                      {relativeTime(entity.updated_at)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {entity.created_by}
-                    </TableCell>
+                    {searchMode ? (
+                      <TableCell>
+                        {row.snippet ? (
+                          <span
+                            className="text-xs text-foreground [&_mark]:rounded-sm [&_mark]:bg-tint-amber [&_mark]:text-status-amber"
+                            // biome-ignore lint/security/noDangerouslySetInnerHtml: FTS5 snippet sanitized to highlight tags only
+                            dangerouslySetInnerHTML={{
+                              __html: sanitizeSnippet(row.snippet),
+                            }}
+                          />
+                        ) : (
+                          <Muted>—</Muted>
+                        )}
+                      </TableCell>
+                    ) : (
+                      <>
+                        <TableCell>
+                          {state ? (
+                            <Badge variant={state.variant}>{state.value}</Badge>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="tila-num text-right text-muted-foreground">
+                          {row.updated_at !== undefined
+                            ? relativeTime(row.updated_at)
+                            : null}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {row.created_by}
+                        </TableCell>
+                      </>
+                    )}
                   </TableRow>
                 );
               })}
@@ -406,13 +732,41 @@ export function TasksPage() {
             className="px-3 py-1.5 text-[10px] text-fg-faint"
             aria-hidden="true"
           >
-            <kbd className="font-mono">/</kbd> filter{" "}
+            <kbd className="font-mono">/</kbd> search{" "}
             <kbd className="font-mono">j</kbd>/
             <kbd className="font-mono">k</kbd> navigate{" "}
             <kbd className="font-mono">Enter</kbd> open{" "}
-            <kbd className="font-mono">⌘K</kbd> search
+            <kbd className="font-mono">⌘K</kbd> palette
           </p>
         </div>
+      )}
+
+      {(after || nextCursor) && !showPending && !showError && (
+        <nav
+          aria-label="Task pages"
+          className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted-foreground"
+        >
+          {after &&
+            (canGoPrevious ? (
+              <Button variant="ghost" size="sm" onClick={goPrevious}>
+                Previous
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={goFirst}>
+                First page
+              </Button>
+            ))}
+          {position && <span className="tila-num">{position}</span>}
+          {nextCursor && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => goNext(nextCursor)}
+            >
+              {searchMode ? "More results" : "Next"}
+            </Button>
+          )}
+        </nav>
       )}
     </div>
   );

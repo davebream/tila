@@ -1,47 +1,42 @@
 import { http, HttpResponse } from "msw";
+import {
+  catalogHandler,
+  declaredEntry,
+  makeTask,
+  pagedTasksHandler,
+  searchHandler,
+} from "./tasks";
 
 export const handlers = [
   http.get("*/api/auth/github/login-config", () =>
     HttpResponse.json({ ok: true, enabled: false }),
   ),
-  // List entities
-  http.get("*/projects/*/tasks", () => {
-    return HttpResponse.json({
-      ok: true,
-      entities: [
-        {
-          id: "entity-1",
-          type: "task",
-          schema_version: 1,
-          data: { title: "Test Task 1" },
-          archived: 0,
-          created_at: Date.now() - 10000,
-          updated_at: Date.now() - 5000,
-          created_by: "test-user",
-        },
-        {
-          id: "entity-2",
-          type: "document",
-          schema_version: 1,
-          data: { title: "Test Document" },
-          archived: 0,
-          created_at: Date.now() - 20000,
-          updated_at: Date.now() - 10000,
-          created_by: "test-user",
-        },
-        {
-          id: "entity-3",
-          type: "task",
-          schema_version: 1,
-          data: { title: "Test Task 2", status: "active" },
-          archived: 0,
-          created_at: Date.now() - 30000,
-          updated_at: Date.now() - 15000,
-          created_by: "another-user",
-        },
-      ],
-    });
-  }),
+  // Task type catalog (#300)
+  catalogHandler([declaredEntry("document", 1), declaredEntry("task", 2)]),
+
+  // List entities: one keyset page over a small fixture
+  pagedTasksHandler([
+    makeTask("entity-1", {
+      data: { title: "Test Task 1" },
+      created_at: Date.now() - 10000,
+      updated_at: Date.now() - 5000,
+    }),
+    makeTask("entity-2", {
+      type: "document",
+      data: { title: "Test Document" },
+      created_at: Date.now() - 20000,
+      updated_at: Date.now() - 10000,
+    }),
+    makeTask("entity-3", {
+      data: { title: "Test Task 2", status: "active" },
+      created_at: Date.now() - 30000,
+      updated_at: Date.now() - 15000,
+      created_by: "another-user",
+    }),
+  ]),
+
+  // Unified search: no matches by default
+  searchHandler([]),
 
   // Get entity detail
   http.get("*/projects/*/tasks/:id", ({ params }) => {
