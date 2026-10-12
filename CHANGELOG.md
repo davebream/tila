@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-12
+
+### Upgrade notes
+
+- Apply additive D1 migration `0032_human_accounts.sql` and deploy the Worker before upgrading clients. Existing project memberships are preserved. Configure `AUTH_SECRET` (at least 32 random characters), or retain `INFRA_ADMIN_TOKEN` for the purpose-separated fallback; deployments require `nodejs_compat` and enough CPU budget for password hashing.
+- Bootstrap the first administrator with `tila auth setup`, then invite users from Account. Human accounts use email/password independently of GitHub. GitHub browser login requires explicit `GITHUB_LOGIN_ENABLED=true` and configured OAuth credentials; existing GitHub CLI exchanges remain supported.
+- `POST /auth/session` now returns 410: API tokens can no longer mint browser sessions. Use `tila login` for remembered CLI access and `tila open` for an explicitly confirmed, single-use browser handoff. CLI logins use the OS credential store and are not inherited by managed runtimes or CI.
+
+### Human accounts and remembered CLI login
+
+- Add invitation-only human accounts, instance administrator controls, recovery links, project-scoped personal API tokens, device approval, and remembered CLI login with `tila login` / `tila logout`.
+- Require recent authentication for sensitive account changes. Device revocation invalidates transferred browser sessions; password recovery invalidates account sessions. GitHub accounts require explicit linking and cannot self-register or merge implicitly by email.
+- Optional invitation email delivery uses `RESEND_API_KEY` and `EMAIL_FROM`; invitation and recovery links remain usable without email delivery.
+
+### Agent status
+
+- Correct agent lease timestamps and distinguish current presence, expired leases, and unavailable observations in the dashboard.
+
 ### Dashboard resilience (#295)
 
 - Task detail, settings, record history, artifact search and record types no longer present a pending, failed or forbidden request as "none": claims, artifacts, relationships, repositories, membership changes, history and search results each show loading, access denied, unavailable (with retry), or the last good data with its last-success time and the refresh failure. A failed section no longer erases other sections or typed input, and the membership policy select no longer reads "explicit" before the policy is known.
@@ -204,7 +222,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/davebream/tila/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/davebream/tila/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/davebream/tila/compare/v0.2.7...v0.3.0
 [0.2.7]: https://github.com/davebream/tila/compare/v0.2.6...v0.2.7
