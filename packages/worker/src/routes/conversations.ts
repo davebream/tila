@@ -3,6 +3,10 @@ import { Hono } from "hono";
 import { RuntimeDenied, RuntimeStore } from "../d1";
 import { runtimeIdentity } from "../lib/agent-authority";
 import { analyticsCtxFrom } from "../lib/analytics";
+import {
+  CURSOR_KEY_MIN_LENGTH,
+  resolveConversationCursorKey,
+} from "../lib/conversation-cursor-key";
 import { forwardToDO } from "../lib/do-forward";
 import { principalIdFor } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
@@ -135,28 +139,32 @@ conversations.all("*", async (c) => {
       );
     await store.context(holder.current_token_id);
   }
-  if (!c.env.HASH_PEPPER)
+  // The cursor signing secret is project-specific and never taken from headers.
+  const cursor = await resolveConversationCursorKey(c.env, c.get("projectId"));
+  if (!cursor.ok)
     return c.json(
       {
         ok: false,
         error: {
           code: "config-unavailable",
-          message: "Conversation cursors require HASH_PEPPER",
+          // Only managers learn deployment configuration detail.
+          ...(authority.can_manage
+            ? {
+                message:
+                  cursor.reason === "cursor-key-too-short"
+                    ? `CONVERSATION_CURSOR_KEY must be at least ${CURSOR_KEY_MIN_LENGTH} characters`
+                    : "Conversations require the CONVERSATION_CURSOR_KEY Worker secret",
+                details: { reason: cursor.reason },
+              }
+            : {
+                message: "Conversations are not configured on this deployment",
+              }),
           retryable: false,
         },
       },
       503,
     );
-  // The cursor signing secret is project-specific and never taken from headers.
-  const material = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(
-      JSON.stringify([c.env.HASH_PEPPER, "conversation-1", c.get("projectId")]),
-    ),
-  );
-  const cursorKey = Array.from(new Uint8Array(material), (v) =>
-    v.toString(16).padStart(2, "0"),
-  ).join("");
+  const cursorKey = cursor.key;
   let body: unknown;
   if (c.req.method !== "GET" && c.req.method !== "DELETE") {
     const text = await c.req.text();
