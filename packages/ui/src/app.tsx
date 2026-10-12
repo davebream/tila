@@ -18,6 +18,7 @@ import { DeliveriesPage } from "@/pages/deliveries";
 import { JournalPage } from "@/pages/journal";
 import { LoginPage } from "@/pages/login";
 import { PresencePage } from "@/pages/presence";
+import { QueuePage } from "@/pages/queue";
 import { RecordsPage } from "@/pages/records";
 import { RoomsPage } from "@/pages/rooms";
 import { RuntimePage } from "@/pages/runtime";
@@ -111,6 +112,7 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
         <Route path=":type/*" element={<RecordDetailPage />} />
       </Route>
       <Route path="journal" element={<JournalPage />} />
+      <Route path="queue" element={<QueuePage />} />
       <Route path="presence" element={<PresencePage />} />
       <Route path="signals" element={<SignalsPage />} />
       <Route path="rooms" element={<RoomsPage />} />

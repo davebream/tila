@@ -70,6 +70,12 @@ export function CommandPalette({
         href: `${prefix}/runtime`,
       },
       {
+        id: "nav:queue",
+        label: "Go to Queue",
+        group: "navigation",
+        href: `${prefix}/queue`,
+      },
+      {
         id: "nav:tasks",
         label: "Go to Tasks",
         group: "navigation",

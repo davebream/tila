@@ -142,6 +142,7 @@ export const QueueClaimCommandSchema = QueueCommandSchema.extend({
   types: z.array(z.string().min(1)).optional(),
 });
 export const QueueListQuerySchema = z.object({
+  task_id: z.string().optional(),
   state: z
     .enum(["backlog", "active", "suspended", "uncertain", "terminal"])
     .optional(),

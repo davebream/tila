@@ -584,6 +584,7 @@ export function inspect(
     }
     const filtered = entries.filter(
       (entry) =>
+        (!query.task_id || entry.task_id === query.task_id) &&
         (!query.state || group(entry, latest.get(entry.id)) === query.state) &&
         (!query.type ||
           snapshot.entities.get(entry.task_id)?.type === query.type) &&
