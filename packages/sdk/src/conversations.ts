@@ -25,10 +25,11 @@ import { UnsupportedCapabilityError } from "./agents";
 import type { TilaClient } from "./client";
 const ok = z.object({ ok: z.literal(true) });
 type Page = z.input<typeof ConversationPageOptionsSchema>;
-const options = <T>(
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
-  protocol = 1,
-) => ({ schema, validate: true, conversationProtocol: protocol });
+const options = <T>(schema: z.ZodType<T, unknown>, protocol = 1) => ({
+  schema,
+  validate: true,
+  conversationProtocol: protocol,
+});
 const encode = (id: string) => encodeURIComponent(AgentIdSchema.parse(id));
 function page(raw: Page = {}) {
   const value = ConversationPageOptionsSchema.parse(raw);

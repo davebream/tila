@@ -17,9 +17,10 @@ export const TimingSummarySchema = z.object({
   timed_requests: z.number().int().nonnegative(),
   invalid_residuals: z.number().int().nonnegative(),
   metrics: z.record(
+    z.string(),
     LatencySchema.extend({ count: z.number().int().nonnegative() }),
   ),
-  locations: z.record(z.number().int().nonnegative()),
+  locations: z.record(z.string(), z.number().int().nonnegative()),
 });
 
 export const MetricsSchema = z.object({
@@ -47,8 +48,8 @@ export const ScenarioResultSchema = z.object({
   description: z.string(),
   participants: z.number().int().nonnegative(),
   window_s: z.number().nonnegative(),
-  dataset: z.record(z.unknown()),
-  ops: z.record(MetricsSchema),
+  dataset: z.record(z.string(), z.unknown()),
+  ops: z.record(z.string(), MetricsSchema),
   totals: MetricsSchema,
   invariants: z.array(
     z.object({
@@ -57,7 +58,7 @@ export const ScenarioResultSchema = z.object({
       detail: z.string().optional(),
     }),
   ),
-  extra: z.record(z.number()),
+  extra: z.record(z.string(), z.number()),
 });
 
 export const SoakSampleSchema = z.object({
@@ -65,8 +66,8 @@ export const SoakSampleSchema = z.object({
   rss_bytes: z.number().nonnegative(),
   heap_used_bytes: z.number().nonnegative(),
   db_bytes: z.number().nullable(),
-  counts: z.record(z.number()).nullable(),
-  sweep: z.record(z.number()).nullable(),
+  counts: z.record(z.string(), z.number()).nullable(),
+  sweep: z.record(z.string(), z.number()).nullable(),
 });
 
 export const BenchResultSchema = z.object({

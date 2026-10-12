@@ -44,7 +44,7 @@ export const JournalEventSchema = z.object({
   environment: EnvironmentMetadataSchema,
   token_id: z.string().nullable().optional(),
   fence: z.number().int().nullable(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
 });
 
 export type JournalEvent = z.infer<typeof JournalEventSchema>;

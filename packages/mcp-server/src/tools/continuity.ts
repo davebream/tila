@@ -29,7 +29,7 @@ export function registerContinuityTools(
     server,
     "tila_reentry",
     "Recover project context, journal changes, live claims, pending signals and the newest work handoff, falling back to the newest shutdown snapshot. An explicit handoff_id selects that exact snapshot. Read-only: acknowledge events separately. Use an explicit handoff_id or resource when changing participants.",
-    ReentryRequestSchema.innerType().shape,
+    ReentryRequestSchema.shape,
     (input) => result(() => facade.reentry(ReentryRequestSchema.parse(input))),
   );
   registerPrimitiveTool(

@@ -56,7 +56,7 @@ export function registerWorkflowTools(
       { request },
       McpWorkflowResults[name],
       async (input) => {
-        const result = await run(input.request);
+        const result = await run((input as { request: z.output<S> }).request);
         const structuredContent = { result };
         return {
           content: [

@@ -39,7 +39,7 @@ export function registerTemplateTools(
         .optional()
         .describe("Override the auto-generated root entity ID"),
       variables: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .default({})
         .describe("Template variable substitutions"),
     },

@@ -6,7 +6,7 @@ export const PresenceSchema = z.object({
   participant_id: ParticipantIdSchema,
   environment: EnvironmentMetadataSchema,
   last_seen: z.number().int(),
-  info: z.record(z.unknown()),
+  info: z.record(z.string(), z.unknown()),
 });
 
 export type Presence = z.infer<typeof PresenceSchema>;

@@ -3,7 +3,7 @@
 Private shared implementation for the Claude Code and Codex CLI adapters. It owns
 participant identity, bounded re-entry context, presence, and durable shutdown
 intent. It does not launch, supervise, resume, or terminate either coding client.
-The production CLI remains Citty and the MCP server remains on MCP SDK v1/Zod 3.
+The production CLI remains Citty and the MCP server remains on MCP SDK v1.
 
 ## State and identity
 

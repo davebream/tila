@@ -25,13 +25,14 @@ type Json = Record<string, unknown>;
 const McpEntrySchema = z
   .object({
     command: z.string().optional(),
-    env: z.record(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
   })
   .passthrough();
 const HookConfigSchema = z
   .object({
     hooks: z
       .record(
+        z.string(),
         z.array(
           z
             .object({
@@ -102,7 +103,7 @@ export function configureLifecycle(
       : readJson(mcpFile);
   const table = client === "codex" ? "mcp_servers" : "mcpServers";
   const definitions = z
-    .record(McpEntrySchema)
+    .record(z.string(), McpEntrySchema)
     .parse((mcp as Json)[table] ?? {});
   (mcp as Json)[table] = definitions;
   if (definitions.tila && !definitions.tila.command)
@@ -212,8 +213,9 @@ export function configureLifecycle(
           commands,
           previousMcp: previous
             ? previous.previousMcp
-            : (z.record(McpEntrySchema).parse((original as Json)[table] ?? {})
-                .tila ?? null),
+            : (z
+                .record(z.string(), McpEntrySchema)
+                .parse((original as Json)[table] ?? {}).tila ?? null),
           installedMcp,
           hooksFile,
           mcpFile,

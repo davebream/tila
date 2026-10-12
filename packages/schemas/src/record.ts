@@ -144,9 +144,11 @@ export async function canonicalJsonSha256(value: unknown): Promise<string> {
 
 const MAX_RECORD_VALUE_BYTES = 65536; // 64 KiB
 
-export const RecordValueSchema = z.record(z.unknown()).refine((value) => {
-  const canonical = canonicalJson(value);
-  return new TextEncoder().encode(canonical).length <= MAX_RECORD_VALUE_BYTES;
-}, "Record value exceeds 64 KiB canonical JSON limit");
+export const RecordValueSchema = z
+  .record(z.string(), z.unknown())
+  .refine((value) => {
+    const canonical = canonicalJson(value);
+    return new TextEncoder().encode(canonical).length <= MAX_RECORD_VALUE_BYTES;
+  }, "Record value exceeds 64 KiB canonical JSON limit");
 
 export type RecordValue = z.infer<typeof RecordValueSchema>;

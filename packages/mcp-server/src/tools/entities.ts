@@ -25,7 +25,7 @@ function registerCrudTools(
           `${labelSingular[0].toUpperCase()}${labelSingular.slice(1)} type (e.g. 'task', 'epic')`,
         ),
       data: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .default({})
         .describe(`Key-value data fields for the ${labelSingular}`),
       tags: z
@@ -132,7 +132,7 @@ function registerCrudTools(
           `${labelSingular[0].toUpperCase()}${labelSingular.slice(1)} ID to update`,
         ),
       data: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .describe(`Key-value data fields to merge into the ${labelSingular}`),
       fence: z
         .number()

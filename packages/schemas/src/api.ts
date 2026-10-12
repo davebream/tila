@@ -42,7 +42,7 @@ export const AcquireRequestSchema = z.object({
   mode: ClaimModeSchema,
   ttl_ms: z.number().int().positive(),
   idempotency_key: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type AcquireRequest = z.infer<typeof AcquireRequestSchema>;
@@ -102,7 +102,7 @@ export const StateResponseSchema = z.object({
       fence: z.number().int(),
       acquired_at: z.number().int(),
       expires_at: z.number().int(),
-      metadata: z.record(z.unknown()).optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
     })
     .nullable(),
 });
@@ -121,7 +121,7 @@ export const StateListResponseSchema = z.object({
       fence: z.number().int(),
       acquired_at: z.number().int(),
       expires_at: z.number().int(),
-      metadata: z.record(z.unknown()).optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
 });
@@ -133,14 +133,14 @@ export type StateListResponse = z.infer<typeof StateListResponseSchema>;
 export const CreateEntityRequestSchema = z.object({
   id: z.string(),
   type: z.string(),
-  data: z.record(z.unknown()).default({}),
+  data: z.record(z.string(), z.unknown()).default({}),
   tags: TagsSchema.optional(),
 });
 
 export type CreateEntityRequest = z.infer<typeof CreateEntityRequestSchema>;
 
 export const UpdateEntityRequestSchema = z.object({
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   fence: z.number().int(),
   tags: TagsSchema.optional(),
 });
@@ -159,7 +159,7 @@ export const EntityResponseSchema = z.object({
     id: z.string(),
     type: z.string(),
     schema_version: z.number().int(),
-    data: z.record(z.unknown()),
+    data: z.record(z.string(), z.unknown()),
     archived: z.number().int(),
     created_at: z.number().int(),
     updated_at: z.number().int(),
@@ -177,7 +177,7 @@ export const EntityListResponseSchema = z.object({
       id: z.string(),
       type: z.string(),
       schema_version: z.number().int(),
-      data: z.record(z.unknown()),
+      data: z.record(z.string(), z.unknown()),
       archived: z.number().int(),
       created_at: z.number().int(),
       updated_at: z.number().int(),
@@ -196,7 +196,7 @@ export const PaginatedEntityListResponseSchema = z.object({
       id: z.string(),
       type: z.string(),
       schema_version: z.number().int(),
-      data: z.record(z.unknown()),
+      data: z.record(z.string(), z.unknown()),
       archived: z.number().int(),
       created_at: z.number().int(),
       updated_at: z.number().int(),
@@ -221,7 +221,7 @@ export const ListReadyEntitiesResponseSchema = z.object({
       id: z.string(),
       type: z.string(),
       schema_version: z.number().int(),
-      data: z.record(z.unknown()),
+      data: z.record(z.string(), z.unknown()),
       archived: z.number().int(),
       created_at: z.number().int(),
       updated_at: z.number().int(),
@@ -280,8 +280,8 @@ export const SummaryResponseSchema = z.object({
   ok: z.literal(true),
   project: z.object({
     entity_count: z.number().int(),
-    entity_counts: z.record(z.number().int()),
-    status_counts: z.record(z.number().int()),
+    entity_counts: z.record(z.string(), z.number().int()),
+    status_counts: z.record(z.string(), z.number().int()),
     active_claims: z.number().int(),
     ready_count: z.number().int(),
     online_participants: z.array(ParticipantIdSchema),
@@ -307,7 +307,7 @@ export const EntityDetailResponseSchema = z.object({
     id: z.string(),
     type: z.string(),
     schema_version: z.number().int(),
-    data: z.record(z.unknown()),
+    data: z.record(z.string(), z.unknown()),
     archived: z.number().int(),
     created_at: z.number().int(),
     updated_at: z.number().int(),
@@ -413,7 +413,7 @@ export const JournalResponseSchema = z.object({
       environment: EnvironmentMetadataSchema,
       token_id: z.string().nullable(),
       fence: z.number().int().nullable(),
-      data: z.record(z.unknown()),
+      data: z.record(z.string(), z.unknown()),
     }),
   ),
 });
@@ -423,7 +423,7 @@ export type JournalResponse = z.infer<typeof JournalResponseSchema>;
 // --- Presence API ---
 
 export const PresenceHeartbeatRequestSchema = z.object({
-  info: z.record(z.unknown()).default({}),
+  info: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type PresenceHeartbeatRequest = z.infer<
@@ -438,7 +438,7 @@ export const PresenceListResponseSchema = z.object({
       participant_id: ParticipantIdSchema,
       environment: EnvironmentMetadataSchema,
       last_seen: z.number().int(),
-      info: z.record(z.unknown()),
+      info: z.record(z.string(), z.unknown()),
     }),
   ),
 });
@@ -453,7 +453,7 @@ export const PresenceAllListResponseSchema = z.object({
       participant_id: ParticipantIdSchema,
       environment: EnvironmentMetadataSchema,
       last_seen: z.number().int(),
-      info: z.record(z.unknown()),
+      info: z.record(z.string(), z.unknown()),
       active: z.boolean(),
     }),
   ),
@@ -533,7 +533,7 @@ export type DOHealthResponse = z.infer<typeof DOHealthResponseSchema>;
 
 export const StoreCountsResponseSchema = z.object({
   counts: z.object({
-    domain: z.record(z.number().int().nonnegative()),
+    domain: z.record(z.string(), z.number().int().nonnegative()),
     schemaHistory: z.number().int().nonnegative(),
   }),
   // Older deployments expose row counts only.
@@ -579,7 +579,7 @@ export const DoctorSchemaSuccessResponseSchema = z.object({
   sqlite_version: z.string(),
   migrations: z.array(SchemaMigrationRecordSchema),
   tables: z.array(z.string()),
-  columns: z.record(z.array(SqliteColumnInfoSchema)),
+  columns: z.record(z.string(), z.array(SqliteColumnInfoSchema)),
   claims_columns: z.array(SqliteColumnInfoSchema).optional(),
 });
 
@@ -591,7 +591,7 @@ export const DoctorSchemaStaleResponseSchema = z.object({
   ok: z.literal(true),
   stale_do: z.literal(true),
   message: z.string(),
-  probe_result: z.unknown(),
+  probe_result: z.unknown().optional(),
 });
 
 export type DoctorSchemaStaleResponse = z.infer<
@@ -771,7 +771,7 @@ export type SearchRebuildReport = z.infer<typeof SearchRebuildReportSchema>;
 export const AddEntityArtifactReferenceRequestSchema = z.object({
   artifact_key: z.string().min(1),
   slot: z.string().min(1),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type AddEntityArtifactReferenceRequest = z.infer<
@@ -785,7 +785,7 @@ export const EntityArtifactReferenceListResponseSchema = z.object({
       entity_id: z.string(),
       artifact_key: z.string(),
       slot: z.string(),
-      metadata: z.record(z.unknown()),
+      metadata: z.record(z.string(), z.unknown()),
       created_at: z.number().int(),
     }),
   ),
@@ -825,13 +825,12 @@ export function parseTagFilter(raw: string | undefined): string[] | undefined {
   const unique = [...new Set(parts)];
 
   if (unique.length > 20) {
-    throw new z.ZodError([
+    throw new z.ZodRealError([
       {
-        code: z.ZodIssueCode.too_big,
+        code: "too_big",
         maximum: 20,
-        type: "array",
+        origin: "array",
         inclusive: true,
-        exact: false,
         message: "tag_filter may not have more than 20 tags",
         path: ["tag_filter"],
       },
@@ -846,7 +845,7 @@ export function parseTagFilter(raw: string | undefined): string[] | undefined {
  * Accepts an optional string, transforms it via `parseTagFilter`.
  * Uses superRefine + transform so that ZodErrors from parseTagFilter are
  * reported via ctx.addIssue rather than thrown (thrown ZodErrors escape
- * safeParse in Zod v3).
+ * safeParse).
  */
 export const tagFilterQueryParam = z
   .string()
@@ -858,7 +857,11 @@ export const tagFilterQueryParam = z
     } catch (err) {
       if (err instanceof z.ZodError) {
         for (const issue of err.issues) {
-          ctx.addIssue(issue);
+          ctx.addIssue({
+            code: "custom",
+            message: issue.message,
+            path: issue.path,
+          });
         }
       } else {
         throw err;
@@ -1049,7 +1052,7 @@ export const ArtifactRelationshipListResponseSchema = z.object({
       to_key: z.string().nullable(),
       to_uri: z.string().nullable(),
       type: z.string(),
-      metadata: z.record(z.unknown()),
+      metadata: z.record(z.string(), z.unknown()),
       created_at: z.number(),
     }),
   ),
@@ -1063,7 +1066,7 @@ export type ArtifactRelationshipListResponse = z.infer<
 export const InstantiateTemplateRequestSchema = z.object({
   template_name: z.string(),
   root_id: z.string(),
-  vars: z.record(z.string()).default({}),
+  vars: z.record(z.string(), z.string()).default({}),
 });
 export type InstantiateTemplateRequest = z.infer<
   typeof InstantiateTemplateRequestSchema
@@ -1234,7 +1237,7 @@ export type RepoDeleteResponse = z.infer<typeof RepoDeleteResponseSchema>;
 
 export const SchemaGetResponseSchema = z.object({
   ok: z.literal(true),
-  schema: z.unknown(),
+  schema: z.unknown().optional(),
   version: z.number().int().nullable(),
 });
 
@@ -1243,7 +1246,7 @@ export type SchemaGetResponse = z.infer<typeof SchemaGetResponseSchema>;
 export const SchemaApplyResponseSchema = z.object({
   ok: z.literal(true),
   version: z.number().int().nullable(),
-  diff: z.unknown(),
+  diff: z.unknown().optional(),
 });
 
 export type SchemaApplyResponse = z.infer<typeof SchemaApplyResponseSchema>;
@@ -1259,7 +1262,7 @@ export type SchemaHistoryResponse = z.infer<typeof SchemaHistoryResponseSchema>;
 
 export const RecordCreateRequestSchema = z.object({
   key: RecordKeySchema,
-  value: z.record(z.unknown()),
+  value: z.record(z.string(), z.unknown()),
   tags: RecordTagSchema.optional(),
   message: z.string().optional(),
   source_artifact_key: z.string().nullable().optional(),
@@ -1268,7 +1271,7 @@ export const RecordCreateRequestSchema = z.object({
 export type RecordCreateRequest = z.infer<typeof RecordCreateRequestSchema>;
 
 export const RecordSetRequestSchema = z.object({
-  value: z.record(z.unknown()),
+  value: z.record(z.string(), z.unknown()),
   fence: z.number().int(),
   tags: RecordTagSchema.optional(),
   message: z.string().optional(),
@@ -1278,7 +1281,7 @@ export const RecordSetRequestSchema = z.object({
 export type RecordSetRequest = z.infer<typeof RecordSetRequestSchema>;
 
 export const RecordPutRequestSchema = z.object({
-  value: z.record(z.unknown()),
+  value: z.record(z.string(), z.unknown()),
   tags: RecordTagSchema.optional(),
   message: z.string().optional(),
   source_artifact_key: z.string().nullable().optional(),
@@ -1287,7 +1290,7 @@ export const RecordPutRequestSchema = z.object({
 export type RecordPutRequest = z.infer<typeof RecordPutRequestSchema>;
 
 export const RecordPatchRequestSchema = z.object({
-  patch: z.record(z.unknown()),
+  patch: z.record(z.string(), z.unknown()),
   fence: z.number().int(),
   message: z.string().optional(),
 });
@@ -1314,7 +1317,7 @@ export const RecordItemSchema = z.object({
   type: RecordTypeSchema,
   key: RecordKeySchema,
   schema_version: z.number().int(),
-  value: z.record(z.unknown()),
+  value: z.record(z.string(), z.unknown()),
   value_sha256: z.string(),
   revision: z.number().int(),
   archived: z.number().int(),
@@ -1399,7 +1402,7 @@ export const RecordHistoryItemSchema = z.object({
   message: z.string().nullable(),
   // Populated only when the history is requested with `includeValues=true`
   // (wire: `?values=true`). Optional so existing parsers stay compatible.
-  value: z.record(z.unknown()).optional(),
+  value: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type RecordHistoryItem = z.infer<typeof RecordHistoryItemSchema>;

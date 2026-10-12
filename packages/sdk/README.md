@@ -8,11 +8,7 @@ TypeScript SDK for [tila](https://github.com/davebream/tila) -- a state-and-coor
 npm install tila-sdk
 ```
 
-`zod` is an optional peer dependency. Install it to enable opt-in response validation:
-
-```bash
-npm install zod
-```
+`tila-sdk` depends on `zod` 4 and installs it for you. If your own code combines the SDK's exported schemas with its own zod schemas, use zod 4 as well.
 
 ## Quick Start
 
@@ -313,10 +309,10 @@ semantics with the remote backend. See [Revision history and restore](#revision-
 |--------|------|---------|-------------|
 | `baseUrl` | `string` | (required) | tila Worker URL |
 | `token` | `string` | (required) | API token or session token |
-| `validate` | `boolean` | `false` | Enable Zod response validation (requires `zod` installed) |
+| `validate` | `boolean` | `false` | Enable Zod response validation |
 | `timeoutMs` | `number` | `30000` | Request timeout in milliseconds |
 
-> **Note:** `validate` defaults to `false` to keep the bundle lightweight. Pass `validate: true` to enable Zod schema validation on every response (requires `zod` installed as a peer dependency).
+> **Note:** `validate` defaults to `false` to skip the cost of parsing every response. Pass `validate: true` to enable Zod schema validation on every response.
 
 If you have a `.tila/config.toml` project file:
 

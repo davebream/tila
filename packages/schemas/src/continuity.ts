@@ -48,7 +48,7 @@ export const HandoffCreateRequestSchema = z
     // Omission means work without changing legacy serialized retry requests.
     kind: z.enum(["work", "shutdown"]).optional(),
     summary: z.string().min(1).max(16384),
-    current_state: z.record(z.unknown()).default({}),
+    current_state: z.record(z.string(), z.unknown()).default({}),
     findings: z.array(z.string().max(16384)).max(100).default([]),
     unresolved_questions: z.array(z.string().max(16384)).max(100).default([]),
     based_on_seq: JournalSequenceSchema,

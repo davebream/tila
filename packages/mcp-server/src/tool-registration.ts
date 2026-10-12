@@ -216,15 +216,17 @@ export function registerResultTool<S extends z.ZodRawShape>(
   handler: (input: z.output<z.ZodObject<S>>) => Promise<CallToolResult>,
 ): void {
   const annotations = toolAnnotations(name);
-  server.registerTool(
+  const input = z.object(inputSchema);
+  const output = z.object({
+    result: resultSchema.optional(),
+    error: McpRecoverySchema.optional(),
+  });
+  server.registerTool<typeof output, typeof input>(
     name,
     {
       description,
-      inputSchema: z.object(inputSchema),
-      outputSchema: z.object({
-        result: resultSchema.optional(),
-        error: McpRecoverySchema.optional(),
-      }),
+      inputSchema: input,
+      outputSchema: output,
       annotations,
     },
     async (input) => {

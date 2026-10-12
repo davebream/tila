@@ -8,7 +8,7 @@ const Payload = z
     scope: z.string(),
     generation: z.string().uuid(),
     issued: z.number().int(),
-    position: z.unknown(),
+    position: z.unknown().optional(),
   })
   .strict();
 const encode = (bytes: Uint8Array) =>

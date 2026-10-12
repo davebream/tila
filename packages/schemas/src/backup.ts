@@ -38,8 +38,8 @@ export const ProjectBackupObjectSchema = z.object({
   blob_path: SafeBackupPathSchema.nullable(),
   tombstoned: z.boolean().default(false),
   blob_deleted: z.boolean().default(false),
-  http_metadata: z.record(z.unknown()).default({}),
-  custom_metadata: z.record(z.string()).default({}),
+  http_metadata: z.record(z.string(), z.unknown()).default({}),
+  custom_metadata: z.record(z.string(), z.string()).default({}),
 });
 
 export const ProjectBackupManifestSchema = z.object({

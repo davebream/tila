@@ -76,7 +76,9 @@ describe("errorHandler", () => {
     expect(body.error.code).toBe("validation-error");
     expect(body.error.retryable).toBe(false);
     // error.ts maps each issue to "<path>: <message>" joined with "; ".
-    expect(body.error.message).toBe("type: Required");
+    expect(body.error.message).toBe(
+      "type: Invalid input: expected string, received undefined",
+    );
   });
 
   it("still returns 500 internal (retryable) for a generic Error (regression)", async () => {

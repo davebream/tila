@@ -36,15 +36,14 @@ function makeDoApp() {
 
 describe("Cross-surface envelope parity — ZodError", () => {
   it("worker and DO emit identical body for ZodError", async () => {
-    const { ZodError } = await import("zod");
-    const zodErr = new ZodError([
+    const { ZodRealError } = await import("zod");
+    const zodErr = new ZodRealError([
       {
         code: "invalid_type",
         expected: "string",
-        received: "number",
         path: ["name"],
         message: "Expected string",
-      } as Parameters<(typeof ZodError.prototype)["addIssue"]>[0],
+      },
     ]);
 
     const workerApp = makeWorkerApp();

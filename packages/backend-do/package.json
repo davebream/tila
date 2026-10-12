@@ -21,7 +21,7 @@
     "@tila/schemas": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
-    "zod": "^3.24.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261008.1",
