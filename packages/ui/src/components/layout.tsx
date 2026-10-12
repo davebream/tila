@@ -359,6 +359,7 @@ export function Layout() {
               "Rooms",
               "Agents",
               "Deliveries",
+              "Runtime",
               "Artifacts",
               "Settings",
             ].map((label) => (

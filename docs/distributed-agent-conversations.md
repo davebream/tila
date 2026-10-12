@@ -641,3 +641,9 @@ the commands the caller may use.
 - Capability reports keep "not reported" (key absent) apart from "unsupported"
   (`false`). Profile evidence is shown as declared or unknown; nothing in this
   projection verifies an account.
+
+The dashboard's Runtime tab renders this projection and re-derives expiry each
+second from the server clock offset, so leases keep expiring while polls fail.
+Release is a two-step confirm that reports requested, acknowledged or rejected,
+and an unanswered request as unknown. It shows "observed" only after a later
+poll no longer finds the released binding.

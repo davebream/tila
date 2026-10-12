@@ -20,6 +20,7 @@ import { LoginPage } from "@/pages/login";
 import { PresencePage } from "@/pages/presence";
 import { RecordsPage } from "@/pages/records";
 import { RoomsPage } from "@/pages/rooms";
+import { RuntimePage } from "@/pages/runtime";
 import { SettingsPage } from "@/pages/settings";
 import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
@@ -124,6 +125,8 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
         path="deliveries/:agentId/:deliveryId"
         element={<DeliveriesPage />}
       />
+      <Route path="runtime" element={<RuntimePage />} />
+      <Route path="runtime/:agentId" element={<RuntimePage />} />
       <Route path="settings" element={<SettingsPage />} />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />

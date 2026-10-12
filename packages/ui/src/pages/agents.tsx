@@ -36,7 +36,12 @@ export function AgentsPage() {
       <header>
         <h1 className="font-logo text-2xl">Agents</h1>
         <p className="text-sm text-muted-foreground">
-          Durable identities and their current mailbox consumers.
+          Durable identities and their current mailbox consumers. Leases here
+          are the binding's last snapshot; the{" "}
+          <Link className="underline" to={`/p/${projectId}/runtime`}>
+            Runtime
+          </Link>{" "}
+          view shows run authority, hosts and sessions.
         </p>
       </header>
       {agents.isPending && <p>Loading agents…</p>}
@@ -75,6 +80,12 @@ export function AgentsPage() {
                     <span className="block text-xs text-muted-foreground">
                       {row.id}
                     </span>
+                    <Link
+                      className="text-xs font-normal underline"
+                      to={`/p/${projectId}/runtime/${encodeURIComponent(row.id)}`}
+                    >
+                      Runtime
+                    </Link>
                   </th>
                   <td className="p-3">
                     {row.archived ? "Archived" : BINDING_LABEL[view.kind]}

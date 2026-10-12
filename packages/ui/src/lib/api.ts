@@ -8,6 +8,7 @@ import type {
   RoomHistoryResponseSchema,
   RoomListResponseSchema,
   RoomResponseSchema,
+  RuntimeViewResponseSchema,
   ThreadSchema,
 } from "@tila/schemas";
 import type {
@@ -174,11 +175,12 @@ async function request<T>(
     }
   }
   const conversation = /^\/(rooms|inbox|deliveries)(\/|$)/.test(path);
+  const runtime = /^\/(agents|runtime-view)(\/|$)/.test(path);
   let response: Response;
   try {
     response = await fetch(url.toString(), {
       credentials: "include",
-      cache: conversation ? "no-store" : "default",
+      cache: conversation || runtime ? "no-store" : "default",
       headers: {
         Accept: "application/json",
         ...(conversation ? { "X-Tila-Conversation-Protocol": "1" } : {}),
@@ -841,6 +843,29 @@ export function listDeliveries(
   filters: DeliveryListQuery & { cursor?: string } = {},
 ): Promise<DeliveryListResponse> {
   return request(projectId, "/deliveries", { ...filters, limit: "50" });
+}
+export type RuntimeView = (typeof RuntimeViewResponseSchema)["_output"];
+export function getRuntimeView(
+  projectId: string,
+  params: { cursor?: string; agent?: string; limit?: number } = {},
+): Promise<RuntimeView> {
+  return request(projectId, "/runtime-view", {
+    cursor: params.cursor,
+    agent: params.agent,
+    limit: params.limit === undefined ? undefined : String(params.limit),
+  });
+}
+/** Release the binding only if it is still at `expectedEpoch`. */
+export function releaseAgentBinding(
+  projectId: string,
+  agentId: string,
+  expectedEpoch: number,
+): Promise<{ ok: true }> {
+  return mutate(
+    "POST",
+    projectPath(projectId, `/agents/${encodeURIComponent(agentId)}/release`),
+    { expected_epoch: expectedEpoch },
+  );
 }
 export function inspectDelivery(
   projectId: string,
