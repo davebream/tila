@@ -26,7 +26,7 @@ export const SessionCapabilitiesSchema = z.object({
   /** False when the membership store could not be consulted (fail closed). */
   membership_available: z.boolean(),
   /** How an interactive cookie session authenticated; absent for bearer auth. */
-  auth_method: z.enum(["github", "token"]).optional(),
+  auth_method: z.enum(["github", "token", "email"]).optional(),
   /** Unix ms of the last interactive authentication; absent for bearer auth. */
   authenticated_at: z.number().optional(),
   /** Step-up window applied to high-impact mutations from cookie sessions. */

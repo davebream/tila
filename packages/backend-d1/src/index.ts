@@ -70,3 +70,10 @@ export {
   RUNTIME_TOKEN_MARKER,
   type RuntimeSecret,
 } from "./runtime-store";
+
+export {
+  createHumanAuth,
+  type HumanAuth,
+  type HumanSession,
+} from "./human-auth";
+export { HumanStore, HumanAccountError, humanSecretHash } from "./human-store";

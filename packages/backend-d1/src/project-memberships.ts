@@ -7,7 +7,11 @@ import {
   type ProjectMembershipMode,
   type ProjectRole,
 } from "@tila/schemas";
+import { and, count, eq, isNull, ne, or } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { user as humanUsers } from "./human-schema";
 import { canonicalizePrincipal } from "./principal";
+import { projectMemberships } from "./schema";
 
 export interface EffectiveMembership {
   role: ProjectRole;
@@ -47,15 +51,15 @@ function canonicalIssuer(raw: string): string {
 
 export function canonicalMembershipPrincipal(principal: MembershipPrincipal): {
   principalId: string;
-  provider: "github" | "oidc" | "service";
+  provider: "github" | "oidc" | "service" | "user";
   identityHost: string;
   subjectId: string;
   displayName: string | null;
 } {
-  if (principal.provider === "service")
+  if (principal.provider === "service" || principal.provider === "user")
     return {
-      principalId: `service:${principal.id}`,
-      provider: "service",
+      principalId: `${principal.provider}:${principal.id}`,
+      provider: principal.provider,
       identityHost: "tila",
       subjectId: principal.id,
       displayName: null,
@@ -233,6 +237,18 @@ export class ProjectMembershipStore {
     displayName?: string;
     actorPrincipalId: string;
   }): Promise<{ membership: ProjectMembership; created: boolean }> {
+    if (params.principal.provider === "user") {
+      const [user] = await drizzle(this.db)
+        .select({ id: humanUsers.id })
+        .from(humanUsers)
+        .where(
+          and(
+            eq(humanUsers.id, params.principal.id),
+            eq(humanUsers.disabled, false),
+          ),
+        );
+      if (!user) throw new Error("Active tila account required");
+    }
     const canonical = canonicalMembershipPrincipal(params.principal);
     const existing = await this.getActive(
       params.projectId,
@@ -366,12 +382,21 @@ export class ProjectMembershipStore {
   }
 
   async countActiveOwners(projectId: string): Promise<number> {
-    const row = await this.db
-      .prepare(
-        "SELECT COUNT(*) AS count FROM _project_memberships WHERE project_id = ? AND role = 'owner' AND revoked_at IS NULL",
-      )
-      .bind(projectId)
-      .first<{ count: number }>();
+    const [row] = await drizzle(this.db)
+      .select({ count: count() })
+      .from(projectMemberships)
+      .leftJoin(humanUsers, eq(humanUsers.id, projectMemberships.subject_id))
+      .where(
+        and(
+          eq(projectMemberships.project_id, projectId),
+          eq(projectMemberships.role, "owner"),
+          isNull(projectMemberships.revoked_at),
+          or(
+            ne(projectMemberships.provider, "user"),
+            eq(humanUsers.disabled, false),
+          ),
+        ),
+      );
     return row?.count ?? 0;
   }
 

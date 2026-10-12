@@ -94,6 +94,8 @@ const main = defineCommand({
     repos: () => load(() => import("./commands/repos")),
     admin: () => load(() => import("./commands/admin")),
     auth: () => load(() => import("./commands/auth")),
+    login: () => load(() => import("./commands/login")),
+    logout: () => load(() => import("./commands/logout")),
     switch: () => load(() => import("./commands/switch")),
     instances: () => load(() => import("./commands/instances")),
     shell: () => load(() => import("./commands/shell")),

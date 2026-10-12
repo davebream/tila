@@ -554,6 +554,7 @@ describe("SettingsPage failure states", () => {
     const table = await screen.findByRole("table", { name: "Members" });
     const row = (await within(table).findByText("hubot")).closest("tr");
     if (!row) throw new Error("row missing");
+    await user.click(screen.getByRole("radio", { name: "GitHub user" }));
     await user.type(await screen.findByLabelText("GitHub login"), "new-person");
     await user.click(within(row).getByRole("button", { name: "Revoke" }));
     await screen.findByRole("dialog");

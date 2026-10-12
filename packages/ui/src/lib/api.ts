@@ -199,27 +199,6 @@ export async function githubLoginConfig(signal?: AbortSignal) {
   return GitHubLoginConfigResponseSchema.parse(await response.json());
 }
 
-export async function sessionExchange(
-  token: string,
-  projectId: string,
-): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/auth/session`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, project_id: projectId }),
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({
-      error: { message: "Exchange failed" },
-    }))) as { error?: { message?: string } };
-    throw new ApiError(
-      `http-${res.status}`,
-      body.error?.message ?? "Session exchange failed",
-    );
-  }
-}
-
 export type SessionStatus = {
   projectId: string;
   /** Server-computed management flags; null when the server did not send them. */

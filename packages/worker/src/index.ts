@@ -23,6 +23,7 @@ import { requestIdentityMiddleware } from "./middleware/request-identity";
 import { sourceResolution } from "./middleware/source-resolution";
 import { tokenEstimateMiddleware } from "./middleware/token-estimate";
 import { versionCheckMiddleware } from "./middleware/version-check";
+import { accounts } from "./routes/accounts";
 import { admin } from "./routes/admin";
 import { adminRoster } from "./routes/admin-roster";
 import { agents } from "./routes/agents";
@@ -112,6 +113,7 @@ app.use("/auth/*", createCorsMiddleware());
 app.use("/api/*", versionCheckMiddleware());
 
 app.route("/api", health);
+app.route("/api/account", accounts);
 
 // GitHub auth exchange -- pre-auth (no auth middleware on this path)
 app.route("/api/auth/github", authGithub);

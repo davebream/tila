@@ -96,6 +96,7 @@ export function generateWranglerConfig(
     name: slug,
     main: mainRelative,
     compatibility_date: COMPATIBILITY_DATE,
+    compatibility_flags: ["nodejs_compat"],
     workers_dev: true,
 
     placement: {

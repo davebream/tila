@@ -235,7 +235,7 @@ tila artifact put plan.md --kind=plan --resource=T-abc123 --fence=1
 tila artifact search "auth"     # full-text search across artifacts
 ```
 
-> GitHub auth is configured automatically during `tila project create`. Teammates join via `tila init` — no shared API token needed.
+> Browser access uses invited email/password accounts. Run `tila auth setup` as the infrastructure owner to create the first administrator, then `tila login` and `tila open` for remembered CLI access. GitHub browser sign-in is optional. See [account setup](docs/05-OPERATIONS.md#human-accounts-invitations-and-cli-login).
 
 ### Local path
 

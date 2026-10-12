@@ -16,7 +16,10 @@
   "dependencies": {
     "@tila/core": "workspace:*",
     "@tila/schemas": "workspace:*",
-    "drizzle-orm": "^0.45.4"
+    "better-auth": "1.7.7",
+    "better-call": "1.4.0",
+    "drizzle-orm": "^0.45.4",
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261008.1",

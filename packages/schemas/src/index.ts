@@ -507,3 +507,5 @@ export * from "./runtime";
 export * from "./conversation";
 
 export * from "./connector";
+
+export * from "./human-account";

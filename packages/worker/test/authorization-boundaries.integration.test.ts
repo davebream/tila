@@ -591,7 +591,7 @@ it("denies unbound workload membership when the adapter is disabled", async () =
   expect(response.status).toBe(403);
 });
 
-it("enforces current Actions policy in cookies derived from scoped credentials", async () => {
+it("prevents workload credentials from opening browser sessions", async () => {
   await boundWorkload();
   const server = app();
   const issued = await exchange(server);
@@ -605,18 +605,8 @@ it("enforces current Actions policy in cookies derived from scoped credentials",
     env,
     ctx,
   );
-  expect(converted.status, await converted.clone().text()).toBe(200);
-  const cookie = cookieHeader(converted);
-  const read = () =>
-    server.request(
-      "/projects/p/schema",
-      { headers: { Cookie: cookie } },
-      env,
-      ctx,
-    );
-  expect((await read()).status).toBe(200);
-  f.sqlite.exec("UPDATE _project_repos SET oidc_enabled=0");
-  expect([401, 403]).toContain((await read()).status);
+  expect(converted.status).toBe(410);
+  expect(converted.headers.get("Set-Cookie")).toBeNull();
 });
 
 it("rejects old Actions credentials without revalidation context and revoked bindings", async () => {

@@ -1,9 +1,5 @@
-import {
-  sessionExchange,
-  sessionLogout,
-  sessionStatus,
-  workspaceDeselect,
-} from "@/lib/api";
+import { accountRequest } from "@/lib/account-api";
+import { sessionLogout, sessionStatus, workspaceDeselect } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import type { SessionCapabilities } from "@tila/schemas";
 import {
@@ -29,7 +25,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (projectId: string, token: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   clearProject: () => Promise<void>;
   selectProject: (projectId: string) => void;
@@ -72,18 +68,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshStatus]);
 
   const login = useCallback(
-    async (projectId: string, token: string) => {
-      await sessionExchange(token, projectId);
-      setState({
-        isAuthenticated: true,
-        projectId,
-        isLoading: false,
-        capabilities: null,
-      });
-      // Capabilities depend on the new session; best-effort refresh.
-      void refreshStatus();
+    async (email: string, password: string) => {
+      await accountRequest("/auth/sign-in/email", { email, password });
+      queryClient.clear();
+      await refreshStatus();
     },
-    [refreshStatus],
+    [refreshStatus, queryClient],
   );
 
   const logout = useCallback(async () => {

@@ -1,3 +1,4 @@
+import { D1SessionStore } from "@tila/backend-d1";
 /**
  * SEC-1 — HASH_PEPPER consistency for the mint↔lookup pairs this change touched.
  *
@@ -21,6 +22,7 @@
  */
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { hashToken } from "../lib/hash-token";
 import { createAuthMiddleware } from "../middleware/auth";
 import type { Env, HonoVariables } from "../types";
 
@@ -209,29 +211,25 @@ async function bearerLookupHash(env: Env, rawToken: string): Promise<string> {
 }
 
 async function mintSession(env: Env): Promise<string> {
-  // Token validation inside the exchange must pass so a session is created.
   mockTokenValidate.mockResolvedValue({
     projectId: "proj-1",
     name: "ci-token",
     scopes: "full",
     tokenId: "tok-id-1",
   });
-  const app = makeSessionMintApp();
-  const res = await app.request(
-    "/auth/session",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: "tila_raw_token", project_id: "proj-1" }),
-    },
-    env,
-    mockCtx,
-  );
-  expect(res.status).toBe(200);
-  const setCookie = res.headers.get("Set-Cookie") ?? "";
-  const m = setCookie.match(/tila_session=([^;]+)/);
-  expect(m).not.toBeNull();
-  return decodeURIComponent((m as RegExpMatchArray)[1]);
+  // Persist an already-issued legacy session: token-to-cookie exchange is retired.
+  const raw = crypto.randomUUID();
+  await new D1SessionStore(env.DB).create({
+    sessionHash: await hashToken(raw, env.HASH_PEPPER),
+    projectId: "proj-1",
+    tokenHash: "tok-hash",
+    actorName: "ci-token",
+    principalId: "token:tok-id-1",
+    scopes: "full",
+    permission: "admin",
+    expiresAt: Date.now() + 3600_000,
+  });
+  return raw;
 }
 
 function storedSessionHash(): string {
@@ -312,36 +310,6 @@ describe("SEC-1: D1 token mint↔lookup hash consistency", () => {
       expect(lookupHash).toBe(mintHash);
       void res;
     });
-
-    it(`mint (tokens.ts) and session-exchange lookup (auth-session.ts) agree — ${label}`, async () => {
-      const env = baseEnv(pepper);
-      const raw = await mintD1Token(env);
-      const mintHash = storedTokenHash();
-
-      vi.clearAllMocks();
-      // The session-exchange endpoint validates the presented token against D1.
-      mockTokenValidate.mockResolvedValue({
-        projectId: "proj-1",
-        name: "ci-token",
-        scopes: "full",
-        tokenId: "tok-id-1",
-      });
-      const app = makeSessionMintApp();
-      const res = await app.request(
-        "/auth/session",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: raw, project_id: "proj-1" }),
-        },
-        env,
-        mockCtx,
-      );
-      expect(res.status).toBe(200);
-      expect(mockTokenValidate).toHaveBeenCalled();
-      const lookupHash = mockTokenValidate.mock.calls[0][0] as string;
-      expect(lookupHash).toBe(mintHash);
-    });
   }
 });
 
@@ -349,7 +317,7 @@ describe("SEC-1: session cookie mint↔lookup hash consistency", () => {
   for (const pepper of [undefined, "operator-pepper-secret"] as const) {
     const label = pepper ? "HASH_PEPPER set" : "HASH_PEPPER unset";
 
-    it(`mint (auth-session.ts) and cookie lookup (auth.ts) agree — ${label}`, async () => {
+    it(`persisted legacy session and cookie lookup (auth.ts) agree — ${label}`, async () => {
       const env = baseEnv(pepper);
       const cookie = await mintSession(env);
       const mintHash = storedSessionHash();

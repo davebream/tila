@@ -307,57 +307,103 @@ Export the token before running any `tila init` command:
 export CLOUDFLARE_API_TOKEN=<your-token>
 ```
 
+### Human accounts, invitations, and CLI login
+
+Apply `0032_human_accounts.sql` before deploying this version. It adds Better Auth
+users, password/OAuth accounts, browser/device sessions, invitation and recovery
+records, and native `user:<uuid>` project identities. Existing memberships and API
+credentials are preserved. New token-to-browser exchanges return `410`; existing
+legacy cookies retain their existing expiry and revocation checks.
+
+Browser access uses email/password. Open registration is disabled. Email delivery
+is optional: administrators can copy invitation and password recovery links from
+**Account** and share them privately. An invitation names an email, account role,
+and optional project membership; it expires in seven days and can be used once.
+Manually shared invitations do not mark email ownership as verified.
+
+Create the first administrator with the infrastructure owner's credential (a
+project API token cannot create an instance administrator):
+
+```sh
+tila auth setup --url https://tila.example.com --email admin@example.com --project my-project
+```
+
+This prints a private invitation. The command reads the existing provisioning
+credential or `TILA_INFRA_ADMIN_TOKEN`. Subsequent users are invited in **Account**.
+An instance administrator manages users; project access still requires a canonical
+project membership. Existing GitHub/OIDC identities are not automatically merged
+with email accounts. Grant an existing native user additional project access in
+project settings using the user ID shown in account settings.
+
+The Worker requires `AUTH_SECRET` (at least 32 random characters) or the existing
+`INFRA_ADMIN_TOKEN`. When only the latter exists, tila derives a purpose-separated
+signing secret. Rotating that source invalidates account cookies; coordinate this
+with users. `nodejs_compat` is required and is included in generated deployment
+configuration. Better Auth's pinned password utility selects native scrypt for
+Workers; local runtime tests cover password creation and verification. Production
+CPU limits must accommodate password hashing; do not reduce hash strength to fit
+a smaller execution budget.
+
+```sh
+tila login --url https://tila.example.com
+tila open
+tila logout
+```
+
+`tila login` shows a code, opens the browser, and waits for explicit device approval.
+It stores the login only in the OS credential store (no plaintext fallback).
+`tila open` issues a one-minute, single-use browser link; `--print` prints it for
+manual use. Treat printed links as secrets. The browser shows the target email and
+asks for confirmation. URL secrets use fragments and are removed from browser
+history when read. Opening a browser preserves the original authentication time.
+
+CLI login expires after 30 days; transferred browser sessions expire within eight
+hours and cannot outlive their parent. Revoking a device invalidates its transferred
+browser sessions. Role/membership changes and suspension are checked against D1 on
+each authenticated request. Sensitive operations use `STEP_UP_MAX_AGE_SECONDS`
+(default ten minutes). Sign in again when prompted. CLI account fallback is for
+interactive terminal use; managed runtimes and CI never inherit it.
+
+**Account → Your API tokens** issues project-scoped personal credentials, displays
+the secret once, and lists status/expiry. Rotation has a five-minute overlap and
+retains the original expiry; revocation is immediate. Tokens never authorize account
+login or browser handoffs. Project owners retain project-wide credential controls;
+service-account and workload credentials keep their existing authorization rules.
+
+A lost password can be recovered using an administrator-shared one-hour recovery
+link. Redeeming it invalidates all account sessions. If all administrators are
+locked out, the infrastructure owner can run:
+
+```sh
+tila auth recover-account --url https://tila.example.com --email admin@example.com
+```
+
+Optional invitation email delivery requires the Worker secrets `RESEND_API_KEY`
+and `EMAIL_FROM` (a sender on a verified domain). The invitation remains copyable if
+delivery fails. tila never requires email delivery for account creation or recovery.
+
 ### GitHub browser login (explicit opt-in)
 
-Browser login is **off by default**, including on existing installations that
-already have GitHub App credentials. Provisioning and deployment never opt an
-instance in automatically. API-token login remains available.
+Email/password login is available independently of GitHub. Set Worker secrets
+`GITHUB_LOGIN_ENABLED=true`, `GITHUB_APP_CLIENT_ID`, and
+`GITHUB_APP_CLIENT_SECRET` to enable GitHub for human accounts. Configure the OAuth
+callback as `https://<instance-host>/api/account/auth/callback/github`.
+The account configuration endpoint reports availability without returning secrets.
 
-To enable browser login, configure all three Worker secrets:
-`GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and
-`GITHUB_SESSION_HMAC_KEY` (a base64url-encoded session signing key). Configure
-the GitHub App OAuth callback URL as
-`https://<instance-host>/api/auth/github/oauth/callback`. Then set the separate
-switch on that same Worker:
+Sign in with your password first, then use **Account → Link your GitHub account**.
+New GitHub accounts cannot self-register, and matching emails are not implicitly
+linked. Keep email/password access for recovery. Disabling `GITHUB_LOGIN_ENABLED`
+blocks new GitHub sign-ins without disabling password login.
 
-```bash
-wrangler secret put GITHUB_LOGIN_ENABLED --name <worker-name>
-# At the prompt, enter exactly: true
-```
-
-Store the switch as a **Worker secret**, even though its value is not sensitive.
-Normal `tila deploy` and `tila infra provision --force-redeploy` preserve secrets;
-their generated configuration removes unmanaged plain Worker variables.
-For local development, use `GITHUB_LOGIN_ENABLED=true` in the Worker's `.dev.vars`
-alongside the required credentials.
-
-To disable it, set the secret to `false` with the same command, or delete it:
-
-```bash
-wrangler secret delete GITHUB_LOGIN_ENABLED --name <worker-name>
-```
-
-Only the exact string `true` enables the switch. An absent switch or any other
-value disables browser login. Blank or missing required credentials also hide
-the option. No credentials are returned by the public
-`GET /api/auth/github/login-config` endpoint, which responds with
-`{ "ok": true, "enabled": false }` (or `true`) and `Cache-Control: no-store`.
-
-The login page and GitHub reauthentication action appear only after the instance
-reports availability. Both login URLs and every OAuth callback branch enforce
-the same check: disabled requests return `404` / `github-login-disabled`, and
-opted-in but incomplete configurations return `503` / `not-configured`, before
-creating cookies, contacting GitHub, or writing sessions. Disabling during an
-OAuth flow also blocks its callback.
-
-Disabling this switch does not revoke existing sessions or change CLI GitHub
-exchanges, GitHub Actions OIDC, repository integration, or API-token login.
-Existing GitHub sessions cannot reauthenticate while browser login is disabled;
-the dashboard directs those users to the instance administrator.
+Legacy GitHub CLI exchanges and existing GitHub sessions remain supported. Their
+older OAuth endpoint uses `/api/auth/github/oauth/callback` and additionally
+requires `GITHUB_SESSION_HMAC_KEY`. Do not remove that callback or secret while
+clients still depend on it. Neither legacy nor personal API tokens can use the new
+human browser handoff endpoint.
 
 ### GitHub Session Auth (CLI)
 
-Uses GitHub repository permissions as the authorization source. The CLI exchanges a GitHub token for a short-lived (1-hour) tila session token signed with HMAC-SHA256. This is the recommended auth path for all new projects.
+Uses GitHub repository permissions as the authorization source. The CLI exchanges a GitHub token for a short-lived (1-hour) tila session token signed with HMAC-SHA256. This compatibility path remains available; use `tila login` for remembered human account access.
 
 **Step 1: Generate and set the HMAC signing key**
 
