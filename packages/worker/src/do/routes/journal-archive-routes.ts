@@ -1,5 +1,6 @@
 import { journalArchiveOps, journalOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
+import { jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
@@ -29,13 +30,7 @@ export function createJournalArchiveRoutes(deps: RouterDeps): ProjectSubRouter {
     const throughSeq = body.throughSeq;
 
     if (typeof throughSeq !== "number") {
-      return c.json(
-        {
-          ok: false,
-          error: { code: "BAD_REQUEST", message: "throughSeq is required" },
-        },
-        400,
-      );
+      return jsonError(c, 400, "bad-request", "throughSeq is required");
     }
 
     journalArchiveOps.markArchived(deps.db, throughSeq);
