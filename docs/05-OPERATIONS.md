@@ -2097,9 +2097,16 @@ leave delivery pending. Do not repair these states by acknowledging unread inbox
 Open **Rooms** to read recent shared messages and existing threads. Use **Older
 messages** to page back and **Latest messages** to restart at the tail. Expired or
 restored cursors require Latest; they do not alter pending inbox delivery. The
-**Agents** page displays mailbox attachment/lease status. Inspect a delivery UUID
-from CLI inbox/dispatch output to obtain a shareable project-scoped inspection URL.
-Only authorized managers/current consumers can inspect delivery metadata.
+**Agents** page displays mailbox attachment/lease status and links each agent to
+its deliveries. Select **Deliveries** under a message to see its outcome: room
+readers get counts (stored, pending, acknowledged, expired); managers also get each
+recipient with a **Trace** link. The **Deliveries** page browses and filters traces
+by agent, room, state or message/delivery ID without copying IDs from CLI output.
+A trace shows Stored, Wake, Fetched, Acknowledged and Work result separately.
+Acknowledged means accepted for processing, not finished work; Work result stays
+"Not reported" until an explicit result exists. Expired delivery metadata does not
+mean the message was never sent; room history keeps it. Trace URLs stay
+project-scoped and shareable, and opening one never fetches or acknowledges.
 
 Replies are saved in sessionStorage for the current tab and principal. After a
 network failure or fresh sign-in, use **Retry saved reply**. It resends the frozen

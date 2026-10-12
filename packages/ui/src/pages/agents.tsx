@@ -1,13 +1,13 @@
-import { Button } from "@/components/ui/button";
+import { DeliveryDetail } from "@/components/delivery-trace";
 import { Drawer } from "@/components/ui/drawer";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
-import { inspectDelivery, listAgents } from "@/lib/api";
+import { listAgents } from "@/lib/api";
 import { deriveBindingView, leaseCountdown } from "@/lib/lease";
 import { formatTime } from "@/lib/time";
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useRef } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 
 const BINDING_LABEL = {
   none: "No binding",
@@ -24,9 +24,7 @@ export function AgentsPage() {
   const { projectId } = useAuth();
   const { agentId, deliveryId } = useParams();
   const navigate = useNavigate();
-  const [agent, setAgent] = useState("");
-  const [delivery, setDelivery] = useState("");
-  const opener = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLAnchorElement>(null);
   const agents = useQuery({
     queryKey: ["agents", projectId],
     queryFn: () => listAgents(projectId as string),
@@ -53,13 +51,18 @@ export function AgentsPage() {
         <table className="w-full text-left text-sm" aria-label="Agents">
           <thead className="bg-card">
             <tr>
-              {["Agent", "Mailbox", "Epoch", "Wake", "Lease until"].map(
-                (label) => (
-                  <th key={label} className="p-3">
-                    {label}
-                  </th>
-                ),
-              )}
+              {[
+                "Agent",
+                "Mailbox",
+                "Epoch",
+                "Wake",
+                "Lease until",
+                "Deliveries",
+              ].map((label) => (
+                <th key={label} className="p-3">
+                  {label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -97,6 +100,15 @@ export function AgentsPage() {
                       </>
                     )}
                   </td>
+                  <td className="p-3">
+                    <Link
+                      className="text-signal-blue underline"
+                      to={`/p/${projectId}/deliveries?agent=${encodeURIComponent(row.id)}`}
+                      aria-label={`Deliveries for ${row.name}`}
+                    >
+                      Deliveries
+                    </Link>
+                  </td>
                 </tr>
               );
             })}
@@ -104,54 +116,21 @@ export function AgentsPage() {
         </table>
       </div>
       {agents.data?.agents.length === 0 && <p>No agents registered.</p>}
-      <form
-        className="flex flex-wrap items-end gap-3 rounded-lg border border-border p-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          navigate(
-            `/p/${projectId}/agents/${encodeURIComponent(agent)}/deliveries/${encodeURIComponent(delivery.trim())}`,
-          );
-        }}
-      >
-        <label className="grid gap-1 text-sm">
-          Agent
-          <select
-            aria-label="Agent"
-            className="rounded border border-border bg-background p-2"
-            value={agent}
-            onChange={(event) => setAgent(event.target.value)}
-            required
-          >
-            <option value="">Choose agent</option>
-            {agents.data?.agents.map(({ agent: row }) => (
-              <option key={row.id} value={row.id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-1 text-sm">
-          Delivery ID
-          <input
-            className="rounded border border-border bg-background p-2 font-mono"
-            value={delivery}
-            onChange={(event) => setDelivery(event.target.value)}
-            placeholder="UUID from inbox or dispatch metadata"
-            pattern="[0-9a-fA-F-]{36}"
-            required
-          />
-        </label>
-        <Button ref={opener} type="submit">
-          Inspect delivery
-        </Button>
-        <p className="basis-full text-xs text-muted-foreground">
-          Inspection requires conversation management authority. Fetching and
-          acknowledging remain with the active mailbox consumer.
-        </p>
-      </form>
+      <p className="text-sm text-muted-foreground">
+        <Link
+          ref={opener}
+          className="text-signal-blue underline"
+          to={`/p/${projectId}/deliveries`}
+        >
+          Browse deliveries
+        </Link>{" "}
+        to trace messages to their wake, acknowledgement and work result.
+        Browsing requires conversation management authority. Fetching and
+        acknowledging remain with the active mailbox consumer.
+      </p>
       {projectId && agentId && deliveryId && (
         <Drawer
-          title="Delivery inspection"
+          title="Delivery trace"
           restoreFocus={() =>
             requestAnimationFrame(() => opener.current?.focus())
           }
@@ -166,75 +145,6 @@ export function AgentsPage() {
             delivery={deliveryId}
           />
         </Drawer>
-      )}
-    </div>
-  );
-}
-export function DeliveryDetail({
-  project,
-  agent,
-  delivery,
-}: { project: string; agent: string; delivery: string }) {
-  const result = useQuery({
-    queryKey: ["delivery", project, agent, delivery],
-    queryFn: () => inspectDelivery(project, agent, delivery),
-    refetchInterval: 5000,
-    retry: false,
-  });
-  const row = result.data?.delivery;
-  return (
-    <div className="space-y-4 p-6">
-      {result.isPending && <p>Loading delivery…</p>}
-      {result.error && <p role="alert">{result.error.message}</p>}
-      {row && (
-        <>
-          <p className="break-all font-mono text-xs">{row.id}</p>
-          <p className="text-lg">{result.data?.reason.replaceAll("-", " ")}</p>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-            {Object.entries({
-              Agent: row.agent_id,
-              State: row.state,
-              Disposition: row.disposition ?? "Not acknowledged",
-              "Target epoch": row.target_epoch ?? "Any current binding",
-              "Fetched epoch": row.fetched_epoch ?? "Not fetched",
-              "Acknowledged epoch": row.acked_epoch ?? "Not acknowledged",
-              Suppression: row.wake_suppressed ?? "None",
-              Expires: new Date(row.expires_at).toLocaleString(),
-            }).map(([label, value]) => (
-              <div key={label} className="contents">
-                <dt className="text-muted-foreground">{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="text-xs text-muted-foreground">
-            Acknowledgement records accepted processing or decline. It never
-            means task completion.
-          </p>
-          <h2 className="font-medium">Wake attempts</h2>
-          <ol className="space-y-2">
-            {result.data?.attempts.map((attempt) => (
-              <li
-                key={attempt.id}
-                className="rounded border border-border p-3 text-sm"
-              >
-                {attempt.outcome} · epoch {attempt.binding_epoch} · publication{" "}
-                {attempt.publish_gen}
-                <time
-                  className="block text-xs text-muted-foreground"
-                  dateTime={new Date(attempt.created_at).toISOString()}
-                >
-                  {new Date(attempt.created_at).toLocaleString()}
-                </time>
-              </li>
-            ))}
-          </ol>
-          {result.data?.attempts.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No wake attempts recorded.
-            </p>
-          )}
-        </>
       )}
     </div>
   );

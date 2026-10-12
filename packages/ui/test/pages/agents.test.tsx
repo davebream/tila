@@ -162,3 +162,15 @@ test("opens delivery inspection directly without fetching or acknowledging a mai
     `GET /projects/test-project/inbox/worker/deliveries/${delivery}`,
   ]);
 });
+
+test("links each agent to its deliveries instead of asking for a delivery UUID", async () => {
+  server.use(agentsHandler(null));
+  renderAgents();
+  expect(
+    await screen.findByRole("link", { name: "Deliveries for Reviewer" }),
+  ).toHaveAttribute("href", "/p/test-project/deliveries?agent=worker");
+  expect(
+    screen.getByRole("link", { name: "Browse deliveries" }),
+  ).toHaveAttribute("href", "/p/test-project/deliveries");
+  expect(screen.queryByLabelText("Delivery ID")).toBeNull();
+});
