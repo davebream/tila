@@ -8,13 +8,14 @@ import {
   artifactOps,
   constraintOps,
   relationshipOps,
+  resolveArtifactResource,
   searchDriftOps,
   searchReindexOps,
 } from "@tila/ops-sqlite";
 import { parseTagFilter } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import type { ReindexState } from "../project-do";
 import { scheduleArtifactPublication } from "./artifact-alarm";
 import { lifecycleStore } from "./artifact-lifecycle-routes";
@@ -38,6 +39,14 @@ const {
 
 export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
+
+  app.post("/artifact/resolve-resource", async (c) => {
+    const body = z.object({ resource: z.string() }).parse(await c.req.json());
+    return c.json({
+      ok: true,
+      resource: resolveArtifactResource(deps.db, body.resource),
+    });
+  });
 
   app.post("/artifact/pointer", async (c) => {
     const { db } = deps;

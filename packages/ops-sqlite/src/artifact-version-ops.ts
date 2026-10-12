@@ -13,6 +13,10 @@ import {
 } from "@tila/schemas";
 import { and, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import {
+  resolveArtifactResource,
+  withArtifactResourceErrors,
+} from "./artifact-resource";
 import { enrichArtifacts, provenanceFromOrigin } from "./artifact-review-ops";
 import {
   assertResourceFence,
@@ -160,15 +164,15 @@ function validateFences(db: Db, record: ArtifactCommitRecord): void {
 
 export function reserveArtifactRevision(
   db: Db,
-  input: ReserveArtifactRevision,
+  rawInput: ReserveArtifactRevision,
   origin: RequestOrigin,
 ): { operation?: RevisionOperation; duplicate?: ArtifactRevision } {
-  ArtifactLineageIdSchema.parse(input.lineage_id);
-  const tags = TagsSchema.parse(input.tags ?? []);
+  ArtifactLineageIdSchema.parse(rawInput.lineage_id);
+  const tags = TagsSchema.parse(rawInput.tags ?? []);
   return db.transaction((tx) => {
-    const replay = getRevisionOperation(tx, input.operation_id);
+    const replay = getRevisionOperation(tx, rawInput.operation_id);
     if (replay) {
-      if (replay.request_hash !== input.request_hash)
+      if (replay.request_hash !== rawInput.request_hash)
         throw new ArtifactVersionError(
           422,
           "idempotency-key-conflict",
@@ -182,6 +186,10 @@ export function reserveArtifactRevision(
         );
       return { operation: replay };
     }
+    const input = {
+      ...rawInput,
+      resource: resolveArtifactResource(tx, rawInput.resource),
+    };
     const lineage = tx
       .select()
       .from(schema.artifactLineages)
@@ -454,10 +462,13 @@ function insertPublishedPointer(
   )
     return;
   const { tags, ...effectivePointer } = effective;
-  db.insert(schema.artifactPointers)
-    .values(effectivePointer)
-    .onConflictDoNothing()
-    .run();
+  withArtifactResourceErrors(() =>
+    db
+      .insert(schema.artifactPointers)
+      .values(effectivePointer)
+      .onConflictDoNothing()
+      .run(),
+  );
   for (const tag of tags)
     db.insert(schema.artifactTags)
       .values({ artifact_key: pointer.r2_key, tag })

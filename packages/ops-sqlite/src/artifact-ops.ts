@@ -22,6 +22,11 @@ import {
 import { alias } from "drizzle-orm/sqlite-core";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as lifecycle from "./artifact-lifecycle-ops";
+import {
+  resolveArtifactResource,
+  resolveArtifactResourceFilter,
+  withArtifactResourceErrors,
+} from "./artifact-resource";
 import { enrichArtifacts, provenanceFromOrigin } from "./artifact-review-ops";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
@@ -41,7 +46,7 @@ export class SearchQueryError extends Error {
 
 export function upsertPointer(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  pointer: {
+  rawPointer: {
     r2_key: string;
     resource: string | null;
     kind: string;
@@ -68,67 +73,72 @@ export function upsertPointer(
   const normalizedTags =
     tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
 
-  return db.transaction((tx) => {
-    // Fence validation is skipped for source artifacts (resource=null),
-    // explicitly unfenced uploads, and reconcile replays (skipFenceValidation).
-    if (
-      pointer.fence !== null &&
-      pointer.resource !== null &&
-      !skipFenceValidation
-    ) {
-      // requireLiveClaim closes the zombie-write window: artifact fences bump
-      // only on acquire, so after a lease expires with no competing re-acquire
-      // the stale fence still equals current_fence. The flag additionally
-      // requires a LIVE claim and is a no-op for non-entity resources
-      // (records/source), which keep the fence-only contract.
-      assertResourceFence(tx, pointer.resource, pointer.fence, {
-        requireLiveClaim: true,
-      });
-    }
-
-    // Deduplication oracle: artifacts are content-addressed, so an identical
-    // r2_key means identical content. If a row already exists, the INSERT OR
-    // IGNORE below is a no-op and this is a deduplicated put -- we must NOT emit
-    // a second artifact.produced journal event for it.
-    const existing = tx.all<{ r2_key: string }>(
-      sql`SELECT r2_key FROM artifact_pointers WHERE r2_key = ${pointer.r2_key} LIMIT 1`,
-    );
-    const deduplicated = existing.length > 0;
-
-    const provenance = skipFenceValidation
-      ? null
-      : provenanceFromOrigin(origin, pointer.produced_at);
-    tx.insert(schema.artifactPointers)
-      .values({
-        ...pointer,
-        tombstoned: 0,
-        provenance,
-        revision_creation: provenance,
-      })
-      .onConflictDoNothing()
-      .run();
-
-    // Tags: on re-upsert of an existing r2_key (content-addressed; INSERT OR IGNORE
-    // is a no-op), delete-all-then-reinsert ONLY when tags provided; preserve when undefined.
-    if (normalizedTags !== undefined) {
-      tx.run(
-        sql`DELETE FROM artifact_tags WHERE artifact_key = ${pointer.r2_key}`,
-      );
-      for (const tag of normalizedTags) {
-        tx.insert(schema.artifactTags)
-          .values({ artifact_key: pointer.r2_key, tag })
-          .run();
+  return withArtifactResourceErrors(() =>
+    db.transaction((tx) => {
+      const pointer = {
+        ...rawPointer,
+        resource: resolveArtifactResource(tx, rawPointer.resource),
+      };
+      // Fence validation is skipped for source artifacts (resource=null),
+      // explicitly unfenced uploads, and reconcile replays (skipFenceValidation).
+      if (
+        pointer.fence !== null &&
+        pointer.resource !== null &&
+        !skipFenceValidation
+      ) {
+        // requireLiveClaim closes the zombie-write window: artifact fences bump
+        // only on acquire, so after a lease expires with no competing re-acquire
+        // the stale fence still equals current_fence. The flag additionally
+        // requires a LIVE claim and is a no-op for non-entity resources
+        // (records/source), which keep the fence-only contract.
+        assertResourceFence(tx, pointer.resource, pointer.fence, {
+          requireLiveClaim: true,
+        });
       }
-    }
 
-    // Conditional search doc insert -- atomic with pointer write.
-    // INSERT OR IGNORE mirrors pointer idempotency: re-upload of same
-    // content-addressed r2_key is a no-op. FTS5 triggers (asd_ai) fire
-    // automatically on insert. tombstoned defaults to 0; T12 owns propagation.
-    if (searchText != null) {
-      const indexedAt = Date.now();
-      tx.run(
-        sql`INSERT OR IGNORE INTO artifact_search_docs(
+      // Deduplication oracle: artifacts are content-addressed, so an identical
+      // r2_key means identical content. If a row already exists, the INSERT OR
+      // IGNORE below is a no-op and this is a deduplicated put -- we must NOT emit
+      // a second artifact.produced journal event for it.
+      const existing = tx.all<{ r2_key: string }>(
+        sql`SELECT r2_key FROM artifact_pointers WHERE r2_key = ${pointer.r2_key} LIMIT 1`,
+      );
+      const deduplicated = existing.length > 0;
+
+      const provenance = skipFenceValidation
+        ? null
+        : provenanceFromOrigin(origin, pointer.produced_at);
+      tx.insert(schema.artifactPointers)
+        .values({
+          ...pointer,
+          tombstoned: 0,
+          provenance,
+          revision_creation: provenance,
+        })
+        .onConflictDoNothing()
+        .run();
+
+      // Tags: on re-upsert of an existing r2_key (content-addressed; INSERT OR IGNORE
+      // is a no-op), delete-all-then-reinsert ONLY when tags provided; preserve when undefined.
+      if (normalizedTags !== undefined) {
+        tx.run(
+          sql`DELETE FROM artifact_tags WHERE artifact_key = ${pointer.r2_key}`,
+        );
+        for (const tag of normalizedTags) {
+          tx.insert(schema.artifactTags)
+            .values({ artifact_key: pointer.r2_key, tag })
+            .run();
+        }
+      }
+
+      // Conditional search doc insert -- atomic with pointer write.
+      // INSERT OR IGNORE mirrors pointer idempotency: re-upload of same
+      // content-addressed r2_key is a no-op. FTS5 triggers (asd_ai) fire
+      // automatically on insert. tombstoned defaults to 0; T12 owns propagation.
+      if (searchText != null) {
+        const indexedAt = Date.now();
+        tx.run(
+          sql`INSERT OR IGNORE INTO artifact_search_docs(
           artifact_key, kind, mime_type, resource, title, body_text,
           indexed_at, source_sha256, tombstoned
         ) VALUES(
@@ -136,43 +146,44 @@ export function upsertPointer(
           ${pointer.resource}, ${searchText.title}, ${searchText.body_text},
           ${indexedAt}, ${pointer.sha256}, 0
         )`,
-      );
-    }
-
-    // Auto-supersedes: create supersedes relationships from the new pointer to all
-    // existing non-tombstoned pointers with matching (kind, resource).
-    // Direction convention: from_key = new (superseder), to_key = old (superseded).
-    // Uses inline SQL with ALL required columns -- do NOT use addArtifactRelationship
-    // which omits the required `target` column.
-    if (autoSupersedes === true && pointer.resource !== null) {
-      const existingPointers = tx.all<{ r2_key: string }>(
-        sql`SELECT r2_key FROM artifact_pointers WHERE kind = ${pointer.kind} AND resource = ${pointer.resource} AND tombstoned = 0 AND r2_key != ${pointer.r2_key}`,
-      );
-      const now = Date.now();
-      for (const old of existingPointers) {
-        tx.run(
-          sql`INSERT OR IGNORE INTO artifact_relationships(from_key, to_key, to_uri, type, target, metadata, created_at) VALUES(${pointer.r2_key}, ${old.r2_key}, NULL, 'supersedes', ${old.r2_key}, '{}', ${now})`,
         );
       }
-    }
 
-    // A deduplicated put records no new event: the artifact was already
-    // produced. This keeps the journal a true log of distinct artifacts.
-    if (!deduplicated) {
-      appendJournal(tx, {
-        kind: journalKind ?? "artifact.produced",
-        resource: pointer.resource ?? "source",
-        ...origin,
-        fence: pointer.fence,
-        data: { r2_key: pointer.r2_key, sha256: pointer.sha256 },
-        tokenId: origin.tokenId,
-        source: origin.source,
-        sourceVersion: origin.sourceVersion,
-      });
-    }
+      // Auto-supersedes: create supersedes relationships from the new pointer to all
+      // existing non-tombstoned pointers with matching (kind, resource).
+      // Direction convention: from_key = new (superseder), to_key = old (superseded).
+      // Uses inline SQL with ALL required columns -- do NOT use addArtifactRelationship
+      // which omits the required `target` column.
+      if (autoSupersedes === true && pointer.resource !== null) {
+        const existingPointers = tx.all<{ r2_key: string }>(
+          sql`SELECT r2_key FROM artifact_pointers WHERE kind = ${pointer.kind} AND resource = ${pointer.resource} AND tombstoned = 0 AND r2_key != ${pointer.r2_key}`,
+        );
+        const now = Date.now();
+        for (const old of existingPointers) {
+          tx.run(
+            sql`INSERT OR IGNORE INTO artifact_relationships(from_key, to_key, to_uri, type, target, metadata, created_at) VALUES(${pointer.r2_key}, ${old.r2_key}, NULL, 'supersedes', ${old.r2_key}, '{}', ${now})`,
+          );
+        }
+      }
 
-    return { deduplicated };
-  });
+      // A deduplicated put records no new event: the artifact was already
+      // produced. This keeps the journal a true log of distinct artifacts.
+      if (!deduplicated) {
+        appendJournal(tx, {
+          kind: journalKind ?? "artifact.produced",
+          resource: pointer.resource ?? "source",
+          ...origin,
+          fence: pointer.fence,
+          data: { r2_key: pointer.r2_key, sha256: pointer.sha256 },
+          tokenId: origin.tokenId,
+          source: origin.source,
+          sourceVersion: origin.sourceVersion,
+        });
+      }
+
+      return { deduplicated };
+    }),
+  );
 }
 
 /**
@@ -191,8 +202,9 @@ export function upsertPointer(
 export function getLatestPointer(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   kind: string,
-  resource: string,
+  rawResource: string,
 ): ArtifactPointer | null {
+  const resource = resolveArtifactResourceFilter(db, rawResource);
   const newer = alias(schema.artifactPointers, "newer_revision");
   const old = alias(schema.artifactPointers, "legacy_target");
   const row = db
@@ -277,7 +289,12 @@ export function listPointers(
   const conditions: SQL[] = [eq(schema.artifactPointers.tombstoned, 0)];
 
   if (query.resource !== undefined) {
-    conditions.push(eq(schema.artifactPointers.resource, query.resource));
+    conditions.push(
+      eq(
+        schema.artifactPointers.resource,
+        resolveArtifactResourceFilter(db, query.resource),
+      ),
+    );
   }
   if (query.kind) {
     if (Array.isArray(query.kind)) {
@@ -387,7 +404,12 @@ export function listGrepCandidates(
   const conditions: SQL[] = [eq(schema.artifactPointers.tombstoned, 0)];
 
   if (query.resource !== undefined) {
-    conditions.push(eq(schema.artifactPointers.resource, query.resource));
+    conditions.push(
+      eq(
+        schema.artifactPointers.resource,
+        resolveArtifactResourceFilter(db, query.resource),
+      ),
+    );
   }
   if (query.kind) {
     if (Array.isArray(query.kind)) {
@@ -738,7 +760,9 @@ export function searchArtifacts(
   if (query.source_only) {
     conditions.push(sql`d.resource IS NULL`);
   } else if (query.resource) {
-    conditions.push(sql`d.resource = ${query.resource}`);
+    conditions.push(
+      sql`d.resource = ${resolveArtifactResourceFilter(db, query.resource)}`,
+    );
   }
 
   if (query.tagFilter?.length) {
