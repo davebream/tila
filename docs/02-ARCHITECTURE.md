@@ -2882,3 +2882,32 @@ Source audit anchors: [shared schema inventory](../packages/schemas/src/index.ts
 [current Settings](../packages/ui/src/pages/settings.tsx). The inventory includes
 declared fields even when current enforcement/editor coverage is incomplete;
 implementation must verify the shared operation, not infer behavior from a label.
+
+## Managed execution foundations
+
+Managed dispatch is under construction and is not yet an advertised capability.
+Adding lifecycle metadata does not enroll or launch a task. The shared SQLite
+migration adds durable queue entries, attempts, execution/WIP reservations and
+command receipts; subsequent delivery adds admission and public interfaces.
+
+An attempt has a separate identity from its task, enrollment, participant and
+provider session. A reservation holds capacity before acceptance. Acceptance
+commits the optional lifecycle start transition and authorizes launch; the
+adapter then binds the provider session. Results commit their optional task
+transition, terminal history, reservation release and receipt together. A schema
+or gate conflict rolls the result back, leaving the attempt available for
+reconciliation. A competing terminal command observes the first committed result.
+
+Execution authority includes principal, participant, fence and an unexpired
+claim. Commands use revision preconditions and durable operation keys. Replaying
+an acceptance returns the current attempt and current `grant_valid`, never a
+cached permission to spawn. A receipt does not extend a lease twice. Receipts
+are retained with attempt history and are not removed by the generic seven-day
+idempotency sweep.
+
+Expiry before acceptance abandons the unstarted attempt and returns its entry
+to the backlog. Expiry after acceptance makes the attempt uncertain and retains
+both capacity reservations, even if the ordinary claim has already been swept.
+The old fence is invalidated. Expiry runs before attempt mutations and during
+sweeps; admission will evaluate it in its own transaction. A missing heartbeat
+is not evidence that an external process stopped.
