@@ -54,6 +54,47 @@ export async function runMigrationsWithPitrRollback(
 }
 
 const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
+  queue_policy: [
+    "singleton",
+    "enabled",
+    "paused",
+    "execution_limit",
+    "wip_limit",
+    "lease_ms",
+    "revision",
+  ],
+  queue_entries: [
+    "id",
+    "task_id",
+    "state",
+    "enqueue_order",
+    "revision",
+    "retry_policy",
+  ],
+  work_attempts: [
+    "id",
+    "entry_id",
+    "task_id",
+    "state",
+    "fence",
+    "lease_expires_at",
+    "outcome",
+    "revision",
+  ],
+  execution_reservations: [
+    "task_id",
+    "entry_id",
+    "attempt_id",
+    "execution_held",
+    "wip_held",
+  ],
+  queue_operation_receipts: [
+    "key",
+    "request",
+    "result",
+    "entry_id",
+    "attempt_id",
+  ],
   rooms: ["id", "history_policy", "budgets", "next_seq"],
   room_members: ["room_id", "member", "wake"],
   threads: ["id", "room_id"],

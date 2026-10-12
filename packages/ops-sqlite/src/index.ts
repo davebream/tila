@@ -154,3 +154,6 @@ export * as artifactReviewOps from "./artifact-review-ops";
 export { ArtifactReviewError } from "./artifact-review-ops";
 
 export * as conversationOps from "./conversation-ops";
+
+export * as attemptOps from "./attempt-ops";
+export { QueueError } from "./queue-internals";
