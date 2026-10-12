@@ -25,7 +25,7 @@ export function testOrigin(
 }
 
 // Cloudflare's SQLite fork supports COALESCE in PRIMARY KEY; standard SQLite does not.
-// Replace for testing (same pattern as backend-do test suite).
+// Replace for testing (same pattern as the worker/test/do suite).
 export function patchMigration(sql: string): string {
   return sql.replace(
     "PRIMARY KEY (from_key, COALESCE(to_key, to_uri), type)",

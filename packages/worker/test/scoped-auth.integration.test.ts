@@ -1,4 +1,3 @@
-import { D1SessionStore } from "@tila/backend-d1";
 import {
   CAPABILITIES,
   type CredentialPolicy,
@@ -12,12 +11,12 @@ import {
   generateKeyPair,
 } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
 import { TilaClient } from "../../sdk/src/client";
 import {
   type DpopProofContext,
   createOidcWorkloadTokenProvider,
 } from "../../sdk/src/token-provider";
+import { D1SessionStore } from "../src/d1";
 import { generateToken, hashToken } from "../src/lib/hash";
 import { exchangeScopedWorkload } from "../src/lib/workload-credential";
 import {
@@ -36,6 +35,7 @@ import { backup } from "../src/routes/backup";
 import { serviceAccountRoutes } from "../src/routes/service-accounts";
 import { tokens } from "../src/routes/tokens";
 import type { Env, HonoVariables } from "../src/types";
+import { createCredentialFixture } from "./d1/helpers/credential-fixture";
 
 describe("scoped HTTP authentication with authoritative D1 persistence", () => {
   let f: ReturnType<typeof createCredentialFixture>;

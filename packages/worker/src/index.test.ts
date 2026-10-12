@@ -15,7 +15,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("./d1", () => ({
   RuntimeStore: class {
     async pruneReplayState() {}
   },
@@ -24,8 +24,8 @@ vi.mock("@tila/backend-d1", () => ({
   D1RateLimitStore: vi.fn(),
   D1TokenStore: vi.fn(),
 }));
-vi.mock("@tila/backend-r2", () => ({ R2ArtifactBackend: vi.fn() }));
-vi.mock("@tila/backend-do", () => ({ ProjectDO: vi.fn() }));
+vi.mock("./r2", () => ({ R2ArtifactBackend: vi.fn() }));
+vi.mock("./do", () => ({ ProjectDO: vi.fn() }));
 vi.mock("./lib/session-cache", () => ({
   getSessionFromCache: vi.fn().mockReturnValue(undefined),
   setSessionInCache: vi.fn(),

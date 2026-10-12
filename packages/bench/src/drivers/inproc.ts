@@ -13,12 +13,8 @@
  */
 import { Hono } from "hono";
 import { TilaClient } from "tila-sdk";
-import { createProjectRouter } from "../../../backend-do/src/project-do-router";
-import type { RouterDeps } from "../../../backend-do/src/routes/types";
-import {
-  type TestDb,
-  createTestDb,
-} from "../../../backend-do/test/helpers/create-test-db";
+import { createProjectRouter } from "../../../worker/src/do/project-do-router";
+import type { RouterDeps } from "../../../worker/src/do/routes/types";
 import { errorHandler } from "../../../worker/src/middleware/error";
 import { artifacts } from "../../../worker/src/routes/artifacts";
 import { claims } from "../../../worker/src/routes/claims";
@@ -30,6 +26,10 @@ import { records } from "../../../worker/src/routes/records";
 import { signals } from "../../../worker/src/routes/signals";
 import { summary } from "../../../worker/src/routes/summary";
 import type { Env, HonoVariables } from "../../../worker/src/types";
+import {
+  type TestDb,
+  createTestDb,
+} from "../../../worker/test/do/helpers/create-test-db";
 import { HARNESS_VERSION } from "../result-schema";
 import type { Driver, Participant } from "../types";
 import { facadeFromClient } from "./facade";

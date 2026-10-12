@@ -15,7 +15,7 @@ vi.mock("../lib/github-app", () => ({
   checkUserMembership: mockCheckUserMembership,
 }));
 
-// Mock backend-d1 stores
+// Mock worker/src/d1 stores
 const mockRegistryListAll = vi.fn();
 const mockRegistryGet = vi.fn();
 const mockConfigGetInstallation = vi.fn();
@@ -24,7 +24,7 @@ const mockSessionRevoke = vi.fn();
 const mockRateLimitCheck = vi.fn();
 const mockAllowlistListForProject = vi.fn();
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   D1ProjectRegistry: vi.fn().mockImplementation(
     class {
       listAll = mockRegistryListAll;

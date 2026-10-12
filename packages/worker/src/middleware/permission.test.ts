@@ -13,7 +13,7 @@ import type {
 // ---------------------------------------------------------------------------
 // Module-level mocks for the re-verify (Layer B) test cases.
 // These mocks target the same seam as permission-recheck.test.ts:
-//   - @tila/backend-d1 store methods (getInstallation, isRegistered)
+//   - worker/src/d1 store methods (getInstallation, isRegistered)
 //   - global.fetch (used transitively by githubFetch → checkUserMembershipStatus)
 //   - ./github-app (mintAppJwt, getInstallationAccessToken, GitHubAppTokenError)
 // Hoisted so factories are available inside vi.mock() closures.
@@ -30,7 +30,7 @@ const {
   mockGetInstallationAccessToken: vi.fn(),
 }));
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   GitHubAppConfigStore: vi.fn().mockImplementation(
     class {
       getInstallation = mockGetInstallation;
@@ -627,7 +627,7 @@ describe("project middleware — PROJECT_MISMATCH guard", () => {
 
 // =============================================================================
 // requirePermission + Layer B re-verify integration (Task 7, WI-H)
-// Seam: vi.mock("@tila/backend-d1") + vi.mock("../lib/github-app") + global.fetch
+// Seam: vi.mock("../d1") + vi.mock("../lib/github-app") + global.fetch
 // Reset _resetPermissionRecheckCacheForTest between cases.
 // =============================================================================
 

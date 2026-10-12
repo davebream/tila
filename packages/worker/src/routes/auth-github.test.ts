@@ -55,7 +55,7 @@ vi.mock("../lib/deployment-instance", () => ({
   __resetInstanceCache: vi.fn(),
 }));
 
-// Mock backend-d1 stores
+// Mock worker/src/d1 stores
 const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 const mockRateLimitRecordFailure = vi.fn().mockResolvedValue(undefined);
 const mockIdempotencyCheck = vi.fn().mockResolvedValue(null);
@@ -76,10 +76,8 @@ const mockD1TokenValidate = vi.fn().mockResolvedValue(null);
 const mockD1TokenUpdateLastUsedAt = vi.fn().mockResolvedValue(undefined);
 const mockD1SessionCreate = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@tila/backend-d1", async () => ({
-  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
-    "@tila/backend-d1",
-  )),
+vi.mock("../d1", async () => ({
+  ...(await vi.importActual<typeof import("../d1")>("../d1")),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   resolveActionsMembership: vi.fn(async () => {
     const { policy, repo } = await mockGetOidcPolicy();

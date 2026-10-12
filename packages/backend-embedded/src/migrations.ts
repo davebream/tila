@@ -24,7 +24,7 @@
  *
  *  2. An embedded-only idempotency table (`MIGRATION_IDEMPOTENCY`) is appended
  *     at a non-canonical version ABOVE the shared range (1000). In Cloudflare
- *     mode idempotency lives in D1 (`@tila/backend-d1`); in embedded mode it
+ *     mode idempotency lives in D1 (`worker/src/d1`); in embedded mode it
  *     lives in the same project SQLite file (one fewer store to coordinate).
  *     The store is a standalone INSERT OR IGNORE, not folded into the mutating
  *     operation's own transaction.
@@ -62,7 +62,7 @@ export const IDEMPOTENCY_MIGRATION_VERSION = 1000;
 /**
  * Embedded-only idempotency table.
  *
- * In Cloudflare mode, idempotency lives in D1 (`@tila/backend-d1`). In embedded
+ * In Cloudflare mode, idempotency lives in D1 (`worker/src/d1`). In embedded
  * mode it lives in the same project SQLite database (one fewer store to
  * coordinate); the store is a standalone INSERT OR IGNORE, not folded into the
  * mutating operation's own transaction. The `project_id` column is omitted

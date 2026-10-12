@@ -1,8 +1,8 @@
-import { CredentialStore, SCOPED_TOKEN_MARKER } from "@tila/backend-d1";
-import { D1SessionStore, D1TokenStore } from "@tila/backend-d1";
 import { SessionExchangeRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
+import { CredentialStore, SCOPED_TOKEN_MARKER } from "../d1";
+import { D1SessionStore, D1TokenStore } from "../d1";
 import { revokeSession } from "../lib/admin-ops";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import { hashToken } from "../lib/hash-token";

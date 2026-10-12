@@ -1,15 +1,14 @@
-import { ProjectMembershipStore, RuntimeStore } from "@tila/backend-d1";
 import { CREDENTIAL_PRESETS, accessTokenHash } from "@tila/schemas";
 import { Hono } from "hono";
 import { SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
 import {
   generateRuntimeKey,
   runtimeBinding,
 } from "../../client-lifecycle/src/runtime-proof";
 import { TilaClient } from "../../sdk/src/client";
 import { RuntimeClient, exchangeRuntimeWorkload } from "../../sdk/src/runtime";
+import { ProjectMembershipStore, RuntimeStore } from "../src/d1";
 import { generateToken, hashToken } from "../src/lib/hash";
 import { exchangeScopedWorkload } from "../src/lib/workload-credential";
 import {
@@ -25,6 +24,7 @@ import { requestIdentityMiddleware } from "../src/middleware/request-identity";
 import { authSessionExchange } from "../src/routes/auth-session";
 import { runtimeRoutes } from "../src/routes/runtime";
 import type { Env, HonoVariables } from "../src/types";
+import { createCredentialFixture } from "./d1/helpers/credential-fixture";
 
 describe("runtime HTTP authority and SDK wire contracts", () => {
   let f: ReturnType<typeof createCredentialFixture>;

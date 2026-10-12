@@ -1,14 +1,4 @@
 import {
-  RuntimeDenied,
-  RuntimeStore,
-  resolveActionsPolicy,
-} from "@tila/backend-d1";
-import {
-  CredentialConflict,
-  CredentialDenied,
-  CredentialStore,
-} from "@tila/backend-d1";
-import {
   type CredentialPolicy,
   type GitHubActionsContext,
   delegablePolicy,
@@ -16,6 +6,8 @@ import {
 } from "@tila/schemas";
 import { CredentialPolicyReadSchema, roleToPermission } from "@tila/schemas";
 import type { Context } from "hono";
+import { RuntimeDenied, RuntimeStore, resolveActionsPolicy } from "../d1";
+import { CredentialConflict, CredentialDenied, CredentialStore } from "../d1";
 import type { Env, HonoVariables } from "../types";
 import { agentRunAuthorizer } from "./agent-authority";
 import { generateToken, hashToken } from "./hash";

@@ -18,7 +18,7 @@ const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
 // guard (checkExchangeRateLimit constructs D1RateLimitStore), so the mock must
 // provide it. Default check=false → existing tests are unaffected.
 const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   D1ProjectRegistry: vi.fn().mockImplementation(
     class {
       listAllIncludingArchived = listAllIncludingArchivedMock;
@@ -95,7 +95,7 @@ vi.mock("../lib/token-cache", () => ({
 const deleteManyMock = vi.fn();
 const deleteByPrefixMock = vi.fn();
 const headMock = vi.fn();
-vi.mock("@tila/backend-r2", () => ({
+vi.mock("../r2", () => ({
   R2ArtifactBackend: vi.fn().mockImplementation(
     class {
       deleteMany = deleteManyMock;

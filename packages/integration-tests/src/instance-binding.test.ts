@@ -54,8 +54,8 @@ vi.mock("../../worker/src/lib/analytics", async (importOriginal) => {
   };
 });
 
-// Stub backend-d1 stores (token + session + rate-limit + revocation)
-vi.mock("@tila/backend-d1", () => ({
+// Stub worker/src/d1 stores (token + session + rate-limit + revocation)
+vi.mock("../../worker/src/d1", () => ({
   D1TokenStore: vi.fn().mockImplementation(
     class {
       validate = vi.fn().mockResolvedValue(null);

@@ -1,10 +1,10 @@
-import { GitHubAppConfigStore, RepoAllowlistStore } from "@tila/backend-d1";
 import {
   RepoAccessPolicyRequestSchema,
   RepoOidcPolicyRequestSchema,
   RepoRegisterRequestSchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { GitHubAppConfigStore, RepoAllowlistStore } from "../d1";
 import { getInstallationAccessToken, mintAppJwt } from "../lib/github-app";
 import { getRepoMetadata } from "../lib/github-client";
 import { zodValidationError } from "../lib/validation";

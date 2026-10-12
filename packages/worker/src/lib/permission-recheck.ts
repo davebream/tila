@@ -1,9 +1,4 @@
 import {
-  GitHubAppConfigStore,
-  type RepoAllowlistRow,
-  RepoAllowlistStore,
-} from "@tila/backend-d1";
-import {
   ProjectRoleSchema,
   type SessionPermission,
   roleToPermission,
@@ -14,6 +9,11 @@ import {
   PERMISSION_RECHECK_CACHE_MAX_SIZE,
   PERMISSION_RECHECK_TTL_MS,
 } from "../config";
+import {
+  GitHubAppConfigStore,
+  type RepoAllowlistRow,
+  RepoAllowlistStore,
+} from "../d1";
 import type {
   CookieSessionTokenResult,
   Env,

@@ -83,10 +83,6 @@ test("Turbo hashes shared configuration, revision, toolchain and transitive pack
     const before = hashes(dry());
     const revision = hashes(dry([], { TILA_BUILD_REVISION: "revision-b" }));
     assert.notEqual(
-      before["@tila/backend-do#build"],
-      revision["@tila/backend-do#build"],
-    );
-    assert.notEqual(
       before["@tila/worker#build"],
       revision["@tila/worker#build"],
     );
@@ -97,7 +93,7 @@ test("Turbo hashes shared configuration, revision, toolchain and transitive pack
       ["packages/schemas/src/input.ts", ["tila-sdk#test", "@tila/worker#test"]],
       [
         "packages/ops-sqlite/src/input.ts",
-        ["@tila/backend-do#test", "tila-sdk#test"],
+        ["@tila/worker#test", "tila-sdk#test"],
       ],
       [
         "packages/worker/migrations/global/fixture.sql",

@@ -1,6 +1,6 @@
-import type { IdempotencyStoreLike } from "@tila/backend-d1";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import type { IdempotencyStoreLike } from "../d1";
 import { createIdempotencyMiddleware } from "./idempotency";
 
 // ---------------------------------------------------------------------------

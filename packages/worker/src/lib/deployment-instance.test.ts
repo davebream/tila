@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── Mock D1DeploymentMetaStore ───────────────────────────────────────────────
-// We mock the entire backend-d1 module so the worker wrapper's dependency on
+// We mock the entire worker/src/d1 module so the worker wrapper's dependency on
 // the store can be controlled without a real D1 binding or better-sqlite3.
 
 let mockEnsureResult: string | null = null;
@@ -15,7 +15,7 @@ class DeploymentIdUnavailable extends Error {
   }
 }
 
-vi.mock("@tila/backend-d1", () => {
+vi.mock("../d1", () => {
   // Re-define within the factory (hoisted — cannot access outer-scope let/class)
   class MockDeploymentIdUnavailable extends Error {
     constructor(message: string) {
@@ -76,7 +76,7 @@ describe("ensureDeploymentInstanceId", () => {
 
     // Track how many times the store's ensure() is called by instrumenting
     // the module mock after it is set up.
-    const { D1DeploymentMetaStore } = await import("@tila/backend-d1");
+    const { D1DeploymentMetaStore } = await import("../d1");
     const ensureSpy = vi.spyOn(
       D1DeploymentMetaStore.prototype,
       "ensure" as keyof InstanceType<typeof D1DeploymentMetaStore>,

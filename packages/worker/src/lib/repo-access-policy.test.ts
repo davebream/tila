@@ -1,5 +1,5 @@
-import type { RepoAllowlistRow } from "@tila/backend-d1";
 import { describe, expect, it } from "vitest";
+import type { RepoAllowlistRow } from "../d1";
 import {
   evaluateRepositoryAccess,
   resolveRepositoryAccess,

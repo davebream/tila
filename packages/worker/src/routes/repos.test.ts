@@ -24,7 +24,7 @@ const mockSetAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 const mockGetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 const mockSetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   RepoAllowlistStore: vi.fn().mockImplementation(
     class {
       register = mockRegister;

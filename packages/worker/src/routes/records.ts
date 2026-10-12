@@ -1,4 +1,3 @@
-import { R2ArtifactBackend } from "@tila/backend-r2";
 import {
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
@@ -23,6 +22,7 @@ import { zodValidationError } from "../lib/validation";
 import { scopedPolicy } from "../middleware/capability";
 import { requirePermission } from "../middleware/permission";
 import { identityPayload } from "../middleware/request-identity";
+import { R2ArtifactBackend } from "../r2";
 import type { Env, HonoVariables } from "../types";
 
 export const records = new Hono<{

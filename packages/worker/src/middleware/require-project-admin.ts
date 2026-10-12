@@ -1,10 +1,10 @@
-import { AdminGrantsStore, D1ProjectRegistry } from "@tila/backend-d1";
 import { PROJECT_ROLE_RANK } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
 import {
   ADMIN_GRANTS_CACHE_MAX_SIZE,
   ADMIN_GRANTS_CACHE_TTL_MS,
 } from "../config";
+import { AdminGrantsStore, D1ProjectRegistry } from "../d1";
 import { adminCacheKey } from "../lib/admin-cache-key";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 import { ADMIN_PERMISSION } from "./permission";

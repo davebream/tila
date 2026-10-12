@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Env, HonoVariables } from "../types";
 
 // --- Mock D1TokenStore and D1SessionStore ---
-vi.mock("@tila/backend-d1", async () => ({
+vi.mock("../d1", async () => ({
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {

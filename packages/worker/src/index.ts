@@ -1,5 +1,5 @@
-import { RuntimeStore } from "@tila/backend-d1";
 import { Hono } from "hono";
+import { RuntimeStore } from "./d1";
 import { emitRequestDatapoint, emitSweepErrorDatapoint } from "./lib/analytics";
 import { constantTimeSecretMatch } from "./lib/constant-time-compare";
 import { forwardToDO } from "./lib/do-forward";
@@ -60,7 +60,7 @@ import { whoami } from "./routes/whoami";
 import { workspace } from "./routes/workspace";
 import type { Env, HonoVariables } from "./types";
 
-export { ProjectDO } from "@tila/backend-do";
+export { ProjectDO } from "./do";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
 

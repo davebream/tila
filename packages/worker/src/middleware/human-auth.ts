@@ -1,9 +1,6 @@
-import {
-  D1RevokedSubjectsStore,
-  ProjectMembershipStore,
-} from "@tila/backend-d1";
 import { roleToPermission } from "@tila/schemas";
 import type { Context } from "hono";
+import { D1RevokedSubjectsStore, ProjectMembershipStore } from "../d1";
 import {
   HUMAN_BEARER_PREFIX,
   currentHuman,

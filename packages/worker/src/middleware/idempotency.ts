@@ -1,8 +1,5 @@
-import {
-  D1IdempotencyStore,
-  type IdempotencyStoreLike,
-} from "@tila/backend-d1";
 import type { Context, MiddlewareHandler } from "hono";
+import { D1IdempotencyStore, type IdempotencyStoreLike } from "../d1";
 import type { Env, HonoVariables } from "../types";
 
 // ---------------------------------------------------------------------------

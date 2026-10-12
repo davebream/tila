@@ -10,8 +10,8 @@
  *
  * Lower layers are covered by faster tests:
  *   - ops-sqlite AND semantics + post-MATCH EXISTS: packages/ops-sqlite/test/*,
- *     packages/backend-do/test/{entity-ops-search,record-search,artifact-search-query}.test.ts
- *   - DO router threading + 400: packages/backend-do/test/entity-artifact-tags-route.test.ts
+ *     packages/worker/test/do/{entity-ops-search,record-search,artifact-search-query}.test.ts
+ *   - DO router threading + 400: packages/worker/test/do/entity-artifact-tags-route.test.ts
  *   - worker edge parse/forward + 400: packages/worker/src/routes/{entities,search,artifacts}.test.ts
  *
  * Requires TILA_BASE_URL and TILA_TOKEN to run against a live worker. When the

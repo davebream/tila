@@ -81,7 +81,7 @@ function createMockBucket(): R2Bucket {
 
 describe("Artifact lifecycle (mock R2)", () => {
   it("AC1: produced artifact gets correct key format", async () => {
-    const { R2ArtifactBackend } = await import("@tila/backend-r2");
+    const { R2ArtifactBackend } = await import("../../worker/src/r2");
     const bucket = createMockBucket();
     const backend = new R2ArtifactBackend(bucket);
 
@@ -99,7 +99,7 @@ describe("Artifact lifecycle (mock R2)", () => {
   });
 
   it("AC2: source artifact gets correct key format", async () => {
-    const { R2ArtifactBackend } = await import("@tila/backend-r2");
+    const { R2ArtifactBackend } = await import("../../worker/src/r2");
     const bucket = createMockBucket();
     const backend = new R2ArtifactBackend(bucket);
 
@@ -117,7 +117,7 @@ describe("Artifact lifecycle (mock R2)", () => {
   });
 
   it("AC3: duplicate write returns bytes: 0 (deduplicated)", async () => {
-    const { R2ArtifactBackend } = await import("@tila/backend-r2");
+    const { R2ArtifactBackend } = await import("../../worker/src/r2");
     const bucket = createMockBucket();
     const backend = new R2ArtifactBackend(bucket);
 
@@ -140,7 +140,7 @@ describe("Artifact lifecycle (mock R2)", () => {
   });
 
   it("AC4: GET returns correct contentType from httpMetadata", async () => {
-    const { R2ArtifactBackend } = await import("@tila/backend-r2");
+    const { R2ArtifactBackend } = await import("../../worker/src/r2");
     const bucket = createMockBucket();
     const backend = new R2ArtifactBackend(bucket);
 
@@ -158,7 +158,7 @@ describe("Artifact lifecycle (mock R2)", () => {
   });
 
   it("AC5: LIST with prefix returns only matching keys", async () => {
-    const { R2ArtifactBackend } = await import("@tila/backend-r2");
+    const { R2ArtifactBackend } = await import("../../worker/src/r2");
     const bucket = createMockBucket();
     const backend = new R2ArtifactBackend(bucket);
 
@@ -203,7 +203,7 @@ describe("Artifact lifecycle (mock R2)", () => {
   // expect orphans_found: 0
 
   it("AC6: metadata keys are passed through to R2", async () => {
-    const { R2ArtifactBackend } = await import("@tila/backend-r2");
+    const { R2ArtifactBackend } = await import("../../worker/src/r2");
     const bucket = createMockBucket();
     const backend = new R2ArtifactBackend(bucket);
 
@@ -241,7 +241,7 @@ describe("Artifact lifecycle (mock R2)", () => {
  * normalizeArtifactText directly, since full Worker-level multipart upload
  * tests require @cloudflare/vitest-pool-workers which is outside T5 scope.
  * The DO-side atomic transaction and FTS5 indexing are covered by
- * packages/backend-do/test/artifact-ops-search.test.ts.
+ * packages/worker/test/do/artifact-ops-search.test.ts.
  *
  * Acceptance criteria coverage (write-path Worker step):
  * - Searchable kind + text/markdown -> normalized title + body_text non-null

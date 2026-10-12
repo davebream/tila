@@ -87,7 +87,6 @@ test("scopes follow tila's real transitive package graph, including migrations",
     [
       "packages/ops-sqlite/src/input.ts",
       [
-        "@tila/backend-do",
         "@tila/backend-embedded",
         "tila-sdk",
         "tila-cli",

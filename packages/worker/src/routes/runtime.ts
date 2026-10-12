@@ -1,9 +1,4 @@
 import {
-  D1DeploymentMetaStore,
-  RuntimeDenied,
-  RuntimeStore,
-} from "@tila/backend-d1";
-import {
   CREDENTIAL_PRESETS,
   CredentialPolicyReadSchema,
   RuntimeEnrollmentRequestSchema,
@@ -15,6 +10,7 @@ import {
   policyContains,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { D1DeploymentMetaStore, RuntimeDenied, RuntimeStore } from "../d1";
 import {
   agentRunAuthorizer,
   expireAgentBindings,

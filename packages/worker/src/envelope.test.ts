@@ -11,7 +11,7 @@ import { FenceError } from "@tila/core";
 import { errorEnvelope, okEnvelope } from "@tila/schemas";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { installProjectErrorHandlers } from "../../backend-do/src/routes/errors";
+import { installProjectErrorHandlers } from "./do/routes/errors";
 import { errorHandler } from "./middleware/error";
 
 // ---------------------------------------------------------------------------

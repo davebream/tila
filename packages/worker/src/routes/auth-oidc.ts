@@ -24,12 +24,6 @@ import { exchangeScopedWorkload } from "../lib/workload-credential";
  */
 
 import {
-  D1IdempotencyStore,
-  D1RateLimitStore,
-  ProjectMembershipStore,
-  canonicalMembershipPrincipal,
-} from "@tila/backend-d1";
-import {
   type MembershipSource,
   OidcExchangeRequestSchema,
   type ProjectRole,
@@ -37,6 +31,12 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { SESSION_TTL_SECONDS_BY_TIER } from "../config";
+import {
+  D1IdempotencyStore,
+  D1RateLimitStore,
+  ProjectMembershipStore,
+  canonicalMembershipPrincipal,
+} from "../d1";
 import { ensureDeploymentInstanceId } from "../lib/deployment-instance";
 import { resolveJwksUri } from "../lib/oidc-discovery";
 import { OidcVerificationError, verifyOidcJwt } from "../lib/oidc-verify";

@@ -62,7 +62,7 @@ vi.mock("../../context", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// In-memory EmbeddedProject bootstrap (mirrors backend-do test create-test-db).
+// In-memory EmbeddedProject bootstrap (mirrors worker/test/do/helpers/create-test-db).
 // ---------------------------------------------------------------------------
 
 function createMigrationStorage(

@@ -16,7 +16,7 @@ const store = vi.hoisted(() => ({
   listAccessPolicies: vi.fn(),
 }));
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   ProjectMembershipStore: class {
     list = store.list;
     grant = store.grant;

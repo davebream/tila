@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock backend-local to avoid bun:sqlite import
+// Mock the CLI local backend (src/local) to avoid the bun:sqlite import
 vi.mock("../../local", () => ({
   LocalProject: {
     open: vi.fn(),

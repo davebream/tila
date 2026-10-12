@@ -1,4 +1,3 @@
-import { R2ArtifactBackend } from "@tila/backend-r2";
 import {
   GREP_DEADLINE_MS,
   GREP_MAX_MATCHES,
@@ -29,6 +28,7 @@ import {
   makeLineScanAccumulator,
   scanR2Candidate,
 } from "../lib/artifact-service";
+import { R2ArtifactBackend } from "../r2";
 // Re-export helpers that are tested via the route module (existing tests import from here)
 export {
   callPointerWithRetry,

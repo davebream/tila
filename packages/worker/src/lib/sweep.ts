@@ -1,11 +1,4 @@
 import {
-  D1ProjectRegistry,
-  D1RevokedJtiStore,
-  D1RevokedSubjectsStore,
-  D1SessionStore,
-} from "@tila/backend-d1";
-import { R2ArtifactBackend } from "@tila/backend-r2";
-import {
   DRIFT_RECONCILE_THRESHOLD,
   REVOCATION_GC_RETENTION_MS,
   SWEEP_ANALYTICS_MAX_PROJECT_DATAPOINTS,
@@ -16,6 +9,13 @@ import {
   SWEEP_SUBREQUEST_BUDGET,
   SWEEP_TIME_BUDGET_MS,
 } from "../config";
+import {
+  D1ProjectRegistry,
+  D1RevokedJtiStore,
+  D1RevokedSubjectsStore,
+  D1SessionStore,
+} from "../d1";
+import { R2ArtifactBackend } from "../r2";
 import type { Env } from "../types";
 import {
   emitSweepProjectDatapoint,

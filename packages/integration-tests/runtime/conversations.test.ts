@@ -2,7 +2,6 @@ import { SELF } from "cloudflare:test";
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { D1TokenStore } from "@tila/backend-d1";
 import { ConversationInboxResponseSchema } from "@tila/schemas";
 import {
   RUNTIME_RUN_CEILING,
@@ -22,6 +21,7 @@ import { createConversationMethods, createInboxMethods } from "tila-sdk";
 import { expect, it } from "vitest";
 import { z } from "zod";
 import { registerConversationTools } from "../../mcp-server/src/tools/conversations";
+import { D1TokenStore } from "../../worker/src/d1";
 import { hashToken } from "../../worker/src/lib/hash";
 import { bindings } from "./setup";
 

@@ -1,4 +1,3 @@
-import { RuntimeDenied, RuntimeStore } from "@tila/backend-d1";
 import {
   AgentIdSchema,
   AgentRegistrationSchema,
@@ -6,6 +5,7 @@ import {
   PROJECT_ROLE_RANK,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { RuntimeDenied, RuntimeStore } from "../d1";
 import { runtimeIdentity } from "../lib/agent-authority";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";

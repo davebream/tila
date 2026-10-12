@@ -1,3 +1,5 @@
+import { GITHUB_LOGIN_REGEX } from "@tila/schemas";
+import { z } from "zod";
 /**
  * Shared admin grant helper — extracted from admin-roster.ts POST /.
  *
@@ -13,9 +15,7 @@
  * SECURITY: Never serialize or log `env` (holds GITHUB_APP_PRIVATE_KEY)
  * or any GitHub token / Authorization header value.
  */
-import { GitHubAppConfigStore, ProjectMembershipStore } from "@tila/backend-d1";
-import { GITHUB_LOGIN_REGEX } from "@tila/schemas";
-import { z } from "zod";
+import { GitHubAppConfigStore, ProjectMembershipStore } from "../d1";
 import type { Env } from "../types";
 import { getInstallationAccessToken, mintAppJwt } from "./github-app";
 import { getUserByLogin } from "./github-client";

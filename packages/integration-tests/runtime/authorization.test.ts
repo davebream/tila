@@ -1,7 +1,7 @@
 import { SELF } from "cloudflare:test";
-import { ProjectMembershipStore } from "@tila/backend-d1";
 import { SignJWT } from "jose";
 import { expect, it } from "vitest";
+import { ProjectMembershipStore } from "../../worker/src/d1";
 import { bindings } from "./setup";
 
 it("enforces real D1 memberships, project scope, permission and revocation", async () => {

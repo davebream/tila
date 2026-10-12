@@ -1,8 +1,8 @@
-import { D1ProjectRegistry } from "@tila/backend-d1";
 import { Hono } from "hono";
 import type { Context, ExecutionContext, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import { D1ProjectRegistry } from "../d1";
 import { applyAdminGrant } from "../lib/admin-grant";
 import { archiveJournal, revokeSession } from "../lib/admin-ops";
 import { emitInfraAdminDatapoint } from "../lib/analytics";

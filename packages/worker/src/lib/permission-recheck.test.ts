@@ -21,8 +21,8 @@ const {
   mockGetInstallationAccessToken: vi.fn(),
 }));
 
-// Mock @tila/backend-d1 stores — mirrors auth-github.test.ts:59-83
-vi.mock("@tila/backend-d1", () => ({
+// Mock worker/src/d1 stores — mirrors auth-github.test.ts:59-83
+vi.mock("../d1", () => ({
   GitHubAppConfigStore: vi.fn().mockImplementation(
     class {
       getInstallation = mockGetInstallation;

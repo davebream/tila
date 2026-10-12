@@ -584,7 +584,7 @@ export const recordSearchDocs = sqliteTable(
 
 // --- _idempotency ---
 // Embedded-only idempotency overlay. In Cloudflare mode, idempotency lives in D1
-// (`@tila/backend-d1`); in embedded mode it lives in the same project SQLite file
+// (`worker/src/d1`); in embedded mode it lives in the same project SQLite file
 // (one fewer store to coordinate). The store is a standalone INSERT OR IGNORE,
 // NOT folded into the mutating operation's own transaction. This Drizzle model
 // mirrors the DDL in `@tila/backend-embedded`'s MIGRATION_IDEMPOTENCY

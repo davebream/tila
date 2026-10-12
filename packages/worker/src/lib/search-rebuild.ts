@@ -1,4 +1,4 @@
-import type { R2ArtifactBackend } from "@tila/backend-r2";
+import type { R2ArtifactBackend } from "../r2";
 import { normalizeArtifactText } from "./normalize-text";
 
 export type ScanRow = {

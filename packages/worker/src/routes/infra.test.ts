@@ -18,7 +18,7 @@ vi.mock("../lib/admin-ops", () => ({
 const listAllIncludingArchivedMock = vi.fn();
 const getMock = vi.fn();
 const getIncludingArchivedMock = vi.fn();
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   D1ProjectRegistry: vi.fn().mockImplementation(
     class {
       listAllIncludingArchived = listAllIncludingArchivedMock;
@@ -38,7 +38,7 @@ vi.mock("../lib/admin-grant", () => ({
 const deleteManyMock = vi.fn();
 const deleteByPrefixMock = vi.fn();
 const headMock = vi.fn();
-vi.mock("@tila/backend-r2", () => ({
+vi.mock("../r2", () => ({
   R2ArtifactBackend: vi.fn().mockImplementation(
     class {
       deleteMany = deleteManyMock;

@@ -1,0 +1,377 @@
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { describe, expect, it } from "vitest";
+import {
+  SearchQueryError,
+  artifactOps,
+  coordinationOps,
+  entityOps,
+  recordOps,
+  type schema,
+} from "../../../ops-sqlite/src";
+import { createTestDb } from "./helpers/create-test-db";
+
+function createEntity(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  overrides?: { id?: string; type?: string; data?: Record<string, unknown> },
+) {
+  return entityOps.create(
+    db,
+    {
+      id: overrides?.id ?? `ent-${Date.now()}`,
+      type: overrides?.type ?? "task",
+      data: overrides?.data ?? { name: "Deploy pipeline", status: "open" },
+      created_by: "test-actor",
+    },
+    1,
+    {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    },
+  );
+}
+
+function acquireClaim(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  entityId: string,
+): number {
+  const result = coordinationOps.acquire(
+    db,
+    entityId,
+    {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: { machine: "test-actor" },
+      actor: "test-actor/test-actor",
+    },
+    "exclusive",
+    60_000,
+  );
+  return result.fence;
+}
+
+describe("searchEntities", () => {
+  it("finds entity by name after create", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "e1", data: { name: "Deploy pipeline" } });
+    const results = entityOps.searchEntities(db, { q: "deploy" });
+    expect(results).toHaveLength(1);
+    expect(results[0].entity_id).toBe("e1");
+    expect(results[0].name).toBe("Deploy pipeline");
+    expect(results[0].snippet).toBeTruthy();
+  });
+
+  it("finds updated name after update", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "e2", data: { name: "Deploy pipeline" } });
+    const fence = acquireClaim(db, "e2");
+    entityOps.update(db, "e2", { name: "Release pipeline" }, fence, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
+    const found = entityOps.searchEntities(db, { q: "release" });
+    expect(found).toHaveLength(1);
+    expect(found[0].name).toBe("Release pipeline");
+    const notFound = entityOps.searchEntities(db, { q: "deploy" });
+    expect(notFound).toHaveLength(0);
+  });
+
+  it("removes from index after archive", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "e3", data: { name: "Archive test entity" } });
+    const fence = acquireClaim(db, "e3");
+    entityOps.archive(db, "e3", fence, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
+    const results = entityOps.searchEntities(db, { q: "archive" });
+    expect(results).toHaveLength(0);
+  });
+
+  it("filters by entity_type", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "e4", type: "task", data: { name: "Task item" } });
+    createEntity(db, { id: "e5", type: "epic", data: { name: "Epic item" } });
+    const taskOnly = entityOps.searchEntities(db, {
+      q: "item",
+      entity_type: "task",
+    });
+    expect(taskOnly).toHaveLength(1);
+    expect(taskOnly[0].entity_type).toBe("task");
+  });
+
+  it("respects limit", () => {
+    const { db } = createTestDb();
+    for (let i = 0; i < 5; i++) {
+      createEntity(db, {
+        id: `e${i + 10}`,
+        data: { name: `Searchable item ${i}` },
+      });
+    }
+    const limited = entityOps.searchEntities(db, { q: "searchable", limit: 2 });
+    expect(limited).toHaveLength(2);
+  });
+
+  it("returns empty array for no matches", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "e20", data: { name: "Something else" } });
+    const results = entityOps.searchEntities(db, { q: "nonexistent" });
+    expect(results).toHaveLength(0);
+  });
+
+  it("throws SearchQueryError for overly long queries", () => {
+    const { db } = createTestDb();
+    expect(() => entityOps.searchEntities(db, { q: "x".repeat(201) })).toThrow(
+      SearchQueryError,
+    );
+  });
+
+  it("finds entity by data.title term (issue #412)", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "t1", data: { title: "Auth System" } });
+    const results = entityOps.searchEntities(db, { q: "auth" });
+    expect(results.map((r) => r.entity_id)).toContain("t1");
+  });
+
+  it("finds updated data.title after update (issue #412)", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "t2", data: { title: "Auth System" } });
+    const fence = acquireClaim(db, "t2");
+    entityOps.update(db, "t2", { title: "Billing System" }, fence, {
+      principalId: "test:test-actor",
+      participantId: "test-actor",
+      environment: {},
+      actor: "test-actor",
+    });
+    expect(
+      entityOps.searchEntities(db, { q: "billing" }).map((r) => r.entity_id),
+    ).toContain("t2");
+    expect(entityOps.searchEntities(db, { q: "auth" })).toHaveLength(0);
+  });
+
+  it("prefers data.title over data.name when both present (issue #412)", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "t3", data: { title: "Payments", name: "Legacy" } });
+    expect(
+      entityOps.searchEntities(db, { q: "payments" }).map((r) => r.entity_id),
+    ).toContain("t3");
+  });
+});
+
+describe("searchAll returns interleaved entity and artifact results", () => {
+  it("returns entity results with type=entity when only entities exist", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "e30", data: { name: "Deploy service" } });
+    // searchAll calls searchArtifacts too -- with no artifacts, only entity results returned
+    const results = entityOps.searchAll(db, { q: "deploy" });
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results[0].type).toBe("entity");
+  });
+});
+
+describe("searchAll returns all three result types", () => {
+  it("interleaves entities, artifacts, and records in round-robin", async () => {
+    const { db, sqlite } = createTestDb();
+
+    // Create an entity
+    createEntity(db, {
+      id: "unified-e1",
+      data: { name: "unifiedterm testrun" },
+    });
+
+    // Create an artifact with searchText
+    sqlite
+      .prepare(
+        "INSERT INTO artifact_pointers(r2_key, resource, kind, sha256, bytes, fence, mime_type, produced_at, produced_by, tombstoned) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "sources/unifiedterm.md",
+        null,
+        "lesson",
+        "abc123unified",
+        100,
+        null,
+        "text/markdown",
+        Date.now(),
+        "agent",
+        0,
+      );
+    sqlite
+      .prepare(
+        "INSERT OR IGNORE INTO artifact_search_docs(artifact_key, kind, mime_type, resource, title, body_text, indexed_at, source_sha256, tombstoned) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "sources/unifiedterm.md",
+        "lesson",
+        "text/markdown",
+        null,
+        "Unified Title",
+        "unifiedterm content",
+        Date.now(),
+        "abc123unified",
+        0,
+      );
+
+    // Create a record
+    await recordOps.createRecord(
+      db,
+      {
+        type: "note",
+        key: "unified-r1",
+        value: { content: "unifiedterm record data" },
+        schema_version: 1,
+        actor: "agent",
+      },
+      {
+        principalId: "test:agent",
+        participantId: "agent",
+        environment: {},
+        actor: "agent",
+      },
+    );
+
+    const results = entityOps.searchAll(db, { q: "unifiedterm", limit: 10 });
+    const types = results.map((r) => r.type);
+
+    // All three types should be present
+    expect(types).toContain("entity");
+    expect(types).toContain("artifact");
+    expect(types).toContain("record");
+  });
+
+  it("round-robin interleaving respects limit", async () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "rr-e1", data: { name: "rrterm entity1" } });
+    createEntity(db, { id: "rr-e2", data: { name: "rrterm entity2" } });
+
+    const results = entityOps.searchAll(db, { q: "rrterm", limit: 1 });
+    expect(results).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchEntities — tagFilter (post-MATCH EXISTS)
+// ---------------------------------------------------------------------------
+
+describe("searchEntities — tagFilter", () => {
+  it("returns only entities carrying all tagFilter tags (AND)", () => {
+    const { db, sqlite } = createTestDb();
+    createEntity(db, { id: "tf-e1", data: { name: "tagfilterterm one" } });
+    createEntity(db, { id: "tf-e2", data: { name: "tagfilterterm two" } });
+    createEntity(db, { id: "tf-e3", data: { name: "tagfilterterm three" } });
+
+    // e1 has both tags, e2 has only repo:a, e3 has neither
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-e1", "repo:a");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-e1", "team:x");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-e2", "repo:a");
+
+    const results = entityOps.searchEntities(db, {
+      q: "tagfilterterm",
+      tagFilter: ["repo:a", "team:x"],
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].entity_id).toBe("tf-e1");
+  });
+
+  it("single tagFilter returns all entities with that tag", () => {
+    const { db, sqlite } = createTestDb();
+    createEntity(db, { id: "tf-s1", data: { name: "singletagterm alpha" } });
+    createEntity(db, { id: "tf-s2", data: { name: "singletagterm beta" } });
+    createEntity(db, { id: "tf-s3", data: { name: "singletagterm gamma" } });
+
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-s1", "repo:a");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-s2", "repo:a");
+
+    const results = entityOps.searchEntities(db, {
+      q: "singletagterm",
+      tagFilter: ["repo:a"],
+    });
+    expect(results).toHaveLength(2);
+    const ids = results.map((r) => r.entity_id);
+    expect(ids).toContain("tf-s1");
+    expect(ids).toContain("tf-s2");
+  });
+
+  it("bm25 ordering preserved among tag-filtered survivors", () => {
+    const { db, sqlite } = createTestDb();
+    // e-high has many repetitions of 'bm25tagterm' (higher relevance)
+    createEntity(db, {
+      id: "tf-bm-high",
+      data: {
+        name: "bm25tagterm bm25tagterm bm25tagterm bm25tagterm bm25tagterm",
+      },
+    });
+    // e-low has one occurrence
+    createEntity(db, {
+      id: "tf-bm-low",
+      data: { name: "bm25tagterm something else" },
+    });
+
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-bm-high", "keep:yes");
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("tf-bm-low", "keep:yes");
+
+    const results = entityOps.searchEntities(db, {
+      q: "bm25tagterm",
+      tagFilter: ["keep:yes"],
+    });
+    expect(results).toHaveLength(2);
+    expect(results[0].entity_id).toBe("tf-bm-high");
+  });
+
+  it("empty tagFilter behaves same as no tagFilter", () => {
+    const { db } = createTestDb();
+    createEntity(db, { id: "tf-empty", data: { name: "emptytagfilterterm" } });
+
+    const withEmpty = entityOps.searchEntities(db, {
+      q: "emptytagfilterterm",
+      tagFilter: [],
+    });
+    const withUndefined = entityOps.searchEntities(db, {
+      q: "emptytagfilterterm",
+    });
+    expect(withEmpty).toHaveLength(withUndefined.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchAll — tagFilter forwarded to all three sub-searches
+// ---------------------------------------------------------------------------
+
+describe("searchAll — tagFilter", () => {
+  it("filters entity results by tagFilter in searchAll", () => {
+    const { db, sqlite } = createTestDb();
+    createEntity(db, { id: "sa-e1", data: { name: "searchalltagterm one" } });
+    createEntity(db, { id: "sa-e2", data: { name: "searchalltagterm two" } });
+
+    sqlite
+      .prepare("INSERT INTO entity_tags(entity_id, tag) VALUES(?, ?)")
+      .run("sa-e1", "scope:included");
+
+    const results = entityOps.searchAll(db, {
+      q: "searchalltagterm",
+      tagFilter: ["scope:included"],
+    });
+    const entityResults = results.filter((r) => r.type === "entity");
+    expect(entityResults).toHaveLength(1);
+    expect((entityResults[0] as { entity_id: string }).entity_id).toBe("sa-e1");
+  });
+});
