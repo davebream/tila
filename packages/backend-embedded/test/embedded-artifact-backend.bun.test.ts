@@ -54,6 +54,57 @@ describe("EmbeddedArtifactBackend", () => {
   });
 
   describe("put", () => {
+    it("normalizes resource aliases for writes and filters while preserving explicit keys", async () => {
+      const claim = await h.project.acquire("task:task-1", "exclusive", 60_000);
+      const first = await backend.writeText("alias content", {
+        kind: "log",
+        resource: "task:task-1",
+        fence: claim.fence,
+      });
+      const second = await backend.writeText("alias content", {
+        kind: "log",
+        resource: "task-1",
+        fence: claim.fence,
+      });
+      expect(second).toMatchObject({
+        key: first.key,
+        deduplicated: true,
+        pointer: { resource: "task-1" },
+      });
+      expect(await backend.listPointers({ resource: "task:task-1" })).toEqual(
+        await backend.listPointers({ resource: "task-1" }),
+      );
+      expect((await backend.getLatest("log", "task:task-1"))?.resource).toBe(
+        "task-1",
+      );
+      const explicit = await backend.put({
+        key: "custom/alias.txt",
+        body: "explicit",
+        sha256: await sha256Hex("explicit"),
+        metadata: {},
+        contentType: "text/plain",
+        resource: "task:task-1",
+        fence: claim.fence,
+      });
+      expect(explicit.key).toBe("custom/alias.txt");
+      expect(explicit.pointer?.resource).toBe("task-1");
+      await expect(
+        backend.put({
+          key: "custom/missing.txt",
+          body: "invalid",
+          sha256: "a".repeat(64),
+          metadata: {},
+          contentType: "text/plain",
+          resource: "task:missing",
+          fence: 1,
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        code: "validation-error",
+        retryable: false,
+      });
+      expect(await h.blobs.exists("custom/missing.txt")).toBe(false);
+    });
     it("stores a string body and returns key + bytes", async () => {
       const content = "hello world";
       const hash = await sha256Hex(content);

@@ -4,7 +4,7 @@ import { tombstonePointer, upsertPointer } from "../src/artifact-ops";
 import * as versions from "../src/artifact-version-ops";
 import { acquire } from "../src/coordination-ops";
 import * as schema from "../src/schema";
-import { type TestDb, createTestDb, testOrigin } from "./helpers";
+import { type TestDb, createEntity, createTestDb, testOrigin } from "./helpers";
 
 let test: TestDb;
 const origin = testOrigin("revision-test");
@@ -55,6 +55,43 @@ function commit(
 }
 
 describe("artifact revisions", () => {
+  it("normalizes aliases before lineage identity, duplicate checks and publication", () => {
+    createEntity(test.db, { id: "task.api-routes" });
+    const taskFence = acquire(
+      test.db,
+      "task:task.api-routes",
+      origin,
+      "exclusive",
+      60_000,
+    ).fence;
+    const first = commit("typed", {
+      resource: "task:task.api-routes",
+      fence: taskFence,
+    });
+    expect(first.pointer.resource).toBe("task.api-routes");
+    const duplicate = commit("bare", {
+      resource: "task.api-routes",
+      fence: taskFence,
+    });
+    expect(duplicate).toMatchObject({ key: first.key, deduplicated: true });
+    const next = commit("next", {
+      resource: "task.api-routes",
+      fence: taskFence,
+      sha256: "b".repeat(64),
+    });
+    expect(next.pointer).toMatchObject({
+      resource: "task.api-routes",
+      revision: 2,
+    });
+    expect(
+      test.db.select().from(schema.artifactLineages).all()[0].resource,
+    ).toBe("task.api-routes");
+    const operation = versions.getRevisionOperation(test.db, "typed");
+    if (!operation) throw new Error("Missing revision operation");
+    expect(versions.revisionRecord(operation).pointer.resource).toBe(
+      "task.api-routes",
+    );
+  });
   it("publishes only accepted revisions and preserves identical-byte restores", () => {
     const r1 = commit("one");
     expect(
