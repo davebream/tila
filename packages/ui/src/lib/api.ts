@@ -1,6 +1,9 @@
 import type {
   AgentListResponseSchema,
   DeliveryExplainResponseSchema,
+  DeliveryListQuery,
+  DeliveryListResponse,
+  MessageDeliveriesResponse,
   MessagePublishResponseSchema,
   RoomHistoryResponseSchema,
   RoomListResponseSchema,
@@ -170,7 +173,7 @@ async function request<T>(
       if (v !== undefined && v !== "") url.searchParams.set(k, v);
     }
   }
-  const conversation = /^\/(rooms|inbox)(\/|$)/.test(path);
+  const conversation = /^\/(rooms|inbox|deliveries)(\/|$)/.test(path);
   let response: Response;
   try {
     response = await fetch(url.toString(), {
@@ -820,6 +823,24 @@ export function publishReply(
 }
 export function listAgents(projectId: string): Promise<AgentList> {
   return request(projectId, "/agents");
+}
+/** Aggregate counts for readers; per-recipient traces for managers. */
+export function messageDeliveries(
+  projectId: string,
+  room: string,
+  message: string,
+): Promise<MessageDeliveriesResponse> {
+  return request(
+    projectId,
+    `/rooms/${encodeURIComponent(room)}/messages/${encodeURIComponent(message)}/deliveries`,
+  );
+}
+/** Browse delivery traces newest first. Requires conversations:manage. */
+export function listDeliveries(
+  projectId: string,
+  filters: DeliveryListQuery & { cursor?: string } = {},
+): Promise<DeliveryListResponse> {
+  return request(projectId, "/deliveries", { ...filters, limit: "50" });
 }
 export function inspectDelivery(
   projectId: string,

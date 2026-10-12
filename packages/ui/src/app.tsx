@@ -14,6 +14,7 @@ import {
 import { AgentsPage } from "@/pages/agents";
 import { ArtifactsPage } from "@/pages/artifacts";
 import { AuthResultPage } from "@/pages/auth-result";
+import { DeliveriesPage } from "@/pages/deliveries";
 import { JournalPage } from "@/pages/journal";
 import { LoginPage } from "@/pages/login";
 import { PresencePage } from "@/pages/presence";
@@ -117,6 +118,11 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route
         path="agents/:agentId/deliveries/:deliveryId"
         element={<AgentsPage />}
+      />
+      <Route path="deliveries" element={<DeliveriesPage />} />
+      <Route
+        path="deliveries/:agentId/:deliveryId"
+        element={<DeliveriesPage />}
       />
       <Route path="settings" element={<SettingsPage />} />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
