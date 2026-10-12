@@ -188,6 +188,22 @@ export async function deployWorkerWithAssets(
   const workerMainPath = resolveWorkerMainPath();
   const uiDistDir = resolveUiDistDir();
 
+  // Source deploys bundle src/index.ts directly, so refresh the generated
+  // release identity reported by /api/health. Sidecar bundles carry their own.
+  if (isMonorepoLayout()) {
+    try {
+      execSync("pnpm --filter @tila/worker gen:version", {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      const e = err as { stderr?: string; message?: string };
+      throw new Error(
+        `Worker version generation failed: ${(e.stderr ?? "").trim() || e.message}\n\nRetry: pnpm --filter @tila/worker gen:version`,
+      );
+    }
+  }
+
   if (opts.skipUi) {
     // Worker-only deploy: generate a config without the [assets] block
     // by calling wrangler with --no-bundle or using a minimal config.

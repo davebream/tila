@@ -16,6 +16,10 @@ test("version generation uses explicit revision and package versions independent
   const dir = mkdtempSync(join(tmpdir(), "tila-versions-"));
   try {
     mkdirSync(join(dir, "scripts"));
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ version: "4.5.6" }),
+    );
     copyFileSync(
       "scripts/generate-version.mjs",
       join(dir, "scripts/generate-version.mjs"),
@@ -50,10 +54,14 @@ test("version generation uses explicit revision and package versions independent
       [join(dir, "scripts/generate-version.mjs"), "worker"],
       { env: { ...process.env, TILA_BUILD_REVISION: "def5678" } },
     );
-    assert.match(
-      readFileSync(join(dir, "packages/worker/src/version.ts"), "utf8"),
-      /def5678/,
+    const worker = readFileSync(
+      join(dir, "packages/worker/src/version.ts"),
+      "utf8",
     );
+    assert.match(worker, /export const DO_CODE_VERSION = "def5678"/);
+    // Release identity comes from the root product marker, not the private package.
+    assert.match(worker, /export const PRODUCT_VERSION = "4\.5\.6"/);
+    assert.match(worker, /export const BUILD_COMMIT = "def5678"/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
