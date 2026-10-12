@@ -29,6 +29,7 @@ import {
   generateRawToken,
   hashToken,
   resolveCfApiToken,
+  resolveHashPepper,
   resolveProjectName,
   tilaHome,
 } from "../../lib/provisioning";
@@ -179,7 +180,8 @@ async function runCloudflareProvisioning(
   const s = json ? null : p.spinner();
   if (s) s.start("Generating API token...");
   const rawToken = generateRawToken();
-  const tokenHash = hashToken(rawToken);
+  // A peppered Worker only matches a peppered digest (TILA_HASH_PEPPER).
+  const tokenHash = hashToken(rawToken, resolveHashPepper());
   await insertTokenAndProject({
     client: cf,
     accountId,

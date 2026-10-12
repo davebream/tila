@@ -685,6 +685,11 @@ Steps:
 
 Do not rotate `HASH_PEPPER` expecting a grace period — plan the re-issue before rotating.
 
+`tila project create` writes the first project token straight to D1, so it must
+hash it the way the Worker does. On a Worker with `HASH_PEPPER`, run it with the
+same value in `TILA_HASH_PEPPER` (environment or `~/.tila/.env`); otherwise the
+new token is rejected. The CLI never prints or stores the value.
+
 ## Troubleshooting
 
 Common failure modes and remediation steps.
