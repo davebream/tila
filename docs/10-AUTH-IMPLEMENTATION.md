@@ -79,7 +79,7 @@ Cookie sessions additionally include:
 1. Client sends `Authorization: Bearer <token>` header
 2. Middleware hashes token with SHA-256 (`packages/worker/src/lib/hash-token.ts`)
 3. LRU cache lookup (`packages/worker/src/lib/token-cache.ts` lines 24-38)
-4. On cache miss: D1 lookup via `D1TokenStore.validate()` (`packages/backend-d1/src/token-store.ts`)
+4. On cache miss: D1 lookup via `D1TokenStore.validate()` (`packages/worker/src/d1/token-store.ts`)
 5. Result cached with 60-second positive TTL, 10-second negative TTL
 
 ### D1 Schema
@@ -87,7 +87,7 @@ Cookie sessions additionally include:
 Tokens are stored in the `_tokens` table (D1 global database):
 
 ```typescript
-// packages/backend-d1/src/schema.ts lines 21-37
+// packages/worker/src/d1/schema.ts lines 21-37
 export const tokens = sqliteTable("_tokens", {
   token_hash: text("token_hash").primaryKey(),
   project_id: text("project_id").notNull(),
@@ -263,7 +263,7 @@ All calls include:
 Projects maintain an allowlist of GitHub repos eligible for session exchange. Stored in D1 `_project_repos` table:
 
 ```typescript
-// packages/backend-d1/src/schema.ts lines 47-70
+// packages/worker/src/d1/schema.ts lines 47-70
 export const projectRepos = sqliteTable("_project_repos", {
   project_id: text("project_id").notNull(),
   github_host: text("github_host").notNull().default("github.com"),
@@ -449,7 +449,7 @@ Set-Cookie: tila_session=<UUID>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age
 Session records are stored in the `_sessions` table (D1 global database):
 
 ```typescript
-// packages/backend-d1/src/schema.ts lines 73-85
+// packages/worker/src/d1/schema.ts lines 73-85
 export const sessions = sqliteTable("_sessions", {
   session_hash: text("session_hash").primaryKey(),
   project_id: text("project_id").notNull(),
@@ -461,7 +461,7 @@ export const sessions = sqliteTable("_sessions", {
 })
 ```
 
-**Store operations** (`packages/backend-d1/src/session-store.ts`):
+**Store operations** (`packages/worker/src/d1/session-store.ts`):
 
 - `create(params)` — Insert new session (lines 20-37)
 - `validate(sessionHash)` — Lookup + expiry check (lines 39-58)
@@ -791,7 +791,7 @@ The Worker serves the UI SPA via Cloudflare Workers Assets binding (`ASSETS`). B
 
 ## 7. D1 Schema
 
-All global auth-related tables live in the D1 database (`packages/backend-d1/src/schema.ts`).
+All global auth-related tables live in the D1 database (`packages/worker/src/d1/schema.ts`).
 
 ### _tokens
 
@@ -1153,8 +1153,8 @@ revocation SLA, the threat model, and the migration guide — lives in
 server-side implementation detail.
 
 > **D1 migration location.** All epic #122 D1 migrations live under
-> `packages/worker/migrations/global/` (the global D1 store), even though D1 is conceptually owned
-> by `@tila/backend-d1`. Do not look for them under `packages/backend-d1/`.
+> `packages/worker/migrations/global/` (the global D1 store). The D1 store code lives in
+> `packages/worker/src/d1/`.
 
 ### Instance-ID binding (WI-E)
 
@@ -1173,9 +1173,9 @@ pre-binding token) is accepted; an unverifiable deployment id with a present cla
 `_revoked_subjects` (`migrations/global/0019_revoked_subjects.sql`) is a bulk kill-switch keyed by
 the canonical principal `(project_id, identity_host, subject_id)`. The principal is derived
 identically at write and verify time via `canonicalizePrincipal(host, subject)`
-(`packages/backend-d1/src/principal.ts`). The revoke upsert is monotonic
+(`packages/worker/src/d1/principal.ts`). The revoke upsert is monotonic
 (`revoked_before = MAX(revoked_before, excluded.revoked_before)`,
-`packages/backend-d1/src/revoked-subjects-store.ts`). The middleware reads it per request and denies
+`packages/worker/src/d1/revoked-subjects-store.ts`). The middleware reads it per request and denies
 `subject-revoked` when the token predates the cutoff. This complements the per-`jti` kill-switch
 (`_revoked_jti`, decision C9 in [`docs/01-DECISIONS.md`](01-DECISIONS.md)). The revocation SLA and GC
 are documented in [`docs/13`](13-MULTI-INSTANCE-AUTH.md) § Revocation and SLA.

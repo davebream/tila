@@ -334,14 +334,14 @@ Note: the artifact path *is* a cross-backend operation (Worker → R2, Worker �
 
 ### 1.5 Shared SQLite operations layer
 
-`@tila/ops-sqlite` extracts the business-logic operations from `@tila/backend-do` into a platform-agnostic package with zero Cloudflare Workers types. Both `@tila/backend-do` (DO path) and `@tila/backend-embedded` (local path) import from `@tila/ops-sqlite` for all entity, coordination, artifact, journal, and sweep logic.
+`@tila/ops-sqlite` extracts the business-logic operations from the Durable Object code into a platform-agnostic package with zero Cloudflare Workers types. Both the Worker's Durable Object (`packages/worker/src/do`, DO path) and `@tila/backend-embedded` (local path) import from `@tila/ops-sqlite` for all entity, coordination, artifact, journal, and sweep logic.
 
-The ops package uses `BaseSQLiteDatabase` generic (from `drizzle-orm/sqlite-core`) instead of the DO-specific `DrizzleSqliteDODatabase`, making it runtime-agnostic. The Drizzle schema, migrations (0001-0004), and all query modules live in `@tila/ops-sqlite`. Backend packages provide only the connection layer (DO's `blockConcurrencyWhile` + `this.ctx.storage.sql` vs. bun:sqlite's `new Database()` + `PRAGMA` initialization) and transaction semantics (DO implicit single-threading vs. `BEGIN IMMEDIATE` explicit locking).
+The ops package uses `BaseSQLiteDatabase` generic (from `drizzle-orm/sqlite-core`) instead of the DO-specific `DrizzleSqliteDODatabase`, making it runtime-agnostic. The Drizzle schema, migrations (0001-0004), and all query modules live in `@tila/ops-sqlite`. The hosts provide only the connection layer (DO's `blockConcurrencyWhile` + `this.ctx.storage.sql` vs. bun:sqlite's `new Database()` + `PRAGMA` initialization) and transaction semantics (DO implicit single-threading vs. `BEGIN IMMEDIATE` explicit locking).
 
 Package dependency flow:
 
 ```
-schemas -> core -> ops-sqlite -> backend-do       (Cloudflare path)
+schemas -> core -> ops-sqlite -> worker/src/do    (Cloudflare path)
                               -> backend-embedded (local path)
 ```
 
@@ -2243,27 +2243,7 @@ tila/                                  # github.com/davebream/tila
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
-│   ├── backend-do/                    # @tila/backend-do — ProjectDO with all per-project state (entities, claims, journal, etc.)
-│   │   ├── src/
-│   │   │   ├── index.ts               # ProjectDO class export
-│   │   │   ├── schema.ts              # Drizzle schema for DO SQLite (entities, relationships, claims, fences, journal, _schema_history, etc.)
-│   │   │   ├── queries/               # query modules per concern (entity, coord, artifact, journal, schema)
-│   │   │   └── migrations/            # DO SQLite migrations, applied via blockConcurrencyWhile
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── backend-d1/                    # @tila/backend-d1 — global D1 for auth tokens, idempotency, project registry
-│   │   ├── src/
-│   │   │   ├── index.ts
-│   │   │   ├── schema.ts              # Drizzle schema for _tokens, _idempotency, _projects
-│   │   │   └── queries.ts
-│   │   ├── migrations/                # Wrangler-managed D1 migrations
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── backend-r2/                    # @tila/backend-r2 — R2 ArtifactBackend
-│   │
-│   ├── ops-sqlite/                    # @tila/ops-sqlite — shared SQLite ops (entity, coord, artifact, journal, sweep); platform-agnostic BaseSQLiteDatabase generic; used by both backend-do and backend-embedded
+│   ├── ops-sqlite/                    # @tila/ops-sqlite — shared SQLite ops (entity, coord, artifact, journal, sweep); platform-agnostic BaseSQLiteDatabase generic; used by both worker/src/do and backend-embedded
 │   │   ├── src/
 │   │   │   ├── schema.ts              # shared Drizzle schema (BaseSQLiteDatabase generic)
 │   │   │   ├── migrations.ts          # shared migrations 0001-0004
@@ -2281,7 +2261,9 @@ tila/                                  # github.com/davebream/tila
 │   │   │   ├── index.ts               # Hono app entry; routes through to ProjectDO
 │   │   │   ├── routes/                # public API routes (entities, claims, artifacts, journal, schema, health)
 │   │   │   ├── middleware/            # auth (D1 lookup with in-memory cache), idempotency, rate-limit, analytics-emit
-│   │   │   ├── do/                    # re-exports ProjectDO from backend-do
+│   │   │   ├── do/                    # ProjectDO: per-project DO SQLite (entities, claims, journal, ...); router and migration runner over ops-sqlite
+│   │   │   ├── d1/                    # global D1 store: tokens, sessions, idempotency, project registry, human accounts
+│   │   │   ├── r2/                    # R2 ArtifactBackend (content-addressed blobs)
 │   │   │   ├── sweep.ts               # cron handler for artifact cleanup
 │   │   │   └── env.ts                 # typed bindings (PROJECT, GLOBAL, ARTIFACTS, ANALYTICS)
 │   │   │   └── env.ts
@@ -2364,7 +2346,7 @@ tila/                                  # github.com/davebream/tila
 
 **`@tila/schemas`** is the keystone — both the Worker and the CLI depend on it. Changes here are the riskiest because they affect everything; protect with rigorous CI checks (semver-aware contract testing).
 
-**Backends as separate packages** is not required for v0.1 functionally — they could be inlined in `core` — but separating them upfront makes the adapter pattern *real* rather than aspirational. Adding `backend-github-issues` or `backend-linear` in v0.2 is "create a new package," not "refactor existing code." `@tila/ops-sqlite` sits between `core` and `backend-{do,local}` in the dependency graph -- it extracts the shared business logic so both backends share identical entity, coordination, artifact, journal, and sweep operations without duplication.
+**Packages only where code has more than one consumer.** `@tila/ops-sqlite` and `@tila/backend-embedded` are packages because two runtimes share them: `ops-sqlite` serves both the Durable Object and the embedded local path, and `backend-embedded` serves both the Bun CLI and the Node SDK. Storage code with a single consumer lives inside that consumer: the Worker holds its Durable Object, D1 and R2 backends under `packages/worker/src/{do,d1,r2}`, and the CLI holds its Bun local backend and auth store under `packages/cli/src/{local,auth-store}`. A backend becomes its own package once a second consumer needs it. `@tila/ops-sqlite` sits between `core` and both storage hosts in the dependency graph, so they share identical entity, coordination, artifact, journal, and sweep operations without duplication.
 
 **`packages/worker/wrangler.toml`** is the Worker's own wrangler.toml — used for `wrangler dev` during local development of the Worker package itself. This is different from the per-deploy config the CLI generates programmatically via `generateWranglerConfig()` in `packages/cli/src/lib/wrangler-config.ts` (written as `wrangler.<slug>.toml`) when a user runs `tila project create` for their own project. Don't conflate them.
 
@@ -2379,7 +2361,7 @@ tila/                                  # github.com/davebream/tila
   "dependencies": {
     "@tila/schemas": "workspace:*",
     "@tila/core": "workspace:*",
-    "@tila/backend-d1": "workspace:*"
+    "@tila/ops-sqlite": "workspace:*"
   }
 }
 ```

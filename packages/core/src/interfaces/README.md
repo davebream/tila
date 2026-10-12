@@ -21,7 +21,7 @@ regardless of which mode is active.
 ## What this seam is NOT
 
 These interfaces are **not** the Durable Object contract. The `ProjectDO`
-(`@tila/backend-do`) does **not** implement these interfaces; it calls `@tila/ops-sqlite`
+(`worker/src/do`) does **not** implement these interfaces; it calls `@tila/ops-sqlite`
 modules directly via Drizzle. The interface seam is purely for the CLI backend-swap path.
 
 ## `RecordBackend`

@@ -95,7 +95,7 @@ exists at two granularities:
   now" control.
 
 The subject principal is canonicalized identically at write time (admin grant / revoke) and at
-verify time via `canonicalizePrincipal(host, subject)` (`packages/backend-d1/src/principal.ts`):
+verify time via `canonicalizePrincipal(host, subject)` (`packages/worker/src/d1/principal.ts`):
 `identity_host` is lowercased+trimmed (defaulting to `github.com`), `subject_id` is the
 stringified+trimmed GitHub user id. The auth middleware reads `_revoked_subjects` on each request
 and denies with code `subject-revoked` when the token's `issued_at` predates the cutoff
@@ -103,7 +103,7 @@ and denies with code `subject-revoked` when the token's `issued_at` predates the
 
 **Monotonic cutoff.** The revoke upsert uses
 `revoked_before = MAX(revoked_before, excluded.revoked_before)`
-(`packages/backend-d1/src/revoked-subjects-store.ts`) — a tombstone only ever moves *forward*;
+(`packages/worker/src/d1/revoked-subjects-store.ts`) — a tombstone only ever moves *forward*;
 re-arming with an earlier cutoff is a no-op. No fence token is involved; this is forward-only
 idempotency, not coordination.
 

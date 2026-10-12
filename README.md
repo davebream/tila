@@ -274,10 +274,7 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 | `@tila/schemas` | Zod schemas, canonical JSON helpers, no runtime deps |
 | `@tila/core` | Backend interfaces, fence logic, schema evolution |
 | `@tila/ops-sqlite` | Shared SQLite operations (entity, coord, artifact, journal, gate, signal, sweep) |
-| `@tila/backend-d1` | D1 backend (auth tokens, sessions, idempotency, repo allowlist) |
-| `@tila/backend-do` | Durable Object SQLite backend (Cloudflare path) |
-| `@tila/backend-r2` | R2 artifact backend (content-addressed blobs) |
-| `@tila/worker` | Cloudflare Worker (Hono routing, Smart Placement) |
+| `@tila/worker` | Cloudflare Worker (Hono routing, Smart Placement), including its Durable Object, D1 and R2 backends |
 | `@tila/ui` | Project dashboard with scoped access management and conversations, served by the Worker |
 | `tila-cli` | `tila` CLI binary (Bun-compiled), including the bun:sqlite local backend and client-side auth store |
 | `tila-sdk` | Typed TypeScript client for framework consumers |

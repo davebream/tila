@@ -133,7 +133,7 @@ Returns a `vi.mock` factory covering the full D1 store surface constructed by th
 Declare this once per test file as a hoisted mock:
 
 ```ts
-vi.mock("@tila/backend-d1", () => backendD1MockFactory());
+vi.mock("../../worker/src/d1", () => backendD1MockFactory());
 ```
 
 ### `resetBackendD1Mocks(): void`
@@ -160,7 +160,7 @@ Each consuming test file MUST declare its own `vi.mock` — vitest hoisting is p
 
 ```ts
 import { backendD1MockFactory, resetBackendD1Mocks, _resetMiddlewareStateForTest } from "@tila/worker/test-support";
-vi.mock("@tila/backend-d1", () => backendD1MockFactory());
+vi.mock("../../worker/src/d1", () => backendD1MockFactory());
 
 beforeEach(() => {
   _resetMiddlewareStateForTest();
@@ -198,9 +198,9 @@ To un-skip a WI's tests:
 
 ## Cross-package mock limitation
 
-**Problem:** Mocking a `@tila/backend-d1` store *method* from the `integration-tests` package does NOT reliably intercept the worker's internal store construction.
+**Problem:** Mocking a D1 store *method* from the `integration-tests` package does NOT reliably intercept the worker's internal store construction.
 
-**Root cause:** vitest's `vi.mock` hoisting is per-module. The mock is registered in the integration-tests module graph. The worker's auth middleware constructs `new D1SessionStore(c.env.DB)` inside its own module graph, which resolves `@tila/backend-d1` from the worker package's node_modules resolution path — a different module graph node. This creates a mock→worker→mocked-package import cycle where the mock does not intercept the worker's import.
+**Root cause:** vitest's `vi.mock` hoisting is per-module. The mock is registered in the integration-tests module graph. The worker's auth middleware constructs `new D1SessionStore(c.env.DB)` inside its own module graph, which imports the stores from `packages/worker/src/d1`. This creates a mock→worker→mocked-module import cycle where the mock does not intercept the worker's import.
 
 **What this means for tests:**
 
@@ -214,4 +214,4 @@ To un-skip a WI's tests:
 3. **Payload / issuer / proof-shape level:** For skip-gated OIDC and DPoP tests, validation happens at the token-structure level (issuer allowlist, htu/htm binding). These can be tested without D1 mocks once the fixture stubs are implemented.
 4. **Project-mismatch:** The `project-mismatch` guard in `project.ts` fires after auth succeeds but before any DO fetch. No D1 mock is involved — the DO stub in `makeAuthEnv` is sufficient.
 
-**D1-store-dependent assertions belong in worker co-located tests** (`packages/worker/src/middleware/auth.test.ts`, `packages/worker/src/routes/auth-github.test.ts`). These tests use `vi.mock("@tila/backend-d1", ...)` in the same module graph as the production code and reliably intercept store construction.
+**D1-store-dependent assertions belong in worker co-located tests** (`packages/worker/src/middleware/auth.test.ts`, `packages/worker/src/routes/auth-github.test.ts`). These tests use `vi.mock("../d1", ...)` in the same module graph as the production code and reliably intercept store construction.

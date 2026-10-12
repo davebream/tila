@@ -1715,9 +1715,9 @@ Files likely touched:
 
 - `packages/ops-sqlite/src/schema.ts`
 - `packages/ops-sqlite/src/migrations-sql.ts`
-- `packages/backend-do/migrations/do/*.sql`
+- `packages/worker/migrations/do/*.sql`
 - new `packages/ops-sqlite/src/record-ops.ts`
-- `packages/backend-do/src/project-do-router.ts`
+- `packages/worker/src/do/project-do-router.ts`
 
 Tasks:
 
