@@ -2988,7 +2988,8 @@ many rows share a timestamp. With a `limit`, the response carries an opaque
   `scope.restricted` says restrictions applied; `scope.archived` says whether
   archived rows were excluded (`archived=0`) or included (no `archived` filter).
 - Migration 33 adds `(created_at, id)`, `(updated_at, id)` and `(type, id)`
-  indexes. Title and status sorts read `data` and are not indexed.
+  indexes. `title` and `status` sorts read `data.title` and `data.status`
+  directly (not presentation metadata) and are not indexed.
 
 **Unified search pages with per-kind offsets.** `GET /search` ranks each kind by
 FTS5 bm25 with an id tie-break. bm25 scores shift whenever the corpus changes,
@@ -3006,9 +3007,11 @@ corpus and may drift under concurrent writes. Each kind stops at depth 1000.
 - **Task ids are searchable.** Migration 33 indexes `entity_id` beside the title,
   weighted below it, so `task-251` or `251` finds the task.
 - **Titles follow presentation.** The indexed title is the declared
-  `presentation.title` field, else `data.title`, else `data.name`. A presentation
-  change is picked up lazily, when a task is next written or
-  `POST /search/reindex` runs.
+  `presentation.title` field, else `data.title`, else `data.name`. Applying a
+  schema that changes a type's `presentation.title` re-derives the indexed
+  titles of that type's tasks in the same transaction.
+- **Ids are tokenized.** `task-251` indexes as `task` and `251`, so a common id
+  prefix matches many tasks. Title matches still rank first.
 - **Scope is explicit.** `scope.kinds` lists the kinds searched and
   `scope.excluded_kinds` the ones left out, with a reason: `capability` (a
   scoped credential lacks `tasks:read`, `records:read` or `artifacts:read`) or
