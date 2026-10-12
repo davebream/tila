@@ -10,6 +10,7 @@ export async function packageBinaries(
   cliRoot,
   bunVersion,
   epoch = 0,
+  uiRoot = resolve(cliRoot, "../ui"),
 ) {
   if (!bunVersion || !/^\d+\.\d+\.\d+/.test(bunVersion))
     throw new Error("BUN_VERSION must identify the compiler runtime");
@@ -35,14 +36,27 @@ export async function packageBinaries(
       await readFile(join(cliRoot, "dist", "metadata", `${name}.json`), "utf8"),
     );
     const dependencies = new Map();
-    // The Worker sidecar is embedded as text, so include its original esbuild inputs too.
+    // The binary embeds the deploy payload (scripts/build-deploy-payload.mjs):
+    // the Worker bundle, described by its esbuild inputs, and the UI build,
+    // described by the UI package's runtime dependencies.
     const worker = JSON.parse(
       await readFile(join(cliRoot, "worker/bundle-meta.json"), "utf8"),
     );
     const workerInputs = Object.keys(worker.inputs).map((input) =>
       resolve(cliRoot, "../worker", input),
     );
-    for (const input of [...Object.keys(metadata.inputs), ...workerInputs]) {
+    const ui = JSON.parse(await readFile(join(uiRoot, "package.json"), "utf8"));
+    const uiInputs = [
+      join(uiRoot, "package.json"),
+      ...Object.keys(ui.dependencies ?? {}).map((name) =>
+        join(uiRoot, "node_modules", name, "package.json"),
+      ),
+    ];
+    for (const input of [
+      ...Object.keys(metadata.inputs),
+      ...workerInputs,
+      ...uiInputs,
+    ]) {
       if (input.startsWith("bun:") || input.startsWith("node:")) continue;
       let cursor = dirname(resolve(cliRoot, input));
       while (cursor !== dirname(cursor)) {

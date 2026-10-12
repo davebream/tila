@@ -46,10 +46,11 @@ export interface GenerateWranglerConfigArgs {
  * `[assets].directory` are computed relative to the config dir:
  *
  * - monorepo: main = "src/index.ts", assets.directory = "../ui/dist"
- * - sidecar:  main = "index.js",     assets.directory = "../ui/dist"
+ * - payload:  main = "index.js",     assets.directory = "../ui/dist"
  *
  * Both layouts yield "../ui/dist" because the worker directory and ui/dist
- * are always siblings (under packages/ or next to process.execPath).
+ * are always siblings (under packages/, or in the deploy payload a compiled
+ * binary stages under ~/.tila/cache/deploy-payload/).
  *
  * Returns the absolute path to the written config file.
  */
@@ -72,7 +73,7 @@ export function generateWranglerConfig(
   //             → configDir = .../packages/worker/   (parent of src/)
   //             → main = "src/index.ts"
   //
-  // - sidecar:  resolveWorkerMainPath() = .../worker/index.js
+  // - payload:  resolveWorkerMainPath() = .../deploy-payload/<v>/worker/index.js
   //             → configDir = .../worker/             (dirname)
   //             → main = "index.js"
   //

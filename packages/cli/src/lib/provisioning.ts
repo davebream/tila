@@ -8,9 +8,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as dotenv from "dotenv";
+import { VERSION } from "../version";
+import {
+  type StagedPayload,
+  embeddedPayloadRoot,
+  stageEmbeddedPayload,
+} from "./deploy-payload";
 import { diagnostic, exit } from "./output";
 import * as p from "./prompts";
 
@@ -57,29 +63,37 @@ export function deriveOrg(cwd: string): string {
 }
 
 /**
+ * Deploy payload of a compiled binary, staged under ~/.tila/cache. Null when
+ * tila runs from source; throws when a compiled binary has no valid payload.
+ */
+function embeddedPayload(): StagedPayload | null {
+  return stageEmbeddedPayload(
+    join(tilaHome(), "cache", "deploy-payload"),
+    VERSION,
+  );
+}
+
+/**
  * Resolve the Worker entry-point path for wrangler.toml `main` field.
  *
  * Resolution order:
  * 1. TILA_WORKER_DIST env var (absolute path override)
- * 2. process.execPath-relative sidecar (installed binary scenario)
- * 3. import.meta.url-relative monorepo fallback (dev scenario)
+ * 2. Deploy payload embedded in the compiled binary (installed CLI)
+ * 3. import.meta.url-relative monorepo path (source runs only)
  *
- * All strategies return an absolute path. Never throws.
+ * All strategies return an absolute path.
  */
 export function resolveWorkerMainPath(): string {
-  // Strategy 1: env var override
   const envOverride = process.env.TILA_WORKER_DIST;
   if (envOverride) {
     return envOverride;
   }
 
-  // Strategy 2: sidecar next to the compiled binary
-  const sidecarPath = join(dirname(process.execPath), "worker", "index.js");
-  if (existsSync(sidecarPath)) {
-    return sidecarPath;
+  const payload = embeddedPayload();
+  if (payload) {
+    return payload.workerMain;
   }
 
-  // Strategy 3: monorepo fallback (relative to this source file)
   return fileURLToPath(
     new URL("../../../../packages/worker/src/index.ts", import.meta.url),
   );
@@ -117,16 +131,20 @@ export function resolveCfApiToken(): string | null {
 
 /**
  * Resolve the D1 migrations directory path using the same strategy cascade
- * as resolveWorkerMainPath. Returns an absolute path.
+ * as resolveWorkerMainPath (TILA_MIGRATIONS_DIR, embedded payload, monorepo).
+ * Returns an absolute path.
  */
 export function resolveMigrationsDir(): string {
-  // Strategy 1: sidecar next to the compiled binary
-  const sidecarPath = join(dirname(process.execPath), "migrations", "global");
-  if (existsSync(sidecarPath)) {
-    return sidecarPath;
+  const envOverride = process.env.TILA_MIGRATIONS_DIR;
+  if (envOverride) {
+    return envOverride;
   }
 
-  // Strategy 2: monorepo fallback
+  const payload = embeddedPayload();
+  if (payload) {
+    return payload.migrationsDir;
+  }
+
   return fileURLToPath(
     new URL("../../../../packages/worker/migrations/global", import.meta.url),
   );
@@ -138,9 +156,9 @@ export function resolveUiDistDir(): string {
     return envOverride;
   }
 
-  const sidecarPath = join(dirname(process.execPath), "ui", "dist");
-  if (existsSync(sidecarPath)) {
-    return sidecarPath;
+  const payload = embeddedPayload();
+  if (payload) {
+    return payload.uiDist;
   }
 
   return fileURLToPath(
@@ -150,31 +168,16 @@ export function resolveUiDistDir(): string {
 
 /**
  * Returns true when tila is running from the monorepo source tree (dev layout),
- * false when running from an installed binary (sidecar layout) or env override.
+ * false when running from a compiled binary or with an env override.
  *
- * Strategy detection mirrors `resolveWorkerMainPath` / `resolveUiDistDir`:
- * 1. If TILA_WORKER_DIST or TILA_UI_DIST env var is set → env override (not monorepo)
- * 2. If the sidecar worker path exists next to process.execPath → sidecar (not monorepo)
- * 3. Otherwise → monorepo fallback (dev layout)
- *
- * Consumed by:
- * - wrangler-config.ts: to compute relative paths (both layouts yield `../ui/dist`)
- * - deploy.ts: to gate `pnpm --filter @tila/ui build` to monorepo-only
+ * Consumed by deploy.ts to gate `pnpm --filter @tila/ui build` to source
+ * runs; compiled binaries deploy their embedded, pre-built UI as-is.
  */
 export function isMonorepoLayout(): boolean {
-  // Strategy 1: env override
   if (process.env.TILA_WORKER_DIST || process.env.TILA_UI_DIST) {
     return false;
   }
-
-  // Strategy 2: sidecar binary
-  const sidecarPath = join(dirname(process.execPath), "worker", "index.js");
-  if (existsSync(sidecarPath)) {
-    return false;
-  }
-
-  // Strategy 3: monorepo fallback
-  return true;
+  return embeddedPayloadRoot() === null;
 }
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

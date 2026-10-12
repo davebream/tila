@@ -1,10 +1,19 @@
 import { execSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type { TilaProjectConfig } from "@tila/schemas";
+import { VERSION } from "../version";
 import type { Cloudflare } from "./cloudflare-client";
+import { embeddedPayloadRoot } from "./deploy-payload";
 import {
   isMonorepoLayout,
+  resolveMigrationsDir,
   resolveUiDistDir,
   resolveWorkerMainPath,
   tilaHome,
@@ -205,7 +214,7 @@ export async function deployWorkerWithAssets(
     return { workerUrl: deployedUrl, ui: { kind: "skipped", reason: "flag" } };
   }
 
-  // Step 3: Build UI (monorepo-only; in sidecar mode the pre-built dist is used as-is)
+  // Step 3: Build UI (source runs only; a compiled binary deploys its embedded build as-is)
   if (isMonorepoLayout()) {
     try {
       execSync("pnpm --filter @tila/ui build", {
@@ -278,4 +287,74 @@ export function describeUiOutcome(ui: UiOutcome): {
         uiLine: "UI:      not deployed",
       };
   }
+}
+
+const PAYLOAD_OVERRIDES = [
+  "TILA_WORKER_DIST",
+  "TILA_UI_DIST",
+  "TILA_MIGRATIONS_DIR",
+] as const;
+
+export interface DeployPayloadSummary {
+  version: string;
+  /** "embedded" for a compiled binary, "source" for a monorepo checkout. */
+  source: "embedded" | "source";
+  overrides: string[];
+  worker: string;
+  ui: { dir: string; files: number; indexHtml: boolean };
+  migrations: { dir: string; count: number; latest: string | null };
+}
+
+function countFiles(dir: string): number {
+  let count = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) count += countFiles(path);
+    else if (entry.isFile() || statSync(path).isFile()) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Resolve and check everything a deploy would upload, without contacting
+ * Cloudflare or requiring wrangler. Backs `tila deploy --dry-run`, which
+ * release smoke tests run against every packed binary.
+ */
+export function describeDeployPayload(): DeployPayloadSummary {
+  const source = embeddedPayloadRoot() === null ? "source" : "embedded";
+  const worker = resolveWorkerMainPath();
+  if (!existsSync(worker))
+    throw new Error(`Worker entry point not found: ${worker}`);
+
+  const migrationsDir = resolveMigrationsDir();
+  const migrations = existsSync(migrationsDir)
+    ? readdirSync(migrationsDir)
+        .filter((name) => name.endsWith(".sql"))
+        .sort()
+    : [];
+  if (migrations.length === 0)
+    throw new Error(`No D1 migrations found in ${migrationsDir}`);
+
+  const uiDir = resolveUiDistDir();
+  const indexHtml = existsSync(join(uiDir, "index.html"));
+  // Source runs build the UI during deploy; anything else must ship it.
+  if (!indexHtml && !isMonorepoLayout())
+    throw new Error(`UI build not found: ${join(uiDir, "index.html")}`);
+
+  return {
+    version: VERSION,
+    source,
+    overrides: PAYLOAD_OVERRIDES.filter((name) => process.env[name]),
+    worker,
+    ui: {
+      dir: uiDir,
+      files: existsSync(uiDir) ? countFiles(uiDir) : 0,
+      indexHtml,
+    },
+    migrations: {
+      dir: migrationsDir,
+      count: migrations.length,
+      latest: migrations.at(-1) ?? null,
+    },
+  };
 }

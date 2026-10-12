@@ -46,6 +46,14 @@ function localConfig(cwd) {
     `project_id="release-smoke"\nbackend="local"\nschema_version=1\ntila_version=${JSON.stringify(manifest.version)}\ncreated_at="2026-01-01T00:00:00Z"\n[local]\ndb_path=${JSON.stringify(join(cwd, "project.db"))}\nartifacts_path=${JSON.stringify(join(cwd, "artifacts"))}\norg="release-smoke"\n`,
   );
 }
+// Every installed CLI must carry a deploy payload matching its own version.
+function assertDeployPayload(output) {
+  const { result } = JSON.parse(output);
+  assert.equal(result.version, manifest.version, "Deploy payload version");
+  assert.equal(result.source, "embedded", "Deploy payload source");
+  assert.ok(result.migrations.count > 0, "Deploy payload has D1 migrations");
+  assert.ok(result.ui.indexHtml, "Deploy payload has the UI build");
+}
 function cliSmoke(command, prefix = []) {
   const cwd = join(temporary, `cli-${prefix.length ? "npm" : "binary"}`);
   localConfig(cwd);
@@ -53,6 +61,7 @@ function cliSmoke(command, prefix = []) {
     run(command, [...prefix, ...args], { cwd, env: cleanEnv, timeout: 30_000 });
   assert.ok(call("--version").includes(manifest.version));
   assert.match(call("--help"), /tila/i);
+  assertDeployPayload(call("deploy", "--dry-run", "--json"));
   assert.match(
     call(
       "task",
@@ -126,6 +135,12 @@ async function installerSmoke(binary) {
   );
   assert.ok(
     run(installed, ["--version"], { env: cleanEnv }).includes(manifest.version),
+  );
+  assertDeployPayload(
+    run(installed, ["deploy", "--dry-run", "--json"], {
+      env: cleanEnv,
+      timeout: 60_000,
+    }),
   );
 }
 
