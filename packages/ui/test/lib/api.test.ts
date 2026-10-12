@@ -2,11 +2,13 @@ import {
   ApiError,
   getArtifactBlob,
   getArtifactHistory,
+  getWorkCatalog,
   githubLoginConfig,
   githubUserLookup,
   listTasks,
   mutate,
   revokeMembership,
+  searchTasks,
 } from "@/lib/api";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
@@ -81,6 +83,62 @@ describe("listTasks URL params", () => {
     await listTasks("test-project", {});
     expect(capturedParams?.get("limit")).toBeNull();
     expect(capturedParams?.get("offset")).toBeNull();
+  });
+});
+
+describe("task catalog and search requests", () => {
+  test("listTasks forwards an opaque cursor unchanged", async () => {
+    let params: URLSearchParams | null = null;
+    server.use(
+      http.get("*/projects/*/tasks", ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({ ok: true, entities: [] });
+      }),
+    );
+    await listTasks("test-project", { cursor: "a+b/=", sort: "id" });
+    const sent = params as URLSearchParams | null;
+    expect(sent?.get("cursor")).toBe("a+b/=");
+    expect(sent?.get("sort")).toBe("id");
+  });
+
+  test("getWorkCatalog reads the task type catalog", async () => {
+    let path = "";
+    server.use(
+      http.get("*/projects/*/tasks/~/types", ({ request }) => {
+        path = new URL(request.url).pathname;
+        return HttpResponse.json({
+          ok: true,
+          types: [],
+          scope: { restricted: false },
+        });
+      }),
+    );
+    const response = await getWorkCatalog("test-project");
+    expect(path).toBe("/projects/test-project/tasks/~/types");
+    expect(response.types).toEqual([]);
+  });
+
+  test("searchTasks asks for literal task search", async () => {
+    let params: URLSearchParams | null = null;
+    server.use(
+      http.get("*/projects/*/search", ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({ ok: true, results: [], total: 0 });
+      }),
+    );
+    await searchTasks("test-project", {
+      q: "fix (auth",
+      type: ["task", "epic"],
+      cursor: "c1",
+      limit: 20,
+    });
+    const sent = params as URLSearchParams | null;
+    expect(sent?.get("q")).toBe("fix (auth");
+    expect(sent?.get("kind")).toBe("task");
+    expect(sent?.get("syntax")).toBe("literal");
+    expect(sent?.get("type")).toBe("task,epic");
+    expect(sent?.get("cursor")).toBe("c1");
+    expect(sent?.get("limit")).toBe("20");
   });
 });
 
