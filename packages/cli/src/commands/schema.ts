@@ -27,7 +27,7 @@ import { loadComposedSchema } from "../lib/schema-loader";
 function parseCurrentDefinition(definition: string | null): TilaSchemaToml {
   if (!definition) {
     // No schema applied yet → diff against an empty schema (everything is "added").
-    return TilaSchemaTomlSchema.parse({ schema_version: 0, work_units: {} });
+    return TilaSchemaTomlSchema.parse({ schema_version: 1, work_units: {} });
   }
   let raw: unknown;
   try {

@@ -1,4 +1,5 @@
 import type { Entity, FieldDeclaration, TilaSchemaToml } from "@tila/schemas";
+import { canonicalJson } from "@tila/schemas";
 
 export type ValidationResult = { ok: true } | { ok: false; errors: string[] };
 
@@ -158,7 +159,8 @@ export type SchemaChange =
   | SchemaFieldChange
   | SchemaUnitChange
   | SchemaArtifactChange
-  | SchemaRecordChange;
+  | SchemaRecordChange
+  | { kind: "definition-changed"; path: string; destructive: boolean };
 
 export type SchemaDiffResult = {
   changes: SchemaChange[];
@@ -252,7 +254,7 @@ export function diffSchemas(
       const prevDecl = prevFields[fieldName];
       const nextDecl = nextFields[fieldName];
 
-      const typeChanged = prevDecl.type !== nextDecl.type;
+      const typeChanged = canonicalJson(prevDecl) !== canonicalJson(nextDecl);
       const requiredChanged =
         (prevDecl.required ?? false) !== (nextDecl.required ?? false);
 
@@ -366,7 +368,7 @@ export function diffSchemas(
       if (!nextFieldNames.has(fieldName)) continue;
       const prevDecl = prevFields[fieldName];
       const nextDecl = nextFields[fieldName];
-      const typeChanged = prevDecl.type !== nextDecl.type;
+      const typeChanged = canonicalJson(prevDecl) !== canonicalJson(nextDecl);
       const requiredChanged =
         (prevDecl.required ?? false) !== (nextDecl.required ?? false);
       if (typeChanged || requiredChanged) {
@@ -381,6 +383,47 @@ export function diffSchemas(
     }
   }
 
+  // Cover non-field configuration too. New sections are additive, but changing
+  // existing behavior requires an explicit strategy. Compare canonical values
+  // so TOML key ordering never creates a spurious revision.
+  const compare = (path: string, before: unknown, after: unknown) => {
+    if (canonicalJson(before) !== canonicalJson(after)) {
+      changes.push({
+        kind: "definition-changed",
+        path,
+        destructive: path !== "schema_version" && path !== "templates",
+      });
+    }
+  };
+  for (const name of prevUnits) {
+    if (!nextUnitSet.has(name)) continue;
+    const { fields: _previousFields, ...before } = previous.work_units[name];
+    const { fields: _nextFields, ...after } = next.work_units[name];
+    compare(`work_units.${name}`, before, after);
+  }
+  for (const name of prevRecordTypes) {
+    if (!nextRecordSet.has(name)) continue;
+    const { fields: _previousFields, ...before } = prevRecords[name];
+    const { fields: _nextFields, ...after } = nextRecords[name];
+    compare(`records.${name}`, before, after);
+  }
+  for (const kind of prevKinds) {
+    if (nextKinds.has(kind))
+      compare(`artifacts.${kind}`, prevArtifacts[kind], nextArtifacts[kind]);
+  }
+  for (const section of Object.keys({
+    ...previous,
+    ...next,
+  }) as (keyof TilaSchemaToml)[]) {
+    if (
+      section === "work_units" ||
+      section === "records" ||
+      section === "artifacts"
+    )
+      continue;
+    compare(section, previous[section], next[section]);
+  }
+
   // autoApplicable: true iff no destructive changes present
   const destructiveKinds = new Set([
     "work-unit-removed",
@@ -391,7 +434,11 @@ export function diffSchemas(
     "record-field-removed",
     "record-field-required-added",
   ]);
-  const autoApplicable = !changes.some((c) => destructiveKinds.has(c.kind));
+  const autoApplicable = !changes.some(
+    (c) =>
+      destructiveKinds.has(c.kind) ||
+      (c.kind === "definition-changed" && c.destructive),
+  );
 
   return { changes, autoApplicable };
 }

@@ -790,7 +790,11 @@ export class RemoteBackend
     });
     return {
       version: result.version,
-      definition: result.schema ? JSON.stringify(result.schema) : null,
+      definition: result.schema
+        ? typeof result.schema.definition === "string"
+          ? result.schema.definition
+          : JSON.stringify(result.schema)
+        : null,
     };
   }
 

@@ -63,6 +63,8 @@ export type ApplySchemaResult =
 function humanizeChanges(changes: SchemaChange[]): string[] {
   return changes.map((c) => {
     switch (c.kind) {
+      case "definition-changed":
+        return `Changed definition: ${c.path}`;
       case "work-unit-added":
         return `Added work-unit type: ${c.unitType}`;
       case "work-unit-removed":
@@ -93,7 +95,10 @@ function humanizeChanges(changes: SchemaChange[]): string[] {
 
 function buildHint(changes: string[]): string {
   const destructive = changes.filter(
-    (c) => c.startsWith("Removed") || c.startsWith("Added required"),
+    (c) =>
+      c.startsWith("Removed") ||
+      c.startsWith("Added required") ||
+      c.startsWith("Changed"),
   );
   const lines = destructive.map((c) => `  - ${c}`).join("\n");
   return `Destructive changes detected:\n${lines}\n\nRe-run with --strategy=relax (enforce only for new writes) or --strategy=force (apply regardless).`;
