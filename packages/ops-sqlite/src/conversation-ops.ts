@@ -3,7 +3,10 @@ import {
   CONVERSATION_INSTRUCTIONS,
   type ConsumerBinding,
   type CreateRoom,
+  type DeliveryMessageRef,
   DeliverySchema,
+  type DeliveryTrace,
+  DeliveryTraceSchema,
   DispatchAttemptSchema,
   type DispatchReport,
   type Message,
@@ -1113,13 +1116,7 @@ export function explainDelivery(
     .get();
   if (!d) fail("not-found", "Delivery not found", 404);
   const b = current(db, agent);
-  const attempts = db
-    .select()
-    .from(s.dispatchAttempts)
-    .where(eq(s.dispatchAttempts.agent_id, agent))
-    .orderBy(s.dispatchAttempts.created_at)
-    .all()
-    .filter((attempt) => attempt.delivery_ids.includes(id));
+  const attempts = attemptsFor(db, [id]).get(id) ?? [];
   const last = attempts.at(-1);
   const reason =
     d.state === "acked"
@@ -1141,10 +1138,289 @@ export function explainDelivery(
                   : last?.outcome === "rejected"
                     ? "wake-rejected"
                     : "connector-not-polling";
+  const message = db
+    .select({ message: s.messages.message })
+    .from(s.messages)
+    .where(eq(s.messages.id, d.message_id))
+    .get()?.message;
   return {
     reason,
     delivery: DeliverySchema.parse(d),
     attempts: attempts.map((v) => DispatchAttemptSchema.parse(v)),
+    ...(message ? { message: messageRef(message) } : {}),
+    trace: deliveryTrace(db, d, attempts, now, new Map()),
+  };
+}
+
+type RecipientRow = typeof s.messageRecipients.$inferSelect;
+type AttemptRow = typeof s.dispatchAttempts.$inferSelect;
+type RecipientStatus = DeliveryTrace["recipient"];
+export interface DeliveryFilters {
+  agent?: string;
+  room?: string;
+  thread?: string;
+  message?: string;
+  id?: string;
+  state?: "pending" | "acked" | "expired";
+}
+/** Wake attempts per delivery, oldest first. Attempts store delivery IDs as JSON. */
+function attemptsFor(db: DB, ids: string[]) {
+  const byDelivery = new Map<string, AttemptRow[]>();
+  if (!ids.length) return byDelivery;
+  const wanted = new Set(ids);
+  const rows = db
+    .select()
+    .from(s.dispatchAttempts)
+    .where(
+      sql`EXISTS (SELECT 1 FROM json_each(${s.dispatchAttempts.delivery_ids}) WHERE json_each.value IN (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )}))`,
+    )
+    .orderBy(s.dispatchAttempts.created_at, s.dispatchAttempts.id)
+    .all();
+  for (const row of rows)
+    for (const id of row.delivery_ids)
+      if (wanted.has(id))
+        byDelivery.set(id, [...(byDelivery.get(id) ?? []), row]);
+  return byDelivery;
+}
+function effectiveState(
+  d: Pick<RecipientRow, "state" | "expires_at">,
+  now: number,
+) {
+  return d.state === "pending" && d.expires_at <= now
+    ? "expired"
+    : DeliverySchema.shape.state.parse(d.state);
+}
+function recipientStatus(
+  db: DB,
+  d: RecipientRow,
+  now: number,
+  cache: Map<string, RecipientStatus>,
+): RecipientStatus {
+  const key = d.target_binding_id ?? `agent:${d.agent_id}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const row = db
+    .select()
+    .from(s.agentBindings)
+    .where(
+      d.target_binding_id
+        ? eq(s.agentBindings.consumer_binding_id, d.target_binding_id)
+        : and(
+            eq(s.agentBindings.agent_id, d.agent_id),
+            eq(s.agentBindings.state, "active"),
+          ),
+    )
+    .get();
+  const value: RecipientStatus = row
+    ? {
+        status:
+          row.state === "active"
+            ? row.lease_expires_at * 1000 > now
+              ? "active"
+              : "offline"
+            : DeliveryTraceSchema.shape.recipient.shape.status.parse(row.state),
+        binding_epoch: row.binding_epoch,
+      }
+    : { status: "none", binding_epoch: null };
+  cache.set(key, value);
+  return value;
+}
+function deliveryTrace(
+  db: DB,
+  d: RecipientRow,
+  attempts: AttemptRow[],
+  now: number,
+  cache: Map<string, RecipientStatus>,
+): DeliveryTrace {
+  const last = attempts.at(-1);
+  const delivery = DeliverySchema.parse(d);
+  return {
+    state: effectiveState(d, now),
+    stored: { at: d.created_at },
+    wake: {
+      status: last
+        ? last.outcome === "leased"
+          ? "requested"
+          : DispatchAttemptSchema.shape.outcome
+              .exclude(["leased"])
+              .parse(last.outcome)
+        : d.wake_suppressed
+          ? "suppressed"
+          : "not-requested",
+      suppressed: delivery.wake_suppressed,
+      attempts: attempts.length,
+      rewakes: d.rewakes,
+      last_at: last ? (last.reported_at ?? last.created_at) : null,
+    },
+    fetched:
+      d.fetched_at === null
+        ? null
+        : { at: d.fetched_at, epoch: d.fetched_epoch },
+    acknowledged:
+      d.acked_at === null
+        ? null
+        : {
+            at: d.acked_at,
+            epoch: d.acked_epoch,
+            disposition: delivery.disposition,
+          },
+    // No work-result API exists yet; acknowledgement must never stand in for it.
+    work_result: { status: "not-reported" },
+    recipient: recipientStatus(db, d, now, cache),
+  };
+}
+function messageRef(m: Message): DeliveryMessageRef {
+  return {
+    id: m.id,
+    room_id: m.room_id,
+    thread_id: m.thread_id,
+    seq: m.seq,
+    ...(m.task_id ? { task_id: m.task_id } : {}),
+    ...(m.attempt_id ? { attempt_id: m.attempt_id } : {}),
+    ...(m.correlation_id ? { correlation_id: m.correlation_id } : {}),
+  };
+}
+function traceItems(
+  db: DB,
+  rows: Array<{ delivery: RecipientRow; message: Message }>,
+  now: number,
+) {
+  const attempts = attemptsFor(
+    db,
+    rows.map((r) => r.delivery.id),
+  );
+  const cache = new Map<string, RecipientStatus>();
+  return rows.map(({ delivery, message }) => ({
+    delivery: DeliverySchema.parse(delivery),
+    message: messageRef(message),
+    trace: deliveryTrace(
+      db,
+      delivery,
+      attempts.get(delivery.id) ?? [],
+      now,
+      cache,
+    ),
+  }));
+}
+function stateWhere(state: DeliveryFilters["state"], now: number) {
+  const r = s.messageRecipients;
+  if (state === "pending")
+    return and(eq(r.state, "pending"), gt(r.expires_at, now));
+  if (state === "expired")
+    return or(
+      eq(r.state, "expired"),
+      and(eq(r.state, "pending"), lte(r.expires_at, now)),
+    );
+  if (state === "acked") return eq(r.state, "acked");
+  return undefined;
+}
+/**
+ * Browse delivery traces newest first. Management-only: delivery metadata
+ * names agents and bindings. Read-only, so lazily expired rows are reported
+ * as expired without being swept here.
+ */
+export function listDeliveries(
+  db: DB,
+  a: ConversationAuthority,
+  filters: DeliveryFilters = {},
+  limit = 50,
+  before?: { ordinal: number; id: string },
+  now = Date.now(),
+) {
+  bodyAccess(a);
+  if (!a.can_manage)
+    fail(
+      "permission-denied",
+      "Browsing deliveries requires conversations:manage",
+    );
+  const r = s.messageRecipients;
+  const pageSize = Math.min(100, Math.max(1, limit));
+  const rows = db
+    .select({ delivery: r, message: s.messages.message })
+    .from(r)
+    .innerJoin(s.messages, eq(s.messages.id, r.message_id))
+    .where(
+      and(
+        filters.agent ? eq(r.agent_id, filters.agent) : undefined,
+        filters.room ? eq(s.messages.room_id, filters.room) : undefined,
+        filters.thread ? eq(s.messages.thread_id, filters.thread) : undefined,
+        filters.message ? eq(r.message_id, filters.message) : undefined,
+        filters.id
+          ? or(eq(r.id, filters.id), eq(r.message_id, filters.id))
+          : undefined,
+        stateWhere(filters.state, now),
+        before
+          ? or(
+              lt(r.ordinal, before.ordinal),
+              and(eq(r.ordinal, before.ordinal), lt(r.id, before.id)),
+            )
+          : undefined,
+      ),
+    )
+    .orderBy(desc(r.ordinal), desc(r.id))
+    .limit(pageSize + 1)
+    .all();
+  return {
+    deliveries: traceItems(db, rows.slice(0, pageSize), now),
+    has_more: rows.length > pageSize,
+  };
+}
+const MESSAGE_DELIVERY_LIMIT = 200;
+/**
+ * Deliveries for one message. Anyone who can read the room gets aggregate
+ * counts; recipient, binding and wake details need conversations:manage.
+ */
+export function messageDeliveries(
+  db: DB,
+  room: string,
+  message: string,
+  a: ConversationAuthority,
+  now = Date.now(),
+) {
+  roomAccess(db, room, a);
+  const row = db
+    .select({ message: s.messages.message })
+    .from(s.messages)
+    .where(and(eq(s.messages.id, message), eq(s.messages.room_id, room)))
+    .get();
+  if (!row) fail("not-found", "Message not found", 404);
+  const states = db
+    .select({
+      state: s.messageRecipients.state,
+      expires_at: s.messageRecipients.expires_at,
+    })
+    .from(s.messageRecipients)
+    .where(eq(s.messageRecipients.message_id, message))
+    .all()
+    .map((d) => effectiveState(d, now));
+  const summary = {
+    recipients: states.length,
+    pending: states.filter((v) => v === "pending").length,
+    acknowledged: states.filter((v) => v === "acked").length,
+    expired: states.filter((v) => v === "expired").length,
+  };
+  if (!a.can_manage) return { restricted: true as const, summary };
+  const rows = db
+    .select()
+    .from(s.messageRecipients)
+    .where(eq(s.messageRecipients.message_id, message))
+    .orderBy(s.messageRecipients.agent_id, s.messageRecipients.id)
+    .limit(MESSAGE_DELIVERY_LIMIT + 1)
+    .all();
+  return {
+    restricted: false as const,
+    summary,
+    deliveries: traceItems(
+      db,
+      rows
+        .slice(0, MESSAGE_DELIVERY_LIMIT)
+        .map((delivery) => ({ delivery, message: row.message })),
+      now,
+    ),
+    has_more: rows.length > MESSAGE_DELIVERY_LIMIT,
   };
 }
 export function resumeDelivery(

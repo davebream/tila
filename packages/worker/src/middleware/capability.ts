@@ -70,6 +70,12 @@ export function routeCapability(
     ["PUT", /^\/rooms\/[^/]+\/members\/[^/]+$/, "conversations:manage"],
     ["DELETE", /^\/rooms\/[^/]+\/members\/[^/]+$/, "conversations:manage"],
     ["POST", /^\/rooms\/[^/]+\/(?:messages|threads)$/, "conversations:publish"],
+    [
+      "GET",
+      /^\/rooms\/[^/]+\/messages\/[^/]+\/deliveries$/,
+      "conversations:read",
+    ],
+    ["GET", /^\/deliveries$/, "conversations:manage"],
     ["GET", /^\/inbox\/[^/]+(?:\/watch)?$/, "inbox:consume"],
     ["GET", /^\/inbox\/[^/]+\/deliveries\/[^/]+$/, "conversations:read"],
     ["POST", /^\/inbox\/[^/]+\/deliveries\/[^/]+\/ack$/, "inbox:consume"],
@@ -398,7 +404,7 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     c.set("authorizationChecked", true);
     c.header(
       "Cache-Control",
-      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch)(?:\/|$)/.test(
+      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
         c.req.path,
       )
         ? "private, no-store"
@@ -407,7 +413,7 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     await next();
     c.header(
       "Cache-Control",
-      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch)(?:\/|$)/.test(
+      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
         c.req.path,
       )
         ? "private, no-store"

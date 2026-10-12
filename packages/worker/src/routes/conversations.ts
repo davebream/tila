@@ -16,7 +16,8 @@ conversations.use("*", async (c, next) => {
 });
 conversations.all("*", async (c) => {
   const path = c.req.path.replace(/^\/projects\/[^/]+/, "").replace(/\/$/, "");
-  if (!/^\/(?:rooms|inbox|dispatch)(?:\/|$)/.test(path)) return c.notFound();
+  if (!/^\/(?:rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(path))
+    return c.notFound();
   const protocol = c.req.header("X-Tila-Conversation-Protocol");
   if (protocol !== undefined && protocol !== "1")
     return c.json(
