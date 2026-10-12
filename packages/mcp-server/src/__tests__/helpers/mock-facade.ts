@@ -71,10 +71,14 @@ export type MockFacadeShape = {
     | "threads"
     | "createThread"
     | "history"
-    | "publish",
+    | "publish"
+    | "deliveries",
     Mock
   >;
-  inbox: Record<"fetch" | "ack" | "watch" | "explain" | "resume", Mock>;
+  inbox: Record<
+    "fetch" | "ack" | "watch" | "explain" | "resume" | "deliveries",
+    Mock
+  >;
   dispatch: Record<"status" | "lease" | "report", Mock>;
   agents: Record<"list" | "get" | "register" | "bind" | "release", Mock>;
   tasks: Record<
@@ -171,8 +175,9 @@ export function createMockFacade(): MockFacadeShape {
       "createThread",
       "history",
       "publish",
+      "deliveries",
     ),
-    inbox: fns("fetch", "ack", "watch", "explain", "resume"),
+    inbox: fns("fetch", "ack", "watch", "explain", "resume", "deliveries"),
     dispatch: fns("status", "lease", "report"),
     agents: fns("list", "get", "register", "bind", "release"),
     tasks: fns(

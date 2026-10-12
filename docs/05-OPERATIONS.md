@@ -2058,6 +2058,7 @@ procedure before introducing or changing this secret on an established deploymen
 | `fetched-not-acked` | Inspect the session; fetch does not accept responsibility and may indicate a crash |
 | `budget-suppressed` | Inspect the delivery timeline and loop cause; a maintainer can use `tila inbox resume AGENT --delivery ID` |
 | Uncertain native wake | Reconcile `dispatch.status(agent, leaseToken)`; fetched/acked observations are metadata only |
+| Unknown delivery outcome | Browse `GET /deliveries` (filters `agent`, `room`, `state`, `id`) as a manager, or read `GET /rooms/:room/messages/:message/deliveries`. Acknowledged is not completed: `work_result` stays `not-reported` |
 
 Room membership controls publication and private history. Creating rooms and
 changing members requires `conversations:manage`. Explicit enrollment policies

@@ -174,3 +174,74 @@ it("separates backward history from forward tail cursors across publication and 
   ).toBe(400);
   expect((await get("direction=invalid")).status).toBe(400);
 });
+
+it("browses delivery traces with scoped cursors and keeps reader views to counts", async () => {
+  const ids: string[] = [];
+  for (const body of ["one", "two", "three"])
+    ids.push(
+      (
+        await ops.publish(
+          f.db,
+          "general",
+          PublishMessageSchema.parse({ client_op_id: body, body }),
+          owner,
+        )
+      ).message.id,
+    );
+  expect((await app.request("/deliveries")).status).toBe(403);
+  const list = async (query: string, a = owner) =>
+    app.request(`/deliveries?${query}`, { headers: headers(a) });
+  type Page = {
+    deliveries: { message: { seq: number }; trace: { state: string } }[];
+    has_more: boolean;
+    cursor: string | null;
+  };
+  const first = (await (await list("limit=2")).json()) as Page;
+  expect(first.deliveries.map((d) => d.message.seq)).toEqual([3, 2]);
+  expect(first.has_more).toBe(true);
+  const cursor = encodeURIComponent(first.cursor ?? "");
+  const second = (await (
+    await list(`limit=2&cursor=${cursor}`)
+  ).json()) as Page;
+  expect(second.deliveries.map((d) => d.message.seq)).toEqual([1]);
+  expect(second.cursor).toBeNull();
+  // Cursors are bound to their filters and caller.
+  expect((await list(`limit=2&state=acked&cursor=${cursor}`)).status).toBe(400);
+  expect((await list("state=done")).status).toBe(400);
+  const denied = await list("", { ...owner, can_manage: false });
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toMatchObject({
+    error: { code: "permission-denied" },
+  });
+  const reader = await app.request(
+    `/rooms/general/messages/${ids[0]}/deliveries`,
+    {
+      headers: headers({
+        ...owner,
+        can_manage: false,
+        principal_id: "worker-owner",
+      }),
+    },
+  );
+  // Members-only rooms still require membership for readers.
+  expect(reader.status).toBe(403);
+  ops.setMember(f.db, "general", "principal:reader", false, owner);
+  const counts = await app.request(
+    `/rooms/general/messages/${ids[0]}/deliveries`,
+    {
+      headers: headers({ ...owner, can_manage: false, principal_id: "reader" }),
+    },
+  );
+  expect(await counts.json()).toEqual({
+    ok: true,
+    restricted: true,
+    summary: { recipients: 1, pending: 1, acknowledged: 0, expired: 0 },
+  });
+  const full = (await (
+    await app.request(`/rooms/general/messages/${ids[0]}/deliveries`, {
+      headers: headers(owner),
+    })
+  ).json()) as { restricted: boolean; deliveries: unknown[] };
+  expect(full.restricted).toBe(false);
+  expect(full.deliveries).toHaveLength(1);
+});

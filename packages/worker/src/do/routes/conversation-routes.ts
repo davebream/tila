@@ -4,6 +4,7 @@ import {
   AgentIdSchema,
   CreateRoomSchema,
   CreateThreadSchema,
+  DeliveryListQuerySchema,
   DispatchReportSchema,
   PublishMessageSchema,
   RoomMemberSchema,
@@ -36,7 +37,7 @@ export function createConversationRoutes(deps: RouterDeps) {
     for (const [id, list] of waiters)
       if (!agent || agent === id) for (const wake of [...list]) wake();
   };
-  for (const path of ["/rooms/*", "/inbox/*", "/dispatch/*"])
+  for (const path of ["/rooms/*", "/inbox/*", "/dispatch/*", "/deliveries/*"])
     app.use(path, async (c, next) => {
       const a = Authority.safeParse(
         JSON.parse(c.req.header("X-Tila-Conversation-Authority") ?? "null"),
@@ -232,6 +233,85 @@ export function createConversationRoutes(deps: RouterDeps) {
         generation,
         tail,
       ),
+    });
+  });
+  app.get("/rooms/:room/messages/:message/deliveries", (c) =>
+    c.json({
+      ok: true,
+      ...ops.messageDeliveries(
+        deps.db,
+        AgentIdSchema.parse(c.req.param("room")),
+        z.string().uuid().parse(c.req.param("message")),
+        c.get("authority"),
+      ),
+    }),
+  );
+  app.get("/deliveries", async (c) => {
+    const a = c.get("authority");
+    const filters = DeliveryListQuerySchema.parse({
+      agent: c.req.query("agent") || undefined,
+      room: c.req.query("room") || undefined,
+      thread: c.req.query("thread") || undefined,
+      message: c.req.query("message") || undefined,
+      id: c.req.query("id") || undefined,
+      state: c.req.query("state") || undefined,
+    });
+    const scope = JSON.stringify([
+      "deliveries",
+      a.principal_id,
+      a.participant_id,
+      filters.agent ?? null,
+      filters.room ?? null,
+      filters.thread ?? null,
+      filters.message ?? null,
+      filters.id ?? null,
+      filters.state ?? null,
+    ]);
+    const generation = ops.cursorGeneration(deps.db);
+    const cursor = c.req.query("cursor");
+    const before = cursor
+      ? z
+          .object({
+            ordinal: z.number().int().positive(),
+            id: z.string().uuid(),
+          })
+          .parse(
+            await readConversationCursor(
+              c.get("cursorKey"),
+              cursor,
+              scope,
+              generation,
+            ),
+          )
+      : undefined;
+    const result = ops.listDeliveries(
+      deps.db,
+      a,
+      filters,
+      z.coerce
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .parse(c.req.query("limit") ?? 50),
+      before,
+    );
+    const last = result.deliveries.at(-1)?.delivery;
+    return c.json({
+      ok: true,
+      ...result,
+      cursor:
+        result.has_more && last
+          ? await signConversationCursor(
+              c.get("cursorKey"),
+              scope,
+              generation,
+              {
+                ordinal: last.ordinal,
+                id: last.id,
+              },
+            )
+          : null,
     });
   });
   app.get("/inbox/:agent", async (c) => {

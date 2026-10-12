@@ -7,10 +7,13 @@ import {
   CreateRoomSchema,
   CreateThreadSchema,
   DeliveryExplainResponseSchema,
+  DeliveryListQuerySchema,
+  DeliveryListResponseSchema,
   DispatchReportSchema,
   DispatchStatusResponseSchema,
   InboxAckResponseSchema,
   InboxWatchResponseSchema,
+  MessageDeliveriesResponseSchema,
   MessagePublishResponseSchema,
   NativeSessionRefSchema,
   PublishMessageSchema,
@@ -105,6 +108,12 @@ export function createConversationMethods(
         PublishMessageSchema.parse(input),
         options(MessagePublishResponseSchema, protocol),
       ),
+    /** Readers get aggregate counts; managers also get per-recipient traces. */
+    deliveries: (room: string, message: string) =>
+      client.get(
+        `${path(room)}/messages/${encodeURIComponent(z.string().uuid().parse(message))}/deliveries`,
+        options(MessageDeliveriesResponseSchema),
+      ),
   };
 }
 export function createInboxMethods(client: TilaClient, projectId: string) {
@@ -146,6 +155,18 @@ export function createInboxMethods(client: TilaClient, projectId: string) {
       client.get(delivery(agent, id), options(DeliveryExplainResponseSchema)),
     resume: (agent: string, id: string) =>
       client.post(`${delivery(agent, id)}/resume`, {}, options(ok)),
+    /** Browse delivery traces newest first; requires conversations:manage. */
+    deliveries: (raw: z.input<typeof DeliveryListQuerySchema> & Page = {}) => {
+      const filters = DeliveryListQuerySchema.parse(raw);
+      return client.get(
+        `/projects/${encodeURIComponent(projectId)}/deliveries`,
+        {
+          ...options(DeliveryListResponseSchema),
+          ...page(raw),
+          query: { ...page(raw).query, ...filters },
+        },
+      );
+    },
   };
 }
 const LeaseSchema = z.object({
@@ -201,6 +222,7 @@ export function createUnsupportedConversationMethods(): ReturnType<
     createThread: unsupported,
     history: unsupported,
     publish: unsupported,
+    deliveries: unsupported,
   };
 }
 export function createUnsupportedInboxMethods(): ReturnType<
@@ -212,6 +234,7 @@ export function createUnsupportedInboxMethods(): ReturnType<
     watch: unsupported,
     explain: unsupported,
     resume: unsupported,
+    deliveries: unsupported,
   };
 }
 export function createUnsupportedDispatchMethods(): ReturnType<
