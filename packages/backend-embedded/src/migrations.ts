@@ -1,42 +1,10 @@
 /**
- * Embedded migration set — the bun/node-safe migration sequence used by the
- * runtime-agnostic embedded backend (and, once Task 4 re-points it, by
- * `cli/src/local`).
- *
- * SCHEMA IDENTITY IS THE #1 INVARIANT. Shared versions through v24 reuse the canonical DO
- * `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` VERBATIM, so an
- * embedded SQLite file is byte-for-byte schema-identical to a DO project for
- * every shared version. There is NO embedded-specific variant of `MIGRATION_0001`:
- * the canonical schema is already standard-SQLite-portable (verified executable
- * under bun:sqlite with `foreign_keys=ON` — `artifact_relationships` carries
- * `target TEXT NOT NULL` with PRIMARY KEY `(from_key, target, type)` and all FK
- * clauses). The previous COALESCE-in-PK rationale was obsolete: the canonical
- * `artifact_relationships` PK was long ago refactored to the plain-`target`
- * form precisely to be portable, so no divergence is needed or wanted.
- *
- * Three deliberate, narrowly-scoped deltas vs the DO set:
- *
- *  1. Version 21 (`_do_idempotency`) is SKIPPED: the DO-side
- *      in-transaction idempotency dedup table (audit B1) is a Cloudflare-only
- *      guard. Embedded mode has its own `_idempotency` overlay (delta 2 below),
- *      so creating `_do_idempotency` here would be redundant and off-schema.
- *      Skipping it does not affect any shared table.
- *
- *  2. An embedded-only idempotency table (`MIGRATION_IDEMPOTENCY`) is appended
- *     at a non-canonical version ABOVE the shared range (1000). In Cloudflare
- *     mode idempotency lives in D1 (`worker/src/d1`); in embedded mode it
- *     lives in the same project SQLite file (one fewer store to coordinate).
- *     The store is a standalone INSERT OR IGNORE, not folded into the mutating
- *     operation's own transaction.
- *     The `project_id` column is omitted because each embedded DB file is
- *     scoped to exactly one project. It is given a version OUTSIDE the canonical
- *     shared range (rather than hijacking canonical slot 5, which the DO uses for
- *     the `idx_er_to_id_type` index) so it is purely additive and never shadows
- *     or collides with a canonical migration. Every canonical version, including
- *     v5, applies exactly as upstream.
- *
- * The runner is storage-agnostic: it operates purely against an injected
- * `MigrationStorage`, so the host supplies the concrete SQLite driver.
+ * Embedded runtimes use every canonical project migration, plus the existing
+ * local response-cache overlay at version 1000. Migration 21 was previously
+ * skipped; it now supplies transactional receipts for revision-aware writes.
+ * The runner tracks individual versions, so old databases receive the missing
+ * additive migration even when they already have higher versions applied.
+ * Keep the legacy overlay for compatibility with existing local consumers.
  */
 
 import {
@@ -47,13 +15,6 @@ import {
 } from "@tila/ops-sqlite";
 
 export type { Migration, MigrationStorage } from "@tila/ops-sqlite";
-
-/**
- * Canonical version slots skipped in embedded mode (DO-only features):
- *  - 21: `_do_idempotency` (DO-only in-transaction idempotency dedup, audit B1;
- *        embedded mode uses its own `_idempotency` overlay instead)
- */
-const SKIPPED_VERSIONS = new Set<number>([21]);
 
 /** Version assigned to the embedded-only idempotency overlay (outside the
  *  canonical shared range so it is purely additive). */
@@ -81,13 +42,13 @@ CREATE INDEX IF NOT EXISTS idx_idempotency_created ON _idempotency(created_at);
 /**
  * The embedded migration set, ordered by version.
  *
- * = canonical DO `MIGRATIONS` (verbatim) minus the skipped versions, with the
+ * = canonical project `MIGRATIONS` (verbatim), with the
  * embedded-only idempotency overlay appended above the canonical range. Every
  * shared version reuses the exact same SQL / run-function object as the DO, so
  * schema identity is structurally guaranteed (no copy that can drift).
  */
 export const EMBEDDED_MIGRATIONS: ReadonlyArray<Migration> = [
-  ...MIGRATIONS.filter((m) => !SKIPPED_VERSIONS.has(m.version)),
+  ...MIGRATIONS,
   { version: IDEMPOTENCY_MIGRATION_VERSION, sql: MIGRATION_IDEMPOTENCY },
 ];
 

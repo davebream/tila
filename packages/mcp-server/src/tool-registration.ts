@@ -12,6 +12,7 @@ import { TilaApiError } from "tila-sdk";
 import { z } from "zod";
 
 const reads = new Set([
+  "tila_schema_preview",
   "tila_room_list",
   "tila_room_history",
   "tila_inbox_fetch",

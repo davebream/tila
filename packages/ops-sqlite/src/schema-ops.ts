@@ -6,9 +6,14 @@ import {
   diffSchemas,
   parseTilaSchemaToml,
 } from "@tila/core";
-import type { SchemaHistory } from "@tila/schemas";
-import { and, desc, eq, sql } from "drizzle-orm";
+import {
+  SchemaApplyRequestSchema,
+  type SchemaHistory,
+  canonicalJson,
+} from "@tila/schemas";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { withDoIdempotency } from "./do-idempotency-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 
@@ -51,14 +56,37 @@ export type PreviewSchemaChange =
     };
 
 export type PreviewSchemaResult = {
+  revision: number;
+  reviewed_definition: string;
   changes: PreviewSchemaChange[];
   autoApplicable: boolean;
 };
 
 export type ApplySchemaResult =
-  | { ok: true; version: number; changes: string[] }
-  | { ok: false; reason: "no-change" }
+  | { ok: true; version: number; revision: number; changes: string[] }
+  | { ok: false; reason: "no-change"; revision: number }
   | { ok: false; reason: "destructive"; changes: string[]; hint: string };
+
+export class SchemaPreconditionError extends Error {
+  constructor(
+    public readonly code:
+      | "schema-revision-conflict"
+      | "schema-review-required"
+      | "schema-review-mismatch",
+    public readonly revision: number,
+  ) {
+    super(
+      `${code}: preview the current configuration and retry with its revision and reviewed definition`,
+    );
+    this.name = "SchemaPreconditionError";
+  }
+}
+
+export interface SchemaApplyOptions {
+  expected_revision?: number;
+  reviewed_definition?: string;
+  idempotency_key?: string;
+}
 
 function humanizeChanges(changes: SchemaChange[]): string[] {
   return changes.map((c) => {
@@ -150,92 +178,178 @@ export function applySchema(
   appliedBy: string,
   strategy?: string,
   origin?: RequestOrigin,
+  options: SchemaApplyOptions = {},
 ): ApplySchemaResult {
+  SchemaApplyRequestSchema.parse({
+    definition,
+    strategy,
+    expected_revision: options.expected_revision,
+    reviewed_definition: options.reviewed_definition,
+  });
   // Step 1: Validate incoming TOML (throws SchemaParseException on invalid)
   const nextParsed = parseTilaSchemaToml(definition);
 
-  return db.transaction((tx) => {
-    // Step 2: Fetch current schema
-    const currentRow = tx
-      .select()
-      .from(schema.schemaHistory)
-      .orderBy(desc(schema.schemaHistory.version))
-      .limit(1)
-      .get();
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency<ApplySchemaResult>(
+        tx,
+        options.idempotency_key
+          ? {
+              key: `schema:${canonicalJson([origin?.principalId ?? appliedBy, origin?.participantId ?? appliedBy, options.idempotency_key])}`,
+              requestHash: canonicalJson([
+                definition,
+                strategy ?? null,
+                options.expected_revision ?? null,
+                options.reviewed_definition ?? null,
+              ]),
+              shouldStore: (result) =>
+                result.ok || result.reason === "no-change",
+            }
+          : undefined,
+        () => {
+          // Step 2: Fetch current schema
+          const currentRow = tx
+            .select()
+            .from(schema.schemaHistory)
+            .orderBy(desc(schema.schemaHistory.version))
+            .limit(1)
+            .get();
 
-    let changeSummary: string[] = [];
-    let diffAutoApplicable = true;
+          const revision = currentRow?.version ?? 0;
+          if (
+            options.expected_revision !== undefined &&
+            options.expected_revision !== revision
+          ) {
+            throw new SchemaPreconditionError(
+              "schema-revision-conflict",
+              revision,
+            );
+          }
+          if (
+            options.reviewed_definition !== undefined &&
+            canonicalJson(parseTilaSchemaToml(options.reviewed_definition)) !==
+              canonicalJson(nextParsed)
+          ) {
+            throw new SchemaPreconditionError(
+              "schema-review-mismatch",
+              revision,
+            );
+          }
 
-    if (currentRow) {
-      // Step 3: Diff against previous schema
-      const prevParsed = parseTilaSchemaToml(currentRow.definition);
-      const diff = diffSchemas(prevParsed, nextParsed);
+          let changeSummary: string[] = [];
+          let diffAutoApplicable = true;
 
-      // Step 4: No-change detection
-      if (diff.changes.length === 0) {
-        return { ok: false as const, reason: "no-change" as const };
-      }
+          if (currentRow) {
+            // Step 3: Diff against previous schema
+            const prevParsed = parseTilaSchemaToml(currentRow.definition);
+            const diff = diffSchemas(prevParsed, nextParsed);
 
-      changeSummary = humanizeChanges(diff.changes);
-      diffAutoApplicable = diff.autoApplicable;
+            // Step 4: No-change detection
+            if (diff.changes.length === 0) {
+              return {
+                ok: false as const,
+                reason: "no-change" as const,
+                revision,
+              };
+            }
 
-      // Step 5: Reject destructive without strategy
-      if (!diffAutoApplicable && !strategy) {
-        return {
-          ok: false as const,
-          reason: "destructive" as const,
-          changes: changeSummary,
-          hint: buildHint(changeSummary),
-        };
-      }
-    } else {
-      // First schema ever — no diff needed
-      changeSummary = ["Initial schema applied"];
-    }
+            changeSummary = humanizeChanges(diff.changes);
+            diffAutoApplicable = diff.autoApplicable;
 
-    // Step 6: Compute new version
-    const current = tx
-      .select({ maxVersion: sql<number>`COALESCE(MAX(version), 0)` })
-      .from(schema.schemaHistory)
-      .get();
+            if (
+              !diffAutoApplicable &&
+              strategy &&
+              options.expected_revision !== undefined &&
+              options.reviewed_definition === undefined
+            ) {
+              throw new SchemaPreconditionError(
+                "schema-review-required",
+                revision,
+              );
+            }
 
-    const newVersion = (current?.maxVersion ?? 0) + 1;
-    const now = Date.now();
+            // Step 5: Reject destructive without strategy
+            if (!diffAutoApplicable && !strategy) {
+              return {
+                ok: false as const,
+                reason: "destructive" as const,
+                changes: changeSummary,
+                hint: buildHint(changeSummary),
+              };
+            }
+          } else {
+            // First schema ever — no diff needed
+            changeSummary = ["Initial schema applied"];
+          }
 
-    // Step 7: Insert with new columns
-    tx.insert(schema.schemaHistory)
-      .values({
-        version: newVersion,
-        definition,
-        applied_at: now,
-        applied_by: appliedBy,
-        change_summary: JSON.stringify(changeSummary),
-        strategy: strategy ?? null,
-      })
-      .run();
+          // Step 6: Compute new version
+          const current = tx
+            .select({ maxVersion: sql<number>`COALESCE(MAX(version), 0)` })
+            .from(schema.schemaHistory)
+            .get();
 
-    // Step 8: Emit journal event
-    const journalOrigin = origin ?? {
-      principalId: "system:schema",
-      participantId: "system:schema",
-      environment: {},
-      actor: appliedBy,
-    };
-    appendJournal(tx, {
-      kind: "schema.applied",
-      resource: "schema",
-      ...journalOrigin,
-      actor: appliedBy,
-      fence: null,
-      data: { version: newVersion, changes: changeSummary },
-      tokenId: origin?.tokenId,
-      source: origin?.source,
-      sourceVersion: origin?.sourceVersion,
-    });
+          const newVersion = (current?.maxVersion ?? 0) + 1;
+          const now = Date.now();
 
-    // Step 9: Return result
-    return { ok: true as const, version: newVersion, changes: changeSummary };
-  });
+          // Step 7: Insert with new columns
+          tx.insert(schema.schemaHistory)
+            .values({
+              version: newVersion,
+              definition,
+              applied_at: now,
+              applied_by: appliedBy,
+              change_summary: JSON.stringify(changeSummary),
+              strategy: strategy ?? null,
+            })
+            .run();
+
+          // Step 8: Emit journal event
+          const journalOrigin = origin ?? {
+            principalId: "system:schema",
+            participantId: "system:schema",
+            environment: {},
+            actor: appliedBy,
+          };
+          appendJournal(tx, {
+            kind: "schema.applied",
+            resource: "schema",
+            ...journalOrigin,
+            actor: appliedBy,
+            fence: null,
+            data: { version: newVersion, changes: changeSummary },
+            tokenId: origin?.tokenId,
+            source: origin?.source,
+            sourceVersion: origin?.sourceVersion,
+          });
+
+          // Step 9: Return result
+          return {
+            ok: true as const,
+            version: newVersion,
+            revision: newVersion,
+            changes: changeSummary,
+          };
+        },
+      ).result,
+  );
+}
+
+export function listSchemaHistory(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  limit = 50,
+  before?: number,
+): SchemaHistory[] {
+  return db
+    .select()
+    .from(schema.schemaHistory)
+    .where(
+      before === undefined
+        ? undefined
+        : lt(schema.schemaHistory.version, before),
+    )
+    .orderBy(desc(schema.schemaHistory.version))
+    .limit(Math.max(1, Math.min(250, limit)))
+    .all();
 }
 
 /**
@@ -255,6 +369,13 @@ export function previewSchema(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   definition: string,
 ): PreviewSchemaResult {
+  return db.transaction((tx) => previewSchemaInTransaction(tx, definition));
+}
+
+function previewSchemaInTransaction(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  definition: string,
+): PreviewSchemaResult {
   // Validate incoming TOML (throws SchemaParseException on invalid)
   const nextParsed = parseTilaSchemaToml(definition);
 
@@ -268,7 +389,12 @@ export function previewSchema(
 
   // No current schema — nothing to diff
   if (!currentRow) {
-    return { changes: [], autoApplicable: true };
+    return {
+      revision: 0,
+      reviewed_definition: definition,
+      changes: [],
+      autoApplicable: true,
+    };
   }
 
   const prevParsed = parseTilaSchemaToml(currentRow.definition);
@@ -339,5 +465,10 @@ export function previewSchema(
     }
   });
 
-  return { changes: enriched, autoApplicable: diff.autoApplicable };
+  return {
+    revision: currentRow.version,
+    reviewed_definition: definition,
+    changes: enriched,
+    autoApplicable: diff.autoApplicable,
+  };
 }

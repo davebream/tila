@@ -5,6 +5,10 @@
  * strings returned by the worker and DO layers.
  */
 export const TILA_ERRORS = {
+  SCHEMA_DESTRUCTIVE: "schema-destructive",
+  SCHEMA_REVISION_CONFLICT: "schema-revision-conflict",
+  SCHEMA_REVIEW_REQUIRED: "schema-review-required",
+  SCHEMA_REVIEW_MISMATCH: "schema-review-mismatch",
   UNSUPPORTED_PROTOCOL: "unsupported-protocol",
   CURSOR_EXPIRED: "cursor-expired",
   DELIVERY_EXPIRED: "delivery-expired",

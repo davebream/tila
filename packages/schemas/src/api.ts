@@ -1235,10 +1235,38 @@ export type RepoDeleteResponse = z.infer<typeof RepoDeleteResponseSchema>;
 
 // --- Schema-method response types (C3: named wrappers, inner content stays unknown) ---
 
+export const SchemaApplyRequestSchema = z
+  .object({
+    definition: z.string().min(1),
+    strategy: z.enum(["relax", "force"]).optional(),
+    expected_revision: z.number().int().nonnegative().optional(),
+    reviewed_definition: z.string().min(1).optional(),
+    idempotency_key: z.string().min(1).max(256).optional(),
+  })
+  .refine(
+    (value) =>
+      value.reviewed_definition === undefined ||
+      value.expected_revision !== undefined,
+    {
+      message: "reviewed_definition requires expected_revision",
+    },
+  );
+export type SchemaApplyRequest = z.infer<typeof SchemaApplyRequestSchema>;
+
+export const SchemaPreviewResponseSchema = z.object({
+  ok: z.literal(true),
+  revision: z.number().int().nonnegative(),
+  reviewed_definition: z.string(),
+  changes: z.array(z.unknown()),
+  autoApplicable: z.boolean(),
+});
+export type SchemaPreviewResponse = z.infer<typeof SchemaPreviewResponseSchema>;
+
 export const SchemaGetResponseSchema = z.object({
   ok: z.literal(true),
   schema: z.unknown().optional(),
   version: z.number().int().nullable(),
+  revision: z.number().int().nonnegative().optional(),
 });
 
 export type SchemaGetResponse = z.infer<typeof SchemaGetResponseSchema>;
@@ -1246,6 +1274,9 @@ export type SchemaGetResponse = z.infer<typeof SchemaGetResponseSchema>;
 export const SchemaApplyResponseSchema = z.object({
   ok: z.literal(true),
   version: z.number().int().nullable(),
+  revision: z.number().int().nonnegative().optional(),
+  changes: z.array(z.string()).optional(),
+  noChange: z.boolean().optional(),
   diff: z.unknown().optional(),
 });
 

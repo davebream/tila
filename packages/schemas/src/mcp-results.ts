@@ -171,6 +171,7 @@ export const McpPrimitiveResults = {
   tila_gate_resolve: GateResponseSchema,
   tila_gate_cancel: ok,
   tila_schema_update: api.SchemaApplyResponseSchema,
+  tila_schema_preview: api.SchemaPreviewResponseSchema,
   tila_template_list: templates,
   tila_template_instantiate: api.InstantiateTemplateResponseSchema,
   tila_reentry: reentry,

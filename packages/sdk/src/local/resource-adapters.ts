@@ -2,7 +2,7 @@ import type {
   EmbeddedArtifactBackend,
   EmbeddedProject,
 } from "@tila/backend-embedded";
-import { ContinuityError } from "@tila/core";
+import { type ApplySchemaInput, ContinuityError } from "@tila/core";
 /**
  * Local resource adapters — present the SAME public method surface the HTTP
  * resource-method factories expose (`createTaskMethods`, `createRecordMethods`,
@@ -37,7 +37,7 @@ import {
   type PresenceWithStatus,
   parseTilaSchemaToml,
 } from "@tila/core";
-import { signalOps } from "@tila/ops-sqlite";
+import { mapProjectError, signalOps } from "@tila/ops-sqlite";
 import type { ArtifactDeleteOptions } from "@tila/schemas";
 import type {
   ArtifactReviewRequest,
@@ -105,6 +105,7 @@ import type {
   UnifiedSearchResponse,
 } from "@tila/schemas";
 import {
+  SchemaApplyRequestSchema,
   SendSignalRequestSchema,
   SetSignalGroupRequestSchema,
   SignalGroupIdSchema,
@@ -119,6 +120,7 @@ import {
   createUnsupportedDispatchMethods,
   createUnsupportedInboxMethods,
 } from "../conversations";
+import { toTilaErrorCode } from "../error-codes";
 
 /**
  * Thrown when a consumer calls a facade method that has no local equivalent
@@ -951,45 +953,92 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
 }
 
 /** Schema methods (mirrors `createSchemaMethods` in `schema.ts`). */
-function createLocalSchemaMethods(project: EmbeddedProject) {
+function createLocalSchemaMethods(
+  project: EmbeddedProject,
+): TilaFacade["schema"] {
   return {
-    async get(): Promise<{ ok: true; schema: unknown; version: number }> {
+    async get() {
       const current = await project.getCurrentSchema();
-      // Mirror the DO `/schema/current` shape: `schema` is the schema RECORD
-      // (`{ version, definition }`, with `definition` the raw TOML string) — the
-      // stored definition is TOML, NOT JSON, so it must not be JSON.parsed.
       return {
-        ok: true,
-        schema: current,
+        ok: true as const,
+        schema: current.definition === null ? null : current,
         version: current.version ?? 0,
+        revision: current.revision,
       };
     },
-
     async apply(
       schema: unknown,
       strategy?: string,
-    ): Promise<{ ok: true; version: number; diff: unknown }> {
-      const result = await project.applySchema({
+      options?: Omit<ApplySchemaInput, "definition" | "strategy">,
+    ) {
+      const request = SchemaApplyRequestSchema.safeParse({
         definition:
           typeof schema === "string" ? schema : JSON.stringify(schema),
         strategy,
+        ...options,
       });
-      return { ok: true, version: result.version ?? 0, diff: result.changes };
+      if (!request.success)
+        throw new TilaApiError(
+          400,
+          "validation-error",
+          request.error.message,
+          false,
+        );
+      let result: Awaited<ReturnType<EmbeddedProject["applySchema"]>>;
+      try {
+        result = await project.applySchema(request.data);
+      } catch (error) {
+        const mapped = error instanceof Error ? mapProjectError(error) : null;
+        if (mapped)
+          throw new TilaApiError(
+            mapped.status,
+            toTilaErrorCode(mapped.code),
+            (error as Error).message,
+            mapped.retryable,
+          );
+        throw error;
+      }
+      if (!result.ok)
+        throw new TilaApiError(
+          422,
+          "schema-destructive",
+          result.hint ?? "Schema apply failed",
+          false,
+        );
+      return {
+        ...result,
+        ok: true as const,
+        version: result.version ?? 0,
+        diff: result.changes,
+      };
     },
-
-    async history(_opts?: { limit?: string }): Promise<{
-      ok: true;
-      entries: unknown[];
-    }> {
-      // Schema history DATA exists locally — applySchema inserts a row per
-      // version into `_schema_history`, so every version is retained. It is not
-      // surfaced here because there is no matching REMOTE endpoint (the Worker
-      // exposes no schema-history route; the cloudflare branch's
-      // `schema.history` would 404). So this method is effectively unimplemented
-      // on BOTH sides; returning an empty list keeps the two branches at parity
-      // rather than diverging. (Tracked for Task 14 docs: whether to drop this
-      // dead method from the facade.)
-      return { ok: true, entries: [] };
+    async preview(definition: string) {
+      return {
+        ok: true as const,
+        ...(await project.previewSchema(definition)),
+      };
+    },
+    async history(opts?: { limit?: string; before?: string }) {
+      const limit = Number(opts?.limit ?? 50);
+      const before =
+        opts?.before === undefined ? undefined : Number(opts.before);
+      if (
+        !Number.isSafeInteger(limit) ||
+        limit < 1 ||
+        limit > 250 ||
+        (before !== undefined && (!Number.isSafeInteger(before) || before < 1))
+      ) {
+        throw new TilaApiError(
+          400,
+          "validation-error",
+          "Invalid schema history pagination",
+          false,
+        );
+      }
+      return {
+        ok: true as const,
+        entries: await project.getSchemaHistory(limit, before),
+      };
     },
   };
 }
