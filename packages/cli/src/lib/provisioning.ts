@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -262,17 +262,37 @@ export function ensureGitignored(
 }
 
 /**
- * Hash a raw token using SHA-256 (matching the Worker auth middleware).
- * Returns lowercase hex string.
+ * Hash a raw token exactly like the Worker's `hashToken`
+ * (packages/worker/src/lib/hash-token.ts): HMAC-SHA-256 keyed by the
+ * `HASH_PEPPER` secret when the Worker has one, plain SHA-256 otherwise.
+ * Returns lowercase hex.
  *
- * NOTE: this is bare SHA-256, while the Worker hashes with HASH_PEPPER when set.
- * Under a set pepper a CLI-minted bootstrap hash would mismatch the Worker lookup —
- * a pre-existing SEC-1 migration gap, out of scope for the token-format change
- * (see the T5 design Open Questions). The hash stays over the FULL token string,
- * so the new tila_d1_ format flows through it unchanged.
+ * `pepper` is required (`string | undefined`) so a caller cannot silently
+ * write a bare hash that a peppered Worker would never match. The hash stays
+ * over the FULL token string, so the tila_d1_ format flows through unchanged.
  */
-export function hashToken(rawToken: string): string {
+export function hashToken(
+  rawToken: string,
+  pepper: string | undefined,
+): string {
+  if (pepper)
+    return createHmac("sha256", pepper).update(rawToken).digest("hex");
   return createHash("sha256").update(rawToken).digest("hex");
+}
+
+/**
+ * The Worker's `HASH_PEPPER`, for credentials the CLI writes straight to D1.
+ * Resolution: `TILA_HASH_PEPPER` env var, then `~/.tila/.env`. Unset means the
+ * Worker has no pepper. The value is never printed or persisted by the CLI.
+ */
+export function resolveHashPepper(): string | undefined {
+  if (process.env.TILA_HASH_PEPPER) return process.env.TILA_HASH_PEPPER;
+  const homeEnv = join(tilaHome(), ".env");
+  if (existsSync(homeEnv)) {
+    const parsed = dotenv.parse(readFileSync(homeEnv));
+    if (parsed.TILA_HASH_PEPPER) return parsed.TILA_HASH_PEPPER;
+  }
+  return undefined;
 }
 
 /**

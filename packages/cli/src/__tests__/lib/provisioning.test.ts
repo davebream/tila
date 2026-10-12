@@ -1,7 +1,13 @@
-import { homedir } from "node:os";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isMonorepoLayout, tilaHome } from "../../lib/provisioning";
+import {
+  hashToken,
+  isMonorepoLayout,
+  resolveHashPepper,
+  tilaHome,
+} from "../../lib/provisioning";
 
 describe("tilaHome()", () => {
   afterEach(() => {
@@ -52,5 +58,55 @@ describe("isMonorepoLayout()", () => {
   it("returns false when TILA_UI_DIST env var is set (env override strategy)", () => {
     vi.stubEnv("TILA_UI_DIST", "/custom/path/to/ui/dist");
     expect(isMonorepoLayout()).toBe(false);
+  });
+});
+
+/** The Worker's algorithm (packages/worker/src/lib/hash-token.ts), via WebCrypto. */
+async function workerHash(raw: string, pepper: string | undefined) {
+  const data = new TextEncoder().encode(raw);
+  const digest = pepper
+    ? await crypto.subtle.sign(
+        "HMAC",
+        await crypto.subtle.importKey(
+          "raw",
+          new TextEncoder().encode(pepper),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"],
+        ),
+        data,
+      )
+    : await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+describe("hashToken()", () => {
+  const raw = `tila_d1_${"a".repeat(64)}00000000`;
+
+  it("matches the Worker digest with and without a pepper", async () => {
+    expect(hashToken(raw, undefined)).toBe(await workerHash(raw, undefined));
+    expect(hashToken(raw, "pepper-ü")).toBe(await workerHash(raw, "pepper-ü"));
+    expect(hashToken(raw, "pepper-ü")).not.toBe(hashToken(raw, undefined));
+  });
+});
+
+describe("resolveHashPepper()", () => {
+  let home: string;
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    if (home) rmSync(home, { recursive: true, force: true });
+  });
+
+  it("prefers TILA_HASH_PEPPER, then ~/.tila/.env, else undefined", () => {
+    home = mkdtempSync(join(tmpdir(), "tila-pepper-"));
+    vi.stubEnv("TILA_HOME", home);
+    vi.stubEnv("TILA_HASH_PEPPER", "");
+    expect(resolveHashPepper()).toBeUndefined();
+    writeFileSync(join(home, ".env"), "TILA_HASH_PEPPER=from-file\n");
+    expect(resolveHashPepper()).toBe("from-file");
+    vi.stubEnv("TILA_HASH_PEPPER", "from-env");
+    expect(resolveHashPepper()).toBe("from-env");
   });
 });

@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `GET /api/health` now reports the product release `version` and full source `commit` of the deployed build, generated at build time from the root release marker. It previously always reported `0.1.0`. `apiVersion` and `minCliVersion` remain the separate protocol compatibility fields; `commit` is optional in `HealthResponseSchema` so older Workers still validate.
 
+### Bootstrap token hashing (#307)
+
+- `tila project create` now hashes the first project token with `TILA_HASH_PEPPER` (environment or `~/.tila/.env`) when it is set, matching a Worker that uses `HASH_PEPPER`. Previously it always wrote a plain SHA-256 digest, so on a peppered Worker the new token never authenticated.
+
 ## [0.5.0] - 2026-10-12
 
 ### Upgrade notes
