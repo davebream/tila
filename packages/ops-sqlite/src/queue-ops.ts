@@ -404,116 +404,119 @@ export function claimNext(
   now = Date.now(),
 ): QueueClaimResult {
   const input = QueueClaimCommandSchema.parse(raw);
-  return db.transaction((tx) => {
-    attempts.expireInTransaction(tx, now);
-    const result = command(
-      tx,
-      "claim-next",
-      origin,
-      input,
-      () => {
-        const current = policy(tx);
-        const denied = (reason: keyof typeof noGrantMessages) => ({
-          reason,
-          policy_revision: current.revision,
-        });
-        if (!current.enabled) return denied("disabled");
-        if (current.paused) return denied("paused");
-        const counts = occupancy(tx);
-        if (
-          current.execution_limit === null ||
-          counts.execution >= current.execution_limit
-        )
-          return denied("execution_capacity");
-        const entries = tx
-          .select()
-          .from(schema.queueEntries)
-          .where(eq(schema.queueEntries.state, "queued"))
-          .orderBy(
-            desc(schema.queueEntries.priority),
-            asc(schema.queueEntries.enqueue_order),
-            asc(schema.queueEntries.id),
-          )
-          .all()
-          .filter((entry) => allowsTask(entry.task_id));
-        if (!entries.length) return denied("empty");
-        const snapshot = readReadinessSnapshot(tx, now);
-        let wipBlocked = false;
-        for (const entry of entries) {
-          if (
-            input.types &&
-            !input.types.includes(
-              snapshot.entities.get(entry.task_id)?.type ?? "",
-            )
-          )
-            continue;
-          if (
-            entryReasons(tx, entry, snapshot, now, origin, input.capabilities)
-              .length
-          )
-            continue;
-          const reservation = tx
-            .select()
-            .from(schema.executionReservations)
-            .where(eq(schema.executionReservations.task_id, entry.task_id))
-            .get();
-          if (
-            !reservation?.wip_held &&
-            current.wip_limit !== null &&
-            counts.wip >= current.wip_limit
-          ) {
-            wipBlocked = true;
-            continue;
-          }
-          const predecessor = tx
-            .select()
-            .from(schema.workAttempts)
-            .where(eq(schema.workAttempts.entry_id, entry.id))
-            .orderBy(
-              desc(schema.workAttempts.created_at),
-              desc(schema.workAttempts.id),
-            )
-            .get();
-          const attempt = attempts.reserveInTransaction(
-            tx,
-            entry,
-            origin,
-            current.lease_ms,
-            now,
-            predecessor?.id,
-          );
-          return {
-            attempt_id: attempt.id,
-            entry_id: entry.id,
+  return db.transaction(
+    (tx) => {
+      attempts.expireInTransaction(tx, now);
+      const result = command(
+        tx,
+        "claim-next",
+        origin,
+        input,
+        () => {
+          const current = policy(tx);
+          const denied = (reason: keyof typeof noGrantMessages) => ({
+            reason,
             policy_revision: current.revision,
-          };
-        }
-        return denied(wipBlocked ? "wip_capacity" : "blocked");
-      },
-      {},
-      now,
-    );
-    if ("attempt_id" in result) {
-      const attempt = attempts.get(tx, result.attempt_id);
-      if (!allowsTask(attempt.task_id))
-        throw new QueueError(
-          "queue-authority-lost",
-          "Current resource permissions no longer allow this grant",
-        );
+          });
+          if (!current.enabled) return denied("disabled");
+          if (current.paused) return denied("paused");
+          const counts = occupancy(tx);
+          if (
+            current.execution_limit === null ||
+            counts.execution >= current.execution_limit
+          )
+            return denied("execution_capacity");
+          const entries = tx
+            .select()
+            .from(schema.queueEntries)
+            .where(eq(schema.queueEntries.state, "queued"))
+            .orderBy(
+              desc(schema.queueEntries.priority),
+              asc(schema.queueEntries.enqueue_order),
+              asc(schema.queueEntries.id),
+            )
+            .all()
+            .filter((entry) => allowsTask(entry.task_id));
+          if (!entries.length) return denied("empty");
+          const snapshot = readReadinessSnapshot(tx, now);
+          let wipBlocked = false;
+          for (const entry of entries) {
+            if (
+              input.types &&
+              !input.types.includes(
+                snapshot.entities.get(entry.task_id)?.type ?? "",
+              )
+            )
+              continue;
+            if (
+              entryReasons(tx, entry, snapshot, now, origin, input.capabilities)
+                .length
+            )
+              continue;
+            const reservation = tx
+              .select()
+              .from(schema.executionReservations)
+              .where(eq(schema.executionReservations.task_id, entry.task_id))
+              .get();
+            if (
+              !reservation?.wip_held &&
+              current.wip_limit !== null &&
+              counts.wip >= current.wip_limit
+            ) {
+              wipBlocked = true;
+              continue;
+            }
+            const predecessor = tx
+              .select()
+              .from(schema.workAttempts)
+              .where(eq(schema.workAttempts.entry_id, entry.id))
+              .orderBy(
+                desc(schema.workAttempts.created_at),
+                desc(schema.workAttempts.id),
+              )
+              .get();
+            const attempt = attempts.reserveInTransaction(
+              tx,
+              entry,
+              origin,
+              current.lease_ms,
+              now,
+              predecessor?.id,
+            );
+            return {
+              attempt_id: attempt.id,
+              entry_id: entry.id,
+              policy_revision: current.revision,
+            };
+          }
+          return denied(wipBlocked ? "wip_capacity" : "blocked");
+        },
+        {},
+        now,
+      );
+      if ("attempt_id" in result) {
+        const attempt = attempts.get(tx, result.attempt_id);
+        if (!allowsTask(attempt.task_id))
+          throw new QueueError(
+            "queue-authority-lost",
+            "Current resource permissions no longer allow this grant",
+          );
+        return {
+          kind: "granted",
+          entry: getEntry(tx, attempt.entry_id),
+          ...attempts.view(tx, attempt.id, origin, now),
+          policy_revision: result.policy_revision,
+        };
+      }
       return {
-        kind: "granted",
-        entry: getEntry(tx, attempt.entry_id),
-        ...attempts.view(tx, attempt.id, origin, now),
+        kind: "no_grant",
+        reason: result.reason,
+        message: noGrantMessages[result.reason],
         policy_revision: result.policy_revision,
       };
-    }
-    return {
-      kind: "no_grant",
-      reason: result.reason,
-      message: noGrantMessages[result.reason],
-      policy_revision: result.policy_revision,
-    };
-  });
+    },
+    { behavior: "immediate" },
+  );
 }
 function group(
   entry: QueueEntry,

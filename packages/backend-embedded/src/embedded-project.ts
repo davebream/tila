@@ -172,12 +172,12 @@ export class EmbeddedProject
     this.queue = new EmbeddedQueueBackend(
       this.db,
       () => this.localOrigin(),
-      (fn) => this.retry(fn),
+      (fn) => withBusyRetry(fn, this.sleepSync, 9),
     );
     this.attempts = new EmbeddedAttemptBackend(
       this.db,
       () => this.localOrigin(),
-      (fn) => this.retry(fn),
+      (fn) => withBusyRetry(fn, this.sleepSync, 9),
     );
     this.identity = IdentityContextSchema.parse(
       opts.identity ?? {
