@@ -5,6 +5,14 @@
  * strings returned by the worker and DO layers.
  */
 export const TILA_ERRORS = {
+  SCHEMA_REVISION_REQUIRED: "schema-revision-required",
+  QUEUE_MANAGED_WORK: "queue-managed-work",
+  QUEUE_NOT_FOUND: "queue-not-found",
+  QUEUE_CONFLICT: "queue-conflict",
+  QUEUE_AUTHORITY_LOST: "queue-authority-lost",
+  QUEUE_PRECONDITION: "queue-precondition",
+  QUEUE_INVALID_STATE: "queue-invalid-state",
+  QUEUE_IDEMPOTENCY_CONFLICT: "queue-idempotency-conflict",
   SCHEMA_DESTRUCTIVE: "schema-destructive",
   SCHEMA_REVISION_CONFLICT: "schema-revision-conflict",
   SCHEMA_REVIEW_REQUIRED: "schema-review-required",

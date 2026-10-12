@@ -42,6 +42,7 @@ import {
   type SummaryBackend,
   applyRecordLegacyDefaults,
 } from "@tila/core";
+import { isManagedTask } from "@tila/ops-sqlite";
 import { continuityOps, summaryOps } from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
@@ -70,6 +71,7 @@ import type {
   ReentryResponse,
 } from "@tila/schemas";
 import type { TilaSchemaToml } from "@tila/schemas";
+import { EmbeddedAttemptBackend, EmbeddedQueueBackend } from "./embedded-queue";
 
 import {
   type Claim,
@@ -147,6 +149,8 @@ export class EmbeddedProject
   private readonly sleepSync: SleepSync;
   private readonly _close: () => void;
   private readonly identity: IdentityContext;
+  readonly queue: EmbeddedQueueBackend;
+  readonly attempts: EmbeddedAttemptBackend;
 
   // `org`/`project` are accepted in the constructor opts for symmetry with the
   // wrapper API (and with EmbeddedArtifactBackend, which DOES use them for key
@@ -165,6 +169,16 @@ export class EmbeddedProject
     this.archives = opts.archives;
     this.sleepSync = opts.sleepSync;
     this._close = opts.close;
+    this.queue = new EmbeddedQueueBackend(
+      this.db,
+      () => this.localOrigin(),
+      (fn) => this.retry(fn),
+    );
+    this.attempts = new EmbeddedAttemptBackend(
+      this.db,
+      () => this.localOrigin(),
+      (fn) => this.retry(fn),
+    );
     this.identity = IdentityContextSchema.parse(
       opts.identity ?? {
         principal_id: `local:${opts.org}`,
@@ -220,6 +234,16 @@ export class EmbeddedProject
   }
 
   async update(id: string, data: Partial<Entity["data"]>): Promise<Entity> {
+    if (isManagedTask(this.db, id))
+      return this.retry(() =>
+        entityOps.update(
+          this.db,
+          id,
+          data as Record<string, unknown>,
+          0,
+          this.localOrigin(),
+        ),
+      );
     const entity = await this.retry(() => entityOps.get(this.db, id));
     if (!entity) throw new NotFoundError(`Entity ${id} not found`);
     const resource = `${entity.type}:${id}`;

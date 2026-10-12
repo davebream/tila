@@ -30,6 +30,7 @@ import {
 } from "./fence-ops";
 import { checkPendingGates } from "./gate-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
+import { assertUnmanagedArchive, checkManagedWrite } from "./managed-work";
 import { searchRecords } from "./record-ops";
 import * as schema from "./schema";
 import { SchemaCorruptError } from "./schema-errors";
@@ -483,6 +484,7 @@ export function updateInTransaction(
   origin: RequestOrigin,
   tags?: string[],
   now = Date.now(),
+  internalAttemptId?: string,
 ): Entity {
   const normalizedTags =
     tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
@@ -503,9 +505,19 @@ export function updateInTransaction(
   // Use the fast path: we already have `existing.type` from the SELECT above,
   // so construct the canonical resource string directly without another DB read.
   const canonicalResource = resolveEntityResourceDirect(existing.type, id);
-  assertResourceFenceWithCanonical(tx, canonicalResource, fence, {
-    requireLiveClaim: true,
-  });
+  const contentOnly = checkManagedWrite(
+    tx,
+    id,
+    data,
+    fence,
+    origin,
+    now,
+    internalAttemptId,
+  );
+  if (!contentOnly)
+    assertResourceFenceWithCanonical(tx, canonicalResource, fence, {
+      requireLiveClaim: true,
+    });
 
   // Gate enforcement: block terminal transitions if pending gates exist.
   // Non-terminal status changes and updates without a status field are unaffected.
@@ -517,7 +529,7 @@ export function updateInTransaction(
   const incomingStatus = data[lifecycle?.field ?? "status"] as
     | string
     | undefined;
-  if (incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
+  if (!contentOnly && incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
     // B5: share the function-level `now` so entity.updated_at and any
     // gate.resolved_at agree (single clock per transaction).
     checkPendingGates(tx, id, now);
@@ -613,6 +625,7 @@ export function archive(
   const now = Date.now();
 
   db.transaction((tx) => {
+    assertUnmanagedArchive(tx, id);
     // Dedup the fence-validated archive inside this transaction (audit B1): a
     // replay returns without re-running the terminal archive (which would
     // re-delete the claim / re-journal). The route body carries no data, so we

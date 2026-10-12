@@ -164,3 +164,4 @@ export {
   type Settled,
   type AssembleRuntimeViewInput,
 } from "./runtime-observation";
+export type { QueueBackend } from "./interfaces/queue-backend";

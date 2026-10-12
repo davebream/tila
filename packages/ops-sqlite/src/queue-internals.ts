@@ -16,6 +16,7 @@ export type ProjectTransaction = Parameters<
 export class QueueError extends Error {
   constructor(
     public readonly code:
+      | "queue-managed-work"
       | "queue-not-found"
       | "queue-conflict"
       | "queue-authority-lost"
@@ -77,7 +78,18 @@ export function command<T extends Record<string, unknown>>(
   }
   const result = run();
   tx.insert(schema.queueOperationReceipts)
-    .values({ key, request, result, ...links, created_at: now })
+    .values({
+      key,
+      request,
+      result,
+      entry_id:
+        links.entry_id ??
+        (typeof result.entry_id === "string" ? result.entry_id : undefined),
+      attempt_id:
+        links.attempt_id ??
+        (typeof result.attempt_id === "string" ? result.attempt_id : undefined),
+      created_at: now,
+    })
     .run();
   return result;
 }

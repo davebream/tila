@@ -157,3 +157,7 @@ export * as conversationOps from "./conversation-ops";
 
 export * as attemptOps from "./attempt-ops";
 export { QueueError } from "./queue-internals";
+
+export * as queueOps from "./queue-ops";
+
+export { isManagedTask } from "./managed-work";

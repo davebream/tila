@@ -137,6 +137,8 @@ export function assertCredentialRequest(
     !policy.capabilities.includes("artifacts:read")
   )
     throw new CredentialPolicyDenied();
+  // Queue transport checks capabilities and current task access before any replay.
+  if (path.startsWith("/queue/")) return;
   if (!restricted) return;
   if (path === "/schema/current" || path === "/admin/transfer/status") return; // Internal validation/status only, never returned by restricted public routes.
   if (path.startsWith("/record/")) {

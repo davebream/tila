@@ -70,6 +70,7 @@ export type ApplySchemaResult =
 export class SchemaPreconditionError extends Error {
   constructor(
     public readonly code:
+      | "schema-revision-required"
       | "schema-revision-conflict"
       | "schema-review-required"
       | "schema-review-mismatch",
@@ -189,149 +190,157 @@ export function applySchema(
   // Step 1: Validate incoming TOML (throws SchemaParseException on invalid)
   const nextParsed = parseTilaSchemaToml(definition);
 
-  return db.transaction(
-    (tx) =>
-      withDoIdempotency<ApplySchemaResult>(
-        tx,
-        options.idempotency_key
-          ? {
-              key: `schema:${canonicalJson([origin?.principalId ?? appliedBy, origin?.participantId ?? appliedBy, options.idempotency_key])}`,
-              requestHash: canonicalJson([
-                definition,
-                strategy ?? null,
-                options.expected_revision ?? null,
-                options.reviewed_definition ?? null,
-              ]),
-              shouldStore: (result) =>
-                result.ok || result.reason === "no-change",
-            }
-          : undefined,
-        () => {
-          // Step 2: Fetch current schema
-          const currentRow = tx
-            .select()
-            .from(schema.schemaHistory)
-            .orderBy(desc(schema.schemaHistory.version))
-            .limit(1)
-            .get();
-
-          const revision = currentRow?.version ?? 0;
-          if (
-            options.expected_revision !== undefined &&
-            options.expected_revision !== revision
-          ) {
-            throw new SchemaPreconditionError(
-              "schema-revision-conflict",
-              revision,
-            );
-          }
-          if (
-            options.reviewed_definition !== undefined &&
-            canonicalJson(parseTilaSchemaToml(options.reviewed_definition)) !==
-              canonicalJson(nextParsed)
-          ) {
-            throw new SchemaPreconditionError(
-              "schema-review-mismatch",
-              revision,
-            );
-          }
-
-          let changeSummary: string[] = [];
-          let diffAutoApplicable = true;
-
-          if (currentRow) {
-            // Step 3: Diff against previous schema
-            const prevParsed = parseTilaSchemaToml(currentRow.definition);
-            const diff = diffSchemas(prevParsed, nextParsed);
-
-            // Step 4: No-change detection
-            if (diff.changes.length === 0) {
-              return {
-                ok: false as const,
-                reason: "no-change" as const,
-                revision,
-              };
-            }
-
-            changeSummary = humanizeChanges(diff.changes);
-            diffAutoApplicable = diff.autoApplicable;
-
-            if (
-              !diffAutoApplicable &&
-              strategy &&
-              options.expected_revision !== undefined &&
-              options.reviewed_definition === undefined
-            ) {
-              throw new SchemaPreconditionError(
-                "schema-review-required",
-                revision,
-              );
-            }
-
-            // Step 5: Reject destructive without strategy
-            if (!diffAutoApplicable && !strategy) {
-              return {
-                ok: false as const,
-                reason: "destructive" as const,
-                changes: changeSummary,
-                hint: buildHint(changeSummary),
-              };
-            }
-          } else {
-            // First schema ever — no diff needed
-            changeSummary = ["Initial schema applied"];
-          }
-
-          // Step 6: Compute new version
-          const current = tx
-            .select({ maxVersion: sql<number>`COALESCE(MAX(version), 0)` })
-            .from(schema.schemaHistory)
-            .get();
-
-          const newVersion = (current?.maxVersion ?? 0) + 1;
-          const now = Date.now();
-
-          // Step 7: Insert with new columns
-          tx.insert(schema.schemaHistory)
-            .values({
-              version: newVersion,
+  return db.transaction((tx) => {
+    // A cached legacy receipt cannot bypass the now-managed precondition.
+    if (
+      options.expected_revision === undefined &&
+      tx
+        .select()
+        .from(schema.queuePolicy)
+        .where(eq(schema.queuePolicy.singleton, 1))
+        .get()?.revision_required
+    )
+      throw new SchemaPreconditionError(
+        "schema-revision-required",
+        getCurrentSchema(tx)?.version ?? 0,
+      );
+    return withDoIdempotency<ApplySchemaResult>(
+      tx,
+      options.idempotency_key
+        ? {
+            key: `schema:${canonicalJson([origin?.principalId ?? appliedBy, origin?.participantId ?? appliedBy, options.idempotency_key])}`,
+            requestHash: canonicalJson([
               definition,
-              applied_at: now,
-              applied_by: appliedBy,
-              change_summary: JSON.stringify(changeSummary),
-              strategy: strategy ?? null,
-            })
-            .run();
+              strategy ?? null,
+              options.expected_revision ?? null,
+              options.reviewed_definition ?? null,
+            ]),
+            shouldStore: (result) => result.ok || result.reason === "no-change",
+          }
+        : undefined,
+      () => {
+        // Step 2: Fetch current schema
+        const currentRow = tx
+          .select()
+          .from(schema.schemaHistory)
+          .orderBy(desc(schema.schemaHistory.version))
+          .limit(1)
+          .get();
 
-          // Step 8: Emit journal event
-          const journalOrigin = origin ?? {
-            principalId: "system:schema",
-            participantId: "system:schema",
-            environment: {},
-            actor: appliedBy,
-          };
-          appendJournal(tx, {
-            kind: "schema.applied",
-            resource: "schema",
-            ...journalOrigin,
-            actor: appliedBy,
-            fence: null,
-            data: { version: newVersion, changes: changeSummary },
-            tokenId: origin?.tokenId,
-            source: origin?.source,
-            sourceVersion: origin?.sourceVersion,
-          });
+        const revision = currentRow?.version ?? 0;
+        if (
+          options.expected_revision !== undefined &&
+          options.expected_revision !== revision
+        ) {
+          throw new SchemaPreconditionError(
+            "schema-revision-conflict",
+            revision,
+          );
+        }
+        if (
+          options.reviewed_definition !== undefined &&
+          canonicalJson(parseTilaSchemaToml(options.reviewed_definition)) !==
+            canonicalJson(nextParsed)
+        ) {
+          throw new SchemaPreconditionError("schema-review-mismatch", revision);
+        }
 
-          // Step 9: Return result
-          return {
-            ok: true as const,
+        let changeSummary: string[] = [];
+        let diffAutoApplicable = true;
+
+        if (currentRow) {
+          // Step 3: Diff against previous schema
+          const prevParsed = parseTilaSchemaToml(currentRow.definition);
+          const diff = diffSchemas(prevParsed, nextParsed);
+
+          // Step 4: No-change detection
+          if (diff.changes.length === 0) {
+            return {
+              ok: false as const,
+              reason: "no-change" as const,
+              revision,
+            };
+          }
+
+          changeSummary = humanizeChanges(diff.changes);
+          diffAutoApplicable = diff.autoApplicable;
+
+          if (
+            !diffAutoApplicable &&
+            strategy &&
+            options.expected_revision !== undefined &&
+            options.reviewed_definition === undefined
+          ) {
+            throw new SchemaPreconditionError(
+              "schema-review-required",
+              revision,
+            );
+          }
+
+          // Step 5: Reject destructive without strategy
+          if (!diffAutoApplicable && !strategy) {
+            return {
+              ok: false as const,
+              reason: "destructive" as const,
+              changes: changeSummary,
+              hint: buildHint(changeSummary),
+            };
+          }
+        } else {
+          // First schema ever — no diff needed
+          changeSummary = ["Initial schema applied"];
+        }
+
+        // Step 6: Compute new version
+        const current = tx
+          .select({ maxVersion: sql<number>`COALESCE(MAX(version), 0)` })
+          .from(schema.schemaHistory)
+          .get();
+
+        const newVersion = (current?.maxVersion ?? 0) + 1;
+        const now = Date.now();
+
+        // Step 7: Insert with new columns
+        tx.insert(schema.schemaHistory)
+          .values({
             version: newVersion,
-            revision: newVersion,
-            changes: changeSummary,
-          };
-        },
-      ).result,
-  );
+            definition,
+            applied_at: now,
+            applied_by: appliedBy,
+            change_summary: JSON.stringify(changeSummary),
+            strategy: strategy ?? null,
+          })
+          .run();
+
+        // Step 8: Emit journal event
+        const journalOrigin = origin ?? {
+          principalId: "system:schema",
+          participantId: "system:schema",
+          environment: {},
+          actor: appliedBy,
+        };
+        appendJournal(tx, {
+          kind: "schema.applied",
+          resource: "schema",
+          ...journalOrigin,
+          actor: appliedBy,
+          fence: null,
+          data: { version: newVersion, changes: changeSummary },
+          tokenId: origin?.tokenId,
+          source: origin?.source,
+          sourceVersion: origin?.sourceVersion,
+        });
+
+        // Step 9: Return result
+        return {
+          ok: true as const,
+          version: newVersion,
+          revision: newVersion,
+          changes: changeSummary,
+        };
+      },
+    ).result;
+  });
 }
 
 export function listSchemaHistory(
