@@ -442,9 +442,11 @@ describe("RecordsPage list", () => {
 
     await waitFor(() => expect(urlParam("q")).toBe("-12"));
     expect(urlParam("after")).toBeNull();
-    const request = requests.at(-1);
-    expect(request?.get("key_contains")).toBe("-12");
-    expect(request?.has("cursor")).toBe(false);
+    // The URL updates before the debounced request is sent; wait for it.
+    await waitFor(() =>
+      expect(requests.at(-1)?.get("key_contains")).toBe("-12"),
+    );
+    expect(requests.at(-1)?.has("cursor")).toBe(false);
     expect(await screen.findByText("key-120")).toBeInTheDocument();
     expect(screen.queryByText("key-101")).not.toBeInTheDocument();
   });
