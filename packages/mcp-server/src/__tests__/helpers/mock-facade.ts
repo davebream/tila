@@ -96,7 +96,8 @@ export type MockFacadeShape = {
     | "listRelationships"
     | "ready"
     | "addArtifactRef"
-    | "listArtifactRefs",
+    | "listArtifactRefs"
+    | "catalog",
     Mock
   >;
   records: Record<
@@ -222,6 +223,7 @@ export function createMockFacade(): MockFacadeShape {
       "ready",
       "addArtifactRef",
       "listArtifactRefs",
+      "catalog",
     ),
     records: fns(
       "create",
