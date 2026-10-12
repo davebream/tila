@@ -165,6 +165,9 @@ else if(args[0] === "install") {
   let alive = true; try { process.kill(pid,0); } catch { alive = false; }
   if(alive) throw new Error("native child still running");
   if(args.join("|") !== ${JSON.stringify(["install", "--global", "--prefix", dirname(modules), "tila-cli@1.2.0"].join("|"))}) throw new Error("wrong update arguments");
+  // Model package replacement with a new file, avoiding macOS executable-cache
+  // state from rewriting a previously executed signed binary in place.
+  fs.unlinkSync(${JSON.stringify(installed)});
   fs.copyFileSync(${JSON.stringify(newBinary)}, ${JSON.stringify(installed)});
   console.log("manager progress, never JSON stdout");
 } else process.exit(3);
