@@ -35,117 +35,131 @@ export function acquire(
     return withDoIdempotency<AcquireResult>(
       tx,
       idempotency && { ...idempotency, shouldStore: (r) => r.acquired },
-      () => doAcquire(),
+      () =>
+        acquireInTransaction(tx, resource, origin, mode, ttlMs, metadata, now),
     ).result;
+  });
+}
 
-    function doAcquire(): AcquireResult {
-      // Canonicalize entity resources to `<type>:<id>` at the write boundary.
-      // This ensures both the fence row and the claim row use the canonical form
-      // regardless of whether the caller passed a bare id or the typed form.
-      // Non-entity resources (records, arbitrary coordination keys) pass through
-      // unchanged (resolveEntityResource returns null for them).
-      const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
+/** Internal primitive: the caller owns the project transaction and admission checks. */
+export function acquireInTransaction(
+  tx: Parameters<
+    Parameters<
+      BaseSQLiteDatabase<"sync", unknown, typeof schema>["transaction"]
+    >[0]
+  >[0],
+  resource: string,
+  origin: RequestOrigin,
+  mode: "exclusive" | "owner" | "presence",
+  ttlMs: number,
+  metadata?: Record<string, unknown>,
+  now = Date.now(),
+): AcquireResult {
+  // Canonicalize entity resources to `<type>:<id>` at the write boundary.
+  // This ensures both the fence row and the claim row use the canonical form
+  // regardless of whether the caller passed a bare id or the typed form.
+  // Non-entity resources (records, arbitrary coordination keys) pass through
+  // unchanged (resolveEntityResource returns null for them).
+  const canonicalResource = resolveEntityResource(tx, resource) ?? resource;
 
-      const existing = tx
-        .select()
-        .from(schema.claims)
-        .where(eq(schema.claims.resource, canonicalResource))
-        .get();
+  const existing = tx
+    .select()
+    .from(schema.claims)
+    .where(eq(schema.claims.resource, canonicalResource))
+    .get();
 
-      if (existing && existing.expires_at > now) {
-        if (
-          existing.principal_id === origin.principalId &&
-          existing.participant_id === origin.participantId
-        ) {
-          // Same-participant reacquire is treated as a RENEW, not a fresh acquire:
-          // we only extend expires_at and return the EXISTING fence unchanged. The
-          // fence does NOT bump here. Per docs/01-DECISIONS §2 the fence increments
-          // on each *acquire* to invalidate a prior participant — but re-acquiring a
-          // lease you already hold has no prior participant to fence out, so bumping would
-          // needlessly invalidate the caller's own in-flight fenced writes.
-          const expiresAt = now + ttlMs;
-          tx.update(schema.claims)
-            .set({ expires_at: expiresAt })
-            .where(eq(schema.claims.resource, canonicalResource))
-            .run();
-
-          return {
-            acquired: true,
-            fence: existing.fence,
-            expires_at: expiresAt,
-            participant_id: origin.participantId,
-          };
-        }
-
-        if (existing.mode === "exclusive" || mode === "exclusive") {
-          return {
-            acquired: false,
-            fence: existing.fence,
-            expires_at: 0,
-            participant_id: origin.participantId,
-          };
-        }
-        if (mode === "owner" && existing.principal_id !== origin.principalId) {
-          return {
-            acquired: false,
-            fence: existing.fence,
-            expires_at: 0,
-            participant_id: origin.participantId,
-          };
-        }
-      }
-
-      tx.run(
-        sql`INSERT INTO fences(resource, current_fence) VALUES(${canonicalResource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
-      );
-
-      const fenceRow = tx
-        .select()
-        .from(schema.fences)
-        .where(eq(schema.fences.resource, canonicalResource))
-        .get();
-      const newFence = fenceRow?.current_fence ?? 1;
-
-      tx.delete(schema.claims)
-        .where(eq(schema.claims.resource, canonicalResource))
-        .run();
-
+  if (existing && existing.expires_at > now) {
+    if (
+      existing.principal_id === origin.principalId &&
+      existing.participant_id === origin.participantId
+    ) {
+      // Same-participant reacquire is treated as a RENEW, not a fresh acquire:
+      // we only extend expires_at and return the EXISTING fence unchanged. The
+      // fence does NOT bump here. Per docs/01-DECISIONS §2 the fence increments
+      // on each *acquire* to invalidate a prior participant — but re-acquiring a
+      // lease you already hold has no prior participant to fence out, so bumping would
+      // needlessly invalidate the caller's own in-flight fenced writes.
       const expiresAt = now + ttlMs;
-      tx.insert(schema.claims)
-        .values({
-          resource: canonicalResource,
-          principal_id: origin.principalId,
-          participant_id: origin.participantId,
-          environment: JSON.stringify(origin.environment),
-          mode,
-          fence: newFence,
-          acquired_at: now,
-          expires_at: expiresAt,
-          metadata: JSON.stringify(metadata ?? {}),
-        })
+      tx.update(schema.claims)
+        .set({ expires_at: expiresAt })
+        .where(eq(schema.claims.resource, canonicalResource))
         .run();
-
-      appendJournal(tx, {
-        kind: "claim.acquired",
-        resource: canonicalResource,
-        actor: origin.actor,
-        principalId: origin.principalId,
-        participantId: origin.participantId,
-        environment: origin.environment,
-        fence: newFence,
-        tokenId: origin?.tokenId,
-        source: origin?.source,
-        sourceVersion: origin?.sourceVersion,
-      });
 
       return {
         acquired: true,
-        fence: newFence,
+        fence: existing.fence,
         expires_at: expiresAt,
         participant_id: origin.participantId,
       };
     }
+
+    if (existing.mode === "exclusive" || mode === "exclusive") {
+      return {
+        acquired: false,
+        fence: existing.fence,
+        expires_at: 0,
+        participant_id: origin.participantId,
+      };
+    }
+    if (mode === "owner" && existing.principal_id !== origin.principalId) {
+      return {
+        acquired: false,
+        fence: existing.fence,
+        expires_at: 0,
+        participant_id: origin.participantId,
+      };
+    }
+  }
+
+  tx.run(
+    sql`INSERT INTO fences(resource, current_fence) VALUES(${canonicalResource}, 1) ON CONFLICT(resource) DO UPDATE SET current_fence = current_fence + 1`,
+  );
+
+  const fenceRow = tx
+    .select()
+    .from(schema.fences)
+    .where(eq(schema.fences.resource, canonicalResource))
+    .get();
+  const newFence = fenceRow?.current_fence ?? 1;
+
+  tx.delete(schema.claims)
+    .where(eq(schema.claims.resource, canonicalResource))
+    .run();
+
+  const expiresAt = now + ttlMs;
+  tx.insert(schema.claims)
+    .values({
+      resource: canonicalResource,
+      principal_id: origin.principalId,
+      participant_id: origin.participantId,
+      environment: JSON.stringify(origin.environment),
+      mode,
+      fence: newFence,
+      acquired_at: now,
+      expires_at: expiresAt,
+      metadata: JSON.stringify(metadata ?? {}),
+    })
+    .run();
+
+  appendJournal(tx, {
+    kind: "claim.acquired",
+    resource: canonicalResource,
+    actor: origin.actor,
+    principalId: origin.principalId,
+    participantId: origin.participantId,
+    environment: origin.environment,
+    fence: newFence,
+    tokenId: origin?.tokenId,
+    source: origin?.source,
+    sourceVersion: origin?.sourceVersion,
   });
+
+  return {
+    acquired: true,
+    fence: newFence,
+    expires_at: expiresAt,
+    participant_id: origin.participantId,
+  };
 }
 
 export interface RenewResult {

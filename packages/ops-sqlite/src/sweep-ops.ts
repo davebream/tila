@@ -1,6 +1,7 @@
 import { lt, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { deleteTombstonedPointers } from "./artifact-ops";
+import { expireInTransaction } from "./attempt-ops";
 import { expireDeliveries } from "./conversation-ops";
 import { appendJournal } from "./journal-ops";
 import * as schema from "./schema";
@@ -81,6 +82,8 @@ export function sweep(
 
     tx.delete(schema.claims).where(lte(schema.claims.expires_at, now)).run();
     const claimsDeleted = readChanges(tx);
+    // Reservations remain after accepted execution loses its claim.
+    expireInTransaction(tx, now);
 
     const presenceCutoff = now - presenceTtlMs;
     tx.delete(schema.presence)
