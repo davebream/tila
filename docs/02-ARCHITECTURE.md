@@ -2937,3 +2937,37 @@ both capacity reservations, even if the ordinary claim has already been swept.
 The old fence is invalidated. Expiry runs before attempt mutations and during
 sweeps; admission will evaluate it in its own transaction. A missing heartbeat
 is not evidence that an external process stopped.
+
+### Queue admission and managed work
+
+The admission backend uses one explicitly enrolled project queue. Enrollment
+does not launch work. Selection orders priority descending, enrollment order
+ascending, then stable ID; blocked, incompatible and differently targeted work
+is skipped. Capabilities describe scheduling compatibility and never replace
+resource authorization.
+
+Admission checks the current project policy, lifecycle/dependency/gate snapshot,
+claims and reservations in one SQLite transaction. That transaction reserves
+execution and WIP, establishes the claim and attempt, journals the grant and
+records the command receipt. A replay rechecks current task access and reports
+current grant validity. A reserved grant still requires acceptance before launch.
+
+An explicit positive execution limit is required to enable dispatch. WIP is
+uncapped unless configured and counts distinct admitted items. Pausing prevents
+new grants, while existing grants may be accepted and finished. Lowering a limit
+does not evict work. Empty, blocked, paused and exhausted capacity are ordinary
+no-grant results, distinct from conflicts and unavailable service.
+
+Unfinished enrollment prevents generic claim acquisition, renewal, release and
+task archival. Terminal lifecycle changes must commit with the attempt result;
+nonterminal lifecycle changes require the current execution authority. Ordinary
+content edits use an explicit zero-fence content path on managed tasks and never
+grant execution authority. Supplying a positive fence continues to require a
+live matching claim, so stale execution writes are rejected. Unmanaged tasks
+retain their existing claim behavior. Public client integration follows in B3.
+
+Once enabled, managed configuration permanently requires revision-aware writes,
+even after dispatch is disabled. Migration 33 preserves that marker. Internal
+DO transport and embedded facades share the same operations; public capability
+advertisement and rollout remain gated on completion of the recovery and public
+API contract.
