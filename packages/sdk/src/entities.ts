@@ -6,6 +6,7 @@ import type {
   EntityListResponse,
   EntityResponse,
   ListEntityRelationshipsResponse,
+  WorkCatalogResponse,
 } from "@tila/schemas";
 import type { TilaClient } from "./client";
 
@@ -47,6 +48,14 @@ function _createMethods(client: TilaClient, base: string) {
       if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
       if (compact) q.compact = "true";
       return client.get<EntityListResponse>(base, { query: q });
+    },
+
+    /**
+     * Task type catalog: every type the caller may read, declared by the
+     * schema or present in storage, with visible counts and definitions.
+     */
+    async catalog(): Promise<WorkCatalogResponse> {
+      return client.get<WorkCatalogResponse>(`${base}/~/types`);
     },
 
     async update(

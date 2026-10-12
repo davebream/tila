@@ -386,26 +386,57 @@ export function diffSchemas(
   // Cover non-field configuration too. New sections are additive, but changing
   // existing behavior requires an explicit strategy. Compare canonical values
   // so TOML key ordering never creates a spurious revision.
-  const compare = (path: string, before: unknown, after: unknown) => {
+  const compare = (
+    path: string,
+    before: unknown,
+    after: unknown,
+    destructive = path !== "schema_version" && path !== "templates",
+  ) => {
     if (canonicalJson(before) !== canonicalJson(after)) {
-      changes.push({
-        kind: "definition-changed",
-        path,
-        destructive: path !== "schema_version" && path !== "templates",
-      });
+      changes.push({ kind: "definition-changed", path, destructive });
     }
   };
+  // Presentation metadata is display-only, so changing it never needs an
+  // explicit strategy.
   for (const name of prevUnits) {
     if (!nextUnitSet.has(name)) continue;
-    const { fields: _previousFields, ...before } = previous.work_units[name];
-    const { fields: _nextFields, ...after } = next.work_units[name];
+    const {
+      fields: _previousFields,
+      presentation: previousPresentation,
+      ...before
+    } = previous.work_units[name];
+    const {
+      fields: _nextFields,
+      presentation: nextPresentation,
+      ...after
+    } = next.work_units[name];
     compare(`work_units.${name}`, before, after);
+    compare(
+      `work_units.${name}.presentation`,
+      previousPresentation ?? null,
+      nextPresentation ?? null,
+      false,
+    );
   }
   for (const name of prevRecordTypes) {
     if (!nextRecordSet.has(name)) continue;
-    const { fields: _previousFields, ...before } = prevRecords[name];
-    const { fields: _nextFields, ...after } = nextRecords[name];
+    const {
+      fields: _previousFields,
+      presentation: previousPresentation,
+      ...before
+    } = prevRecords[name];
+    const {
+      fields: _nextFields,
+      presentation: nextPresentation,
+      ...after
+    } = nextRecords[name];
     compare(`records.${name}`, before, after);
+    compare(
+      `records.${name}.presentation`,
+      previousPresentation ?? null,
+      nextPresentation ?? null,
+      false,
+    );
   }
   for (const kind of prevKinds) {
     if (nextKinds.has(kind))

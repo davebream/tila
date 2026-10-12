@@ -161,6 +161,7 @@ export function assertCredentialRequest(
     if (body.source_artifact_key) throw new CredentialPolicyDenied();
     return;
   }
+  if (path === "/entity/type-counts") return; // Counts apply the restriction themselves.
   if (path === "/entity/list") {
     if (query.get("compact") === "true") throw new CredentialPolicyDenied();
     if (query.has("parent")) assertTaskAccess(db, policy, query.get("parent"));

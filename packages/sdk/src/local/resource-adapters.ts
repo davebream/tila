@@ -103,6 +103,7 @@ import type {
   StateResponse,
   SummaryResponse,
   UnifiedSearchResponse,
+  WorkCatalogResponse,
 } from "@tila/schemas";
 import {
   SchemaApplyRequestSchema,
@@ -204,6 +205,10 @@ function createLocalTaskMethods(project: EmbeddedProject) {
         tagFilter: query?.tagFilter,
       });
       return { ok: true, entities };
+    },
+
+    async catalog(): Promise<WorkCatalogResponse> {
+      return project.workCatalog();
     },
 
     async update(
@@ -443,7 +448,8 @@ function createLocalRecordMethods(project: EmbeddedProject) {
 
     async types(): Promise<RecordTypesResponse> {
       const types = await project.listRecordTypesInUse();
-      return { ok: true, types };
+      const catalog = project.recordCatalog();
+      return { ok: true, types, entries: catalog.types, scope: catalog.scope };
     },
 
     async typesInUse(): Promise<RecordTypesResponse> {
