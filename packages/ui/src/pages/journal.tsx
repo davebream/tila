@@ -1,3 +1,7 @@
+import {
+  JournalReportForm,
+  ProjectReportDetails,
+} from "@/components/journal-report";
 import { AuthorAffix } from "@/components/ui/author-affix";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,6 +69,7 @@ const KIND_GROUPS: FilterGroup[] = [
     label: "Other",
     options: [
       "schema.applied",
+      "custom.reported",
       "template.instantiated",
       "record.created",
       "record.updated",
@@ -229,17 +234,26 @@ function EventRow({ event }: { event: JournalEvent }) {
           {formatTime(event.t)}
         </TableCell>
         <TableCell>
-          <Badge variant={kindBadgeVariant(event.kind)}>{event.kind}</Badge>
+          {event.kind === "custom.reported" ? (
+            <ProjectReportDetails data={event.data} projectId={projectId} />
+          ) : (
+            <Badge variant={kindBadgeVariant(event.kind)}>{event.kind}</Badge>
+          )}
         </TableCell>
         <TableCell>
-          <ResourceLink
-            resource={event.resource}
-            kind={event.kind}
-            data={event.data}
-            projectId={projectId}
-          />
+          {event.kind === "custom.reported" ? (
+            <span>{event.resource}</span>
+          ) : (
+            <ResourceLink
+              resource={event.resource}
+              kind={event.kind}
+              data={event.data}
+              projectId={projectId}
+            />
+          )}
         </TableCell>
         <TableCell className="text-muted-foreground">
+          {event.kind === "custom.reported" && <span>Reporter: </span>}
           <span className="inline-flex items-center gap-1.5">
             {event.principal_id}/{event.participant_id}
             <AuthorAffix
@@ -306,6 +320,14 @@ export function JournalPage() {
   const [clientNameFilter, setClientNameFilter] = useState<string[]>(
     () => searchParams.get("client_name")?.split(",").filter(Boolean) ?? [],
   );
+  const [eventName, setEventName] = useState(
+    () => searchParams.get("event_name") ?? "",
+  );
+  const [correlation, setCorrelation] = useState(
+    () => searchParams.get("correlation_id") ?? "",
+  );
+  const filterEventName = useDebouncedValue(eventName, 300);
+  const filterCorrelation = useDebouncedValue(correlation, 300);
   const filterResource = useDebouncedValue(resourceInput, 300);
   const filterKind = kindFilter;
   const filterClientName = clientNameFilter;
@@ -319,12 +341,21 @@ export function JournalPage() {
 
   useEffect(() => {
     const params = new URLSearchParams();
+    if (filterEventName) params.set("event_name", filterEventName);
+    if (filterCorrelation) params.set("correlation_id", filterCorrelation);
     if (filterResource) params.set("resource", filterResource);
     if (filterKind.length > 0) params.set("kind", filterKind.join(","));
     if (filterClientName.length > 0)
       params.set("client_name", filterClientName.join(","));
     setSearchParams(params, { replace: true });
-  }, [filterResource, filterKind, filterClientName, setSearchParams]);
+  }, [
+    filterResource,
+    filterKind,
+    filterClientName,
+    filterEventName,
+    filterCorrelation,
+    setSearchParams,
+  ]);
 
   // Scroll tracking
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -349,15 +380,21 @@ export function JournalPage() {
       filterResource,
       filterKind,
       filterClientName,
+      filterEventName,
+      filterCorrelation,
       retryKey,
     ],
     queryFn: async () => {
       const params: {
+        event_name?: string;
+        correlation_id?: string;
         resource?: string;
         kind?: string[];
         client_name?: string[];
         limit: number;
       } = { limit: 100 };
+      if (filterEventName) params.event_name = filterEventName;
+      if (filterCorrelation) params.correlation_id = filterCorrelation;
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
       if (filterClientName.length > 0) params.client_name = filterClientName;
@@ -389,15 +426,21 @@ export function JournalPage() {
       filterResource,
       filterKind,
       filterClientName,
+      filterEventName,
+      filterCorrelation,
     ],
     queryFn: async () => {
       const params: {
+        event_name?: string;
+        correlation_id?: string;
         resource?: string;
         kind?: string[];
         client_name?: string[];
         after_seq: number;
         limit: number;
       } = { after_seq: lastSeqRef.current, limit: 100 };
+      if (filterEventName) params.event_name = filterEventName;
+      if (filterCorrelation) params.correlation_id = filterCorrelation;
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
       if (filterClientName.length > 0) params.client_name = filterClientName;
@@ -437,6 +480,8 @@ export function JournalPage() {
   const initialLoaded = initialQuery.isSuccess;
 
   const clearFilters = useCallback(() => {
+    setEventName("");
+    setCorrelation("");
     setResourceInput("");
     setKindFilter([]);
     setClientNameFilter([]);
@@ -460,8 +505,29 @@ export function JournalPage() {
       <h1 className="font-logo text-xl tracking-tight text-foreground">
         Journal
       </h1>
+      {projectId && (
+        <JournalReportForm
+          key={projectId}
+          projectId={projectId}
+          onAccepted={() => setRetryKey((key) => key + 1)}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
+        <Input
+          aria-label="Filter journal by event name"
+          placeholder="Custom event name"
+          value={eventName}
+          onChange={(e) => setEventName(e.target.value)}
+          className="w-52"
+        />
+        <Input
+          aria-label="Filter journal by correlation ID"
+          placeholder="Correlation ID"
+          value={correlation}
+          onChange={(e) => setCorrelation(e.target.value)}
+          className="w-52"
+        />
         <Input
           ref={searchRef}
           type="text"
@@ -484,7 +550,9 @@ export function JournalPage() {
           selected={clientNameFilter}
           onChange={setClientNameFilter}
         />
-        {(resourceInput ||
+        {(eventName ||
+          correlation ||
+          resourceInput ||
           kindFilter.length > 0 ||
           clientNameFilter.length > 0) && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>
@@ -608,7 +676,9 @@ export function JournalPage() {
             <TableHeader>
               <TableRow>
                 <TableHead title="Event sequence number">Seq</TableHead>
-                <TableHead title="Event timestamp">Time</TableHead>
+                <TableHead title="Server-recorded event time">
+                  Recorded
+                </TableHead>
                 <TableHead title="Event type">Kind</TableHead>
                 <TableHead title="Affected task or artifact">
                   Resource

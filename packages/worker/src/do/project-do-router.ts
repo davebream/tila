@@ -13,6 +13,7 @@ import { createAttemptRoutes } from "./routes/attempt-routes";
 import { createContinuityRoutes } from "./routes/continuity-routes";
 import { createConversationRoutes } from "./routes/conversation-routes";
 import { createCoordinationRoutes } from "./routes/coordination-routes";
+import { createCustomJournalRoutes } from "./routes/custom-journal-routes";
 import { createDiagnosticRoutes } from "./routes/diagnostic-routes";
 import { createEntityRoutes } from "./routes/entity-routes";
 import { installProjectErrorHandlers } from "./routes/errors";
@@ -131,6 +132,7 @@ export function createProjectRouter(deps: RouterDeps) {
   app.route("/", createArtifactVersionRoutes(deps));
   app.route("/", createCoordinationRoutes(deps));
   app.route("/", createContinuityRoutes(deps));
+  app.route("/", createCustomJournalRoutes(deps));
   app.route("/", createGateRoutes(deps));
   app.route("/", createSignalRoutes(deps));
   app.route("/", createSchemaRoutes(deps));

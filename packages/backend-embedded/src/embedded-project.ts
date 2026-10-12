@@ -72,6 +72,8 @@ import {
 import type {
   HandoffCreateRequest,
   HandoffListRequest,
+  JournalAppendRequest,
+  JournalAppendResponse,
   JournalReplayRequest,
   ReentryRequest,
   ReentryResponse,
@@ -600,6 +602,15 @@ export class EmbeddedProject
   }
 
   // ---------- JournalBackend ----------
+  async appendJournal(
+    _input: JournalAppendRequest,
+    _options: { idempotencyKey: string },
+  ): Promise<JournalAppendResponse> {
+    throw Object.assign(
+      new Error("Authenticated journal reports require the Cloudflare backend"),
+      { code: "unsupported-capability", retryable: false },
+    );
+  }
 
   async listJournal(query: JournalQuery): Promise<JournalEvent[]> {
     const rows = journalOps.listJournal(this.db, query);

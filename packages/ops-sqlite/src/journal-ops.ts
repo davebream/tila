@@ -87,6 +87,8 @@ export function listJournal(
     resource?: string | string[];
     kind?: string | string[];
     client_name?: string | string[];
+    event_name?: string;
+    correlation_id?: string;
     after_seq?: number;
     limit?: number;
   },
@@ -114,6 +116,17 @@ export function listJournal(
   }
 
   const conditions: SQL[] = [];
+  if (query.event_name || query.correlation_id) {
+    conditions.push(eq(schema.journal.kind, "custom.reported"));
+    if (query.event_name)
+      conditions.push(
+        sql`json_extract(${schema.journal.data}, '$.event_name') = ${query.event_name}`,
+      );
+    if (query.correlation_id)
+      conditions.push(
+        sql`json_extract(${schema.journal.data}, '$.correlation_id') = ${query.correlation_id}`,
+      );
+  }
 
   if (Array.isArray(query.resource)) {
     conditions.push(inArray(schema.journal.resource, query.resource));

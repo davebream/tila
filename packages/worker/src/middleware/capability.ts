@@ -167,6 +167,7 @@ export function routeCapability(
     ["POST", /^\/search\/reindex$/, "search:reindex"],
     ["GET", /^\/search\/reindex\/status$/, "search:reindex"],
     ["GET", /^\/journal(?:\/(?:replay|cursor))?$/, "journal:read"],
+    ["POST", /^\/journal$/, "journal:append"],
     ["PUT", /^\/journal\/cursor$/, "journal:read"],
     ["GET", /^\/handoffs(?:\/[^/]+)?$/, "journal:read"],
     ["POST", /^\/handoffs$/, "tasks:write"],

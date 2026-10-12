@@ -1,3 +1,4 @@
+import { ProjectReportDetails } from "@/components/journal-report";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Drawer } from "@/components/ui/drawer";
@@ -109,7 +110,10 @@ export function claimResourceMatchesEntity(
 
 type HistoryEvent = JournalResponse["events"][number];
 
-function HistoryTable({ events }: { events: HistoryEvent[] }) {
+function HistoryTable({
+  events,
+  projectId,
+}: { events: HistoryEvent[]; projectId: string | null }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border">
       <Table aria-label="Task history">
@@ -117,15 +121,29 @@ function HistoryTable({ events }: { events: HistoryEvent[] }) {
           <TableRow>
             <TableHead>Event</TableHead>
             <TableHead>Actor</TableHead>
-            <TableHead className="text-right">When</TableHead>
+            <TableHead className="text-right">Recorded</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {events.map((event) => (
             <TableRow key={event.seq}>
-              <TableCell className="text-foreground">{event.kind}</TableCell>
+              <TableCell className="text-foreground">
+                {event.kind === "custom.reported" ? (
+                  <>
+                    <ProjectReportDetails
+                      data={event.data}
+                      projectId={projectId}
+                    />
+                    <CollapsibleData noun="report data" data={event.data} />
+                  </>
+                ) : (
+                  event.kind
+                )}
+              </TableCell>
               <TableCell className="text-muted-foreground">
+                {event.kind === "custom.reported" && "Reporter: "}
                 {event.principal_id}
+                {event.kind === "custom.reported" && `/${event.participant_id}`}
               </TableCell>
               <TableCell
                 className="tila-num text-right text-muted-foreground"
@@ -576,7 +594,9 @@ export function TaskDetailPage() {
                 forbidden="History is not available to this credential."
                 onRetry={retryHistory}
               >
-                {({ events }) => <HistoryTable events={events} />}
+                {({ events }) => (
+                  <HistoryTable events={events} projectId={projectId} />
+                )}
               </QuerySection>
               {historyState.phase === "ready" && (
                 <Link

@@ -166,6 +166,7 @@ export const McpPrimitiveResults = {
   tila_signal_group_set: signals.SignalGroupResponseSchema,
   tila_signal_group_delete: ok,
   tila_journal_list: journal,
+  tila_journal_append: JournalAppendResponseSchema,
   tila_presence_heartbeat: api.PresenceHeartbeatSuccessResponseSchema,
   tila_gate_create: GateResponseSchema,
   tila_gate_resolve: GateResponseSchema,
@@ -216,3 +217,4 @@ export const McpWorkflowResults = {
   ]),
   tila_close: McpCloseResultSchema,
 };
+import { JournalAppendResponseSchema } from "./custom-journal";

@@ -265,6 +265,30 @@ export const journal = sqliteTable(
 );
 
 // --- _journal_archive_watermark ---
+export const journalReportReceipts = sqliteTable(
+  "journal_report_receipts",
+  {
+    key: text("key").primaryKey(),
+    project_id: text("project_id").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    request_hash: text("request_hash").notNull(),
+    response: text("response").notNull(),
+    expires_at: integer("expires_at").notNull(),
+  },
+  (table) => [index("idx_journal_report_receipts_expiry").on(table.expires_at)],
+);
+
+export const journalReportRates = sqliteTable(
+  "journal_report_rates",
+  {
+    key: text("key").primaryKey(),
+    window_start: integer("window_start").notNull(),
+    count: integer("count").notNull(),
+  },
+  (table) => [index("idx_journal_report_rates_window").on(table.window_start)],
+);
+
 // Single-row table (id = 1 enforced by CHECK). Tracks the highest journal seq
 // that has been archived to R2 and deleted from DO SQLite.
 export const journalArchiveWatermark = sqliteTable(

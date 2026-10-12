@@ -117,6 +117,9 @@ export type {
   TokenListResponse,
   TokenRevokeResponse,
   // Journal types
+  JournalAppendRequest,
+  JournalAppendResponse,
+  JournalAppendErrorResponse,
   JournalResponse,
   // Presence types
   PresenceListResponse,

@@ -49,6 +49,7 @@ export const TILA_ERRORS = {
   SESSION_REVOKED: "session-revoked",
   SUBJECT_REVOKED: "subject-revoked",
   RATE_LIMITED: "rate-limited",
+  PAYLOAD_TOO_LARGE: "payload-too-large",
   PERMISSION_DENIED: "permission-denied",
   PERMISSION_REVOKED: "permission-revoked",
   PROJECT_MISMATCH: "project-mismatch",

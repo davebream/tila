@@ -49,6 +49,7 @@ const reads = new Set([
   "tila_inspect",
 ]);
 const additive = new Set([
+  "tila_journal_append",
   "tila_room_publish",
   "tila_task_create",
   "tila_artifact_put",
