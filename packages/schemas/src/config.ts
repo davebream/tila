@@ -85,14 +85,63 @@ const ReferenceSlotSchema = z.object({
 
 export type ReferenceSlot = z.infer<typeof ReferenceSlotSchema>;
 
-const WorkUnitSchema = z.object({
-  fields: z
-    .preprocess(arrayToRecord, z.record(z.string(), FieldDeclarationSchema))
-    .default({}),
-  parents: z.array(z.string()).default([]),
-  required_parent: z.boolean().default(false),
-  references: z.array(ReferenceSlotSchema).optional(),
+export const WorkLifecycleSchema = z.object({
+  field: z.string().min(1),
+  dispatchable: z.array(z.string().min(1)).min(1),
+  terminal: z.array(z.string().min(1)).min(1),
+  dependency_satisfied: z.array(z.string().min(1)).min(1),
+  on_start: z.string().min(1).optional(),
+  outcomes: z
+    .object({
+      success: z.string().min(1).optional(),
+      failure: z.string().min(1).optional(),
+      cancelled: z.string().min(1).optional(),
+      abandoned: z.string().min(1).optional(),
+    })
+    .optional(),
 });
+export type WorkLifecycle = z.infer<typeof WorkLifecycleSchema>;
+
+const WorkUnitSchema = z
+  .object({
+    lifecycle: WorkLifecycleSchema.optional(),
+    fields: z
+      .preprocess(arrayToRecord, z.record(z.string(), FieldDeclarationSchema))
+      .default({}),
+    parents: z.array(z.string()).default([]),
+    required_parent: z.boolean().default(false),
+    references: z.array(ReferenceSlotSchema).optional(),
+  })
+  .superRefine((unit, ctx) => {
+    const lifecycle = unit.lifecycle;
+    if (!lifecycle) return;
+    const issue = (message: string) =>
+      ctx.addIssue({ code: "custom", path: ["lifecycle"], message });
+    const field = unit.fields[lifecycle.field];
+    if (!field || !["string", "text", "enum"].includes(field.type))
+      issue("Lifecycle field must declare a string, text, or enum field");
+    if (
+      lifecycle.dispatchable.some((state) => lifecycle.terminal.includes(state))
+    )
+      issue("Dispatchable and terminal states must be disjoint");
+    if (
+      lifecycle.dependency_satisfied.some(
+        (state) => !lifecycle.terminal.includes(state),
+      )
+    )
+      issue("Dependency-satisfying states must be terminal");
+    if (lifecycle.on_start && lifecycle.terminal.includes(lifecycle.on_start))
+      issue("The start state cannot be terminal");
+    const states = [
+      ...lifecycle.dispatchable,
+      ...lifecycle.terminal,
+      ...lifecycle.dependency_satisfied,
+      ...Object.values(lifecycle.outcomes ?? {}),
+      ...(lifecycle.on_start ? [lifecycle.on_start] : []),
+    ];
+    if (field?.values && states.some((state) => !field.values?.includes(state)))
+      issue("Lifecycle states must be allowed by the declared field values");
+  });
 
 export type WorkUnit = z.infer<typeof WorkUnitSchema>;
 
