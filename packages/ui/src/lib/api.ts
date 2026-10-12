@@ -1,10 +1,17 @@
 import type {
   AgentListResponseSchema,
+  AttemptRequest,
+  AttemptView,
   DeliveryExplainResponseSchema,
   DeliveryListQuery,
   DeliveryListResponse,
   MessageDeliveriesResponse,
   MessagePublishResponseSchema,
+  QueueEntry,
+  QueueInspection,
+  QueueListQuery,
+  QueuePolicy,
+  QueueRequest,
   RoomHistoryResponseSchema,
   RoomListResponseSchema,
   RoomResponseSchema,
@@ -175,7 +182,7 @@ async function request<T>(
     }
   }
   const conversation = /^\/(rooms|inbox|deliveries)(\/|$)/.test(path);
-  const runtime = /^\/(agents|runtime-view)(\/|$)/.test(path);
+  const runtime = /^\/(agents|runtime-view|queue|attempts)(\/|$)/.test(path);
   let response: Response;
   try {
     response = await fetch(url.toString(), {
@@ -184,6 +191,9 @@ async function request<T>(
       headers: {
         Accept: "application/json",
         ...(conversation ? { "X-Tila-Conversation-Protocol": "1" } : {}),
+        ...(/^\/(queue|attempts)(\/|$)/.test(path)
+          ? { "X-Tila-Participant-Id": dashboardParticipantId() }
+          : {}),
       },
     });
   } catch {
@@ -876,4 +886,66 @@ export function inspectDelivery(
     projectId,
     `/inbox/${encodeURIComponent(agent)}/deliveries/${encodeURIComponent(delivery)}`,
   );
+}
+
+export async function inspectQueue(
+  projectId: string,
+  query: QueueListQuery = {},
+): Promise<QueueInspection> {
+  const params = Object.fromEntries(
+    Object.entries(query)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [
+        key,
+        Array.isArray(value) ? JSON.stringify(value) : String(value),
+      ]),
+  );
+  return (
+    await request<{ result: QueueInspection }>(projectId, "/queue", params)
+  ).result;
+}
+export async function controlQueue(
+  projectId: string,
+  input: Extract<
+    QueueRequest,
+    { action: "configure" | "enroll" | "edit" | "withdraw" }
+  >,
+): Promise<QueuePolicy | QueueEntry> {
+  const path =
+    "id" in input
+      ? `entries/${encodeURIComponent(input.id)}/${input.action}`
+      : input.action;
+  return (
+    await mutate<{ result: QueuePolicy | QueueEntry }>(
+      "POST",
+      projectPath(projectId, `/queue/${path}`),
+      input.command,
+    )
+  ).result;
+}
+export async function getAttempt(
+  projectId: string,
+  id: string,
+): Promise<AttemptView> {
+  return (
+    await request<{ result: AttemptView }>(
+      projectId,
+      `/attempts/${encodeURIComponent(id)}`,
+    )
+  ).result;
+}
+export async function controlAttempt(
+  projectId: string,
+  input: Exclude<AttemptRequest, { action: "get" | "list" }>,
+): Promise<AttemptView> {
+  return (
+    await mutate<{ result: AttemptView }>(
+      "POST",
+      projectPath(
+        projectId,
+        `/attempts/${encodeURIComponent(input.id)}/${input.action}`,
+      ),
+      input.command,
+    )
+  ).result;
 }
