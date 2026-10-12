@@ -9,6 +9,9 @@ import type {
 import type { RequestTiming } from "./lib/server-timing";
 
 export interface Env {
+  AUTH_SECRET?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
   DB: D1Database;
   PROJECT: DurableObjectNamespace;
   ARTIFACTS: R2Bucket;
@@ -97,7 +100,7 @@ export interface CookieSessionTokenResult
   /** Unix ms of the last interactive authentication (step-up reauth, #102). */
   authenticatedAt?: number;
   /** How the holder authenticated: GitHub OAuth or a presented project token. */
-  authMethod?: "github" | "token";
+  authMethod?: "github" | "token" | "email";
 }
 
 export interface WorkspaceSessionTokenResult {
@@ -159,6 +162,9 @@ export type UnifiedTokenResult =
   | OidcSessionTokenResult;
 
 export interface HonoVariables {
+  humanSession?: NonNullable<
+    Awaited<ReturnType<import("@tila/backend-d1").HumanStore["live"]>>
+  >;
   requestTiming?: RequestTiming;
   tokenResult: UnifiedTokenResult;
   projectId: string;

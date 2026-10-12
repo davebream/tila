@@ -72,6 +72,7 @@ import type {
   WorkspaceSessionTokenResult,
 } from "../types";
 import { SAFE_TO_EXPOSE_CODES, verifyDpopProof } from "./dpop";
+import { authenticateHuman } from "./human-auth";
 
 // --- Re-export invalidate for T3 revoke handler convenience ---
 export { invalidate } from "../lib/token-cache";
@@ -564,6 +565,10 @@ export function createAuthMiddleware(
         }
       }
     }
+
+    const human = await authenticateHuman(c);
+    if (human instanceof Response) return human;
+    if (human === "valid") return next();
 
     // 1.5: Cookie-session branch (before Bearer check)
     const sessionCookie = parseCookieHeader(

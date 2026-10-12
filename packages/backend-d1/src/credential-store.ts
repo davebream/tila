@@ -21,9 +21,11 @@ import {
   ne,
   not,
   notExists,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { user as humanUsers } from "./human-schema";
 import { ProjectMembershipStore } from "./project-memberships";
 import {
   credentialEvents,
@@ -179,6 +181,20 @@ export class CredentialStore {
               ne(projectMemberships.principal_id, principalId),
               eq(projectMemberships.role, "owner"),
               isNull(projectMemberships.revoked_at),
+              or(
+                ne(projectMemberships.provider, "user"),
+                exists(
+                  this.db
+                    .select({ id: humanUsers.id })
+                    .from(humanUsers)
+                    .where(
+                      and(
+                        eq(humanUsers.id, projectMemberships.subject_id),
+                        eq(humanUsers.disabled, false),
+                      ),
+                    ),
+                ),
+              ),
             ),
           ),
       ),
@@ -330,8 +346,20 @@ export class CredentialStore {
       params.projectId,
       params.principalId,
     );
-    if (!service || !membership)
-      throw new CredentialDenied("Active service membership required");
+    const human = params.principalId.startsWith("user:")
+      ? await this.db
+          .select()
+          .from(humanUsers)
+          .where(
+            and(
+              eq(humanUsers.id, params.principalId.slice(5)),
+              eq(humanUsers.disabled, false),
+            ),
+          )
+          .get()
+      : null;
+    if ((!service && !human) || !membership)
+      throw new CredentialDenied("Active principal membership required");
     policy = effectiveCredentialPolicy(policy, membership.role);
     const credentialId = crypto.randomUUID();
     const tokenId = crypto.randomUUID();
@@ -403,7 +431,7 @@ export class CredentialStore {
         eq(credentials.credential_id, credentialVersions.credential_id),
       )
       .innerJoin(tokens, eq(tokens.token_id, credentialVersions.token_id))
-      .innerJoin(
+      .leftJoin(
         serviceAccounts,
         eq(serviceAccounts.principal_id, credentials.principal_id),
       )
@@ -414,11 +442,24 @@ export class CredentialStore {
       !row ||
       row.token.revoked_at !== null ||
       row.credential.revoked_at !== null ||
-      row.service.revoked_at !== null ||
+      (row.service && row.service.revoked_at !== null) ||
       (row.version.expires_at !== null && row.version.expires_at <= now) ||
       (row.version.retire_at !== null && row.version.retire_at <= now)
     )
       return null;
+    if (row.credential.principal_id.startsWith("user:")) {
+      const human = await this.db
+        .select({ id: humanUsers.id })
+        .from(humanUsers)
+        .where(
+          and(
+            eq(humanUsers.id, row.credential.principal_id.slice(5)),
+            eq(humanUsers.disabled, false),
+          ),
+        )
+        .get();
+      if (!human) return null;
+    } else if (!row.service) return null;
     const membership = await new ProjectMembershipStore(this.binding).resolve(
       row.credential.project_id,
       row.credential.principal_id,

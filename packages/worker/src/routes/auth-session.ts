@@ -6,8 +6,10 @@ import { COOKIE_SESSION_TTL_SECONDS } from "../config";
 import { revokeSession } from "../lib/admin-ops";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import { hashToken } from "../lib/hash-token";
+import { accountAuth, humanHeaders } from "../lib/human-auth";
 import { invalidateSession } from "../lib/session-cache";
 import { invalidate } from "../lib/token-cache";
+import { csrfGuard } from "../middleware/csrf";
 import { computeSessionCapabilities } from "../middleware/session-capabilities";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 import { checkExchangeRateLimit, recordExchangeFailure } from "./auth-github";
@@ -35,158 +37,20 @@ function parseCookieValue(
 // POST /auth/session — pre-auth session exchange endpoint
 export const authSessionExchange = new Hono<AppEnv>();
 
-authSessionExchange.post("/", async (c) => {
-  const ip = c.req.header("CF-Connecting-IP") ?? null;
-
-  // WI-I: route the generic session exchange through the shared `exchange:${ip}`
-  // brute-force counter (previously a separate bare-`ip` counter) so it shares one
-  // budget with the GitHub exchange family. The helper fails open on a D1 error.
-  const limited = await checkExchangeRateLimit(c);
-  if (limited) return limited;
-
-  // Parse and validate body
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "validation-error",
-          message: "Invalid JSON body",
-          retryable: false,
-        },
+authSessionExchange.post("/", (c) =>
+  c.json(
+    {
+      ok: false,
+      error: {
+        code: "token-login-retired",
+        message:
+          "Sign in with your account or run tila login. API tokens cannot create browser sessions.",
+        retryable: false,
       },
-      400,
-    );
-  }
-
-  const parsed = SessionExchangeRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "validation-error",
-          message: "Missing required fields: token, project_id",
-          retryable: false,
-        },
-      },
-      400,
-    );
-  }
-
-  const { token, project_id } = parsed.data;
-
-  // Validate token against D1 (SEC-1: pepper to match D1-token mint in tokens.ts)
-  const tokenHash = await hashToken(token, c.env.HASH_PEPPER);
-  const tokenStore = new D1TokenStore(c.env.DB);
-  const tokenResult = await tokenStore.validate(tokenHash);
-
-  if (!tokenResult) {
-    // Increment the shared exchange:${ip} failure counter (WI-I).
-    await recordExchangeFailure(c.env, ip);
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "unauthorized",
-          message: "Invalid token",
-          retryable: false,
-        },
-      },
-      401,
-    );
-  }
-
-  // Verify token belongs to the requested project
-  if (tokenResult.projectId !== project_id) {
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "unauthorized",
-          message: "Token not authorized for this project",
-          retryable: false,
-        },
-      },
-      401,
-    );
-  }
-
-  if (tokenResult.cnfJkt || tokenResult.scopes === "runtime-v1")
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "dpop-cookie-unsupported",
-          message: "Bound credentials cannot be exchanged for browser cookies",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  const scoped =
-    tokenResult.scopes === SCOPED_TOKEN_MARKER
-      ? await new CredentialStore(c.env.DB).resolve(tokenResult.tokenId)
-      : null;
-  if (tokenResult.scopes === SCOPED_TOKEN_MARKER && !scoped)
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "unauthorized",
-          message: "Credential is no longer active",
-          retryable: false,
-        },
-      },
-      401,
-    );
-  // Create session (SEC-1: pepper to match the cookie-session lookup in auth.ts:302)
-  const sessionUUID = crypto.randomUUID();
-  const sessionHash = await hashToken(sessionUUID, c.env.HASH_PEPPER);
-  const expiresAt = Math.min(
-    Date.now() + COOKIE_SESSION_TTL_MS,
-    scoped?.expiresAt ? scoped.expiresAt * 1000 : Number.POSITIVE_INFINITY,
-    scoped?.retireAt ? scoped.retireAt * 1000 : Number.POSITIVE_INFINITY,
-  );
-
-  const sessionStore = new D1SessionStore(c.env.DB);
-  try {
-    await sessionStore.create({
-      sessionHash,
-      projectId: project_id,
-      tokenHash,
-      actorName: tokenResult.name,
-      principalId: scoped?.principalId ?? `token:${tokenResult.tokenId}`,
-      scopes: tokenResult.scopes,
-      permission: tokenResult.scopes === "full" ? "admin" : "read",
-      expiresAt,
-    });
-  } catch (err) {
-    console.error("[auth-session] session create failed");
-    return c.json(
-      {
-        ok: false,
-        error: {
-          code: "internal",
-          message: "Session creation failed",
-          retryable: true,
-        },
-      },
-      500,
-    );
-  }
-
-  // Set httpOnly cookie (omit Secure on localhost for local dev)
-  c.header(
-    "Set-Cookie",
-    buildSessionCookie(sessionUUID, isLocalhost(c.req.url)),
-  );
-
-  return c.json({ ok: true });
-});
+    },
+    410,
+  ),
+);
 
 authSessionExchange.onError((_error, c) =>
   c.json(
@@ -212,7 +76,12 @@ export const authSessionProtected = new Hono<AppEnv>();
 //   - cookie-session:       revoke session hash (+ session cache) — unchanged path
 //   - workspace-session:    no-op
 // Always clears the cookie and returns { ok: true }; idempotent (double-logout safe).
-authSessionProtected.post("/logout", async (c) => {
+authSessionProtected.post("/logout", csrfGuard, async (c) => {
+  if (c.get("humanSession"))
+    return (await accountAuth(c)).api.signOut({
+      headers: humanHeaders(c.req.raw.headers),
+      asResponse: true,
+    });
   // WI-I: check-only shared rate-limit guard (defense-in-depth). Rejects an IP
   // already over the exchange:${ip} threshold; never records a failure, so a
   // legitimate logout is never counted toward the brute-force budget.

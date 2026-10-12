@@ -4,6 +4,13 @@ import {
 } from "@/components/admin/step-up-resume";
 import { Layout } from "@/components/layout";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { AccountPage } from "@/pages/account";
+import {
+  DevicePage,
+  HandoffPage,
+  InvitationPage,
+  RecoveryPage,
+} from "@/pages/account-access";
 import { AgentsPage } from "@/pages/agents";
 import { ArtifactsPage } from "@/pages/artifacts";
 import { AuthResultPage } from "@/pages/auth-result";
@@ -40,6 +47,7 @@ import {
   Outlet,
   Route,
   Routes,
+  useLocation,
   useSearchParams,
 } from "react-router";
 
@@ -125,6 +133,10 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
 export function AuthGate() {
   const { isLoading, isAuthenticated, projectId } = useAuth();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  if (location.pathname === "/recover") return <RecoveryPage />;
+  if (location.pathname === "/invite") return <InvitationPage />;
+  if (location.pathname === "/handoff") return <HandoffPage />;
 
   if (searchParams.has("auth_status")) {
     return <AuthResultPage />;
@@ -141,6 +153,11 @@ export function AuthGate() {
       </div>
     );
   }
+
+  if (location.pathname === "/login") return <LoginPage />;
+  if (isAuthenticated && location.pathname === "/device") return <DevicePage />;
+  if (isAuthenticated && location.pathname === "/account")
+    return <AccountPage />;
 
   if (!isAuthenticated) {
     return (

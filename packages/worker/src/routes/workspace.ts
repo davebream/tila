@@ -1,3 +1,4 @@
+import { HumanStore } from "@tila/backend-d1";
 import {
   D1ProjectRegistry,
   D1RateLimitStore,
@@ -6,6 +7,7 @@ import {
   ProjectMembershipStore,
   RepoAllowlistStore,
 } from "@tila/backend-d1";
+import { HumanProjectSelectSchema } from "@tila/schemas";
 import {
   type MembershipSource,
   type ProjectRole,
@@ -152,6 +154,8 @@ workspace.get("/projects", async (c) => {
       repos: { owner: string; repo: string; permission: string }[];
     }
   >(explicit.map((project) => [project.projectId, { ...project, repos: [] }]));
+  if (c.get("humanSession"))
+    return c.json({ ok: true, projects: [...accessible.values()] });
   // Project credentials enumerate only their own project.
   if (token.kind !== "workspace-session") {
     const { resolveTokenMembership } = await import("../middleware/membership");
@@ -218,6 +222,28 @@ workspace.get("/projects", async (c) => {
 });
 
 workspace.post("/select", async (c) => {
+  const human = c.get("humanSession");
+  if (human) {
+    const input = HumanProjectSelectSchema.safeParse(await c.req.json());
+    if (!input.success) return c.json({ ok: false }, 400);
+    const membership = await new ProjectMembershipStore(c.env.DB).resolve(
+      input.data.project_id,
+      `user:${human.user.id}`,
+    );
+    if (!membership) return c.json({ ok: false }, 403);
+    await new HumanStore(c.env.DB).selectProject(
+      human.session.id,
+      input.data.project_id,
+    );
+    return c.json({
+      ok: true,
+      projectId: input.data.project_id,
+      role: membership.role,
+      scopes: "full",
+      membership_sources: membership.sources,
+    });
+  }
+
   // Rate limit: keyed by IP
   const ip = c.req.raw.headers.get("CF-Connecting-IP");
   if (ip) {
@@ -359,6 +385,12 @@ workspace.post("/select", async (c) => {
 const WORKSPACE_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 workspace.post("/deselect", async (c) => {
+  const human = c.get("humanSession");
+  if (human) {
+    await new HumanStore(c.env.DB).selectProject(human.session.id, "");
+    return c.json({ ok: true });
+  }
+
   const tokenResult = c.get("tokenResult");
   if (tokenResult.kind !== "cookie-session") {
     return c.json(

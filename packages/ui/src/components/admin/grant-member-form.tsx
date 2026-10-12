@@ -9,7 +9,7 @@ import type {
 } from "@tila/schemas";
 import { useId, useState } from "react";
 
-type Provider = "github" | "service" | "oidc";
+type Provider = "github" | "service" | "oidc" | "user";
 
 interface GrantMemberFormProps {
   serviceAccounts: ServiceAccount[];
@@ -38,7 +38,7 @@ export function GrantMemberForm({
     role: useId(),
     name: useId(),
   };
-  const [provider, setProvider] = useState<Provider>("github");
+  const [provider, setProvider] = useState<Provider>("user");
   const [login, setLogin] = useState("");
   const [userId, setUserId] = useState("");
   const [manualId, setManualId] = useState(false);
@@ -91,7 +91,14 @@ export function GrantMemberForm({
     setError(null);
     setNotice(null);
     let body: MembershipGrantRequest;
-    if (provider === "github") {
+    if (provider === "user") {
+      body = {
+        principal: { provider: "user", id: subject.trim() },
+        subject_kind: "human",
+        role,
+        ...(displayName.trim() ? { display_name: displayName.trim() } : {}),
+      };
+    } else if (provider === "github") {
       const id = await resolveLogin();
       if (id === null) return;
       body = {
@@ -175,6 +182,7 @@ export function GrantMemberForm({
         </legend>
         {(
           [
+            ["user", "Tila user"],
             ["github", "GitHub user"],
             ["service", "Service account"],
             ["oidc", "OIDC subject"],
@@ -200,6 +208,20 @@ export function GrantMemberForm({
       </fieldset>
 
       <div className="grid gap-3 md:grid-cols-3">
+        {provider === "user" && (
+          <label
+            htmlFor="grant-member-form-field-1"
+            className="tila-label block"
+          >
+            User ID (from account settings)
+            <Input
+              id="grant-member-form-field-1"
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+              required
+            />
+          </label>
+        )}
         {provider === "github" && (
           <>
             <div className="space-y-1">

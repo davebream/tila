@@ -27,6 +27,7 @@ export const MembershipSourceSchema = z.enum([
 export type MembershipSource = z.infer<typeof MembershipSourceSchema>;
 
 export const MembershipPrincipalSchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("user"), id: z.string().uuid() }),
   z.object({ provider: z.literal("service"), id: z.string().uuid() }),
   z.object({
     provider: z.literal("github"),
@@ -59,7 +60,8 @@ export const MembershipGrantRequestSchema = z
   })
   .superRefine((value, ctx) => {
     if (
-      (value.principal.provider === "github" &&
+      ((value.principal.provider === "github" ||
+        value.principal.provider === "user") &&
         value.subject_kind !== "human") ||
       (value.principal.provider === "service" &&
         value.subject_kind !== "service")
@@ -93,7 +95,7 @@ export const ProjectMembershipSchema = z.object({
   membership_id: z.string().uuid(),
   project_id: z.string().min(1),
   principal_id: z.string().min(1),
-  provider: z.enum(["github", "oidc", "service"]),
+  provider: z.enum(["github", "oidc", "service", "user"]),
   identity_host: z.string().min(1),
   subject_id: z.string().min(1),
   subject_kind: MembershipSubjectKindSchema,

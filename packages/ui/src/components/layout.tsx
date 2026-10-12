@@ -393,6 +393,12 @@ export function Layout() {
           >
             ?
           </a>
+          <a
+            href="/account"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Account
+          </a>
           <DisplaySettings />
           <Button variant="ghost" size="sm" onClick={handleLogout}>
             Sign out

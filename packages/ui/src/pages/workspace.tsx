@@ -83,8 +83,8 @@ export function WorkspacePage() {
 
         {!isLoading && projects && projects.length === 0 && (
           <div className="py-8 text-center text-sm text-muted-foreground">
-            No accessible projects found. Make sure your GitHub account has
-            access to a tila project.
+            No accessible projects found. Ask your administrator to add you to a
+            project.
           </div>
         )}
 
@@ -134,7 +134,13 @@ export function WorkspacePage() {
           </div>
         )}
 
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex justify-center gap-4">
+          <a
+            href="/account"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Your account
+          </a>
           <button
             type="button"
             className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"

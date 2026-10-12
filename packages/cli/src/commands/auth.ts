@@ -624,6 +624,9 @@ export default defineCommand({
     description: "Manage tila authentication (instances, tokens, status)",
   },
   subCommands: {
+    "recover-account": () =>
+      import("./auth-recover-account").then((module) => module.default),
+    setup: () => import("./auth-setup").then((module) => module.default),
     migrate: migrateCmd,
     recover: recoverCmd,
     status: statusCmd,

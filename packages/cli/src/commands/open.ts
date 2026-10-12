@@ -1,6 +1,12 @@
 import { defineCommand } from "citty";
 import { findConfig } from "../config";
 import { openInBrowser } from "../lib/browser";
+import {
+  assertHumanCommand,
+  humanRequest,
+  humanSessionStore,
+  loginWorkerUrl,
+} from "../lib/human-login";
 import { diagnostic, exit, outputText } from "../lib/output";
 
 export default defineCommand({
@@ -15,7 +21,8 @@ export default defineCommand({
       default: false,
     },
   },
-  run({ args }) {
+  async run({ args }) {
+    assertHumanCommand();
     const typedArgs = args as unknown as { print: boolean };
     const config = findConfig();
     if (!config) {
@@ -38,11 +45,23 @@ export default defineCommand({
       exit(1);
     }
 
+    const workerUrl = loginWorkerUrl(config.worker_url);
+    const session = await humanSessionStore().get(workerUrl);
+    const url = session
+      ? (
+          await humanRequest<{ url: string }>(
+            workerUrl,
+            "/handoff",
+            {},
+            session.token,
+          )
+        ).url
+      : workerUrl;
     if (typedArgs.print) {
-      outputText(config.worker_url);
+      outputText(url);
       return;
     }
 
-    openInBrowser(config.worker_url);
+    openInBrowser(url);
   },
 });

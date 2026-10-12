@@ -106,3 +106,7 @@ export {
   RuntimeFileSecretStore,
   type RuntimeEnrollmentSecret,
 } from "./runtime-store.js";
+export {
+  HumanSessionStore,
+  type StoredHumanSession,
+} from "./human-session-store.js";

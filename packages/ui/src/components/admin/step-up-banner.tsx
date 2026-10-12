@@ -20,7 +20,9 @@ export function StepUpBanner({
 }) {
   const { projectId, capabilities } = useAuth();
   const githubLogin = useGitHubLogin();
-  const tokenAuth = capabilities?.auth_method === "token";
+  const tokenAuth =
+    capabilities?.auth_method === "token" ||
+    capabilities?.auth_method === "email";
   const canSignIn = tokenAuth || githubLogin.enabled;
   const location = useLocation();
   const navigate = useNavigate();

@@ -151,6 +151,13 @@ export async function requireTokenAsync(): Promise<string> {
   const config = findConfig();
   const tilaDir = findTilaDir();
 
+  if (process.env.TILA_API_TOKEN?.trim())
+    return process.env.TILA_API_TOKEN.trim();
+  if (config?.worker_url && !process.env.CI && process.stdin.isTTY) {
+    const { humanSessionStore } = await import("./lib/human-login");
+    const session = await humanSessionStore().get(config.worker_url);
+    if (session) return session.token;
+  }
   const authMode = config?.auth?.mode ?? "tila-token";
 
   if (authMode === "github-repo") {

@@ -31,6 +31,9 @@ sed -e 's/database_id = ""/database_id = "local-dev"/' \
 echo "→ Writing $WORKER_DIR/.dev.vars"
 cat > "$WORKER_DIR/.dev.vars" <<'DEVVARS'
 CORS_ALLOWED_ORIGINS=http://localhost:5173
+UI_ORIGIN=http://localhost:5173
+AUTH_SECRET=tila-local-development-auth-secret-not-for-production
+INFRA_ADMIN_TOKEN=tila-local-development-infra-owner
 DEVVARS
 
 # 3. Write UI .env.local
@@ -84,6 +87,6 @@ echo ""
 echo "Start the Worker and UI:"
 echo "  pnpm dev                          # Worker :8787 and UI :5173"
 echo ""
-echo "Login credentials:"
-echo "  Project ID: $DEV_PROJECT"
-echo "  API Token:  $DEV_TOKEN"
+echo "Create a browser account after starting the Worker:"
+echo "  env TILA_INFRA_ADMIN_TOKEN=tila-local-development-infra-owner pnpm dev:cli auth setup --url http://localhost:8787 --email admin@example.test --project $DEV_PROJECT"
+echo "The command prints a private invitation link. API tokens are for API clients only."
