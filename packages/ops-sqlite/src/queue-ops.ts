@@ -471,6 +471,7 @@ export function claimNext(
               .from(schema.workAttempts)
               .where(eq(schema.workAttempts.entry_id, entry.id))
               .orderBy(
+                desc(schema.workAttempts.fence),
                 desc(schema.workAttempts.created_at),
                 desc(schema.workAttempts.id),
               )
@@ -544,6 +545,7 @@ export function inspect(
       .select()
       .from(schema.workAttempts)
       .orderBy(
+        desc(schema.workAttempts.fence),
         desc(schema.workAttempts.created_at),
         desc(schema.workAttempts.id),
       )
