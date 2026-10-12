@@ -13,6 +13,17 @@ fields = [
 ]
 parents = []
 
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done", "cancelled"]
+dependency_satisfied = ["done"]
+on_start = "in_progress"
+
+[work_units.task.lifecycle.outcomes]
+success = "done"
+cancelled = "cancelled"
+
 # ---------------------------------------------------------------------------
 # ARTIFACTS — content-addressed blobs produced or uploaded into the project
 # ---------------------------------------------------------------------------
