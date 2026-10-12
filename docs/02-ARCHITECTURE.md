@@ -1305,6 +1305,24 @@ tila validates writes against the declared schema. The validation rules are limi
 
 These are structural checks — they verify "does this edge make sense in the declared schema." tila does NOT validate that a review *actually reviews* the design it references; only that a reference of the right kind exists. Semantic validation is the consumer's concern.
 
+#### Work lifecycle and readiness
+
+An optional `[work_units.<type>.lifecycle]` declares the business states used for readiness. It does not enroll or launch work. The checked-in task definition uses `status`, dispatches only from `open`, and treats `done` as successful while `cancelled` remains terminal but does not satisfy dependencies.
+
+| Field | Meaning |
+|---|---|
+| `field` | Declared string/text/enum field carrying the business state |
+| `dispatchable` | States from which work may be admitted |
+| `terminal` | Finished business states, disjoint from dispatchable states |
+| `dependency_satisfied` | Explicitly successful terminal states |
+| `on_start`, `outcomes.success/failure/cancelled/abandoned` | Optional execution-to-business-state mappings; absent mappings leave business status unchanged |
+
+Declared states must match the field's allowed values when present. Start mappings cannot be terminal. Outcome mappings may target nonterminal states: an attempt can fail and return a ticket to `open` for a retry, or succeed and leave it awaiting review. Entity writes validate lifecycle field values against the current definition within the project transaction; custom terminal transitions enforce pending gates, including gates addressed by the canonical resource name.
+
+Readiness respects hard and soft dependency edges, unresolved gates, archive state, and transitive prerequisites. Cycles remain blocked with a diagnostic path. Archiving an unfinished predecessor never counts as success; an explicitly successful predecessor can subsequently be archived without losing its recorded success. Configured work depending on an unconfigured type is blocked until its predecessor's lifecycle is declared. The shared evaluator returns diagnostic reasons for missing work, missing lifecycle metadata, unsuccessful dependencies, cycles and gates.
+
+Unconfigured types retain legacy readiness (`status != closed`, archived predecessors ignored, soft blockers included by default). Managed admission requires lifecycle metadata explicitly and cannot use this fallback. Readiness inspection remains read-only: it ignores expired timer gates without resolving them or appending journal events. Execution ownership and queue capacity are separate admission checks.
+
 ### 6.3 Adding a new work-unit type
 
 The applied definition in project DO SQLite is authoritative. Today the CLI
@@ -1312,8 +1330,8 @@ composes schema fragments and explicitly submits TOML through `tila schema apply
 MCP `tila_schema_update` and the Worker schema endpoint use the same parser/ops.
 Adding a type/kind is a definition revision, not a database migration. The server
 increments `_schema_history.version`; the file's `schema_version` is separate.
-Browser editors and structured/revision-checked writes are required by §14 and
-#296/#297, not delivered by this description.
+Revision-checked TOML writes are described in §2.5. Browser editors and structured
+definition writes remain tracked by §14 and #296/#297.
 
 ### 6.4 Adding a required parent to an existing work-unit type
 
@@ -1321,8 +1339,9 @@ The current diff classifies destructive changes and preview reports affected dat
 Apply rejects a destructive diff without a strategy. The implemented strategies
 are `relax` and `force`; neither is an interactive migration/backfill engine.
 `migrate`, `default-parent` and automatic reparenting are not supported strategies.
-#296 must bind destructive approval to the reviewed revision and revalidate at
-commit; #297 presents the impact without claiming automatic data repair.
+Conditional destructive applies bind to the reviewed revision and definition as
+described in §2.5. Broader affected-data reconciliation remains in #296; #297
+presents the impact without claiming automatic data repair.
 
 ### 6.5 Adding a new artifact kind
 

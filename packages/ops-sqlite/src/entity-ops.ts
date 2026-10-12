@@ -16,7 +16,10 @@ import {
   validateFtsQuery,
 } from "./artifact-ops";
 import { assertArtifactReviewPolicy } from "./artifact-review-ops";
-import { assertCurrentEntityWrite } from "./constraint-ops";
+import {
+  assertCurrentEntityWrite,
+  resolveCurrentSchema,
+} from "./constraint-ops";
 import { taskRestrictionCondition } from "./credential-policy";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { entitySearchText } from "./entity-search-text";
@@ -498,12 +501,19 @@ export function update(
 
       // Gate enforcement: block terminal transitions if pending gates exist.
       // Non-terminal status changes and updates without a status field are unaffected.
-      const TERMINAL_STATUSES = new Set(["done", "closed", "merged"]);
-      const incomingStatus = data.status as string | undefined;
+      const lifecycle =
+        resolveCurrentSchema(tx)?.work_units[existing.type]?.lifecycle;
+      const TERMINAL_STATUSES = new Set(
+        lifecycle?.terminal ?? ["done", "closed", "merged"],
+      );
+      const incomingStatus = data[lifecycle?.field ?? "status"] as
+        | string
+        | undefined;
       if (incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
         // B5: share the function-level `now` so entity.updated_at and any
         // gate.resolved_at agree (single clock per transaction).
         checkPendingGates(tx, id, now);
+        if (lifecycle) checkPendingGates(tx, canonicalResource, now);
       }
 
       // Merge data: spread existing + new fields (passthrough preservation)

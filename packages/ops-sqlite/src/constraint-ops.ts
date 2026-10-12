@@ -22,6 +22,16 @@ export function assertCurrentEntityWrite(
   if (!current) return;
   const result = validatedWrite(data, current, type);
   if (!result.ok) throw new SchemaWriteError(result.errors.join("; "));
+  const unit = current.work_units[type];
+  const lifecycle = unit.lifecycle;
+  if (lifecycle && data[lifecycle.field] !== undefined) {
+    const state = data[lifecycle.field];
+    const allowed = unit.fields[lifecycle.field].values;
+    if (typeof state !== "string" || (allowed && !allowed.includes(state)))
+      throw new SchemaWriteError(
+        `Invalid lifecycle state for ${type}.${lifecycle.field}`,
+      );
+  }
 }
 
 // ---------------------------------------------------------------------------
