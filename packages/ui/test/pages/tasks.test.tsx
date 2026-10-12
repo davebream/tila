@@ -359,7 +359,9 @@ describe("TasksPage type filter", () => {
   });
 });
 
-describe("TasksPage paging", () => {
+// These walk full 100-row pages of a 260-task project (the #300 acceptance
+// size), which is slow under jsdom on CI runners.
+describe("TasksPage paging", { timeout: 60_000 }, () => {
   beforeEach(() => {
     server.use(
       catalogHandler([declaredEntry("task", 260), declaredEntry("doc", 0)]),
