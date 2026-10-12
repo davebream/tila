@@ -1,8 +1,16 @@
 # tila schema definition for the dev project
-# Used by `tila schema push` to register record types
+# Used by the dev seed script to register task and record types
+
+schema_version = 1
 
 [project]
 id = "dev-project"
+
+[work_units.epic]
+
+[work_units.milestone]
+
+[work_units.task]
 
 [records.deploy_config]
 format = "json"
