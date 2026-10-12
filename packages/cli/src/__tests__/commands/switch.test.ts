@@ -1,6 +1,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { InstanceKey } from "@tila/schemas";
+import type { CommandDef } from "citty";
+import { parseArgs } from "citty";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Tests for `tila switch <key>` (Task 6).
  *
@@ -15,11 +19,7 @@ import * as path from "node:path";
  * - Exactly one writeCurrentContext call on success
  * - Unknown key → friendly error + non-zero exit
  */
-import { AuthStore, FakeSecretStore, TilaPaths } from "@tila/auth-store";
-import type { InstanceKey } from "@tila/schemas";
-import type { CommandDef } from "citty";
-import { parseArgs } from "citty";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthStore, FakeSecretStore, TilaPaths } from "../../auth-store";
 import { globalFlagArgs } from "../../lib/global-flags";
 import { resetGlobalFlags } from "../../lib/global-flags";
 import { jsonArg } from "../../lib/output";

@@ -11,7 +11,7 @@ import {
  * Raised when a local database path resolves to a network filesystem mount
  * (NFS/SMB/CIFS/AFP/WebDAV), where SQLite's POSIX advisory locking is unsafe.
  *
- * Ported verbatim (name + semantics) from `@tila/backend-local`'s
+ * Ported verbatim (name + semantics) from `cli/src/local`'s
  * `LocalFilesystemError`, so callers that catch it across the bun and node
  * paths see the same error type by name.
  */
@@ -25,7 +25,7 @@ export class LocalFilesystemError extends Error {
 /**
  * Assert that the database path is on a LOCAL filesystem.
  *
- * Node port of `@tila/backend-local`'s `assertLocalFilesystem` (which uses
+ * Node port of `cli/src/local`'s `assertLocalFilesystem` (which uses
  * `Bun.spawnSync` on macOS); here we use `node:fs` + `node:child_process`
  * (`execFileSync`) instead. Network mounts (NFS/SMB/CIFS/AFP/WebDAV) are
  * rejected because SQLite's locking semantics are unreliable on them.

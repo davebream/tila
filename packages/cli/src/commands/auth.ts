@@ -30,14 +30,14 @@ import {
 
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import type { InstanceRecord } from "@tila/schemas";
+import { defineCommand } from "citty";
 import {
   FakeSecretStore,
   promoteLegacy,
   readLegacyCredential,
-} from "@tila/auth-store";
-import type { LegacyLocations } from "@tila/auth-store";
-import type { InstanceRecord } from "@tila/schemas";
-import { defineCommand } from "citty";
+} from "../auth-store";
+import type { LegacyLocations } from "../auth-store";
 import { findConfig, findTilaDir } from "../config";
 import { generateDpopKey } from "../lib/dpop-key";
 import { resolveGithubRepoToken } from "../lib/github-exchange";

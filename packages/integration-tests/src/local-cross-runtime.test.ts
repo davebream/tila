@@ -5,7 +5,7 @@
  * a plain `environment: "node"` vitest config — there is no `vitest-pool-workers`
  * here). From Node it spawns `bun` children via `node:child_process`'s
  * `spawnSync` so a single SQLite file is written by the BUN embedded path
- * (`@tila/backend-local` → `bun:sqlite`) and read by the NODE path
+ * (`cli/src/local` → `bun:sqlite`) and read by the NODE path
  * (`tila-sdk/local` → `better-sqlite3`), and vice-versa.
  *
  * Covered:

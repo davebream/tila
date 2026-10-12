@@ -8,7 +8,7 @@ const { mockGetCurrentContext, mockRunMcpInit } = vi.hoisted(() => {
   return { mockGetCurrentContext, mockRunMcpInit };
 });
 
-vi.mock("@tila/auth-store", () => ({
+vi.mock("../../auth-store", () => ({
   // Use regular functions so they can be called with `new`
   AuthStore: vi.fn(function (this: unknown) {
     return { getCurrentContext: mockGetCurrentContext };

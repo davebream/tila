@@ -1,10 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  InstanceKeyMismatchError,
-  KeychainUnavailableError,
-} from "@tila/auth-store";
-import {
   DoctorProbeResponseSchema,
   DoctorSchemaResponseSchema,
   GitHubAppInfoResponseSchema,
@@ -17,6 +13,10 @@ import {
 } from "@tila/schemas";
 import c from "ansis";
 import { defineCommand } from "citty";
+import {
+  InstanceKeyMismatchError,
+  KeychainUnavailableError,
+} from "../auth-store";
 import { type CommandContext, runStartupChecks } from "../context";
 import {
   buildAuthStore,
@@ -700,7 +700,7 @@ export default defineCommand({
     // allowlist configuration is out of scope for WI-K (T3 operator step).
     try {
       const { AuthStore, TilaPaths, KeyringSecretStore, processEnvProbe } =
-        await import("@tila/auth-store");
+        await import("../auth-store");
       const { tilaHome } = await import("../lib/provisioning.js");
       void tilaHome(); // tilaHome() sets up TILA_HOME env support
       const paths = new TilaPaths();

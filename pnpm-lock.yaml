@@ -44,31 +44,6 @@ importers:
         specifier: ^4.1.9
         version: 4.1.11(@types/node@26.6.4)(jsdom@30.1.2(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.4)(typescript@5.9.3))(vite@8.3.4(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
-  packages/auth-store:
-    dependencies:
-      '@napi-rs/keyring':
-        specifier: ^2.1.0
-        version: 2.1.0
-      '@tila/core':
-        specifier: workspace:*
-        version: link:../core
-      '@tila/schemas':
-        specifier: workspace:*
-        version: link:../schemas
-      smol-toml:
-        specifier: ^1.8.0
-        version: 1.9.0
-    devDependencies:
-      '@types/node':
-        specifier: ^22.20.5
-        version: 22.20.5
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.9
-        version: 4.1.11(@types/node@22.20.5)(jsdom@30.1.2(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@22.20.5)(typescript@5.9.3))(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
-
   packages/backend-d1:
     dependencies:
       '@tila/core':
@@ -170,34 +145,6 @@ importers:
       vitest:
         specifier: ^4.1.9
         version: 4.1.11(@types/node@22.20.5)(jsdom@30.1.2(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@22.20.5)(typescript@5.9.3))(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
-
-  packages/backend-local:
-    dependencies:
-      '@tila/backend-embedded':
-        specifier: workspace:*
-        version: link:../backend-embedded
-      '@tila/core':
-        specifier: workspace:*
-        version: link:../core
-      '@tila/ops-sqlite':
-        specifier: workspace:*
-        version: link:../ops-sqlite
-      '@tila/schemas':
-        specifier: workspace:*
-        version: link:../schemas
-      drizzle-orm:
-        specifier: ^0.45.4
-        version: 0.45.4(@cloudflare/workers-types@5.20261008.1)(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)(bun-types@1.4.3)(kysely@0.29.6)
-    devDependencies:
-      '@types/bun':
-        specifier: latest
-        version: 1.4.3
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.9
-        version: 4.1.11(@types/node@26.6.4)(jsdom@30.1.2(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.4)(typescript@5.9.3))(vite@8.3.4(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/backend-r2:
     dependencies:
@@ -308,15 +255,12 @@ importers:
       '@clack/prompts':
         specifier: ^1.8.1
         version: 1.8.1
-      '@tila/auth-store':
-        specifier: workspace:*
-        version: link:../auth-store
+      '@napi-rs/keyring':
+        specifier: ^2.1.0
+        version: 2.1.0
       '@tila/backend-embedded':
         specifier: workspace:*
         version: link:../backend-embedded
-      '@tila/backend-local':
-        specifier: workspace:*
-        version: link:../backend-local
       '@tila/client-lifecycle':
         specifier: workspace:*
         version: link:../client-lifecycle
@@ -335,6 +279,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
+      '@types/bun':
+        specifier: latest
+        version: 1.4.3
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -504,9 +451,6 @@ importers:
       '@tila/backend-embedded':
         specifier: workspace:*
         version: link:../backend-embedded
-      '@tila/backend-local':
-        specifier: workspace:*
-        version: link:../backend-local
       '@tila/backend-r2':
         specifier: workspace:*
         version: link:../backend-r2

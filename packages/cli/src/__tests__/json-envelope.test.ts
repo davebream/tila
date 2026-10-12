@@ -2,7 +2,7 @@
  * Tests for the jsonArg lint contract and JSON output migration.
  *
  * Design note: We cannot dynamically import CLI command modules in Vitest
- * because they transitively import bun:sqlite (backend-local) which is
+ * because they transitively import bun:sqlite (src/local) which is
  * unavailable in Node/Vitest. Instead, we verify the static shape of
  * jsonArg and the console.log(JSON.stringify) migration via output.ts.
  */

@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { hostname } from "node:os";
-import { LocalArtifactBackend, LocalProject } from "@tila/backend-local";
 import type {
   ArtifactBackend,
   CoordinationBackend,
@@ -32,6 +31,7 @@ import { managedRuntime } from "./lib/managed-runtime";
 import { outputText } from "./lib/output";
 import { deriveOrg, resolveCfApiToken } from "./lib/provisioning";
 import { checkAccountMatch, verifyCloudflareAuth } from "./lib/wrangler";
+import { LocalArtifactBackend, LocalProject } from "./local";
 import { VERSION as CLI_VERSION } from "./version";
 
 export interface CommandContext {

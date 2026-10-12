@@ -126,7 +126,7 @@ export {
   type GrepMatcher,
 } from "./grep";
 
-// Hardened OIDC egress wrapper (shared by @tila/worker + @tila/auth-store)
+// Hardened OIDC egress wrapper (shared by @tila/worker + cli/src/auth-store)
 export {
   OIDC_EGRESS_TIMEOUT_MS,
   OIDC_EGRESS_MAX_BYTES,

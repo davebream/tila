@@ -5,7 +5,7 @@
  *   - @clack/prompts  (for the Prompter)
  *   - node:child_process  (for the runCommand port)
  *
- * @tila/auth-store must NOT import either of these; it receives them only via
+ * cli/src/auth-store must NOT import either of these; it receives them only via
  * the injected ProviderPorts interface.
  */
 
@@ -18,7 +18,7 @@ import {
   type RunCommand,
   type RunCommandResult,
   processEnvProbe,
-} from "@tila/auth-store";
+} from "../auth-store";
 import * as p from "./prompts";
 
 // ---------------------------------------------------------------------------

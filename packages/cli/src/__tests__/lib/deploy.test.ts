@@ -69,7 +69,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+global.fetch = mockFetch as unknown as typeof fetch;
 
 function makeOpts(
   overrides?: Partial<Parameters<typeof deployWorkerWithAssets>[0]>,

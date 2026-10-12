@@ -11,8 +11,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { PromoteOptions, PromoteResult } from "@tila/auth-store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PromoteOptions, PromoteResult } from "../../auth-store";
 
 // vi.hoisted ensures mockPromoteLegacy is available inside the hoisted vi.mock factory.
 const { mockPromoteLegacy } = vi.hoisted(() => ({
@@ -26,15 +26,15 @@ const { mockPromoteLegacy } = vi.hoisted(() => ({
     }),
 }));
 
-// Partially mock @tila/auth-store: keep everything real but replace promoteLegacy.
-vi.mock("@tila/auth-store", async (importOriginal) => {
+// Partially mock cli/src/auth-store: keep everything real but replace promoteLegacy.
+vi.mock("../../auth-store", async (importOriginal) => {
   const orig = (await importOriginal()) as Record<string, unknown>;
   return { ...orig, promoteLegacy: mockPromoteLegacy };
 });
 
-// Import AFTER vi.mock so the hoisted mock is in place.
-import { AuthStore, FakeSecretStore, TilaPaths } from "@tila/auth-store";
 import type { InstanceKey } from "@tila/schemas";
+// Import AFTER vi.mock so the hoisted mock is in place.
+import { AuthStore, FakeSecretStore, TilaPaths } from "../../auth-store";
 import {
   maybePromoteLegacyAfterWrite,
   resolveInstanceContext,

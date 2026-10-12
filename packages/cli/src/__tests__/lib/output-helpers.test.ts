@@ -1,5 +1,5 @@
-import type { TrustDecision } from "@tila/auth-store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TrustDecision } from "../../auth-store";
 import {
   eprintJson,
   eprintln,

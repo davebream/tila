@@ -2,10 +2,10 @@ import { mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { AuthStore, FakeSecretStore, TilaPaths } from "@tila/auth-store";
-import type { LegacyLocations } from "@tila/auth-store";
 import type { CredentialRecord, InstanceKey } from "@tila/schemas";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AuthStore, FakeSecretStore, TilaPaths } from "../../auth-store";
+import type { LegacyLocations } from "../../auth-store";
 import { resetGlobalFlags, setGlobalFlags } from "../../lib/global-flags";
 import {
   buildAuthStore,

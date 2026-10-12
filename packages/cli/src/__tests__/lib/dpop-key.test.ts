@@ -1,6 +1,6 @@
-import { FakeSecretStore } from "@tila/auth-store";
 import { calculateJwkThumbprint, importJWK, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
+import { FakeSecretStore } from "../../auth-store";
 import {
   generateDpopKey,
   loadDpopPrivateKey,

@@ -1,3 +1,4 @@
+import type { TilaInfraConfig } from "@tila/schemas";
 /**
  * infra-fallback.ts — per-slug store preferred read with flat-file fallback.
  *
@@ -6,8 +7,7 @@
  * This is WI-M's additive read path — flat files keep working unchanged.
  * Full per-slug-only cutover (no flat file required) is WI-N scope.
  */
-import type { AuthStore } from "@tila/auth-store";
-import type { TilaInfraConfig } from "@tila/schemas";
+import type { AuthStore } from "../auth-store";
 import { getInfraSlug, loadInfraConfig } from "./infra-config.js";
 
 /**

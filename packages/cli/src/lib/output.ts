@@ -611,7 +611,7 @@ export function formatExpiry(expiresAtMs: number | null): string {
  * trusted=green, untrusted/spoof=red, ci-*=yellow
  */
 export function formatTrust(
-  decision: import("@tila/auth-store").TrustDecision,
+  decision: import("../auth-store").TrustDecision,
 ): string {
   switch (decision.kind) {
     case "trusted":

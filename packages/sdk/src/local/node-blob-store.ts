@@ -15,7 +15,7 @@ import type { BlobStore } from "@tila/backend-embedded";
 /**
  * Node (`node:fs`) implementation of the embedded `BlobStore` interface.
  *
- * Node analogue of `@tila/backend-local`'s `BunBlobStore` (which uses
+ * Node analogue of `cli/src/local`'s `BunBlobStore` (which uses
  * `Bun.write`/`Bun.file`). Blobs are stored at `<artifactsRoot>/<key>`, where
  * `key` is the content-addressed relative path
  * (`<org>/<project>/<sha256>.<ext>`) chosen by the embedded artifact backend.

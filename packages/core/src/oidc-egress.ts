@@ -4,7 +4,7 @@
  * `oidcEgressFetch` is the single sanctioned network path for reaching OIDC
  * issuer endpoints (discovery docs, JWKS, token endpoints). It is consumed by
  * both `@tila/worker` (`oidcFetch`, with the SSRF host-guard enabled) and
- * `@tila/auth-store` (`oidcEgressFetch`, host-guard omitted under its trusted
+ * `cli/src/auth-store` (`oidcEgressFetch`, host-guard omitted under its trusted
  * instance-registry threat model). Centralising it here means the security
  * invariants cannot drift between the two call sites (issue #153).
  *
@@ -50,7 +50,7 @@ export type OidcEgressErrorCode =
  * callers can branch without string-matching the message.
  *
  * The literal class identifier `OidcEgressError` is load-bearing:
- * `@tila/auth-store`'s `oidc-discovery.ts` branches on
+ * `cli/src/auth-store`'s `oidc-discovery.ts` branches on
  * `err.constructor.name === "OidcEgressError"`. Do not rename the class.
  */
 export class OidcEgressError extends Error {
@@ -80,7 +80,7 @@ export type OidcEgressOptions = {
    * point for tests; production callers can omit it. Resolved at call time so a
    * spy on `globalThis.fetch` is observed.
    */
-  fetchFn?: typeof globalThis.fetch;
+  fetchFn?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   /**
    * Optional SSRF host predicate. When supplied and it returns `true` for the
    * request hostname, the request is rejected as `oidc-fetch-blocked` BEFORE any

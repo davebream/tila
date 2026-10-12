@@ -55,7 +55,7 @@ import { type SleepSync, withBusyRetry } from "./retry";
 /**
  * Runtime-agnostic implementation of `ArtifactBackend`.
  *
- * Ported from `@tila/backend-local`'s `LocalArtifactBackend`, with all Bun I/O
+ * Ported from `cli/src/local`'s `LocalArtifactBackend`, with all Bun I/O
  * (`Bun.write`, `Bun.file().stream()`, `Bun.readableStreamToArrayBuffer`)
  * replaced by an injected `BlobStore`. Metadata stays in SQLite
  * (`artifact_pointers`, shared schema from `@tila/ops-sqlite`).

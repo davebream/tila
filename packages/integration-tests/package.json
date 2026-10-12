@@ -17,7 +17,6 @@
     "@tila/backend-d1": "workspace:*",
     "@tila/backend-do": "workspace:*",
     "@tila/backend-embedded": "workspace:*",
-    "@tila/backend-local": "workspace:*",
     "@tila/backend-r2": "workspace:*",
     "@tila/core": "workspace:*",
     "@tila/ops-sqlite": "workspace:*",

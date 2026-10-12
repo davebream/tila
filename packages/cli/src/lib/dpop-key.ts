@@ -9,9 +9,9 @@
  * @tila/schemas (platform-agnostic).
  */
 
-import type { SecretStore } from "@tila/auth-store";
 import { DPOP_ALG, DPOP_TYP, canonicalizeHtu } from "@tila/schemas";
 import { SignJWT, calculateJwkThumbprint, importJWK } from "jose";
+import type { SecretStore } from "../auth-store";
 
 /** Service name used when storing DPoP keys in the SecretStore. */
 const DPOP_SERVICE = "tila:dpop";

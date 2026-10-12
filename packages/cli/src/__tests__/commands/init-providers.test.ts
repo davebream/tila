@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Module-level mocks (must precede imports of the SUT)
 // ---------------------------------------------------------------------------
 
-// Mock @tila/auth-store — createProvider, resolveWithTrace, AuthStore
+// Mock cli/src/auth-store — createProvider, resolveWithTrace, AuthStore
 const mockCreateProvider = vi.fn();
 const mockResolveWithTrace = vi.fn();
 const mockAuthStoreInstance = {
@@ -25,7 +25,7 @@ const mockAuthStoreInstance = {
   putCredential: vi.fn(),
   putRefresh: vi.fn(),
 };
-vi.mock("@tila/auth-store", () => ({
+vi.mock("../../auth-store", () => ({
   createProvider: (...args: unknown[]) => mockCreateProvider(...args),
   resolveWithTrace: (...args: unknown[]) => mockResolveWithTrace(...args),
   AuthStore: vi.fn(() => mockAuthStoreInstance),
