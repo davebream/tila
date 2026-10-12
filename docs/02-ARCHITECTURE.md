@@ -2610,6 +2610,26 @@ labels; content never becomes approval. Delivery inspection is metadata-only and
 uses the existing manager/current-consumer authorization. Its URL includes agent
 and delivery IDs; it does not fetch or acknowledge the mailbox.
 
+### Delivery tracing (#302)
+
+Two additive read projections trace a message to its delivery outcomes. Neither
+fetches, acknowledges, sweeps or wakes anything.
+
+| Route | Capability | Returns |
+|---|---|---|
+| `GET /rooms/:room/messages/:message/deliveries` | `conversations:read` plus room access | Readers: `restricted: true` and aggregate counts only. Managers: per-recipient traces (up to 200) |
+| `GET /deliveries?agent&room&thread&message&id&state&limit&cursor` | `conversations:manage` | Newest-first traces with a signed cursor bound to caller and filters. `id` matches a delivery or message ID |
+
+Each trace keeps the facts separate: `stored`, `wake` (latest attempt outcome,
+attempt count, re-wakes, suppression), `fetched`, `acknowledged` and
+`work_result`. `work_result` is always `not-reported` until an explicit result API
+exists (#303/#304); acknowledgement never fills it. `state` is the effective
+state, so an unswept pending delivery past its TTL reads `expired` while room
+history keeps the message. `recipient.status` reports the targeted binding as
+`active`, `offline` (lease lapsed), `replaced`, `released`, `expired` or `none`.
+`GET /inbox/:agent/deliveries/:id` additively returns the same `trace` and a
+`message` reference (room, thread, seq and correlation fields).
+
 History accepts `direction=backward` for newest-first page selection while returning
 messages in ascending sequence order. Its signed cursor is direction-scoped. The
 additive `tail_cursor` is a forward cursor at that page's newest message, scoped to

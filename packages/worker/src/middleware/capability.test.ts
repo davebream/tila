@@ -151,6 +151,17 @@ describe("route capability inventory", () => {
       routeCapability("POST", "/projects/p/tasks/new-admin-operation"),
     ).toBeNull();
   });
+  it("lets readers see message delivery counts but not browse deliveries", () => {
+    expect(
+      routeCapability("GET", "/projects/p/rooms/general/messages/m/deliveries"),
+    ).toBe("conversations:read");
+    expect(routeCapability("GET", "/projects/p/deliveries")).toBe(
+      "conversations:manage",
+    );
+    expect(capabilityRole("conversations:manage")).toBe("maintainer");
+    expect(routeCapability("POST", "/projects/p/deliveries")).toBeNull();
+    expect(routeCapability("GET", "/projects/p/deliveries/id")).toBeNull();
+  });
 });
 
 describe("policy intersections", () => {

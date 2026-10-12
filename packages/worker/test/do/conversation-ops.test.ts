@@ -416,4 +416,252 @@ describe("durable conversations", () => {
     );
     expect((await publish()).message.seq).toBe(1);
   });
+  describe("delivery traces", () => {
+    const viewer: ops.ConversationAuthority = {
+      principal_id: "viewer",
+      participant_id: "viewer",
+      can_manage: false,
+      runtime: null,
+    };
+    const ttl = 604800000;
+    const ack = (
+      id: string,
+      b: { consumer_binding_id: string; binding_epoch: number },
+      t = now + 2,
+    ) =>
+      ops.acknowledge(
+        f.db,
+        "worker",
+        id,
+        {
+          consumer_binding_id: b.consumer_binding_id,
+          binding_epoch: b.binding_epoch,
+          disposition: "accepted",
+        },
+        acting,
+        t,
+      );
+    it("keeps stored, wake, fetch, acknowledgement and work result separate", async () => {
+      const b = attach(acting);
+      const { message: m } = await publish("one", { task_id: "task-1" });
+      const stored = ops.listDeliveries(f.db, owner, {}, 50, undefined, now);
+      expect(stored.deliveries[0]).toMatchObject({
+        message: { id: m.id, room_id: "general", seq: 1, task_id: "task-1" },
+        trace: {
+          state: "pending",
+          stored: { at: now },
+          wake: { status: "not-requested", attempts: 0 },
+          fetched: null,
+          acknowledged: null,
+          work_result: { status: "not-reported" },
+          recipient: { status: "active", binding_epoch: b.binding_epoch },
+        },
+      });
+      const lease = required(ops.leaseDispatch(f.db, "worker", relay, now));
+      expect(
+        ops.listDeliveries(f.db, owner, {}, 50, undefined, now).deliveries[0]
+          .trace.wake,
+      ).toMatchObject({ status: "requested", attempts: 1, last_at: now });
+      ops.reportDispatch(
+        f.db,
+        "worker",
+        { ...lease, outcome: "accepted" },
+        relay,
+        now + 1,
+      );
+      const id = ops.fetchInbox(f.db, "worker", acting, 50, undefined, now + 1)
+        .deliveries[0].delivery.id;
+      ack(id, b);
+      // A duplicate acknowledgement replays and does not add a second ack.
+      expect(ack(id, b, now + 5).replayed).toBe(true);
+      const done = ops.explainDelivery(f.db, "worker", id, owner, now + 6);
+      expect(done.message).toMatchObject({ id: m.id, task_id: "task-1" });
+      expect(done.trace).toMatchObject({
+        state: "acked",
+        wake: { status: "accepted", attempts: 1, last_at: now + 1 },
+        fetched: { at: now + 1, epoch: b.binding_epoch },
+        acknowledged: {
+          at: now + 2,
+          epoch: b.binding_epoch,
+          disposition: "accepted",
+        },
+        // Acknowledgement alone never reports completed work.
+        work_result: { status: "not-reported" },
+      });
+    });
+    it("counts repeated wakes as separate attempts", async () => {
+      attach(acting);
+      await publish();
+      ops.fetchInbox(f.db, "worker", acting, 50, undefined, now);
+      let t = now;
+      for (let i = 0; i < 2; i++) {
+        const lease = required(ops.leaseDispatch(f.db, "worker", relay, t));
+        ops.reportDispatch(
+          f.db,
+          "worker",
+          { ...lease, outcome: i ? "rejected" : "accepted" },
+          relay,
+          t + 1,
+        );
+        t =
+          ops.dispatchStatus(f.db, "worker", relay, t + 1).outbox
+            ?.next_attempt_at ?? 0;
+      }
+      const [item] = ops.listDeliveries(
+        f.db,
+        owner,
+        {},
+        50,
+        undefined,
+        t,
+      ).deliveries;
+      expect(item.trace.wake).toMatchObject({
+        status: "rejected",
+        attempts: 2,
+        rewakes: 2,
+      });
+    });
+    it("reports lazily expired deliveries as expired without sweeping them", async () => {
+      attach(acting);
+      await publish();
+      const later = now + ttl + 1;
+      const page = ops.listDeliveries(
+        f.db,
+        owner,
+        { state: "expired" },
+        50,
+        undefined,
+        later,
+      );
+      expect(page.deliveries.map((d) => d.trace.state)).toEqual(["expired"]);
+      expect(
+        ops.listDeliveries(
+          f.db,
+          owner,
+          { state: "pending" },
+          50,
+          undefined,
+          later,
+        ).deliveries,
+      ).toEqual([]);
+      expect(
+        f.sqlite.prepare("SELECT state FROM message_recipients").get(),
+      ).toEqual({ state: "pending" });
+      expect(ops.history(f.db, "general", owner).messages).toHaveLength(1);
+    });
+    it("shows replaced exact bindings and offline recipients", async () => {
+      const b = attach(acting);
+      await publish("exact", {
+        targets: [
+          {
+            kind: "binding",
+            agent_id: "worker",
+            consumer_binding_id: b.consumer_binding_id,
+            binding_epoch: b.binding_epoch,
+          },
+        ],
+      });
+      await publish("logical");
+      const statuses = () =>
+        Object.fromEntries(
+          ops
+            .listDeliveries(f.db, owner, {}, 50, undefined, now)
+            .deliveries.map((d) => [d.message.seq, d.trace.recipient]),
+        );
+      f.sqlite.prepare("UPDATE agent_bindings SET lease_expires_at = 0").run();
+      expect(statuses()).toEqual({
+        1: { status: "offline", binding_epoch: b.binding_epoch },
+        2: { status: "offline", binding_epoch: b.binding_epoch },
+      });
+      acting = { ...acting, runtime: run() };
+      const next = attach(acting, 1);
+      expect(statuses()).toEqual({
+        1: { status: "replaced", binding_epoch: b.binding_epoch },
+        2: { status: "active", binding_epoch: next.binding_epoch },
+      });
+    });
+    it("paginates newest first and filters by agent, room, state and id", async () => {
+      attach(acting);
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++)
+        ids.push((await publish(`op-${i}`, {}, now + i)).message.id);
+      const first = ops.listDeliveries(f.db, owner, {}, 2, undefined, now);
+      expect(first.has_more).toBe(true);
+      const last = required(first.deliveries.at(-1)).delivery;
+      const second = ops.listDeliveries(
+        f.db,
+        owner,
+        {},
+        2,
+        { ordinal: last.ordinal, id: last.id },
+        now,
+      );
+      expect(
+        [...first.deliveries, ...second.deliveries].map((d) => d.message.seq),
+      ).toEqual([5, 4, 3, 2]);
+      expect(
+        ops
+          .listDeliveries(f.db, owner, { id: ids[1] }, 50, undefined, now)
+          .deliveries.map((d) => d.message.id),
+      ).toEqual([ids[1]]);
+      const deliveryId = first.deliveries[0].delivery.id;
+      expect(
+        ops
+          .listDeliveries(f.db, owner, { id: deliveryId }, 50, undefined, now)
+          .deliveries.map((d) => d.delivery.id),
+      ).toEqual([deliveryId]);
+      expect(
+        ops.listDeliveries(f.db, owner, { agent: "other" }, 50, undefined, now)
+          .deliveries,
+      ).toEqual([]);
+      expect(
+        ops.listDeliveries(
+          f.db,
+          owner,
+          { room: "general", state: "acked" },
+          50,
+          undefined,
+          now,
+        ).deliveries,
+      ).toEqual([]);
+    });
+    it("denies browsing to readers and gives them aggregate counts only", async () => {
+      attach(acting);
+      const { message: m } = await publish();
+      ops.setMember(f.db, "general", "principal:viewer", false, owner, now);
+      expect(() =>
+        ops.listDeliveries(f.db, viewer, {}, 50, undefined, now),
+      ).toThrow(/conversations:manage/);
+      expect(() =>
+        ops.listDeliveries(f.db, relay, {}, 50, undefined, now),
+      ).toThrow(/Relay/);
+      const reader = ops.messageDeliveries(f.db, "general", m.id, viewer, now);
+      expect(reader).toEqual({
+        restricted: true,
+        summary: { recipients: 1, pending: 1, acknowledged: 0, expired: 0 },
+      });
+      const serialized = JSON.stringify(reader);
+      expect(serialized).not.toContain("worker");
+      expect(serialized).not.toContain(m.id);
+      const manager = ops.messageDeliveries(f.db, "general", m.id, owner, now);
+      expect(manager).toMatchObject({ restricted: false, has_more: false });
+      expect(
+        manager.restricted
+          ? []
+          : manager.deliveries.map((d) => d.delivery.agent_id),
+      ).toEqual(["worker"]);
+      expect(() =>
+        ops.messageDeliveries(f.db, "general", crypto.randomUUID(), owner, now),
+      ).toThrow(/Message not found/);
+      expect(() =>
+        ops.messageDeliveries(
+          f.db,
+          "general",
+          m.id,
+          { ...viewer, principal_id: "outsider" },
+          now,
+        ),
+      ).toThrow(/membership/);
+    });
+  });
 });

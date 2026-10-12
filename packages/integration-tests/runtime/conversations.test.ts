@@ -226,6 +226,35 @@ it("exchanges durable peer messages between authenticated SDK runs and rejects r
     ...page.binding,
     disposition: "accepted",
   });
+  const traced = await json<{
+    deliveries: {
+      delivery: { id: string };
+      trace: { state: string; work_result: { status: string } };
+    }[];
+  }>(await http("/deliveries?agent=two"));
+  expect(traced.deliveries.map((t) => t.delivery.id)).toEqual([d.delivery.id]);
+  expect(traced.deliveries[0].trace).toMatchObject({
+    state: "acked",
+    work_result: { status: "not-reported" },
+  });
+  const runAs = (path: string) =>
+    http(
+      path,
+      undefined,
+      one.run.token,
+      one.k,
+      one.run.context.participant_id ?? "missing-participant",
+    );
+  expect((await runAs("/deliveries")).status).toBe(403);
+  expect(
+    await json(
+      await runAs(`/rooms/general/messages/${sent.message.id}/deliveries`),
+    ),
+  ).toEqual({
+    ok: true,
+    restricted: true,
+    summary: { recipients: 1, pending: 0, acknowledged: 1, expired: 0 },
+  });
   const reply = await two.rooms.publish("general", {
     client_op_id: d.reply_op_id,
     body: "Review accepted",

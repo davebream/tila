@@ -230,12 +230,123 @@ export const InboxWatchResponseSchema = z.object({
   version: z.string(),
   pending: z.number().int(),
 });
+export const DeliveryStateSchema = DeliverySchema.shape.state;
+/**
+ * Read-only trace of one delivery. Storage, wake, fetch, acknowledgement and
+ * work result are separate facts: acknowledgement never implies completion.
+ */
+export const DeliveryTraceSchema = z.object({
+  /** Effective state: an unswept pending delivery past its TTL is expired. */
+  state: DeliveryStateSchema,
+  stored: z.object({ at: z.number() }),
+  wake: z.object({
+    status: z.enum([
+      "not-requested",
+      "requested",
+      "accepted",
+      "rejected",
+      "deferred",
+      "unknown",
+      "suppressed",
+    ]),
+    suppressed: DeliverySchema.shape.wake_suppressed,
+    attempts: z.number().int().nonnegative(),
+    rewakes: z.number().int().nonnegative(),
+    last_at: z.number().nullable(),
+  }),
+  fetched: z
+    .object({ at: z.number(), epoch: z.number().int().nullable() })
+    .nullable(),
+  acknowledged: z
+    .object({
+      at: z.number(),
+      epoch: z.number().int().nullable(),
+      disposition: DeliverySchema.shape.disposition,
+    })
+    .nullable(),
+  work_result: z.object({ status: z.literal("not-reported") }),
+  recipient: z.object({
+    status: z.enum([
+      "active",
+      "offline",
+      "replaced",
+      "released",
+      "expired",
+      "none",
+    ]),
+    binding_epoch: z.number().int().nullable(),
+  }),
+});
+export const DeliveryMessageRefSchema = z.object({
+  id: z.string().uuid(),
+  room_id: AgentIdSchema,
+  thread_id: z.string().uuid().nullable(),
+  seq: z.number().int().positive(),
+  task_id: z.string().optional(),
+  attempt_id: z.string().optional(),
+  correlation_id: z.string().optional(),
+});
+export const DeliveryTraceItemSchema = z.object({
+  delivery: DeliverySchema,
+  message: DeliveryMessageRefSchema,
+  trace: DeliveryTraceSchema,
+});
+export const DeliverySummarySchema = z.object({
+  recipients: z.number().int().nonnegative(),
+  pending: z.number().int().nonnegative(),
+  acknowledged: z.number().int().nonnegative(),
+  expired: z.number().int().nonnegative(),
+});
+export const DeliveryListQuerySchema = z.object({
+  agent: AgentIdSchema.optional(),
+  room: AgentIdSchema.optional(),
+  thread: z.string().uuid().optional(),
+  message: z.string().uuid().optional(),
+  /** Matches a delivery ID or a message ID. */
+  id: z.string().uuid().optional(),
+  state: DeliveryStateSchema.optional(),
+});
+export const DeliveryListResponseSchema = z.object({
+  ok: z.literal(true),
+  deliveries: z.array(DeliveryTraceItemSchema),
+  has_more: z.boolean(),
+  cursor: z.string().nullable(),
+});
+/** Readers get aggregate counts only; recipients and bindings need manage. */
+export const MessageDeliveriesResponseSchema = z.discriminatedUnion(
+  "restricted",
+  [
+    z.object({
+      ok: z.literal(true),
+      restricted: z.literal(true),
+      summary: DeliverySummarySchema,
+    }),
+    z.object({
+      ok: z.literal(true),
+      restricted: z.literal(false),
+      summary: DeliverySummarySchema,
+      deliveries: z.array(DeliveryTraceItemSchema),
+      has_more: z.boolean(),
+    }),
+  ],
+);
 export const DeliveryExplainResponseSchema = z.object({
   ok: z.literal(true),
   reason: z.string(),
   delivery: DeliverySchema,
   attempts: z.array(DispatchAttemptSchema),
+  message: DeliveryMessageRefSchema.optional(),
+  trace: DeliveryTraceSchema.optional(),
 });
+export type DeliveryTrace = z.infer<typeof DeliveryTraceSchema>;
+export type DeliveryMessageRef = z.infer<typeof DeliveryMessageRefSchema>;
+export type DeliveryTraceItem = z.infer<typeof DeliveryTraceItemSchema>;
+export type DeliverySummary = z.infer<typeof DeliverySummarySchema>;
+export type DeliveryListQuery = z.infer<typeof DeliveryListQuerySchema>;
+export type DeliveryListResponse = z.infer<typeof DeliveryListResponseSchema>;
+export type MessageDeliveriesResponse = z.infer<
+  typeof MessageDeliveriesResponseSchema
+>;
 export const DispatchStatusResponseSchema = z.object({
   ok: z.literal(true),
   server_now: z.number().optional(),

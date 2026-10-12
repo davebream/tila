@@ -250,6 +250,7 @@ projectRoutes.route("/agents", agents);
 projectRoutes.route("/rooms", conversations);
 projectRoutes.route("/inbox", conversations);
 projectRoutes.route("/dispatch", conversations);
+projectRoutes.route("/deliveries", conversations);
 projectRoutes.use("/*", createIdempotencyMiddleware());
 projectRoutes.use("/*", createCacheMiddleware());
 projectRoutes.route("/service-accounts", serviceAccountRoutes);
