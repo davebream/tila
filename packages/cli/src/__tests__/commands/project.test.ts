@@ -101,6 +101,7 @@ const mockDeriveRepo = vi.fn();
 const mockDeriveOrg = vi.fn();
 const mockGenerateRawToken = vi.fn();
 const mockHashToken = vi.fn();
+const mockResolveHashPepper = vi.fn();
 const mockEnsureGitignored = vi.fn();
 const mockGenerateDefaultSchemaToml = vi.fn();
 vi.mock("../../lib/provisioning", () => ({
@@ -111,6 +112,7 @@ vi.mock("../../lib/provisioning", () => ({
   deriveOrg: (...args: unknown[]) => mockDeriveOrg(...args),
   generateRawToken: (...args: unknown[]) => mockGenerateRawToken(...args),
   hashToken: (...args: unknown[]) => mockHashToken(...args),
+  resolveHashPepper: () => mockResolveHashPepper(),
   ensureGitignored: (...args: unknown[]) => mockEnsureGitignored(...args),
   generateDefaultSchemaToml: (...args: unknown[]) =>
     mockGenerateDefaultSchemaToml(...args),
@@ -276,6 +278,7 @@ describe("tila project create (cloudflare)", () => {
     mockDeriveOrg.mockReturnValue("test-org");
     mockGenerateRawToken.mockReturnValue("tila_mock-raw-token");
     mockHashToken.mockReturnValue("mock-token-hash");
+    mockResolveHashPepper.mockReturnValue(undefined);
     mockGenerateDefaultSchemaToml.mockReturnValue("mock-schema-toml");
 
     // Cloudflare defaults
@@ -402,6 +405,18 @@ describe("tila project create (cloudflare)", () => {
       tokenHash: "mock-token-hash",
       slug: "test-project",
     });
+  });
+
+  it("hashes the bootstrap token with the Worker's pepper when one is configured", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockResolveHashPepper.mockReturnValue("instance-pepper");
+
+    await invokeProjectCreate({ "skip-github": true });
+
+    expect(mockHashToken).toHaveBeenCalledWith(
+      "tila_mock-raw-token",
+      "instance-pepper",
+    );
   });
 
   it("registers repo when github credentials and repo info available", async () => {
