@@ -29,7 +29,7 @@ const storeState: {
   getUserByLogin: () => Promise.resolve(null),
 };
 
-vi.mock("@tila/backend-d1", () => {
+vi.mock("../d1", () => {
   class AdminGrantsStore {
     async grant(params: {
       projectId: string;

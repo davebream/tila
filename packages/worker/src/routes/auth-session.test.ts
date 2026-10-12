@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthMiddleware } from "../middleware/auth";
 import type { Env, HonoVariables } from "../types";
 
-// Mock @tila/backend-d1 stores
+// Mock worker/src/d1 stores
 const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 const mockRateLimitRecordFailure = vi.fn().mockResolvedValue(undefined);
 const mockTokenValidate = vi.fn();
@@ -18,10 +18,8 @@ const mockDeleteByTokenHash = vi.fn().mockResolvedValue({ deleted: 0 });
 const mockMembershipResolve = vi.fn().mockResolvedValue(null);
 const mockRepoAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 
-vi.mock("@tila/backend-d1", async () => ({
-  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
-    "@tila/backend-d1",
-  )),
+vi.mock("../d1", async () => ({
+  ...(await vi.importActual<typeof import("../d1")>("../d1")),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   ProjectMembershipStore: vi.fn().mockImplementation(
     class {

@@ -1,12 +1,8 @@
-import {
-  CredentialConflict,
-  CredentialDenied,
-  CredentialStore,
-} from "@tila/backend-d1";
-import { D1SessionStore, D1TokenStore } from "@tila/backend-d1";
 import { TokenRotateRequestSchema, policyContains } from "@tila/schemas";
 import { TokenIssueRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
+import { CredentialConflict, CredentialDenied, CredentialStore } from "../d1";
+import { D1SessionStore, D1TokenStore } from "../d1";
 import { generateToken, hashToken } from "../lib/hash";
 import { nowSeconds } from "../lib/time";
 import { zodValidationError } from "../lib/validation";

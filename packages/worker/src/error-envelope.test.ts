@@ -16,9 +16,9 @@
 import { FenceError } from "@tila/core";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { installProjectErrorHandlers } from "../../backend-do/src/routes/errors";
-import { jsonError } from "../../backend-do/src/routes/responses";
 import { mapProjectError } from "../../ops-sqlite/src/error-map";
+import { installProjectErrorHandlers } from "./do/routes/errors";
+import { jsonError } from "./do/routes/responses";
 
 // ---------------------------------------------------------------------------
 // mapProjectError: verify retryable is returned after Task 9

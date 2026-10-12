@@ -148,7 +148,7 @@ function applyVarsToData(
  *
  * This is the single source of truth for template instantiation, shared by the
  * DO `/template/instantiate` route and `EmbeddedProject.instantiateTemplate`
- * (CLAUDE.md: "Add new ops modules to @tila/ops-sqlite, not backend-do
+ * (CLAUDE.md: "Add new ops modules to @tila/ops-sqlite, not worker/src/do
  * directly"). Both callers are thin wrappers that map {@link TemplateInstantiateError}
  * to their own error type.
  *

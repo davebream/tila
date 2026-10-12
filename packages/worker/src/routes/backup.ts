@@ -1,8 +1,8 @@
-import { RuntimeStore } from "@tila/backend-d1";
-import { CredentialStore } from "@tila/backend-d1";
 import { CredentialPolicySchema, policyContains } from "@tila/schemas";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { RuntimeStore } from "../d1";
+import { CredentialStore } from "../d1";
 import { forwardToDO } from "../lib/do-forward";
 import { generateToken } from "../lib/hash";
 import { hashToken } from "../lib/hash-token";

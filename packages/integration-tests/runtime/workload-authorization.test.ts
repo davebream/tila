@@ -1,12 +1,12 @@
 import { SELF } from "cloudflare:test";
+import { GITHUB_ACTIONS_ISSUER, ROOT_CAPABILITIES } from "@tila/schemas";
+import { SignJWT } from "jose";
+import { expect, it } from "vitest";
 import {
   CredentialStore,
   ProjectMembershipStore,
   RepoAllowlistStore,
-} from "@tila/backend-d1";
-import { GITHUB_ACTIONS_ISSUER, ROOT_CAPABILITIES } from "@tila/schemas";
-import { SignJWT } from "jose";
-import { expect, it } from "vitest";
+} from "../../worker/src/d1";
 import { bindings } from "./setup";
 
 const projectId = "workload-runtime";

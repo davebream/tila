@@ -39,7 +39,7 @@ const storeState: {
 
 // vi.mock is hoisted — the factory must not reference variables initialised
 // after the vi.mock call. Use the storeState container and inline class.
-vi.mock("@tila/backend-d1", () => {
+vi.mock("../d1", () => {
   class AdminGrantsStore {
     async grant(params: {
       projectId: string;

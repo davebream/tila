@@ -79,7 +79,7 @@ describe("entity create with tags (SDK)", () => {
   // NOTE: read-side coverage is intentionally mock-confirms-mock — fetch is mocked to return a
   // body that already contains `tags`, so this asserts SDK pass-through, not a real read
   // round-trip. The real server→client tag round-trip is covered at the ops/integration layer
-  // (packages/backend-do/test, integration-tests). Request-side assertions below are authoritative.
+  // (packages/worker/test/do, integration-tests). Request-side assertions below are authoritative.
   it("get response surfaces tags from the server", async () => {
     const responseBody = {
       ok: true,

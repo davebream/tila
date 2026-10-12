@@ -1,4 +1,3 @@
-import { RuntimeDenied, RuntimeStore } from "@tila/backend-d1";
 import {
   RUNTIME_RUN_CEILING,
   canonicalizeHtu,
@@ -6,6 +5,7 @@ import {
   intersectCredentialPolicies,
 } from "@tila/schemas";
 import type { Context } from "hono";
+import { RuntimeDenied, RuntimeStore } from "../d1";
 import { verifyDpopProof } from "../middleware/dpop";
 import { resolveTokenMembership } from "../middleware/membership";
 import {

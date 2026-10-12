@@ -1,7 +1,7 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { MIGRATIONS, MIGRATION_BOOTSTRAP } from "@tila/ops-sqlite";
 import { expect, it } from "vitest";
-import { runProjectMigrations } from "../../backend-do/src/migration-runner";
+import { runProjectMigrations } from "../../worker/src/do/migration-runner";
 import { bindings } from "./setup";
 
 import { identity, post } from "./helpers";

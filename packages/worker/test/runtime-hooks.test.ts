@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { Hono } from "hono";
 import { expect, it } from "vitest";
-import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
 import {
   RuntimeEnrollmentStore,
   RuntimeFileSecretStore,
@@ -31,6 +30,7 @@ import { createAuthMiddleware } from "../src/middleware/auth";
 import { requestIdentityMiddleware } from "../src/middleware/request-identity";
 import { runtimeRoutes } from "../src/routes/runtime";
 import type { Env, HonoVariables } from "../src/types";
+import { createCredentialFixture } from "./d1/helpers/credential-fixture";
 
 function stopDetachedHelper(pid: number): void {
   try {

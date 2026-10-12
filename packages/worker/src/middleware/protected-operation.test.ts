@@ -24,8 +24,8 @@ const mocks = vi.hoisted(() => ({
   repo: vi.fn(),
   policy: vi.fn(),
 }));
-vi.mock("@tila/backend-d1", async (original) => ({
-  ...(await original<typeof import("@tila/backend-d1")>()),
+vi.mock("../d1", async (original) => ({
+  ...(await original<typeof import("../d1")>()),
   GitHubAppConfigStore: class {
     getInstallation = mocks.installation;
   },

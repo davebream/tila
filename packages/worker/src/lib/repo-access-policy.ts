@@ -1,5 +1,3 @@
-import { ProjectMembershipStore } from "@tila/backend-d1";
-import type { RepoAllowlistRow } from "@tila/backend-d1";
 import {
   PROJECT_ROLE_RANK,
   permissionToRole,
@@ -10,6 +8,8 @@ import {
   RepoAccessPolicySchema,
   type SessionPermission,
 } from "@tila/schemas";
+import { ProjectMembershipStore } from "../d1";
+import type { RepoAllowlistRow } from "../d1";
 import {
   PERMISSION_HIERARCHY,
   normalizeGitHubPermission,

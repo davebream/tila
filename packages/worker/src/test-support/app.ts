@@ -1,3 +1,4 @@
+import { Hono } from "hono";
 /**
  * createAuthTestApp — builds a Hono test app with auth middleware + routes.
  *
@@ -13,8 +14,7 @@
  * The generic OIDC exchange route (WI-B1) is not yet on main; it is excluded.
  * When WI-B1 lands, add a guarded import here and mount it conditionally.
  */
-import type { RateLimitStoreInterface } from "@tila/backend-d1";
-import { Hono } from "hono";
+import type { RateLimitStoreInterface } from "../d1";
 import { createAuthMiddleware } from "../middleware/auth";
 import { projectMiddleware } from "../middleware/project";
 import { authGithub } from "../routes/auth-github";

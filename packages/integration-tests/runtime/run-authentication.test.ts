@@ -1,5 +1,4 @@
 import { SELF } from "cloudflare:test";
-import { D1TokenStore, RuntimeStore } from "@tila/backend-d1";
 import {
   type RuntimeContext,
   accessTokenHash,
@@ -12,6 +11,7 @@ import {
   generateKeyPair,
 } from "jose";
 import { expect, it } from "vitest";
+import { D1TokenStore, RuntimeStore } from "../../worker/src/d1";
 import { hashToken } from "../../worker/src/lib/hash";
 import { bindings } from "./setup";
 

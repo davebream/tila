@@ -1,12 +1,3 @@
-import { HumanStore } from "@tila/backend-d1";
-import {
-  D1ProjectRegistry,
-  D1RateLimitStore,
-  D1SessionStore,
-  GitHubAppConfigStore,
-  ProjectMembershipStore,
-  RepoAllowlistStore,
-} from "@tila/backend-d1";
 import { HumanProjectSelectSchema } from "@tila/schemas";
 import {
   type MembershipSource,
@@ -17,6 +8,15 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import { COOKIE_SESSION_TTL_SECONDS } from "../config";
+import { HumanStore } from "../d1";
+import {
+  D1ProjectRegistry,
+  D1RateLimitStore,
+  D1SessionStore,
+  GitHubAppConfigStore,
+  ProjectMembershipStore,
+  RepoAllowlistStore,
+} from "../d1";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import {
   checkUserMembership,

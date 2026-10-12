@@ -65,7 +65,7 @@ packages/bench/results/*
 # Explicit version-generation task outputs
 /packages/cli/src/version.ts
 /packages/sdk/src/version.ts
-/packages/backend-do/src/version.ts
+/packages/worker/src/version.ts
 
 # Prepared release artifacts (never credentials or runtime state)
 /.release/

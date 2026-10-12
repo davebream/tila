@@ -1,5 +1,5 @@
-import { HumanStore, createHumanAuth, humanSecretHash } from "@tila/backend-d1";
 import type { Context } from "hono";
+import { HumanStore, createHumanAuth, humanSecretHash } from "../d1";
 import { stepUpMaxAgeMs } from "../middleware/protected-operation";
 import type { Env, HonoVariables } from "../types";
 import { parseAllowedOrigins } from "./parse-allowed-origins";

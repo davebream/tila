@@ -69,8 +69,8 @@ vi.mock("../../worker/src/lib/analytics", async (importOriginal) => {
   };
 });
 
-// Stub all @tila/backend-d1 store constructors
-vi.mock("@tila/backend-d1", () => ({
+// Stub all worker/src/d1 store constructors
+vi.mock("../../worker/src/d1", () => ({
   D1TokenStore: vi.fn().mockImplementation(
     class {
       validate = vi.fn().mockResolvedValue(null);

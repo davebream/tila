@@ -1,4 +1,3 @@
-import { createR2JournalArchiveReader } from "@tila/backend-r2";
 import {
   ContinuityError,
   type ReentrySnapshot,
@@ -20,6 +19,7 @@ import { forwardToDO } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
 import { identityPayload } from "../middleware/request-identity";
+import { createR2JournalArchiveReader } from "../r2";
 import type { Env, HonoVariables } from "../types";
 
 export const continuity = new Hono<{

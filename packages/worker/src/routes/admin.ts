@@ -1,14 +1,14 @@
-import {
-  D1SessionStore,
-  ProjectMembershipStore,
-  canonicalMembershipPrincipal,
-  revokePrincipalBatch,
-} from "@tila/backend-d1";
 import { PrincipalRevocationRequestSchema } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import {
+  D1SessionStore,
+  ProjectMembershipStore,
+  canonicalMembershipPrincipal,
+  revokePrincipalBatch,
+} from "../d1";
 import { adminCacheKey } from "../lib/admin-cache-key";
 import { archiveJournal, revokeSession } from "../lib/admin-ops";
 import { expirePrincipalAgentBindings } from "../lib/agent-authority";

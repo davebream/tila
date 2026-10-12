@@ -1,4 +1,4 @@
-import { D1RevokedJtiStore } from "@tila/backend-d1";
+import { D1RevokedJtiStore } from "../d1";
 import { revokeJtiInCache } from "../middleware/auth";
 import type { Env } from "../types";
 import { forwardToDO } from "./do-forward";

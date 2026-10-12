@@ -26,7 +26,7 @@ import { describe, expect, it, vi } from "vitest";
 // Mock heavy dependencies that are not needed for route introspection.
 // These are the same bindings the Worker imports at module load time.
 // ---------------------------------------------------------------------------
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("./d1", () => ({
   D1ProjectRegistry: vi.fn(),
   D1SessionStore: vi.fn().mockImplementation(
     class {
@@ -48,11 +48,11 @@ vi.mock("@tila/backend-d1", () => ({
   ),
 }));
 
-vi.mock("@tila/backend-r2", () => ({
+vi.mock("./r2", () => ({
   R2ArtifactBackend: vi.fn(),
 }));
 
-vi.mock("@tila/backend-do", () => ({
+vi.mock("./do", () => ({
   ProjectDO: vi.fn(),
 }));
 

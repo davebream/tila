@@ -2,7 +2,7 @@
  * makeAuthEnv — builds a static Env shape for auth test apps.
  *
  * Supplies the structural Env binding stubs only. Store BEHAVIOR is controlled
- * by a per-test-file hoisted vi.mock("@tila/backend-d1", () => backendD1MockFactory())
+ * by a per-test-file hoisted vi.mock("../d1", () => backendD1MockFactory())
  * — not by this function. makeAuthEnv does NOT own store behavior.
  *
  * The PROJECT stub's fetch resolves successfully so that projectMiddleware
@@ -24,7 +24,7 @@ export const TEST_HMAC_KEY = btoa("test-hmac-key-this-is-32-bytes!!")
 /**
  * Minimal empty-read D1 stub. Returns empty results for every query (drizzle
  * `.all()` → no rows, `.first()` → null). Needed because a per-package
- * vi.mock("@tila/backend-d1") does NOT reliably intercept the worker's OWN
+ * vi.mock("../d1") does NOT reliably intercept the worker's OWN
  * internal store construction (cross-package module-graph limitation — see
  * auth-revocation.test.ts header). The WI-C subject-revocation gate constructs
  * `new D1RevokedSubjectsStore(c.env.DB)` for EVERY session token and calls

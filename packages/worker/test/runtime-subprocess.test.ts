@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Hono } from "hono";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
 import { hashToken } from "../src/lib/hash";
 import { createAuthMiddleware } from "../src/middleware/auth";
 import { capabilityMiddleware } from "../src/middleware/capability";
@@ -14,6 +13,7 @@ import { projectMiddleware } from "../src/middleware/project";
 import { requestIdentityMiddleware } from "../src/middleware/request-identity";
 import { runtimeRoutes } from "../src/routes/runtime";
 import type { Env, HonoVariables } from "../src/types";
+import { createCredentialFixture } from "./d1/helpers/credential-fixture";
 
 const home = mkdtempSync(join(tmpdir(), "tila-run-process-"));
 const entry = resolve(import.meta.dirname, "../../cli/src/index.ts");

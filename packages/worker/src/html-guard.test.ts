@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock @tila/backend-d1 -- must be before any imports that use it
-vi.mock("@tila/backend-d1", () => ({
+// Mock worker/src/d1 -- must be before any imports that use it
+vi.mock("./d1", () => ({
   D1ProjectRegistry: vi.fn(),
   D1SessionStore: vi.fn().mockImplementation(
     class {
@@ -22,11 +22,11 @@ vi.mock("@tila/backend-d1", () => ({
   ),
 }));
 
-vi.mock("@tila/backend-r2", () => ({
+vi.mock("./r2", () => ({
   R2ArtifactBackend: vi.fn(),
 }));
 
-vi.mock("@tila/backend-do", () => ({
+vi.mock("./do", () => ({
   ProjectDO: vi.fn(),
 }));
 

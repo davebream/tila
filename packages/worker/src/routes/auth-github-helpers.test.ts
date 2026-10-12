@@ -1,18 +1,18 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Unit tests for extracted auth-github helper functions.
  * Mandatory per plan Task 9 (C3) — ensures the refactor covers all duplication
  * sites and the helpers behave correctly in isolation.
  */
-import type { D1IdempotencyStore } from "@tila/backend-d1";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { D1IdempotencyStore } from "../d1";
 
 // ---------------------------------------------------------------------------
-// Module-level mock for @tila/backend-d1 — must be hoisted before imports
+// Module-level mock for worker/src/d1 — must be hoisted before imports
 // so recordExchangeFailure sees the mock when it constructs D1RateLimitStore.
 // ---------------------------------------------------------------------------
 const mockRecordFailure = vi.fn();
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   D1RateLimitStore: vi.fn().mockImplementation(
     class {
       recordFailure = mockRecordFailure;

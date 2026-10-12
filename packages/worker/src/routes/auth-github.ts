@@ -1,14 +1,3 @@
-import { resolveActionsMembership } from "@tila/backend-d1";
-import {
-  D1IdempotencyStore,
-  D1RateLimitStore,
-  D1SessionStore,
-  D1TokenStore,
-  GitHubAppConfigStore,
-  ProjectMembershipStore,
-  RepoAllowlistStore,
-  canonicalMembershipPrincipal,
-} from "@tila/backend-d1";
 import {
   AUTHORIZATION_VERSION,
   GITHUB_ACTIONS_ISSUER,
@@ -35,6 +24,17 @@ import {
   RESERVATION_STALE_MS,
   SESSION_TTL_SECONDS_BY_TIER,
 } from "../config";
+import { resolveActionsMembership } from "../d1";
+import {
+  D1IdempotencyStore,
+  D1RateLimitStore,
+  D1SessionStore,
+  D1TokenStore,
+  GitHubAppConfigStore,
+  ProjectMembershipStore,
+  RepoAllowlistStore,
+  canonicalMembershipPrincipal,
+} from "../d1";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { buildSessionCookie, isLocalhost } from "../lib/cookie-helpers";
 import { ensureDeploymentInstanceId } from "../lib/deployment-instance";

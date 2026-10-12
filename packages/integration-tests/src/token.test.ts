@@ -17,9 +17,9 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Per-file hoisted mock — vitest resolves this to the same module the worker source imports.
-vi.mock("@tila/backend-d1", async () => {
+vi.mock("../../worker/src/d1", async () => {
   const { backendD1MockFactory } = await import(
-    "../../worker/src/test-support/backend-d1-mock"
+    "../../worker/src/test-support/d1-mock"
   );
   return backendD1MockFactory();
 });

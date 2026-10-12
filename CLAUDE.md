@@ -29,12 +29,12 @@ pnpm bench:report -- --in packages/bench/results --out docs/benchmarks/BASELINE.
 ### Single-package commands
 
 ```bash
-pnpm --filter @tila/backend-do test          # Test one package
-pnpm --filter @tila/backend-do test -- --run artifact-ops  # Single test file (substring match)
+pnpm --filter @tila/worker test              # Test one package
+pnpm --filter @tila/worker test -- --run artifact-ops  # Single test file (substring match)
 pnpm --filter @tila/worker typecheck         # Typecheck one package
 ```
 
-Tests use Vitest, except the CLI's Bun-only local backend suite in `packages/cli/test/local`, which uses `bun test` (the `tila-cli` `test` script runs both). Each package has its own `vitest.config.ts`. The `backend-do` tests are in `test/` (not `src/`). Integration tests are either env-gated live HTTP tests (`TILA_BASE_URL`/`TILA_TOKEN`, skipped in CI) or in-process tests that mount the Worker route modules over the real DO router and better-sqlite3 (`packages/integration-tests/src/artifact-versions.test.ts` is the pattern). The benchmark smoke suite in `packages/bench/test` uses the same in-process pattern.
+Tests use Vitest, except the CLI's Bun-only local backend suite in `packages/cli/test/local`, which uses `bun test` (the `tila-cli` `test` script runs both). Each package has its own `vitest.config.ts`. The Worker's Durable Object and D1 tests are in `packages/worker/test/do` and `packages/worker/test/d1` (not `src/`). Integration tests are either env-gated live HTTP tests (`TILA_BASE_URL`/`TILA_TOKEN`, skipped in CI) or in-process tests that mount the Worker route modules over the real DO router and better-sqlite3 (`packages/integration-tests/src/artifact-versions.test.ts` is the pattern). The benchmark smoke suite in `packages/bench/test` uses the same in-process pattern.
 
 ### Local development setup
 
@@ -87,7 +87,7 @@ tila uses one product version for public release artifacts. Bump the root `packa
 pnpm version:check
 ```
 
-Private workspace packages such as `@tila/core`, `@tila/schemas`, backend packages, worker, and UI are implementation modules. They do not need product-version bumps.
+Private workspace packages such as `@tila/core`, `@tila/schemas`, `@tila/ops-sqlite`, `@tila/backend-embedded`, worker, and UI are implementation modules. They do not need product-version bumps.
 
 ### Git workflow
 
@@ -134,12 +134,9 @@ Turborepo monorepo under `packages/`:
 |---|---|
 | `@tila/schemas` | Zod schemas — single source of truth for all types |
 | `@tila/core` | Backend interfaces, fence logic, schema-as-config parser |
-| `@tila/ops-sqlite` | Shared SQLite ops modules (entity-ops, artifact-ops, etc.), Drizzle schema, migrations. Used by both `backend-do` and `backend-embedded` |
+| `@tila/ops-sqlite` | Shared SQLite ops modules (entity-ops, artifact-ops, etc.), Drizzle schema, migrations. Used by both the Worker's Durable Object (`worker/src/do`) and `backend-embedded` |
 | `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by the CLI's local backend (Bun) and `tila-sdk/local` (Node) |
-| `@tila/backend-d1` | D1 global store (tokens, idempotency, project registry, sessions) |
-| `@tila/backend-do` | Durable Object wrapper — constructs `ProjectDO`, runs migrations via `blockConcurrencyWhile`, delegates to `ops-sqlite` |
-| `@tila/backend-r2` | R2 artifact storage (content-addressed, sha256-keyed) |
-| `@tila/worker` | Cloudflare Worker with Hono routing, Smart Placement |
+| `@tila/worker` | Cloudflare Worker with Hono routing, Smart Placement. Also holds its storage backends: `src/do` (Durable Object wrapper — constructs `ProjectDO`, runs migrations via `blockConcurrencyWhile`, delegates to `ops-sqlite`), `src/d1` (D1 global store: tokens, idempotency, project registry, sessions, human accounts) and `src/r2` (content-addressed, sha256-keyed artifact storage) |
 | `tila-sdk` | TypeScript SDK for tila consumers (client, resource methods, retry, error codes) |
 | `tila-mcp-server` | MCP server exposing tila API as tools/resources/prompts for AI agents |
 | `@tila/ui` | Project dashboard with scoped access management and conversations, served by Worker |
@@ -158,23 +155,21 @@ that reference "entity" are referring to the table-level concept.
 ### Package dependency flow
 
 ```
-schemas → core → ops-sqlite → backend-do        → worker
+schemas → core → ops-sqlite → worker            (src/do, src/d1, src/r2)
                             → backend-embedded → cli/src/local   (Bun, bun:sqlite)
                                                → tila-sdk/local  (Node, better-sqlite3)
-         core → backend-d1                → worker
-         core → backend-r2                → worker
 schemas → sdk → mcp-server
                                     worker ← ui
 cli -> schemas, core, backend-embedded, sdk
 ```
 
-`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by the CLI's `src/local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK), not just Bun. The DB file is portable between the CLI and a Node SDK consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
+`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. The Worker's `src/do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by the CLI's `src/local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK), not just Bun. The DB file is portable between the CLI and a Node SDK consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
 
 ### Request flow
 
 HTTP → Worker (Hono) → auth middleware → project middleware (resolves DO stub) → route handler → DO `fetch()` → `project-do-router.ts` (Hono sub-router inside DO) → ops modules from `@tila/ops-sqlite` → Drizzle → DO SQLite.
 
-The `ProjectDO` class in `backend-do/src/project-do.ts` is thin: it constructs Drizzle, runs migrations in `blockConcurrencyWhile`, and delegates all domain logic to the router built from ops-sqlite modules.
+The `ProjectDO` class in `packages/worker/src/do/project-do.ts` is thin: it constructs Drizzle, runs migrations in `blockConcurrencyWhile`, and delegates all domain logic to the router built from ops-sqlite modules.
 
 ### Auth model
 
@@ -199,10 +194,10 @@ Defined in `packages/worker/wrangler.toml`: `PROJECT` (DO), `DB` (D1), `ARTIFACT
 - DO: Validate fencing tokens on every destructive operation downstream of a claim
 - DO: Canonicalize entity coordination resources to `<type>:<id>` at the route or facade boundary before reading claim/fence state
 - DO: Fail closed when a required fence row is missing; do not add `if (fenceRow)` best-effort guards on required-fence paths
-- DO: Add new ops modules to `@tila/ops-sqlite`, not to `backend-do` directly
+- DO: Add new ops modules to `@tila/ops-sqlite`, not to `worker/src/do` directly
 - DON'T: Create circular dependencies between workspace packages
 - DON'T: Import Cloudflare Workers types in packages that don't run on Workers (schemas, core, ops-sqlite, cli, sdk)
-- DON'T: Store business logic in Worker route handlers — extract to backend packages
+- DON'T: Store business logic in Worker route handlers — extract it to the storage modules (`worker/src/do`, `worker/src/d1`, `worker/src/r2`), `@tila/ops-sqlite`, or another shared package
 - Maintain `.github/workflows/` directly. Preserve the required `ci` gate and validate workflow changes.
 - DO: Deploy via `tila infra provision --force-redeploy` or `tila deploy` — both route through `deployWorkerWithAssets`, which generates a per-deploy `wrangler.<slug>.toml` and shells out to `wrangler deploy`. `wrangler deploy` **preserves Worker secrets** (secrets are never deleted by a deployment); plain `[vars]` absent from the generated config ARE removed (`keep_vars=false` by default — intentional, since `CORS_ALLOWED_ORIGINS` is dropped under same-origin deployment). Do NOT run `wrangler deploy` manually; let the CLI manage config generation and secret injection. `wrangler dev` for local development is fine.
 - DON'T: Poll a DO to check if it restarted — each request resets the 70-140s idle eviction timer, preventing the restart you're waiting for

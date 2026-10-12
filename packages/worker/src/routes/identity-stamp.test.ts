@@ -29,7 +29,7 @@ vi.mock("../lib/analytics", () => ({
 
 const mockIssue = vi.fn().mockResolvedValue({ tokenId: "mock-token-id-uuid" });
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   D1TokenStore: vi.fn().mockImplementation(
     class {
       issue = mockIssue;
@@ -207,7 +207,7 @@ describe("Identity stamp — spoof prevention", () => {
 
   describe("POST /tokens (token issue)", () => {
     // The token issue route uses new D1TokenStore(c.env.DB).
-    // D1TokenStore is mocked above (vi.mock("@tila/backend-d1")), so the constructor
+    // D1TokenStore is mocked above (vi.mock("../d1")), so the constructor
     // receives whatever we pass as c.env.DB. We pass the env as the second arg to
     // app.request() so c.env is defined.
     const mockEnv = { DB: {} } as unknown as Env;

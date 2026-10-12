@@ -18,7 +18,7 @@
  *   } from "@tila/worker/test-support";
  *
  *   // Per-file hoisted mock (vitest hoisting is per-module — unavoidable):
- *   vi.mock("@tila/backend-d1", () => backendD1MockFactory());
+ *   vi.mock("../d1", () => backendD1MockFactory());
  *
  *   beforeEach(() => {
  *     _resetMiddlewareStateForTest();
@@ -56,7 +56,7 @@ export {
   mockRepoIsRegistered,
   mockGitHubAppConfigSetInstallation,
   mockGitHubAppConfigGetInstallation,
-} from "./backend-d1-mock";
+} from "./d1-mock";
 
 // Env builder + test HMAC key
 export { makeAuthEnv, TEST_HMAC_KEY } from "./env";

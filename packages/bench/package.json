@@ -11,9 +11,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261008.1",
-    "@tila/backend-do": "workspace:*",
     "@tila/backend-embedded": "workspace:*",
-    "@tila/backend-r2": "workspace:*",
     "@tila/core": "workspace:*",
     "@tila/ops-sqlite": "workspace:*",
     "@tila/schemas": "workspace:*",

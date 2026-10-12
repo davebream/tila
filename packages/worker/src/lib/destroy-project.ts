@@ -1,6 +1,6 @@
-import { D1ProjectRegistry } from "@tila/backend-d1";
-import { R2ArtifactBackend } from "@tila/backend-r2";
 import { artifactVersionPrefix } from "@tila/schemas";
+import { D1ProjectRegistry } from "../d1";
+import { R2ArtifactBackend } from "../r2";
 import type { Env } from "../types";
 import { forwardToDO } from "./do-forward";
 

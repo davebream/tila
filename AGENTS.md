@@ -27,12 +27,12 @@ pnpm version:test     # Test version policy scripts
 Target one package with workspace filters:
 
 ```bash
-pnpm --filter @tila/backend-do test
-pnpm --filter @tila/backend-do test -- --run artifact-ops
+pnpm --filter @tila/worker test
+pnpm --filter @tila/worker test -- --run artifact-ops
 pnpm --filter @tila/worker typecheck
 ```
 
-Tests use Vitest, except the CLI's Bun-only local backend suite in `packages/cli/test/local`, which uses `bun test` (the `tila-cli` `test` script runs both). Each package has its own `vitest.config.ts`. `backend-do` tests live in `test/`, not `src/`. Required Cloudflare runtime tests use `@cloudflare/vitest-plugin` and a separate configuration. They require no deployed service or credentials; skipped/TODO runtime cases fail CI.
+Tests use Vitest, except the CLI's Bun-only local backend suite in `packages/cli/test/local`, which uses `bun test` (the `tila-cli` `test` script runs both). Each package has its own `vitest.config.ts`. The Worker's Durable Object and D1 tests live in `packages/worker/test/do` and `packages/worker/test/d1`, not `src/`. Required Cloudflare runtime tests use `@cloudflare/vitest-plugin` and a separate configuration. They require no deployed service or credentials; skipped/TODO runtime cases fail CI.
 
 Lefthook runs Biome auto-fix, gitleaks secret detection, and targeted version lockstep checks on staged files.
 
@@ -45,7 +45,7 @@ tila uses one product version for public release artifacts. Bump the root `packa
 pnpm version:check
 ```
 
-Private workspace packages such as `@tila/core`, `@tila/schemas`, backend packages, worker, and UI are implementation modules. They do not need product-version bumps.
+Private workspace packages such as `@tila/core`, `@tila/schemas`, `@tila/ops-sqlite`, `@tila/backend-embedded`, worker, and UI are implementation modules. They do not need product-version bumps.
 
 ## Architecture
 
@@ -55,12 +55,9 @@ This is a Turborepo monorepo with packages under `packages/`:
 |---|---|
 | `@tila/schemas` | Zod schemas, single source of truth for all types |
 | `@tila/core` | Backend interfaces, fence logic, schema-as-config parser |
-| `@tila/ops-sqlite` | Shared SQLite ops modules, Drizzle schema, and migrations. Used by both `backend-do` and `backend-embedded` |
+| `@tila/ops-sqlite` | Shared SQLite ops modules, Drizzle schema, and migrations. Used by both the Worker's Durable Object (`worker/src/do`) and `backend-embedded` |
 | `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by the CLI's local backend (Bun) and `tila-sdk/local` (Node) |
-| `@tila/backend-d1` | D1 global store for tokens, idempotency, project registry, sessions |
-| `@tila/backend-do` | Durable Object wrapper — runs migrations, delegates to `ops-sqlite` |
-| `@tila/backend-r2` | R2 artifact storage |
-| `@tila/worker` | Cloudflare Worker with Hono routing and Smart Placement |
+| `@tila/worker` | Cloudflare Worker with Hono routing and Smart Placement. Also holds its storage backends: `src/do` (Durable Object wrapper — runs migrations, delegates to `ops-sqlite`), `src/d1` (D1 global store for tokens, idempotency, project registry, sessions) and `src/r2` (R2 artifact storage) |
 | `tila-sdk` | TypeScript SDK for tila consumers |
 | `tila-mcp-server` | MCP server exposing tila API as tools/resources/prompts for AI agents |
 | `@tila/ui` | Project dashboard with scoped access management and conversations, served by the Worker |
@@ -70,11 +67,9 @@ This is a Turborepo monorepo with packages under `packages/`:
 Package dependency flow:
 
 ```text
-schemas -> core -> ops-sqlite -> backend-do        -> worker
+schemas -> core -> ops-sqlite -> worker            (src/do, src/d1, src/r2)
                               -> backend-embedded -> cli/src/local   (Bun, bun:sqlite)
                                                   -> tila-sdk/local  (Node, better-sqlite3)
-          core -> backend-d1                      -> worker
-          core -> backend-r2                      -> worker
 schemas -> sdk -> mcp-server
                                        worker <- ui
 cli -> schemas, core, backend-embedded, sdk
@@ -89,7 +84,7 @@ HTTP -> Worker (Hono) -> auth middleware -> project middleware -> route handler
   -> DO fetch() -> project-do-router.ts (Hono sub-router) -> ops-sqlite modules -> Drizzle -> DO SQLite
 ```
 
-`ProjectDO` in `packages/backend-do/src/project-do.ts` is thin: it constructs Drizzle, runs migrations in `blockConcurrencyWhile`, and delegates all domain logic to the router built from ops-sqlite modules.
+`ProjectDO` in `packages/worker/src/do/project-do.ts` is thin: it constructs Drizzle, runs migrations in `blockConcurrencyWhile`, and delegates all domain logic to the router built from ops-sqlite modules.
 
 ## Working Rules
 
@@ -100,9 +95,9 @@ HTTP -> Worker (Hono) -> auth middleware -> project middleware -> route handler
 - Keep entity and claim writes in single DO SQLite transactions when correctness depends on both.
 - Content-address artifacts by SHA-256. Key format is `<prefix>/<id>/<sha256>.<ext>`.
 - Validate fencing tokens on every destructive operation downstream of a claim.
-- Add new ops modules to `@tila/ops-sqlite`, not to `backend-do` directly.
+- Add new ops modules to `@tila/ops-sqlite`, not to `worker/src/do` directly.
 - Do not create circular dependencies between workspace packages.
-- Do not store business logic in Worker route handlers; move it into backend packages.
+- Do not store business logic in Worker route handlers; move it into the storage modules (`worker/src/do`, `worker/src/d1`, `worker/src/r2`), `@tila/ops-sqlite`, or another shared package.
 - Maintain `.github/workflows/` directly. Preserve the required `ci` gate and validate workflow changes.
 
 ## Git Workflow

@@ -1,4 +1,3 @@
-import { canonicalMembershipPrincipal } from "@tila/backend-d1";
 import { GITHUB_ACTIONS_ISSUER } from "@tila/schemas";
 import {
   type EnvironmentMetadata,
@@ -6,6 +5,7 @@ import {
   ParticipantIdSchema,
 } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
+import { canonicalMembershipPrincipal } from "../d1";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);

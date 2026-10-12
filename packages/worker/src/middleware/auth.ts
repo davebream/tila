@@ -1,20 +1,4 @@
 import {
-  RUNTIME_TOKEN_MARKER,
-  RuntimeDenied,
-  RuntimeStore,
-  resolveActionsMembership,
-} from "@tila/backend-d1";
-import { CredentialStore, SCOPED_TOKEN_MARKER } from "@tila/backend-d1";
-import {
-  D1RateLimitStore,
-  D1RevokedJtiStore,
-  D1RevokedSubjectsStore,
-  D1SessionStore,
-  D1TokenStore,
-  type RateLimitStoreInterface,
-  canonicalizePrincipal,
-} from "@tila/backend-d1";
-import {
   AUTHORIZATION_VERSION,
   CAPABILITIES,
   GITHUB_ACTIONS_ISSUER,
@@ -39,6 +23,22 @@ import {
   SUBJECT_REVCHECK_TTL_MS,
   SUBJECT_REV_CACHE_MAX_SIZE,
 } from "../config";
+import {
+  RUNTIME_TOKEN_MARKER,
+  RuntimeDenied,
+  RuntimeStore,
+  resolveActionsMembership,
+} from "../d1";
+import { CredentialStore, SCOPED_TOKEN_MARKER } from "../d1";
+import {
+  D1RateLimitStore,
+  D1RevokedJtiStore,
+  D1RevokedSubjectsStore,
+  D1SessionStore,
+  D1TokenStore,
+  type RateLimitStoreInterface,
+  canonicalizePrincipal,
+} from "../d1";
 import { emitInstanceMismatchDatapoint } from "../lib/analytics";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { ensureDeploymentInstanceId } from "../lib/deployment-instance";

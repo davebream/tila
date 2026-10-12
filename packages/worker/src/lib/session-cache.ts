@@ -1,4 +1,4 @@
-import type { SessionResult } from "@tila/backend-d1";
+import type { SessionResult } from "../d1";
 import { LruTtlCache } from "./lru-ttl-cache";
 
 const cache = new LruTtlCache<SessionResult | false>({

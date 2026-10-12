@@ -9,7 +9,7 @@ import { artifactVersionOps, schema } from "@tila/ops-sqlite";
 import { artifactCommitKey } from "@tila/schemas";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { expect, it } from "vitest";
-import { createProjectRouter } from "../../backend-do/src/project-do-router";
+import { createProjectRouter } from "../../worker/src/do/project-do-router";
 import { hashToken } from "../../worker/src/lib/hash-token";
 import { identity, post } from "./helpers";
 import { bindings } from "./setup";

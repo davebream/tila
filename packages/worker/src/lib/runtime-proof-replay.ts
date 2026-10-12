@@ -1,5 +1,5 @@
-import { RuntimeStore } from "@tila/backend-d1";
 import { decodeJwt } from "jose";
+import { RuntimeStore } from "../d1";
 import { hashToken } from "./hash";
 
 const consumed = new WeakSet<Request>();

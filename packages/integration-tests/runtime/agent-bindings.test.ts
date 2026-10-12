@@ -1,5 +1,4 @@
 import { SELF } from "cloudflare:test";
-import { D1TokenStore } from "@tila/backend-d1";
 import { projectTransferOps } from "@tila/ops-sqlite";
 import {
   RUNTIME_RUN_CEILING,
@@ -14,6 +13,7 @@ import {
   generateKeyPair,
 } from "jose";
 import { expect, it } from "vitest";
+import { D1TokenStore } from "../../worker/src/d1";
 import { hashToken } from "../../worker/src/lib/hash";
 import { bindings } from "./setup";
 

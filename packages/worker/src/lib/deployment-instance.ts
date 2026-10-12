@@ -1,4 +1,4 @@
-import { D1DeploymentMetaStore } from "@tila/backend-d1";
+import { D1DeploymentMetaStore } from "../d1";
 
 /**
  * Per-isolate cache for the deployment instance id.

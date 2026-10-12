@@ -12,20 +12,20 @@ import {
   createClaimMethods,
 } from "tila-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createProjectRouter } from "../../backend-do/src/project-do-router";
-import { drainArtifactLifecycle } from "../../backend-do/src/routes/artifact-lifecycle-routes";
-import { flushArtifactCommits } from "../../backend-do/src/routes/artifact-version-routes";
-import type { RouterDeps } from "../../backend-do/src/routes/types";
-import {
-  type TestDb,
-  createTestDb,
-} from "../../backend-do/test/helpers/create-test-db";
 import { createCloudflareClient } from "../../cli/src/lib/cloudflare-client";
 import { loadInfraConfig } from "../../cli/src/lib/infra-config";
+import { createProjectRouter } from "../../worker/src/do/project-do-router";
+import { drainArtifactLifecycle } from "../../worker/src/do/routes/artifact-lifecycle-routes";
+import { flushArtifactCommits } from "../../worker/src/do/routes/artifact-version-routes";
+import type { RouterDeps } from "../../worker/src/do/routes/types";
 import { hashToken } from "../../worker/src/lib/hash-token";
 import { errorHandler } from "../../worker/src/middleware/error";
 import { artifacts } from "../../worker/src/routes/artifacts";
 import type { Env, HonoVariables } from "../../worker/src/types";
+import {
+  type TestDb,
+  createTestDb,
+} from "../../worker/test/do/helpers/create-test-db";
 
 let db: TestDb;
 let app: Hono<{ Bindings: Env; Variables: HonoVariables }>;

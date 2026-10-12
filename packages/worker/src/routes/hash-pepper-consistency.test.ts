@@ -1,4 +1,3 @@
-import { D1SessionStore } from "@tila/backend-d1";
 /**
  * SEC-1 — HASH_PEPPER consistency for the mint↔lookup pairs this change touched.
  *
@@ -22,11 +21,12 @@ import { D1SessionStore } from "@tila/backend-d1";
  */
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { D1SessionStore } from "../d1";
 import { hashToken } from "../lib/hash-token";
 import { createAuthMiddleware } from "../middleware/auth";
 import type { Env, HonoVariables } from "../types";
 
-// --- Mock @tila/backend-d1: capture hashes at the store boundary ---------------
+// --- Mock worker/src/d1: capture hashes at the store boundary ---------------
 
 // D1TokenStore.issue receives { tokenHash } at mint (tokens.ts).
 // D1TokenStore.validate receives the hash at lookup (auth.ts, auth-github app-config, auth-session exchange).
@@ -42,10 +42,8 @@ const mockSessionValidate = vi.fn();
 const mockRateLimitCheck = vi.fn().mockResolvedValue(false);
 const mockRateLimitRecordFailure = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@tila/backend-d1", async () => ({
-  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
-    "@tila/backend-d1",
-  )),
+vi.mock("../d1", async () => ({
+  ...(await vi.importActual<typeof import("../d1")>("../d1")),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {

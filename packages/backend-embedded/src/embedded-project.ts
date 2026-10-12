@@ -800,7 +800,7 @@ export class EmbeddedProject
   // ---------- RecordBackend ----------
   //
   // Mirrors the DO record router's actor/origin/schema_version resolution
-  // (see backend-do `record-routes.ts`): records resolve `schema_version` from
+  // (see worker/src/do `record-routes.ts`): records resolve `schema_version` from
   // the current applied schema (0 when none), `actor: "local"`, and a local
   // `RequestOrigin`. The camelCase RecordBackend inputs (`sourceArtifactKey`)
   // are translated to the ops/DB snake_case (`source_artifact_key`) here.

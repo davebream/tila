@@ -74,7 +74,7 @@ describe("Sweep lifecycle", () => {
  * These tests validate that artifact_search_docs stays in sync with
  * artifact_pointers across the tombstone and sweep lifecycle events.
  *
- * Unit-level verification is in packages/backend-do/test/artifact-expiry.test.ts.
+ * Unit-level verification is in packages/worker/test/do/artifact-expiry.test.ts.
  * Integration-level assertions on artifact_search_docs require direct DO SQLite
  * access, which is not yet available via @cloudflare/vitest-pool-workers.
  * When T6 (search query operations) lands, these stubs can assert via the search

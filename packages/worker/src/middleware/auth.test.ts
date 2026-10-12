@@ -1,4 +1,3 @@
-import type { RateLimitStoreInterface, SessionResult } from "@tila/backend-d1";
 import { Hono } from "hono";
 import {
   type JWK,
@@ -19,6 +18,7 @@ import {
   vi,
 } from "vitest";
 import { MAX_DEBOUNCE_MAP_SIZE } from "../config";
+import type { RateLimitStoreInterface, SessionResult } from "../d1";
 import { base64UrlDecode, base64UrlEncode } from "../lib/base64url";
 import { hashToken } from "../lib/hash-token";
 import { _clearCacheForTest } from "../lib/token-cache";
@@ -145,10 +145,8 @@ let mockGetRevokedBefore = vi.fn().mockResolvedValue(null);
 // mockImplementation's call-signature parameter type. Do NOT "simplify" these
 // back to `() => ({...})` arrows — Biome's useArrowFunction would also rewrite a
 // plain `function` expression to an arrow, so `class` + cast is the stable form.
-vi.mock("@tila/backend-d1", async () => ({
-  ...(await vi.importActual<typeof import("@tila/backend-d1")>(
-    "@tila/backend-d1",
-  )),
+vi.mock("../d1", async () => ({
+  ...(await vi.importActual<typeof import("../d1")>("../d1")),
   ...(await import("../test-support/credential-mock")).credentialMockExports(),
   D1TokenStore: vi.fn().mockImplementation(
     class {
@@ -181,7 +179,7 @@ vi.mock("@tila/backend-d1", async () => ({
   ),
   // Real (pure) canonicalization — the verify path uses it to build the cache
   // key; mocking it would defeat parity. Kept byte-identical to
-  // backend-d1/src/principal.ts.
+  // worker/src/d1/principal.ts.
   canonicalizePrincipal: (
     host: string | null | undefined,
     subject: string | number,

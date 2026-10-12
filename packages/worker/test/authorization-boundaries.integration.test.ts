@@ -9,8 +9,7 @@ import {
   GitHubAppConfigStore,
   ProjectMembershipStore,
   RepoAllowlistStore,
-} from "../../backend-d1/src/index";
-import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
+} from "../src/d1/index";
 import { generateToken, hashToken } from "../src/lib/hash";
 import {
   _resetMiddlewareStateForTest,
@@ -28,6 +27,7 @@ import { memberships } from "../src/routes/memberships";
 import { serviceAccountRoutes } from "../src/routes/service-accounts";
 import { tokens } from "../src/routes/tokens";
 import type { Env, HonoVariables } from "../src/types";
+import { createCredentialFixture } from "./d1/helpers/credential-fixture";
 
 vi.mock("../src/lib/oidc-verify", () => ({
   verifyOidcToken: async () => ({

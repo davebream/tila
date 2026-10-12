@@ -23,7 +23,7 @@ test("version generation uses explicit revision and package versions independent
     for (const [name, symbol] of [
       ["cli", "VERSION"],
       ["sdk", "SDK_VERSION"],
-      ["backend-do", "DO_CODE_VERSION"],
+      ["worker", "DO_CODE_VERSION"],
     ]) {
       mkdirSync(join(dir, "packages", name, "src"), { recursive: true });
       writeFileSync(
@@ -41,17 +41,17 @@ test("version generation uses explicit revision and package versions independent
       assert.match(
         readFileSync(join(dir, "packages", name, "src/version.ts"), "utf8"),
         new RegExp(
-          `export const ${symbol} = "${name === "backend-do" ? "abc1234" : "1.2.3"}"`,
+          `export const ${symbol} = "${name === "worker" ? "abc1234" : "1.2.3"}"`,
         ),
       );
     }
     execFileSync(
       process.execPath,
-      [join(dir, "scripts/generate-version.mjs"), "backend-do"],
+      [join(dir, "scripts/generate-version.mjs"), "worker"],
       { env: { ...process.env, TILA_BUILD_REVISION: "def5678" } },
     );
     assert.match(
-      readFileSync(join(dir, "packages/backend-do/src/version.ts"), "utf8"),
+      readFileSync(join(dir, "packages/worker/src/version.ts"), "utf8"),
       /def5678/,
     );
   } finally {

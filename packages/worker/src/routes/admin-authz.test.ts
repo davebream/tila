@@ -30,7 +30,7 @@ const isActiveAdminMock = vi.fn().mockResolvedValue(true);
 // class (matching admin.test.ts's pattern). Also export the stores the
 // irreversible handlers touch so that, should a handler ever run, construction
 // does not throw.
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   AdminGrantsStore: class {
     isActiveAdmin = isActiveAdminMock;
   } as unknown as () => unknown,

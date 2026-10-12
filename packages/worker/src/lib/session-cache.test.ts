@@ -1,5 +1,5 @@
-import type { SessionResult } from "@tila/backend-d1";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionResult } from "../d1";
 import {
   _clearSessionCacheForTest,
   _sessionCacheSizeForTest,

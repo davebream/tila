@@ -9,8 +9,6 @@
   "references": [
     { "path": "../schemas" },
     { "path": "../core" },
-    { "path": "../backend-d1" },
-    { "path": "../backend-do" },
-    { "path": "../backend-r2" }
+    { "path": "../ops-sqlite" }
   ]
 }

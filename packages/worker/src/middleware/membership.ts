@@ -1,15 +1,15 @@
-import { resolveActionsMembership } from "@tila/backend-d1";
-import {
-  type MirroredMembershipCandidate,
-  ProjectMembershipStore,
-  RepoAllowlistStore,
-} from "@tila/backend-d1";
 import {
   type MembershipSource,
   PROJECT_ROLE_RANK,
   type ProjectRole,
 } from "@tila/schemas";
 import type { MiddlewareHandler } from "hono";
+import { resolveActionsMembership } from "../d1";
+import {
+  type MirroredMembershipCandidate,
+  ProjectMembershipStore,
+  RepoAllowlistStore,
+} from "../d1";
 import { measurePhase } from "../lib/server-timing";
 import type { Env, HonoVariables, UnifiedTokenResult } from "../types";
 import { principalIdFor } from "./request-identity";

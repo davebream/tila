@@ -12,7 +12,7 @@ for (const target of compileTargets)
 run(process.execPath, ["scripts/generate-version.mjs", "cli"], {
   stdio: "inherit",
 });
-run(process.execPath, ["scripts/generate-version.mjs", "backend-do"], {
+run(process.execPath, ["scripts/generate-version.mjs", "worker"], {
   stdio: "inherit",
 });
 run("pnpm", ["--filter", "tila-cli", "run", "build:worker-sidecar"], {

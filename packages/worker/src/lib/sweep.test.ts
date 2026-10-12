@@ -21,8 +21,8 @@ import { type SweepSummary, runSweep } from "./sweep";
 const jtiDeleteExpired = vi.fn(async (_cutoff: number) => 0);
 const subjectsDeleteExpired = vi.fn(async (_cutoff: number) => 0);
 
-vi.mock("@tila/backend-d1", async (importActual) => {
-  const actual = await importActual<typeof import("@tila/backend-d1")>();
+vi.mock("../d1", async (importActual) => {
+  const actual = await importActual<typeof import("../d1")>();
   return {
     ...actual,
     D1RevokedJtiStore: class {

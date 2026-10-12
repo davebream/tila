@@ -1,10 +1,10 @@
-import { ProjectMembershipStore, RepoAllowlistStore } from "@tila/backend-d1";
 import {
   MembershipGrantRequestSchema,
   MembershipPolicyRequestSchema,
   MembershipRoleUpdateRequestSchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { ProjectMembershipStore, RepoAllowlistStore } from "../d1";
 import { stepUpGuard } from "../middleware/protected-operation";
 import { requireProjectOwner } from "../middleware/require-project-owner";
 import type { Env, HonoVariables } from "../types";

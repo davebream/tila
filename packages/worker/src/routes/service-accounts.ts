@@ -1,9 +1,4 @@
 import {
-  CredentialConflict,
-  CredentialDenied,
-  CredentialStore,
-} from "@tila/backend-d1";
-import {
   PROJECT_ROLE_RANK,
   ServiceAccountCreateRequestSchema,
   ServiceAccountUpdateRequestSchema,
@@ -12,6 +7,7 @@ import {
   policyContains,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import { CredentialConflict, CredentialDenied, CredentialStore } from "../d1";
 import { expireAgentBindings } from "../lib/agent-authority";
 import { zodValidationError } from "../lib/validation";
 import { denied, scopedPolicy } from "../middleware/capability";

@@ -11,7 +11,7 @@ import type {
 } from "../types";
 
 // --- Test seam (committed) -------------------------------------------------
-// The middleware constructs @tila/backend-d1 stores directly, so the module
+// The middleware constructs worker/src/d1 stores directly, so the module
 // boundary is the seam. Every constructed instance shares the same stubbable mock.
 // Extended for Task 8 (WI-H) to also include GitHubAppConfigStore and
 // RepoAllowlistStore needed by reverifySessionPermission (called from the
@@ -32,7 +32,7 @@ const {
   mockGetInstallationAccessToken: vi.fn(),
 }));
 
-vi.mock("@tila/backend-d1", () => ({
+vi.mock("../d1", () => ({
   AdminGrantsStore: class {
     isActiveAdmin = mockIsActiveAdmin;
   },
@@ -687,7 +687,7 @@ describe("requireProjectAdminHttp — direct gate unit tests", () => {
 // =============================================================================
 // Reuses the makeHttpCtx stub and factory functions from the
 // requireProjectAdminHttp block above. The real gate logic runs without
-// mocking it — only @tila/backend-d1 is mocked (module boundary seam).
+// mocking it — only worker/src/d1 is mocked (module boundary seam).
 // =============================================================================
 describe("requireD1TokenHttp — direct gate unit tests", () => {
   beforeEach(() => {
@@ -899,7 +899,7 @@ describe("autoAdminGrants helper", () => {
 // =============================================================================
 // Task 8 (WI-H): Layer B re-verify wired into requireProjectAdmin* auto-admin path
 //
-// Seam: vi.mock("@tila/backend-d1") + vi.mock("../lib/github-app") + global.fetch.
+// Seam: vi.mock("../d1") + vi.mock("../lib/github-app") + global.fetch.
 // Only the autoAdminGrants SESSION path is re-verified; cookie-session, d1-token,
 // and explicit roster-admit paths retain their independent revocation source.
 // =============================================================================

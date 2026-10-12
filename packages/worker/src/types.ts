@@ -1,4 +1,3 @@
-import type { TokenResult } from "@tila/backend-d1";
 import type { GitHubActionsContext } from "@tila/schemas";
 import type { CredentialPolicy } from "@tila/schemas";
 import type {
@@ -6,6 +5,7 @@ import type {
   MembershipSource,
   ProjectRole,
 } from "@tila/schemas";
+import type { TokenResult } from "./d1";
 import type { RequestTiming } from "./lib/server-timing";
 
 export interface Env {
@@ -163,7 +163,7 @@ export type UnifiedTokenResult =
 
 export interface HonoVariables {
   humanSession?: NonNullable<
-    Awaited<ReturnType<import("@tila/backend-d1").HumanStore["live"]>>
+    Awaited<ReturnType<import("./d1").HumanStore["live"]>>
   >;
   requestTiming?: RequestTiming;
   tokenResult: UnifiedTokenResult;

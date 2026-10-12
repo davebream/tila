@@ -1,3 +1,5 @@
+import { Hono } from "hono";
+import { describe, expect, it, vi } from "vitest";
 /**
  * Route-level tests for the entity relationship list/delete routes (#399).
  *
@@ -5,9 +7,7 @@
  * validation, and the requirePermission guards (read for list, write for delete).
  * The realistic scoped-token end-to-end flow is exercised in the integration tests.
  */
-import type { IdempotencyStoreLike } from "@tila/backend-d1";
-import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import type { IdempotencyStoreLike } from "../d1";
 import { createIdempotencyMiddleware } from "../middleware/idempotency";
 import type { Env, HonoVariables } from "../types";
 import { entities } from "./entities";

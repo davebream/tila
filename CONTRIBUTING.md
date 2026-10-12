@@ -44,7 +44,7 @@ Prerequisites:
 This is a Turborepo monorepo. Use workspace filters for targeted work:
 
 ```bash
-pnpm --filter @tila/backend-do test      # test one package
+pnpm --filter @tila/worker test          # test one package
 pnpm --filter @tila/worker typecheck     # typecheck one package
 ```
 
@@ -70,7 +70,7 @@ the root `package.json` marker, `tila-cli`, all `tila-cli-*` platform packages,
 pnpm version:check
 ```
 
-Private workspace packages such as `@tila/core`, `@tila/schemas`, backend packages,
+Private workspace packages such as `@tila/core`, `@tila/schemas`, `@tila/ops-sqlite`,
 worker, and UI are implementation modules. They do not need product-version bumps.
 
 ## Commits
@@ -98,7 +98,7 @@ Allowed types:
 Rules:
 
 - Keep one commit to one type. Split mixed docs, tests, fixes, and features.
-- Use a focused scope when useful, such as `worker`, `backend-do`, `sdk`, `cli`, or `docs`.
+- Use a focused scope when useful, such as `worker`, `ops-sqlite`, `sdk`, `cli`, or `docs`.
 - Write descriptions in lowercase imperative mood, without a trailing period.
 - Mark breaking changes with `!` before the colon and a `BREAKING CHANGE:` footer.
 
@@ -124,7 +124,7 @@ Every PR description should include:
 Before opening a PR, run the narrowest useful verification first. Prefer workspace filters for package-specific changes:
 
 ```bash
-pnpm --filter @tila/backend-do test
+pnpm --filter @tila/worker test
 pnpm --filter @tila/worker typecheck
 ```
 

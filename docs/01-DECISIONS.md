@@ -480,7 +480,7 @@ This document is the constitution. It changes when reality requires it, not when
 
 **Why D1-token-only is correct:**
 
-- `scopes = "full"` is the only scope value issued — hardcoded in `D1TokenStore.issue()` (see `packages/backend-d1/src/token-store.ts`).
+- `scopes = "full"` is the only scope value issued — hardcoded in `D1TokenStore.issue()` (see `packages/worker/src/d1/token-store.ts`).
 - The v0.2 roadmap (§16: "Token scopes and rotation with overlap windows") introduces fine-grained scopes. Until then, every token holder is a peer administrator within their project.
 - Token routes enforce this policy via the `requireD1TokenHttp` inline gate that checks `kind === "d1-token" && scopes === "full"` (kind checked first — load-bearing, because cookie-sessions can carry `scopes:"full"`). It rejects all other principals with HTTP 403 and error code `token-authz-denied`.
 
@@ -509,7 +509,7 @@ This document is the constitution. It changes when reality requires it, not when
 
 Either way the column is a label on the audit row, not a gate. Cross-project infra revoke is therefore expected and correct: it records the caller-asserted slug and still revokes the jti globally.
 
-**Code references:** `packages/backend-d1/src/revoked-jti-store.ts` (store contract + `isRevoked` DON'T comment), `packages/backend-d1/src/schema.ts` (`_revoked_jti` table), `packages/worker/src/middleware/auth.ts` (fail-closed per-isolate revocation check), `packages/worker/src/routes/admin.ts` and `packages/worker/src/routes/infra.ts` (revoke entry points).
+**Code references:** `packages/worker/src/d1/revoked-jti-store.ts` (store contract + `isRevoked` DON'T comment), `packages/worker/src/d1/schema.ts` (`_revoked_jti` table), `packages/worker/src/middleware/auth.ts` (fail-closed per-isolate revocation check), `packages/worker/src/routes/admin.ts` and `packages/worker/src/routes/infra.ts` (revoke entry points).
 
 ## 23. Multi-instance auth: per-deployment sovereignty (epic #122)
 
@@ -557,7 +557,7 @@ OIDC allowlist entries are retained as history but are no longer authorization i
 revocation, its audit event, the subject tombstone, and project-cookie deletion commit in one D1
 batch. There is no positive membership cache in v1.
 
-**Code references:** `packages/backend-d1/src/project-memberships.ts`,
+**Code references:** `packages/worker/src/d1/project-memberships.ts`,
 `packages/worker/src/middleware/membership.ts`, and
 `packages/worker/migrations/global/0026_project_memberships.sql`.
 

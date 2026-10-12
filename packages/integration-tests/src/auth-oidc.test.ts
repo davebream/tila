@@ -24,8 +24,8 @@ import {
  *
  * ## Cross-package mock strategy
  *
- * The `vi.mock("@tila/backend-d1", ...)` pattern does NOT reliably intercept the
- * worker's internal imports of `@tila/backend-d1` when running in vitest node mode
+ * The `vi.mock("../../worker/src/d1", ...)` pattern does NOT reliably intercept the
+ * worker's internal imports of `worker/src/d1` when running in vitest node mode
  * (different module resolution contexts). See `auth-harness.README.md`.
  *
  * Instead we use a **smart D1 stub** passed via `env.DB`:
@@ -151,7 +151,7 @@ const GITHUB_HOST = "github.com";
 // Routes calls based on the SQL table name. Drizzle typed SELECT queries use
 // .raw() (returns column-value arrays); raw SQL uses .first() or .run().
 //
-// Column orders match the Drizzle schema in packages/backend-d1/src/schema.ts:
+// Column orders match the Drizzle schema in packages/worker/src/d1/schema.ts:
 //
 //   _oidc_principals: project_id, issuer, subject, permission, enabled,
 //                     created_at, created_by

@@ -1,5 +1,5 @@
-import { RuntimeDenied, RuntimeStore } from "@tila/backend-d1";
 import { type RuntimeContext, RuntimeIdentitySchema } from "@tila/schemas";
+import { RuntimeDenied, RuntimeStore } from "../d1";
 import type { Env } from "../types";
 import { forwardToDO } from "./do-forward";
 
