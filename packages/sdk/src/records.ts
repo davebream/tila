@@ -90,11 +90,12 @@ export function createRecordMethods(client: TilaClient, projectId: string) {
     async history(
       type: string,
       key: string,
-      opts?: { limit?: number; values?: boolean },
+      opts?: { limit?: number; values?: boolean; cursor?: string },
     ): Promise<RecordHistoryResponse> {
       const query: Record<string, string | undefined> = {};
       if (opts?.limit !== undefined) query.limit = String(opts.limit);
       if (opts?.values !== undefined) query.values = String(opts.values);
+      if (opts?.cursor) query.cursor = opts.cursor;
       return client.get<RecordHistoryResponse>(
         `${base}/${type}/~/history/${encodeKey(key)}`,
         { query },
@@ -109,11 +110,17 @@ export function createRecordMethods(client: TilaClient, projectId: string) {
         "include-archived"?: string;
         limit?: string;
         tagFilter?: string[];
+        /** `next_cursor` from a previous page. */
+        cursor?: string;
+        sort?: "key" | "updated_at" | "revision";
+        order?: "asc" | "desc";
+        keyContains?: string;
       },
     ): Promise<RecordListResponse> {
-      const { tagFilter, ...rest } = query ?? {};
+      const { tagFilter, keyContains, ...rest } = query ?? {};
       const q: Record<string, string | undefined> = { ...rest };
       if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
+      if (keyContains) q.key_contains = keyContains;
       return client.get<RecordListResponse>(`${base}/${type}`, { query: q });
     },
 

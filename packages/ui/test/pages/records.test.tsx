@@ -1,18 +1,58 @@
 import { RecordsPage } from "@/pages/records";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, delay } from "msw";
-import { Route, Routes } from "react-router";
+import {
+  type Location,
+  type NavigateFunction,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router";
+import {
+  makeRecordItem,
+  manyRecords,
+  pagedRecordsHandler,
+  recordEntry,
+  recordTypesHandler,
+} from "../mocks/records";
 import { server } from "../mocks/server";
-import { act, renderWithProviders, screen, within } from "../test-utils";
+import {
+  act,
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test-utils";
 
-function renderRecords() {
+let currentLocation: Location;
+let navigateTo: NavigateFunction;
+
+function LocationProbe() {
+  currentLocation = useLocation();
+  navigateTo = useNavigate();
+  return null;
+}
+
+function renderRecords(route = "/p/test-project/records") {
   return renderWithProviders(
     <Routes>
-      <Route path="/p/:projectId/records" element={<RecordsPage />} />
+      <Route
+        path="/p/:projectId/records"
+        element={
+          <>
+            <RecordsPage />
+            <LocationProbe />
+          </>
+        }
+      />
     </Routes>,
-    { route: "/p/test-project/records" },
+    { route },
   );
 }
+
+const urlParam = (name: string) =>
+  new URLSearchParams(currentLocation.search).get(name);
 
 function typesHandler(body: object) {
   return http.get("*/projects/*/records/_types", () =>
@@ -243,5 +283,272 @@ describe("RecordsPage record types", () => {
       await screen.findByText(/Showing record types from .* Refresh failed/),
     ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "deploy" })).toBeInTheDocument();
+  });
+});
+
+describe("RecordsPage catalog tabs", () => {
+  test("declared types come first with counts, including empty ones", async () => {
+    server.use(
+      recordTypesHandler([
+        recordEntry("deploy", 2),
+        recordEntry("flags", 0),
+        {
+          type: "legacy",
+          declaration: "undeclared",
+          count: 1,
+          archived_count: 0,
+        },
+      ]),
+      pagedRecordsHandler([]),
+    );
+    renderRecords("/p/test-project/records?type=flags");
+
+    const tabs = await screen.findByRole("tablist", { name: "Record types" });
+    const names = within(tabs)
+      .getAllByRole("tab")
+      .map((t) => t.textContent);
+    expect(names).toEqual(["deploy2", "flags0", "legacy1Not in schema"]);
+    const legacy = within(tabs).getByRole("tab", { name: /legacy/ });
+    expect(within(legacy).getByText("Not in schema")).toHaveAttribute(
+      "data-variant",
+      "amber",
+    );
+    expect(
+      await screen.findByText(
+        (_, el) =>
+          el?.tagName === "P" && el.textContent === "No flags records.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("with no type in the URL the first entry is opened", async () => {
+    server.use(
+      recordTypesHandler([recordEntry("alpha", 0), recordEntry("beta", 1)]),
+      pagedRecordsHandler([]),
+    );
+    renderRecords();
+
+    await waitFor(() => expect(urlParam("type")).toBe("alpha"));
+    expect(screen.getByRole("tab", { name: /alpha/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  test("a classification badge appears only when the definition declares it", async () => {
+    server.use(
+      recordTypesHandler([
+        // Named like configuration, but makes no claim: no badge.
+        recordEntry("config", 1),
+        recordEntry("settings", 1, {
+          definition: {
+            fields: [],
+            format: "json",
+            history: "revision",
+            presentation: { kind: "configuration" },
+          },
+        }),
+        recordEntry("pages", 1, {
+          definition: {
+            fields: [],
+            format: "json",
+            history: "revision",
+            presentation: { kind: "content" },
+          },
+        }),
+      ]),
+      pagedRecordsHandler([]),
+    );
+    renderRecords("/p/test-project/records?type=config");
+
+    const config = await screen.findByRole("tab", { name: /^config/ });
+    expect(within(config).queryByText("Configuration")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("tab", { name: /settings/ })).getByText(
+        "Configuration",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("tab", { name: /pages/ })).getByText("Content"),
+    ).toBeInTheDocument();
+  });
+
+  test("an unknown type in the URL is reported, not replaced", async () => {
+    const listed: string[] = [];
+    server.use(
+      recordTypesHandler([recordEntry("deploy", 1)]),
+      pagedRecordsHandler([makeRecordItem("deploy", "prod")], {
+        onRequest: (type) => listed.push(type),
+      }),
+    );
+    renderRecords("/p/test-project/records?type=ghost");
+
+    expect(
+      await screen.findByText(
+        (_, el) =>
+          el?.tagName === "SPAN" &&
+          el.textContent === "ghost is not an available record type.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /deploy/ })).toBeInTheDocument();
+    expect(urlParam("type")).toBe("ghost");
+    expect(listed).not.toContain("ghost");
+  });
+});
+
+describe("RecordsPage list", () => {
+  function captureRequests(items = manyRecords("deploy", 150)) {
+    const requests: URLSearchParams[] = [];
+    server.use(
+      recordTypesHandler([recordEntry("deploy", items.length)]),
+      pagedRecordsHandler(items, { onRequest: (_, p) => requests.push(p) }),
+    );
+    return requests;
+  }
+
+  test("Next and Previous walk cursor pages with the cursor in the URL", async () => {
+    const user = userEvent.setup();
+    const requests = captureRequests();
+    renderRecords("/p/test-project/records?type=deploy");
+
+    expect(await screen.findByText("key-001")).toBeInTheDocument();
+    expect(screen.getByText("1–100 of 150")).toBeInTheDocument();
+    expect(requests.at(-1)?.get("limit")).toBe("100");
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("key-101")).toBeInTheDocument();
+    expect(screen.getByText("101–150 of 150")).toBeInTheDocument();
+    expect(urlParam("after")).not.toBeNull();
+    expect(requests.at(-1)?.get("cursor")).toBe(urlParam("after"));
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(await screen.findByText("key-001")).toBeInTheDocument();
+    expect(urlParam("after")).toBeNull();
+
+    // Browser Back returns to the second page.
+    act(() => navigateTo(-1));
+    expect(await screen.findByText("key-101")).toBeInTheDocument();
+  });
+
+  test("the key filter is sent to the server and drops the cursor", async () => {
+    const user = userEvent.setup();
+    const requests = captureRequests();
+    renderRecords("/p/test-project/records?type=deploy");
+    await screen.findByText("key-001");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("key-101");
+
+    await user.type(screen.getByLabelText("Filter records by key"), "-12");
+
+    await waitFor(() => expect(urlParam("q")).toBe("-12"));
+    expect(urlParam("after")).toBeNull();
+    // The URL updates before the debounced request is sent; wait for it.
+    await waitFor(() =>
+      expect(requests.at(-1)?.get("key_contains")).toBe("-12"),
+    );
+    expect(requests.at(-1)?.has("cursor")).toBe(false);
+    expect(await screen.findByText("key-120")).toBeInTheDocument();
+    expect(screen.queryByText("key-101")).not.toBeInTheDocument();
+  });
+
+  test("sorting is done by the server", async () => {
+    const user = userEvent.setup();
+    const requests = captureRequests(manyRecords("deploy", 3));
+    renderRecords("/p/test-project/records?type=deploy");
+    await screen.findByText("key-001");
+    expect(requests.at(-1)?.get("sort")).toBe("key");
+    expect(requests.at(-1)?.get("order")).toBe("asc");
+
+    await user.click(screen.getByRole("columnheader", { name: /Revision/ }));
+
+    await waitFor(() => expect(requests.at(-1)?.get("sort")).toBe("revision"));
+    expect(requests.at(-1)?.get("order")).toBe("desc");
+    expect(urlParam("sort")).toBe("revision:desc");
+    const rows = screen
+      .getAllByRole("row")
+      .filter((r) => r.getAttribute("aria-rowindex"));
+    expect(within(rows[0]).getByText("key-003")).toBeInTheDocument();
+  });
+
+  test("an invalid cursor resets to the first page with a notice", async () => {
+    captureRequests();
+    renderRecords("/p/test-project/records?type=deploy&after=bogus");
+
+    expect(
+      await screen.findByText(
+        "That page link is no longer valid; showing the first page.",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("key-001")).toBeInTheDocument();
+    expect(urlParam("after")).toBeNull();
+  });
+
+  test("states the restricted scope of the count", async () => {
+    server.use(
+      recordTypesHandler([recordEntry("deploy", 2)], { restricted: true }),
+      pagedRecordsHandler(manyRecords("deploy", 2), { restricted: true }),
+    );
+    renderRecords("/p/test-project/records?type=deploy");
+
+    expect(
+      await screen.findByText(
+        "2 records · excluding archived · visible to this credential",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("including archived is sent and stated", async () => {
+    const user = userEvent.setup();
+    const requests = captureRequests(manyRecords("deploy", 2));
+    renderRecords("/p/test-project/records?type=deploy");
+    expect(
+      await screen.findByText("2 records · excluding archived"),
+    ).toBeInTheDocument();
+    expect(requests.at(-1)?.has("include-archived")).toBe(false);
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Include archived" }),
+    );
+
+    expect(
+      await screen.findByText("2 records · including archived"),
+    ).toBeInTheDocument();
+    expect(requests.at(-1)?.get("include-archived")).toBe("true");
+  });
+
+  test("a declared presentation title adds a Title column", async () => {
+    server.use(
+      recordTypesHandler([
+        recordEntry("deploy", 2, {
+          definition: {
+            fields: [{ name: "name", type: "string", required: false }],
+            format: "json",
+            history: "revision",
+            presentation: { title: "name" },
+          },
+        }),
+        recordEntry("flags", 1),
+      ]),
+      pagedRecordsHandler([
+        makeRecordItem("deploy", "prod", { title: "Production" }),
+        makeRecordItem("deploy", "scratch", { title: null }),
+        makeRecordItem("flags", "beta"),
+      ]),
+    );
+    renderRecords("/p/test-project/records?type=deploy");
+
+    expect(await screen.findByText("Production")).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Title" }),
+    ).toBeInTheDocument();
+    const scratch = screen.getByText("scratch").closest("tr") as HTMLElement;
+    expect(within(scratch).getAllByRole("cell")[1]).toHaveTextContent(/^—$/);
+    expect(screen.queryByText(/Untitled/)).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("tab", { name: /flags/ }));
+    expect(await screen.findByText("beta")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Title" }),
+    ).not.toBeInTheDocument();
   });
 });

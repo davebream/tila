@@ -2,6 +2,7 @@ import { RecordDetailPage } from "@/pages/record-detail";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, delay } from "msw";
 import { Route, Routes } from "react-router";
+import { recordEntry, recordTypesHandler } from "../mocks/records";
 import { server } from "../mocks/server";
 import {
   act,
@@ -188,5 +189,200 @@ describe("RecordDetailPage record", () => {
     renderRecord();
 
     expect(await screen.findByText("Record not found.")).toBeInTheDocument();
+  });
+});
+
+function recordWith(value: Record<string, unknown>) {
+  return http.get("*/projects/*/records/:type/*", () =>
+    HttpResponse.json({ ok: true, record: { ...record, value }, fence: 7 }),
+  );
+}
+
+const sentence = (text: string) => (_: string, el: Element | null) =>
+  el?.tagName === "P" && el.textContent === text;
+
+function region(name: string) {
+  return screen.getByRole("region", { name });
+}
+
+function fieldNames(table: HTMLElement): string[] {
+  return within(table)
+    .getAllByRole("row")
+    .map((row) => within(row).getAllByRole("cell")[0].textContent ?? "");
+}
+
+const DEPLOY_DEFINITION = {
+  fields: [
+    { name: "name", type: "string", required: true },
+    { name: "note", type: "text", required: false },
+    {
+      name: "region",
+      type: "enum",
+      required: true,
+      values: ["eu", "us"],
+    },
+    { name: "replicas", type: "number", required: false },
+    { name: "hosts", type: "list<string>", required: false },
+  ],
+  format: "json" as const,
+  history: "revision" as const,
+  presentation: {
+    title: "name",
+    summary: "note",
+    kind: "configuration" as const,
+  },
+};
+
+describe("RecordDetailPage content", () => {
+  test("content comes first, then tags, metadata and the raw value", async () => {
+    server.use(
+      recordTypesHandler([
+        recordEntry("deploy", 1, { definition: DEPLOY_DEFINITION }),
+      ]),
+      historyOk(),
+      recordWith({
+        name: "Production",
+        note: "Main region",
+        region: "eu",
+        hosts: ["a", "b"],
+        legacy: true,
+      }),
+      listOk,
+    );
+    renderRecord();
+
+    expect(
+      await screen.findByRole("dialog", { name: "Production" }),
+    ).toBeInTheDocument();
+    expect(
+      within(region("Summary")).getByText("Main region"),
+    ).toBeInTheDocument();
+    const fields = await within(region("Fields")).findByRole("table", {
+      name: "Record fields",
+    });
+    // Title and summary fields are not repeated; order is declaration order.
+    expect(fieldNames(fields)).toEqual(["region", "replicas", "hosts"]);
+    expect(within(fields).getByText("eu")).toHaveAttribute(
+      "data-variant",
+      "gray",
+    );
+    expect(within(fields).getByText("Not set")).toBeInTheDocument();
+    expect(
+      within(region("Other fields")).getByText(
+        sentence("Not declared by the deploy schema."),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Configuration")).toBeInTheDocument();
+
+    const order = [
+      "Summary",
+      "Fields",
+      "Other fields",
+      "Tags",
+      "Metadata",
+      "Value",
+    ].map((name) => region(name));
+    for (let i = 1; i < order.length; i++) {
+      expect(
+        order[i - 1].compareDocumentPosition(order[i]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    // The raw value is collapsed until asked for.
+    expect(
+      within(region("Value")).getByRole("button", {
+        name: "Show value (5 keys)",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("without a presented title the key is the heading, never Untitled", async () => {
+    server.use(
+      recordTypesHandler([
+        recordEntry("deploy", 1, { definition: DEPLOY_DEFINITION }),
+      ]),
+      historyOk(),
+      recordWith({ region: "us", title: "Not the declared title" }),
+      listOk,
+    );
+    renderRecord();
+
+    // Once the record and its definition are loaded, the heading is the key.
+    await screen.findByRole("table", { name: "Record fields" });
+    expect(screen.getByRole("dialog", { name: "prod" })).toBeInTheDocument();
+    expect(screen.queryByText(/Untitled/)).not.toBeInTheDocument();
+  });
+
+  test("an undeclared record type stays readable with all its keys", async () => {
+    server.use(
+      recordTypesHandler([
+        {
+          type: "deploy",
+          declaration: "undeclared",
+          count: 1,
+          archived_count: 0,
+        },
+      ]),
+      historyOk(),
+      recordWith({ region: "eu", owner: "ops" }),
+      listOk,
+    );
+    renderRecord();
+
+    expect(await screen.findByText("Not in schema")).toHaveAttribute(
+      "data-variant",
+      "amber",
+    );
+    const other = await screen.findByRole("region", { name: "Other fields" });
+    expect(
+      within(other).getByText(
+        sentence(
+          "Type deploy is not in the current schema. Stored data is shown as-is.",
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      fieldNames(within(other).getByRole("table", { name: "Other fields" })),
+    ).toEqual(["region", "owner"]);
+    expect(
+      within(region("Fields")).getByText(
+        "No fields are declared for this type.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("Older revisions loads the next history page by cursor", async () => {
+    const user = userEvent.setup();
+    const cursors: (string | null)[] = [];
+    server.use(
+      http.get("*/projects/*/records/:type/~/history/*", ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        cursors.push(cursor);
+        return cursor === "older"
+          ? HttpResponse.json({
+              ok: true,
+              items: [{ ...historyItem, revision: 1, actor: "first-actor" }],
+              meta: { total: 1, limit: 20, next_cursor: null },
+            })
+          : HttpResponse.json({
+              ok: true,
+              items: [historyItem],
+              meta: { total: 1, limit: 20, next_cursor: "older" },
+            });
+      }),
+      recordOk(),
+      listOk,
+    );
+    renderRecord();
+
+    expect(await screen.findByText("revision-actor")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Older revisions" }));
+
+    expect(await screen.findByText("first-actor")).toBeInTheDocument();
+    expect(screen.getByText("revision-actor")).toBeInTheDocument();
+    expect(cursors).toEqual([null, "older"]);
+    expect(
+      screen.queryByRole("button", { name: "Older revisions" }),
+    ).not.toBeInTheDocument();
   });
 });

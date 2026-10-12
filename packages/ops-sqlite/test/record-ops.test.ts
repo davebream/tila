@@ -854,7 +854,13 @@ describe("listRecordHistory", () => {
     const result = listRecordHistory(testDb.db, "config", "app", { limit: 3 });
     expect(result.items).toHaveLength(3);
     expect(result.total).toBe(5);
-    expect(result.next_cursor).toBe("truncated");
+    expect(result.next_cursor).toEqual(expect.any(String));
+    const rest = listRecordHistory(testDb.db, "config", "app", {
+      limit: 3,
+      cursor: result.next_cursor ?? undefined,
+    });
+    expect(rest.items.map((i) => i.revision)).toEqual([2, 1]);
+    expect(rest.next_cursor).toBeNull();
   });
 });
 

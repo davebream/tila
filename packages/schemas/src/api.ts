@@ -1515,9 +1515,22 @@ export const RecordListItemSchema = z.object({
   updated_by: z.string(),
   archived: z.number().int(),
   tags: z.array(z.string()),
+  /** Value of the type's declared `presentation.title` field; absent when none is declared. */
+  title: z.string().nullable().optional(),
 });
 
 export type RecordListItem = z.infer<typeof RecordListItemSchema>;
+
+export const RECORD_LIST_SORTS = ["key", "updated_at", "revision"] as const;
+
+/** Paging and search parameters for `GET /records/:type`. */
+export const RecordListQuerySchema = z.object({
+  cursor: ListCursorSchema.optional(),
+  sort: z.enum(RECORD_LIST_SORTS).optional(),
+  order: z.enum(["asc", "desc"]).optional(),
+  key_contains: z.string().min(1).max(200).optional(),
+});
+export type RecordListQuery = z.infer<typeof RecordListQuerySchema>;
 
 export const RecordListResponseSchema = z.object({
   ok: z.literal(true),
@@ -1525,7 +1538,9 @@ export const RecordListResponseSchema = z.object({
   meta: z.object({
     total: z.number().int(),
     limit: z.number().int(),
+    /** Opaque keyset cursor for the next page, or null on the last page. */
     next_cursor: z.string().nullable(),
+    scope: ResultScopeSchema.optional(),
   }),
 });
 

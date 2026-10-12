@@ -1013,7 +1013,7 @@ Do not add a nested path query API in v0.1, even though SQLite supports
 
 ### List Envelope
 
-All list responses use a pagination-ready envelope:
+List responses page with an opaque keyset cursor (#300):
 
 ```json
 {
@@ -1022,26 +1022,30 @@ All list responses use a pagination-ready envelope:
   "meta": {
     "total": 0,
     "limit": 200,
-    "next_cursor": null
+    "next_cursor": null,
+    "scope": { "restricted": false, "archived": "excluded" }
   }
 }
 ```
 
-Rules:
+| Query parameter | Meaning |
+|---|---|
+| `limit` | Page size, 1–200 (default 200) |
+| `cursor` | `next_cursor` from the previous page |
+| `sort` | `key` (default), `updated_at` or `revision`; every order breaks ties by key |
+| `order` | `asc` (default) or `desc` |
+| `key_contains` | Case-sensitive key substring, up to 200 characters |
 
-```text
-hard cap limit = 200
-next_cursor always present
-query LIMIT 201 internally
-next_cursor = null when the full result fits in the page
-next_cursor = "truncated" when more than 200 rows match
-no real cursor pagination in v0.1
-```
-
-The response envelope avoids a future breaking change when pagination lands.
-When `next_cursor` is `"truncated"`, clients must narrow the query with type,
-tag, or filter. A future version can replace `"truncated"` with an opaque cursor
-token without changing the response shape.
+- `next_cursor` is null on the last page. A cursor is bound to the type, filters,
+  sort and order it was issued for; reusing it with other parameters returns
+  `400 invalid-cursor`.
+- `total` counts every matching record the caller may read.
+  `scope.restricted` says namespace restrictions applied, and `scope.archived`
+  says whether archived records were included.
+- Record history (`GET /records/:type/~/history/:key`) pages newest-first with
+  the same `cursor` parameter.
+- Servers before #300 returned `next_cursor: "truncated"` instead of a cursor.
+  Clients that still see that value must narrow the query.
 
 ### Metadata List Shape
 
@@ -1055,11 +1059,14 @@ token without changing the response shape.
   "updated_at": 1779090000000,
   "updated_by": "agent-a",
   "archived": 0,
-  "tags": ["repo:api-service", "team:platform"]
+  "tags": ["repo:api-service", "team:platform"],
+  "title": "API service"
 }
 ```
 
-Fetch full values with `record get`.
+`title` is present only when the type declares `presentation.title`; it holds
+that field's value, or null when the value is missing or empty. Fetch full
+values with `record get`.
 
 ## API Contract
 

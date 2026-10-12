@@ -1093,7 +1093,21 @@ export class EmbeddedProject
       tagFilter: filter.tagFilter,
       dataFilter: filter.dataFilter,
       limit: filter.limit,
+      sort: filter.sort,
+      order: filter.order,
+      keyContains: filter.keyContains,
+      cursor: filter.cursor,
+      titleField: this.recordTitleField(filter.type),
     });
+  }
+
+  private recordTitleField(type: string): string | undefined {
+    try {
+      return constraintOps.resolveCurrentSchema(this.db)?.records?.[type]
+        ?.presentation?.title;
+    } catch {
+      return undefined;
+    }
   }
 
   async listRecordHistory(
@@ -1104,6 +1118,7 @@ export class EmbeddedProject
     return recordOps.listRecordHistory(this.db, type, key, {
       limit: opts?.limit,
       includeValues: opts?.includeValues,
+      cursor: opts?.cursor,
     });
   }
 

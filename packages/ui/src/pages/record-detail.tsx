@@ -1,6 +1,15 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Drawer } from "@/components/ui/drawer";
+import {
+  CollapsibleData,
+  DefinitionsUnavailable,
+  FieldLabel,
+  FieldTable,
+  MutedLine,
+  dataRows,
+} from "@/components/ui/field-table";
 import {
   QuerySection,
   SectionFailure,
@@ -15,24 +24,51 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InfoTip } from "@/components/ui/tooltip";
-import { useRecord, useRecordHistory, useRecords } from "@/hooks/use-api";
+import {
+  useRecord,
+  useRecordHistory,
+  useRecordPage,
+  useRecordTypes,
+} from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
+import { type TypeDefinitions, resolveDefinitions } from "@/lib/presentation";
 import { deriveSectionState } from "@/lib/query-state";
+import { recordPageParams } from "@/lib/record-list";
 import { formatDateTime, relativeTime } from "@/lib/time";
+import { ClassificationBadge } from "@/pages/records";
+import type { RecordCatalogEntry } from "@tila/schemas";
+import { presentedText, presentedTitle } from "@tila/schemas";
 import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router";
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <h2 className="tila-label">{children}</h2>;
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function DetailSection({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  const headingId = useId();
   return (
-    <TableCell className="w-40 font-sans text-sm font-medium text-muted-foreground">
+    <section aria-labelledby={headingId} className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 id={headingId} className="tila-label">
+          {title}
+        </h2>
+        {action}
+      </div>
       {children}
-    </TableCell>
+    </section>
   );
 }
 
@@ -59,55 +95,75 @@ export function RecordDetailPage() {
   const params = useParams();
   const { projectId } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
 
   const type = params.type ?? "";
   const key = params["*"] ?? "";
 
+  // Siblings come from the list page on screen behind the drawer, so J/K
+  // walk the rows the viewer is looking at. Without list state for this
+  // type, the first page in key order is used.
+  const listSearch =
+    searchParams.get("type") === type ? searchParams : new URLSearchParams();
+  const listQuery = useRecordPage(type, recordPageParams(listSearch));
+  const listLink = {
+    pathname: `/p/${projectId}/records`,
+    search: location.search || `?type=${encodeURIComponent(type)}`,
+  };
+  const recordLink = (t: string, k: string) => ({
+    pathname: `/p/${projectId}/records/${t}/${k}`,
+    search: location.search,
+  });
+
   const recordQuery = useRecord(type, key);
   const historyQuery = useRecordHistory(type, key, { limit: 20 });
-  const { data: listData } = useRecords(type);
+  const typesQuery = useRecordTypes();
 
   const siblings = useMemo(() => {
-    const items = listData?.items ?? [];
+    const items = listQuery.data?.items ?? [];
     const idx = items.findIndex((r) => r.key === key);
     return {
       prev: idx > 0 ? items[idx - 1] : null,
       next: idx >= 0 && idx < items.length - 1 ? items[idx + 1] : null,
-      position: idx >= 0 ? idx + 1 : null,
-      total: items.length,
     };
-  }, [listData, key]);
+  }, [listQuery.data, key]);
+
+  const goTo = (sibling: { type: string; key: string } | null) => {
+    if (sibling) {
+      navigate(recordLink(sibling.type, sibling.key), {
+        state: location.state,
+      });
+    }
+  };
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.ctrlKey || e.metaKey) return;
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (e.key === "j" || e.key === "ArrowDown") {
-        if (siblings.next) {
-          e.preventDefault();
-          navigate(
-            `/p/${projectId}/records/${siblings.next.type}/${siblings.next.key}`,
-          );
-        }
-      } else if (e.key === "k" || e.key === "ArrowUp") {
-        if (siblings.prev) {
-          e.preventDefault();
-          navigate(
-            `/p/${projectId}/records/${siblings.prev.type}/${siblings.prev.key}`,
-          );
-        }
+      if ((e.key === "j" || e.key === "ArrowDown") && siblings.next) {
+        e.preventDefault();
+        goTo(siblings.next);
+      } else if ((e.key === "k" || e.key === "ArrowUp") && siblings.prev) {
+        e.preventDefault();
+        goTo(siblings.prev);
       }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [siblings, navigate, projectId]);
+  });
 
   const [expanded, setExpanded] = useState(false);
   const recordState = deriveSectionState(recordQuery);
-  const historyState = deriveSectionState(historyQuery, {
-    isEmpty: (d) => d.items.length === 0,
-  });
+  // A failed "Older revisions" request is reported beside the button; the
+  // pages already loaded are still current.
+  const historyState = deriveSectionState(
+    historyQuery.isFetchNextPageError
+      ? { ...historyQuery, status: "success" as const }
+      : historyQuery,
+    { isEmpty: (d) => (d.pages[0]?.items.length ?? 0) === 0 },
+  );
   // Only a record that is currently readable is shown: after a 403/404 refresh
   // the query still holds the old record, which must not keep rendering.
   const recordData =
@@ -115,11 +171,46 @@ export function RecordDetailPage() {
   const record = recordData?.record;
   const fence = recordData?.fence;
 
+  const defs: TypeDefinitions<RecordCatalogEntry> = resolveDefinitions(
+    typesQuery.data && {
+      entries: typesQuery.data.entries,
+      incomplete: typesQuery.data.incomplete,
+    },
+    typesQuery.isError && !typesQuery.data,
+    type,
+  );
+  const entry = defs.status === "declared" ? defs.entry : undefined;
+  const definition = entry?.definition;
+  const presentation = definition?.presentation;
+  const value = record?.value ?? {};
+
+  // Until definitions resolve the heading stays the key, so a presented title
+  // never flashes in from the wrong field.
+  const title =
+    record && defs.status !== "pending"
+      ? presentedTitle(record.value, presentation)
+      : null;
+  const summary = presentedText(value, presentation?.summary);
+  const shownElsewhere = [presentation?.title, presentation?.summary].filter(
+    (name): name is string => Boolean(name),
+  );
+  const declaredNames = (definition?.fields ?? []).map((f) => f.name);
+  const otherRows =
+    defs.status === "declared"
+      ? dataRows(value, [...declaredNames, ...shownElsewhere])
+      : defs.status === "undeclared"
+        ? dataRows(value)
+        : [];
+  const showOtherFields =
+    record !== undefined &&
+    (defs.status === "undeclared" ||
+      (defs.status === "declared" && otherRows.length > 0));
+
+  const historyItems = historyQuery.data?.pages.flatMap((p) => p.items) ?? [];
+
   return (
     <Drawer
-      onClose={() =>
-        navigate(`/p/${projectId}/records?type=${encodeURIComponent(type)}`)
-      }
+      onClose={() => navigate(listLink, { state: location.state })}
       expanded={expanded}
       headerActions={
         <>
@@ -127,12 +218,7 @@ export function RecordDetailPage() {
             <button
               type="button"
               disabled={!siblings.prev}
-              onClick={() =>
-                siblings.prev &&
-                navigate(
-                  `/p/${projectId}/records/${siblings.prev.type}/${siblings.prev.key}`,
-                )
-              }
+              onClick={() => goTo(siblings.prev)}
               className="cursor-pointer rounded-sm p-1.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue disabled:opacity-30 disabled:cursor-default"
               aria-label="Previous record (K / ↑)"
               title="Previous record (K / ↑)"
@@ -142,23 +228,13 @@ export function RecordDetailPage() {
             <button
               type="button"
               disabled={!siblings.next}
-              onClick={() =>
-                siblings.next &&
-                navigate(
-                  `/p/${projectId}/records/${siblings.next.type}/${siblings.next.key}`,
-                )
-              }
+              onClick={() => goTo(siblings.next)}
               className="cursor-pointer rounded-sm p-1.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue disabled:opacity-30 disabled:cursor-default"
               aria-label="Next record (J / ↓)"
               title="Next record (J / ↓)"
             >
               <ChevronDown size={16} />
             </button>
-            {siblings.position && (
-              <span className="px-1 font-mono text-[11px] text-fg-faint tabular-nums">
-                {siblings.position}/{siblings.total}
-              </span>
-            )}
           </div>
           <button
             type="button"
@@ -170,22 +246,34 @@ export function RecordDetailPage() {
           </button>
         </>
       }
-      title={
-        <span className="flex items-center gap-1.5">
+      title={title ?? <span className="font-mono">{key}</span>}
+    >
+      <div className="space-y-6 px-6 py-4">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
-            to={`/p/${projectId}/records?type=${encodeURIComponent(type)}`}
-            className="text-muted-foreground hover:text-foreground"
+            to={listLink}
+            state={location.state}
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
             Records
           </Link>
           <span className="text-muted-foreground">/</span>
           <Badge variant="gray">{type}</Badge>
           <span className="text-muted-foreground">/</span>
-          <span className="font-mono">{key}</span>
-        </span>
-      }
-    >
-      <div className="space-y-6 px-6 py-4">
+          <span className="font-mono text-sm text-foreground">{key}</span>
+          <CopyButton value={key} />
+          {defs.status === "undeclared" && (
+            <Badge
+              variant="amber"
+              title="The current schema does not declare this type"
+            >
+              Not in schema
+            </Badge>
+          )}
+          <ClassificationBadge entry={entry} />
+          {record?.archived === 1 && <Badge variant="red">Archived</Badge>}
+        </div>
+
         {recordState.phase === "pending" && (
           <output className="block text-sm text-muted-foreground">
             Loading record…
@@ -212,8 +300,93 @@ export function RecordDetailPage() {
 
         {record && (
           <>
-            <section>
-              <SectionLabel>Metadata</SectionLabel>
+            {summary && (
+              <DetailSection title="Summary">
+                <p className="whitespace-pre-wrap text-sm text-foreground">
+                  {summary}
+                </p>
+              </DetailSection>
+            )}
+
+            <DetailSection title="Fields">
+              {defs.status === "pending" ? (
+                <MutedLine>Loading field definitions…</MutedLine>
+              ) : defs.status === "unavailable" ? (
+                <>
+                  <DefinitionsUnavailable
+                    onRetry={
+                      typesQuery.isError
+                        ? () => void typesQuery.refetch()
+                        : undefined
+                    }
+                  />
+                  {Object.keys(value).length > 0 ? (
+                    <FieldTable label="Record fields" rows={dataRows(value)} />
+                  ) : (
+                    <MutedLine>No stored data.</MutedLine>
+                  )}
+                </>
+              ) : defs.status === "undeclared" ? (
+                <MutedLine>No fields are declared for this type.</MutedLine>
+              ) : (
+                (() => {
+                  const declared = (definition?.fields ?? []).filter(
+                    (f) => !shownElsewhere.includes(f.name),
+                  );
+                  return declared.length > 0 ? (
+                    <FieldTable
+                      label="Record fields"
+                      rows={declared.map((f) => ({
+                        name: f.name,
+                        type: f.type,
+                        value: value[f.name],
+                      }))}
+                    />
+                  ) : (
+                    <MutedLine>No other declared fields.</MutedLine>
+                  );
+                })()
+              )}
+            </DetailSection>
+
+            {showOtherFields && (
+              <DetailSection title="Other fields">
+                <MutedLine>
+                  {defs.status === "undeclared" ? (
+                    <>
+                      Type <code className="font-mono">{type}</code> is not in
+                      the current schema. Stored data is shown as-is.
+                    </>
+                  ) : (
+                    <>
+                      Not declared by the{" "}
+                      <code className="font-mono">{type}</code> schema.
+                    </>
+                  )}
+                </MutedLine>
+                {otherRows.length > 0 ? (
+                  <FieldTable label="Other fields" rows={otherRows} />
+                ) : (
+                  <MutedLine>No stored data.</MutedLine>
+                )}
+              </DetailSection>
+            )}
+
+            <DetailSection title="Tags">
+              {record.tags.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 py-2">
+                  {record.tags.map((tag) => (
+                    <Badge key={tag} variant="gray">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-2 text-sm text-muted-foreground">No tags</p>
+              )}
+            </DetailSection>
+
+            <DetailSection title="Metadata">
               <Table aria-label="Record metadata">
                 <TableBody>
                   <TableRow>
@@ -294,48 +467,25 @@ export function RecordDetailPage() {
                   </TableRow>
                 </TableBody>
               </Table>
-            </section>
+            </DetailSection>
 
-            <section>
-              <SectionLabel>Tags</SectionLabel>
-              {record.tags.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5 py-2">
-                  {record.tags.map((tag) => (
-                    <Badge key={tag} variant="gray">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="py-2 text-sm text-muted-foreground">No tags</p>
-              )}
-            </section>
-
-            {record.archived === 1 && (
-              <div className="rounded-md border border-status-red/30 bg-status-red/5 px-3 py-2">
-                <Badge variant="red">Archived</Badge>
-              </div>
-            )}
-
-            <section>
-              <div className="flex items-center justify-between">
-                <SectionLabel>Value</SectionLabel>
+            <DetailSection
+              title="Value"
+              action={
                 <CopyButton value={JSON.stringify(record.value, null, 2)} />
-              </div>
-              <pre className="mt-2 max-h-[400px] overflow-auto rounded-md bg-card p-3 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap break-all">
-                {JSON.stringify(record.value, null, 2)}
-              </pre>
-            </section>
+              }
+            >
+              <CollapsibleData data={record.value} noun="value" />
+            </DetailSection>
 
-            <section>
-              <SectionLabel>Revision History</SectionLabel>
+            <DetailSection title="Revision History">
               <QuerySection
                 state={historyState}
                 label="revision history"
                 empty="No history available"
                 onRetry={() => void historyQuery.refetch()}
               >
-                {({ items }) => (
+                {() => (
                   <Table aria-label="Revision history">
                     <TableHeader>
                       <TableRow>
@@ -347,7 +497,7 @@ export function RecordDetailPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {items.map((item) => (
+                      {historyItems.map((item) => (
                         <TableRow key={item.revision}>
                           <TableCell className="font-mono text-xs tabular-nums">
                             {item.revision}
@@ -360,7 +510,10 @@ export function RecordDetailPage() {
                           <TableCell className="font-mono text-xs">
                             {item.actor}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell
+                            className="text-muted-foreground"
+                            title={formatDateTime(item.created_at)}
+                          >
                             {relativeTime(item.created_at)}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
@@ -372,7 +525,27 @@ export function RecordDetailPage() {
                   </Table>
                 )}
               </QuerySection>
-            </section>
+              {historyState.phase === "ready" && historyQuery.hasNextPage && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={historyQuery.isFetchingNextPage}
+                    onClick={() => void historyQuery.fetchNextPage()}
+                  >
+                    {historyQuery.isFetchingNextPage
+                      ? "Loading older revisions…"
+                      : "Older revisions"}
+                  </Button>
+                  {historyQuery.isFetchNextPageError && (
+                    <span className="text-xs text-status-red">
+                      Could not load older revisions.
+                    </span>
+                  )}
+                </div>
+              )}
+            </DetailSection>
           </>
         )}
       </div>

@@ -2,12 +2,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LastRefreshed } from "@/components/ui/last-refreshed";
+import { PageNav } from "@/components/ui/page-nav";
 import {
   SectionFailure,
   SectionNotice,
   StaleNotice,
 } from "@/components/ui/query-section";
-import { SortableHead, useSort } from "@/components/ui/sortable-head";
+import { SortableHead } from "@/components/ui/sortable-head";
 import {
   Table,
   TableBody,
@@ -18,62 +19,181 @@ import {
 } from "@/components/ui/table";
 import { TableError } from "@/components/ui/table-error";
 import { TableSkeleton } from "@/components/ui/table-skeleton";
-import { useRecordTypes, useRecords } from "@/hooks/use-api";
+import { useRecordPage, useRecordTypes } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  CURSOR_RESET_NOTICE,
+  pagePosition,
+  useCursorPaging,
+  useDropInvalidCursor,
+} from "@/hooks/use-cursor-paging";
 import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { deriveSectionState } from "@/lib/query-state";
+import {
+  DEFAULT_RECORD_SORT,
+  RECORD_PAGE_SIZE,
+  type RecordSort,
+  type RecordSortKey,
+  parseRecordSort,
+  recordPageParams,
+} from "@/lib/record-list";
 import { relativeTime } from "@/lib/time";
+import type {
+  RecordCatalogEntry,
+  RecordTypesResponse,
+  TypeDeclaration,
+} from "@tila/schemas";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 
-type RecordListItem = {
+/** A record type tab: a catalog entry, or a bare name from an older server. */
+type TypeTab = {
   type: string;
-  key: string;
-  revision: number;
-  updated_at: number;
-  updated_by: string;
-  archived: number;
-  tags: string[];
+  declaration: TypeDeclaration;
+  entry?: RecordCatalogEntry;
 };
 
-function parseSort(
-  raw: string | null,
-): { key: "updated" | "key" | "revision"; dir: "asc" | "desc" } | null {
-  if (!raw) return null;
-  const [k, d] = raw.split(":");
-  if (
-    ["updated", "key", "revision"].includes(k) &&
-    (d === "asc" || d === "desc")
-  ) {
-    return { key: k as "updated" | "key" | "revision", dir: d };
-  }
-  return null;
+const DECLARATION_ORDER: TypeDeclaration[] = [
+  "declared",
+  "undeclared",
+  "unknown",
+];
+
+/**
+ * Declared types first (including empty ones), then types the schema does not
+ * declare, then types whose definitions could not be read.
+ */
+function typeTabs(data: RecordTypesResponse | undefined): TypeTab[] {
+  if (!data) return [];
+  const tabs: TypeTab[] = data.entries
+    ? data.entries.map((entry) => ({
+        type: entry.type,
+        declaration: entry.declaration,
+        entry,
+      }))
+    : data.types.map((type) => ({
+        type,
+        declaration: !data.declared_types
+          ? "unknown"
+          : data.declared_types.includes(type)
+            ? "declared"
+            : "undeclared",
+      }));
+  return DECLARATION_ORDER.flatMap((d) =>
+    tabs.filter((t) => t.declaration === d),
+  );
+}
+
+const KIND_LABELS = { configuration: "Configuration", content: "Content" };
+
+/** Classification only when the definition declares it; never from the name. */
+export function ClassificationBadge({
+  entry,
+}: {
+  entry: RecordCatalogEntry | undefined;
+}) {
+  const kind = entry?.definition?.presentation?.kind;
+  if (!kind) return null;
+  return <Badge variant="gray">{KIND_LABELS[kind]}</Badge>;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 export function RecordsPage() {
   useTimeTick();
   const { projectId } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [selectedType, setSelectedType] = useState<string | undefined>(
-    () => searchParams.get("type") || undefined,
-  );
-  const [keyFilter, setKeyFilter] = useState(() => searchParams.get("q") ?? "");
-  const [includeArchived, setIncludeArchived] = useState(
-    () => searchParams.get("archived") === "1",
-  );
-  const [sort, toggleSort] = useSort<"updated" | "key" | "revision">(
-    parseSort(searchParams.get("sort")) ?? { key: "updated", dir: "desc" },
-  );
+  const urlType = searchParams.get("type") || undefined;
+  const urlQ = (searchParams.get("q") ?? "").trim();
+  const sort = parseRecordSort(searchParams.get("sort"));
+  const includeArchived = searchParams.get("archived") === "1";
+  const paging = useCursorPaging();
+
+  // Type, filter, sort and archived changes start again from page one.
+  function updateParams(mutate: (p: URLSearchParams) => void) {
+    paging.clearCursorReset();
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        mutate(next);
+        next.delete("after");
+        return next;
+      },
+      { replace: true },
+    );
+  }
+  const updateParamsRef = useRef(updateParams);
+  updateParamsRef.current = updateParams;
+
+  // The key filter is local while typing; the URL follows after a debounce.
+  const [keyFilter, setKeyFilter] = useState(urlQ);
+  const debouncedKey = useDebouncedValue(keyFilter);
+  const syncedQ = useRef(urlQ);
+  useEffect(() => {
+    if (urlQ !== syncedQ.current) {
+      syncedQ.current = urlQ;
+      setKeyFilter(urlQ);
+    }
+  }, [urlQ]);
+  useEffect(() => {
+    const trimmed = debouncedKey.trim();
+    if (trimmed === syncedQ.current) return;
+    syncedQ.current = trimmed;
+    updateParamsRef.current((p) => {
+      if (trimmed) p.set("q", trimmed);
+      else p.delete("q");
+    });
+  }, [debouncedKey]);
+
+  function clearKeyFilter() {
+    syncedQ.current = "";
+    setKeyFilter("");
+    updateParams((p) => p.delete("q"));
+  }
+
+  function selectType(type: string) {
+    updateParams((p) => p.set("type", type));
+  }
+
+  function setIncludeArchived(include: boolean) {
+    updateParams((p) => {
+      if (include) p.set("archived", "1");
+      else p.delete("archived");
+    });
+  }
+
+  function toggleSort(key: RecordSortKey) {
+    const next: RecordSort =
+      sort.key === key
+        ? { key, dir: sort.dir === "desc" ? "asc" : "desc" }
+        : { key, dir: key === "key" ? "asc" : "desc" };
+    updateParams((p) => {
+      if (
+        next.key === DEFAULT_RECORD_SORT.key &&
+        next.dir === DEFAULT_RECORD_SORT.dir
+      ) {
+        p.delete("sort");
+      } else {
+        p.set("sort", `${next.key}:${next.dir}`);
+      }
+    });
+  }
+
+  // --- Types ---
 
   const typesQuery = useRecordTypes();
   const typesState = deriveSectionState(typesQuery);
   // After a 403/404 refresh the query still holds the old list; only a
   // currently readable listing is used.
   const typesData = typesState.phase === "ready" ? typesState.data : undefined;
-  const types = typesData?.types ?? [];
+  const tabs = useMemo(() => typeTabs(typesData), [typesData]);
   const typesIncomplete = typesData?.incomplete;
   const incompleteReasons = [
     typesIncomplete?.declared_types === "unavailable"
@@ -90,53 +210,40 @@ export function RecordsPage() {
     typesIncomplete?.declared_types === "unavailable" ||
     typesIncomplete?.in_use_types === "unavailable";
 
+  // With no type in the URL, open the first tab. A type in the URL is never
+  // replaced, even when the catalog does not list it.
+  const firstType = tabs[0]?.type;
   useEffect(() => {
-    if (!selectedType && types.length > 0) {
-      setSelectedType(types[0]);
+    if (!urlType && firstType) {
+      updateParamsRef.current((p) => p.set("type", firstType));
     }
-  }, [types, selectedType]);
+  }, [urlType, firstType]);
 
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (selectedType) params.set("type", selectedType);
-    if (keyFilter.trim()) params.set("q", keyFilter.trim());
-    if (includeArchived) params.set("archived", "1");
-    if (sort) params.set("sort", `${sort.key}:${sort.dir}`);
-    setSearchParams(params);
-  }, [selectedType, keyFilter, includeArchived, sort, setSearchParams]);
+  const selectedTab = tabs.find((t) => t.type === urlType);
+  const selectedEntry = selectedTab?.entry;
+  const typeNotAvailable =
+    Boolean(urlType) && typesData !== undefined && !selectedTab;
+  // The list waits for the catalog so an unknown type is never requested. An
+  // incomplete or failed catalog may omit a type that still has records.
+  const listType =
+    urlType &&
+    (typesState.phase === "failed" ||
+      (typesData !== undefined && (selectedTab || typesIncomplete)))
+      ? urlType
+      : undefined;
 
-  const { data, isLoading, isError, error, dataUpdatedAt, refetch } =
-    useRecords(selectedType, {
-      "include-archived": includeArchived ? "true" : undefined,
-    });
-  const allRecords: RecordListItem[] = data?.items ?? [];
+  // --- Rows ---
 
-  const debouncedKeyFilter = useDebouncedValue(keyFilter);
-
-  const records = useMemo(() => {
-    let filtered = allRecords;
-    if (debouncedKeyFilter.trim()) {
-      const q = debouncedKeyFilter.toLowerCase().trim();
-      filtered = allRecords.filter((r) => r.key.toLowerCase().includes(q));
-    }
-    if (!sort) return filtered;
-    const dir = sort.dir === "asc" ? 1 : -1;
-    return [...filtered].sort((a, b) => {
-      switch (sort.key) {
-        case "updated":
-          return (a.updated_at - b.updated_at) * dir;
-        case "key":
-          return a.key.localeCompare(b.key) * dir;
-        case "revision":
-          return (a.revision - b.revision) * dir;
-        default:
-          return 0;
-      }
-    });
-  }, [allRecords, debouncedKeyFilter, sort]);
+  const listQuery = useRecordPage(listType, recordPageParams(searchParams));
+  const invalidCursor = useDropInvalidCursor(listQuery.error, paging);
+  const records = listQuery.data?.items ?? [];
+  const meta = listQuery.data?.meta;
+  const nextCursor = meta?.next_cursor ?? null;
+  const showTitle =
+    Boolean(selectedEntry?.definition?.presentation?.title) ||
+    records.some((r) => "title" in r);
 
   const searchRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.ctrlKey || e.metaKey) return;
@@ -145,7 +252,7 @@ export function RecordsPage() {
         if (e.key === "Escape") {
           e.preventDefault();
           (document.activeElement as HTMLElement)?.blur();
-          if (keyFilter) setKeyFilter("");
+          if (keyFilter) clearKeyFilter();
         }
         return;
       }
@@ -155,40 +262,62 @@ export function RecordsPage() {
         searchRef.current?.focus();
       } else if (e.key === "a") {
         e.preventDefault();
-        setIncludeArchived((v) => !v);
+        setIncludeArchived(!includeArchived);
       }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [keyFilter]);
+  });
 
-  const navigate = useNavigate();
-  const tableRef = useRef<HTMLDivElement>(null);
+  // The drawer opens over the same list page: keep the query string and the
+  // page trail so closing it returns to exactly this page.
+  const recordLink = (type: string, key: string) => ({
+    pathname: `/p/${projectId}/records/${type}/${key}`,
+    search: location.search,
+  });
   const { focusIdx, handleKeyDown: handleTableKeyDown } = useTableKeyNav(
     records.length,
     (idx) =>
-      navigate(
-        `/p/${projectId}/records/${records[idx].type}/${records[idx].key}`,
-      ),
+      navigate(recordLink(records[idx].type, records[idx].key), {
+        state: location.state,
+      }),
   );
+
+  let summary: string | null = null;
+  let position: string | null = null;
+  if (meta) {
+    const archivedScope =
+      meta.scope?.archived ?? (includeArchived ? "included" : "excluded");
+    summary = `${plural(meta.total, "record", "records")} · ${archivedScope === "included" ? "including" : "excluding"} archived${meta.scope?.restricted ? " · visible to this credential" : ""}`;
+    if ((paging.after || nextCursor) && records.length > 0) {
+      position = pagePosition(
+        paging.pageIndex,
+        RECORD_PAGE_SIZE,
+        records.length,
+        meta.total,
+      );
+    }
+  }
+
+  const showPending = listQuery.isPending || invalidCursor;
+  const showError = listQuery.isError && !invalidCursor && !listQuery.data;
+  const columns = showTitle ? 6 : 5;
 
   return (
     <div className="space-y-4 p-3 md:p-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-logo text-xl tracking-tight text-foreground">
           Records
         </h1>
-        {types.length > 0 && (
+        {tabs.length > 0 && (
           <span className="tila-num rounded-full border border-border bg-card px-[7px] py-px font-mono text-[11px] text-fg-faint">
-            {types.length} {types.length === 1 ? "type" : "types"}
+            {plural(tabs.length, "type", "types")}
           </span>
         )}
-        {!isLoading && !isError && selectedType && (
-          <span className="font-mono text-xs text-muted-foreground tabular-nums">
-            {allRecords.length} {allRecords.length === 1 ? "record" : "records"}
-          </span>
+        {summary && listType && (
+          <span className="font-mono text-[11px] text-fg-faint">{summary}</span>
         )}
-        <LastRefreshed dataUpdatedAt={dataUpdatedAt} />
+        <LastRefreshed dataUpdatedAt={listQuery.dataUpdatedAt} />
       </div>
 
       {typesState.phase === "pending" && (
@@ -228,7 +357,7 @@ export function RecordsPage() {
       {typesState.phase === "ready" &&
         !typesState.stale &&
         incompleteReasons.length === 0 &&
-        types.length === 0 && (
+        tabs.length === 0 && (
           <div className="py-12 text-center">
             <p className="text-sm text-muted-foreground">
               No record types defined.
@@ -246,274 +375,305 @@ export function RecordsPage() {
           </div>
         )}
 
-      {types.length > 0 && (
-        <>
-          <div
-            className="flex flex-wrap items-center gap-1.5"
-            role="tablist"
-            aria-label="Record types"
-            onKeyDown={(e) => {
-              if (!selectedType) return;
-              const idx = types.indexOf(selectedType);
-              if (e.key === "ArrowRight" && idx < types.length - 1) {
-                e.preventDefault();
-                setSelectedType(types[idx + 1]);
-              } else if (e.key === "ArrowLeft" && idx > 0) {
-                e.preventDefault();
-                setSelectedType(types[idx - 1]);
-              }
-            }}
-          >
-            {types.map((t) => (
+      {tabs.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="tablist"
+          aria-label="Record types"
+          onKeyDown={(e) => {
+            const idx = tabs.findIndex((t) => t.type === urlType);
+            if (idx === -1) return;
+            if (e.key === "ArrowRight" && idx < tabs.length - 1) {
+              e.preventDefault();
+              selectType(tabs[idx + 1].type);
+            } else if (e.key === "ArrowLeft" && idx > 0) {
+              e.preventDefault();
+              selectType(tabs[idx - 1].type);
+            }
+          }}
+        >
+          {tabs.map((tab) => {
+            const selected = urlType === tab.type;
+            const count = tab.entry
+              ? tab.entry.count +
+                (includeArchived ? tab.entry.archived_count : 0)
+              : null;
+            return (
               <button
-                key={t}
+                key={tab.type}
                 type="button"
                 role="tab"
-                id={`tab-${t}`}
-                aria-selected={selectedType === t}
+                id={`tab-${tab.type}`}
+                aria-selected={selected}
                 aria-controls="tabpanel-records"
-                tabIndex={selectedType === t ? 0 : -1}
-                onClick={() => setSelectedType(t)}
-                className={`rounded-sm px-2.5 py-1 text-[13px] transition-[background-color,color] duration-150 cursor-pointer ${
-                  selectedType === t
-                    ? "text-signal-blue bg-tint-blue-15"
-                    : "text-muted-foreground hover:text-foreground hover:bg-[var(--color-row-hover-2)]"
+                tabIndex={selected ? 0 : -1}
+                onClick={() => selectType(tab.type)}
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-2.5 py-1 text-[13px] transition-[background-color,color] duration-150 ${
+                  selected
+                    ? "bg-tint-blue-15 text-signal-blue"
+                    : "text-muted-foreground hover:bg-[var(--color-row-hover-2)] hover:text-foreground"
                 }`}
               >
-                {t}
+                <span>{tab.type}</span>
+                {count !== null && (
+                  <span className="tila-num font-mono text-[11px] text-fg-faint">
+                    {count}
+                  </span>
+                )}
+                {tab.declaration === "undeclared" && (
+                  <Badge variant="amber">Not in schema</Badge>
+                )}
+                {tab.declaration === "unknown" && (
+                  <Badge variant="gray">Definitions unavailable</Badge>
+                )}
+                <ClassificationBadge entry={tab.entry} />
               </button>
-            ))}
+            );
+          })}
+        </div>
+      )}
+
+      {typeNotAvailable && urlType && (
+        <SectionNotice>
+          <code className="font-mono">{urlType}</code> is not an available
+          record type.
+        </SectionNotice>
+      )}
+
+      {listType && (
+        <div
+          role="tabpanel"
+          id="tabpanel-records"
+          aria-labelledby={selectedTab ? `tab-${listType}` : undefined}
+          aria-label={selectedTab ? undefined : listType}
+          className="space-y-3"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              ref={searchRef}
+              id="record-key-filter"
+              name="q"
+              value={keyFilter}
+              maxLength={200}
+              onChange={(e) => setKeyFilter(e.target.value)}
+              placeholder="Filter by key… ( / )"
+              aria-label="Filter records by key"
+              className="w-56"
+            />
+            <label
+              className="flex cursor-pointer items-center gap-1.5 text-[13px] text-muted-foreground select-none"
+              title="Toggle archived records (A)"
+            >
+              <input
+                type="checkbox"
+                checked={includeArchived}
+                onChange={() => setIncludeArchived(!includeArchived)}
+                className="size-3.5 cursor-pointer rounded-[3px] border border-border bg-card accent-signal-blue"
+              />
+              Include archived
+            </label>
+            {(keyFilter || includeArchived) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  syncedQ.current = "";
+                  setKeyFilter("");
+                  updateParams((p) => {
+                    p.delete("q");
+                    p.delete("archived");
+                  });
+                }}
+              >
+                Reset
+              </Button>
+            )}
           </div>
 
-          {selectedType && (
-            <div
-              role="tabpanel"
-              id="tabpanel-records"
-              aria-labelledby={`tab-${selectedType}`}
-              className="space-y-3"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  ref={searchRef}
-                  id="record-key-filter"
-                  name="q"
-                  value={keyFilter}
-                  onChange={(e) => setKeyFilter(e.target.value)}
-                  placeholder="Filter by key… ( / )"
-                  aria-label="Filter records by key"
-                  className="w-56"
-                />
-                <label
-                  className="flex cursor-pointer items-center gap-1.5 text-[13px] text-muted-foreground select-none"
-                  title="Toggle archived records (A)"
-                >
-                  <input
-                    type="checkbox"
-                    checked={includeArchived}
-                    onChange={() => setIncludeArchived(!includeArchived)}
-                    className="size-3.5 cursor-pointer rounded-[3px] border border-border bg-card accent-signal-blue"
-                  />
-                  Include archived
-                </label>
-                {(keyFilter || includeArchived) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setKeyFilter("");
-                      setIncludeArchived(false);
-                    }}
-                  >
-                    Reset
-                  </Button>
+          {paging.cursorReset && (
+            <p className="text-xs text-muted-foreground">
+              {CURSOR_RESET_NOTICE}
+            </p>
+          )}
+
+          {showError ? (
+            <TableError
+              error={listQuery.error}
+              onRetry={() => void listQuery.refetch()}
+            />
+          ) : showPending ? (
+            <div className="overflow-hidden rounded-lg border border-border">
+              <Table aria-label="Records">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Key</TableHead>
+                    {showTitle && <TableHead>Title</TableHead>}
+                    <TableHead>Revision</TableHead>
+                    <TableHead>Updated</TableHead>
+                    <TableHead>Updated By</TableHead>
+                    <TableHead>Tags</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableSkeleton columns={columns} rows={5} />
+                </TableBody>
+              </Table>
+            </div>
+          ) : records.length === 0 ? (
+            <div className="py-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                {urlQ ? (
+                  `No ${listType} records match “${urlQ}”.`
+                ) : (
+                  <>
+                    No <code className="font-mono">{listType}</code> records.
+                  </>
                 )}
-              </div>
-
-              {debouncedKeyFilter && !isLoading && !isError && (
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue">
-                    key: {debouncedKeyFilter}
-                  </span>
-                  <span className="text-[10px] text-fg-faint">
-                    {records.length} of {allRecords.length}
-                  </span>
-                </div>
-              )}
-
-              {isLoading && (
-                <div className="overflow-hidden rounded-lg border border-border">
-                  <Table aria-label="Records">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Key</TableHead>
-                        <TableHead>Revision</TableHead>
-                        <TableHead>Updated</TableHead>
-                        <TableHead>Updated By</TableHead>
-                        <TableHead>Tags</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      <TableSkeleton columns={5} rows={5} />
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-
-              {isError && (
-                <TableError error={error} onRetry={() => refetch()} />
-              )}
-
-              {!isLoading && !isError && records.length === 0 && (
-                <div className="py-8 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    {debouncedKeyFilter
-                      ? `No ${selectedType} records match "${debouncedKeyFilter}".`
-                      : `No ${selectedType} records yet.`}
-                  </p>
-                  <p className="mt-1 text-xs text-fg-faint">
-                    {debouncedKeyFilter
-                      ? "Try a broader filter or clear it with Reset."
-                      : `Create records with tila record set ${selectedType} <key>`}
-                  </p>
-                  {!includeArchived && !debouncedKeyFilter && (
-                    <button
-                      type="button"
-                      onClick={() => setIncludeArchived(true)}
-                      className="mt-2 cursor-pointer text-xs text-signal-blue hover:text-signal-blue-hover"
-                    >
-                      Check archived records
-                    </button>
-                  )}
-                  {!includeArchived && debouncedKeyFilter && (
-                    <button
-                      type="button"
-                      onClick={() => setIncludeArchived(true)}
-                      className="mt-2 cursor-pointer text-xs text-signal-blue hover:text-signal-blue-hover"
-                    >
-                      Search archived records too
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {!isLoading && !isError && records.length > 0 && (
-                <>
-                  <div
-                    ref={tableRef}
-                    onKeyDown={handleTableKeyDown}
-                    className="overflow-hidden rounded-lg border border-border focus-visible:outline-none"
-                    // biome-ignore lint/a11y/noNoninteractiveTabindex: table container needs focus for keyboard row navigation
-                    // biome-ignore lint/a11y/useSemanticElements: div wraps a table, role="grid" enables keyboard nav
-                    tabIndex={0}
-                    role="grid"
-                  >
-                    <Table aria-label="Records">
-                      <TableHeader>
-                        <TableRow>
-                          <SortableHead
-                            sortKey="key"
-                            active={sort?.key === "key"}
-                            dir={sort?.key === "key" ? sort.dir : null}
-                            onSort={() => toggleSort("key")}
-                            title="Record key (unique within type)"
-                          >
-                            Key
-                          </SortableHead>
-                          <SortableHead
-                            sortKey="revision"
-                            active={sort?.key === "revision"}
-                            dir={sort?.key === "revision" ? sort.dir : null}
-                            onSort={() => toggleSort("revision")}
-                            title="Revision number"
-                          >
-                            Revision
-                          </SortableHead>
-                          <SortableHead
-                            sortKey="updated"
-                            active={sort?.key === "updated"}
-                            dir={sort?.key === "updated" ? sort.dir : null}
-                            onSort={() => toggleSort("updated")}
-                            title="Last modification time"
-                          >
-                            Updated
-                          </SortableHead>
-                          <TableHead title="Token or agent that last modified">
-                            Updated By
-                          </TableHead>
-                          <TableHead title="Record tags">Tags</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {records.map((r, idx) => (
-                          <TableRow
-                            key={`${r.type}/${r.key}`}
-                            className={`cursor-pointer ${focusIdx === idx ? "bg-[var(--color-row-hover)]" : ""}`}
-                          >
-                            <TableCell>
-                              <span className="inline-flex items-center gap-1.5">
-                                <Link
-                                  to={`/p/${projectId}/records/${r.type}/${r.key}`}
-                                  className="font-mono text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover"
-                                >
-                                  {r.key}
-                                </Link>
-                                {r.archived === 1 && (
-                                  <Badge variant="red">archived</Badge>
-                                )}
-                              </span>
-                            </TableCell>
-                            <TableCell className="font-mono text-xs tabular-nums">
-                              {r.revision}
-                            </TableCell>
-                            <TableCell className="font-mono text-muted-foreground">
-                              {relativeTime(r.updated_at)}
-                            </TableCell>
-                            <TableCell
-                              className="max-w-[140px] truncate font-mono text-xs text-muted-foreground"
-                              title={r.updated_by}
-                            >
-                              {r.updated_by}
-                            </TableCell>
-                            <TableCell>
-                              {r.tags.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {r.tags.map((tag) => (
-                                    <Badge key={tag} variant="gray">
-                                      {tag}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <div className="flex items-center gap-4 pt-1.5 text-[11px] text-fg-faint">
-                    <span>
-                      <kbd className="font-mono">/</kbd> filter
-                    </span>
-                    <span>
-                      <kbd className="font-mono">a</kbd> archived
-                    </span>
-                    <span>
-                      <kbd className="font-mono">↑↓</kbd> navigate
-                    </span>
-                    <span>
-                      <kbd className="font-mono">↵</kbd> open
-                    </span>
-                    <span>
-                      <kbd className="font-mono">esc</kbd> clear
-                    </span>
-                  </div>
-                </>
+              </p>
+              {!includeArchived && (selectedEntry?.archived_count ?? 0) > 0 && (
+                <p className="mt-1 text-xs text-fg-faint">
+                  Archived records are excluded.
+                </p>
               )}
             </div>
+          ) : (
+            <>
+              <div
+                onKeyDown={handleTableKeyDown}
+                className="overflow-hidden rounded-lg border border-border focus-visible:outline-none"
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: table container needs focus for keyboard row navigation
+                // biome-ignore lint/a11y/useSemanticElements: div wraps a table, role="grid" enables keyboard nav
+                tabIndex={0}
+                role="grid"
+              >
+                <Table aria-label="Records" aria-rowcount={records.length}>
+                  <TableHeader>
+                    <TableRow>
+                      <SortableHead
+                        sortKey="key"
+                        active={sort.key === "key"}
+                        dir={sort.key === "key" ? sort.dir : null}
+                        onSort={() => toggleSort("key")}
+                        title="Record key (unique within type)"
+                      >
+                        Key
+                      </SortableHead>
+                      {showTitle && (
+                        <TableHead title="Title as the record type presents it">
+                          Title
+                        </TableHead>
+                      )}
+                      <SortableHead
+                        sortKey="revision"
+                        active={sort.key === "revision"}
+                        dir={sort.key === "revision" ? sort.dir : null}
+                        onSort={() => toggleSort("revision")}
+                        title="Revision number"
+                      >
+                        Revision
+                      </SortableHead>
+                      <SortableHead
+                        sortKey="updated"
+                        active={sort.key === "updated"}
+                        dir={sort.key === "updated" ? sort.dir : null}
+                        onSort={() => toggleSort("updated")}
+                        title="Last modification time"
+                      >
+                        Updated
+                      </SortableHead>
+                      <TableHead title="Token or agent that last modified">
+                        Updated By
+                      </TableHead>
+                      <TableHead title="Record tags">Tags</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {records.map((r, idx) => (
+                      <TableRow
+                        key={`${r.type}/${r.key}`}
+                        aria-rowindex={idx + 1}
+                        className={`cursor-pointer ${focusIdx === idx ? "bg-[var(--color-row-hover)]" : ""}`}
+                      >
+                        <TableCell>
+                          <span className="inline-flex items-center gap-1.5">
+                            <Link
+                              to={recordLink(r.type, r.key)}
+                              state={location.state}
+                              className="font-mono text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover"
+                            >
+                              {r.key}
+                            </Link>
+                            {r.archived === 1 && (
+                              <Badge variant="red">archived</Badge>
+                            )}
+                          </span>
+                        </TableCell>
+                        {showTitle && (
+                          <TableCell className="max-w-[28ch] truncate font-sans text-foreground">
+                            {r.title ?? (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        )}
+                        <TableCell className="font-mono text-xs tabular-nums">
+                          {r.revision}
+                        </TableCell>
+                        <TableCell className="font-mono text-muted-foreground">
+                          {relativeTime(r.updated_at)}
+                        </TableCell>
+                        <TableCell
+                          className="max-w-[140px] truncate font-mono text-xs text-muted-foreground"
+                          title={r.updated_by}
+                        >
+                          {r.updated_by}
+                        </TableCell>
+                        <TableCell>
+                          {r.tags.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {r.tags.map((tag) => (
+                                <Badge key={tag} variant="gray">
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex items-center gap-4 pt-1.5 text-[11px] text-fg-faint">
+                <span>
+                  <kbd className="font-mono">/</kbd> filter
+                </span>
+                <span>
+                  <kbd className="font-mono">a</kbd> archived
+                </span>
+                <span>
+                  <kbd className="font-mono">↑↓</kbd> navigate
+                </span>
+                <span>
+                  <kbd className="font-mono">↵</kbd> open
+                </span>
+                <span>
+                  <kbd className="font-mono">esc</kbd> clear
+                </span>
+              </div>
+            </>
           )}
-        </>
+
+          {!showPending && !showError && (
+            <PageNav
+              paging={paging}
+              nextCursor={nextCursor}
+              position={position}
+              label="Record pages"
+            />
+          )}
+        </div>
       )}
     </div>
   );

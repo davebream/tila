@@ -1,7 +1,14 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Drawer } from "@/components/ui/drawer";
+import {
+  CollapsibleData,
+  DefinitionsUnavailable,
+  FieldLabel,
+  FieldTable,
+  MutedLine,
+  dataRows,
+} from "@/components/ui/field-table";
 import { QuerySection } from "@/components/ui/query-section";
 import {
   Table,
@@ -21,7 +28,11 @@ import {
 } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
-import { taskState } from "@/lib/presentation";
+import {
+  type TypeDefinitions,
+  resolveDefinitions,
+  taskState,
+} from "@/lib/presentation";
 import { type SectionState, deriveSectionState } from "@/lib/query-state";
 import { formatDateTime, relativeTime } from "@/lib/time";
 import type {
@@ -29,10 +40,9 @@ import type {
   JournalResponse,
   StateListResponse,
   WorkCatalogEntry,
-  WorkCatalogResponse,
 } from "@tila/schemas";
 import { presentedText, presentedTitle } from "@tila/schemas";
-import { ChevronRight, Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2 } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 
@@ -40,6 +50,9 @@ const dataLinkClass =
   "rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue";
 
 type Claim = StateListResponse["claims"][number];
+
+/** Data keys never listed as fields: shown elsewhere in the drawer. */
+const STRUCTURAL_KEYS = ["parent_id"];
 
 function TaskSection({
   title,
@@ -56,14 +69,6 @@ function TaskSection({
       </h2>
       {children}
     </section>
-  );
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <TableCell className="w-40 font-sans text-sm font-medium text-muted-foreground">
-      {children}
-    </TableCell>
   );
 }
 
@@ -100,177 +105,6 @@ export function claimResourceMatchesEntity(
   if (resource === entityId) return true;
   if (entityType && resource === `${entityType}:${entityId}`) return true;
   return false;
-}
-
-function CollapsibleData({ data }: { data: Record<string, unknown> }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-      >
-        <ChevronRight
-          size={14}
-          className={`transition-transform duration-150 ${open ? "rotate-90" : ""}`}
-        />
-        Show data ({Object.keys(data).length} keys)
-      </button>
-      {open && (
-        <pre className="mt-2 overflow-x-auto rounded-md bg-background p-3 text-xs text-foreground whitespace-pre-wrap break-all">
-          {JSON.stringify(data, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-/**
- * What the current schema says about this task's type.
- * `unavailable`: the catalog failed, or it could not read definitions.
- * `undeclared`: the schema does not declare the type; stored data stays readable.
- */
-type TypeDefinitions =
-  | { status: "pending" }
-  | { status: "unavailable" }
-  | { status: "undeclared" }
-  | { status: "declared"; entry: WorkCatalogEntry };
-
-export function resolveDefinitions(
-  catalog: WorkCatalogResponse | undefined,
-  catalogFailed: boolean,
-  type: string,
-): TypeDefinitions {
-  if (!catalog) return { status: catalogFailed ? "unavailable" : "pending" };
-  const entry = catalog.types.find((e) => e.type === type);
-  if (!entry) {
-    // A type missing from a complete catalog is not declared by the schema.
-    return catalog.incomplete?.declared_types
-      ? { status: "unavailable" }
-      : { status: "undeclared" };
-  }
-  if (entry.declaration === "declared") return { status: "declared", entry };
-  if (entry.declaration === "undeclared") return { status: "undeclared" };
-  return { status: "unavailable" };
-}
-
-/** Data keys never listed as fields: shown elsewhere in the drawer. */
-const STRUCTURAL_KEYS = new Set(["parent_id"]);
-
-function NotSet() {
-  return <span className="font-sans text-muted-foreground">Not set</span>;
-}
-
-/**
- * One stored value, rendered by its declared type. A value whose shape does
- * not match the declaration is shown as stored rather than coerced.
- */
-function FieldValue({ value, type }: { value: unknown; type?: string }) {
-  if (value === undefined || value === null) return <NotSet />;
-  if (typeof value === "string") {
-    if (value === "") {
-      return <span className="font-sans text-muted-foreground">Empty</span>;
-    }
-    if (type === "enum") return <Badge variant="gray">{value}</Badge>;
-    if (type === "text") {
-      return (
-        <span className="whitespace-pre-wrap font-sans text-foreground">
-          {value}
-        </span>
-      );
-    }
-    return (
-      <span className="whitespace-pre-wrap break-words text-foreground">
-        {value}
-      </span>
-    );
-  }
-  if (typeof value === "number") {
-    return <span className="tila-num text-foreground">{value}</span>;
-  }
-  if (typeof value === "boolean") {
-    return <span className="text-foreground">{value ? "Yes" : "No"}</span>;
-  }
-  if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
-    if (value.length === 0) {
-      return <span className="font-sans text-muted-foreground">None</span>;
-    }
-    return (
-      <span className="flex flex-wrap gap-1">
-        {value.map((item, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: list items may repeat
-          <Badge key={`${item}-${i}`} variant="secondary">
-            {item}
-          </Badge>
-        ))}
-      </span>
-    );
-  }
-  return (
-    <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-background p-2 text-xs text-foreground">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
-}
-
-function FieldTable({
-  label,
-  rows,
-}: {
-  label: string;
-  rows: { name: string; value: unknown; type?: string }[];
-}) {
-  return (
-    <div className="border-t border-border">
-      <Table aria-label={label}>
-        <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.name}>
-              <FieldLabel>
-                <span className="font-mono">{row.name}</span>
-              </FieldLabel>
-              <TableCell>
-                <FieldValue value={row.value} type={row.type} />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
-function MutedLine({ children }: { children: ReactNode }) {
-  return <p className="text-sm text-muted-foreground">{children}</p>;
-}
-
-function DefinitionsUnavailable({ onRetry }: { onRetry?: () => void }) {
-  return (
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-tint-amber px-3 py-2 text-xs text-status-amber">
-      <span>
-        Field definitions unavailable. Stored data is shown without its schema.
-      </span>
-      {onRetry && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          onClick={onRetry}
-          className="font-mono text-muted-foreground"
-        >
-          Retry
-        </Button>
-      )}
-    </p>
-  );
-}
-
-function dataRows(data: Record<string, unknown>, exclude: Set<string>) {
-  return Object.keys(data)
-    .filter((key) => !exclude.has(key) && !STRUCTURAL_KEYS.has(key))
-    .map((key) => ({ name: key, value: data[key] }));
 }
 
 type HistoryEvent = JournalResponse["events"][number];
@@ -338,9 +172,12 @@ export function TaskDetailPage() {
   const entity = fieldsState.phase === "ready" ? fieldsState.data.entity : null;
   const historyQuery = useTaskHistory(entityId, entity?.type);
 
-  const defs: TypeDefinitions = entity
+  const defs: TypeDefinitions<WorkCatalogEntry> = entity
     ? resolveDefinitions(
-        catalogQuery.data,
+        catalogQuery.data && {
+          entries: catalogQuery.data.types,
+          incomplete: catalogQuery.data.incomplete,
+        },
         catalogQuery.isError && !catalogQuery.data,
         entity.type,
       )
@@ -451,7 +288,7 @@ export function TaskDetailPage() {
       : new Set<string>();
   const otherRows =
     defs.status === "declared" || defs.status === "undeclared"
-      ? dataRows(data, otherKeys)
+      ? dataRows(data, [...otherKeys, ...STRUCTURAL_KEYS])
       : [];
   const showOtherFields =
     entity !== null &&
@@ -532,7 +369,7 @@ export function TaskDetailPage() {
                 return <MutedLine>Loading field definitions…</MutedLine>;
               }
               if (defs.status === "unavailable") {
-                const rows = dataRows(task.data, new Set());
+                const rows = dataRows(task.data, STRUCTURAL_KEYS);
                 return (
                   <>
                     <DefinitionsUnavailable
