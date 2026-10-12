@@ -11,13 +11,29 @@ import {
   canonicalJsonSha256,
   formatRecordResource,
 } from "@tila/schemas";
-import { type SQL, and, asc, desc, eq, or, sql } from "drizzle-orm";
+import {
+  type SQL,
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { SearchQueryError, validateFtsQuery } from "./artifact-ops";
 import { recordRestrictionCondition } from "./credential-policy";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { assertResourceFence } from "./fence-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
+import {
+  InvalidCursorError,
+  decodeCursor,
+  encodeCursor,
+  fingerprint,
+} from "./list-cursor";
 import * as schema from "./schema";
 import { tagExistsConditions } from "./tag-filter-ops";
 
@@ -1373,6 +1389,8 @@ export function unarchiveRecord(
 // listRecords — type-required, metadata-only, pagination envelope
 // ---------------------------------------------------------------------------
 
+export type RecordListSort = "key" | "updated_at" | "revision";
+
 export function listRecords(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   filter: {
@@ -1383,6 +1401,15 @@ export function listRecords(
     tagFilter?: string[];
     dataFilter?: Record<string, unknown>;
     limit?: number;
+    /** Defaults to `key`. Every order is tie-broken by `key`. */
+    sort?: RecordListSort;
+    order?: "asc" | "desc";
+    /** Case-sensitive substring of the key. */
+    keyContains?: string;
+    /** Opaque keyset cursor from a previous page's `next_cursor`. */
+    cursor?: string;
+    /** Declared `presentation.title` field to project as `title`. */
+    titleField?: string;
   },
 ): { items: RecordListItem[]; total: number; next_cursor: string | null } {
   const effectiveLimit = Math.min(Math.max(filter.limit ?? 200, 1), 200);
@@ -1429,6 +1456,11 @@ export function listRecords(
       );
     }
   }
+  if (filter.keyContains) {
+    conditions.push(
+      sql`instr(${schema.records.key}, ${filter.keyContains}) > 0`,
+    );
+  }
 
   const whereClause = and(...conditions);
 
@@ -1440,17 +1472,82 @@ export function listRecords(
     .get();
   const total = countResult?.count ?? 0;
 
+  const sort: RecordListSort = filter.sort ?? "key";
+  const dir = filter.order === "desc" ? "desc" : "asc";
+  const sortColumn =
+    sort === "updated_at"
+      ? schema.records.updated_at
+      : sort === "revision"
+        ? schema.records.revision
+        : null;
+  const binding = fingerprint({
+    type: filter.type,
+    includeArchived: filter.includeArchived ?? false,
+    tag: filter.tag ?? null,
+    tagFilter: filter.tagFilter?.map((t) => t.toLowerCase()).sort() ?? null,
+    dataFilter: filter.dataFilter ?? null,
+    keyContains: filter.keyContains ?? null,
+    sort,
+    order: dir,
+  });
+
+  const pageConditions = [...conditions];
+  if (filter.cursor) {
+    const position = decodeCursor(filter.cursor, binding);
+    if (
+      typeof position.key !== "string" ||
+      (sortColumn !== null && !Number.isSafeInteger(position.k))
+    )
+      throw new InvalidCursorError();
+    const keyAfter =
+      dir === "asc"
+        ? sql`${schema.records.key} > ${position.key}`
+        : sql`${schema.records.key} < ${position.key}`;
+    pageConditions.push(
+      sortColumn === null
+        ? keyAfter
+        : dir === "asc"
+          ? sql`(${sortColumn} > ${position.k} OR (${sortColumn} = ${position.k} AND ${keyAfter}))`
+          : sql`(${sortColumn} < ${position.k} OR (${sortColumn} = ${position.k} AND ${keyAfter}))`,
+    );
+  }
+
+  const orderFn = dir === "desc" ? desc : asc;
+  // A quoted JSON path label keeps dots in field names literal. Names that
+  // contain a quote cannot be expressed that way and get no projection.
+  const titlePath =
+    filter.titleField && !filter.titleField.includes('"')
+      ? `$."${filter.titleField}"`
+      : null;
   // Data query with LIMIT+1 probe
   const rows = db
-    .select()
+    .select({
+      ...getTableColumns(schema.records),
+      title: titlePath
+        ? sql<unknown>`json_extract(${schema.records.value_json}, ${titlePath})`
+        : sql<unknown>`NULL`,
+    })
     .from(schema.records)
-    .where(whereClause)
+    .where(and(...pageConditions))
+    .orderBy(
+      ...(sortColumn ? [orderFn(sortColumn)] : []),
+      orderFn(schema.records.key),
+    )
     .limit(effectiveLimit + 1)
     .all();
 
   const truncated = rows.length > effectiveLimit;
   const resultRows = truncated ? rows.slice(0, effectiveLimit) : rows;
-  const next_cursor = truncated ? "truncated" : null;
+  const last = resultRows.at(-1);
+  const next_cursor =
+    truncated && last
+      ? encodeCursor(binding, {
+          key: last.key,
+          ...(sortColumn === null
+            ? {}
+            : { k: sort === "updated_at" ? last.updated_at : last.revision }),
+        })
+      : null;
 
   // Batch tag enrichment: single query for all returned records
   const items: RecordListItem[] = [];
@@ -1482,6 +1579,14 @@ export function listRecords(
         updated_by: r.updated_by,
         archived: r.archived,
         tags: tagMap.get(`${r.type}|${r.key}`) ?? [],
+        ...(titlePath
+          ? {
+              title:
+                typeof r.title === "string" && r.title.trim().length > 0
+                  ? r.title
+                  : null,
+            }
+          : {}),
       });
     }
   }
@@ -1500,6 +1605,8 @@ export function listRecordHistory(
   opts?: {
     limit?: number;
     includeValues?: boolean;
+    /** Opaque keyset cursor from a previous page's `next_cursor`. */
+    cursor?: string;
   },
 ): { items: RecordHistoryItem[]; total: number; next_cursor: string | null } {
   const effectiveLimit = Math.min(Math.max(opts?.limit ?? 20, 1), 200);
@@ -1508,6 +1615,13 @@ export function listRecordHistory(
     eq(schema.recordRevisions.type, type),
     eq(schema.recordRevisions.key, key),
   );
+  const binding = fingerprint({ history: true, type, key });
+  let before: number | undefined;
+  if (opts?.cursor) {
+    const position = decodeCursor(opts.cursor, binding);
+    if (!Number.isSafeInteger(position.before)) throw new InvalidCursorError();
+    before = position.before as number;
+  }
 
   // COUNT(*)
   const countResult = db
@@ -1517,18 +1631,24 @@ export function listRecordHistory(
     .get();
   const total = countResult?.count ?? 0;
 
-  // Data query, newest-first
+  // Data query, newest-first; revisions are unique per record.
   const rows = db
     .select()
     .from(schema.recordRevisions)
-    .where(whereClause)
+    .where(
+      before === undefined
+        ? whereClause
+        : and(whereClause, lt(schema.recordRevisions.revision, before)),
+    )
     .orderBy(desc(schema.recordRevisions.revision))
     .limit(effectiveLimit + 1)
     .all();
 
   const truncated = rows.length > effectiveLimit;
   const resultRows = truncated ? rows.slice(0, effectiveLimit) : rows;
-  const next_cursor = truncated ? "truncated" : null;
+  const last = resultRows.at(-1);
+  const next_cursor =
+    truncated && last ? encodeCursor(binding, { before: last.revision }) : null;
 
   const items: RecordHistoryItem[] = resultRows.map((r) => {
     const item: RecordHistoryItem = {

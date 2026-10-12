@@ -1,7 +1,9 @@
 import { catalogOps } from "@tila/ops-sqlite";
 import {
+  ListCursorSchema,
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
+  RecordListQuerySchema,
   RecordPatchRequestSchema,
   RecordPutRequestSchema,
   RecordSetRequestSchema,
@@ -221,6 +223,9 @@ records.get("/:type/~/history/:key{.+}", async (c) => {
   if (limit) query.limit = limit;
   const values = c.req.query("values");
   if (values) query.values = values;
+  const cursor = ListCursorSchema.optional().safeParse(c.req.query("cursor"));
+  if (!cursor.success) return zodValidationError(c, cursor.error);
+  if (cursor.data) query.cursor = cursor.data;
   return forwardToDO(
     stub,
     `/record/${type}/${key}/history`,
@@ -660,6 +665,17 @@ records.get("/:type", async (c) => {
   if (includeArchived) query.includeArchived = includeArchived;
   const limit = c.req.query("limit");
   if (limit) query.limit = limit;
+  const paging = RecordListQuerySchema.safeParse({
+    cursor: c.req.query("cursor"),
+    sort: c.req.query("sort"),
+    order: c.req.query("order"),
+    key_contains: c.req.query("key_contains"),
+  });
+  if (!paging.success) return zodValidationError(c, paging.error);
+  if (paging.data.cursor) query.cursor = paging.data.cursor;
+  if (paging.data.sort) query.sort = paging.data.sort;
+  if (paging.data.order) query.order = paging.data.order;
+  if (paging.data.key_contains) query.keyContains = paging.data.key_contains;
   const filter = c.req.query("filter");
   if (filter) {
     // Validate JSON at Worker boundary before forwarding

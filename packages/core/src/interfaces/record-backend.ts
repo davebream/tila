@@ -56,11 +56,20 @@ export interface RecordListFilter {
   tagFilter?: string[];
   dataFilter?: Record<string, unknown>;
   limit?: number;
+  /** Defaults to `key`; every order is tie-broken by key. */
+  sort?: "key" | "updated_at" | "revision";
+  order?: "asc" | "desc";
+  /** Case-sensitive key substring. */
+  keyContains?: string;
+  /** `next_cursor` from a previous page. */
+  cursor?: string;
 }
 
 export interface RecordHistoryOptions {
   limit?: number;
   includeValues?: boolean;
+  /** `next_cursor` from a previous page. */
+  cursor?: string;
 }
 
 export interface RecordPage<T> {

@@ -14,6 +14,7 @@ import {
   validateRecordValue,
 } from "@tila/ops-sqlite";
 import {
+  RECORD_LIST_SORTS,
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
   RecordPatchRequestSchema,
@@ -586,17 +587,37 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       throw err;
     }
 
+    const restrictions = readCredentialPolicy(
+      c.req.header("X-Tila-Credential-Policy"),
+    )?.restrictions;
+    const sortParam = c.req.query("sort");
+    const sort = (RECORD_LIST_SORTS as readonly string[]).includes(
+      sortParam ?? "",
+    )
+      ? (sortParam as recordOps.RecordListSort)
+      : undefined;
+    let titleField: string | undefined;
+    try {
+      titleField = constraintOps.resolveCurrentSchema(deps.db)?.records?.[type]
+        ?.presentation?.title;
+    } catch {
+      // A corrupt schema only loses presented titles on this list.
+    }
+
     try {
       const result = recordOps.listRecords(deps.db, {
-        restrictions: readCredentialPolicy(
-          c.req.header("X-Tila-Credential-Policy"),
-        )?.restrictions,
+        restrictions,
         type,
         includeArchived,
         tag: tag ?? undefined,
         dataFilter,
         limit,
         tagFilter,
+        sort,
+        order: c.req.query("order") === "desc" ? "desc" : "asc",
+        keyContains: c.req.query("keyContains") || undefined,
+        cursor: c.req.query("cursor") || undefined,
+        titleField,
       });
 
       return c.json({
@@ -606,6 +627,10 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
           total: result.total,
           limit: limit ?? 200,
           next_cursor: result.next_cursor,
+          scope: {
+            restricted: restrictions?.records !== undefined,
+            archived: includeArchived ? "included" : "excluded",
+          },
         },
       });
     } catch (err) {
@@ -628,6 +653,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
     const result = recordOps.listRecordHistory(deps.db, type, key, {
       limit,
       includeValues,
+      cursor: c.req.query("cursor") || undefined,
     });
 
     return c.json({

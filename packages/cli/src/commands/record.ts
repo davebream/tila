@@ -3,6 +3,7 @@ import { extname, join } from "node:path";
 import type { SchemaBackend } from "@tila/core";
 import {
   RecordDefinitionSchema,
+  type RecordListItem,
   type TilaSchemaToml,
   TilaSchemaTomlSchema,
 } from "@tila/schemas";
@@ -287,6 +288,10 @@ export default defineCommand({
         },
         filter: { type: "string", description: "JSON data filter" },
         limit: { type: "string", description: "Maximum results" },
+        cursor: {
+          type: "string",
+          description: "Continue from a previous page's next cursor",
+        },
         ...jsonArg,
       },
       async run({ args }) {
@@ -314,6 +319,7 @@ export default defineCommand({
             includeArchived: Boolean(args["include-archived"]),
             dataFilter,
             limit: args.limit ? Number(args.limit) : undefined,
+            cursor: args.cursor ? (args.cursor as string) : undefined,
           }),
         );
 
@@ -352,8 +358,10 @@ export default defineCommand({
           ],
         );
 
-        if (page.next_cursor === "truncated") {
-          outputText(`(results truncated at ${args.limit ?? page.total})`);
+        if (page.next_cursor !== null) {
+          outputText(
+            `(showing ${page.items.length} of ${page.total}; next page: --cursor ${page.next_cursor})`,
+          );
         }
       },
     }),
@@ -623,10 +631,19 @@ export default defineCommand({
           }
           const ext = outputFormat === "yaml" ? ".yaml" : ".json";
 
-          // List all records of this type
-          const listResult = await ctx.record.listRecords({ type: recordType });
+          // List all records of this type, following cursors past one page.
+          const items: RecordListItem[] = [];
+          let cursor: string | undefined;
+          do {
+            const page = await ctx.record.listRecords({
+              type: recordType,
+              cursor,
+            });
+            items.push(...page.items);
+            cursor = page.next_cursor ?? undefined;
+          } while (cursor);
 
-          for (const item of listResult.items) {
+          for (const item of items) {
             // Fetch full record
             const record = await ctx.record.getRecord(recordType, item.key);
             if (!record) continue;

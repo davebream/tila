@@ -1405,6 +1405,10 @@ export class RemoteRecordBackend implements RecordBackend {
     if (filter.tagFilter?.length) query.tag_filter = filter.tagFilter.join(",");
     if (filter.dataFilter) query.filter = JSON.stringify(filter.dataFilter);
     if (filter.limit !== undefined) query.limit = String(filter.limit);
+    if (filter.cursor) query.cursor = filter.cursor;
+    if (filter.sort) query.sort = filter.sort;
+    if (filter.order) query.order = filter.order;
+    if (filter.keyContains) query.key_contains = filter.keyContains;
     const result = await this.client.get(`${this.base()}/${filter.type}`, {
       schema: RecordListResponseSchema,
       validate: true,
@@ -1426,6 +1430,7 @@ export class RemoteRecordBackend implements RecordBackend {
     if (opts?.limit !== undefined) query.limit = String(opts.limit);
     if (opts?.includeValues !== undefined)
       query.values = String(opts.includeValues);
+    if (opts?.cursor) query.cursor = opts.cursor;
     const result = await this.client.get(
       `${this.base()}/${type}/~/history/${this.encodeKey(key)}`,
       { schema: RecordHistoryResponseSchema, validate: true, query },

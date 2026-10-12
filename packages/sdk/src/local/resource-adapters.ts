@@ -401,11 +401,12 @@ function createLocalRecordMethods(project: EmbeddedProject) {
     async history(
       type: string,
       key: string,
-      opts?: { limit?: number; values?: boolean },
+      opts?: { limit?: number; values?: boolean; cursor?: string },
     ): Promise<RecordHistoryResponse> {
       const page = await project.listRecordHistory(type, key, {
         limit: opts?.limit,
         includeValues: opts?.values,
+        cursor: opts?.cursor,
       });
       return {
         ok: true,
@@ -426,6 +427,10 @@ function createLocalRecordMethods(project: EmbeddedProject) {
         "include-archived"?: string;
         limit?: string;
         tagFilter?: string[];
+        cursor?: string;
+        sort?: "key" | "updated_at" | "revision";
+        order?: "asc" | "desc";
+        keyContains?: string;
       },
     ): Promise<RecordListResponse> {
       const page = await project.listRecords({
@@ -435,6 +440,10 @@ function createLocalRecordMethods(project: EmbeddedProject) {
         tagFilter: query?.tagFilter,
         dataFilter: query?.filter ? JSON.parse(query.filter) : undefined,
         limit: query?.limit ? Number(query.limit) : undefined,
+        cursor: query?.cursor,
+        sort: query?.sort,
+        order: query?.order,
+        keyContains: query?.keyContains,
       });
       return {
         ok: true,
