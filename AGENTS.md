@@ -64,7 +64,7 @@ This is a Turborepo monorepo with packages under `packages/`:
 | `@tila/worker` | Cloudflare Worker with Hono routing and Smart Placement |
 | `tila-sdk` | TypeScript SDK for tila consumers |
 | `tila-mcp-server` | MCP server exposing tila API as tools/resources/prompts for AI agents |
-| `@tila/ui` | Read-only SPA served by the Worker |
+| `@tila/ui` | Project dashboard with scoped access management and conversations, served by the Worker |
 | `tila-cli` | `tila` CLI binary using Citty, Bun-compiled for multi-platform distribution |
 | `@tila/integration-tests` | E2E tests via Cloudflare Vitest pool |
 
