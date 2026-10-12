@@ -462,138 +462,142 @@ export function update(
   tags?: string[],
   idempotency?: DoIdempotency<Entity>,
 ): Entity {
-  // Validate + normalize tags before the transaction
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, idempotency, () =>
+        updateInTransaction(tx, id, data, fence, origin, tags),
+      ).result,
+  );
+}
+
+/** Internal primitive for a task transition committed together with an attempt result. */
+export function updateInTransaction(
+  tx: Parameters<
+    Parameters<
+      BaseSQLiteDatabase<"sync", unknown, typeof schema>["transaction"]
+    >[0]
+  >[0],
+  id: string,
+  data: Record<string, unknown>,
+  fence: number,
+  origin: RequestOrigin,
+  tags?: string[],
+  now = Date.now(),
+): Entity {
   const normalizedTags =
     tags !== undefined ? (TagsSchema.parse(tags) as string[]) : undefined;
+  const existing = tx
+    .select()
+    .from(schema.entities)
+    .where(eq(schema.entities.id, id))
+    .get();
 
-  // Single clock read for the whole transaction: the entity write and any gate
-  // resolution it triggers (checkPendingGates resolving an expired timer gate)
-  // must share one timestamp, so entity.updated_at and gate.resolved_at agree.
-  const now = Date.now();
+  if (!existing) {
+    throw new EntityNotFoundError(id);
+  }
 
-  return db.transaction((tx) => {
-    // Dedup the fence-mutating write inside this same transaction (audit B1):
-    // a replay of the same Idempotency-Key returns the stored result and never
-    // re-applies the update. No idempotency → runs the write unchanged.
-    return withDoIdempotency(tx, idempotency, () => doUpdate()).result;
-
-    function doUpdate(): Entity {
-      const existing = tx
-        .select()
-        .from(schema.entities)
-        .where(eq(schema.entities.id, id))
-        .get();
-
-      if (!existing) {
-        throw new EntityNotFoundError(id);
-      }
-
-      // Fence validation: always required -- caller must hold a LIVE claim.
-      // requireLiveClaim closes the zombie-write window where an expired lease's
-      // fence still numerically matches current_fence (entity fences do not bump
-      // on write).
-      // Use the fast path: we already have `existing.type` from the SELECT above,
-      // so construct the canonical resource string directly without another DB read.
-      const canonicalResource = resolveEntityResourceDirect(existing.type, id);
-      assertResourceFenceWithCanonical(tx, canonicalResource, fence, {
-        requireLiveClaim: true,
-      });
-
-      // Gate enforcement: block terminal transitions if pending gates exist.
-      // Non-terminal status changes and updates without a status field are unaffected.
-      const lifecycle =
-        resolveCurrentSchema(tx)?.work_units[existing.type]?.lifecycle;
-      const TERMINAL_STATUSES = new Set(
-        lifecycle?.terminal ?? ["done", "closed", "merged"],
-      );
-      const incomingStatus = data[lifecycle?.field ?? "status"] as
-        | string
-        | undefined;
-      if (incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
-        // B5: share the function-level `now` so entity.updated_at and any
-        // gate.resolved_at agree (single clock per transaction).
-        checkPendingGates(tx, id, now);
-        if (lifecycle) checkPendingGates(tx, canonicalResource, now);
-      }
-
-      // Merge data: spread existing + new fields (passthrough preservation)
-      const existingData = JSON.parse(existing.data) as Record<string, unknown>;
-      const mergedData = { ...existingData, ...data };
-      assertCurrentEntityWrite(tx, existing.type, mergedData);
-      if (mergedData.status !== existingData.status)
-        assertArtifactReviewPolicy(tx, id, existing.type, mergedData.status);
-
-      tx.update(schema.entities)
-        .set({
-          data: JSON.stringify(mergedData),
-          updated_at: now,
-        })
-        .where(eq(schema.entities.id, id))
-        .run();
-
-      // Tag update: undefined=preserve, []=clear, [...]= replace
-      if (normalizedTags !== undefined) {
-        tx.delete(schema.entityTags)
-          .where(eq(schema.entityTags.entity_id, id))
-          .run();
-        for (const tag of normalizedTags) {
-          tx.insert(schema.entityTags).values({ entity_id: id, tag }).run();
-        }
-      }
-
-      appendJournal(tx, {
-        kind: "entity.updated",
-        resource: id,
-        ...origin,
-        fence: fence,
-        tokenId: origin.tokenId,
-        source: origin.source,
-        sourceVersion: origin.sourceVersion,
-      });
-
-      // FTS5: re-index entity for full-text search (data.title, fallback data.name -- issue #412)
-      const updatedName = entitySearchText(
-        mergedData as Record<string, unknown>,
-      );
-      tx.run(
-        sql`INSERT OR REPLACE INTO entity_search_docs(
-        entity_id, entity_type, name, indexed_at
-      ) VALUES(
-        ${id}, ${existing.type}, ${updatedName}, ${now}
-      )`,
-      );
-
-      // Construct the return value from mergedData + the already-read `existing` row.
-      // This avoids the post-write SELECT while preserving all passthrough fields:
-      // created_at, created_by, type, and schema_version come from `existing`;
-      // data comes from `mergedData` (the merged patch applied by the UPDATE above).
-      const entity: Entity = {
-        id: existing.id,
-        type: existing.type,
-        schema_version: existing.schema_version,
-        data: mergedData,
-        archived: existing.archived,
-        created_at: existing.created_at,
-        updated_at: now,
-        created_by: existing.created_by,
-        tags: [],
-      };
-
-      // Attach final tags: if we updated them, use normalizedTags; else read current tags
-      if (normalizedTags !== undefined) {
-        entity.tags = normalizedTags;
-      } else {
-        const tagRows = tx
-          .select()
-          .from(schema.entityTags)
-          .where(eq(schema.entityTags.entity_id, id))
-          .all();
-        entity.tags = tagRows.map((t) => t.tag);
-      }
-
-      return entity;
-    }
+  // Fence validation: always required -- caller must hold a LIVE claim.
+  // requireLiveClaim closes the zombie-write window where an expired lease's
+  // fence still numerically matches current_fence (entity fences do not bump
+  // on write).
+  // Use the fast path: we already have `existing.type` from the SELECT above,
+  // so construct the canonical resource string directly without another DB read.
+  const canonicalResource = resolveEntityResourceDirect(existing.type, id);
+  assertResourceFenceWithCanonical(tx, canonicalResource, fence, {
+    requireLiveClaim: true,
   });
+
+  // Gate enforcement: block terminal transitions if pending gates exist.
+  // Non-terminal status changes and updates without a status field are unaffected.
+  const lifecycle =
+    resolveCurrentSchema(tx)?.work_units[existing.type]?.lifecycle;
+  const TERMINAL_STATUSES = new Set(
+    lifecycle?.terminal ?? ["done", "closed", "merged"],
+  );
+  const incomingStatus = data[lifecycle?.field ?? "status"] as
+    | string
+    | undefined;
+  if (incomingStatus && TERMINAL_STATUSES.has(incomingStatus)) {
+    // B5: share the function-level `now` so entity.updated_at and any
+    // gate.resolved_at agree (single clock per transaction).
+    checkPendingGates(tx, id, now);
+    if (lifecycle) checkPendingGates(tx, canonicalResource, now);
+  }
+
+  // Merge data: spread existing + new fields (passthrough preservation)
+  const existingData = JSON.parse(existing.data) as Record<string, unknown>;
+  const mergedData = { ...existingData, ...data };
+  assertCurrentEntityWrite(tx, existing.type, mergedData);
+  if (mergedData.status !== existingData.status)
+    assertArtifactReviewPolicy(tx, id, existing.type, mergedData.status);
+
+  tx.update(schema.entities)
+    .set({
+      data: JSON.stringify(mergedData),
+      updated_at: now,
+    })
+    .where(eq(schema.entities.id, id))
+    .run();
+
+  // Tag update: undefined=preserve, []=clear, [...]= replace
+  if (normalizedTags !== undefined) {
+    tx.delete(schema.entityTags)
+      .where(eq(schema.entityTags.entity_id, id))
+      .run();
+    for (const tag of normalizedTags) {
+      tx.insert(schema.entityTags).values({ entity_id: id, tag }).run();
+    }
+  }
+
+  appendJournal(tx, {
+    kind: "entity.updated",
+    resource: id,
+    ...origin,
+    fence: fence,
+    tokenId: origin.tokenId,
+    source: origin.source,
+    sourceVersion: origin.sourceVersion,
+  });
+
+  // FTS5: re-index entity for full-text search (data.title, fallback data.name -- issue #412)
+  const updatedName = entitySearchText(mergedData as Record<string, unknown>);
+  tx.run(
+    sql`INSERT OR REPLACE INTO entity_search_docs(
+    entity_id, entity_type, name, indexed_at
+  ) VALUES(
+    ${id}, ${existing.type}, ${updatedName}, ${now}
+  )`,
+  );
+
+  // Construct the return value from mergedData + the already-read `existing` row.
+  // This avoids the post-write SELECT while preserving all passthrough fields:
+  // created_at, created_by, type, and schema_version come from `existing`;
+  // data comes from `mergedData` (the merged patch applied by the UPDATE above).
+  const entity: Entity = {
+    id: existing.id,
+    type: existing.type,
+    schema_version: existing.schema_version,
+    data: mergedData,
+    archived: existing.archived,
+    created_at: existing.created_at,
+    updated_at: now,
+    created_by: existing.created_by,
+    tags: [],
+  };
+
+  // Attach final tags: if we updated them, use normalizedTags; else read current tags
+  if (normalizedTags !== undefined) {
+    entity.tags = normalizedTags;
+  } else {
+    const tagRows = tx
+      .select()
+      .from(schema.entityTags)
+      .where(eq(schema.entityTags.entity_id, id))
+      .all();
+    entity.tags = tagRows.map((t) => t.tag);
+  }
+
+  return entity;
 }
 
 export function archive(
