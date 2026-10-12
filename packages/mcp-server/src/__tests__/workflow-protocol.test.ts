@@ -106,12 +106,14 @@ async function call(
   expect(response.isError, JSON.stringify(response)).not.toBe(true);
   return JSON.parse(JSON.stringify(response.structuredContent)).result;
 }
-it("lists exactly six default tools, validates real calls, and preserves the explicit primitive catalog", async () => {
+it("lists exactly eight default tools, validates real calls, and preserves the explicit primitive catalog", async () => {
   vi.stubEnv("TILA_MCP_TOOLS", "");
   const { a } = await fixture();
   const client = await connect(a);
   const { tools } = await client.listTools();
   expect(tools.map((t) => t.name)).toEqual([
+    "tila_queue",
+    "tila_attempt",
     "tila_session",
     "tila_inspect",
     "tila_claim",
@@ -154,7 +156,7 @@ it("lists exactly six default tools, validates real calls, and preserves the exp
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(64);
+  expect((await all.listTools()).tools).toHaveLength(66);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -164,7 +166,7 @@ it("lists exactly six default tools, validates real calls, and preserves the exp
     JSON.parse(JSON.stringify(legacy.structuredContent)).result,
   );
   const both = await connect(a, ["workflow", "artifacts", "workflow"]);
-  expect((await both.listTools()).tools).toHaveLength(18);
+  expect((await both.listTools()).tools).toHaveLength(20);
   const unavailable = await all.callTool({
     name: "tila_artifact_put",
     arguments: { content: "aGk=", kind: "log" },
@@ -532,7 +534,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(66);
+  expect(listed).toHaveLength(68);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -549,9 +551,13 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
       expect(result.artifact_metadata).toEqual(
         JSON.parse(texts[0].text).artifact_metadata,
       );
-    } else expect(result).toEqual(JSON.parse(texts[0].text));
+    } else if (name === "tila_queue" || name === "tila_attempt")
+      expect(result).toEqual(JSON.parse(texts[0].text).result);
+    else expect(result).toEqual(JSON.parse(texts[0].text));
     return result;
   }
+  await primitive("tila_queue", { request: { action: "inspect" } });
+  await primitive("tila_attempt", { request: { action: "list" } });
   await primitive("tila_schema_preview", { definition: "schema_version = 1" });
   await primitive("tila_schema_update", {
     definition: `schema_version = 1
@@ -865,4 +871,94 @@ it("preserves truncation metadata and normalizes structured fields without chang
   expect(JSON.parse((listed.content as { text: string }[])[0].text)).toEqual(
     result,
   );
+});
+
+it("manages the same embedded queue through typed MCP requests and SDK operations", async () => {
+  const { a, b } = await fixture();
+  await a.schema.apply(
+    `schema_version = 1
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done"]
+dependency_satisfied = ["done"]
+[work_units.task.fields.status]
+type = "enum"
+values = ["open", "done"]
+`,
+    undefined,
+    { expected_revision: 0 },
+  );
+  await a.tasks.create("queued", "task", { status: "open" });
+  const client = await connect(a);
+  await call(client, "tila_queue", {
+    action: "configure",
+    command: {
+      idempotency_key: "enable",
+      expected_revision: 0,
+      enabled: true,
+      paused: false,
+      execution_limit: 1,
+    },
+  });
+  await call(client, "tila_queue", {
+    action: "enroll",
+    command: { idempotency_key: "enroll", task_id: "queued" },
+  });
+  const grant = await call(client, "tila_queue", {
+    action: "claim",
+    command: { idempotency_key: "claim" },
+  });
+  expect(grant.kind).toBe("granted");
+  let attempt = grant.attempt;
+  const accepted = await call(client, "tila_attempt", {
+    action: "accept",
+    id: attempt.id,
+    command: {
+      idempotency_key: "accept",
+      expected_revision: attempt.revision,
+      fence: attempt.fence,
+    },
+  });
+  attempt = accepted.attempt;
+  expect(accepted.grant_valid).toBe(true);
+  expect((await b.queue.inspect()).counts).toMatchObject({
+    execution: 1,
+    wip: 1,
+  });
+  await expect(
+    b.attempts.heartbeat(attempt.id, {
+      idempotency_key: "steal",
+      expected_revision: attempt.revision,
+      fence: attempt.fence,
+    }),
+  ).rejects.toMatchObject({ code: "queue-authority-lost" });
+  attempt = (
+    await call(client, "tila_attempt", {
+      action: "request-cancellation",
+      id: attempt.id,
+      command: {
+        idempotency_key: "cancel",
+        expected_revision: attempt.revision,
+      },
+    })
+  ).attempt;
+  expect((await a.queue.inspect()).counts.execution).toBe(1);
+  const result = await call(client, "tila_attempt", {
+    action: "finish",
+    id: attempt.id,
+    command: {
+      idempotency_key: "finish",
+      expected_revision: attempt.revision,
+      fence: attempt.fence,
+      outcome: {
+        status: "cancelled",
+        execution_stopped: true,
+        unresolved_external_execution: false,
+        evidence: [],
+      },
+    },
+  });
+  expect(result.attempt.state).toBe("terminal");
+  expect((await b.queue.inspect()).counts.execution).toBe(0);
 });

@@ -19,6 +19,9 @@ it("routes managed room, inbox and binding commands while preserving operator re
   vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   for (const [family, command, allowed] of [
+    ["queue", "claim", true],
+    ["attempt", "accept", true],
+    ["attempt", "heartbeat", true],
     ["room", "publish", true],
     ["inbox", "fetch", true],
     ["inbox", "ack", true],

@@ -129,7 +129,7 @@ it("restores real DO snapshots without resurrecting bindings or rewinding epochs
     journal: { nextSequence: number };
     tables: string[];
   }>();
-  expect(meta.migrationVersion).toBe(31);
+  expect(meta.migrationVersion).toBe(34);
   const snapshot = new Map<string, Record<string, unknown>[]>();
   for (const table of meta.tables) {
     const { rows } = await (
