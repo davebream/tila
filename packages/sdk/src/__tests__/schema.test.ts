@@ -52,4 +52,34 @@ describe("createSchemaMethods — outgoing request shape", () => {
     expect(body.definition).toBe(JSON.stringify({ a: 1 }));
     expect(body.strategy).toBeUndefined();
   });
+
+  it("carries the reviewed revision and definition unchanged on apply", async () => {
+    const definition = "schema_version = 1\n";
+    mockFetch.mockResolvedValueOnce(
+      ok({
+        ok: true,
+        revision: 4,
+        reviewed_definition: definition,
+        changes: [],
+        autoApplicable: false,
+      }),
+    );
+    const review = await schema().preview(definition);
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "https://api.test/projects/proj-1/schema/preview",
+    );
+    mockFetch.mockResolvedValueOnce(ok({ ok: true, version: 5, revision: 5 }));
+    await schema().apply(definition, "force", {
+      expected_revision: review.revision,
+      reviewed_definition: review.reviewed_definition,
+      idempotency_key: "edit-1",
+    });
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toEqual({
+      definition,
+      strategy: "force",
+      expected_revision: 4,
+      reviewed_definition: definition,
+      idempotency_key: "edit-1",
+    });
+  });
 });

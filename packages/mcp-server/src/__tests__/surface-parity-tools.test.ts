@@ -224,14 +224,14 @@ describe("registerJournalTools", () => {
 });
 
 describe("registerSchemaTools", () => {
-  it("registers 1 tool", () => {
+  it("registers preview and update tools", () => {
     const server = createMockServer();
     registerSchemaTools(
       asServer(server),
       asClient(createMockClient()),
       PROJECT_ID,
     );
-    expect(server.tool).toHaveBeenCalledTimes(1);
+    expect(server.tool).toHaveBeenCalledTimes(2);
   });
 
   it("registers tila_schema_update", () => {

@@ -29,6 +29,7 @@ function collectEmittedCodesFromContent(content: string): string[] {
     /this\.deny\(\s*"([a-z][a-z0-9-]*)"/g,
     /ConversationError\(\s*"([a-z][a-z0-9-]*)"/g,
     /ContinuityError\(\s*"([a-z][a-z0-9-]*)"/g,
+    /SchemaPreconditionError\(\s*"([a-z][a-z0-9-]*)"/g,
     /ArtifactVersionError\(\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
     /code:\s*"([a-z][a-z0-9-]*)"/g,
     /zodValidationError\([^)]*?"([a-z][a-z0-9-]*)"/g,
@@ -92,6 +93,10 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
   ]);
 
   const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
+    "schema-destructive",
+    "schema-revision-conflict",
+    "schema-review-required",
+    "schema-review-mismatch",
     "unsupported-protocol",
     "cursor-expired",
     "delivery-expired",

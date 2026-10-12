@@ -49,6 +49,33 @@ describe("createTilaLocal — full local round-trip", () => {
     });
   });
 
+  it("previews, conditionally applies, replays and reads real configuration history", async () => {
+    const { schema } = buildLocalResources(local.project, local.artifacts);
+    const definition = "schema_version = 1\n[work_units.task]\n";
+    const review = await schema.preview(definition);
+    expect(review.revision).toBe(0);
+    const options = {
+      expected_revision: review.revision,
+      idempotency_key: "first",
+    };
+    const result = await schema.apply(definition, undefined, options);
+    expect(result.revision).toBe(1);
+    expect(await schema.apply(definition, undefined, options)).toEqual(result);
+    await expect(
+      schema.apply(definition, undefined, { expected_revision: 0 }),
+    ).rejects.toMatchObject({ status: 412, code: "schema-revision-conflict" });
+    expect((await schema.history()).entries).toHaveLength(1);
+    const removed = "schema_version = 1\nwork_units = {}";
+    await expect(schema.apply(removed)).rejects.toMatchObject({
+      status: 422,
+      code: "schema-destructive",
+    });
+    expect((await schema.get()).revision).toBe(1);
+    await expect(
+      schema.apply(definition, undefined, { expected_revision: -1 }),
+    ).rejects.toMatchObject({ status: 400, code: "validation-error" });
+  });
+
   it("exposes version history, metadata and append-only restore under Node", async () => {
     const claim = await local.project.acquire(
       "artifact:report",
