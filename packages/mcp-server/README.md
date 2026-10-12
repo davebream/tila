@@ -41,7 +41,7 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (73)
+## Tools (74)
 
 The default catalog contains **nine workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
@@ -175,6 +175,7 @@ Artifact results expose provenance and review state; a matching hash does not es
 | Tool | Description |
 |------|-------------|
 | `tila_journal_list` | Query the project event journal |
+| `tila_journal_append` | Append a project-visible authenticated report; requires a stable idempotency key and never changes work state. Cloudflare only. |
 | `tila_reentry` | Recover summary, journal changes, live claims, pending signals, and a relevant handoff |
 | `tila_journal_replay` | Replay oldest-first journal pages, including archived history |
 | `tila_journal_cursor_get` | Read the current participant's durable acknowledged cursor |
