@@ -8,6 +8,7 @@ import {
   type FilterGroup,
   MultiSelectFilter,
 } from "@/components/ui/multi-select-filter";
+import { PageNav } from "@/components/ui/page-nav";
 import { SectionFailure } from "@/components/ui/query-section";
 import { SortableHead } from "@/components/ui/sortable-head";
 import {
@@ -27,10 +28,16 @@ import {
   useWorkCatalog,
 } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  CURSOR_RESET_NOTICE,
+  pagePosition,
+  useCursorPaging,
+  useDropInvalidCursor,
+} from "@/hooks/use-cursor-paging";
 import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
-import { ApiError, type TaskListSort } from "@/lib/api";
+import type { TaskListSort } from "@/lib/api";
 import { catalogIndex, taskState, taskTitle } from "@/lib/presentation";
 import { classifyApiError } from "@/lib/query-state";
 import { sanitizeSnippet } from "@/lib/snippet";
@@ -72,28 +79,6 @@ function parseSort(raw: string | null): Sort | null {
 
 function parseList(raw: string | null): string[] {
   return raw?.split(",").filter(Boolean) ?? [];
-}
-
-/**
- * Cursors of the pages before the current one, kept in history state so
- * "Previous" works without the server offering backward cursors. `fromStart`
- * says the trail reaches page one, so the page number is known.
- */
-type PageTrail = { cursors: (string | null)[]; fromStart: boolean };
-
-function readTrail(state: unknown): PageTrail | null {
-  if (!state || typeof state !== "object" || !("taskPages" in state)) {
-    return null;
-  }
-  const trail = (state as { taskPages?: unknown }).taskPages;
-  if (
-    !trail ||
-    typeof trail !== "object" ||
-    !Array.isArray((trail as PageTrail).cursors)
-  ) {
-    return null;
-  }
-  return trail as PageTrail;
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -170,20 +155,16 @@ export function TasksPage() {
   const urlQ = (searchParams.get("q") ?? "").trim();
   const sort = parseSort(searchParams.get("sort")) ?? DEFAULT_SORT;
   const includeArchived = searchParams.get("archived") === "1";
-  const after = searchParams.get("after") ?? undefined;
-  const trail = readTrail(location.state);
+  const paging = useCursorPaging();
+  const { after, cursorReset } = paging;
 
   const archivedId = useId();
   const searchMode = urlQ.length >= TASK_SEARCH_MIN_LENGTH;
   const shortQuery = urlQ.length > 0 && !searchMode;
 
-  // Shown after an expired or foreign page link was dropped. Cleared by the
-  // next deliberate navigation.
-  const [cursorReset, setCursorReset] = useState(false);
-
   // Filter, sort, query and archived changes start again from page one.
   function updateParams(mutate: (p: URLSearchParams) => void) {
-    setCursorReset(false);
+    paging.clearCursorReset();
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -255,43 +236,6 @@ export function TasksPage() {
     });
   }
 
-  function goToPage(cursor: string | null, nextTrail: PageTrail) {
-    setCursorReset(false);
-    const next = new URLSearchParams(searchParams);
-    if (cursor) next.set("after", cursor);
-    else next.delete("after");
-    const search = next.toString();
-    navigate(
-      { pathname: location.pathname, search: search ? `?${search}` : "" },
-      { state: { taskPages: nextTrail } },
-    );
-  }
-
-  function goNext(nextCursor: string) {
-    goToPage(
-      nextCursor,
-      after
-        ? {
-            cursors: [...(trail?.cursors ?? []), after],
-            fromStart: trail?.fromStart ?? false,
-          }
-        : { cursors: [null], fromStart: true },
-    );
-  }
-
-  const canGoPrevious = Boolean(after) && (trail?.cursors.length ?? 0) > 0;
-  function goPrevious() {
-    if (!trail || trail.cursors.length === 0) return;
-    goToPage(trail.cursors[trail.cursors.length - 1], {
-      cursors: trail.cursors.slice(0, -1),
-      fromStart: trail.fromStart,
-    });
-  }
-
-  function goFirst() {
-    goToPage(null, { cursors: [], fromStart: true });
-  }
-
   // --- Data ---
 
   const catalogQuery = useWorkCatalog();
@@ -315,20 +259,7 @@ export function TasksPage() {
   );
   const active = searchMode ? searchQuery : listQuery;
 
-  const invalidCursor =
-    active.error instanceof ApiError && active.error.code === "invalid-cursor";
-  useEffect(() => {
-    if (!invalidCursor || !after) return;
-    setCursorReset(true);
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("after");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [invalidCursor, after, setSearchParams]);
+  const invalidCursor = useDropInvalidCursor(active.error, paging);
 
   const rows: Row[] = useMemo(() => {
     if (searchMode) {
@@ -440,17 +371,7 @@ export function TasksPage() {
     summary = `${plural(total, "task", "tasks")} · ${archivedScope === "included" ? "including" : "excluding"} archived${restricted ? " · visible to this credential" : ""}`;
     const paged = Boolean(after) || nextCursor !== null;
     if (paged && rows.length > 0) {
-      const pageIndex = !after
-        ? 0
-        : trail?.fromStart
-          ? trail.cursors.length
-          : null;
-      if (pageIndex !== null) {
-        const start = pageIndex * PAGE_SIZE + 1;
-        position = `${start}–${start + rows.length - 1} of ${total}`;
-      } else {
-        position = `Showing ${rows.length} of ${total}`;
-      }
+      position = pagePosition(paging.pageIndex, PAGE_SIZE, rows.length, total);
     }
   }
 
@@ -569,9 +490,7 @@ export function TasksPage() {
         </p>
       )}
       {cursorReset && (
-        <p className="text-xs text-muted-foreground">
-          That page link is no longer valid; showing the first page.
-        </p>
+        <p className="text-xs text-muted-foreground">{CURSOR_RESET_NOTICE}</p>
       )}
 
       {showError ? (
@@ -741,32 +660,14 @@ export function TasksPage() {
         </div>
       )}
 
-      {(after || nextCursor) && !showPending && !showError && (
-        <nav
-          aria-label="Task pages"
-          className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted-foreground"
-        >
-          {after &&
-            (canGoPrevious ? (
-              <Button variant="ghost" size="sm" onClick={goPrevious}>
-                Previous
-              </Button>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={goFirst}>
-                First page
-              </Button>
-            ))}
-          {position && <span className="tila-num">{position}</span>}
-          {nextCursor && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => goNext(nextCursor)}
-            >
-              {searchMode ? "More results" : "Next"}
-            </Button>
-          )}
-        </nav>
+      {!showPending && !showError && (
+        <PageNav
+          paging={paging}
+          nextCursor={nextCursor}
+          position={position}
+          label="Task pages"
+          nextLabel={searchMode ? "More results" : "Next"}
+        />
       )}
     </div>
   );
