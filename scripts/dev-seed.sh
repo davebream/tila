@@ -7,25 +7,20 @@ PROJECT="dev-project"
 BASE="$API/projects/$PROJECT"
 
 auth() {
-  curl -s -H "Authorization: Bearer $TOKEN" "$@"
+  curl -fsS -H "Authorization: Bearer $TOKEN" \
+    -H "X-Tila-Participant-Id: ${PARTICIPANT_ID:-dev-seed}" "$@"
 }
 
 post() {
   local path="$1"; shift
-  auth -X POST -f "$BASE$path" -H "Content-Type: application/json" -d "$@" > /dev/null
+  auth -X POST "$BASE$path" -H "Content-Type: application/json" -d "$@" > /dev/null
 }
 
-get_fence() {
+acquire_fence() {
   local resource="$1"
-  auth "$BASE/claims" | python3 -c "
-import sys, json
-claims = json.load(sys.stdin).get('claims', [])
-for c in claims:
-    if c['resource'] == '$resource':
-        print(c['fence'])
-        sys.exit(0)
-print('0')
-"
+  auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg resource "$resource" '{resource: $resource, mode: "exclusive", ttl_ms: 600000}')" |
+    jq -e '.fence | select(type == "number") | select(. > 0 and . == floor)'
 }
 
 echo "=== Seeding dev project with realistic data ==="
@@ -96,24 +91,20 @@ echo "  3 records created"
 # --- Claims: agents holding work ---
 echo "→ Acquiring claims"
 
-auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
-  -d '{"resource":"task.auth-middleware","mode":"exclusive","ttl_ms":600000}' > /dev/null
-FENCE1=$(get_fence "task.auth-middleware")
+FENCE1=$(acquire_fence "task.auth-middleware")
 echo "  task.auth-middleware claimed (fence=$FENCE1)"
 
-auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
-  -d '{"resource":"task.integration-tests","mode":"exclusive","ttl_ms":600000}' > /dev/null
-FENCE2=$(get_fence "task.integration-tests")
+FENCE2=$(acquire_fence "task.integration-tests")
 echo "  task.integration-tests claimed (fence=$FENCE2)"
 
 # --- Presence: heartbeats from machines ---
 echo "→ Sending presence heartbeats"
 
-auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
+PARTICIPANT_ID="machine.m1-macbook-pro" auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
   -d '{"resource":"machine.m1-macbook-pro","mode":"presence","ttl_ms":120000,"metadata":{"os":"darwin","arch":"arm64","agent":"claude-code/1.0.42","session":"sess-a8f3"}}' > /dev/null
-auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
+PARTICIPANT_ID="machine.m2-linux-workstation" auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
   -d '{"resource":"machine.m2-linux-workstation","mode":"presence","ttl_ms":120000,"metadata":{"os":"linux","arch":"x86_64","agent":"claude-code/1.0.42","session":"sess-b2e1"}}' > /dev/null
-auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
+PARTICIPANT_ID="machine.m3-github-actions" auth -X POST "$BASE/claims/acquire" -H "Content-Type: application/json" \
   -d '{"resource":"machine.m3-github-actions","mode":"presence","ttl_ms":120000,"metadata":{"os":"linux","arch":"x86_64","agent":"claude-code/1.0.41","session":"sess-c7d4"}}' > /dev/null
 
 echo "  3 machines registered"
@@ -167,7 +158,7 @@ echo ""
 echo "=== Seed complete ==="
 echo ""
 echo "Dashboard: http://localhost:5173"
-echo "  10 tasks (1 epic, 2 milestones, 7 tasks)"
+echo "  11 tasks (1 epic, 2 milestones, 8 tasks)"
 echo "  3 records (1 deploy_config, 2 db_schema)"
 echo "  16 relationships (10 parent-child, 6 blocking)"
 echo "  2 active claims (auth-middleware, integration-tests)"
