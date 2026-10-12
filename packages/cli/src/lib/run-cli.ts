@@ -181,6 +181,8 @@ export async function runCli(
           ].includes(path) &&
           !new Set([
             "task",
+            "queue",
+            "attempt",
             "room",
             "inbox",
             "entity",

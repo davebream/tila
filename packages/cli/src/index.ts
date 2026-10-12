@@ -84,6 +84,8 @@ const main = defineCommand({
     presence: () => load(() => import("./commands/presence")),
     signal: () => load(() => import("./commands/signal")),
     artifact: () => load(() => import("./commands/artifact")),
+    queue: () => load(() => import("./commands/queue")),
+    attempt: () => load(() => import("./commands/attempt")),
     schema: () => load(() => import("./commands/schema")),
     journal: () => load(() => import("./commands/journal")),
     config: () => load(() => import("./commands/config")),

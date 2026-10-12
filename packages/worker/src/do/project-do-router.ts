@@ -9,6 +9,7 @@ import { createAdminRoutes } from "./routes/admin-routes";
 import { createAgentRoutes } from "./routes/agent-routes";
 import { createArtifactRoutes } from "./routes/artifact-routes";
 import { createArtifactVersionRoutes } from "./routes/artifact-version-routes";
+import { createAttemptRoutes } from "./routes/attempt-routes";
 import { createContinuityRoutes } from "./routes/continuity-routes";
 import { createConversationRoutes } from "./routes/conversation-routes";
 import { createCoordinationRoutes } from "./routes/coordination-routes";
@@ -94,7 +95,14 @@ export function createProjectRouter(deps: RouterDeps) {
     const readOnly =
       c.req.method === "GET" ||
       c.req.method === "HEAD" ||
-      c.req.method === "OPTIONS";
+      c.req.method === "OPTIONS" ||
+      (c.req.method === "POST" &&
+        [
+          "/queue/policy",
+          "/queue/inspect",
+          "/attempts/get",
+          "/attempts/list",
+        ].includes(c.req.path));
     if (transferRoute || (state.mode === "export" && readOnly)) return next();
     return c.json(
       {
@@ -114,6 +122,7 @@ export function createProjectRouter(deps: RouterDeps) {
   app.route("/", createConversationRoutes(deps));
   app.route("/", createEntityRoutes(deps));
   app.route("/", createQueueRoutes(deps));
+  app.route("/", createAttemptRoutes(deps));
   app.route("/", createArtifactRoutes(deps));
   app.route("/", createArtifactVersionRoutes(deps));
   app.route("/", createCoordinationRoutes(deps));

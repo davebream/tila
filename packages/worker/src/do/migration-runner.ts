@@ -54,6 +54,7 @@ export async function runMigrationsWithPitrRollback(
 }
 
 const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
+  _project_transfer_state: ["singleton", "queue_fences_json"],
   queue_policy: [
     "singleton",
     "enabled",

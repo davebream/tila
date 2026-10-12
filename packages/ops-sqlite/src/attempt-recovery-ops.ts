@@ -363,6 +363,51 @@ export function reconcile(
         );
         return;
       }
+      if (input.observation === "suspended") {
+        requireState(attempt, ["uncertain", "running", "suspended"]);
+        if (
+          !input.execution_quiescent ||
+          !input.checkpoint ||
+          !input.session ||
+          (attempt.session &&
+            canonicalJson(attempt.session) !== canonicalJson(input.session))
+        )
+          throw new QueueError(
+            "queue-invalid-state",
+            "Suspended reconciliation requires confirmed quiescence, checkpoint and the recorded session",
+          );
+        attempts.revoke(tx, attempt);
+        attempts.change(
+          tx,
+          attempt,
+          {
+            state: "suspended",
+            session: input.session,
+            checkpoint: input.checkpoint,
+            suspension_requested: false,
+            lease_expires_at: null,
+          },
+          now,
+        );
+        tx.update(schema.executionReservations)
+          .set({ execution_held: false, updated_at: now })
+          .where(eq(schema.executionReservations.task_id, attempt.task_id))
+          .run();
+        event(
+          tx,
+          "attempt.suspended",
+          attempt.resource,
+          origin,
+          {
+            attempt_id: id,
+            reason: input.reason,
+            execution_quiescent: true,
+            checkpoint: input.checkpoint,
+          },
+          attempt.fence,
+        );
+        return;
+      }
       if (input.observation === "running") {
         requireState(attempt, ["starting", "running", "uncertain"]);
         if (

@@ -24,7 +24,8 @@
   "dependencies": {
     "@tila/core": "workspace:*",
     "@tila/schemas": "workspace:*",
-    "drizzle-orm": "^0.45.4"
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

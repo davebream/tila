@@ -3,6 +3,7 @@ import {
   ArtifactReviewEventSchema,
 } from "@tila/schemas";
 import type { ProjectTransferMode, ProjectTransferState } from "@tila/schemas";
+import { validateQueueBackupRow } from "./queue-backup-ops";
 
 export interface SqlRows<T = Record<string, unknown>> {
   toArray(): T[];
@@ -58,11 +59,21 @@ export const PROJECT_BACKUP_TABLES = [
   "artifact_search_docs",
   "entity_search_docs",
   "record_search_docs",
+  "queue_policy",
+  "queue_entries",
+  "work_attempts",
+  "execution_reservations",
+  "queue_operation_receipts",
 ] as const;
 
 export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
+  queue_policy: ["singleton"],
+  queue_entries: ["id"],
+  work_attempts: ["fence", "id"],
+  execution_reservations: ["task_id"],
+  queue_operation_receipts: ["key"],
   rooms: ["id"],
   room_members: ["room_id", "member"],
   threads: ["id"],
@@ -189,10 +200,21 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
 
 export async function semanticDigest(
   sql: ProjectSqlStorage,
-  migrationVersion = 31,
+  migrationVersion = 34,
 ): Promise<string> {
   const sections: string[] = [];
   for (const table of PROJECT_BACKUP_TABLES) {
+    if (
+      migrationVersion < 34 &&
+      [
+        "queue_policy",
+        "queue_entries",
+        "work_attempts",
+        "execution_reservations",
+        "queue_operation_receipts",
+      ].includes(table)
+    )
+      continue;
     if (
       migrationVersion < 31 &&
       [
@@ -337,6 +359,7 @@ export function insertSnapshotRows(
     ).map(({ name }) => name),
   );
   for (const row of rows) {
+    validateQueueBackupRow(table, row);
     if (table === "artifact_pointers") {
       for (const column of ["provenance", "revision_creation"]) {
         if (row[column] != null)

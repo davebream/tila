@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import {
   SessionStore,
   brokerReference,
@@ -5,11 +6,18 @@ import {
   connectRuntimeBroker,
   sessionKey,
 } from "@tila/client-lifecycle";
+import { ParticipantIdSchema } from "@tila/schemas";
 import { LifecycleClientSchema } from "@tila/schemas";
 import { TokenProviderError, assertRuntimeContext } from "tila-sdk";
 
 export interface McpServerConfig {
-  mode: "remote";
+  mode: "remote" | "local";
+  local?: {
+    dbPath: string;
+    artifactsPath: string;
+    org: string;
+    participantId: string;
+  };
   apiUrl: string;
   projectId: string;
   resolveRun(
@@ -19,6 +27,57 @@ export interface McpServerConfig {
 
 /** MCP accepts only a managed run or an installed, unambiguous host mapping. */
 export async function resolveServerConfig(): Promise<McpServerConfig> {
+  if (
+    process.env.TILA_MODE === "local" ||
+    process.env.TILA_BACKEND === "local"
+  ) {
+    if (
+      [
+        "TILA_RUN_SOCKET",
+        "TILA_RUN_CAPABILITY",
+        "TILA_API_URL",
+        "TILA_API_TOKEN",
+        "TILA_TOKEN",
+      ].some((key) => !!process.env[key])
+    )
+      throw new TokenProviderError(
+        "runtime-binding-mismatch",
+        "Explicit local MCP mode cannot be combined with remote credentials or a run binding",
+      );
+    const dbPath = process.env.TILA_DB_PATH;
+    const artifactsPath = process.env.TILA_ARTIFACTS_PATH;
+    const projectId = process.env.TILA_PROJECT_ID;
+    if (
+      !dbPath ||
+      !artifactsPath ||
+      !projectId ||
+      !isAbsolute(dbPath) ||
+      !isAbsolute(artifactsPath)
+    )
+      throw new TokenProviderError(
+        "runtime-auth-required",
+        "Local MCP requires TILA_PROJECT_ID and absolute TILA_DB_PATH and TILA_ARTIFACTS_PATH",
+      );
+    return {
+      mode: "local",
+      apiUrl: "",
+      projectId,
+      local: {
+        dbPath,
+        artifactsPath,
+        org: process.env.TILA_LOCAL_ORG || "local",
+        participantId: ParticipantIdSchema.parse(
+          process.env.TILA_PARTICIPANT_ID || crypto.randomUUID(),
+        ),
+      },
+      resolveRun: async () => {
+        throw new TokenProviderError(
+          "runtime-auth-required",
+          "Local MCP has no remote runtime binding",
+        );
+      },
+    };
+  }
   for (const key of [
     "TILA_API_TOKEN",
     "TILA_TOKEN",
@@ -31,11 +90,6 @@ export async function resolveServerConfig(): Promise<McpServerConfig> {
         `${key} is unsupported by MCP. Use tila machine enroll and tila mcp init, or tila run exec.`,
       );
   }
-  if (process.env.TILA_MODE === "local" || process.env.TILA_BACKEND === "local")
-    throw new TokenProviderError(
-      "runtime-auth-required",
-      "MCP requires a shared project runtime; private SQLite mode was removed",
-    );
   if (process.env.TILA_RUN_SOCKET || process.env.TILA_RUN_CAPABILITY) {
     const reference = brokerReference();
     const initial = await connectRuntimeBroker(reference);

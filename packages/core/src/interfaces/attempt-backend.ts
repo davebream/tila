@@ -2,6 +2,7 @@ import type {
   AttemptAuthorityCommand,
   AttemptFinishCommand,
   AttemptForceCommand,
+  AttemptListQuery,
   AttemptRebindCommand,
   AttemptReconcileCommand,
   AttemptResumeCommand,
@@ -17,12 +18,7 @@ import type {
 /** Caller identity is supplied by the backend, never by the command payload. */
 export interface AttemptBackend {
   get(id: string): Promise<AttemptView>;
-  list(options?: {
-    task_id?: string;
-    entry_id?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<WorkAttempt[]>;
+  list(options?: AttemptListQuery): Promise<WorkAttempt[]>;
   accept(id: string, command: AttemptAuthorityCommand): Promise<AttemptView>;
   started(id: string, command: AttemptStartedCommand): Promise<AttemptView>;
   heartbeat(id: string, command: AttemptAuthorityCommand): Promise<AttemptView>;

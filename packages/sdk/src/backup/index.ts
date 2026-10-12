@@ -14,6 +14,7 @@ import { copyFile, mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { queueBackupOps } from "@tila/ops-sqlite";
 import { agentBindingOps, projectTransferOps } from "@tila/ops-sqlite";
 import {
   ArtifactCommitRecordSchema,
@@ -36,8 +37,9 @@ import { SDK_VERSION } from "../version";
 
 export const SUPPORTED_BACKUP_FEATURES = new Set<string>([
   "artifact-review-v1",
+  "managed-queue-v1",
 ]);
-export const MAX_SUPPORTED_DO_MIGRATION = 31;
+export const MAX_SUPPORTED_DO_MIGRATION = 34;
 
 export type LocalBackupEndpoint = {
   backend: "local";
@@ -403,7 +405,7 @@ async function exportLocal(
         do_migration_version: MAX_SUPPORTED_DO_MIGRATION,
         schema_version: options.source.schemaVersion ?? 1,
       },
-      required_features: ["artifact-review-v1"],
+      required_features: ["artifact-review-v1", "managed-queue-v1"],
       optional_sections: ["d1/project.jsonl"],
       entries,
       content_root: contentRoot(entries),
@@ -554,6 +556,25 @@ async function scanArchive(
       `Backup requires unsupported DO migration ${manifest.source.do_migration_version}`,
     );
   }
+  if (
+    manifest.source.do_migration_version >= 34 &&
+    !manifest.required_features.includes("managed-queue-v1")
+  )
+    throw new Error("Queue-aware backups must declare managed-queue-v1");
+  if (manifest.required_features.includes("managed-queue-v1")) {
+    for (const table of [
+      "queue_policy",
+      "queue_entries",
+      "work_attempts",
+      "execution_reservations",
+      "queue_operation_receipts",
+    ]) {
+      if (!manifest.entries.some((entry) => entry.path === `do/${table}.jsonl`))
+        throw new Error(
+          `Backup is missing safety-critical queue section ${table}`,
+        );
+    }
+  }
   const unknown = manifest.required_features.filter(
     (feature) => !SUPPORTED_BACKUP_FEATURES.has(feature),
   );
@@ -615,6 +636,7 @@ async function extractLocalArchive(
   dbPath: string,
   artifactsPath: string,
   manifest: ProjectBackupManifest,
+  destinationFences: Record<string, number> = {},
 ): Promise<void> {
   const scanned = await scanArchive(archive, true);
   const connection = await createNodeConnection(dbPath, {
@@ -644,6 +666,10 @@ async function extractLocalArchive(
         "Restored SQLite semantic digest does not match the backup",
       );
     agentBindingOps.invalidateRestoredBindings(connection.db);
+    queueBackupOps.invalidateRestoredExecutions(
+      connection.db,
+      destinationFences,
+    );
   } finally {
     connection.close();
   }
@@ -768,6 +794,17 @@ async function importLocal(
       original.close();
     }
   }
+  let destinationFences: Record<string, number> = {};
+  if (exists) {
+    const destination = await createNodeConnection(options.destination.dbPath, {
+      skipFilesystemCheck: true,
+    });
+    try {
+      destinationFences = queueBackupOps.readFenceWatermarks(destination.db);
+    } finally {
+      destination.close();
+    }
+  }
   const stageId = randomUUID();
   const stageDb = `${options.destination.dbPath}.restore-${stageId}`;
   const stageArtifacts = `${options.destination.artifactsPath}.restore-${stageId}`;
@@ -779,6 +816,7 @@ async function importLocal(
       stageDb,
       stageArtifacts,
       inspected.manifest,
+      destinationFences,
     );
     if (exists) {
       const oldDb = `${options.destination.dbPath}.swap-old-${stageId}`;
@@ -1134,7 +1172,7 @@ async function exportCloud(
             }
           : {}),
       },
-      required_features: ["artifact-review-v1"],
+      required_features: ["artifact-review-v1", "managed-queue-v1"],
       optional_sections: [],
       entries,
       content_root: contentRoot(entries),

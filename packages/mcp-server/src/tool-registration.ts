@@ -59,6 +59,8 @@ const additive = new Set([
   "tila_gate_create",
 ]);
 const idempotent = new Set([
+  "tila_queue",
+  "tila_attempt",
   "tila_room_publish",
   "tila_inbox_ack",
   "tila_journal_acknowledge",
