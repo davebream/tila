@@ -61,6 +61,9 @@ function cliSmoke(command, prefix = []) {
     run(command, [...prefix, ...args], { cwd, env: cleanEnv, timeout: 30_000 });
   assert.ok(call("--version").includes(manifest.version));
   assert.match(call("--help"), /tila/i);
+  // Loads the native keyring addon; a binary built without its target's
+  // addon fails here even though --version and --help succeed.
+  assert.match(call("auth", "setup", "--help"), /administrator/i);
   assertDeployPayload(call("deploy", "--dry-run", "--json"));
   assert.match(
     call(
