@@ -11,16 +11,28 @@ export const search = new Hono<{
   Variables: HonoVariables;
 }>();
 
-// GET /projects/:projectId/search -- unified full-text search across entities and artifacts
+// GET /projects/:projectId/search -- unified full-text search across tasks, records and artifacts.
+// The DO narrows kinds to what the credential may read and reports that in `scope`.
 search.get("/", requirePermission("read"), async (c) => {
   const raw = c.req.query();
   const parsed = UnifiedSearchQuerySchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
 
-  const { q, limit, tag_filter: tagFilter } = parsed.data;
-  const query: Record<string, string> = { q };
+  const {
+    q,
+    limit,
+    tag_filter: tagFilter,
+    kind,
+    type,
+    cursor,
+    syntax,
+  } = parsed.data;
+  const query: Record<string, string> = { q, syntax };
   if (limit !== undefined) query.limit = String(limit);
   if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
+  if (kind?.length) query.kind = kind.join(",");
+  if (type?.length) query.type = type.join(",");
+  if (cursor) query.cursor = cursor;
 
   const stub = c.get("doStub");
   return forwardToDO(

@@ -215,7 +215,10 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.get("/journal/list", (c) => {
     const { db } = deps;
-    const resource = c.req.query("resource") ?? undefined;
+    const resourcesRaw = c.req.query("resources");
+    const resource: string | string[] | undefined = resourcesRaw
+      ? (JSON.parse(resourcesRaw) as string[])
+      : (c.req.query("resource") ?? undefined);
     const kindRaw = c.req.query("kind");
     const kind = kindRaw?.includes(",")
       ? kindRaw.split(",").filter(Boolean)

@@ -44,7 +44,12 @@ import {
   parseSchemaToml,
 } from "@tila/core";
 import { isManagedTask } from "@tila/ops-sqlite";
-import { catalogOps, continuityOps, summaryOps } from "@tila/ops-sqlite";
+import {
+  catalogOps,
+  continuityOps,
+  searchPageOps,
+  summaryOps,
+} from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
   SchemaCorruptError,
@@ -71,7 +76,12 @@ import type {
   ReentryRequest,
   ReentryResponse,
 } from "@tila/schemas";
-import type { TilaSchemaToml, WorkCatalogResponse } from "@tila/schemas";
+import type {
+  SearchKind,
+  TilaSchemaToml,
+  UnifiedSearchResponse,
+  WorkCatalogResponse,
+} from "@tila/schemas";
 import { EmbeddedAttemptBackend, EmbeddedQueueBackend } from "./embedded-queue";
 
 import {
@@ -1215,6 +1225,35 @@ export class EmbeddedProject
     tagFilter?: string[];
   }): ReturnType<typeof entityOps.searchAll> {
     return entityOps.searchAll(this.db, query);
+  }
+
+  /** Paged, kind-scoped search with an opaque cursor (#300). Local callers are unrestricted. */
+  searchPage(query: {
+    q: string;
+    limit?: number;
+    tagFilter?: string[];
+    kinds?: SearchKind[];
+    types?: string[];
+    cursor?: string;
+    syntax?: "fts" | "literal";
+  }): UnifiedSearchResponse {
+    const scope = searchPageOps.searchableKinds(undefined, query.kinds);
+    const page = searchPageOps.searchPage(this.db, {
+      q: query.q,
+      syntax: query.syntax,
+      kinds: scope.kinds,
+      types: query.types,
+      tagFilter: query.tagFilter,
+      limit: Math.min(query.limit ?? 20, 100),
+      cursor: query.cursor,
+    });
+    return {
+      ok: true,
+      results: page.results,
+      total: page.results.length,
+      next_cursor: page.next_cursor,
+      scope: { ...scope, archived: "excluded" },
+    };
   }
 
   /**

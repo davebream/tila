@@ -214,9 +214,20 @@ describe("namespace isolation in shared SQLite operations", () => {
     );
   });
   it("rejects broad aggregates and templates without all mutation capabilities", () => {
+    // `/search` is allowed: the route filters each kind itself (#300).
+    expect(() =>
+      assertCredentialRequest(
+        f.db,
+        policy,
+        "GET",
+        "/search",
+        new URLSearchParams(),
+        {},
+      ),
+    ).not.toThrow();
     for (const path of [
       "/summary",
-      "/search",
+      "/search/reindex",
       "/journal/list",
       "/admin/transfer/snapshot/entities",
     ])

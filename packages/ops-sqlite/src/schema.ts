@@ -63,7 +63,13 @@ export const entities = sqliteTable(
     updated_at: integer("updated_at").notNull(),
     created_by: text("created_by").notNull(),
   },
-  (table) => [index("idx_entities_type").on(table.type)],
+  (table) => [
+    index("idx_entities_type").on(table.type),
+    // Keyset paging (MIGRATION_0035): every list order is tie-broken by id.
+    index("idx_entities_created_id").on(table.created_at, table.id),
+    index("idx_entities_updated_id").on(table.updated_at, table.id),
+    index("idx_entities_type_id").on(table.type, table.id),
+  ],
 );
 
 // --- entity_relationships ---

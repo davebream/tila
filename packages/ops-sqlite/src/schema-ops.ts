@@ -14,6 +14,7 @@ import {
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { withDoIdempotency } from "./do-idempotency-ops";
+import { refreshPresentedSearchTitles } from "./entity-search-text";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 
@@ -247,10 +248,11 @@ export function applySchema(
 
         let changeSummary: string[] = [];
         let diffAutoApplicable = true;
+        let prevParsed: ReturnType<typeof parseTilaSchemaToml> | null = null;
 
         if (currentRow) {
           // Step 3: Diff against previous schema
-          const prevParsed = parseTilaSchemaToml(currentRow.definition);
+          prevParsed = parseTilaSchemaToml(currentRow.definition);
           const diff = diffSchemas(prevParsed, nextParsed);
 
           // Step 4: No-change detection
@@ -311,6 +313,9 @@ export function applySchema(
             strategy: strategy ?? null,
           })
           .run();
+
+        // Step 7b: Search titles follow presentation metadata.
+        refreshPresentedSearchTitles(tx, prevParsed, nextParsed);
 
         // Step 8: Emit journal event
         const journalOrigin = origin ?? {

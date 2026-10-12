@@ -213,11 +213,46 @@ export const PaginatedEntityListResponseSchema = z.object({
   limit: z.number().int().nullable(),
   offset: z.number().int(),
   has_more: z.boolean(),
+  /** Opaque keyset cursor for the next page, or null on the last page. */
+  next_cursor: z.string().nullable().optional(),
+  scope: ResultScopeSchema.optional(),
 });
 
 export type PaginatedEntityListResponse = z.infer<
   typeof PaginatedEntityListResponseSchema
 >;
+
+/** Opaque pagination cursor. Bound to the filter and sort it was issued for. */
+export const ListCursorSchema = z.string().min(1).max(2048);
+
+export const TASK_LIST_SORTS = [
+  "created_at",
+  "updated_at",
+  "type",
+  "title",
+  "status",
+  "id",
+] as const;
+
+/**
+ * Query validation for `GET /tasks`. Only the paging contract is strict;
+ * filter params stay lenient strings so existing callers keep working.
+ */
+export const TaskListQuerySchema = z
+  .object({
+    cursor: ListCursorSchema.optional(),
+    offset: z
+      .string()
+      .regex(/^\d+$/, "offset must be a non-negative integer")
+      .optional(),
+    sort: z.enum(TASK_LIST_SORTS).optional(),
+    order: z.enum(["asc", "desc"]).optional(),
+  })
+  .refine((q) => !(q.cursor && q.offset && q.offset !== "0"), {
+    message: "cursor and offset cannot be combined",
+    path: ["cursor"],
+  });
+export type TaskListQuery = z.infer<typeof TaskListQuerySchema>;
 
 export const ListReadyEntitiesResponseSchema = z.object({
   ok: z.literal(true),
@@ -273,6 +308,8 @@ export const PaginatedCompactEntityListResponseSchema = z.object({
   limit: z.number().int().nullable(),
   offset: z.number().int(),
   has_more: z.boolean(),
+  next_cursor: z.string().nullable().optional(),
+  scope: ResultScopeSchema.optional(),
 });
 
 export type PaginatedCompactEntityListResponse = z.infer<
@@ -979,24 +1016,91 @@ export const UnifiedSearchResultSchema = z.discriminatedUnion("type", [
 
 export type UnifiedSearchResult = z.infer<typeof UnifiedSearchResultSchema>;
 
+/** Searchable kinds. `task` results carry `type: "entity"`. */
+export const SearchKindSchema = z.enum(["task", "record", "artifact"]);
+export type SearchKind = z.infer<typeof SearchKindSchema>;
+
+export const SearchScopeSchema = z.object({
+  /** Namespace restrictions on the credential narrowed the results. */
+  restricted: z.boolean(),
+  /** Kinds actually searched. */
+  kinds: z.array(SearchKindSchema),
+  /** Kinds left out, and why. */
+  excluded_kinds: z
+    .array(
+      z.object({
+        kind: SearchKindSchema,
+        reason: z.enum(["restricted", "capability"]),
+      }),
+    )
+    .optional(),
+  /** Search never matches archived tasks or records. */
+  archived: z.literal("excluded"),
+});
+export type SearchScope = z.infer<typeof SearchScopeSchema>;
+
 export const UnifiedSearchResponseSchema = z.object({
   ok: z.literal(true),
   results: z.array(UnifiedSearchResultSchema),
+  /** Number of results in this page (not a total match count). */
   total: z.number().int(),
+  /** Opaque cursor for the next page, or null when there are no more results. */
+  next_cursor: z.string().nullable().optional(),
+  scope: SearchScopeSchema.optional(),
 });
 
 export type UnifiedSearchResponse = z.infer<typeof UnifiedSearchResponseSchema>;
 
-export const UnifiedSearchQuerySchema = z.object({
-  q: z.string().min(1).max(200),
-  limit: z
+const commaList = (max: number) =>
+  z
     .string()
     .optional()
-    .default("20")
-    .transform((v) => Number.parseInt(v, 10))
-    .pipe(z.number().int().min(1).max(100)),
-  tag_filter: tagFilterQueryParam,
-});
+    .transform((v) =>
+      v === undefined
+        ? undefined
+        : [
+            ...new Set(
+              v
+                .split(",")
+                .map((part) => part.trim())
+                .filter(Boolean),
+            ),
+          ],
+    )
+    .pipe(z.array(z.string().min(1).max(200)).max(max).optional());
+
+export const UnifiedSearchQuerySchema = z
+  .object({
+    q: z.string().min(1).max(200),
+    limit: z
+      .string()
+      .optional()
+      .default("20")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(1).max(100)),
+    tag_filter: tagFilterQueryParam,
+    /** Comma list of kinds to search. Defaults to every kind the caller may read. */
+    kind: commaList(3).pipe(z.array(SearchKindSchema).optional()),
+    /** Comma list of task or record types. Requires exactly one of those kinds. */
+    type: commaList(20),
+    cursor: ListCursorSchema.optional(),
+    /** `fts`: FTS5 query syntax. `literal`: plain words, prefix-matched as typed. */
+    syntax: z.enum(["fts", "literal"]).default("fts"),
+  })
+  .superRefine((q, ctx) => {
+    if (
+      q.type?.length &&
+      !(
+        q.kind?.length === 1 &&
+        (q.kind[0] === "task" || q.kind[0] === "record")
+      )
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["type"],
+        message: "type requires kind=task or kind=record",
+      });
+  });
 
 export type UnifiedSearchQuery = z.infer<typeof UnifiedSearchQuerySchema>;
 

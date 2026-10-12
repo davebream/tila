@@ -17,9 +17,11 @@ import {
   relationshipOps,
   schema,
   schemaOps,
+  searchPageOps,
 } from "@tila/ops-sqlite";
 import {
   ArchiveRequestSchema,
+  type SearchKind,
   UpdateEntityRequestSchema,
   parseTagFilter,
 } from "@tila/schemas";
@@ -44,6 +46,24 @@ const {
 } = constraintOps;
 
 const MAX_ENTITY_LIST_LIMIT = 500;
+
+/** Compact titles follow presentation metadata; a corrupt schema only loses that. */
+function currentSchemaOrNull(
+  db: Parameters<typeof constraintOps.resolveCurrentSchema>[0],
+) {
+  try {
+    return constraintOps.resolveCurrentSchema(db);
+  } catch {
+    return null;
+  }
+}
+
+function currentPresentation(
+  db: Parameters<typeof constraintOps.resolveCurrentSchema>[0],
+  type: string,
+) {
+  return currentSchemaOrNull(db)?.work_units[type]?.presentation;
+}
 
 export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
@@ -110,7 +130,13 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       const stats = entityOps.getCompactEntityStats(db, [entity.id]);
       return c.json({
         ok: true,
-        entity: entityOps.compactEntity(db, entity, activeClaims, stats),
+        entity: entityOps.compactEntity(
+          db,
+          entity,
+          activeClaims,
+          stats,
+          currentPresentation(db, entity.type),
+        ),
       });
     }
 
@@ -190,13 +216,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     const parent = c.req.query("parent");
     if (parent) dataFilter.parent_id = parent;
 
-    const sort = c.req.query("sort") as
-      | "created_at"
-      | "updated_at"
-      | "type"
-      | "title"
-      | "status"
-      | undefined;
+    const sort = c.req.query("sort") as entityOps.TaskListSort | undefined;
     const order = c.req.query("order") as "asc" | "desc" | undefined;
     const limitParam = c.req.query("limit");
     const limit =
@@ -205,13 +225,15 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         : undefined;
     const offsetParam = c.req.query("offset");
     const offset = offsetParam !== undefined ? Number(offsetParam) : 0;
+    const cursor = c.req.query("cursor") || undefined;
+    const restrictions = readCredentialPolicy(
+      c.req.header("X-Tila-Credential-Policy"),
+    )?.restrictions;
 
-    const { entities, total } = entityOps.list(
+    const { entities, total, next_cursor } = entityOps.list(
       db,
       {
-        restrictions: readCredentialPolicy(
-          c.req.header("X-Tila-Credential-Policy"),
-        )?.restrictions,
+        restrictions,
         type,
         archived,
         ...(Object.keys(dataFilter).length > 0 ? { dataFilter } : {}),
@@ -219,6 +241,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         order,
         limit,
         offset,
+        cursor,
         ...(tagFilter?.length ? { tagFilter } : {}),
       },
       deps.enrichOpts(),
@@ -228,7 +251,17 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       total,
       limit: limit ?? null,
       offset,
-      has_more: limit !== undefined ? offset + limit < total : false,
+      has_more: next_cursor !== null,
+      next_cursor,
+      scope: {
+        restricted: restrictions?.task_types !== undefined,
+        // archived=1 lists only archived rows, which neither value describes.
+        ...(archived === 0
+          ? { archived: "excluded" as const }
+          : archived === undefined
+            ? { archived: "included" as const }
+            : {}),
+      },
     };
 
     const compact = c.req.query("compact") === "true";
@@ -238,10 +271,17 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         db,
         entities.map((entity) => entity.id),
       );
+      const current = currentSchemaOrNull(db);
       return c.json({
         ok: true as const,
         entities: entities.map((e) =>
-          entityOps.compactEntity(db, e, activeClaims, stats),
+          entityOps.compactEntity(
+            db,
+            e,
+            activeClaims,
+            stats,
+            current?.work_units[e.type]?.presentation,
+          ),
         ),
         ...paginationMeta,
       });
@@ -507,12 +547,47 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       throw err;
     }
 
+    const policy = readCredentialPolicy(
+      c.req.header("X-Tila-Credential-Policy"),
+    );
+    const list = (name: string) =>
+      c.req
+        .query(name)
+        ?.split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+    const requestedKinds = list("kind") as SearchKind[] | undefined;
+    const types = list("type");
+    const syntax = c.req.query("syntax") === "literal" ? "literal" : "fts";
+
     try {
-      const results = entityOps.searchAll(db, { q, limit, tagFilter });
-      return c.json({ ok: true, results, total: results.length });
+      const scope = searchPageOps.searchableKinds(policy, requestedKinds);
+      const page =
+        scope.kinds.length === 0
+          ? { results: [], next_cursor: null }
+          : searchPageOps.searchPage(db, {
+              q,
+              syntax,
+              kinds: scope.kinds,
+              types,
+              tagFilter,
+              limit,
+              cursor: c.req.query("cursor") || undefined,
+              restrictions: policy?.restrictions,
+            });
+      return c.json({
+        ok: true,
+        results: page.results,
+        total: page.results.length,
+        next_cursor: page.next_cursor,
+        scope: { ...scope, archived: "excluded" as const },
+      });
     } catch (err) {
       if (err instanceof artifactOps.SearchQueryError) {
         return jsonError(c, 400, "invalid-query", err.message);
+      }
+      if (err instanceof searchPageOps.SearchKindDenied) {
+        return jsonError(c, 403, "permission-denied", err.message);
       }
       throw err;
     }

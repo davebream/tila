@@ -702,7 +702,8 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/whoami` | — | `{ token_name, scopes }` |
 | GET | `/schema` | — | `{ version, schema_toml }` |
 | POST | `/schema/apply` | `{ schema_toml, strategy?, dry_run? }` | `{ ok, new_version, changes, warnings }` |
-| GET | `/entities` | query: `type`, `status`, `parent`, `limit`, `cursor` | `{ entities: [], cursor? }` |
+| GET | `/tasks` (alias `/entities`) | query: `type`, `status`, `parent`, `archived`, `sort` (`created_at`, `updated_at`, `type`, `title`, `status`, `id`), `order`, `limit`, `cursor` or `offset` | `{ entities: [], total, limit, offset, has_more, next_cursor, scope }` — keyset pages (§14.8) |
+| GET | `/search` | query: `q`, `kind`, `type`, `syntax`, `limit`, `cursor`, `tag_filter` | `{ results: [], total, next_cursor, scope }` — `total` counts this page (§14.8) |
 | GET | `/tasks/~/types` | — | `{ ok, types: [{ type, declaration, count, archived_count, definition? }], scope, incomplete? }` — the work type catalog (§14.7) |
 | POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` |
 | GET | `/entities/:id` | — | `{ entity, claim?, recent_journal }` |
@@ -725,7 +726,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/artifacts/:key` | — | binary body with metadata headers |
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
-| GET | `/journal` | query: `since_seq`, `resource`, `kind`, `client_name`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — `archived: true` signals a cold-stored range |
+| GET | `/journal` | query: `since_seq`, `resource` (repeatable, up to 10), `kind`, `client_name`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — `archived: true` signals a cold-stored range |
 | GET | `/journal/stream` | query: `since_seq` | SSE event stream (v0.2; v0.1 uses polling) |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
@@ -2971,6 +2972,56 @@ field of `GET /records/_types` serves records. Each entry carries:
   `incomplete` names the missing half, mirroring the records types response.
 - **Display only.** Catalog definitions and presentation metadata guide clients;
   they grant nothing. Authorization stays on the server.
+
+### 14.8 Paging and search scope (#300)
+
+**Task lists use keyset cursors.** `GET /tasks` orders by `sort` (default
+`created_at`) and always breaks ties by `id`, so the order is total even when
+many rows share a timestamp. With a `limit`, the response carries an opaque
+`next_cursor` (null on the last page); pass it back as `cursor`.
+
+- A cursor is bound to the filter and sort it came from. Reusing it with other
+  parameters returns `400 invalid-cursor` instead of skipping or repeating rows.
+- `cursor` and a non-zero `offset` cannot be combined. Offset paging still works,
+  and its responses also carry `next_cursor` so callers can switch.
+- `total` counts every row matching the filter and the caller's restrictions.
+  `scope.restricted` says restrictions applied; `scope.archived` says whether
+  archived rows were excluded (`archived=0`) or included (no `archived` filter).
+- Migration 35 adds `(created_at, id)`, `(updated_at, id)` and `(type, id)`
+  indexes. `title` and `status` sorts read `data.title` and `data.status`
+  directly (not presentation metadata) and are not indexed.
+
+**Unified search pages with per-kind offsets.** `GET /search` ranks each kind by
+FTS5 bm25 with an id tie-break. bm25 scores shift whenever the corpus changes,
+so a keyset on the score would not be stable; the cursor instead holds one
+offset per kind, bound to the query. Pages are deterministic for an unchanged
+corpus and may drift under concurrent writes. Each kind stops at depth 1000.
+
+| Parameter | Meaning |
+|---|---|
+| `kind` | Comma list of `task`, `record`, `artifact`. Defaults to every kind the caller may read. Task results carry `type: "entity"` |
+| `type` | Comma list of task or record types. Requires exactly one `task` or `record` kind |
+| `syntax` | `fts` (default): FTS5 query syntax. `literal`: plain words, each quoted, the last prefix-matched |
+| `cursor` | `next_cursor` from the previous page |
+
+- **Task ids are searchable.** Migration 35 indexes `entity_id` beside the title,
+  weighted below it, so `task-251` or `251` finds the task.
+- **Titles follow presentation.** The indexed title is the declared
+  `presentation.title` field, else `data.title`, else `data.name`. Applying a
+  schema that changes a type's `presentation.title` re-derives the indexed
+  titles of that type's tasks in the same transaction.
+- **Ids are tokenized.** `task-251` indexes as `task` and `251`, so a common id
+  prefix matches many tasks. Title matches still rank first.
+- **Scope is explicit.** `scope.kinds` lists the kinds searched and
+  `scope.excluded_kinds` the ones left out, with a reason: `capability` (a
+  scoped credential lacks `tasks:read`, `records:read` or `artifacts:read`) or
+  `restricted` (namespace-restricted credentials never search artifacts).
+  Asking for an excluded kind explicitly returns 403. Archived tasks and records
+  never match (`scope.archived: "excluded"`).
+- **Restricted credentials can search.** Exact `/search` is allowed for
+  namespace-restricted credentials; tasks and records are filtered by the same
+  restriction conditions as lists. `/search/reindex` stays denied.
+- `total` is the number of results in the page, not a match count.
 
 ## Managed execution foundations
 

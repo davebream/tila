@@ -393,8 +393,12 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
         if (body?.source_artifact_key) return denied(c);
       }
       // The listed surfaces cannot safely project their cross-resource data.
+      // Exact `/search` filters each kind inside the DO (#300).
       if (
-        !/^\/(tasks|records|claims|templates|queue|attempts)(\/|$)/.test(path)
+        !/^\/(tasks|records|claims|templates|queue|attempts)(\/|$)/.test(
+          path,
+        ) &&
+        path !== "/search"
       )
         return denied(c);
       if (/^\/tasks\/ready(?:\/|$)/.test(path) || /artifact-refs/.test(path))

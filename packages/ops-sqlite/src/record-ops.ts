@@ -123,13 +123,20 @@ export function searchRecords(
   query: {
     q: string;
     limit?: number;
+    /** Rows to skip in `(bm25, type, key)` order. */
+    offset?: number;
+    /** Restrict matches to these record types. */
+    types?: string[];
     tagFilter?: string[];
+    /** Caller's namespace restrictions; forbidden records never match. */
+    restrictions?: NamespaceRestrictions;
     /** Internal: skip validation when the caller (searchAll) has already validated. */
     _skipValidation?: boolean;
   },
 ): RecordSearchResult[] {
   if (!query._skipValidation) validateFtsQuery(query.q);
-  const limit = Math.min(query.limit ?? 20, 100);
+  const limit = Math.min(query.limit ?? 20, 101);
+  const restricted = recordRestrictionCondition(query.restrictions);
 
   const tagConditions = query.tagFilter?.length
     ? tagExistsConditions(
@@ -153,11 +160,22 @@ export function searchRecords(
         snippet(record_search_docs_fts, 0, '<b>', '</b>', '...', 10) AS snippet
       FROM record_search_docs_fts fts
       JOIN record_search_docs d ON d.rowid = fts.rowid
+      ${restricted ? sql`JOIN records ON records.type = d.record_type AND records.key = d.record_key` : sql``}
       WHERE record_search_docs_fts MATCH ${query.q}
         AND d.tombstoned = 0
+        ${
+          query.types?.length
+            ? sql`AND d.record_type IN (${sql.join(
+                query.types.map((t) => sql`${t}`),
+                sql.raw(", "),
+              )})`
+            : sql``
+        }
+        ${restricted ? sql`AND ${restricted}` : sql``}
         ${tagConditions.length ? sql`AND ${sql.join(tagConditions, sql.raw(" AND "))}` : sql``}
-      ORDER BY bm25(record_search_docs_fts)
+      ORDER BY bm25(record_search_docs_fts), d.record_type, d.record_key
       LIMIT ${limit}
+      ${query.offset ? sql`OFFSET ${query.offset}` : sql``}
     `);
 
     return rows;

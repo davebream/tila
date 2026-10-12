@@ -1,5 +1,7 @@
+import type { TilaSchemaToml } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { resolveCurrentSchema } from "./constraint-ops";
 import { entitySearchText } from "./entity-search-text";
 import type * as schema from "./schema";
 
@@ -119,12 +121,22 @@ function reindexEntityBatch(
   }
 
   const indexedAt = Date.now();
+  // Resolve the schema once per batch so titles follow presentation metadata.
+  let current: TilaSchemaToml | null = null;
+  try {
+    current = resolveCurrentSchema(db);
+  } catch {
+    // A corrupt schema must not block reindexing; fall back to data.title/name.
+  }
   db.transaction((tx) => {
     for (const row of rows) {
       let name: string | null = null;
       try {
         const parsed = JSON.parse(row.data) as Record<string, unknown>;
-        name = entitySearchText(parsed);
+        name = entitySearchText(
+          parsed,
+          current?.work_units[row.type]?.presentation,
+        );
       } catch {
         // malformed data -- skip name extraction
       }
