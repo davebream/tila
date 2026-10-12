@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import * as attempts from "../src/attempt-ops";
+import { requestCancellation } from "../src/attempt-recovery-ops";
 import { get as getEntity } from "../src/entity-ops";
 import * as schema from "../src/schema";
 import { applySchema } from "../src/schema-ops";
@@ -24,6 +25,44 @@ const stopped = {
   evidence: [],
   unresolved_external_execution: false,
 };
+
+it("acknowledges preaccept cancellation but rejects other unaccepted results", () => {
+  const { db } = fixture;
+  const attempt = seedAttempt(db);
+  expect(() =>
+    attempts.finish(
+      db,
+      attempt.id,
+      { ...authority(attempt), outcome: stopped },
+      origin,
+    ),
+  ).toThrow("Unaccepted");
+  const cancelled = requestCancellation(
+    db,
+    attempt.id,
+    authority(attempt),
+    origin,
+  ).attempt;
+  const result = attempts.finish(
+    db,
+    attempt.id,
+    { ...authority(cancelled), outcome: { ...stopped, status: "cancelled" } },
+    origin,
+  );
+  expect(result.attempt.outcome?.status).toBe("cancelled");
+  expect(result.attempt.accepted_at).toBeNull();
+  expect(db.select().from(schema.executionReservations).all()).toEqual([]);
+});
+it("does not requeue a cancelled unaccepted reservation when it expires", () => {
+  const { db } = fixture;
+  const now = Date.now();
+  const attempt = seedAttempt(db, "task", now);
+  requestCancellation(db, attempt.id, authority(attempt), origin, now);
+  attempts.expire(db, now + 60_001);
+  expect(attempts.get(db, attempt.id).outcome?.status).toBe("cancelled");
+  expect(db.select().from(schema.queueEntries).get()?.state).toBe("finished");
+  expect(db.select().from(schema.executionReservations).all()).toEqual([]);
+});
 
 it("commits acceptance, lifecycle status, session binding and result without losing immutable history", () => {
   const { db } = fixture;
