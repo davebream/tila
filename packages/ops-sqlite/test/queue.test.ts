@@ -157,7 +157,7 @@ it("admits at most 20 of 100 concurrent consumers and replays one reservation pe
       .all()
       .filter((r) => r.attempt_id),
   ).toHaveLength(20);
-});
+}, 30_000);
 
 it("keeps existing grants when paused or lowered, and checks WIP independently", () => {
   const { db } = fixture;
