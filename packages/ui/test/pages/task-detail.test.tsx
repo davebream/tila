@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, delay } from "msw";
 import { Route, Routes } from "react-router";
 import { server } from "../mocks/server";
+import { catalogHandler, declaredEntry } from "../mocks/tasks";
 import {
   act,
   renderWithProviders,
@@ -374,7 +375,7 @@ describe("TaskDetailPage section states", () => {
     ).toBeInTheDocument();
     expect(
       await within(region("Artifacts")).findByText(
-        "You do not have access to artifacts.",
+        "Artifacts are not available to this credential.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Not claimed.")).not.toBeInTheDocument();
@@ -633,5 +634,319 @@ describe("TaskDetailPage user state across refetch failures", () => {
 
     expect(screen.getByText(/"title": "Test Task"/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse" })).toBe(collapse);
+  });
+});
+
+const JOB_DEFINITION = {
+  fields: [
+    { name: "headline", type: "string", required: false },
+    { name: "pitch", type: "text", required: false },
+    { name: "owner", type: "string", required: false },
+    { name: "body", type: "text", required: false },
+    { name: "labels", type: "list<string>", required: false },
+    {
+      name: "state",
+      type: "enum",
+      required: true,
+      values: ["queued", "shipped"],
+    },
+    {
+      name: "priority",
+      type: "enum",
+      required: false,
+      values: ["low", "high"],
+    },
+  ],
+  lifecycle: {
+    field: "state",
+    dispatchable: ["queued"],
+    terminal: ["shipped"],
+    dependency_satisfied: ["shipped"],
+  },
+  presentation: { title: "headline", summary: "pitch", description: "body" },
+};
+
+const JOB = "/p/test-project/tasks/job-1";
+
+function jobHandler(type: string, data: Record<string, unknown>) {
+  return http.get("*/projects/*/tasks/:id", ({ params }) =>
+    HttpResponse.json({
+      ok: true,
+      entity: {
+        id: params.id as string,
+        type,
+        schema_version: 3,
+        data,
+        archived: 0,
+        created_at: Date.now() - 10_000,
+        updated_at: Date.now() - 5_000,
+        created_by: "test-user",
+        tags: [],
+      },
+      relationships: [],
+    }),
+  );
+}
+
+function journalHandler(onRequest?: (params: URLSearchParams) => void) {
+  return http.get("*/projects/*/journal", ({ request }) => {
+    onRequest?.(new URL(request.url).searchParams);
+    return HttpResponse.json({
+      ok: true,
+      events: [
+        {
+          seq: 7,
+          t: Date.now() - 2_000,
+          kind: "entity.updated",
+          resource: "job-1",
+          principal_id: "agent:builder",
+          participant_id: "p-1",
+          environment: {},
+          token_id: null,
+          fence: 2,
+          data: {},
+        },
+      ],
+    });
+  });
+}
+
+/** The field names of a key/value table, top to bottom. */
+function fieldNames(table: HTMLElement): string[] {
+  return within(table)
+    .getAllByRole("row")
+    .map((row) => within(row).getAllByRole("cell")[0].textContent ?? "");
+}
+
+const sentence = (text: string) => (_: string, el: Element | null) =>
+  el?.tagName === "P" && el.textContent === text;
+
+describe("TaskDetailPage schema-aware content", () => {
+  beforeEach(() => {
+    server.use(
+      catalogHandler([
+        declaredEntry("job", 2, JOB_DEFINITION),
+        {
+          type: "legacy",
+          declaration: "undeclared",
+          count: 1,
+          archived_count: 0,
+        },
+      ]),
+      claimsHandler([]),
+      refsHandler([]),
+      journalHandler(),
+    );
+  });
+
+  test("presents the declared title, summary, description, state and fields in order", async () => {
+    server.use(
+      jobHandler("job", {
+        headline: "Ship the catalog",
+        pitch: "Types come from the server.",
+        body: "Line one\nLine two",
+        state: "queued",
+        owner: "dawid",
+        labels: ["ui", "catalog"],
+      }),
+    );
+    renderDrawer(JOB);
+
+    expect(
+      await screen.findByRole("dialog", { name: "Ship the catalog" }),
+    ).toBeInTheDocument();
+    expect(
+      within(region("Summary")).getByText("Types come from the server."),
+    ).toBeInTheDocument();
+    expect(
+      within(region("Description")).getByText(/Line one/),
+    ).toHaveTextContent("Line one Line two");
+
+    const fields = await within(region("Fields")).findByRole("table", {
+      name: "Task fields",
+    });
+    // Title, summary, description and lifecycle fields are not repeated.
+    expect(fieldNames(fields)).toEqual(["owner", "labels", "priority"]);
+    expect(within(fields).getByText("ui")).toBeInTheDocument();
+    expect(within(fields).getByText("catalog")).toBeInTheDocument();
+    expect(within(fields).getByText("Not set")).toBeInTheDocument();
+
+    const stateBadge = screen.getByText("queued");
+    expect(stateBadge.getAttribute("data-variant")).toBe("default");
+    // No status is fabricated for a type whose lifecycle field is `state`.
+    expect(screen.queryByText(/^status$/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Other fields" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("without a presented title the id is the heading, never Untitled", async () => {
+    server.use(
+      jobHandler("job", { title: "Not the presented field", state: "queued" }),
+    );
+    renderDrawer(JOB);
+
+    expect(
+      await screen.findByRole("dialog", { name: "job-1" }),
+    ).toBeInTheDocument();
+    await within(region("Fields")).findByRole("table", { name: "Task fields" });
+    expect(screen.queryByText(/Untitled/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Summary" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("keys the schema does not declare are listed under Other fields", async () => {
+    server.use(
+      jobHandler("job", {
+        headline: "Ship it",
+        state: "shipped",
+        legacy_note: "kept from v1",
+        parent_id: "epic-1",
+      }),
+    );
+    renderDrawer(JOB);
+
+    const other = await screen.findByRole("region", { name: "Other fields" });
+    expect(
+      within(other).getByText(sentence("Not declared by the job schema.")),
+    ).toBeInTheDocument();
+    const table = within(other).getByRole("table", { name: "Other fields" });
+    expect(fieldNames(table)).toEqual(["legacy_note"]);
+    // parent_id is a relationship, not a field.
+    expect(
+      within(region("Relationships")).getByRole("link", { name: "epic-1" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("shipped").getAttribute("data-variant")).toBe(
+      "green",
+    );
+  });
+
+  test("an undeclared type shows all stored data under Other fields", async () => {
+    server.use(jobHandler("legacy", { title: "Old work", status: "done" }));
+    renderDrawer(JOB);
+
+    expect(await screen.findByText("Not in schema")).toBeInTheDocument();
+    const other = await screen.findByRole("region", { name: "Other fields" });
+    expect(
+      within(other).getByText(
+        sentence(
+          "Type legacy is not in the current schema. Stored data is shown as-is.",
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      fieldNames(within(other).getByRole("table", { name: "Other fields" })),
+    ).toEqual(["title", "status"]);
+    expect(
+      within(region("Fields")).getByText(
+        "No fields are declared for this type.",
+      ),
+    ).toBeInTheDocument();
+    // Without a lifecycle, a plain status is shown neutrally.
+    expect(
+      screen.getByText("done", { selector: "[data-variant]" }),
+    ).toHaveAttribute("data-variant", "gray");
+  });
+
+  test("a failed catalog still renders the task data with a notice", async () => {
+    server.use(
+      jobHandler("job", { headline: "Ship it", owner: "dawid" }),
+      http.get("*/projects/*/tasks/~/types", unavailableResponse),
+    );
+    renderDrawer(JOB);
+
+    const fields = region("Fields");
+    expect(
+      await within(fields).findByText(/Field definitions unavailable/),
+    ).toBeInTheDocument();
+    expect(
+      fieldNames(within(fields).getByRole("table", { name: "Task fields" })),
+    ).toEqual(["headline", "owner"]);
+    expect(
+      within(fields).getByRole("button", { name: "Retry" }),
+    ).toBeInTheDocument();
+  });
+
+  test("history requests both resource forms and links to the journal", async () => {
+    const requests: URLSearchParams[] = [];
+    server.use(
+      jobHandler("job", { headline: "Ship it" }),
+      journalHandler((p) => requests.push(p)),
+    );
+    renderDrawer(JOB);
+
+    const history = await screen.findByRole("region", { name: "History" });
+    expect(
+      await within(history).findByText("entity.updated"),
+    ).toBeInTheDocument();
+    expect(within(history).getByText("agent:builder")).toBeInTheDocument();
+    expect(requests[0].getAll("resource")).toEqual(["job-1", "job:job-1"]);
+    expect(requests[0].get("limit")).toBe("20");
+    expect(
+      within(history).getByRole("link", { name: "Open in Journal" }),
+    ).toHaveAttribute("href", "/p/test-project/journal?resource=job-1");
+  });
+
+  test("an artifact failure does not affect history", async () => {
+    server.use(
+      jobHandler("job", { headline: "Ship it" }),
+      http.get("*/projects/*/tasks/:id/artifact-refs", unavailableResponse),
+    );
+    renderDrawer(JOB);
+
+    expect(
+      await within(region("Artifacts")).findByRole("alert"),
+    ).toHaveTextContent("Could not load artifacts.");
+    expect(
+      await within(region("History")).findByText("entity.updated"),
+    ).toBeInTheDocument();
+  });
+
+  test("a history failure does not affect artifacts and offers retry", async () => {
+    server.use(
+      jobHandler("job", { headline: "Ship it" }),
+      refsHandler([artifactRef("report", "reports/run-1")]),
+      http.get("*/projects/*/journal", unavailableResponse),
+    );
+    renderDrawer(JOB);
+
+    const history = region("History");
+    expect(await within(history).findByRole("alert")).toHaveTextContent(
+      "Could not load history.",
+    );
+    expect(
+      within(history).getByRole("button", { name: "Retry" }),
+    ).toBeInTheDocument();
+    expect(
+      await within(region("Artifacts")).findByRole("link", {
+        name: "reports/run-1",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("forbidden history is a notice while artifacts still render", async () => {
+    server.use(
+      jobHandler("job", { headline: "Ship it" }),
+      refsHandler([artifactRef("report", "reports/run-1")]),
+      http.get("*/projects/*/journal", forbiddenResponse),
+    );
+    renderDrawer(JOB);
+
+    const history = region("History");
+    expect(
+      await within(history).findByText(
+        "History is not available to this credential.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(history).queryByRole("button")).not.toBeInTheDocument();
+    expect(
+      within(history).queryByRole("link", { name: "Open in Journal" }),
+    ).not.toBeInTheDocument();
+    expect(
+      await within(region("Artifacts")).findByRole("link", {
+        name: "reports/run-1",
+      }),
+    ).toBeInTheDocument();
   });
 });
