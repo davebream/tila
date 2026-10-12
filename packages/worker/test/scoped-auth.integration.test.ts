@@ -251,6 +251,24 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
     ).toBe(403);
     expect(effects).not.toHaveBeenCalled();
   });
+  it("lets restricted credentials reach scoped search and the work catalog only", async () => {
+    const server = app();
+    const restricted = await issue({
+      role: "viewer",
+      capabilities: ["search:read", "tasks:read", "search:reindex"],
+      restrictions: { task_types: ["task"] },
+    });
+    for (const path of ["search?q=x", "tasks/~/types"])
+      expect(
+        (await request(server, `/projects/p/${path}`, restricted.plaintext))
+          .status,
+      ).toBe(200);
+    for (const path of ["search/reindex/status", "summary"])
+      expect(
+        (await request(server, `/projects/p/${path}`, restricted.plaintext))
+          .status,
+      ).toBe(403);
+  });
   it("requires both read and write for artifact restore, and denies restricted keys", async () => {
     const server = app();
     for (const capabilities of [

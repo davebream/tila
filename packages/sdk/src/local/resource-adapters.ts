@@ -123,6 +123,7 @@ import {
 } from "../conversations";
 import { toTilaErrorCode } from "../error-codes";
 import { attemptFacade, queueFacade } from "../queue-commands";
+import type { SearchOptions } from "../search";
 import { localQueueErrors } from "./queue";
 
 /**
@@ -1067,16 +1068,17 @@ function createLocalSearchMethods(project: EmbeddedProject) {
   return {
     async search(
       q: string,
-      opts?: { limit?: number; tagFilter?: string[] },
+      opts?: SearchOptions,
     ): Promise<UnifiedSearchResponse> {
-      const results = project.searchAll({
+      return project.searchPage({
         q,
         limit: opts?.limit,
         tagFilter: opts?.tagFilter,
+        kinds: opts?.kind,
+        types: opts?.type,
+        cursor: opts?.cursor,
+        syntax: opts?.syntax,
       });
-      // `searchAll` returns `UnifiedSearchResult[]` — the exact element type of
-      // the wire `results`. The wire response also requires `total`.
-      return { ok: true, results, total: results.length };
     },
   };
 }

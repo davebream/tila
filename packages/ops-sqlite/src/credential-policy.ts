@@ -162,6 +162,7 @@ export function assertCredentialRequest(
     return;
   }
   if (path === "/entity/type-counts") return; // Counts apply the restriction themselves.
+  if (path === "/search") return; // Search applies restrictions and per-kind capabilities itself.
   if (path === "/entity/list") {
     if (query.get("compact") === "true") throw new CredentialPolicyDenied();
     if (query.has("parent")) assertTaskAccess(db, policy, query.get("parent"));

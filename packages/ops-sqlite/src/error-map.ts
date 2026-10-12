@@ -14,6 +14,7 @@ import {
   GateFenceError,
   GateNotFoundError,
 } from "./gate-ops";
+import { InvalidCursorError } from "./list-cursor";
 import { QueueError } from "./queue-internals";
 import {
   RecordAlreadyExistsError,
@@ -52,7 +53,8 @@ type ProjectErrorConstructor =
   | typeof EntityAlreadyExistsError
   | typeof EntityNotFoundError
   | typeof DoIdempotencyConflictError
-  | typeof SchemaCorruptError;
+  | typeof SchemaCorruptError
+  | typeof InvalidCursorError;
 
 export type ProjectErrorResponse = {
   errorClass: ProjectErrorConstructor;
@@ -163,6 +165,13 @@ export const projectErrorResponses: ProjectErrorResponse[] = [
     errorClass: SchemaCorruptError,
     status: 500,
     code: "schema-corrupt",
+    retryable: false,
+  },
+  // A cursor that is malformed or was issued for another filter or sort.
+  {
+    errorClass: InvalidCursorError,
+    status: 400,
+    code: "invalid-cursor",
     retryable: false,
   },
 ];

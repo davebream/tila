@@ -12,14 +12,17 @@ export class SchemaWriteError extends Error {
   }
 }
 
-/** Must be called with the transaction performing the entity write. */
+/**
+ * Must be called with the transaction performing the entity write. Returns
+ * the resolved current schema (or null) so the caller can reuse it.
+ */
 export function assertCurrentEntityWrite(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schemaModule>,
   type: string,
   data: Record<string, unknown>,
-): void {
+): TilaSchemaToml | null {
   const current = resolveCurrentSchema(db);
-  if (!current) return;
+  if (!current) return null;
   const result = validatedWrite(data, current, type);
   if (!result.ok) throw new SchemaWriteError(result.errors.join("; "));
   const unit = current.work_units[type];
@@ -32,6 +35,7 @@ export function assertCurrentEntityWrite(
         `Invalid lifecycle state for ${type}.${lifecycle.field}`,
       );
   }
+  return current;
 }
 
 // ---------------------------------------------------------------------------

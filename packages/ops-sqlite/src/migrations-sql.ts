@@ -1433,6 +1433,54 @@ function runMigration0034(storage: MigrationStorage): void {
     storage.sql.exec(MIGRATION_0034);
 }
 
+export const MIGRATION_0035 = `
+-- #300: deterministic keyset paging for task lists, and task ids in search.
+CREATE INDEX IF NOT EXISTS idx_entities_created_id ON entities(created_at, id);
+CREATE INDEX IF NOT EXISTS idx_entities_updated_id ON entities(updated_at, id);
+CREATE INDEX IF NOT EXISTS idx_entities_type_id ON entities(type, id);
+`;
+
+/** Rebuilds the entity FTS index with an `entity_id` column (#300). */
+export const MIGRATION_0035_SEARCH = `
+DROP TRIGGER IF EXISTS esd_ai;
+DROP TRIGGER IF EXISTS esd_au;
+DROP TRIGGER IF EXISTS esd_ad;
+DROP TABLE IF EXISTS entity_search_docs_fts;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS entity_search_docs_fts USING fts5(
+  name,
+  entity_id,
+  content=entity_search_docs,
+  content_rowid=rowid
+);
+
+CREATE TRIGGER IF NOT EXISTS esd_ai AFTER INSERT ON entity_search_docs BEGIN
+  INSERT INTO entity_search_docs_fts(rowid, name, entity_id)
+  VALUES (new.rowid, new.name, new.entity_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS esd_au AFTER UPDATE ON entity_search_docs BEGIN
+  INSERT INTO entity_search_docs_fts(entity_search_docs_fts, rowid, name, entity_id)
+  VALUES ('delete', old.rowid, old.name, old.entity_id);
+  INSERT INTO entity_search_docs_fts(rowid, name, entity_id)
+  VALUES (new.rowid, new.name, new.entity_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS esd_ad AFTER DELETE ON entity_search_docs BEGIN
+  INSERT INTO entity_search_docs_fts(entity_search_docs_fts, rowid, name, entity_id)
+  VALUES ('delete', old.rowid, old.name, old.entity_id);
+END;
+
+INSERT INTO entity_search_docs_fts(entity_search_docs_fts) VALUES ('rebuild');
+`;
+
+function runMigration0035(storage: MigrationStorage): void {
+  storage.sql.exec(MIGRATION_0035);
+  // Pre-search local databases have no entity search docs to rebuild.
+  if (tableExists(storage, "entity_search_docs"))
+    storage.sql.exec(MIGRATION_0035_SEARCH);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1468,4 +1516,5 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 32, run: runMigration0032 },
   { version: 33, run: runMigration0033 },
   { version: 34, run: runMigration0034 },
+  { version: 35, run: runMigration0035 },
 ];
