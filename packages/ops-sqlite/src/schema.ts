@@ -835,3 +835,123 @@ export const conversationState = sqliteTable("_conversation_state", {
   singleton: integer("singleton").primaryKey(),
   generation: text("generation").notNull(),
 });
+
+// Managed work execution. These rows outlive expiring claims and generic receipts.
+export const queuePolicy = sqliteTable("queue_policy", {
+  singleton: integer("singleton").primaryKey(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  paused: integer("paused", { mode: "boolean" }).notNull().default(true),
+  execution_limit: integer("execution_limit"),
+  wip_limit: integer("wip_limit"),
+  lease_ms: integer("lease_ms").notNull().default(60_000),
+  revision: integer("revision").notNull().default(0),
+});
+export const queueEntries = sqliteTable(
+  "queue_entries",
+  {
+    id: text("id").primaryKey(),
+    task_id: text("task_id")
+      .notNull()
+      .references(() => entities.id),
+    state: text("state")
+      .$type<import("@tila/schemas").QueueEntry["state"]>()
+      .notNull(),
+    priority: integer("priority").notNull().default(0),
+    enqueue_order: integer("enqueue_order").notNull(),
+    required_capabilities: text("required_capabilities", { mode: "json" })
+      .$type<string[]>()
+      .notNull(),
+    target_principal: text("target_principal"),
+    retry_policy: text("retry_policy", { mode: "json" })
+      .$type<import("@tila/schemas").QueueRetryPolicy>()
+      .notNull(),
+    revision: integer("revision").notNull().default(1),
+    available_at: integer("available_at").notNull(),
+    created_at: integer("created_at").notNull(),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("queue_entries_unfinished_task")
+      .on(table.task_id)
+      .where(sql`${table.state} IN ('queued','admitted')`),
+    index("queue_entries_order").on(
+      table.priority,
+      table.enqueue_order,
+      table.id,
+    ),
+  ],
+);
+export const workAttempts = sqliteTable(
+  "work_attempts",
+  {
+    id: text("id").primaryKey(),
+    entry_id: text("entry_id")
+      .notNull()
+      .references(() => queueEntries.id),
+    task_id: text("task_id")
+      .notNull()
+      .references(() => entities.id),
+    resource: text("resource").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    state: text("state")
+      .$type<import("@tila/schemas").AttemptState>()
+      .notNull(),
+    revision: integer("revision").notNull().default(1),
+    fence: integer("fence").notNull(),
+    lease_expires_at: integer("lease_expires_at"),
+    accepted_at: integer("accepted_at"),
+    session: text("session", { mode: "json" }).$type<
+      import("@tila/schemas").AttemptSession
+    >(),
+    checkpoint: text("checkpoint", { mode: "json" }).$type<
+      Record<string, unknown>
+    >(),
+    cancellation_requested: integer("cancellation_requested", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    suspension_requested: integer("suspension_requested", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    predecessor_id: text("predecessor_id"),
+    outcome: text("outcome", { mode: "json" }).$type<
+      import("@tila/schemas").AttemptOutcome
+    >(),
+    created_at: integer("created_at").notNull(),
+    updated_at: integer("updated_at").notNull(),
+    finished_at: integer("finished_at"),
+  },
+  (table) => [
+    uniqueIndex("work_attempts_nonterminal_task")
+      .on(table.task_id)
+      .where(sql`${table.state} != 'terminal'`),
+    index("work_attempts_entry").on(table.entry_id, table.created_at),
+    index("work_attempts_expiry").on(table.state, table.lease_expires_at),
+  ],
+);
+export const executionReservations = sqliteTable("execution_reservations", {
+  task_id: text("task_id")
+    .primaryKey()
+    .references(() => entities.id),
+  entry_id: text("entry_id")
+    .notNull()
+    .references(() => queueEntries.id),
+  attempt_id: text("attempt_id")
+    .notNull()
+    .references(() => workAttempts.id),
+  execution_held: integer("execution_held", { mode: "boolean" }).notNull(),
+  wip_held: integer("wip_held", { mode: "boolean" }).notNull(),
+  updated_at: integer("updated_at").notNull(),
+});
+export const queueOperationReceipts = sqliteTable("queue_operation_receipts", {
+  key: text("key").primaryKey(),
+  request: text("request").notNull(),
+  result: text("result", { mode: "json" })
+    .$type<Record<string, unknown>>()
+    .notNull(),
+  entry_id: text("entry_id").references(() => queueEntries.id),
+  attempt_id: text("attempt_id").references(() => workAttempts.id),
+  created_at: integer("created_at").notNull(),
+});
