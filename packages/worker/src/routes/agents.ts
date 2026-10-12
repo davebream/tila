@@ -2,15 +2,17 @@ import {
   AgentIdSchema,
   AgentRegistrationSchema,
   AttachAgentBindingSchema,
-  PROJECT_ROLE_RANK,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { RuntimeDenied, RuntimeStore } from "../d1";
-import { runtimeIdentity } from "../lib/agent-authority";
+import {
+  agentAuthorityFor,
+  agentAuthorityHeaders,
+  runtimeIdentity,
+} from "../lib/agent-authority";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
-import { principalIdFor } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
 export const agents = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
@@ -38,25 +40,8 @@ agents.all("*", async (c) => {
       },
       400,
     );
-  const token = c.get("tokenResult");
-  const policy = c.get("credentialPolicy");
-  const role = c.get("effectiveRole");
-  const authority = {
-    principal_id: principalIdFor(token),
-    can_manage: policy
-      ? policy.capabilities.includes("agents:manage")
-      : (token.kind === "d1-token" && token.scopes === "full") ||
-        (role !== undefined &&
-          PROJECT_ROLE_RANK[role] >= PROJECT_ROLE_RANK.maintainer),
-    runtime: runtimeIdentity(
-      token.kind === "d1-token" ? token.runtime : undefined,
-    ),
-    acting_runtime: null as ReturnType<typeof runtimeIdentity>,
-    terminal_run_id: null as string | null,
-  };
-  const headers = () => ({
-    "X-Tila-Agent-Authority": JSON.stringify(authority),
-  });
+  const authority = agentAuthorityFor(c);
+  const headers = () => agentAuthorityHeaders(authority);
   let body: unknown;
   if (c.req.method === "POST") {
     const raw = await c.req.json().catch(() => null);

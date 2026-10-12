@@ -3,6 +3,7 @@ import {
   AgentIdSchema,
   AgentRegistrationSchema,
   AttachAgentBindingSchema,
+  RUNTIME_VIEW_MAX_LIMIT,
   RuntimeIdentitySchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
@@ -113,6 +114,20 @@ export function createAgentRoutes(deps: RouterDeps) {
     return c.json({
       ok: true,
       run_id: agentBindingOps.current(deps.db, id)?.holder.run_id ?? null,
+    });
+  });
+  app.get("/agents/internal/runtime-page", (c) => {
+    const input = z
+      .object({
+        after: AgentIdSchema.optional(),
+        agent: AgentIdSchema.optional(),
+        limit: z.coerce.number().int().min(1).max(RUNTIME_VIEW_MAX_LIMIT),
+      })
+      .strict()
+      .parse(c.req.query());
+    return c.json({
+      ok: true,
+      ...agentBindingOps.runtimePage(deps.db, c.get("authority"), input),
     });
   });
   app.post("/agents/internal/expire", async (c) => {

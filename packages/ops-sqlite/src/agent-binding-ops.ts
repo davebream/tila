@@ -1,12 +1,14 @@
+import { bindingDetailVisible, summarizeBinding } from "@tila/core";
 import {
   type AgentRegistration,
+  type AgentRuntimePage,
   AgentSchema,
   type AttachAgentBinding,
   type ConsumerBinding,
   ConsumerBindingSchema,
   type RuntimeIdentity,
 } from "@tila/schemas";
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ne } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
   invalidateRestoredConversations,
@@ -122,26 +124,24 @@ export function current(db: DB, id: string) {
     .get();
   return row ? binding(row) : null;
 }
+function viewer(authority: AgentAuthority) {
+  return {
+    principal_id: authority.principal_id,
+    can_manage: authority.can_manage,
+    run_id: authority.runtime?.run_id ?? null,
+  };
+}
 export function view(db: DB, id: string, authority: AgentAuthority) {
   const value = agent(db, id);
   const active = current(db, id);
-  const full =
-    authority.can_manage ||
-    value.owner_principal_id === authority.principal_id ||
-    (active !== null && active.holder.run_id === authority.runtime?.run_id);
+  const full = bindingDetailVisible(
+    value.owner_principal_id,
+    active,
+    viewer(authority),
+  );
   return {
     agent: full ? value : { ...value, bind_policy: [] },
-    binding:
-      !active || full
-        ? active
-        : {
-            consumer_binding_id: active.consumer_binding_id,
-            agent_id: active.agent_id,
-            binding_epoch: active.binding_epoch,
-            state: active.state,
-            mechanism: active.mechanism,
-            lease_expires_at: active.lease_expires_at,
-          },
+    binding: !active || full ? active : summarizeBinding(active),
   };
 }
 export function list(db: DB, authority: AgentAuthority) {
@@ -313,6 +313,23 @@ export function attach(
     return binding(row);
   });
 }
+/** Holder (live acting run), agent manager or agent owner. */
+export function releaseAuthorized(
+  ownerPrincipalId: string,
+  active: ConsumerBinding,
+  authority: AgentAuthority,
+  now: number,
+) {
+  const holder =
+    authority.runtime?.run_role === "acting" &&
+    authority.runtime.run_id === active.holder.run_id &&
+    authority.runtime.lease_expires_at * 1000 > now;
+  return (
+    holder ||
+    authority.can_manage ||
+    authority.principal_id === ownerPrincipalId
+  );
+}
 export function release(
   db: DB,
   id: string,
@@ -326,15 +343,7 @@ export function release(
     if (active.binding_epoch !== epoch)
       fail("stale-binding", "Binding epoch changed", 409);
     const value = agent(tx, id);
-    const holder =
-      authority.runtime?.run_role === "acting" &&
-      authority.runtime.run_id === active.holder.run_id &&
-      authority.runtime.lease_expires_at * 1000 > now;
-    if (
-      !holder &&
-      !authority.can_manage &&
-      authority.principal_id !== value.owner_principal_id
-    )
+    if (!releaseAuthorized(value.owner_principal_id, active, authority, now))
       fail(
         "permission-denied",
         "Only the holder or agent manager can release a binding",
@@ -349,6 +358,102 @@ export function release(
       )
       .run();
   });
+}
+function latestEnded(db: DB, id: string) {
+  const row = db
+    .select()
+    .from(schema.agentBindings)
+    .where(
+      and(
+        eq(schema.agentBindings.agent_id, id),
+        ne(schema.agentBindings.state, "active"),
+      ),
+    )
+    .orderBy(
+      desc(schema.agentBindings.updated_at),
+      desc(schema.agentBindings.binding_epoch),
+    )
+    .limit(1)
+    .get();
+  return row ? binding(row) : null;
+}
+function presenceOf(db: DB, value: ConsumerBinding) {
+  const row = db
+    .select()
+    .from(schema.presence)
+    .where(
+      and(
+        eq(schema.presence.principal_id, value.principal_id),
+        eq(schema.presence.participant_id, value.participant_id),
+      ),
+    )
+    .get();
+  return row
+    ? {
+        principal_id: row.principal_id,
+        participant_id: row.participant_id,
+        environment: JSON.parse(row.environment),
+        last_seen: row.last_seen,
+      }
+    : null;
+}
+/**
+ * One page of non-archived agents with the active binding and the latest
+ * binding that no longer holds the mailbox. Bindings are unredacted; `detail`
+ * tells the Worker what the caller may see.
+ */
+export function runtimePage(
+  db: DB,
+  authority: AgentAuthority,
+  options: { after?: string; limit: number; agent?: string },
+  now = Date.now(),
+): AgentRuntimePage {
+  const filters = [eq(schema.agents.archived, false)];
+  if (options.agent) filters.push(eq(schema.agents.id, options.agent));
+  else if (options.after) filters.push(gt(schema.agents.id, options.after));
+  const agents = db
+    .select()
+    .from(schema.agents)
+    .where(and(...filters))
+    .orderBy(asc(schema.agents.id))
+    .limit(options.limit + 1)
+    .all();
+  const page = agents.slice(0, options.limit);
+  const who = viewer(authority);
+  return {
+    rows: page.map((row) => {
+      const active = current(db, row.id);
+      const ended = latestEnded(db, row.id);
+      const occupant = (value: ConsumerBinding) => ({
+        binding: value,
+        detail: bindingDetailVisible(row.owner_principal_id, value, who)
+          ? ("full" as const)
+          : ("redacted" as const),
+        presence: presenceOf(db, value),
+      });
+      return {
+        agent: {
+          id: row.id,
+          name: row.name,
+          binding_epoch: row.binding_epoch,
+        },
+        current: active
+          ? {
+              ...occupant(active),
+              release_authorized: releaseAuthorized(
+                row.owner_principal_id,
+                active,
+                authority,
+                now,
+              ),
+            }
+          : null,
+        previous: ended ? occupant(ended) : null,
+      };
+    }),
+    next_after:
+      agents.length > options.limit ? (page.at(-1)?.id ?? null) : null,
+  };
 }
 export function expire(
   db: DB,

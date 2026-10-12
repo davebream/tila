@@ -145,3 +145,22 @@ export type { ContinuityBackend } from "./interfaces/continuity-backend";
 export * from "./github-oidc-policy";
 
 export type { AttemptBackend } from "./interfaces/attempt-backend";
+
+// Runtime view: binding visibility and observation derivation
+export {
+  bindingDetailVisible,
+  summarizeBinding,
+  capabilityState,
+  deriveObservation,
+  deriveReleaseCommand,
+  assembleRuntimeView,
+  UNSUPPORTED_HOST_COMMAND,
+  type BindingViewer,
+  type CapabilityState,
+  type ObservationInput,
+  type RuntimeRunRecord,
+  type RuntimeEnrollmentRecord,
+  type RuntimeVisibilityScope,
+  type Settled,
+  type AssembleRuntimeViewInput,
+} from "./runtime-observation";
