@@ -1,4 +1,4 @@
-import { ApplyStrategySchema } from "@tila/schemas";
+import { ApplyStrategySchema, SchemaApplyRequestSchema } from "@tila/schemas";
 import { Hono } from "hono";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
@@ -89,15 +89,28 @@ schemaRoutes.post("/", requirePermission("write"), async (c) => {
   }
 
   const tokenResult = c.get("tokenResult");
+  const parsed = SchemaApplyRequestSchema.safeParse(raw);
+  if (!parsed.success)
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "validation-error",
+          message: parsed.error.message,
+          retryable: false,
+        },
+      },
+      400,
+    );
   const stub = c.get("doStub");
   const res = await forwardToDO(
     stub,
     "/schema/apply",
     "POST",
     {
-      definition: raw.definition,
+      ...parsed.data,
       applied_by: tokenResult.name,
-      strategy: raw.strategy,
+      idempotency_key: c.get("idempotencyKey") ?? parsed.data.idempotency_key,
       ...identityPayload(c),
     },
     undefined,
@@ -114,3 +127,14 @@ schemaRoutes.post("/", requirePermission("write"), async (c) => {
 
   return res;
 });
+
+schemaRoutes.get("/history", async (c) =>
+  forwardToDO(
+    c.get("doStub"),
+    `/schema/history?${new URL(c.req.url).searchParams}`,
+    "GET",
+    undefined,
+    undefined,
+    analyticsCtxFrom(c),
+  ),
+);

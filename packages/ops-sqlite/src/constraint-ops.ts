@@ -1,9 +1,28 @@
-import { parseSchemaToml } from "@tila/core";
+import { parseSchemaToml, validatedWrite } from "@tila/core";
 import type { TilaSchemaToml } from "@tila/schemas";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type * as schemaModule from "./schema";
 import { SchemaCorruptError } from "./schema-errors";
 import { getCurrentSchema } from "./schema-ops";
+
+export class SchemaWriteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SchemaWriteError";
+  }
+}
+
+/** Must be called with the transaction performing the entity write. */
+export function assertCurrentEntityWrite(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schemaModule>,
+  type: string,
+  data: Record<string, unknown>,
+): void {
+  const current = resolveCurrentSchema(db);
+  if (!current) return;
+  const result = validatedWrite(data, current, type);
+  if (!result.ok) throw new SchemaWriteError(result.errors.join("; "));
+}
 
 // ---------------------------------------------------------------------------
 // Types

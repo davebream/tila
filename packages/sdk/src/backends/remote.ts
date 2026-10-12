@@ -162,6 +162,7 @@ const SchemaApplyLenientSchema = z.object({
   version: z.number().int().nullable().optional(),
   changes: z.array(z.string()).optional(),
   noChange: z.boolean().optional(),
+  revision: z.number().int().nonnegative().optional(),
 });
 
 const StateListInternalSchema = z.object({
@@ -790,7 +791,12 @@ export class RemoteBackend
     });
     return {
       version: result.version,
-      definition: result.schema ? JSON.stringify(result.schema) : null,
+      revision: result.version ?? 0,
+      definition: result.schema
+        ? typeof result.schema.definition === "string"
+          ? result.schema.definition
+          : JSON.stringify(result.schema)
+        : null,
     };
   }
 
@@ -799,6 +805,12 @@ export class RemoteBackend
       definition: input.definition,
     };
     if (input.strategy) body.strategy = input.strategy;
+    if (input.expected_revision !== undefined)
+      body.expected_revision = input.expected_revision;
+    if (input.reviewed_definition !== undefined)
+      body.reviewed_definition = input.reviewed_definition;
+    if (input.idempotency_key !== undefined)
+      body.idempotency_key = input.idempotency_key;
     const result = await this.client.post(
       `/projects/${this.projectId}/schema`,
       body,
@@ -809,6 +821,7 @@ export class RemoteBackend
       version: result.version ?? null,
       changes: result.changes ?? [],
       noChange: result.noChange ?? false,
+      revision: result.revision,
     };
   }
 

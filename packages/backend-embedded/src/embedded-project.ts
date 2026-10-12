@@ -711,6 +711,7 @@ export class EmbeddedProject
     const row = schemaOps.getCurrentSchema(this.db);
     return {
       version: row?.version ?? null,
+      revision: row?.version ?? 0,
       definition: row?.definition ?? null,
     };
   }
@@ -722,11 +723,19 @@ export class EmbeddedProject
         input.definition,
         "local",
         input.strategy,
+        {
+          principalId: this.identity.principal_id,
+          participantId: this.identity.participant_id,
+          environment: this.identity.environment,
+          actor: "local",
+        },
+        input,
       );
       if (result.ok) {
         return {
           ok: true,
           version: result.version,
+          revision: result.revision,
           changes: result.changes,
           noChange: false,
         };
@@ -737,6 +746,7 @@ export class EmbeddedProject
           version: null,
           changes: [],
           noChange: true,
+          revision: result.revision,
         };
       }
       // destructive
@@ -751,6 +761,14 @@ export class EmbeddedProject
   }
 
   // ---------- SummaryBackend ----------
+
+  async previewSchema(definition: string) {
+    return this.db.transaction((tx) => schemaOps.previewSchema(tx, definition));
+  }
+
+  async getSchemaHistory(limit = 50, before?: number) {
+    return schemaOps.listSchemaHistory(this.db, limit, before);
+  }
 
   async getSummary(): Promise<ProjectSummary> {
     return this.db.transaction((tx) => summaryOps.getSummary(tx));

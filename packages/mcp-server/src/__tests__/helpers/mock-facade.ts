@@ -133,7 +133,7 @@ export type MockFacadeShape = {
   handoffs: Record<"create" | "get" | "list", Mock>;
   reentry: Mock;
   presence: Record<"heartbeat" | "list" | "listAll", Mock>;
-  schema: Record<"get" | "apply" | "history", Mock>;
+  schema: Record<"get" | "apply" | "preview" | "history", Mock>;
   summary: Record<"get", Mock>;
   search: Record<"search", Mock>;
   indexes: Record<"create" | "addEntry" | "listEntries", Mock>;
@@ -229,7 +229,7 @@ export function createMockFacade(): MockFacadeShape {
     handoffs: fns("create", "get", "list"),
     reentry: vi.fn(),
     presence: fns("heartbeat", "list", "listAll"),
-    schema: fns("get", "apply", "history"),
+    schema: fns("get", "apply", "preview", "history"),
     summary: fns("get"),
     search: fns("search"),
     indexes: fns("create", "addEntry", "listEntries"),

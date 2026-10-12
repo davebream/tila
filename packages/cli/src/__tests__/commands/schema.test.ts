@@ -176,6 +176,22 @@ describe("tila schema apply", () => {
     );
   });
 
+  it("passes an explicit revision and stable retry key without replacing them", async () => {
+    mockLoadComposedSchema.mockReturnValue(COMPOSED_OK);
+    mockApplySchema.mockResolvedValue({ ok: true, version: 3, changes: [] });
+    await runCmd(getSubCommand(await loadCommand(), "apply"), {
+      json: true,
+      "expected-revision": "2",
+      "idempotency-key": "edit-2",
+    });
+    expect(mockApplySchema).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expected_revision: 2,
+        idempotency_key: "edit-2",
+      }),
+    );
+  });
+
   it("(b) FILE_NOT_FOUND → JSON error + exit 1, no extra human stderr line in --json mode", async () => {
     mockLoadComposedSchema.mockReturnValue(FILE_NOT_FOUND);
 
@@ -349,6 +365,11 @@ describe("tila schema diff", () => {
         unitType: "task",
         fieldName: "priority",
       }),
+      {
+        kind: "definition-changed",
+        path: "schema_version",
+        destructive: false,
+      },
     ]);
   });
 

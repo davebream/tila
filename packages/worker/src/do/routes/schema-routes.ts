@@ -11,7 +11,10 @@ import {
   schemaOps,
   templateOps,
 } from "@tila/ops-sqlite";
-import { InstantiateTemplateRequestSchema } from "@tila/schemas";
+import {
+  InstantiateTemplateRequestSchema,
+  SchemaApplyRequestSchema,
+} from "@tila/schemas";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { originFromBody } from "./origin";
@@ -43,6 +46,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
       ok: true,
       schema: current,
       version: current?.version ?? null,
+      revision: current?.version ?? 0,
     });
   });
 
@@ -52,18 +56,29 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
       definition: string;
       applied_by: string;
       strategy?: string;
+      expected_revision?: number;
+      reviewed_definition?: string;
+      idempotency_key?: string;
       actor_token_id?: string | null;
       source?: string | null;
       source_version?: string | null;
     };
     const schemaOrigin = originFromBody(body as Record<string, unknown>);
     try {
+      // The Worker may use a caller-scoped key longer than the public key limit.
+      const parsed = SchemaApplyRequestSchema.safeParse({
+        ...body,
+        idempotency_key: undefined,
+      });
+      if (!parsed.success)
+        return jsonError(c, 400, "validation-error", parsed.error.message);
       const result = schemaOps.applySchema(
         db,
         body.definition,
         body.applied_by,
         body.strategy,
         schemaOrigin,
+        body,
       );
       if (!result.ok && result.reason === "no-change") {
         return c.json({
@@ -71,6 +86,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
           version: null,
           changes: [],
           noChange: true,
+          revision: result.revision,
         });
       }
       if (!result.ok && result.reason === "destructive") {
@@ -82,6 +98,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
         ok: true,
         version: result.version,
         changes: result.changes,
+        revision: result.revision,
       });
     } catch (e) {
       if (e instanceof schemaOps.SchemaParseException) {
@@ -89,6 +106,31 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
       }
       throw e;
     }
+  });
+
+  app.get("/schema/history", (c) => {
+    const limit = Number(c.req.query("limit") ?? 50);
+    const before =
+      c.req.query("before") === undefined
+        ? undefined
+        : Number(c.req.query("before"));
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 250 ||
+      (before !== undefined && (!Number.isSafeInteger(before) || before < 1))
+    ) {
+      return jsonError(
+        c,
+        400,
+        "validation-error",
+        "limit must be 1–250 and before a positive revision",
+      );
+    }
+    return c.json({
+      ok: true,
+      entries: schemaOps.listSchemaHistory(deps.db, limit, before),
+    });
   });
 
   app.post("/schema/preview", async (c) => {

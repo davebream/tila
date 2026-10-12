@@ -381,6 +381,11 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
         unitType: "task",
         fieldName: "priority",
       }),
+      {
+        kind: "definition-changed",
+        path: "schema_version",
+        destructive: false,
+      },
     ]);
   });
 

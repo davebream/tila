@@ -10,15 +10,15 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–31 minus 21
- * (v21 = DO-only idempotency table). The archive watermark and transfer lock
+ * Canonical shared versions present in the embedded set: 1–31.
+ * The transactional receipts, archive watermark and transfer lock
  * are shared so cloud/local backups have identical recovery semantics.
  * The embedded-only idempotency overlay is appended
  * at IDEMPOTENCY_MIGRATION_VERSION, above the shared range.
  */
 const CANONICAL_VERSIONS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23,
-  24, 25, 26, 27, 28, 29, 30, 31,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+  23, 24, 25, 26, 27, 28, 29, 30, 31,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,
@@ -338,4 +338,18 @@ describe("pre-feature stale-schema detection", () => {
       ),
     ).toBe(false);
   });
+});
+
+it("backfills transactional receipts in databases that previously skipped migration 21", () => {
+  const { storage, appliedOrder } = createFakeStorage();
+  for (const version of EXPECTED_VERSIONS.filter((version) => version !== 21)) {
+    storage.sql.exec(
+      "INSERT INTO _migrations (version, applied_at) VALUES (?, ?)",
+      version,
+      1,
+    );
+  }
+  appliedOrder.length = 0;
+  runEmbeddedMigrations(storage);
+  expect(appliedOrder).toEqual([21]);
 });

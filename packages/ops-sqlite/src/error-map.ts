@@ -1,5 +1,6 @@
 import { ContinuityError, FenceError } from "@tila/core";
 import { ArtifactReviewError } from "./artifact-review-ops";
+import { SchemaWriteError } from "./constraint-ops";
 import { DoIdempotencyConflictError } from "./do-idempotency-ops";
 import { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
 import {
@@ -26,6 +27,7 @@ import {
 // module init. Imported for local use in projectErrorResponses and re-exported
 // for back-compat (index.ts and downstream import it from here).
 import { SchemaCorruptError } from "./schema-errors";
+import { SchemaPreconditionError } from "./schema-ops";
 
 export { SchemaCorruptError } from "./schema-errors";
 
@@ -170,6 +172,15 @@ export function mapProjectError(err: Error): {
   retryable: boolean;
   extras?: Record<string, unknown>;
 } | null {
+  if (err instanceof SchemaWriteError)
+    return { status: 422, code: "constraint-violation", retryable: false };
+  if (err instanceof SchemaPreconditionError)
+    return {
+      status: err.code === "schema-review-required" ? 428 : 412,
+      code: err.code,
+      retryable: false,
+      extras: { revision: err.revision },
+    };
   if (err instanceof ArtifactReviewError)
     return {
       status: err.status,

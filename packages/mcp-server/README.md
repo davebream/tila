@@ -39,7 +39,7 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (69)
+## Tools (70)
 
 The default catalog contains **six workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
@@ -171,6 +171,7 @@ Artifact results expose provenance and review state; a matching hash does not es
 | `tila_handoff_get` | Read a handoff by ID |
 | `tila_handoff_list` | List this participant's handoffs or handoffs referencing a resource |
 | `tila_schema_update` | Apply a new TOML schema definition |
+| `tila_schema_preview` | Preview configuration changes and return the revision and reviewed definition for conditional apply |
 | `tila_template_list` | List available task templates |
 | `tila_template_instantiate` | Create tasks from a template |
 

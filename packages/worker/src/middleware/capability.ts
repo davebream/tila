@@ -131,6 +131,7 @@ export function routeCapability(
     ["POST", /^\/gates\/[^/]+\/resolve$/, "gates:resolve"],
     ["DELETE", /^\/gates\/[^/]+$/, "gates:delete"],
     ["GET", /^\/(?:schema|templates)$/, "schema:read"],
+    ["GET", /^\/schema\/history$/, "schema:read"],
     ["POST", /^\/schema\/preview$/, "schema:preview"],
     ["POST", /^\/schema$/, "schema:write"],
     ["POST", /^\/templates\/instantiate$/, "templates:instantiate"],
