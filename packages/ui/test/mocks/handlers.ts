@@ -1,6 +1,9 @@
 import { http, HttpResponse } from "msw";
 
 export const handlers = [
+  http.get("*/api/auth/github/login-config", () =>
+    HttpResponse.json({ ok: true, enabled: false }),
+  ),
   // List entities
   http.get("*/projects/*/tasks", () => {
     return HttpResponse.json({
