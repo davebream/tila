@@ -13,10 +13,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 
-import { AuthStore, FakeSecretStore, TilaPaths } from "@tila/auth-store";
-import type { InfraRecord } from "@tila/auth-store";
 import { stringify } from "smol-toml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AuthStore, FakeSecretStore, TilaPaths } from "../../auth-store";
+import type { InfraRecord } from "../../auth-store";
 
 import { resolveInfraConfig } from "../../lib/infra-fallback";
 

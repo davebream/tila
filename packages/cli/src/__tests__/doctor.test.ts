@@ -4,6 +4,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { InstanceKey } from "@tila/schemas";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AuthStore,
   FakeSecretStore,
@@ -12,10 +14,8 @@ import {
   KeychainUnavailableError,
   TilaPaths,
   processEnvProbe,
-} from "@tila/auth-store";
-import type { ResolveOutcome, TraceStep } from "@tila/auth-store";
-import type { InstanceKey } from "@tila/schemas";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+} from "../auth-store";
+import type { ResolveOutcome, TraceStep } from "../auth-store";
 
 // ---------------------------------------------------------------------------
 // Mocks (hoisted — apply to all tests in this file)

@@ -68,7 +68,7 @@ export interface NodeConnectionOptions {
  * Open a local SQLite database for a tila project under plain Node, backed by
  * `better-sqlite3`.
  *
- * This is the Node analogue of `@tila/backend-local`'s `createLocalConnection`
+ * This is the Node analogue of `cli/src/local`'s `createLocalConnection`
  * (which uses `bun:sqlite`). It:
  *
  *  - dynamically `import()`s BOTH `better-sqlite3` AND `drizzle-orm/better-sqlite3`

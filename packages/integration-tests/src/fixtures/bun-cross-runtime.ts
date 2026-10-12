@@ -3,7 +3,7 @@
  * (`src/local-cross-runtime.test.ts`).
  *
  * This script is spawned by the Node-driven vitest test via `spawnSync("bun", …)`.
- * It exercises the BUN embedded path (`@tila/backend-local` →
+ * It exercises the BUN embedded path (`cli/src/local` →
  * `LocalProject.open`/`LocalArtifactBackend`, which use `bun:sqlite`) against a
  * DB file the Node side also opens (via `tila-sdk/local` → better-sqlite3). The
  * single DB file is the interop boundary.
@@ -28,7 +28,7 @@ import {
   LocalArtifactBackend,
   LocalProject,
   createLocalConnection,
-} from "@tila/backend-local";
+} from "../../../cli/src/local";
 
 const DB = requireEnv("DB");
 const ARTIFACTS = process.env.ARTIFACTS ?? `${DB}.artifacts`;

@@ -89,7 +89,6 @@ test("scopes follow tila's real transitive package graph, including migrations",
       [
         "@tila/backend-do",
         "@tila/backend-embedded",
-        "@tila/backend-local",
         "tila-sdk",
         "tila-cli",
         "tila-mcp-server",

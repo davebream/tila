@@ -297,7 +297,7 @@ describe("validateTokenScopes()", () => {
         json: () => Promise.resolve({}),
         text: () => Promise.resolve("{}"),
       });
-    });
+    }) as unknown as typeof fetch;
   }
 
   it("throws TokenScopeError for Workers Scripts: Edit when /workers/scripts returns 403", async () => {
@@ -433,7 +433,7 @@ describe("validateTokenScopes()", () => {
       }
       return Promise.reject(new Error("Network error"));
     });
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     // Network errors on capability probes are non-fatal
     await expect(validateTokenScopes("tok", "acc123")).resolves.toBeUndefined();

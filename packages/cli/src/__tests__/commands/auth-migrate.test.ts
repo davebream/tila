@@ -2,7 +2,7 @@
  * Integration tests for `tila auth migrate` subcommand (WI-M Task 9).
  *
  * Pattern: invoke run handler directly; mock buildAuthStore + maybePromoteLegacyAfterWrite
- * from lib/instance-context; mock promoteLegacy from @tila/auth-store; use
+ * from lib/instance-context; mock promoteLegacy from cli/src/auth-store; use
  * FakeSecretStore-backed AuthStore over a temp TILA_HOME + temp project .tila dir.
  *
  * Tests:
@@ -17,11 +17,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { PromoteOptions, PromoteResult } from "@tila/auth-store";
-import { AuthStore, FakeSecretStore, TilaPaths } from "@tila/auth-store";
 import type { InstanceKey } from "@tila/schemas";
 import type { CommandDef, SubCommandsDef } from "citty";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PromoteOptions, PromoteResult } from "../../auth-store";
+import { AuthStore, FakeSecretStore, TilaPaths } from "../../auth-store";
 import { resetGlobalFlags } from "../../lib/global-flags";
 
 // ---- module mocks -------------------------------------------------------
@@ -53,7 +53,7 @@ vi.mock("../../lib/provisioning", () => ({
 }));
 
 // Replace promoteLegacy at the module level so the command uses our mock.
-vi.mock("@tila/auth-store", async (importOriginal) => {
+vi.mock("../../auth-store", async (importOriginal) => {
   const orig = (await importOriginal()) as Record<string, unknown>;
   return { ...orig, promoteLegacy: mockPromoteLegacy };
 });

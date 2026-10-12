@@ -32,7 +32,7 @@ pnpm --filter @tila/backend-do test -- --run artifact-ops
 pnpm --filter @tila/worker typecheck
 ```
 
-Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. `backend-do` tests live in `test/`, not `src/`. Required Cloudflare runtime tests use `@cloudflare/vitest-plugin` and a separate configuration. They require no deployed service or credentials; skipped/TODO runtime cases fail CI.
+Tests use Vitest, except the CLI's Bun-only local backend suite in `packages/cli/test/local`, which uses `bun test` (the `tila-cli` `test` script runs both). Each package has its own `vitest.config.ts`. `backend-do` tests live in `test/`, not `src/`. Required Cloudflare runtime tests use `@cloudflare/vitest-plugin` and a separate configuration. They require no deployed service or credentials; skipped/TODO runtime cases fail CI.
 
 Lefthook runs Biome auto-fix, gitleaks secret detection, and targeted version lockstep checks on staged files.
 
@@ -56,29 +56,28 @@ This is a Turborepo monorepo with packages under `packages/`:
 | `@tila/schemas` | Zod schemas, single source of truth for all types |
 | `@tila/core` | Backend interfaces, fence logic, schema-as-config parser |
 | `@tila/ops-sqlite` | Shared SQLite ops modules, Drizzle schema, and migrations. Used by both `backend-do` and `backend-embedded` |
-| `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by `backend-local` (Bun) and `tila-sdk/local` (Node) |
+| `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by the CLI's local backend (Bun) and `tila-sdk/local` (Node) |
 | `@tila/backend-d1` | D1 global store for tokens, idempotency, project registry, sessions |
 | `@tila/backend-do` | Durable Object wrapper — runs migrations, delegates to `ops-sqlite` |
-| `@tila/backend-local` | Local SQLite backend for CLI offline mode (`bun:sqlite`). Delegates to `@tila/backend-embedded`; shares ops via `ops-sqlite` |
 | `@tila/backend-r2` | R2 artifact storage |
 | `@tila/worker` | Cloudflare Worker with Hono routing and Smart Placement |
 | `tila-sdk` | TypeScript SDK for tila consumers |
 | `tila-mcp-server` | MCP server exposing tila API as tools/resources/prompts for AI agents |
 | `@tila/ui` | Project dashboard with scoped access management and conversations, served by the Worker |
-| `tila-cli` | `tila` CLI binary using Citty, Bun-compiled for multi-platform distribution |
+| `tila-cli` | `tila` CLI binary using Citty, Bun-compiled for multi-platform distribution. Also holds the local SQLite backend for offline mode (`src/local`, `bun:sqlite`) and client-side auth persistence (`src/auth-store`) |
 | `@tila/integration-tests` | E2E tests via Cloudflare Vitest pool |
 
 Package dependency flow:
 
 ```text
 schemas -> core -> ops-sqlite -> backend-do        -> worker
-                              -> backend-embedded -> backend-local   (Bun, bun:sqlite)
+                              -> backend-embedded -> cli/src/local   (Bun, bun:sqlite)
                                                   -> tila-sdk/local  (Node, better-sqlite3)
           core -> backend-d1                      -> worker
           core -> backend-r2                      -> worker
 schemas -> sdk -> mcp-server
                                        worker <- ui
-cli -> schemas, core, auth-store, backend-local, sdk
+cli -> schemas, core, backend-embedded, sdk
 ```
 
 `schemas` and `core` must remain platform-agnostic. `ops-sqlite` is the shared SQLite layer containing all Drizzle table definitions, migrations, and ops modules. Do not import Cloudflare Workers types into `schemas`, `core`, `ops-sqlite`, `cli`, or `sdk`.

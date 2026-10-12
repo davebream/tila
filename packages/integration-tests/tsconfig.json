@@ -8,5 +8,7 @@
     "types": ["@cloudflare/workers-types", "node"]
   },
   "include": ["src"],
+  // Runs under `bun run` and imports the CLI's Bun-only local backend source.
+  "exclude": ["src/fixtures/bun-cross-runtime.ts"],
   "references": [{ "path": "../schemas" }]
 }

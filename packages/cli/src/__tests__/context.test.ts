@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock @tila/backend-local before importing the module under test
-vi.mock("@tila/backend-local", () => ({
+// Mock cli/src/local before importing the module under test
+vi.mock("../local", () => ({
   LocalProject: {
     open: vi.fn().mockReturnValue({ close: vi.fn(), getDb: vi.fn() }),
   },

@@ -1,6 +1,6 @@
 /**
  * Pure-data connection configuration shared by every embedded SQLite host
- * wrapper (bun via `@tila/backend-local`, node via `tila-sdk/local`).
+ * wrapper (bun via `cli/src/local`, node via `tila-sdk/local`).
  *
  * This module contains NO driver imports and NO runtime (`node:*` / `bun:*`)
  * references — only ordered string/data constants — so it does not violate the

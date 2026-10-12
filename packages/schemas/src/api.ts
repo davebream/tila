@@ -1331,7 +1331,7 @@ export type RecordItem = z.infer<typeof RecordItemSchema>;
 
 /**
  * Internal record row as produced by backend ops modules (`@tila/ops-sqlite`,
- * `@tila/backend-local`). Unlike `RecordItemSchema` (the HTTP wire shape), this
+ * `cli/src/local`). Unlike `RecordItemSchema` (the HTTP wire shape), this
  * adds the `fence` token, which destructive record mutations require.
  *
  * Defined as `RecordItemSchema.extend(...)` so the wire shape and the internal

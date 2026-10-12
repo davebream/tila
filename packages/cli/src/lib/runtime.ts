@@ -4,15 +4,6 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  AuthStore,
-  KeyringSecretStore,
-  type RuntimeEnrollmentSecret,
-  RuntimeEnrollmentStore,
-  RuntimeFileSecretStore,
-  TilaPaths,
-  processEnvProbe,
-} from "@tila/auth-store";
-import {
   RuntimeBroker,
   SessionStore,
   generateRuntimeKey,
@@ -30,6 +21,15 @@ import {
   exchangeRuntimeWorkload,
 } from "tila-sdk";
 import { requireTokenAsync } from "../auth";
+import {
+  AuthStore,
+  KeyringSecretStore,
+  type RuntimeEnrollmentSecret,
+  RuntimeEnrollmentStore,
+  RuntimeFileSecretStore,
+  TilaPaths,
+  processEnvProbe,
+} from "../auth-store";
 import { findConfig } from "../config";
 import { getGlobalFlags } from "./global-flags";
 

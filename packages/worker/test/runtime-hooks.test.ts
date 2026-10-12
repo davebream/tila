@@ -14,11 +14,11 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { Hono } from "hono";
 import { expect, it } from "vitest";
+import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
 import {
   RuntimeEnrollmentStore,
   RuntimeFileSecretStore,
-} from "../../auth-store/src/runtime-store";
-import { createCredentialFixture } from "../../backend-d1/test/helpers/credential-fixture";
+} from "../../cli/src/auth-store/runtime-store";
 import { SessionStore, processAlive } from "../../client-lifecycle/src/index";
 import {
   generateRuntimeKey,

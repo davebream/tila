@@ -113,7 +113,7 @@ export type EmbeddedDb = BaseSQLiteDatabase<"sync", void, typeof schema>;
  * Runtime-agnostic SQLite implementation of every `@tila/core` backend
  * interface, including `RecordBackend`.
  *
- * Ported from `@tila/backend-local`'s `LocalProject`, with three Bun-coupled
+ * Ported from `cli/src/local`'s `LocalProject`, with three Bun-coupled
  * dependencies replaced by injected, runtime-neutral primitives:
  *
  *  - C1 retry: `withBusyRetry` no longer calls `Bun.sleepSync`; it takes the

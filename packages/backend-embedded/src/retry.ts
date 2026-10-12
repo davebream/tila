@@ -9,7 +9,7 @@
  * The retry fires AFTER SQLite's built-in `busy_timeout` (typically 5000ms) has
  * been exhausted — this is a second-layer retry for truly contended workloads.
  *
- * Unlike `@tila/backend-local`'s original `withBusyRetry`, this version is
+ * Unlike `cli/src/local`'s original `withBusyRetry`, this version is
  * runtime-agnostic: it takes an injected `sleepSync(ms)` rather than calling
  * `Bun.sleepSync`. This keeps `@tila/backend-embedded` free of `bun:*`/`node:*`
  * imports (the package's runtime-import invariant — see the `no-runtime-imports`

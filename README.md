@@ -276,11 +276,10 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 | `@tila/ops-sqlite` | Shared SQLite operations (entity, coord, artifact, journal, gate, signal, sweep) |
 | `@tila/backend-d1` | D1 backend (auth tokens, sessions, idempotency, repo allowlist) |
 | `@tila/backend-do` | Durable Object SQLite backend (Cloudflare path) |
-| `@tila/backend-local` | bun:sqlite plus filesystem backend (local path) |
 | `@tila/backend-r2` | R2 artifact backend (content-addressed blobs) |
 | `@tila/worker` | Cloudflare Worker (Hono routing, Smart Placement) |
 | `@tila/ui` | Project dashboard with scoped access management and conversations, served by the Worker |
-| `tila-cli` | `tila` CLI binary (Bun-compiled) |
+| `tila-cli` | `tila` CLI binary (Bun-compiled), including the bun:sqlite local backend and client-side auth store |
 | `tila-sdk` | Typed TypeScript client for framework consumers |
 | `tila-mcp-server` | MCP server exposing tila as tools and opt-in resources |
 | `@tila/integration-tests` | End-to-end tests via `@cloudflare/vitest-pool-workers` |

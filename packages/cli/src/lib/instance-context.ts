@@ -15,6 +15,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { InstanceKey } from "@tila/schemas";
 import {
   AuthStore,
   KeyringSecretStore,
@@ -22,7 +23,7 @@ import {
   processEnvProbe,
   promoteLegacy,
   resolveWithTrace,
-} from "@tila/auth-store";
+} from "../auth-store";
 import type {
   EnvProbe,
   LegacyLocations,
@@ -31,8 +32,7 @@ import type {
   ResolveOutcome,
   ResolvedInstance,
   ResolverEnv,
-} from "@tila/auth-store";
-import type { InstanceKey } from "@tila/schemas";
+} from "../auth-store";
 import { findConfig, findTilaDir } from "../config";
 import { getGlobalFlags } from "./global-flags";
 import { tilaHome } from "./provisioning";

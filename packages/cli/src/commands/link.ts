@@ -26,13 +26,13 @@ import {
  * SINGLE-WRITER INVARIANT: does not call setCurrentContext directly.
  */
 
+import type { CredentialRecord, InstanceKey } from "@tila/schemas";
+import { defineCommand } from "citty";
 import {
   CredentialWriteRefusedError,
   InvalidWorkerUrlError,
   canonicalizeWorkerUrl,
-} from "@tila/auth-store";
-import type { CredentialRecord, InstanceKey } from "@tila/schemas";
-import { defineCommand } from "citty";
+} from "../auth-store";
 import { findConfig, writeConfigFile } from "../config";
 import { globalFlagArgs } from "../lib/global-flags";
 import {

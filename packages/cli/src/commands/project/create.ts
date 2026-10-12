@@ -409,7 +409,7 @@ async function runLocalProvisioning(
   if (!json) p.log.info("Initializing local database...");
   try {
     mkdirSync(dirname(dbPath), { recursive: true });
-    const { LocalProject } = await import("@tila/backend-local");
+    const { LocalProject } = await import("../../local");
     const lp = LocalProject.open(dbPath, org, projectId);
     lp.close();
     if (!json) p.log.info(`  Database: ${dbPath}`);

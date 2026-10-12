@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Module-level mocks (must come before any imports of the SUT) ---
 
-// Mock @tila/backend-local before importing anything that uses it (dynamic import in create.ts)
-vi.mock("@tila/backend-local", () => ({
+// Mock cli/src/local before importing anything that uses it (dynamic import in create.ts)
+vi.mock("../../local", () => ({
   LocalProject: {
     open: vi.fn().mockReturnValue({ close: vi.fn(), getDb: vi.fn() }),
   },
@@ -197,12 +197,12 @@ vi.mock("../../lib/prompts", () => ({
   },
 }));
 
-import { LocalProject } from "@tila/backend-local";
 import configureCmd from "../../commands/project/configure";
 // --- Static import AFTER all vi.mock calls (vitest hoists vi.mock above imports) ---
 import createCmd from "../../commands/project/create";
 import destroyCmd from "../../commands/project/destroy";
 import listCmd from "../../commands/project/list";
+import { LocalProject } from "../../local";
 
 const mockLocalProjectOpen = vi.mocked(LocalProject.open);
 
@@ -659,7 +659,7 @@ describe("tila project create --local", () => {
     // File system defaults
     mockExistsSync.mockReturnValue(false);
 
-    // Re-configure @tila/backend-local mock after clearAllMocks
+    // Re-configure cli/src/local mock after clearAllMocks
     mockLocalProjectOpen.mockReturnValue({
       close: vi.fn(),
       getDb: vi.fn(),

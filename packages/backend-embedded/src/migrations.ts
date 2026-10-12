@@ -1,7 +1,7 @@
 /**
  * Embedded migration set — the bun/node-safe migration sequence used by the
  * runtime-agnostic embedded backend (and, once Task 4 re-points it, by
- * `@tila/backend-local`).
+ * `cli/src/local`).
  *
  * SCHEMA IDENTITY IS THE #1 INVARIANT. Shared versions through v24 reuse the canonical DO
  * `MIGRATIONS` SQL / run-functions from `@tila/ops-sqlite` VERBATIM, so an

@@ -767,7 +767,8 @@ describe("resolveGithubUserId — login resolution via GitHub API", () => {
     const result = await resolveGithubUserId("octocat");
     expect(result).toBe(583231);
 
-    const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const calledUrl = (fetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0][0];
     expect(calledUrl).toContain("api.github.com/users/octocat");
   });
 
@@ -782,7 +783,8 @@ describe("resolveGithubUserId — login resolution via GitHub API", () => {
       "../../lib/cloudflare-resources"
     );
     await resolveGithubUserId("user-name");
-    const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const calledUrl = (fetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0][0];
     expect(calledUrl).toContain(encodeURIComponent("user-name"));
   });
 
@@ -798,7 +800,8 @@ describe("resolveGithubUserId — login resolution via GitHub API", () => {
       "../../lib/cloudflare-resources"
     );
     await resolveGithubUserId("someuser");
-    const calledInit = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const calledInit = (fetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0][1];
     expect(calledInit.headers?.Authorization).toBe("Bearer ghp_test_token");
     vi.unstubAllEnvs();
   });
@@ -817,7 +820,8 @@ describe("resolveGithubUserId — login resolution via GitHub API", () => {
       "../../lib/cloudflare-resources"
     );
     await resolveGithubUserId("otheruser");
-    const calledInit = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const calledInit = (fetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0][1];
     expect(calledInit.headers?.Authorization).toBe("Bearer ghp_gh_token");
     vi.unstubAllEnvs();
   });

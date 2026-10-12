@@ -74,7 +74,7 @@ export interface RecordPage<T> {
  *
  * Part of the CLI local/remote backend-swap seam (see this directory's
  * `README.md`). The CLI resolves either a remote (HTTP → Worker) or local
- * (`@tila/backend-local`) implementation at startup and calls these methods
+ * (`cli/src/local`) implementation at startup and calls these methods
  * uniformly.
  *
  * ## Input casing — camelCase boundary

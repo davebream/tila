@@ -20,15 +20,15 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { CredentialRecord, InstanceKey } from "@tila/schemas";
+import type { CommandDef } from "citty";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AuthStore,
   CredentialWriteRefusedError,
   FakeSecretStore,
   TilaPaths,
-} from "@tila/auth-store";
-import type { CredentialRecord, InstanceKey } from "@tila/schemas";
-import type { CommandDef } from "citty";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+} from "../../auth-store";
 import { resetGlobalFlags } from "../../lib/global-flags";
 
 // ---- module mocks -------------------------------------------------------

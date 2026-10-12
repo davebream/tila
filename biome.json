@@ -51,6 +51,25 @@
       }
     },
     {
+      "include": ["packages/cli/src/auth-store/**"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@clack/prompts": "auth-store takes prompts through the injected Prompter port; wire @clack/prompts in packages/cli/src/lib/providers-cli.ts",
+                  "node:child_process": "auth-store runs commands through the injected RunCommand port; wire child_process in packages/cli/src/lib/providers-cli.ts",
+                  "child_process": "auth-store runs commands through the injected RunCommand port; wire child_process in packages/cli/src/lib/providers-cli.ts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "include": ["packages/ui/src/components/ui/command-palette.tsx"],
       "linter": {
         "rules": {

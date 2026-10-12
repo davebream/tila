@@ -1,11 +1,11 @@
 import { join } from "node:path";
+import type { CredentialProviderConfig } from "@tila/schemas";
+import { defineCommand } from "citty";
 import {
   type TrustDecision,
   createProvider,
   processEnvProbe,
-} from "@tila/auth-store";
-import type { CredentialProviderConfig } from "@tila/schemas";
-import { defineCommand } from "citty";
+} from "../auth-store";
 import { findConfig, findTilaDir } from "../config";
 import { exit } from "../lib/output";
 import * as p from "../lib/prompts";
@@ -90,7 +90,7 @@ export default defineCommand({
     // and the resolver's TrustDecision (needed for the exec trust gate).
     try {
       const { AuthStore, TilaPaths, KeyringSecretStore, resolveWithTrace } =
-        await import("@tila/auth-store");
+        await import("../auth-store");
       const { tilaHome } = await import("../lib/provisioning.js");
       void tilaHome(); // tilaHome() is referenced for TILA_HOME env var support
       const paths = new TilaPaths();

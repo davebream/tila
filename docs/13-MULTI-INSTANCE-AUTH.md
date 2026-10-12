@@ -31,7 +31,7 @@ section).
 
 The CLI keeps per-deployment state in a home-directory store rooted at `~/.tila` (override the root
 with the `TILA_HOME` env var; used by tests and for CI isolation). The store has **four tiers**,
-composed in `packages/auth-store/src/auth-store.ts`:
+composed in `packages/cli/src/auth-store/auth-store.ts`:
 
 | Tier | Backing | Key | Holds |
 |------|---------|-----|-------|
@@ -48,13 +48,13 @@ composed in `packages/auth-store/src/auth-store.ts`:
 
 **Crash-safety write ordering.** When writing a credential, the secret is written to the OS keychain
 *before* the registry/disk pointer. A crash between the two leaves a harmless orphaned keychain
-entry, never a registry pointer to a missing secret (`packages/auth-store/src/auth-store.ts`).
+entry, never a registry pointer to a missing secret (`packages/cli/src/auth-store/auth-store.ts`).
 
 Schemas: `packages/schemas/src/instance-registry.ts`, `credential.ts`, `refresh.ts`.
 
 ## Instance Resolution Precedence
 
-When a CLI command runs, the resolver in `packages/auth-store/src/resolver.ts` selects which
+When a CLI command runs, the resolver in `packages/cli/src/auth-store/resolver.ts` selects which
 deployment + credential to use by trying sources in priority order (the `RUNG_ORDER` plus the
 WI-M legacy rung):
 
@@ -69,7 +69,7 @@ WI-M legacy rung):
 resolver does not silently drop to a weaker rung on a trust mismatch. Because legacy-fallback is the
 lowest rung, **any trusted registry instance always beats a stale legacy token**.
 
-The resolver returns a `TrustDecision` (`packages/auth-store/src/resolver-types.ts`):
+The resolver returns a `TrustDecision` (`packages/cli/src/auth-store/resolver-types.ts`):
 
 | Decision | Meaning |
 |----------|---------|
@@ -133,7 +133,7 @@ The named threats this model defends against, with their mitigations:
 ### Untrusted inline `worker_url` (spoofing)
 
 A CLI invocation can present an arbitrary `worker_url`. The resolver's trust boundary
-(`packages/auth-store/src/trust.ts`) canonicalizes the presented URL and the registered one and
+(`packages/cli/src/auth-store/trust.ts`) canonicalizes the presented URL and the registered one and
 rejects a mismatch (`spoof-worker-url-mismatch`) — a hostile or mistyped URL cannot impersonate a
 registered instance and harvest its home-store credential. An inline `--token` is trusted only for
 *its own* `worker_url`, so possession of a token never leaks the home store.
@@ -156,7 +156,7 @@ running deployment's id (`packages/worker/src/middleware/auth.ts`):
 
 Under CI or a non-TTY shell the home credential store is disabled (`ci-home-store-disabled`), and a
 CI run with an overridden `TILA_HOME` treats the home registry as untrusted
-(`ci-tila-home-untrusted`) — see `packages/auth-store/src/ci-policy.ts`. Only inline `--token` /
+(`ci-tila-home-untrusted`) — see `packages/cli/src/auth-store/ci-policy.ts`. Only inline `--token` /
 `TILA_TOKEN` is honored in CI, so a CI job cannot silently reuse a developer's cached credentials.
 `tila auth migrate` likewise refuses to run outside an interactive terminal.
 
@@ -203,7 +203,7 @@ Operational runbook: [`docs/05-OPERATIONS.md`](05-OPERATIONS.md) § Auth: Revoca
 ## Credential Providers
 
 Credential acquisition is abstracted behind `CredentialProvider` in
-`packages/auth-store/src/providers/` (WI-K), a `{ mint, refresh, revoke }` interface with four kinds:
+`packages/cli/src/auth-store/providers/` (WI-K), a `{ mint, refresh, revoke }` interface with four kinds:
 
 | Kind | Acquires via |
 |------|--------------|

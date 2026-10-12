@@ -2,7 +2,7 @@
  * Pure grep matcher + validator for server-side artifact content grep.
  *
  * Platform-agnostic — no Cloudflare/SQLite imports. Reachable by both
- * the Worker (`@tila/core` is a worker dep) and `backend-local`.
+ * the Worker (`@tila/core` is a worker dep) and `cli/src/local`.
  */
 
 // ---------------------------------------------------------------------------

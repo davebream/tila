@@ -1,5 +1,5 @@
 /**
- * Integration test (WI-J2): the CLI package consumes the @tila/auth-store
+ * Integration test (WI-J2): the CLI package consumes the cli/src/auth-store
  * instance resolver as its trust + CI control. Proves the load-bearing behaviors
  * at the consumer boundary — a cloned/untrusted worker_url is refused before any
  * client is built, and CI fails closed for home-store credentials.
@@ -8,6 +8,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { CredentialRecord, InstanceKey } from "@tila/schemas";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AuthStore,
   FakeSecretStore,
@@ -15,9 +17,7 @@ import {
   TilaPaths,
   resolveInstance,
   resolveWithTrace,
-} from "@tila/auth-store";
-import type { CredentialRecord, InstanceKey } from "@tila/schemas";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+} from "../../auth-store";
 
 const key = (s: string) => s as InstanceKey;
 const interactive: ResolverEnv = {

@@ -2,7 +2,7 @@ import {
   HumanSessionStore,
   KeyringSecretStore,
   canonicalizeWorkerUrl,
-} from "@tila/auth-store";
+} from "../auth-store";
 import { findConfig } from "../config";
 export function assertHumanCommand() {
   if (

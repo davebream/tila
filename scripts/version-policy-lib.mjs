@@ -102,11 +102,9 @@ export async function writeJson(root, relativePath, value) {
  * that are internal workspace packages.
  */
 export const implementationPackagePaths = [
-  "packages/auth-store/package.json",
   "packages/backend-d1/package.json",
   "packages/backend-do/package.json",
   "packages/backend-embedded/package.json",
-  "packages/backend-local/package.json",
   "packages/backend-r2/package.json",
   "packages/core/package.json",
   "packages/integration-tests/package.json",

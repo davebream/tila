@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock backend-local to avoid bun:sqlite import
-vi.mock("@tila/backend-local", () => ({
+vi.mock("../../local", () => ({
   LocalProject: {
     open: vi.fn(),
   },
