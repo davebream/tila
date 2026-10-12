@@ -221,6 +221,31 @@ describe("deployWorkerWithAssets", () => {
     );
   });
 
+  it("regenerates the Worker release identity before a source deploy", async () => {
+    (isMonorepoLayout as Mock).mockReturnValue(true);
+    await deployWorkerWithAssets(makeOpts({ skipUi: true }));
+    expect(execSync).toHaveBeenCalledWith(
+      "pnpm --filter @tila/worker gen:version",
+      expect.anything(),
+    );
+    expect(
+      (execSync as Mock).mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY,
+    ).toBeLessThan((runWrangler as Mock).mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("does not deploy when Worker version generation fails", async () => {
+    (isMonorepoLayout as Mock).mockReturnValue(true);
+    (execSync as Mock).mockImplementation((command: string) => {
+      if (command.includes("gen:version"))
+        throw Object.assign(new Error("gen"), { stderr: "no git" });
+    });
+    await expect(deployWorkerWithAssets(makeOpts())).rejects.toThrow(
+      /Worker version generation failed: no git/,
+    );
+    expect(runWrangler).not.toHaveBeenCalled();
+  });
+
   it("skips pnpm build when isMonorepoLayout is false (sidecar)", async () => {
     (isMonorepoLayout as Mock).mockReturnValue(false);
     await deployWorkerWithAssets(makeOpts());
@@ -236,7 +261,10 @@ describe("deployWorkerWithAssets", () => {
 
   it("does not run UI build when skipUi is true", async () => {
     await deployWorkerWithAssets(makeOpts({ skipUi: true }));
-    expect(execSync).not.toHaveBeenCalled();
+    expect(execSync).not.toHaveBeenCalledWith(
+      "pnpm --filter @tila/ui build",
+      expect.anything(),
+    );
     expect(assertAssetLimits).not.toHaveBeenCalled();
   });
 
@@ -347,8 +375,8 @@ describe("deployWorkerWithAssets", () => {
       stdout: "Build error output",
       stderr: "",
     });
-    (execSync as Mock).mockImplementation(() => {
-      throw buildErr;
+    (execSync as Mock).mockImplementation((command: string) => {
+      if (command.includes("@tila/ui")) throw buildErr;
     });
 
     await expect(deployWorkerWithAssets(makeOpts())).rejects.toThrow(

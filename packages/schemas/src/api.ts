@@ -475,7 +475,10 @@ export type PresenceHeartbeatSuccessResponse = z.infer<
 
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),
+  /** Product release version of the deployed build. */
   version: z.string(),
+  /** Source commit of the deployed build; absent on older Workers. */
+  commit: z.string().optional(),
   apiVersion: z.number().int(),
   minCliVersion: z.string(),
   project_id: z.string().optional(),

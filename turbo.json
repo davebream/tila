@@ -27,7 +27,11 @@
       "outputs": ["src/version.ts"]
     },
     "@tila/worker#gen:version": {
-      "inputs": ["package.json", "$TURBO_ROOT$/scripts/generate-version.mjs"],
+      "inputs": [
+        "package.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/scripts/generate-version.mjs"
+      ],
       "outputs": ["src/version.ts"],
       "env": ["TILA_BUILD_REVISION"]
     },

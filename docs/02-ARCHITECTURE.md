@@ -698,7 +698,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/health` | — | `{ ok: true, version, project_id }` |
+| GET | `/health` | — | `{ ok: true, version, commit, apiVersion, minCliVersion }` — product release and source commit of the deployed build; `apiVersion`/`minCliVersion` are protocol compatibility |
 | GET | `/whoami` | — | `{ token_name, scopes }` |
 | GET | `/schema` | — | `{ version, schema_toml }` |
 | POST | `/schema/apply` | `{ schema_toml, strategy?, dry_run? }` | `{ ok, new_version, changes, warnings }` |
