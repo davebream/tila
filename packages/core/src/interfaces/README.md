@@ -11,7 +11,7 @@ The CLI (`tila-cli`) supports two execution modes:
 - **Remote mode** — forwards calls to the live Cloudflare Worker over HTTP.
 - **Local mode** — runs against the embedded SQLite core (`@tila/backend-embedded`),
   on the developer's machine, without a network connection. The CLI hosts it via
-  `@tila/backend-local` (`bun:sqlite`); the SDK hosts it via `tila-sdk/local`
+  `cli/src/local` (`bun:sqlite`); the SDK hosts it via `tila-sdk/local`
   (`better-sqlite3`).
 
 These interfaces are the boundary that makes the swap transparent. The CLI resolves a
@@ -33,6 +33,6 @@ single source of truth consumed by `@tila/ops-sqlite`. Input plumbing the backen
 resolves itself (`schema_version`, `actor`, `origin`, `canonical_artifact_key`) is
 omitted from the input shapes; the return types preserve those as read-only output
 fields. The concrete offline implementation lives in `@tila/backend-embedded`
-(`EmbeddedProject` implements `RecordBackend`), which `@tila/backend-local` (Bun) and
+(`EmbeddedProject` implements `RecordBackend`), which `cli/src/local` (Bun) and
 `tila-sdk/local` (Node) both delegate to — so records work in local mode across the
 CLI, SDK, and MCP server.

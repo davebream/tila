@@ -197,7 +197,7 @@ This stack uses a Turborepo monorepo, Drizzle ORM, a Hono backend, and Promptfoo
                                  │ direct call (no HTTP)
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                   @tila/backend-local                            │
+│                tila-cli: src/local (Bun host)                    │
 │                                                                  │
 │  ┌──────────────────────────────────────────┐  ┌──────────────┐│
 │  │ LocalProject                              │  │LocalArtifact ││
@@ -334,15 +334,15 @@ Note: the artifact path *is* a cross-backend operation (Worker → R2, Worker �
 
 ### 1.5 Shared SQLite operations layer
 
-`@tila/ops-sqlite` extracts the business-logic operations from `@tila/backend-do` into a platform-agnostic package with zero Cloudflare Workers types. Both `@tila/backend-do` (DO path) and `@tila/backend-local` (local path) import from `@tila/ops-sqlite` for all entity, coordination, artifact, journal, and sweep logic.
+`@tila/ops-sqlite` extracts the business-logic operations from `@tila/backend-do` into a platform-agnostic package with zero Cloudflare Workers types. Both `@tila/backend-do` (DO path) and `@tila/backend-embedded` (local path) import from `@tila/ops-sqlite` for all entity, coordination, artifact, journal, and sweep logic.
 
 The ops package uses `BaseSQLiteDatabase` generic (from `drizzle-orm/sqlite-core`) instead of the DO-specific `DrizzleSqliteDODatabase`, making it runtime-agnostic. The Drizzle schema, migrations (0001-0004), and all query modules live in `@tila/ops-sqlite`. Backend packages provide only the connection layer (DO's `blockConcurrencyWhile` + `this.ctx.storage.sql` vs. bun:sqlite's `new Database()` + `PRAGMA` initialization) and transaction semantics (DO implicit single-threading vs. `BEGIN IMMEDIATE` explicit locking).
 
 Package dependency flow:
 
 ```
-schemas -> core -> ops-sqlite -> backend-do   (Cloudflare path)
-                              -> backend-local (local path)
+schemas -> core -> ops-sqlite -> backend-do       (Cloudflare path)
+                              -> backend-embedded (local path)
 ```
 
 Zero business-logic duplication between the two backends. Differences are confined to the connection, transaction, and migration-runner layers.
@@ -369,7 +369,7 @@ The Cloudflare path serializes writes via the Durable Object's single-threaded e
 
 Local mode is implemented by `@tila/backend-embedded` — a **runtime-agnostic** embedded SQLite core (`EmbeddedProject` + `EmbeddedArtifactBackend` + a `BlobStore` seam) that contains no `bun:*` / `node:*` runtime imports. Two host wrappers inject the concrete driver and primitives:
 
-- `@tila/backend-local` — the **Bun** host (`bun:sqlite`), used by the `tila` CLI.
+- `packages/cli/src/local` — the **Bun** host (`bun:sqlite`), built into the `tila` CLI.
 - `tila-sdk/local` — the **plain-Node** host (`better-sqlite3` + `node:fs`), used by the TypeScript SDK (`createTila({ backend: "local" })` / `createTilaLocal`).
 
 Local mode therefore now runs under **plain Node**, not just Bun. There is no ADR file for this seam in the repo; this section is the canonical description.
@@ -992,7 +992,7 @@ Fence is always returned with a successful acquire and must be included in any d
 
 The CLI never speaks to D1, the DO, or R2 directly. It speaks to three interfaces, each implementable by multiple backends. In v1, only the Cloudflare-backed implementations exist for each.
 
-> **CLI local/remote backend-swap contract.** The interfaces in `packages/core/src/interfaces/` (see that directory's `README.md`) form the swap boundary used by the CLI to select between remote (Worker over HTTP) and local (`@tila/backend-local`, bun:sqlite) execution. These interfaces are **not** the Durable Object contract — the `ProjectDO` calls `@tila/ops-sqlite` directly. There is intentionally no `RecordBackend` interface because typed mutable records have no offline CLI path yet.
+> **CLI local/remote backend-swap contract.** The interfaces in `packages/core/src/interfaces/` (see that directory's `README.md`) form the swap boundary used by the CLI to select between remote (Worker over HTTP) and local (the CLI's `src/local`, bun:sqlite) execution. These interfaces are **not** the Durable Object contract — the `ProjectDO` calls `@tila/ops-sqlite` directly. There is intentionally no `RecordBackend` interface because typed mutable records have no offline CLI path yet.
 
 ### 5.1 EntityBackend
 
@@ -2263,7 +2263,7 @@ tila/                                  # github.com/davebream/tila
 │   │
 │   ├── backend-r2/                    # @tila/backend-r2 — R2 ArtifactBackend
 │   │
-│   ├── ops-sqlite/                    # @tila/ops-sqlite — shared SQLite ops (entity, coord, artifact, journal, sweep); platform-agnostic BaseSQLiteDatabase generic; used by both backend-do and backend-local
+│   ├── ops-sqlite/                    # @tila/ops-sqlite — shared SQLite ops (entity, coord, artifact, journal, sweep); platform-agnostic BaseSQLiteDatabase generic; used by both backend-do and backend-embedded
 │   │   ├── src/
 │   │   │   ├── schema.ts              # shared Drizzle schema (BaseSQLiteDatabase generic)
 │   │   │   ├── migrations.ts          # shared migrations 0001-0004
@@ -2273,18 +2273,6 @@ tila/                                  # github.com/davebream/tila
 │   │   │   ├── journal-ops.ts
 │   │   │   ├── sweep-ops.ts
 │   │   │   └── index.ts
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── backend-local/                 # @tila/backend-local — LocalProject (EntityBackend + CoordinationBackend) and LocalArtifactBackend; bun:sqlite + WAL; no Cloudflare Workers types
-│   │   ├── src/
-│   │   │   ├── connection.ts          # PRAGMA init, NFS detection, migration runner
-│   │   │   ├── migrations-local.ts    # MIGRATION_0005 (_idempotency table, local-only)
-│   │   │   ├── local-project.ts       # LocalProject class (BEGIN IMMEDIATE writes)
-│   │   │   ├── local-artifact-backend.ts  # LocalArtifactBackend class (filesystem blobs)
-│   │   │   ├── retry.ts               # withBusyRetry (SQLITE_BUSY, exponential backoff)
-│   │   │   └── index.ts
-│   │   ├── test/
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
@@ -2315,9 +2303,11 @@ tila/                                  # github.com/davebream/tila
 │   │   │   ├── auth.ts                # startup auth check
 │   │   │   ├── config.ts              # .tila/config.toml read/write
 │   │   │   ├── client.ts              # HTTP client to the Worker
-│   │   │   └── provision.ts           # wrangler shell-out logic
+│   │   │   ├── provision.ts           # wrangler shell-out logic
+│   │   │   ├── local/                 # Bun host for local mode: LocalProject + LocalArtifactBackend over bun:sqlite (WAL); delegates to @tila/backend-embedded
+│   │   │   └── auth-store/            # client-side auth persistence: instance registry, credential store, keychain seam, providers
 │   │   ├── lib/wrangler-config.ts     # generates wrangler.<slug>.toml at deploy time (no bundled templates)
-│   │   ├── test/
+│   │   ├── test/local/                # bun test suite for src/local (Bun-only APIs)
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │

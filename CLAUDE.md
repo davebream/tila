@@ -34,7 +34,7 @@ pnpm --filter @tila/backend-do test -- --run artifact-ops  # Single test file (s
 pnpm --filter @tila/worker typecheck         # Typecheck one package
 ```
 
-Tests use Vitest except `backend-local` which uses `bun test`. Each package has its own `vitest.config.ts`. The `backend-do` tests are in `test/` (not `src/`). Integration tests are either env-gated live HTTP tests (`TILA_BASE_URL`/`TILA_TOKEN`, skipped in CI) or in-process tests that mount the Worker route modules over the real DO router and better-sqlite3 (`packages/integration-tests/src/artifact-versions.test.ts` is the pattern). The benchmark smoke suite in `packages/bench/test` uses the same in-process pattern.
+Tests use Vitest, except the CLI's Bun-only local backend suite in `packages/cli/test/local`, which uses `bun test` (the `tila-cli` `test` script runs both). Each package has its own `vitest.config.ts`. The `backend-do` tests are in `test/` (not `src/`). Integration tests are either env-gated live HTTP tests (`TILA_BASE_URL`/`TILA_TOKEN`, skipped in CI) or in-process tests that mount the Worker route modules over the real DO router and better-sqlite3 (`packages/integration-tests/src/artifact-versions.test.ts` is the pattern). The benchmark smoke suite in `packages/bench/test` uses the same in-process pattern.
 
 ### Local development setup
 
@@ -134,18 +134,16 @@ Turborepo monorepo under `packages/`:
 |---|---|
 | `@tila/schemas` | Zod schemas — single source of truth for all types |
 | `@tila/core` | Backend interfaces, fence logic, schema-as-config parser |
-| `@tila/ops-sqlite` | Shared SQLite ops modules (entity-ops, artifact-ops, etc.), Drizzle schema, migrations. Used by both `backend-do` and `backend-local` |
-| `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by `backend-local` (Bun) and `tila-sdk/local` (Node) |
+| `@tila/ops-sqlite` | Shared SQLite ops modules (entity-ops, artifact-ops, etc.), Drizzle schema, migrations. Used by both `backend-do` and `backend-embedded` |
+| `@tila/backend-embedded` | Runtime-agnostic embedded SQLite core — `EmbeddedProject` facade, `BlobStore` seam, shared `EMBEDDED_MIGRATIONS`; consumed by the CLI's local backend (Bun) and `tila-sdk/local` (Node) |
 | `@tila/backend-d1` | D1 global store (tokens, idempotency, project registry, sessions) |
 | `@tila/backend-do` | Durable Object wrapper — constructs `ProjectDO`, runs migrations via `blockConcurrencyWhile`, delegates to `ops-sqlite` |
-| `@tila/backend-local` | Local SQLite backend for CLI offline mode (`bun:sqlite`). Delegates to `@tila/backend-embedded`; shares ops via `ops-sqlite` |
 | `@tila/backend-r2` | R2 artifact storage (content-addressed, sha256-keyed) |
 | `@tila/worker` | Cloudflare Worker with Hono routing, Smart Placement |
 | `tila-sdk` | TypeScript SDK for tila consumers (client, resource methods, retry, error codes) |
 | `tila-mcp-server` | MCP server exposing tila API as tools/resources/prompts for AI agents |
 | `@tila/ui` | Project dashboard with scoped access management and conversations, served by Worker |
-| `@tila/auth-store` | Client-side auth persistence — instance registry, credential store, keychain seam. Consumed by `tila-cli` |
-| `tila-cli` | `tila` CLI binary (Citty framework, Bun-compiled for multi-platform distribution) |
+| `tila-cli` | `tila` CLI binary (Citty framework, Bun-compiled for multi-platform distribution). Also holds the local SQLite backend for offline mode (`src/local`, `bun:sqlite`, delegates to `@tila/backend-embedded`) and client-side auth persistence (`src/auth-store`: instance registry, credential store, keychain seam) |
 | `tila-cli-{platform}` | Platform-specific binary packages for npm distribution |
 | `@tila/integration-tests` | E2E tests: env-gated live HTTP tests plus in-process Worker-route + DO-router tests |
 | `@tila/bench` | Coordination benchmark harness: `inproc` (CI smoke), `embedded`, `http` (wrangler dev or deployed) tiers; methodology and baselines in `docs/benchmarks/` |
@@ -161,16 +159,16 @@ that reference "entity" are referring to the table-level concept.
 
 ```
 schemas → core → ops-sqlite → backend-do        → worker
-                            → backend-embedded → backend-local   (Bun, bun:sqlite)
+                            → backend-embedded → cli/src/local   (Bun, bun:sqlite)
                                                → tila-sdk/local  (Node, better-sqlite3)
          core → backend-d1                → worker
          core → backend-r2                → worker
 schemas → sdk → mcp-server
                                     worker ← ui
-cli -> schemas, core, auth-store, backend-local, sdk
+cli -> schemas, core, backend-embedded, sdk
 ```
 
-`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by `backend-local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK), not just Bun. The DB file is portable between the CLI and a Node SDK consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
+`schemas` and `core` are platform-agnostic (no Cloudflare Workers types). `ops-sqlite` is the shared SQLite layer — it contains all Drizzle table definitions, migrations, and ops modules. `backend-do` consumes `ops-sqlite` directly (DO SQLite). `backend-embedded` wraps `ops-sqlite` into a runtime-agnostic embedded core consumed by the CLI's `src/local` (Bun via `bun:sqlite`) and `tila-sdk/local` (Node via `better-sqlite3`) — so **local mode now runs under plain Node** (SDK), not just Bun. The DB file is portable between the CLI and a Node SDK consumer because both run the same `EMBEDDED_MIGRATIONS` (see `docs/02-ARCHITECTURE.md` §1.6a).
 
 ### Request flow
 
