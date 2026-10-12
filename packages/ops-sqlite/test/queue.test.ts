@@ -305,6 +305,10 @@ it("lists more than 250 entries and protects enrollment edits and withdrawal wit
   const page = queue.inspect(db, { limit: 100, offset: 200 });
   expect(page.total).toBe(260);
   expect(page.entries).toHaveLength(60);
+  const filtered = queue.inspect(db, { task_id: "t259" });
+  expect(filtered.total).toBe(1);
+  expect(filtered.entries[0].entry.task_id).toBe("t259");
+  expect(queue.inspect(db, { task_id: "t259" }, () => false).total).toBe(0);
   const entry = page.entries[0].entry;
   queue.edit(
     db,
