@@ -1,6 +1,13 @@
+import {
+  SummaryLine,
+  TraceBadges,
+  ackLabel,
+  wakeLabel,
+} from "@/components/delivery-trace";
 import { ReplyComposer } from "@/components/reply-composer";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
+import { QuerySection } from "@/components/ui/query-section";
 import { useWhoami } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -8,9 +15,11 @@ import {
   getRoom,
   listRoomThreads,
   listRooms,
+  messageDeliveries,
   roomHistory,
 } from "@/lib/api";
 import { draftKey, mergeMessages } from "@/lib/conversation-draft";
+import { deriveSectionState } from "@/lib/query-state";
 import {
   useInfiniteQuery,
   useQuery,
@@ -335,6 +344,11 @@ export function RoomStream({
                 Open thread
               </Link>
             )}
+            <MessageDeliveries
+              project={project}
+              room={room}
+              message={message.id}
+            />
           </li>
         ))}
       </ol>
@@ -369,5 +383,100 @@ export function RoomStream({
         </p>
       )}
     </>
+  );
+}
+/**
+ * Delivery outcomes for one message, loaded only when opened. Readers get
+ * counts; managers also get each recipient's trace.
+ */
+function MessageDeliveries({
+  project,
+  room,
+  message,
+}: {
+  project: string;
+  room: string;
+  message: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const panel = `deliveries-${message}`;
+  const query = useQuery({
+    queryKey: ["message-deliveries", project, room, message],
+    queryFn: () => messageDeliveries(project, room, message),
+    enabled: open,
+    refetchInterval: open ? 10000 : false,
+    retry: false,
+  });
+  return (
+    <div className="mt-2 text-xs">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panel}
+        className="text-signal-blue underline"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide deliveries" : "Deliveries"}
+      </button>
+      {open && (
+        <div id={panel} className="mt-2 rounded-md border border-border p-3">
+          <QuerySection
+            state={deriveSectionState(query, { isEmpty: () => false })}
+            label="delivery outcomes"
+            empty=""
+            onRetry={() => void query.refetch()}
+            forbidden="You cannot read delivery outcomes for this room."
+            notFound="This message is no longer available."
+          >
+            {(data) => (
+              <div className="space-y-2">
+                <p>
+                  <SummaryLine summary={data.summary} />
+                </p>
+                {data.restricted ? (
+                  <p className="text-muted-foreground">
+                    Recipient, wake and binding details require conversation
+                    management.
+                  </p>
+                ) : (
+                  <ul aria-label="Recipients" className="space-y-1">
+                    {data.deliveries.map(({ delivery, trace }) => (
+                      <li
+                        key={delivery.id}
+                        className="flex flex-wrap items-center gap-2"
+                      >
+                        <span className="text-foreground">
+                          {delivery.agent_id}
+                        </span>
+                        <TraceBadges trace={trace} />
+                        <span>Wake: {wakeLabel(trace.wake).label}</span>
+                        <span>{ackLabel(trace)[0]}</span>
+                        <span>Work result: not reported</span>
+                        <Link
+                          className="text-signal-blue underline"
+                          to={`/p/${project}/deliveries/${encodeURIComponent(delivery.agent_id)}/${encodeURIComponent(delivery.id)}`}
+                        >
+                          Trace
+                        </Link>
+                      </li>
+                    ))}
+                    {data.has_more && (
+                      <li>
+                        <Link
+                          className="text-signal-blue underline"
+                          to={`/p/${project}/deliveries?id=${encodeURIComponent(message)}`}
+                        >
+                          Browse all recipients
+                        </Link>
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </QuerySection>
+        </div>
+      )}
+    </div>
   );
 }

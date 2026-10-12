@@ -2630,6 +2630,12 @@ history keeps the message. `recipient.status` reports the targeted binding as
 `GET /inbox/:agent/deliveries/:id` additively returns the same `trace` and a
 `message` reference (room, thread, seq and correlation fields).
 
+The dashboard uses these projections: a lazily loaded **Deliveries** disclosure on
+each room message, a `/deliveries` browse page with filters and cursor pagination,
+and a trace drawer at `/deliveries/:agent/:delivery` (the older
+`/agents/:agent/deliveries/:delivery` link still works). The manual delivery UUID
+form is gone.
+
 History accepts `direction=backward` for newest-first page selection while returning
 messages in ascending sequence order. Its signed cursor is direction-scoped. The
 additive `tail_cursor` is a forward cursor at that page's newest message, scoped to

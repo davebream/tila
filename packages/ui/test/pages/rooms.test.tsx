@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { Message } from "@tila/schemas";
 import { http, HttpResponse } from "msw";
 import { Route, Routes } from "react-router";
+import { traceItem } from "../mocks/delivery-fixtures";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor, within } from "../test-utils";
 
@@ -154,4 +155,74 @@ test("opens a deep-linkable thread panel and restores keyboard focus on Escape",
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
   );
   await waitFor(() => expect(button).toHaveFocus());
+});
+
+test.each([
+  ["a reader sees counts only", true],
+  ["a manager sees each recipient's trace", false],
+])("message deliveries: %s", async (_name, restricted) => {
+  const row = message(1);
+  const item = traceItem(1, { message: { id: row.id } });
+  const summary = { recipients: 1, pending: 1, acknowledged: 0, expired: 0 };
+  const requests: string[] = [];
+  server.use(
+    http.get("*/projects/test-project/rooms/general/messages", () =>
+      HttpResponse.json({
+        ok: true,
+        messages: [row],
+        cursor: "c",
+        tail_cursor: "1",
+        has_more: false,
+      }),
+    ),
+    http.get(
+      "*/projects/test-project/rooms/general/messages/:message/deliveries",
+      ({ request }) => {
+        requests.push(new URL(request.url).pathname);
+        return HttpResponse.json(
+          restricted
+            ? { ok: true, restricted: true, summary }
+            : {
+                ok: true,
+                restricted: false,
+                summary,
+                deliveries: [item],
+                has_more: false,
+              },
+        );
+      },
+    ),
+  );
+  renderWithProviders(
+    <RoomStream
+      project="test-project"
+      room="general"
+      thread={null}
+      writable={false}
+    />,
+  );
+  const toggle = await screen.findByRole("button", { name: "Deliveries" });
+  // Outcomes load only when asked for, not once per rendered message.
+  expect(requests).toEqual([]);
+  await userEvent.click(toggle);
+  expect(
+    await screen.findByText(/Stored for 1 recipient · 1 pending/),
+  ).toBeInTheDocument();
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  if (restricted) {
+    expect(
+      screen.getByText(/require conversation management/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Trace" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Recipients" })).toBeNull();
+  } else {
+    expect(screen.getByRole("link", { name: "Trace" })).toHaveAttribute(
+      "href",
+      `/p/test-project/deliveries/worker/${item.delivery.id}`,
+    );
+    expect(screen.getByText("Work result: not reported")).toBeInTheDocument();
+  }
+  expect(requests).toEqual([
+    `/projects/test-project/rooms/general/messages/${row.id}/deliveries`,
+  ]);
 });
