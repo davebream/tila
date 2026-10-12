@@ -52,9 +52,9 @@ tila handles both. Artifact storage is content-addressed with deduplication, lif
 ## 🔬 What it looks like
 
 <p align="center">
-  <img src="docs/assets/tila-dashboard.png" width="100%" alt="tila's read-only dashboard showing a fleet of coding agents coordinating on one shared task graph — an epic broken into milestones and tasks, with per-task status (done, in-progress, blocked, failed, queued) and per-agent ownership across agent-sonnet, agent-opus, agent-haiku, and a human reviewer">
+  <img src="docs/assets/tila-dashboard.png" width="100%" alt="tila's task dashboard showing a fleet of coding agents coordinating on one shared task graph — an epic broken into milestones and tasks, with per-task status (done, in-progress, blocked, failed, queued) and per-agent ownership across agent-sonnet, agent-opus, agent-haiku, and a human reviewer">
   <br>
-  <sub>The read-only dashboard: a fleet of agents coordinating on shared state — task hierarchy, live status, and per-agent ownership.</sub>
+  <sub>The task dashboard: a fleet of agents coordinating on shared state — task hierarchy, live status, and per-agent ownership.</sub>
 </p>
 
 ### Content-addressed artifacts: immutable and deduplicated
@@ -279,7 +279,7 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 | `@tila/backend-local` | bun:sqlite plus filesystem backend (local path) |
 | `@tila/backend-r2` | R2 artifact backend (content-addressed blobs) |
 | `@tila/worker` | Cloudflare Worker (Hono routing, Smart Placement) |
-| `@tila/ui` | Read-only SPA served by the Worker |
+| `@tila/ui` | Project dashboard with scoped access management and conversations, served by the Worker |
 | `tila-cli` | `tila` CLI binary (Bun-compiled) |
 | `tila-sdk` | Typed TypeScript client for framework consumers |
 | `tila-mcp-server` | MCP server exposing tila as tools and opt-in resources |

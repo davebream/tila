@@ -17,8 +17,9 @@ in this repository. Reusing external runtimes does not require a second product 
 | Host integration | Bind assignments to local processes/provider sessions; reuse a runtime where possible |
 | Clients | CLI, MCP, web and later Mac/iPhone views over the same service contracts |
 
-The first topology is one orchestrator plus workers. Roles belong to a run; they are
-not permanent agent types. A task can have several attempts, and an attempt can
+The first topology is one orchestrator plus workers. Workflow roles belong to an
+assignment or work attempt, not permanent agent types; they do not replace the
+runtime credential roles `acting` and `relay`. A task can have several attempts, and an attempt can
 outlive a provider session. Authenticated principals, runtime participants and
 provider session IDs remain distinct.
 
@@ -110,13 +111,27 @@ A resource can be claimed in one of two ways, plus an implicit third:
 
 ## 4. Entity schema is config, not code
 
-Entity types (`task`, `issue`, `epic`, or any custom hierarchy users define) live in `tila.schema.toml`. They are NOT hardcoded in tila's data model.
+Entity types (`task`, `issue`, `epic`, or a custom hierarchy) live in the applied project definition in DO SQLite. They are not hardcoded in the data model. TOML is the current explicit input format; it is not a synchronization authority over later server changes.
 
 **Storage layout:** one generic `entities` table with `type TEXT`, `data JSON`, `schema_version INTEGER`. Adding/removing entity types is a config change, never a DDL migration.
 
 **tila ships a default schema template** — `epic → issue → task` with dependency types (`blocks`, `related`, `parent-child`, `discovered-from`). This is what most software-development consumers will start from. Users with different domains (content workflows, research, automation) define whatever entity hierarchy fits — the schema is config, not code, so the default is just a starting point, not a structural commitment.
 
-**Schema evolution:** field-level `default_for_legacy` for backward-compatible additions; explicit user strategy (`--strategy=relax|migrate|default-parent|...`) for destructive changes. Tolerant reads (each entity validated against the schema active when it was created); validated writes (against current schema).
+**Schema evolution:** supported lazy `default_for_legacy` read enrichment preserves stored rows; subsequent writes use current validation. Current destructive strategies are `relax` and `force`, not automatic migration/backfill. Applied history revisions are distinct from serialized schema-format versions.
+
+**Editable settings contract — 2026-10-12.** UI, CLI and MCP must share validated,
+revision-checked service operations. Every ordinary project setting has a browser
+management path; missing editors/APIs remain tracked work, not file-only exceptions.
+TOML initialization and explicit import/export stay compatible; YAML is optional,
+and automatic Git/file synchronization is deferred. Configuration is persisted;
+runtime leases may also be persisted and still expire. Record definitions determine
+business meaning. Current authority overrides captured workflow revisions, and
+restore creates new validated state without restoring deleted bytes or revoked
+access. DO, D1, R2 and hosts do not share one settings transaction. Provider secrets
+remain host-owned; deployment bootstrap secrets remain operational configuration.
+See [architecture §14](02-ARCHITECTURE.md#section-14-editable-settings-and-entity-lifecycle-contract-293)
+for field coverage, existing permission thresholds, activation and lifecycle rules.
+#296–#299 own implementation; this decision does not claim those editors shipped.
 
 ---
 
@@ -125,7 +140,7 @@ Entity types (`task`, `issue`, `epic`, or any custom hierarchy users define) liv
 - **Content-addressed by sha256.** Key format: `<prefix>/<task-id>/<sha256>.<ext>`. The same content produces the same key — deduplication falls out for free.
 - **Write-once, never edited.** "Updating" means writing a new artifact with a new hash; pointer files (if any) reference the current one via conditional PUT.
 - **Self-describing via metadata.** Every artifact carries its resource/kind/fence plus canonical principal and participant metadata. Environment metadata is descriptive only. Reconciliation continues to accept legacy `tila-machine` metadata while rebuilding older objects.
-- **R2 lifecycle rules encode retention by prefix.** Tasks 30 days, designs 90 days, transcripts 14 days, completed-state markers retained longer. Configurable per project in `tila.config.toml`.
+- **Applied artifact policy controls retention.** Per-kind `retention_days` belongs to the applied definition. Versioned writes capture expiry; later policy edits do not rewrite assigned expiry, and live heads are protected. Worker/DO lifecycle operations own deletion; the deployment R2 backstop is separate and excludes `versioned/`. See architecture §14.4.
 - **Pointer files for "current best."** When mutable pointers are needed (e.g., `pointers/T-142/latest.json`), use full PUT with `If-Match: <etag>` for CAS. Fencing-token check at the application layer.
 
 ---
@@ -289,7 +304,7 @@ Specific platform capabilities the architecture depends on or benefits from. Nam
 - **Cache API on the Worker.** Read-through cache for entity reads with cache invalidation on write. Drops repeated `tila task show` to sub-millisecond.
 - **Workers KV.** As a secondary cache layer for schema definitions and lifecycle rules (cross-Worker-region read scope).
 - **R2 event notifications.** R2 → Queue → Worker for triggering downstream work on artifact upload. Replaces polling patterns.
-- **Token scopes.** Currently every token has full read-write; v0.2 adds scoped tokens (`read-only`, `write-artifacts-only`, etc.).
+- **Token scopes.** Scoped service/workload credentials are implemented alongside legacy full D1 keys. Current membership and capability ceilings apply; see architecture §14.3 and the authorization guide.
 
 ---
 

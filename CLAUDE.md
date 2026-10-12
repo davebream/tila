@@ -143,7 +143,7 @@ Turborepo monorepo under `packages/`:
 | `@tila/worker` | Cloudflare Worker with Hono routing, Smart Placement |
 | `tila-sdk` | TypeScript SDK for tila consumers (client, resource methods, retry, error codes) |
 | `tila-mcp-server` | MCP server exposing tila API as tools/resources/prompts for AI agents |
-| `@tila/ui` | Read-only SPA served by Worker |
+| `@tila/ui` | Project dashboard with scoped access management and conversations, served by Worker |
 | `@tila/auth-store` | Client-side auth persistence — instance registry, credential store, keychain seam. Consumed by `tila-cli` |
 | `tila-cli` | `tila` CLI binary (Citty framework, Bun-compiled for multi-platform distribution) |
 | `tila-cli-{platform}` | Platform-specific binary packages for npm distribution |

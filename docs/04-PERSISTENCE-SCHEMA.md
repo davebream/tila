@@ -207,9 +207,9 @@ Why three and not one polymorphic table:
 
 ## What lives in the DO is the durable record
 
-DO SQLite is the source of truth for everything per-project. It is *not* a cache or mirror.
+DO SQLite is authoritative for project content and coordination; D1 separately owns project registry/access/runtime credential state, and R2 owns artifact bytes and recovery records. Persistence does not determine product category: a saved lease still expires. See [the settings/lifecycle contract](02-ARCHITECTURE.md#section-14-editable-settings-and-entity-lifecycle-contract-293) for the five categories and their conceptual relationships.
 
-- **Claims:** persisted, not transient. The single-DO transaction model means claim acquisition is the same kind of write as entity creation.
+- **Claims:** durably stored but lease-limited. A row remaining on disk after expiry grants no authority. Recovery reacquires with a new fence; it does not resume the old lease. Claim/fence/entity operations that require atomicity stay in one DO transaction.
 - **Fences:** persisted indefinitely. Even after a resource is deleted, its fence counter survives (so future re-creates don't reuse fence numbers).
 - **Journal:** the audit log. Append-only, durable, recoverable via Cloudflare's DO SQLite point-in-time recovery.
 - **Presence:** the one mostly-ephemeral table. It is keyed by `(principal_id, participant_id)`, refreshed on heartbeat, and reaped by the sweeper. Crashes are recoverable (participants re-register).
@@ -217,7 +217,7 @@ DO SQLite is the source of truth for everything per-project. It is *not* a cache
 
 If a DO is wiped (catastrophic incident with no PIT recovery), the recovery story is:
 - **Artifacts are recoverable from R2 + object metadata.** `tila doctor --reconcile` walks R2 and synthesizes `artifact_pointers` rows from `x-amz-meta-tila-*` metadata.
-- **Entities, relationships, and journal are NOT recoverable from R2 alone.** v0.1 relies on Cloudflare's DO SQLite PIT recovery. External journal backups to R2 are a v0.2 feature.
+- **Entity state needs a project backup or DO point-in-time recovery.** Ordinary artifact metadata alone cannot reconstruct tasks/relationships. #192 implements full project backup/restore and journal archive recovery; a configuration export is not that backup. Restore invalidates runtime bindings and does not resurrect current D1 authority.
 
 ## Cross-store consistency boundaries
 
@@ -229,9 +229,15 @@ If a DO is wiped (catastrophic incident with no PIT recovery), the recovery stor
 | Put produced artifact | `artifact_pointers` INSERT + (optional) `artifact_relationships` INSERT + `journal` INSERT | R2 PUT with `If-None-Match: *` | `_idempotency` INSERT | R2 first (idempotent), then DO transaction, then D1 idempotency cache. Cross-backend; reconcile recovers. |
 | Put source artifact | `artifact_pointers` INSERT (resource NULL) + `journal` INSERT | R2 PUT with `If-None-Match: *` | `_idempotency` INSERT | same as produced; no fence check |
 | Add entity-artifact reference | `entity_artifact_references` INSERT + `journal` INSERT | — | — | one transaction |
-| Apply schema | `_schema_history` INSERT + (possibly entity backfill) | — | `_projects.schema_version` UPDATE | DO transaction first, then global D1 update; doctor reconciles drift |
+| Apply schema | `_schema_history` + journal INSERT in one transaction; no automatic entity backfill | — | No D1 update in the current Worker schema route | DO applied revision is authoritative; D1 metadata is not a concurrency token. #296 adds expected-revision checks. |
 | Issue API token | — | — | `_tokens` INSERT | atomic within global D1 |
-| Sweep expired artifacts (cron) | `artifact_pointers` UPDATE (tombstone) + `journal` INSERT per artifact | R2 DELETE per artifact | — | per artifact: R2 first, then DO update |
+| Sweep artifacts | Versioned deletion intent, tombstones, lifecycle queue and evidence | Durable lifecycle records and byte deletion | — | Versioned intent is durable before byte deletion, with retry/recovery; legacy pointer cleanup retains its separate path. Live versioned heads are protected. |
+
+There is no atomic settings transaction across DO, D1, R2 and hosts. Applied
+schema history, access/credential policy and host profile revisions have distinct
+owners. A restore-as-new configuration revision changes definitions only; it does
+not restore deleted blobs, rewind a host or restore revoked membership. Archive
+preserves referenced content/evidence; root project destruction is separate.
 
 ## Open questions the diagram surfaces
 
