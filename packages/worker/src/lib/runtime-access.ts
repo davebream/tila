@@ -1,3 +1,4 @@
+import type { RuntimeVisibilityScope } from "@tila/core";
 import {
   RUNTIME_RUN_CEILING,
   canonicalizeHtu,
@@ -162,4 +163,29 @@ export async function runtimeVisibleEnrollments(c: RuntimeHttpContext) {
     c.get("projectId"),
     membership.role === "owner" ? undefined : principalIdFor(token),
   );
+}
+
+/**
+ * Run and enrollment visibility for projections. Mirrors `GET runtime/runs`
+ * without D1 I/O: owners see every run, enrollment credentials their own
+ * enrollment, other members only enrollments they sponsor.
+ */
+export function runtimeVisibilityScope(
+  c: RuntimeHttpContext,
+): RuntimeVisibilityScope {
+  const authority = runtimeAuthority(c);
+  if (authority?.purpose === "enrollment" && authority.enrollment_id)
+    return { kind: "enrollment", enrollment_id: authority.enrollment_id };
+  if (authority) return { kind: "none" };
+  const token = c.get("tokenResult");
+  if (
+    (token.kind === "d1-token" && token.scopes === "full") ||
+    c.get("effectiveRole") === "owner"
+  )
+    return { kind: "all" };
+  try {
+    return { kind: "sponsor", principal_id: principalIdFor(token) };
+  } catch {
+    return { kind: "none" };
+  }
 }

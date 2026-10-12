@@ -49,6 +49,7 @@ import { presence } from "./routes/presence";
 import { records } from "./routes/records";
 import { repos } from "./routes/repos";
 import { runtimeRoutes } from "./routes/runtime";
+import { runtimeView } from "./routes/runtime-view";
 import { schemaRoutes } from "./routes/schema";
 import { search } from "./routes/search";
 import { serviceAccountRoutes } from "./routes/service-accounts";
@@ -247,6 +248,7 @@ projectRoutes.use("/*", async (c, next) => {
   return next();
 });
 projectRoutes.route("/agents", agents);
+projectRoutes.route("/runtime-view", runtimeView);
 projectRoutes.route("/rooms", conversations);
 projectRoutes.route("/inbox", conversations);
 projectRoutes.route("/dispatch", conversations);

@@ -87,6 +87,7 @@ export function routeCapability(
     ["GET", /^\/dispatch\/[^/]+\/status$/, "dispatch:relay"],
     ["POST", /^\/dispatch\/[^/]+\/(?:lease|report)$/, "dispatch:relay"],
     ["GET", /^\/agents(?:\/[^/]+)?$/, "agents:read"],
+    ["GET", /^\/runtime-view$/, "agents:read"],
     ["POST", /^\/agents$/, "agents:manage"],
     ["POST", /^\/agents\/[^/]+\/(?:bind|release)$/, "agent-bindings:attach"],
     [
@@ -404,7 +405,7 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     c.set("authorizationChecked", true);
     c.header(
       "Cache-Control",
-      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
+      /^\/projects\/[^/]+\/(?:agents|runtime-view|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
         c.req.path,
       )
         ? "private, no-store"
@@ -413,7 +414,7 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
     await next();
     c.header(
       "Cache-Control",
-      /^\/projects\/[^/]+\/(?:agents|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
+      /^\/projects\/[^/]+\/(?:agents|runtime-view|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
         c.req.path,
       )
         ? "private, no-store"
