@@ -223,6 +223,7 @@ describe("runMigrationsWithPitrRollback", () => {
                   "wip_limit",
                   "lease_ms",
                   "revision",
+                  "revision_required",
                 ],
                 queue_entries: [
                   "id",
