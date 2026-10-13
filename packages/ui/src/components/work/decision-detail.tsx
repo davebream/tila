@@ -38,12 +38,12 @@ const linkClass =
 
 export const QUESTION_STATE: Record<
   Question["state"],
-  { label: string; variant: "default" | "green" | "gray" | "amber" }
+  { label: string; variant: "green" | "gray" | "amber" }
 > = {
-  open: { label: "Waiting for an answer", variant: "default" },
+  open: { label: "Waiting for an answer", variant: "amber" },
   answered: { label: "Answered", variant: "green" },
   cancelled: { label: "Cancelled", variant: "gray" },
-  superseded: { label: "Superseded", variant: "amber" },
+  superseded: { label: "Superseded", variant: "gray" },
 };
 
 /** Who may act on an open question, mirroring the server's rules. */
@@ -512,7 +512,7 @@ export function DecisionDetail({
                 {QUESTION_STATE[question.state].label}
               </Badge>
               {question.escalated && (
-                <Badge variant="amber">Escalated to owner</Badge>
+                <Badge variant="secondary">Escalated to owner</Badge>
               )}
             </div>
             <section aria-label="Question" className="space-y-2">
@@ -546,7 +546,9 @@ export function DecisionDetail({
                     ` · agent ${question.requester_binding.agent_id}`}
                 </span>
               </Row>
-              <Row label="Waiting on">
+              <Row
+                label={question.state === "open" ? "Waiting on" : "Responder"}
+              >
                 <span className="break-all font-mono text-xs">
                   {question.responder_principal_id}
                 </span>

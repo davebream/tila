@@ -180,7 +180,7 @@ export function DecisionsPage() {
                   key={q.id}
                   aria-current={q.id === questionId ? "true" : undefined}
                 >
-                  <TableCell className="max-w-md">
+                  <TableCell className="min-w-64 max-w-md whitespace-normal font-sans">
                     <Link
                       className="line-clamp-2 text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-signal-blue"
                       to={{
@@ -199,7 +199,7 @@ export function DecisionsPage() {
                       {QUESTION_STATE[q.state].label}
                     </Badge>
                     {q.escalated && (
-                      <Badge variant="amber" className="ml-1">
+                      <Badge variant="secondary" className="ml-1">
                         Owner
                       </Badge>
                     )}
