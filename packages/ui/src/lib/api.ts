@@ -8,6 +8,9 @@ import type {
   DeliveryListResponse,
   MessageDeliveriesResponse,
   MessagePublishResponseSchema,
+  Question,
+  QuestionListResult,
+  QuestionView,
   QueueEntry,
   QueueInspection,
   QueueListQuery,
@@ -18,6 +21,7 @@ import type {
   RoomResponseSchema,
   RuntimeViewResponseSchema,
   ThreadSchema,
+  WorkAttempt,
 } from "@tila/schemas";
 import type {
   ArtifactHistoryQuery,
@@ -222,7 +226,8 @@ async function request<T>(
     }
   }
   const conversation = /^\/(rooms|inbox|deliveries)(\/|$)/.test(path);
-  const runtime = /^\/(agents|runtime-view|queue|attempts)(\/|$)/.test(path);
+  const runtime =
+    /^\/(agents|runtime-view|queue|attempts|questions)(\/|$)/.test(path);
   let response: Response;
   try {
     response = await fetch(url.toString(), {
@@ -231,7 +236,7 @@ async function request<T>(
       headers: {
         Accept: "application/json",
         ...(conversation ? { "X-Tila-Conversation-Protocol": "1" } : {}),
-        ...(/^\/(queue|attempts)(\/|$)/.test(path)
+        ...(/^\/(queue|attempts|questions)(\/|$)/.test(path)
           ? { "X-Tila-Participant-Id": dashboardParticipantId() }
           : {}),
       },
@@ -1239,4 +1244,58 @@ export async function putRecord(
     body,
     { idempotencyKey },
   );
+}
+
+/** Attempts newest first (by fence). The server returns no total; page by offset. */
+export async function listAttempts(
+  projectId: string,
+  query: {
+    task_id?: string;
+    entry_id?: string;
+    active?: boolean;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<WorkAttempt[]> {
+  return (
+    await request<{ result: WorkAttempt[] }>(projectId, "/attempts", {
+      task_id: query.task_id,
+      entry_id: query.entry_id,
+      active: query.active === undefined ? undefined : String(query.active),
+      limit: query.limit === undefined ? undefined : String(query.limit),
+      offset: query.offset === undefined ? undefined : String(query.offset),
+    })
+  ).result;
+}
+
+export async function listQuestions(
+  projectId: string,
+  query: {
+    task_id?: string;
+    attempt_id?: string;
+    responder_principal_id?: string;
+    requester_principal_id?: string;
+    state?: Question["state"];
+    after_id?: string;
+    limit?: number;
+  },
+): Promise<QuestionListResult> {
+  return (
+    await request<{ result: QuestionListResult }>(projectId, "/questions", {
+      ...query,
+      limit: query.limit === undefined ? undefined : String(query.limit),
+    })
+  ).result;
+}
+
+export async function getQuestion(
+  projectId: string,
+  id: string,
+): Promise<QuestionView> {
+  return (
+    await request<{ result: QuestionView }>(
+      projectId,
+      `/questions/${encodeURIComponent(id)}`,
+    )
+  ).result;
 }

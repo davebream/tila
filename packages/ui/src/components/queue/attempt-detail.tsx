@@ -8,6 +8,7 @@ import {
   getAttempt,
 } from "@/lib/api";
 import { deriveSectionState } from "@/lib/query-state";
+import { controlsAttempt } from "@/lib/rights";
 import { useQuery } from "@tanstack/react-query";
 import type {
   AttemptCorrectCommand,
@@ -278,14 +279,14 @@ function AttemptActions({
   // Requests come from the owner, the principal that enrolled the work, or a
   // maintainer. Without the caller's principal or the assigner, leave the
   // decision to the server and show its refusal.
-  const mayControl =
-    identity?.principal_id === undefined ||
-    assigner === undefined ||
-    permission.reconcile ||
-    own ||
-    (assigner !== null && assigner === identity.principal_id);
-  const canOperate =
-    fresh && permission.operate && mayControl && !action.isPending;
+  const mayControl = controlsAttempt(
+    identity,
+    permission,
+    attempt,
+    assigner,
+    dashboardParticipantId(),
+  );
+  const canOperate = fresh && mayControl && !action.isPending;
   const canReconcile =
     fresh && (permission.reconcile || (permission.operate && own));
   const terminal = attempt.state === "terminal";

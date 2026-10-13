@@ -10,6 +10,7 @@ import { useWhoami } from "@/hooks/use-admin";
 import { useWorkCatalog } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import {
+  ApiError,
   createTask,
   createTaskRelationship,
   getTaskDetail,
@@ -162,7 +163,16 @@ interface TaskCreateDrawerProps {
   /** Draft scope; follow-ups use their own so drafts never mix. */
   scope?: string;
   /** Called after the task exists, before navigating to it. */
-  onCreated?: (id: string) => Promise<void> | void;
+  /**
+   * Checked before a new submission is frozen; return a message to block it.
+   * Not called when retrying an already frozen request.
+   */
+  validate?: () => string | null;
+  /**
+   * Runs after the task exists, inside the same retryable submission. It must
+   * be idempotent: a retry replays it after recognising the existing task.
+   */
+  afterCreate?: (id: string) => Promise<void>;
   title?: string;
   children?: ReactNode;
 }
@@ -171,7 +181,8 @@ export function TaskCreateDrawer({
   onClose,
   prefill,
   scope = "new",
-  onCreated,
+  validate,
+  afterCreate,
   title = "New task",
   children,
 }: TaskCreateDrawerProps) {
@@ -216,8 +227,16 @@ export function TaskCreateDrawer({
 
   // Field inputs start from declared defaults (or a follow-up's prefill) the
   // first time a type is chosen; switching types keeps earlier inputs.
+  // A new task starts in its first dispatchable state unless a default says otherwise.
+  const lifecycle = entry?.definition?.lifecycle;
+  const startState =
+    lifecycle &&
+    fields.some((f) => f.name === lifecycle.field && f.default === undefined)
+      ? { [lifecycle.field]: lifecycle.dispatchable[0] ?? "" }
+      : {};
   const fieldValues: RawFields = {
     ...rawFields(fields, null),
+    ...startState,
     ...(prefill?.type === value.type && prefill.fields
       ? rawFields(
           fields.filter((f) => prefill.fields?.[f.name] !== undefined),
@@ -242,7 +261,28 @@ export function TaskCreateDrawer({
     }: {
       staged: NonNullable<typeof draft.pending>;
       retry: boolean;
-    }) => sendCreate(project, staged.command, staged.id, retry),
+    }) => {
+      const result = await sendCreate(
+        project,
+        staged.command,
+        staged.id,
+        retry,
+      );
+      if (result.linkError || !afterCreate) return result;
+      try {
+        await afterCreate(result.id);
+      } catch (error) {
+        // Keep the server's status so the retry/conflict handling still applies.
+        if (!(error instanceof ApiError)) throw error;
+        throw new ApiError(
+          error.code,
+          `Task ${result.id} was created, but the follow-up step failed: ${error.message}. Retry finishes it without creating another task.`,
+          error.details,
+          error.status,
+        );
+      }
+      return result;
+    },
     onSuccess: async (result) => {
       await Promise.all([
         client.invalidateQueries({ queryKey: ["task-page", project] }),
@@ -255,7 +295,6 @@ export function TaskCreateDrawer({
         setLinkError(result.linkError);
         return;
       }
-      await onCreated?.(result.id);
       discard();
       navigate(`/p/${project}/tasks/${encodeURIComponent(result.id)}`);
     },
@@ -324,6 +363,10 @@ export function TaskCreateDrawer({
         root_type: template.entities[0]?.type ?? "",
       }));
     }
+    // The caller's own checks run last, so they only freeze their part once
+    // this form is valid too.
+    const blocked = validate?.();
+    if (blocked) return setErrors({ form: blocked });
     setErrors({});
     update(() => next);
     if (next.pending) submit.mutate({ staged: next.pending, retry: false });
@@ -495,6 +538,7 @@ export function TaskCreateDrawer({
           </div>
         )}
 
+        {errors.form && <FormNotice>{errors.form}</FormNotice>}
         {kind === "unconfirmed" && (
           <FormNotice tone="warning">
             The server did not confirm this request (

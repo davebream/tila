@@ -1,4 +1,4 @@
-import type { Capability, WhoamiResponse } from "@tila/schemas";
+import type { Capability, WhoamiResponse, WorkAttempt } from "@tila/schemas";
 import { permitsRecord, permitsTask } from "@tila/schemas";
 
 /**
@@ -57,3 +57,39 @@ export function rights(identity: WhoamiResponse | undefined, project: string) {
 }
 
 export type Rights = ReturnType<typeof rights>;
+
+/**
+ * Whether the server's attempt-control rule (#392) lets this caller request
+ * cancellation, suspension, resume or retry: the attempt's current owner
+ * (principal and this browser's participant), the principal that enrolled the
+ * work, or a maintainer. Unknown inputs defer to the server's answer.
+ */
+export function controlsAttempt(
+  identity: WhoamiResponse | undefined,
+  allowed: Rights,
+  attempt: Pick<WorkAttempt, "principal_id" | "participant_id">,
+  assigner: string | null | undefined,
+  participant: string,
+): boolean {
+  if (!allowed.operate) return false;
+  if (identity?.principal_id === undefined || assigner === undefined)
+    return true;
+  if (allowed.reconcile) return true;
+  if (
+    identity.principal_id === attempt.principal_id &&
+    participant === attempt.participant_id
+  )
+    return true;
+  return assigner !== null && assigner === identity.principal_id;
+}
+
+/** Queue `edit`/`withdraw`: the assigner or a maintainer (legacy entries: any task writer). */
+export function editsEnrollment(
+  identity: WhoamiResponse | undefined,
+  allowed: Rights,
+  assigner: string | null,
+): boolean {
+  if (!allowed.edit) return false;
+  if (allowed.manage || assigner === null) return true;
+  return identity?.principal_id === assigner;
+}
