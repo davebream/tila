@@ -2155,13 +2155,22 @@ describe("snapshot artifact flows", () => {
     );
     expect(patched.revision).toBe(2);
 
-    recordOps.stampArtifacts(db, {
-      type: "config",
-      key: "main",
-      revision: 2,
-      canonical_artifact_key: "produced/record:config/main/ghi789.json",
-      source_artifact_key: "sources/abc.yaml",
-    });
+    recordOps.stampArtifacts(
+      db,
+      {
+        type: "config",
+        key: "main",
+        revision: 2,
+        canonical_artifact_key: "produced/record:config/main/ghi789.json",
+        source_artifact_key: "sources/abc.yaml",
+      },
+      {
+        principalId: "test:test-agent",
+        participantId: "test-agent",
+        environment: {},
+        actor: "test-agent",
+      },
+    );
 
     const rev = db
       .select()
@@ -2178,6 +2187,24 @@ describe("snapshot artifact flows", () => {
       "produced/record:config/main/ghi789.json",
     );
     expect(rev?.source_artifact_key).toBe("sources/abc.yaml");
+    const pointer = db
+      .select()
+      .from(schema.artifactPointers)
+      .where(
+        eq(
+          schema.artifactPointers.r2_key,
+          "produced/record:config/main/ghi789.json",
+        ),
+      )
+      .get();
+    expect(pointer).toMatchObject({
+      resource: "record:config/main",
+      kind: "record-snapshot-canonical",
+      sha256: patched.value_sha256,
+      bytes: new TextEncoder().encode(JSON.stringify({ env: "staging" }))
+        .byteLength,
+      produced_by: "test:test-agent",
+    });
   });
 
   it("stampArtifacts throws RevisionNotFoundError for non-existent revision", async () => {
@@ -2199,13 +2226,22 @@ describe("snapshot artifact flows", () => {
     );
 
     expect(() =>
-      recordOps.stampArtifacts(db, {
-        type: "config",
-        key: "main",
-        revision: 999,
-        canonical_artifact_key: "produced/record:config/main/xxx.json",
-        source_artifact_key: null,
-      }),
+      recordOps.stampArtifacts(
+        db,
+        {
+          type: "config",
+          key: "main",
+          revision: 999,
+          canonical_artifact_key: "produced/record:config/main/xxx.json",
+          source_artifact_key: null,
+        },
+        {
+          principalId: "test:test-agent",
+          participantId: "test-agent",
+          environment: {},
+          actor: "test-agent",
+        },
+      ),
     ).toThrow(RevisionNotFoundError);
   });
 
@@ -2228,13 +2264,22 @@ describe("snapshot artifact flows", () => {
     );
 
     expect(() =>
-      recordOps.stampArtifacts(db, {
-        type: "other_type",
-        key: "main",
-        revision: 1,
-        canonical_artifact_key: "produced/record:other_type/main/xxx.json",
-        source_artifact_key: null,
-      }),
+      recordOps.stampArtifacts(
+        db,
+        {
+          type: "other_type",
+          key: "main",
+          revision: 1,
+          canonical_artifact_key: "produced/record:other_type/main/xxx.json",
+          source_artifact_key: null,
+        },
+        {
+          principalId: "test:test-agent",
+          participantId: "test-agent",
+          environment: {},
+          actor: "test-agent",
+        },
+      ),
     ).toThrow(RevisionNotFoundError);
   });
 });

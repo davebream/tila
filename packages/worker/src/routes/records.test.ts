@@ -358,3 +358,80 @@ describe("GET /records/_types for credentials with namespace restrictions", () =
     expect(body.incomplete).toEqual({ declared_types: "unavailable" });
   });
 });
+
+describe("snapshot R2 failure boundaries", () => {
+  it.each([
+    ["POST", "/config", { key: "main", value: { region: "eu" } }],
+    ["PUT", "/config/main", { value: { region: "eu" }, fence: 1 }],
+    ["POST", "/config/~/put/main", { value: { region: "eu" } }],
+  ])(
+    "does not mutate the DO when R2 fails for %s %s",
+    async (method, path, body) => {
+      _clearSchemaCacheForTest();
+      const fetch = vi.fn(async (_req: Request | string) =>
+        schemaOk(
+          'schema_version = 1\n[records.config]\nhistory = "snapshot"\n',
+        ),
+      );
+      const app = createApp({ fetch } as unknown as DurableObjectStub);
+      app.onError(() => new Response("R2 unavailable", { status: 500 }));
+      const put = vi.fn().mockRejectedValue(new Error("R2 unavailable"));
+      const response = await app.request(
+        path,
+        {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        { ...MOCK_ENV, ARTIFACTS: { put } } as unknown as Env,
+        MOCK_CTX,
+      );
+      expect(response.status).toBe(500);
+      expect(put).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledOnce();
+      const call = fetch.mock.calls[0]?.[0];
+      expect(typeof call === "string" ? call : call?.url).toContain(
+        "/schema/current",
+      );
+    },
+  );
+
+  it("retains a successful patch response without stamping if the subsequent R2 write fails", async () => {
+    _clearSchemaCacheForTest();
+    const fetch = vi.fn(async (req: Request | string) => {
+      const url = typeof req === "string" ? req : req.url;
+      if (url.includes("/schema/current"))
+        return schemaOk(
+          'schema_version = 1\n[records.config]\nhistory = "snapshot"\n',
+        );
+      if (url.endsWith("/patch"))
+        return json({
+          ok: true,
+          record: { value: { region: "eu" } },
+          fence: 2,
+          revision: 2,
+        });
+      throw new Error(`unexpected DO request: ${url}`);
+    });
+    const app = createApp({ fetch } as unknown as DurableObjectStub);
+    const put = vi.fn().mockRejectedValue(new Error("R2 unavailable"));
+    const response = await app.request(
+      "/config/main",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patch: { region: "eu" }, fence: 1 }),
+      },
+      { ...MOCK_ENV, ARTIFACTS: { put } } as unknown as Env,
+      MOCK_CTX,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      fence: 2,
+      revision: 2,
+    });
+    expect(put).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});

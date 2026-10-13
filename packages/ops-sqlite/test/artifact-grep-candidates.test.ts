@@ -88,14 +88,16 @@ describe("listGrepCandidates", () => {
   });
 
   it("filters by resource", () => {
-    // Disable FK so we can insert a resource pointer without creating the entity row
-    testDb.rawDb.pragma("foreign_keys = OFF");
+    testDb.rawDb
+      .prepare(
+        "INSERT INTO entities (id, type, schema_version, created_at, updated_at, created_by) VALUES ('task-1', 'task', 1, 1, 1, 'test')",
+      )
+      .run();
     insertPointer(testDb, {
       r2_key: "produced/task-1/a.md",
       resource: "task-1",
     });
     insertPointer(testDb, { r2_key: "sources/a/b.md", resource: null });
-    testDb.rawDb.pragma("foreign_keys = ON");
 
     const result = listGrepCandidates(testDb.db, { resource: "task-1" });
     expect(result).toHaveLength(1);

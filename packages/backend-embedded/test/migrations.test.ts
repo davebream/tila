@@ -10,7 +10,7 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–37.
+ * Canonical shared versions present in the embedded set: 1–41.
  * The transactional receipts, archive watermark and transfer lock
  * are shared so cloud/local backups have identical recovery semantics.
  * The embedded-only idempotency overlay is appended
@@ -18,7 +18,7 @@ import {
  */
 const CANONICAL_VERSIONS = [
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-  23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+  23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,
@@ -46,6 +46,16 @@ function createFakeStorage(): {
     sql: {
       exec(statement: string, ...bindings: unknown[]) {
         const trimmed = statement.trim();
+        // DDL is not executed by this bookkeeping fake. Expose the table
+        // definition needed by the snapshot migration's integrity probe.
+        if (trimmed.startsWith("SELECT sql FROM sqlite_master"))
+          return {
+            toArray: () => [
+              {
+                sql: "CREATE TABLE artifact_pointers (r2_key TEXT PRIMARY KEY, resource TEXT)",
+              },
+            ],
+          };
 
         // Read already-applied versions.
         if (/^SELECT\s+version\s+FROM\s+_migrations/i.test(trimmed)) {
@@ -148,6 +158,17 @@ describe("runEmbeddedMigrations concurrent-first-open race (INSERT OR IGNORE)", 
       sql: {
         exec(statement: string, ...bindings: unknown[]) {
           const trimmed = statement.trim();
+          // DDL is not executed by this bookkeeping fake. Expose the table
+          // definition needed by the snapshot migration's integrity probe.
+          if (trimmed.startsWith("SELECT sql FROM sqlite_master"))
+            return {
+              toArray: () => [
+                {
+                  sql: "CREATE TABLE artifact_pointers (r2_key TEXT PRIMARY KEY, resource TEXT)",
+                },
+              ],
+            };
+
           if (/^SELECT\s+version\s+FROM\s+_migrations/i.test(trimmed)) {
             // First (snapshot) read sees an EMPTY table, so the runner attempts
             // every migration. Immediately after, a racing runtime records v1 —
@@ -198,6 +219,17 @@ describe("runEmbeddedMigrations partial-failure consistency (R4)", () => {
       sql: {
         exec(statement: string, ...bindings: unknown[]) {
           const trimmed = statement.trim();
+          // DDL is not executed by this bookkeeping fake. Expose the table
+          // definition needed by the snapshot migration's integrity probe.
+          if (trimmed.startsWith("SELECT sql FROM sqlite_master"))
+            return {
+              toArray: () => [
+                {
+                  sql: "CREATE TABLE artifact_pointers (r2_key TEXT PRIMARY KEY, resource TEXT)",
+                },
+              ],
+            };
+
           if (/^SELECT\s+version\s+FROM\s+_migrations/i.test(trimmed)) {
             return {
               toArray: () =>
@@ -282,6 +314,17 @@ describe("pre-feature stale-schema detection", () => {
       sql: {
         exec(statement: string) {
           const trimmed = statement.trim();
+          // DDL is not executed by this bookkeeping fake. Expose the table
+          // definition needed by the snapshot migration's integrity probe.
+          if (trimmed.startsWith("SELECT sql FROM sqlite_master"))
+            return {
+              toArray: () => [
+                {
+                  sql: "CREATE TABLE artifact_pointers (r2_key TEXT PRIMARY KEY, resource TEXT)",
+                },
+              ],
+            };
+
           if (/SELECT\s+version\s+FROM\s+_migrations/i.test(trimmed)) {
             return {
               toArray: () => opts.versions.map((version) => ({ version })),

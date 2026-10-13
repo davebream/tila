@@ -32,7 +32,7 @@ import {
 export const noopSleep = (_ms: number): void => {};
 
 /** Build a MigrationStorage shim over a raw bun:sqlite Database. */
-function migrationStorage(rawDb: Database): MigrationStorage {
+export function migrationStorage(rawDb: Database): MigrationStorage {
   return {
     sql: {
       exec<T>(statement: string, ...bindings: unknown[]) {

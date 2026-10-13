@@ -1,12 +1,25 @@
 import { describe, expect, it } from "vitest";
 import * as transfer from "../src/project-transfer-ops";
-import { createEntity, createTestDb } from "./helpers";
+import { createRecord } from "../src/record-ops";
+import { createEntity, createTestDb, testOrigin } from "./helpers";
 
 describe("project transfer operations", () => {
   it("orders snapshot rows deterministically and restores journal sequence", async () => {
     const { db, rawDb } = createTestDb();
     createEntity(db, { id: "z" });
     createEntity(db, { id: "a" });
+    await createRecord(
+      db,
+      {
+        type: "config",
+        key: "head",
+        value: { region: "eu" },
+        canonical_artifact_key: "produced/record:config/head/hash.json",
+        schema_version: 1,
+        actor: "test",
+      },
+      testOrigin("test"),
+    );
     rawDb
       .prepare(
         `INSERT INTO signal_groups
@@ -69,7 +82,10 @@ describe("project transfer operations", () => {
         transfer.readSnapshotPage(sql, table, { limit: 1_000 }).rows,
       ]),
     );
-    transfer.replaceSnapshotRows(sql, rows, 42);
+    rawDb.transaction(() => transfer.replaceSnapshotRows(sql, rows, 42))();
+    expect(rows.records).toHaveLength(1);
+    expect(rows.artifact_pointers).toHaveLength(1);
+    expect(rawDb.pragma("foreign_key_check")).toEqual([]);
     expect(await transfer.semanticDigest(sql)).toBe(before);
     expect(transfer.journalState(sql).nextSequence).toBe(42);
     expect(rows.signal_groups).toHaveLength(1);
