@@ -670,7 +670,9 @@ export function inspect(
         (!query.capability ||
           entry.required_capabilities.includes(query.capability)) &&
         (query.priority === undefined || entry.priority === query.priority) &&
-        (!query.lease || leaseLapsed(latest.get(entry.id), now)),
+        (!query.lease ||
+          (group(entry, latest.get(entry.id)) === "active" &&
+            leaseLapsed(latest.get(entry.id), now))),
     );
     return {
       policy: policy(tx),

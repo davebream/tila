@@ -147,6 +147,8 @@ async function loadAttention(
   query: RuntimeViewQuery,
   store: RuntimeStoreReader,
 ): Promise<Response> {
+  // Reject a malformed cursor before paying for the scan.
+  const from = query.cursor ? decodeRuntimeCursor(query.cursor) : null;
   let after: string | null = null;
   let scanned = 0;
   let complete = true;
@@ -175,7 +177,6 @@ async function loadAttention(
     }
     after = result.next_after;
   }
-  const from = query.cursor ? decodeRuntimeCursor(query.cursor) : null;
   const remaining = from
     ? matches.filter((row) => row.agent.id > from)
     : matches;

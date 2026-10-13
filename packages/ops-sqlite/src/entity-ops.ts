@@ -369,11 +369,13 @@ export function list(
         .filter((state): state is string => state !== undefined);
       if (states.length === 0) continue;
       outcomeTypes.push(type);
+      // Match the field by exact key, as readiness does: a JSON path would
+      // read a field named `a.b` as a nested lookup.
       matches.push(
-        sql`(${schema.entities.type} = ${type} AND json_extract(${schema.entities.data}, ${`$.${lifecycle.field}`}) IN (${sql.join(
+        sql`(${schema.entities.type} = ${type} AND EXISTS (SELECT 1 FROM json_each(${schema.entities.data}) WHERE json_each.key = ${lifecycle.field} AND json_each.value IN (${sql.join(
           states.map((state) => sql`${state}`),
           sql.raw(", "),
-        )}))`,
+        )})))`,
       );
     }
     outcomeTypes.sort();
