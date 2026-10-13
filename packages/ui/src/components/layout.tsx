@@ -234,10 +234,12 @@ function ProjectSwitcher() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-foreground transition-colors hover:bg-signal-blue/10 cursor-pointer"
+          className="flex min-w-0 items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-foreground transition-colors hover:bg-signal-blue/10 cursor-pointer"
           aria-label={`Switch project (current: ${projectId})`}
         >
-          <span className="font-mono text-xs">{projectId}</span>
+          <span className="min-w-0 truncate whitespace-nowrap font-mono text-xs">
+            {projectId}
+          </span>
           <svg
             width="12"
             height="12"
@@ -248,7 +250,7 @@ function ProjectSwitcher() {
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
-            className={`transition-transform ${open ? "rotate-180" : ""}`}
+            className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
           >
             <path d="M3 4.5l3 3 3-3" />
           </svg>
@@ -404,7 +406,7 @@ export function Layout() {
         <div className="flex h-[52px] min-w-0 flex-1 items-center gap-3 md:flex-none md:h-auto">
           <span className="shrink-0 flex items-center gap-1.5 text-signal-blue">
             <TilaMark size={18} />
-            <span className="font-logo text-[18px] font-bold tracking-[-0.03em]">
+            <span className="hidden font-logo text-[18px] font-bold tracking-[-0.03em] sm:inline">
               tila
             </span>
           </span>
