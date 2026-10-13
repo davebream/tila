@@ -14,6 +14,7 @@ describe("corsMiddleware", () => {
       "x-tila-participant-id",
       "x-tila-client-name",
       "x-tila-conversation-protocol",
+      "idempotency-key",
     ];
     const res = await app.request(
       "http://worker/projects/p/rooms",
