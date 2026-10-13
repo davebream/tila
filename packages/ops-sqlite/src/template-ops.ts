@@ -2,12 +2,12 @@ import { type CredentialPolicy, permitsTask } from "@tila/schemas";
 import type { TemplateDefinition, TilaSchemaToml } from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import { assertArtifactReviewPolicy } from "./artifact-review-ops";
 import {
   checkEntityTypeDeclared,
   resolveCurrentSchema,
 } from "./constraint-ops";
 import { CredentialPolicyDenied, assertTaskAccess } from "./credential-policy";
+import { insertEntityInTransaction } from "./entity-ops";
 import { type RequestOrigin, appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 import { getCurrentSchema } from "./schema-ops";
@@ -227,19 +227,20 @@ export function instantiateTemplate(
         entity.data as Record<string, unknown>,
         vars,
       );
-      assertArtifactReviewPolicy(tx, entityId, entity.type, data.status);
-      tx.insert(schema.entities)
-        .values({
+      // Same validated insert as a single task create: current-schema
+      // required/lifecycle checks, duplicate-id mapping and search indexing.
+      insertEntityInTransaction(
+        tx,
+        {
           id: entityId,
           type: entity.type,
-          schema_version: schemaVersion,
-          data: JSON.stringify(data),
-          archived: 0,
-          created_at: now,
-          updated_at: now,
+          data,
           created_by: origin.actor,
-        })
-        .run();
+          tags: [],
+        },
+        schemaVersion,
+        now,
+      );
       entityIds.push(entityId);
     }
 
