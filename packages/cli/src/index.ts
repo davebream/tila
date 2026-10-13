@@ -95,6 +95,7 @@ const main = defineCommand({
     token: () => load(() => import("./commands/token")),
     "service-account": () => load(() => import("./commands/service-account")),
     repos: () => load(() => import("./commands/repos")),
+    member: () => load(() => import("./commands/member")),
     admin: () => load(() => import("./commands/admin")),
     auth: () => load(() => import("./commands/auth")),
     login: () => load(() => import("./commands/login")),

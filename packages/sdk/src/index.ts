@@ -241,3 +241,9 @@ export type {
 
 export type { QuestionBackend } from "@tila/core";
 export { RemoteQuestionBackend, executeQuestionRequest } from "./questions";
+export {
+  createMembershipMethods,
+  createProjectMethods,
+  createRepoMethods,
+  type MembershipEvent,
+} from "./access";

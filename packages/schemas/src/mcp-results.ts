@@ -17,6 +17,7 @@ import {
   ArtifactHistoryResponseSchema,
   ArtifactRevisionSchema,
 } from "./artifact-version";
+import { ServiceAccountSchema } from "./capability";
 import {
   HandoffListResponseSchema,
   HandoffSchema,
@@ -27,6 +28,7 @@ import {
 import * as conversations from "./conversation";
 import { GateResponseSchema } from "./gate";
 import { McpRecoverySchema } from "./mcp-workflow";
+import { ProjectMembershipSchema } from "./membership";
 import * as signals from "./signal";
 
 // Existing journal responses may include older relationship events without
@@ -116,6 +118,14 @@ export const McpPrimitiveResults = {
   tila_inbox_watch: conversations.InboxWatchResponseSchema,
   tila_inbox_explain: conversations.DeliveryExplainResponseSchema,
   tila_agent_bind: AgentBindingResponseSchema,
+  tila_access_members: ok.extend({
+    memberships: z.array(ProjectMembershipSchema),
+  }),
+  tila_access_repos: api.RepoListResponseSchema,
+  tila_access_service_accounts: ok.extend({
+    service_accounts: z.array(ServiceAccountSchema),
+  }),
+  tila_access_credentials: api.TokenListResponseSchema,
   tila_agent_list: AgentListResponseSchema,
   tila_agent_get: AgentGetResponseSchema,
   tila_agent_register: AgentResponseSchema,

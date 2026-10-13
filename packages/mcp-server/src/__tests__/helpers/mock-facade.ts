@@ -177,6 +177,26 @@ export type MockFacadeShape = {
     | "revokeWorkloadBinding",
     Mock
   >;
+  memberships: Record<
+    | "list"
+    | "grant"
+    | "updateRole"
+    | "revoke"
+    | "policy"
+    | "setPolicy"
+    | "events",
+    Mock
+  >;
+  repos: Record<
+    | "list"
+    | "accessPolicy"
+    | "setAccessPolicy"
+    | "oidcPolicy"
+    | "setOidcPolicy"
+    | "remove",
+    Mock
+  >;
+  project: Record<"settings" | "rename", Mock>;
   close: Mock;
 };
 
@@ -326,6 +346,24 @@ export function createMockFacade(): MockFacadeShape {
       "updateWorkloadBinding",
       "revokeWorkloadBinding",
     ),
+    memberships: fns(
+      "list",
+      "grant",
+      "updateRole",
+      "revoke",
+      "policy",
+      "setPolicy",
+      "events",
+    ),
+    repos: fns(
+      "list",
+      "accessPolicy",
+      "setAccessPolicy",
+      "oidcPolicy",
+      "setOidcPolicy",
+      "remove",
+    ),
+    project: fns("settings", "rename"),
     close: vi.fn(),
   };
 }
@@ -384,6 +422,9 @@ const _assertMockMatchesFacade: _MockMatchesFacade = {
   templates: true,
   tokens: true,
   serviceAccounts: true,
+  memberships: true,
+  repos: true,
+  project: true,
 };
 void _assertMockMatchesFacade;
 
