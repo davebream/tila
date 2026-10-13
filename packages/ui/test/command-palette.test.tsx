@@ -280,7 +280,12 @@ describe("CommandPalette", () => {
       "Access",
       "Definitions",
     ])
-      expect(await screen.findByText(`Go to ${page}`)).toBeInTheDocument();
+      expect(
+        (await screen.findAllByText(`Go to ${page}`)).length,
+      ).toBeGreaterThan(0);
+    // Runtime › Agents and Settings › Agents share a label; the section
+    // beside each tells them apart.
+    expect(screen.getAllByText("Go to Agents")).toHaveLength(2);
   });
 
   test("finds pages by section and keyword", async () => {

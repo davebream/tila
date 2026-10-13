@@ -12,6 +12,8 @@ interface ConfirmActionProps {
   confirmText?: string;
   confirmLabel?: string;
   pending?: boolean;
+  /** Keeps Confirm disabled, e.g. while the effects are still loading. */
+  disabled?: boolean;
   error?: ReactNode;
   onConfirm: () => void;
 }
@@ -28,6 +30,7 @@ export function ConfirmAction({
   confirmText,
   confirmLabel = "Confirm",
   pending = false,
+  disabled = false,
   error,
   onConfirm,
 }: ConfirmActionProps) {
@@ -86,7 +89,7 @@ export function ConfirmAction({
             <Button
               variant="destructive"
               size="sm"
-              disabled={!ready || pending}
+              disabled={!ready || pending || disabled}
               onClick={onConfirm}
             >
               {pending ? "Working…" : confirmLabel}

@@ -1,21 +1,15 @@
 import { DeliveryDetail } from "@/components/delivery-trace";
 import { Drawer } from "@/components/ui/drawer";
+import { useWhoami } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { listAgents } from "@/lib/api";
-import { deriveBindingView, leaseCountdown } from "@/lib/lease";
+import { BINDING_LABEL, deriveBindingView, leaseCountdown } from "@/lib/lease";
+import { rights } from "@/lib/rights";
 import { formatTime } from "@/lib/time";
 import { useQuery } from "@tanstack/react-query";
 import { useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-
-const BINDING_LABEL = {
-  none: "No binding",
-  attached: "Attached",
-  expired: "Expired",
-  replaced: "Replaced",
-  released: "Released",
-} as const;
 
 export function AgentsPage() {
   // Re-render every second so lease expiry is recomputed even when polling fails.
@@ -25,6 +19,7 @@ export function AgentsPage() {
   const { agentId, deliveryId } = useParams();
   const navigate = useNavigate();
   const opener = useRef<HTMLAnchorElement>(null);
+  const manage = rights(useWhoami().data, projectId ?? "").manageAgents;
   const agents = useQuery({
     queryKey: ["agents", projectId],
     queryFn: () => listAgents(projectId as string),
@@ -43,6 +38,17 @@ export function AgentsPage() {
           </Link>{" "}
           view shows run authority, hosts and sessions.
         </p>
+        {manage && (
+          <p className="mt-1 text-sm">
+            <Link
+              className="text-signal-blue underline"
+              to={`/p/${projectId}/settings/agents`}
+            >
+              Manage agents in Settings › Agents
+            </Link>{" "}
+            to register, rename, change binding grants or archive them.
+          </p>
+        )}
       </header>
       {agents.isPending && <p>Loading agents…</p>}
       {agents.error && (

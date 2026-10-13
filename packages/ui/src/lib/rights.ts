@@ -57,6 +57,8 @@ export function rights(identity: WhoamiResponse | undefined, project: string) {
         : permitsRecord(restrictions, type, key)),
     /** Any write the questions API may accept from this credential. */
     decide: taskWrite,
+    /** Register, edit and archive agents (maintainer, `agents:manage`). */
+    manageAgents: manage && has("agents:manage"),
   };
 }
 

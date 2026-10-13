@@ -205,8 +205,11 @@ describe("Layout navigation", () => {
           role: "viewer",
           policy: {
             role: "viewer",
+            // Every read except the ones behind the settings sub-pages.
             capabilities: CAPABILITIES.filter(
-              (cap) => cap.endsWith(":read") && cap !== "schema:read",
+              (cap) =>
+                cap.endsWith(":read") &&
+                !["schema:read", "agents:read"].includes(cap),
             ),
           },
         }),
