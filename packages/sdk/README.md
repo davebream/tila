@@ -410,11 +410,13 @@ const artifacts = createArtifactMethods(client, projectId);
 
 const result = await artifacts.upload(
   new Blob(["data"], { type: "application/json" }),
-  { kind: "intermediate", mimeType: "application/json" },
+  { kind: "intermediate" },
 );
 ```
 
-**`mimeType` requirement:** When the file's `.type` property is empty (plain `Blob` with no type set), you must pass `mimeType` explicitly. A `TypeError` is thrown synchronously before any network request if `mimeType` is absent and `file.type` is empty.
+**MIME type:** A nonempty `mimeType` option overrides `File.type` or `Blob.type`. When the input's `.type` is empty, you must pass `mimeType` explicitly. Otherwise, a `TypeError` is thrown synchronously before any network request. `ReadableStream` inputs always require `mimeType`.
+
+**Filename:** No filename is required for a `Blob` or `ReadableStream`. The SDK sends `"blob"` as the multipart filename for these inputs and for an empty-named `File`. A nonempty `File.name` is preserved.
 
 ### Download
 
