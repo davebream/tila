@@ -417,3 +417,107 @@ describe("GET / (entity list) tag_filter", () => {
     expect(parsed.searchParams.get("tag_filter")).toBe("repo:a,team:x");
   });
 });
+
+// ---------------------------------------------------------------------------
+// blocked / outcome attention filters on the task list route (#306)
+// ---------------------------------------------------------------------------
+
+describe("GET / (task list) attention filters", () => {
+  function forwardedParams(stub: DurableObjectStub): URLSearchParams {
+    const forwardedReq = vi.mocked(stub.fetch).mock.calls[0][0] as
+      | Request
+      | string;
+    const forwardedUrl =
+      typeof forwardedReq === "string" ? forwardedReq : forwardedReq.url;
+    const parsed = new URL(forwardedUrl);
+    expect(parsed.pathname).toBe("/entity/list");
+    return parsed.searchParams;
+  }
+
+  it("forwards blocked=1 to the DO list query", async () => {
+    const stub = mockStub(jsonResponse({ ok: true, entities: [] }));
+    const app = createApp(stub, FULL_TOKEN as never);
+
+    const res = await app.request(
+      "/?blocked=1&limit=50&type=bug",
+      undefined,
+      MOCK_ENV,
+      MOCK_CTX,
+    );
+
+    expect(res.status).toBe(200);
+    const params = forwardedParams(stub);
+    expect(params.get("blocked")).toBe("1");
+    expect(params.get("limit")).toBe("50");
+    expect(params.get("type")).toBe("bug");
+    expect(params.has("outcome")).toBe(false);
+  });
+
+  it("forwards an outcome comma list to the DO list query unchanged", async () => {
+    const stub = mockStub(jsonResponse({ ok: true, entities: [] }));
+    const app = createApp(stub, FULL_TOKEN as never);
+
+    const res = await app.request(
+      "/?outcome=failure,abandoned",
+      undefined,
+      MOCK_ENV,
+      MOCK_CTX,
+    );
+
+    expect(res.status).toBe(200);
+    const params = forwardedParams(stub);
+    expect(params.get("outcome")).toBe("failure,abandoned");
+    expect(params.has("blocked")).toBe(false);
+  });
+
+  it("forwards blocked and outcome together with a cursor", async () => {
+    const stub = mockStub(jsonResponse({ ok: true, entities: [] }));
+    const app = createApp(stub, FULL_TOKEN as never);
+
+    const res = await app.request(
+      "/?blocked=1&outcome=success&cursor=abc",
+      undefined,
+      MOCK_ENV,
+      MOCK_CTX,
+    );
+
+    expect(res.status).toBe(200);
+    const params = forwardedParams(stub);
+    expect(params.get("blocked")).toBe("1");
+    expect(params.get("outcome")).toBe("success");
+    expect(params.get("cursor")).toBe("abc");
+  });
+
+  for (const [label, query] of [
+    ["an unknown outcome", "outcome=bogus"],
+    ["one unknown outcome in a list", "outcome=failure,bogus"],
+    ["an empty outcome entry", "outcome=failure,"],
+    ["blocked=yes", "blocked=yes"],
+    ["blocked=true", "blocked=true"],
+    ["blocked=0", "blocked=0"],
+  ] as const) {
+    it(`rejects ${label} with 400 validation-error and does not call the DO`, async () => {
+      const stub = mockStub(jsonResponse({ ok: true, entities: [] }));
+      const app = createApp(stub, FULL_TOKEN as never);
+
+      const res = await app.request(
+        `/?${query}`,
+        undefined,
+        MOCK_ENV,
+        MOCK_CTX,
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        ok: boolean;
+        error: { code: string; message: string };
+      };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe("validation-error");
+      expect(body.error.message).toMatch(
+        query.startsWith("outcome") ? /outcome/ : /blocked/,
+      );
+      expect(stub.fetch).not.toHaveBeenCalled();
+    });
+  }
+});

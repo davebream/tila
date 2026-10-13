@@ -64,4 +64,35 @@ describe("delivery trace SDK contracts", () => {
     });
     expect(() => inbox.deliveries({ state: "done" as "acked" })).toThrow();
   });
+
+  it("sends the suppressed-wake and expiry filters and accepts a total", async () => {
+    const { fetch, inbox } = setup();
+    fetch.mockResolvedValueOnce(
+      Response.json({
+        ok: true,
+        deliveries: [],
+        has_more: false,
+        cursor: null,
+        total: 0,
+      }),
+    );
+    const result = await inbox.deliveries({
+      wake: "suppressed",
+      expires_after: 123,
+    });
+    expect(result.total).toBe(0);
+    const url = new URL(String(fetch.mock.calls[0][0]));
+    expect(url.pathname).toBe("/projects/project/deliveries");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      wake: "suppressed",
+      expires_after: "123",
+    });
+    expect(url.search).toContain("wake=suppressed");
+    expect(url.search).toContain("expires_after=123");
+    expect(() =>
+      inbox.deliveries({ wake: "active" as "suppressed" }),
+    ).toThrow();
+    expect(() => inbox.deliveries({ expires_after: -1 })).toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

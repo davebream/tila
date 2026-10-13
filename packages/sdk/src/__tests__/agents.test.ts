@@ -117,4 +117,47 @@ describe("agent SDK contracts", () => {
     fetch.mockResolvedValueOnce(Response.json({ ...view, rows: [{}] }));
     await expect(agents.runtimeView()).rejects.toThrow();
   });
+
+  it("sends the attention filter and accepts its total and scan", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const client = new TilaClient({
+      baseUrl: "https://example.test",
+      token: "fixture",
+      participantId: "participant",
+      fetch,
+    });
+    const agents = createAgentMethods(client, "project");
+    const view = {
+      ok: true,
+      server_now: 1000,
+      sources: {
+        agents: "ok",
+        runs: "ok",
+        enrollments: "ok",
+        presence: "ok",
+      },
+      rows: [],
+      next_cursor: null,
+      total: 0,
+      scan: { agents: 3, complete: true },
+    };
+    fetch.mockResolvedValueOnce(Response.json(view));
+    expect(
+      await agents.runtimeView({ filter: "attention", limit: 10 }),
+    ).toEqual(view);
+    const url = new URL(String(fetch.mock.calls[0][0]));
+    expect(url.pathname).toBe("/projects/project/runtime-view");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      filter: "attention",
+      limit: "10",
+    });
+    // A filter scans every agent, so it cannot be narrowed to one agent.
+    expect(() =>
+      agents.runtimeView({ filter: "attention", agent: "worker" }),
+    ).toThrow();
+    expect(() =>
+      agents.runtimeView({ filter: "everything" as "attention" }),
+    ).toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

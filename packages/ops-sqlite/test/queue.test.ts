@@ -365,3 +365,116 @@ it("does not replay a legacy configuration success after managed revision checks
     applySchema(db, lifecycleDefinition, "legacy", undefined, origin, options),
   ).toThrow("schema-revision-required");
 });
+
+it("filters entries whose starting or running attempt is past its lease", () => {
+  const { db } = fixture;
+  enable();
+  const now = Date.now();
+  const ids = [
+    "reserved",
+    "starting",
+    "running",
+    "renewed",
+    "suspended",
+    "hidden",
+    "waiting",
+  ];
+  for (const [i, id] of ids.entries()) {
+    task(id);
+    // Priorities make the claim order follow `ids`.
+    queue.enroll(
+      db,
+      { ...key(), task_id: id, priority: ids.length - i },
+      origin,
+      now,
+    );
+  }
+  const granted = new Map<string, ReturnType<typeof attempts.get>>();
+  for (const id of ids.slice(0, -1)) {
+    const grant = queue.claimNext(db, key(), origin, undefined, now);
+    if (grant.kind !== "granted") throw new Error(`grant ${id}`);
+    expect(grant.entry.task_id).toBe(id);
+    granted.set(id, grant.attempt);
+  }
+  const attempt = (id: string) => {
+    const found = granted.get(id);
+    if (!found) throw new Error(`attempt ${id}`);
+    return found;
+  };
+  const accept = (id: string) =>
+    granted.set(
+      id,
+      attempts.accept(db, attempt(id).id, authority(attempt(id)), origin, now)
+        .attempt,
+    );
+  const start = (id: string) =>
+    granted.set(
+      id,
+      attempts.started(
+        db,
+        attempt(id).id,
+        {
+          ...authority(attempt(id)),
+          session: { provider: "fixture", id },
+        },
+        origin,
+        now,
+      ).attempt,
+    );
+  for (const id of ["starting", "running", "renewed", "suspended", "hidden"])
+    accept(id);
+  for (const id of ["running", "renewed", "suspended", "hidden"]) start(id);
+  // A heartbeat moves the lease past the inspection time.
+  attempts.heartbeat(
+    db,
+    attempt("renewed").id,
+    authority(attempt("renewed")),
+    origin,
+    now + 30_000,
+  );
+  // Confirmed suspension clears the lease; keep one to prove the state check.
+  db.update(schema.workAttempts)
+    .set({ state: "suspended" })
+    .where(eq(schema.workAttempts.id, attempt("suspended").id))
+    .run();
+  expect(
+    ["reserved", "starting", "running", "suspended"].map(
+      (id) => attempts.get(db, attempt(id).id).lease_expires_at,
+    ),
+  ).toEqual(Array(4).fill(now + 60_000));
+  expect(attempts.get(db, attempt("reserved").id).state).toBe("reserved");
+
+  // The lease boundary is inclusive.
+  const lapsed = now + 60_000;
+  const tasks = (inspection: ReturnType<typeof queue.inspect>) =>
+    inspection.entries.map((view) => view.entry.task_id).sort();
+  const expired = queue.inspect(db, { lease: "expired" }, undefined, lapsed);
+  expect(tasks(expired)).toEqual(["hidden", "running", "starting"]);
+  expect(expired.total).toBe(3);
+  for (const view of expired.entries)
+    expect(["starting", "running"]).toContain(view.attempt?.state);
+  expect(expired.diagnostics?.expired_execution_leases).toBe(3);
+
+  const paged = queue.inspect(
+    db,
+    { lease: "expired", limit: 1, offset: 1 },
+    undefined,
+    lapsed,
+  );
+  expect(paged.total).toBe(3);
+  expect(paged.entries).toHaveLength(1);
+
+  const scoped = queue.inspect(
+    db,
+    { lease: "expired" },
+    (id) => id !== "hidden",
+    lapsed,
+  );
+  expect(tasks(scoped)).toEqual(["running", "starting"]);
+  expect(scoped.total).toBe(2);
+
+  expect(
+    queue.inspect(db, { lease: "expired" }, undefined, lapsed - 1).total,
+  ).toBe(0);
+  expect(queue.inspect(db, {}, undefined, lapsed).total).toBe(ids.length);
+});
