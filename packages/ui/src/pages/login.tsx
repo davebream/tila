@@ -52,6 +52,53 @@ export function LoginPage() {
           <CardTitle>Sign in</CardTitle>
         </CardHeader>
         <CardContent>
+          {auth.migrationRequired && (
+            <div role="alert" className="mb-4 space-y-3 text-sm">
+              <p>
+                Your old API-token browser session needs an account with project
+                access. Sign in below, or ask your administrator for an
+                invitation that includes project membership. Retrying the old
+                session will not restore access.
+              </p>
+              <details>
+                <summary className="cursor-pointer">
+                  First administrator setup
+                </summary>
+                <p className="mt-2">
+                  On the provisioning machine, the infrastructure owner can run:
+                </p>
+                <code className="mt-2 block break-words">
+                  tila auth setup --url &lt;instance-url&gt; --email
+                  &lt;email&gt; --project &lt;project-id&gt;
+                </code>
+                <p className="mt-2">
+                  This requires the infrastructure owner credential. A project
+                  API token cannot create an instance administrator.
+                </p>
+              </details>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await auth.logout();
+                  } catch (error) {
+                    setError(
+                      error instanceof Error
+                        ? error.message
+                        : "Sign-out failed",
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Sign out of old session
+              </Button>
+            </div>
+          )}
           <form onSubmit={submit} className="flex flex-col gap-4">
             <label htmlFor="login-field-1" className="text-sm">
               Email

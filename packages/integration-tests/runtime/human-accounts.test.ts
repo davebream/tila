@@ -1,5 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { expect, it } from "vitest";
+import { D1SessionStore, D1TokenStore } from "../../worker/src/d1";
+import { hashToken } from "../../worker/src/lib/hash-token";
 import { bindings } from "./setup";
 
 const origin = "https://worker";
@@ -42,10 +44,11 @@ async function json(response: Response) {
   expect(response.ok, JSON.stringify(body)).toBe(true);
   return body;
 }
-async function setup() {
+async function setup(beforeInvitation?: () => Promise<void>) {
   await bindings.DB.prepare(
     "INSERT INTO _projects (project_id,created_at,created_by,cloudflare_account_id) VALUES ('human-project',0,'fixture','local')",
   ).run();
+  await beforeInvitation?.();
   const invitation = await json(
     await request(
       "/api/account/setup",
@@ -437,4 +440,108 @@ it("does not count suspended accounts when protecting the remaining project owne
   );
   expect(removal.status).toBe(409);
   expect(await removal.json()).toMatchObject({ error: { code: "last-owner" } });
+});
+
+it("recovers an old bootstrap cookie through an explicit account invitation without inheriting token authority", async () => {
+  const oldCookie = "tila_session=old-bootstrap-cookie";
+  const rawToken = "tila_runtime_legacy_bootstrap";
+  const tokenHash = await hashToken(rawToken, bindings.HASH_PEPPER);
+  const { cookie } = await setup(async () => {
+    const { tokenId } = await new D1TokenStore(bindings.DB).issue({
+      tokenHash,
+      projectId: "human-project",
+      name: "legacy-owner",
+      createdAt: Date.now(),
+      createdBy: "fixture",
+    });
+    await new D1SessionStore(bindings.DB).create({
+      sessionHash: await hashToken(
+        "old-bootstrap-cookie",
+        bindings.HASH_PEPPER,
+      ),
+      tokenHash,
+      projectId: "human-project",
+      actorName: "legacy-owner",
+      principalId: `token:${tokenId}`,
+      scopes: "full",
+      permission: "admin",
+      expiresAt: Date.now() + 3600_000,
+    });
+    for (const path of [
+      "/auth/session/status",
+      "/projects/human-project/tasks",
+    ]) {
+      const response = await request(path, undefined, oldCookie);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({
+        error: { code: "account-migration-required", retryable: false },
+      });
+    }
+    const identity = await request(
+      "/api/whoami",
+      undefined,
+      `Bearer ${rawToken}`,
+    );
+    expect(identity.status).toBe(200);
+    expect(await identity.json()).toMatchObject({
+      role: "owner",
+      membership_sources: ["bootstrap"],
+    });
+    const exchange = await request("/auth/session", {
+      token: rawToken,
+      project_id: "human-project",
+    });
+    expect(exchange.status).toBe(410);
+    expect(exchange.headers.get("set-cookie")).toBeNull();
+    expect(
+      await bindings.DB.prepare(
+        "SELECT COUNT(*) AS n FROM _project_memberships",
+      ).first("n"),
+    ).toBe(0);
+    // The project bearer cannot replace the infrastructure owner's setup key.
+    expect(
+      (
+        await request(
+          "/api/account/setup",
+          { email: "wrong@example.com", projectId: "human-project" },
+          `Bearer ${rawToken}`,
+        )
+      ).ok,
+    ).toBe(false);
+  });
+  // Account authentication wins even while the browser still has the old cookie.
+  const combined = `${cookie}; ${oldCookie}`;
+  await json(
+    await request(
+      "/api/workspace/select",
+      { project_id: "human-project" },
+      combined,
+    ),
+  );
+  const status = await json(
+    await request("/auth/session/status", undefined, combined),
+  );
+  expect(status.capabilities.auth_method).toBe("email");
+  expect(status.capabilities.memberships_manage).toBe(true);
+  expect(
+    (await request("/projects/human-project/tasks", undefined, combined))
+      .status,
+  ).toBe(200);
+  const me = await json(await request("/api/account/me", undefined, combined));
+  const memberships = await bindings.DB.prepare(
+    "SELECT principal_id,role FROM _project_memberships WHERE revoked_at IS NULL",
+  ).all();
+  expect(memberships.results).toEqual([
+    { principal_id: `user:${me.user.id}`, role: "owner" },
+  ]);
+  // Account creation did not repair or promote the old token identity.
+  expect(
+    (await request("/auth/session/status", undefined, oldCookie)).status,
+  ).toBe(401);
+  const logout = await request("/auth/logout", {}, oldCookie);
+  expect(logout.status).toBe(200);
+  expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+  expect(
+    await new D1TokenStore(bindings.DB).validate(tokenHash),
+  ).not.toBeNull();
 });

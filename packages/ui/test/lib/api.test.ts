@@ -10,6 +10,7 @@ import {
   mutate,
   revokeMembership,
   searchTasks,
+  sessionStatus,
 } from "@/lib/api";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
@@ -312,5 +313,22 @@ describe("githubUserLookup", () => {
     await expect(githubUserLookup("limited")).rejects.toMatchObject({
       code: "github-rate-limited",
     });
+  });
+});
+
+describe("session migration status", () => {
+  test.each([
+    [401, "account-migration-required", { migrationRequired: true }],
+    [401, "session-expired", null],
+    [403, "membership-required", null],
+    [503, "auth-unavailable", null],
+    [503, "account-migration-required", null],
+  ])("handles HTTP %s %s", async (status, code, expected) => {
+    server.use(
+      http.get("*/auth/session/status", () =>
+        HttpResponse.json({ error: { code } }, { status: status as number }),
+      ),
+    );
+    expect(await sessionStatus()).toEqual(expected);
   });
 });

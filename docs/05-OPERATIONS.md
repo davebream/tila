@@ -313,7 +313,12 @@ Apply `0032_human_accounts.sql` before deploying this version. It adds Better Au
 users, password/OAuth accounts, browser/device sessions, invitation and recovery
 records, and native `user:<uuid>` project identities. Existing memberships and API
 credentials are preserved. New token-to-browser exchanges return `410`; existing
-legacy cookies retain their existing expiry and revocation checks.
+legacy cookies retain their existing expiry and revocation checks. A valid legacy
+bootstrap cookie without canonical project membership returns
+`401 account-migration-required`; the browser shows account sign-in and recovery
+guidance instead of opening a dashboard that subsequently denies access. Direct
+bearer use of the bootstrap token retains its existing API authority. The cookie
+does not inherit that authority, and retrying it cannot create membership.
 
 Browser access uses email/password. Open registration is disabled. Email delivery
 is optional: administrators can copy invitation and password recovery links from
@@ -334,6 +339,30 @@ An instance administrator manages users; project access still requires a canonic
 project membership. Existing GitHub/OIDC identities are not automatically merged
 with email accounts. Grant an existing native user additional project access in
 project settings using the user ID shown in account settings.
+
+#### Recovering a legacy bootstrap browser login (#328)
+
+If the browser reports `account-migration-required`, use one of these paths:
+
+- **An administrator account already exists:** ask that administrator for an
+  invitation including the intended project and role. If you already have an
+  account, sign in and have an authorized project owner grant your native
+  `user:<uuid>` identity membership. Recover a forgotten password through the
+  administrator's account recovery flow; do not repeat first-administrator setup.
+- **No administrator account exists:** on the provisioning machine, run
+  `tila auth setup --url https://tila.example.com --email admin@example.com --project my-project`
+  using the infrastructure owner credential. Open the private invitation, create
+  the account, and sign in. The project argument grants ownership of that existing
+  project when the invitation is accepted. Environment-only setup can use
+  `TILA_INFRA_ADMIN_TOKEN`. A project bootstrap API token cannot create an instance
+  administrator; contact the infrastructure owner if that is your only credential.
+
+Creating an account alone does not grant project access. Existing token, GitHub,
+and OIDC identities are not automatically linked to a native account. The legacy
+session can still be signed out, and its original expiry and source-token
+revocation remain effective. Signing into a valid account takes precedence over
+an accompanying legacy cookie. No membership or identity is created by the
+migration-required response.
 
 The Worker requires `AUTH_SECRET` (at least 32 random characters) or the existing
 `INFRA_ADMIN_TOKEN`. When only the latter exists, tila derives a purpose-separated
