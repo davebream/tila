@@ -1013,6 +1013,8 @@ Use `--force` only to skip typed confirmation in automation. Existing restore au
 
 Local replace builds and verifies sibling temporary database/artifact paths before swapping them. A pre-swap failure leaves the original untouched. Cloud restore uploads checksum-addressed R2 bytes before DO pointers, restores DO rows in dependency order and the exact journal sequence, replaces approved D1 ACL metadata in a batch, rebuilds FTS, then unlocks.
 
+D1 migration 0035 keeps each project's highest access-settings revision outside the backup, including revisions of deleted repository links. Apply it before deploying the Worker that uses it. Import and rollback give restored repository access policies, OIDC policies, and project display metadata revisions above that recorded maximum, in the same transaction as the restored rows. After restore finishes, editors using older revisions receive `412 revision-conflict` and must reload before saving. Backups made before migration 0034 remain supported. Tracking starts with revisions present when 0035 is applied; it cannot recover already-deleted revision history or protect against a whole-database infrastructure rollback.
+
 Cross-backend restore supports local→local, cloud→cloud, local→cloud, and cloud→local without changing the project ID. Source account and GitHub installation identifiers remain in the manifest for audit. `cloudflare_account_id` stays the destination value. GitHub installation metadata is retained only when already usable at the destination; otherwise restore warns and requires reconnection.
 
 ### Recovery scenarios
