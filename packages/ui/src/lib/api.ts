@@ -1,5 +1,6 @@
 import type {
   AgentListResponseSchema,
+  AttemptCorrectCommand,
   AttemptRequest,
   AttemptView,
   DeliveryExplainResponseSchema,
@@ -1084,4 +1085,15 @@ export async function controlAttempt(
       input.command,
     )
   ).result;
+}
+/**
+ * Link a corrective task to a finished attempt. The original result is never
+ * rewritten. Reuse the same `idempotency_key` when retrying one submission.
+ */
+export function correctAttempt(
+  projectId: string,
+  id: string,
+  command: AttemptCorrectCommand,
+): Promise<AttemptView> {
+  return controlAttempt(projectId, { action: "correct", id, command });
 }

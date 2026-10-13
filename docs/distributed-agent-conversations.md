@@ -623,8 +623,9 @@ Live discovery and wake continue to use the existing native daemon.
 native session and account evidence holds each agent mailbox. It joins one page
 of DO agents (at most 50, opaque cursor) with D1 runs and enrollments and the
 holder's presence row. Each row has the active binding (`current`), the latest
-binding that no longer holds the mailbox (`previous`), `work_attempt: null` and
-the commands the caller may use.
+binding that no longer holds the mailbox (`previous`), the unfinished work
+attempts held by the current participant (`work_attempt`, #303; `null` when
+none, redacted without task read access) and the commands the caller may use.
 
 - D1 run state and lease decide occupancy. The binding lease is a snapshot that
   only bind and inbox fetch refresh, so an active DO binding whose run is

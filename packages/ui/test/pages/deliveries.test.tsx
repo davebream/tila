@@ -62,6 +62,135 @@ test("keeps wake, fetch, acknowledgement and work result separate per delivery",
   expect(within(pending).getByText("Not reported")).toBeInTheDocument();
 });
 
+test("shows the explicit attempt result, never one inferred from acknowledgement", async () => {
+  setup();
+  server.use(
+    http.get(deliveriesUrl, () =>
+      HttpResponse.json({
+        ok: true,
+        deliveries: [
+          traceItem(6, {
+            trace: {
+              ...acknowledgedTrace,
+              work_result: {
+                status: "reported",
+                attempt_id: "attempt-ok",
+                task_id: "task-1",
+                outcome: "success",
+                finished_at: 2_000,
+                corrected: true,
+              },
+            },
+          }),
+          traceItem(5, {
+            trace: {
+              work_result: {
+                status: "reported",
+                attempt_id: "attempt-failed",
+                task_id: "task-1",
+                outcome: "failure",
+                finished_at: 2_000,
+                corrected: false,
+              },
+            },
+          }),
+          traceItem(4, {
+            trace: {
+              ...acknowledgedTrace,
+              work_result: {
+                status: "pending",
+                attempt_id: "attempt-run",
+                task_id: "task-1",
+                attempt_state: "resume_pending",
+              },
+            },
+          }),
+          traceItem(3, {
+            trace: {
+              work_result: {
+                status: "unlinked",
+                attempt_id: "attempt-gone",
+                reason: "task-mismatch",
+              },
+            },
+          }),
+          traceItem(2, { trace: { work_result: { status: "hidden" } } }),
+        ],
+        has_more: false,
+        cursor: null,
+      }),
+    ),
+  );
+  renderPage();
+  const table = await screen.findByRole("table", { name: "Deliveries" });
+  const [, succeeded, failed, pending, unlinked, hidden] =
+    within(table).getAllByRole("row");
+  expect(within(succeeded).getByText("Succeeded")).toBeInTheDocument();
+  expect(
+    within(succeeded).getByText("Corrective work linked"),
+  ).toBeInTheDocument();
+  expect(within(failed).getByText("Failed")).toBeInTheDocument();
+  expect(within(failed).queryByText("Corrective work linked")).toBeNull();
+  // Acknowledged but unfinished work stays pending.
+  expect(
+    within(pending).getByText("Attempt resume pending"),
+  ).toBeInTheDocument();
+  expect(within(unlinked).getByText("Unlinked attempt")).toBeInTheDocument();
+  expect(
+    within(unlinked).getByText("Attempt belongs to another task"),
+  ).toBeInTheDocument();
+  expect(within(hidden).getByText("Hidden")).toBeInTheDocument();
+  expect(within(table).queryByText("Not reported")).toBeNull();
+});
+
+test("traces a reported result and links the work attempt", async () => {
+  setup();
+  const item = traceItem(7, {
+    message: { task_id: "task-9", attempt_id: "attempt-9" },
+    trace: {
+      ...acknowledgedTrace,
+      work_result: {
+        status: "reported",
+        attempt_id: "attempt-9",
+        task_id: "task-9",
+        outcome: "cancelled",
+        finished_at: 2_000,
+        corrected: true,
+      },
+    },
+  });
+  server.use(
+    http.get(deliveriesUrl, () =>
+      HttpResponse.json({
+        ok: true,
+        deliveries: [item],
+        has_more: false,
+        cursor: null,
+      }),
+    ),
+    http.get("*/projects/test-project/inbox/*", () =>
+      HttpResponse.json({
+        ok: true,
+        reason: "acknowledged",
+        delivery: item.delivery,
+        message: item.message,
+        trace: item.trace,
+        attempts: [],
+      }),
+    ),
+  );
+  renderPage(`/p/test-project/deliveries/worker/${item.delivery.id}`);
+  const stages = await screen.findByRole("list", { name: "Delivery stages" });
+  expect(within(stages).getByText("Cancelled")).toBeInTheDocument();
+  expect(
+    within(stages).getByText(/Acknowledgment is not completion/),
+  ).toHaveTextContent(/original result is unchanged/);
+  const links = screen.getByRole("list", { name: "Related evidence" });
+  expect(
+    within(links).getByRole("link", { name: "Work attempt attempt-9" }),
+  ).toHaveAttribute("href", "/p/test-project/queue?attempt=attempt-9");
+});
+
 test("paginates with the server cursor and sends filters", async () => {
   setup();
   const queries: Record<string, string>[] = [];

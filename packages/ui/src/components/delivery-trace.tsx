@@ -42,6 +42,88 @@ export function ackLabel(trace: DeliveryTrace): [string, Tone] {
     : ["Accepted for processing", "green"];
 }
 
+type WorkResult = DeliveryTrace["work_result"];
+type Outcome = Extract<WorkResult, { status: "reported" }>["outcome"];
+const OUTCOME: Record<Outcome, [string, Tone]> = {
+  success: ["Succeeded", "green"],
+  failure: ["Failed", "red"],
+  abandoned: ["Abandoned", "red"],
+  cancelled: ["Cancelled", "gray"],
+};
+const UNLINKED: Record<
+  Extract<WorkResult, { status: "unlinked" }>["reason"],
+  string
+> = {
+  "attempt-not-found": "Attempt not found",
+  "task-mismatch": "Attempt belongs to another task",
+};
+/**
+ * Label for the explicit attempt result. Only a finished attempt reports one;
+ * acknowledgement never stands in for it. `note` carries the qualifier.
+ */
+export function workResultLabel(result: WorkResult): {
+  label: string;
+  tone: Tone;
+  note: string | null;
+} {
+  switch (result.status) {
+    case "pending":
+      return {
+        label: `Attempt ${result.attempt_state.replace("_", " ")}`,
+        tone: "amber",
+        note: null,
+      };
+    case "reported": {
+      const [label, tone] = OUTCOME[result.outcome];
+      return {
+        label,
+        tone,
+        note: result.corrected ? "Corrective work linked" : null,
+      };
+    }
+    case "unlinked":
+      return {
+        label: "Unlinked attempt",
+        tone: "amber",
+        note: UNLINKED[result.reason],
+      };
+    case "hidden":
+      return { label: "Hidden", tone: "gray", note: null };
+    default:
+      return { label: "Not reported", tone: "gray", note: null };
+  }
+}
+export function WorkResultBadge({ result }: { result: WorkResult }) {
+  const { label, tone, note } = workResultLabel(result);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <Badge variant={tone}>{label}</Badge>
+      {note && <span className="text-xs text-muted-foreground">{note}</span>}
+    </span>
+  );
+}
+function workResultDetail(result: WorkResult): ReactNode {
+  switch (result.status) {
+    case "pending":
+      return `Attempt ${result.attempt_id} on task ${result.task_id} has not finished.`;
+    case "reported":
+      return (
+        <>
+          Reported by attempt {result.attempt_id} on task {result.task_id},
+          finished {at(result.finished_at)}.
+          {result.corrected &&
+            " Corrective work is linked; the original result is unchanged."}
+        </>
+      );
+    case "unlinked":
+      return `The message names attempt ${result.attempt_id}: ${UNLINKED[result.reason].toLowerCase()}.`;
+    case "hidden":
+      return "You cannot read the task this attempt belongs to.";
+    default:
+      return "The message names no work attempt.";
+  }
+}
+
 const RECIPIENT: Record<
   DeliveryTrace["recipient"]["status"],
   [string, Tone] | null
@@ -117,6 +199,7 @@ function Stage({
 export function TraceStages({ trace }: { trace: DeliveryTrace }) {
   const wake = wakeLabel(trace.wake);
   const [ack, ackTone] = ackLabel(trace);
+  const work = workResultLabel(trace.work_result);
   return (
     <ol aria-label="Delivery stages" className="divide-y divide-border text-sm">
       <Stage name="Stored" tone="green" status="Stored">
@@ -148,9 +231,8 @@ export function TraceStages({ trace }: { trace: DeliveryTrace }) {
           </>
         ) : null}
       </Stage>
-      <Stage name="Work result" tone="gray" status="Not reported">
-        Acknowledgment is not completion. No work result has been recorded for
-        this delivery.
+      <Stage name="Work result" tone={work.tone} status={work.label}>
+        Acknowledgment is not completion. {workResultDetail(trace.work_result)}
       </Stage>
     </ol>
   );
@@ -188,6 +270,11 @@ export function TraceLinks({
     links.push([
       `Task ${message.task_id}`,
       `${p}/tasks/${encodeURIComponent(message.task_id)}`,
+    ]);
+  if (message?.attempt_id)
+    links.push([
+      `Work attempt ${message.attempt_id}`,
+      `${p}/queue?attempt=${encodeURIComponent(message.attempt_id)}`,
     ]);
   return (
     <ul aria-label="Related evidence" className="space-y-1 text-sm">

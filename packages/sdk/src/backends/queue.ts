@@ -1,6 +1,7 @@
 import type { AttemptBackend, QueueBackend } from "@tila/core";
 import {
   type AttemptAuthorityCommand,
+  type AttemptCorrectCommand,
   type AttemptFinishCommand,
   type AttemptForceCommand,
   type AttemptListQuery,
@@ -174,6 +175,9 @@ export class RemoteAttemptBackend implements AttemptBackend {
   }
   forceRecovery(id: string, input: AttemptForceCommand) {
     return this.mutate(id, "force-recovery", input, AttemptViewSchema);
+  }
+  correct(id: string, input: AttemptCorrectCommand) {
+    return this.mutate(id, "correct", input, AttemptViewSchema);
   }
   replaceSession(id: string, input: AttemptReplaceSessionCommand) {
     return this.mutate(id, "replace-session", input, AttemptViewSchema);

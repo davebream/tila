@@ -1,12 +1,14 @@
 import type { AttemptBackend, QueueBackend } from "@tila/core";
 import {
   type RequestOrigin,
+  attemptCorrectionOps,
   attemptOps,
   attemptRecoveryOps,
   queueOps,
 } from "@tila/ops-sqlite";
 import type {
   AttemptAuthorityCommand,
+  AttemptCorrectCommand,
   AttemptFinishCommand,
   AttemptForceCommand,
   AttemptRebindCommand,
@@ -158,6 +160,12 @@ export class EmbeddedAttemptBackend implements AttemptBackend {
   async forceRecovery(id: string, input: AttemptForceCommand) {
     return this.withRetry(() =>
       attemptRecoveryOps.forceRecovery(this.db, id, input, this.origin(), true),
+    );
+  }
+
+  async correct(id: string, input: AttemptCorrectCommand) {
+    return this.withRetry(() =>
+      attemptCorrectionOps.correct(this.db, id, input, this.origin()),
     );
   }
 

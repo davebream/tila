@@ -99,6 +99,7 @@ export const attemptCommand = defineCommand({
       "retry",
       "force-recovery",
       "replace-session",
+      "correct",
     ].map((action) => [action, operation("attempt", action)]),
   ),
 });

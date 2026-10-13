@@ -115,6 +115,9 @@ async function loadPage(
     scope: runtimeVisibilityScope(c),
     presence_allowed: policy.capabilities.includes("presence:read"),
     attach_allowed: policy.capabilities.includes("agent-bindings:attach"),
+    work_allowed:
+      policy.capabilities.includes("tasks:read") &&
+      policy.capabilities.includes("claims:read"),
     next_cursor: null,
   });
   return { body, next_after: page.next_after };

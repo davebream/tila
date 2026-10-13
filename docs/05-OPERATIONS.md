@@ -2082,7 +2082,7 @@ deliveries, messages, credentials and sessions are unaffected.
 | `fetched-not-acked` | Inspect the session; fetch does not accept responsibility and may indicate a crash |
 | `budget-suppressed` | Inspect the delivery timeline and loop cause; a maintainer can use `tila inbox resume AGENT --delivery ID` |
 | Uncertain native wake | Reconcile `dispatch.status(agent, leaseToken)`; fetched/acked observations are metadata only |
-| Unknown delivery outcome | Browse `GET /deliveries` (filters `agent`, `room`, `state`, `id`) as a manager, or read `GET /rooms/:room/messages/:message/deliveries`. Acknowledged is not completed: `work_result` stays `not-reported` |
+| Unknown delivery outcome | Browse `GET /deliveries` (filters `agent`, `room`, `state`, `id`) as a manager, or read `GET /rooms/:room/messages/:message/deliveries`. Acknowledged is not completed: `work_result` reports only the explicit result of the message's `attempt_id` (`pending`, `reported`, `unlinked`, `hidden`), or `not-reported` when the message names no attempt |
 
 Room membership controls publication and private history. Creating rooms and
 changing members requires `conversations:manage`. Explicit enrollment policies
@@ -2127,8 +2127,9 @@ readers get counts (stored, pending, acknowledged, expired); managers also get e
 recipient with a **Trace** link. The **Deliveries** page browses and filters traces
 by agent, room, state or message/delivery ID without copying IDs from CLI output.
 A trace shows Stored, Wake, Fetched, Acknowledged and Work result separately.
-Acknowledged means accepted for processing, not finished work; Work result stays
-"Not reported" until an explicit result exists. Expired delivery metadata does not
+Acknowledged means accepted for processing, not finished work. Work result shows
+the explicit outcome of the attempt the message names, "Pending" while that
+attempt runs, and "Not reported" when the message names no attempt. Expired delivery metadata does not
 mean the message was never sent; room history keeps it. Trace URLs stay
 project-scoped and shareable, and opening one never fetches or acknowledges.
 The **Signals** page (admin) pages through unexpired signal history and shows each
@@ -2189,6 +2190,12 @@ provider session, the owner calls `tila attempt replace-session` with the record
 fence, the old session as `previous_session`, `previous_stopped: true` and the new
 session. The attempt keeps its ID and gets a fresh fence; the old session can no
 longer heartbeat or report a result.
+
+If a regression appears after an accepted result, do not edit or re-finish the
+original attempt. Create or choose the corrective task, then link it:
+`tila attempt correct <attempt-id> --data '{"idempotency_key":"<key>","task_id":"<task>","reason":"<why>"}' --json`.
+The original outcome stays as evidence, `GET /attempts/:id` lists the link, and
+delivery traces for that attempt show the result as corrected.
 
 If a result fails with `422 constraint-violation` or `409 queue-conflict` and the
 message names a current and a captured definition version, the definition

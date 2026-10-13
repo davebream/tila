@@ -1,12 +1,14 @@
 import {
   CredentialPolicyDenied,
   assertTaskAccess,
+  attemptCorrectionOps,
   attemptOps,
   attemptRecoveryOps,
   readCredentialPolicy,
 } from "@tila/ops-sqlite";
 import {
   AttemptAuthorityCommandSchema,
+  AttemptCorrectCommandSchema,
   AttemptFinishCommandSchema,
   AttemptForceCommandSchema,
   AttemptListQuerySchema,
@@ -40,7 +42,9 @@ export function createAttemptRoutes(deps: RouterDeps) {
       ? ["tasks:read", "claims:read"]
       : action === "rebind" || action === "force-recovery"
         ? ["tasks:write", "claims:acquire", "schema:write"]
-        : ["tasks:write", "claims:renew"];
+        : action === "correct"
+          ? ["tasks:write"]
+          : ["tasks:write", "claims:renew"];
     if (
       (!read &&
         (envelope.authorized_role === "viewer" ||
@@ -171,6 +175,12 @@ export function createAttemptRoutes(deps: RouterDeps) {
             origin,
             manage,
           );
+        case "correct": {
+          const input = AttemptCorrectCommandSchema.parse(body);
+          // The corrective task must be visible too, not only the attempt's.
+          if (!allowsTask(input.task_id)) throw new CredentialPolicyDenied();
+          return attemptCorrectionOps.correct(deps.db, id, input, origin);
+        }
         case "replace-session":
           return attemptRecoveryOps.replaceSession(
             deps.db,

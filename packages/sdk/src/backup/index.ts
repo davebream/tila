@@ -43,6 +43,7 @@ export const SUPPORTED_BACKUP_FEATURES = new Set<string>([
   "artifact-review-v1",
   "managed-queue-v1",
   "work-questions-v1",
+  "attempt-corrections-v1",
 ]);
 export const MAX_SUPPORTED_DO_MIGRATION = LATEST_PROJECT_MIGRATION;
 
@@ -415,6 +416,7 @@ async function exportLocal(
         "artifact-review-v1",
         "managed-queue-v1",
         "work-questions-v1",
+        "attempt-corrections-v1",
       ],
       optional_sections: ["d1/project.jsonl"],
       entries,
@@ -595,6 +597,20 @@ async function scanArchive(
     !manifest.required_features.includes("work-questions-v1")
   )
     throw new Error("Question-aware backups must declare work-questions-v1");
+  if (
+    manifest.source.do_migration_version >= 40 &&
+    !manifest.required_features.includes("attempt-corrections-v1")
+  )
+    throw new Error(
+      "Correction-aware backups must declare attempt-corrections-v1",
+    );
+  if (
+    manifest.required_features.includes("attempt-corrections-v1") &&
+    !manifest.entries.some(
+      (entry) => entry.path === "do/attempt_corrections.jsonl",
+    )
+  )
+    throw new Error("Backup is missing correction section attempt_corrections");
   if (manifest.required_features.includes("work-questions-v1")) {
     for (const table of ["work_questions", "question_receipts"])
       if (!manifest.entries.some((entry) => entry.path === `do/${table}.jsonl`))
@@ -1202,6 +1218,7 @@ async function exportCloud(
         "artifact-review-v1",
         "managed-queue-v1",
         ...(meta.migrationVersion >= 36 ? ["work-questions-v1"] : []),
+        ...(meta.migrationVersion >= 40 ? ["attempt-corrections-v1"] : []),
       ],
       optional_sections: [],
       entries,
@@ -1283,16 +1300,20 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
     });
     newProject = bootstrap.created;
   }
-  if (inspected.manifest.required_features.includes("work-questions-v1")) {
+  for (const [feature, version] of [
+    ["work-questions-v1", 36],
+    ["attempt-corrections-v1", 40],
+  ] as const) {
+    if (!inspected.manifest.required_features.includes(feature)) continue;
     const target = await client.json<{ migrationVersion: number }>(
       "/transfer/meta",
     );
     if (
       !Number.isInteger(target.migrationVersion) ||
-      target.migrationVersion < 36
+      target.migrationVersion < version
     )
       throw new Error(
-        "Destination does not support work-questions-v1; upgrade the Worker before restoring",
+        `Destination does not support ${feature}; upgrade the Worker before restoring`,
       );
   }
   if (options.replace && !options.resume && !options.rollback) {

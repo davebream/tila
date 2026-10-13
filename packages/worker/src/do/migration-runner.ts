@@ -96,6 +96,15 @@ const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
     "revision",
     "revisions",
   ],
+  attempt_corrections: [
+    "id",
+    "attempt_id",
+    "task_id",
+    "reason",
+    "principal_id",
+    "participant_id",
+    "created_at",
+  ],
   execution_reservations: [
     "task_id",
     "entry_id",

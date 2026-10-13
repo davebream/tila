@@ -975,6 +975,29 @@ export const workAttempts = sqliteTable(
     ),
   ],
 );
+export const attemptCorrections = sqliteTable(
+  "attempt_corrections",
+  {
+    id: text("id").primaryKey(),
+    attempt_id: text("attempt_id")
+      .notNull()
+      .references(() => workAttempts.id),
+    task_id: text("task_id")
+      .notNull()
+      .references(() => entities.id),
+    reason: text("reason").notNull(),
+    principal_id: text("principal_id").notNull(),
+    participant_id: text("participant_id").notNull(),
+    created_at: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("attempt_corrections_attempt_task").on(
+      table.attempt_id,
+      table.task_id,
+    ),
+    index("attempt_corrections_task").on(table.task_id, table.created_at),
+  ],
+);
 export const executionReservations = sqliteTable("execution_reservations", {
   task_id: text("task_id")
     .primaryKey()

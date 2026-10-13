@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentIdSchema } from "./agent";
+import { AttemptOutcomeSchema, AttemptStateSchema } from "./queue";
 
 export const ConversationProtocolSchema = z.literal(1);
 export const ConversationBudgetsSchema = z
@@ -264,7 +265,37 @@ export const DeliveryTraceSchema = z.object({
       disposition: DeliverySchema.shape.disposition,
     })
     .nullable(),
-  work_result: z.object({ status: z.literal("not-reported") }),
+  /**
+   * Explicit attempt result for the message's `attempt_id` (#303). Acknowledgement
+   * never stands in for it; only a finished attempt reports a result.
+   */
+  work_result: z.discriminatedUnion("status", [
+    /** The message names no attempt. */
+    z.object({ status: z.literal("not-reported") }),
+    z.object({
+      status: z.literal("pending"),
+      attempt_id: z.string(),
+      task_id: z.string(),
+      attempt_state: AttemptStateSchema,
+    }),
+    z.object({
+      status: z.literal("reported"),
+      attempt_id: z.string(),
+      task_id: z.string(),
+      outcome: AttemptOutcomeSchema.shape.status,
+      finished_at: z.number().int(),
+      /** Corrective work has been linked to this result. */
+      corrected: z.boolean(),
+    }),
+    /** The message names an attempt that does not exist or belongs to another task. */
+    z.object({
+      status: z.literal("unlinked"),
+      attempt_id: z.string(),
+      reason: z.enum(["attempt-not-found", "task-mismatch"]),
+    }),
+    /** The caller cannot read the attempt's task. */
+    z.object({ status: z.literal("hidden") }),
+  ]),
   recipient: z.object({
     status: z.enum([
       "active",

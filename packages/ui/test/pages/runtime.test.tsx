@@ -331,7 +331,84 @@ describe("runtime detail and release outcomes", () => {
     expect(
       scope.getByText(/unsupported — no host adapter command/),
     ).toBeInTheDocument();
-    expect(scope.getByText(/Work attempt: none linked/)).toBeInTheDocument();
+    expect(scope.getByText("No unfinished work attempts.")).toBeInTheDocument();
+    expect(
+      scope.getByText(/never inferred from runtime state/),
+    ).toBeInTheDocument();
+  });
+
+  test("lists unfinished attempts with task and queue links and the overflow count", async () => {
+    server.use(
+      handler(() =>
+        view([
+          {
+            ...row(fullOccupant()),
+            work_attempt: {
+              detail: "full",
+              total: 7,
+              attempts: [
+                {
+                  id: "attempt-alpha-1234",
+                  task_id: "task-1",
+                  state: "running",
+                  fence: 4,
+                  lease_expires_at: NOW + 60_000,
+                },
+                {
+                  id: "attempt-beta-5678",
+                  task_id: "task-2",
+                  state: "uncertain",
+                  fence: 9,
+                  lease_expires_at: null,
+                },
+              ],
+            },
+          },
+        ]),
+      ),
+    );
+    renderRuntime("/p/test-project/runtime/worker");
+    const dialog = await screen.findByRole("dialog");
+    const list = await within(dialog).findByRole("list", {
+      name: "Unfinished work attempts",
+    });
+    expect(within(list).getByText("Running")).toBeInTheDocument();
+    expect(within(list).getByText("Uncertain")).toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: "task-1" })).toHaveAttribute(
+      "href",
+      "/p/test-project/tasks/task-1",
+    );
+    expect(
+      within(list).getByRole("link", {
+        name: "Open attempt attempt-alpha-1234",
+      }),
+    ).toHaveAttribute(
+      "href",
+      "/p/test-project/queue?attempt=attempt-alpha-1234",
+    );
+    expect(within(dialog).getByText("+5 more")).toBeInTheDocument();
+  });
+
+  test("hides attempt identities from callers without task access", async () => {
+    server.use(
+      handler(() =>
+        view([
+          { ...row(fullOccupant()), work_attempt: { detail: "redacted" } },
+        ]),
+      ),
+    );
+    renderRuntime("/p/test-project/runtime/worker");
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      await within(dialog).findByText(/Unfinished attempts exist/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Details hidden")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("list", { name: "Unfinished work attempts" }),
+    ).toBeNull();
+    expect(
+      within(dialog).queryByText("No unfinished work attempts."),
+    ).toBeNull();
   });
 
   test("a stale epoch is reported as rejected, not success", async () => {

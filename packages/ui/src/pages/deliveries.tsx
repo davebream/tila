@@ -1,6 +1,7 @@
 import {
   DeliveryDetail,
   TraceBadges,
+  WorkResultBadge,
   ackLabel,
   wakeLabel,
 } from "@/components/delivery-trace";
@@ -364,7 +365,7 @@ function DeliveryRow({
         <Badge variant={ackTone}>{ack}</Badge>
       </td>
       <td className="p-3">
-        <Badge variant="gray">Not reported</Badge>
+        <WorkResultBadge result={trace.work_result} />
       </td>
       <td className="p-3">
         <Link

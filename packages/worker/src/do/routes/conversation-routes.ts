@@ -1,4 +1,10 @@
-import { agentBindingOps, conversationOps as ops } from "@tila/ops-sqlite";
+import {
+  CredentialPolicyDenied,
+  agentBindingOps,
+  assertTaskAccess,
+  conversationOps as ops,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
 import {
   AckDeliverySchema,
   AgentIdSchema,
@@ -32,6 +38,25 @@ type Env = {
 };
 export function createConversationRoutes(deps: RouterDeps) {
   const app = new Hono<Env>();
+  /** Attempt results follow the same access as `GET /attempts`. */
+  const workAccess = (header: string | undefined): ops.WorkAccess => {
+    const credential = readCredentialPolicy(header);
+    if (!credential) return () => true;
+    const capabilities = credential.capabilities as string[];
+    if (
+      !["tasks:read", "claims:read"].every((cap) => capabilities.includes(cap))
+    )
+      return () => false;
+    return (taskId) => {
+      try {
+        assertTaskAccess(deps.db, credential, taskId);
+        return true;
+      } catch (error) {
+        if (error instanceof CredentialPolicyDenied) return false;
+        throw error;
+      }
+    };
+  };
   const waiters = new Map<string, Set<() => void>>();
   const notify = (agent?: string) => {
     for (const [id, list] of waiters)
@@ -243,6 +268,8 @@ export function createConversationRoutes(deps: RouterDeps) {
         AgentIdSchema.parse(c.req.param("room")),
         z.string().uuid().parse(c.req.param("message")),
         c.get("authority"),
+        undefined,
+        workAccess(c.req.header("X-Tila-Credential-Policy")),
       ),
     }),
   );
@@ -302,6 +329,8 @@ export function createConversationRoutes(deps: RouterDeps) {
         .max(100)
         .parse(c.req.query("limit") ?? 50),
       before,
+      undefined,
+      workAccess(c.req.header("X-Tila-Credential-Policy")),
     );
     const last = result.deliveries.at(-1)?.delivery;
     return c.json({
@@ -453,6 +482,8 @@ export function createConversationRoutes(deps: RouterDeps) {
         c.req.param("agent"),
         c.req.param("id"),
         c.get("authority"),
+        undefined,
+        workAccess(c.req.header("X-Tila-Credential-Policy")),
       ),
     }),
   );

@@ -25,6 +25,10 @@ import { type ReactNode, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
 type Row = RuntimeView["rows"][number];
+type RuntimeWorkAttempt = Extract<
+  NonNullable<Row["work_attempt"]>,
+  { detail: "full" }
+>["attempts"][number];
 type Occupant = NonNullable<Row["current"]>;
 type Observation = Occupant["observation"];
 
@@ -477,11 +481,96 @@ const CAPABILITY_LABEL = {
   "not-reported": "Not reported",
 } as const;
 
+const ATTEMPT_STATE: Record<RuntimeWorkAttempt["state"], string> = {
+  reserved: "Reserved",
+  starting: "Starting",
+  running: "Running",
+  suspended: "Suspended",
+  resume_pending: "Resume pending",
+  uncertain: "Uncertain",
+  terminal: "Finished",
+};
+
+/**
+ * Unfinished attempts held by the current binding's participant, read from
+ * durable attempt records. Runtime state never implies one.
+ */
+function WorkAttempts({
+  project,
+  value,
+}: { project: string; value: Row["work_attempt"] }) {
+  const p = `/p/${encodeURIComponent(project)}`;
+  return (
+    <Section title="Work attempts">
+      {value === null ? (
+        <p className="text-sm text-muted-foreground">
+          No unfinished work attempts.
+        </p>
+      ) : value.detail === "redacted" ? (
+        <p className="text-sm">
+          Unfinished attempts exist. <Hidden />
+        </p>
+      ) : (
+        <>
+          <ul
+            aria-label="Unfinished work attempts"
+            className="space-y-1 text-sm"
+          >
+            {value.attempts.map((attempt) => (
+              <li
+                key={attempt.id}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <Badge
+                  variant={attempt.state === "uncertain" ? "amber" : "gray"}
+                >
+                  {ATTEMPT_STATE[attempt.state]}
+                </Badge>
+                <Link
+                  className="font-mono text-signal-blue underline"
+                  to={`${p}/tasks/${encodeURIComponent(attempt.task_id)}`}
+                >
+                  {attempt.task_id}
+                </Link>
+                <Link
+                  className="text-signal-blue underline"
+                  to={`${p}/queue?attempt=${encodeURIComponent(attempt.id)}`}
+                  aria-label={`Open attempt ${attempt.id}`}
+                >
+                  Attempt <Short id={attempt.id} />
+                </Link>
+                <span className="font-mono text-xs text-muted-foreground">
+                  fence {attempt.fence}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {value.total > value.attempts.length && (
+            <p className="text-sm text-muted-foreground">
+              +{value.total - value.attempts.length} more
+            </p>
+          )}
+        </>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Read from durable attempt records, never inferred from runtime state.
+      </p>
+    </Section>
+  );
+}
+
 function OccupantDetail({
   row,
   occupant,
   now,
-}: { row: Row; occupant: Occupant; now: number }) {
+  work,
+}: {
+  row: Row;
+  occupant: Occupant;
+  now: number;
+  /** Only the current occupant holds attempts. */
+  work?: { project: string; value: Row["work_attempt"] };
+}) {
   const observation = observe(row, occupant, now);
   const { binding, run, host, presence } = occupant;
   const full = binding.detail === "full" ? binding : null;
@@ -527,11 +616,8 @@ function OccupantDetail({
         ) : (
           <RunCell occupant={occupant} now={now} />
         )}
-        <p className="text-xs text-muted-foreground">
-          Work attempt: none linked. This view does not link attempts yet and
-          never infers one from a run.
-        </p>
       </Section>
+      {work && <WorkAttempts project={work.project} value={work.value} />}
       <Section title="Host">
         <Fields
           entries={[
@@ -830,7 +916,12 @@ export function RuntimeDetail({
                 />
               </Section>
               {row.current ? (
-                <OccupantDetail row={row} occupant={row.current} now={now} />
+                <OccupantDetail
+                  row={row}
+                  occupant={row.current}
+                  now={now}
+                  work={{ project, value: row.work_attempt }}
+                />
               ) : (
                 <p className="text-sm text-muted-foreground">
                   No current occupant.

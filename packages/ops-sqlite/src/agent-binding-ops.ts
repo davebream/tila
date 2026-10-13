@@ -6,9 +6,10 @@ import {
   type AttachAgentBinding,
   type ConsumerBinding,
   ConsumerBindingSchema,
+  RUNTIME_WORK_ATTEMPT_LIMIT,
   type RuntimeIdentity,
 } from "@tila/schemas";
-import { and, asc, desc, eq, gt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
   invalidateRestoredConversations,
@@ -389,6 +390,40 @@ function latestEnded(db: DB, id: string) {
     .get();
   return row ? binding(row) : null;
 }
+/** Unfinished attempts held by the binding's participant, newest first. */
+function workFor(db: DB, value: ConsumerBinding) {
+  const owner = and(
+    eq(schema.workAttempts.principal_id, value.principal_id),
+    eq(schema.workAttempts.participant_id, value.participant_id),
+    ne(schema.workAttempts.state, "terminal"),
+  );
+  const total =
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.workAttempts)
+      .where(owner)
+      .get()?.n ?? 0;
+  if (total === 0) return null;
+  return {
+    total,
+    attempts: db
+      .select({
+        id: schema.workAttempts.id,
+        task_id: schema.workAttempts.task_id,
+        state: schema.workAttempts.state,
+        fence: schema.workAttempts.fence,
+        lease_expires_at: schema.workAttempts.lease_expires_at,
+      })
+      .from(schema.workAttempts)
+      .where(owner)
+      .orderBy(
+        desc(schema.workAttempts.updated_at),
+        desc(schema.workAttempts.id),
+      )
+      .limit(RUNTIME_WORK_ATTEMPT_LIMIT)
+      .all(),
+  };
+}
 function presenceOf(db: DB, value: ConsumerBinding) {
   const row = db
     .select()
@@ -461,6 +496,7 @@ export function runtimePage(
             }
           : null,
         previous: ended ? occupant(ended) : null,
+        work: active ? workFor(db, active) : null,
       };
     }),
     next_after:

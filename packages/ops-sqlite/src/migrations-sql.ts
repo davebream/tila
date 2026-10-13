@@ -1520,6 +1520,40 @@ function runMigration0039(storage: MigrationStorage): void {
   );
 }
 
+export const MIGRATION_0040 = `
+CREATE TABLE IF NOT EXISTS attempt_corrections (
+  id TEXT PRIMARY KEY,
+  attempt_id TEXT NOT NULL REFERENCES work_attempts(id),
+  task_id TEXT NOT NULL REFERENCES entities(id),
+  reason TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  participant_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(attempt_id, task_id)
+);
+CREATE INDEX IF NOT EXISTS attempt_corrections_task ON attempt_corrections(task_id, created_at);
+CREATE TRIGGER IF NOT EXISTS attempt_corrections_append_only
+BEFORE UPDATE ON attempt_corrections
+BEGIN
+  SELECT RAISE(ABORT, 'attempt-correction-immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS work_attempts_terminal_immutable
+BEFORE UPDATE ON work_attempts
+WHEN OLD.state = 'terminal' AND (
+  NEW.state IS NOT OLD.state OR
+  NEW.outcome IS NOT OLD.outcome OR
+  NEW.finished_at IS NOT OLD.finished_at
+)
+BEGIN
+  SELECT RAISE(ABORT, 'attempt-terminal-immutable');
+END;
+`;
+/** #303: corrective work links to an accepted result; results are never rewritten. */
+function runMigration0040(storage: MigrationStorage): void {
+  storage.sql.exec(MIGRATION_0040);
+  installTransferGuards(storage, ["attempt_corrections"]);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1574,6 +1608,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_custom_correlation ON journal(json_extrac
   },
   { version: 38, run: runMigration0038 },
   { version: 39, run: runMigration0039 },
+  { version: 40, run: runMigration0040 },
 ];
 
 /** Highest project migration; transfer metadata and backups report this version. */

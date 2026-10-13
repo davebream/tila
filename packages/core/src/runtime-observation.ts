@@ -268,6 +268,8 @@ export interface AssembleRuntimeViewInput {
   scope: RuntimeVisibilityScope;
   presence_allowed: boolean;
   attach_allowed: boolean;
+  /** Caller may read tasks and claims, so attempt details are visible. */
+  work_allowed?: boolean;
   next_cursor: string | null;
 }
 
@@ -450,7 +452,16 @@ export function assembleRuntimeView(
     previous: row.previous
       ? occupantFor(row.previous, row.agent.binding_epoch)
       : null,
-    work_attempt: null,
+    work_attempt:
+      !row.work || row.work.total === 0
+        ? null
+        : input.work_allowed
+          ? {
+              detail: "full" as const,
+              total: row.work.total,
+              attempts: row.work.attempts,
+            }
+          : { detail: "redacted" as const },
     commands: {
       release: deriveReleaseCommand(row.current, input.attach_allowed),
       reconnect: UNSUPPORTED_HOST_COMMAND,

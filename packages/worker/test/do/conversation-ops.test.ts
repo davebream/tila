@@ -7,7 +7,14 @@ import {
 } from "@tila/schemas";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as bindings from "../../../ops-sqlite/src/agent-binding-ops";
+import { correct } from "../../../ops-sqlite/src/attempt-correction-ops";
+import * as attempts from "../../../ops-sqlite/src/attempt-ops";
 import * as ops from "../../../ops-sqlite/src/conversation-ops";
+import {
+  attemptOrigin,
+  authority,
+  seedAttempt,
+} from "../../../ops-sqlite/test/attempt-fixture";
 import { createTestDb } from "./helpers/create-test-db";
 
 function required<T>(value: T | null | undefined): T {
@@ -487,6 +494,85 @@ describe("durable conversations", () => {
         },
         // Acknowledgement alone never reports completed work.
         work_result: { status: "not-reported" },
+      });
+    });
+    it("reports work results only from the explicitly linked attempt", async () => {
+      attach(acting);
+      // Attempt claims run on the real clock; message timestamps use the fixture clock.
+      const t = Date.now();
+      let attempt = seedAttempt(f.db, "task-9", t);
+      await publish("pending", { task_id: "task-9", attempt_id: attempt.id });
+      await publish("missing", { attempt_id: "no-such-attempt" });
+      await publish("mismatch", { task_id: "other", attempt_id: attempt.id });
+      const results = () =>
+        Object.fromEntries(
+          ops
+            .listDeliveries(f.db, owner, {}, 50, undefined, now)
+            .deliveries.map((d) => [d.message.seq, d.trace.work_result]),
+        );
+      expect(results()).toEqual({
+        1: {
+          status: "pending",
+          attempt_id: attempt.id,
+          task_id: "task-9",
+          attempt_state: "reserved",
+        },
+        2: {
+          status: "unlinked",
+          attempt_id: "no-such-attempt",
+          reason: "attempt-not-found",
+        },
+        3: {
+          status: "unlinked",
+          attempt_id: attempt.id,
+          reason: "task-mismatch",
+        },
+      });
+      expect(
+        ops
+          .listDeliveries(f.db, owner, {}, 50, undefined, now, () => false)
+          .deliveries.find((d) => d.message.seq === 1)?.trace.work_result,
+      ).toEqual({ status: "hidden" });
+      attempt = attempts.accept(
+        f.db,
+        attempt.id,
+        authority(attempt),
+        attemptOrigin,
+        t,
+      ).attempt;
+      attempts.finish(
+        f.db,
+        attempt.id,
+        {
+          ...authority(attempt),
+          outcome: {
+            status: "success",
+            execution_stopped: true,
+            unresolved_external_execution: false,
+            evidence: [],
+          },
+        },
+        attemptOrigin,
+        t + 1,
+      );
+      expect(results()[1]).toEqual({
+        status: "reported",
+        attempt_id: attempt.id,
+        task_id: "task-9",
+        outcome: "success",
+        finished_at: t + 1,
+        corrected: false,
+      });
+      correct(
+        f.db,
+        attempt.id,
+        { idempotency_key: "fix", task_id: "task-9", reason: "regression" },
+        attemptOrigin,
+        t + 2,
+      );
+      expect(results()[1]).toMatchObject({
+        status: "reported",
+        corrected: true,
       });
     });
     it("counts repeated wakes as separate attempts", async () => {
