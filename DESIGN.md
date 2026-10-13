@@ -191,7 +191,11 @@ Centered Muted Gray text at default size, 48px vertical padding. No icons, no il
 
 ### Confirmation Dialogs
 
-The one permitted modal. Used only before an irreversible destructive action (revoking a membership or credential, widening a membership policy). Centered on Slate Surface with Wire Border, a Space Grotesk title, muted description, and a ghost Cancel beside a destructive Confirm. When the target has a name, the user types it to enable Confirm. Errors from the server render inside the dialog as Status Red text. Everything else in the administration panel stays inline.
+The one permitted modal. Used only before an irreversible destructive action (revoking a membership or credential, widening a membership policy, applying a destructive definition change). Centered on Slate Surface with Wire Border, a Space Grotesk title, muted description, and a ghost Cancel beside a destructive Confirm. When the target has a name, the user types it to enable Confirm. Errors from the server render inside the dialog as Status Red text. Everything else in the administration panel stays inline.
+
+### Drafts and Drawer Editors
+
+Settings that change through a review (project definitions) keep an unsaved draft. A sticky Slate Surface bar above the content states the base revision and the number of changes, and offers Review & apply, the source editor and Discard (confirmed inline). Each declaration opens in the right-hand drawer, which edits a copy: Save to draft writes it back, Cancel or Escape leaves the draft unchanged. Rows show their draft state with Signal Blue badges (new, changed) or an Amber badge and strikethrough (retired on apply). Validation problems render in one Status Red summary that takes focus after a failed submit.
 
 ### Capability-gated Controls
 
