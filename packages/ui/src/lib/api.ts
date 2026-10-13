@@ -277,13 +277,25 @@ export type SessionStatus = {
   capabilities: SessionCapabilities | null;
 };
 
-export async function sessionStatus(): Promise<SessionStatus | null> {
+export type SessionStatusResult =
+  | SessionStatus
+  | { migrationRequired: true }
+  | null;
+
+export async function sessionStatus(): Promise<SessionStatusResult> {
   try {
     const res = await fetch(`${API_BASE_URL}/auth/session/status`, {
       credentials: "include",
       headers: { Accept: "application/json" },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status === 401) {
+        const data = (await res.json()) as { error?: { code?: string } };
+        if (data.error?.code === "account-migration-required")
+          return { migrationRequired: true };
+      }
+      return null;
+    }
     const data = (await res.json()) as {
       ok: boolean;
       projectId: string;
@@ -299,10 +311,11 @@ export async function sessionStatus(): Promise<SessionStatus | null> {
 }
 
 export async function sessionLogout(): Promise<void> {
-  await fetch(`${API_BASE_URL}/auth/logout`, {
+  const response = await fetch(`${API_BASE_URL}/auth/logout`, {
     method: "POST",
     credentials: "include",
   });
+  if (!response.ok) throw await parseErrorResponse(response);
 }
 
 // --- Data fetching ---

@@ -16,6 +16,7 @@ interface AuthState {
   isAuthenticated: boolean;
   projectId: string | null;
   isLoading: boolean;
+  migrationRequired: boolean;
   /**
    * Server-computed management capabilities (#102). Null until loaded or when
    * the server did not send them. The UI never derives these from permission
@@ -41,27 +42,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: false,
     projectId: null,
     isLoading: true,
+    migrationRequired: false,
     capabilities: null,
   });
 
   const refreshStatus = useCallback(async () => {
     const result = await sessionStatus();
-    if (result) {
+    if (result && !("migrationRequired" in result)) {
       setState({
         isAuthenticated: true,
         projectId: result.projectId || null,
         isLoading: false,
+        migrationRequired: false,
         capabilities: result.capabilities,
       });
     } else {
+      queryClient.clear();
       setState({
         isAuthenticated: false,
         projectId: null,
         isLoading: false,
+        migrationRequired: result?.migrationRequired === true,
         capabilities: null,
       });
     }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     void refreshStatus();
@@ -83,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: false,
       projectId: null,
       isLoading: false,
+      migrationRequired: false,
       capabilities: null,
     });
   }, [queryClient]);
@@ -94,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: true,
       projectId: null,
       isLoading: false,
+      migrationRequired: false,
       capabilities: null,
     });
   }, [queryClient]);

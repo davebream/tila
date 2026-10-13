@@ -78,3 +78,117 @@ describe("account login", () => {
     expect(screen.queryByLabelText("API Token")).not.toBeInTheDocument();
   });
 });
+
+function migrationResponse() {
+  return HttpResponse.json(
+    {
+      ok: false,
+      error: { code: "account-migration-required", retryable: false },
+    },
+    { status: 401 },
+  );
+}
+
+describe("legacy browser session migration", () => {
+  beforeEach(() => {
+    server.use(
+      http.get("*/api/account/config", () =>
+        HttpResponse.json({ github: false, emailDelivery: false }),
+      ),
+    );
+  });
+
+  test("keeps recovery guidance visible when sign-out fails", async () => {
+    server.use(
+      http.get("*/auth/session/status", migrationResponse),
+      http.post("*/auth/logout", () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "auth-unavailable",
+              message: "Try signing out again",
+            },
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />);
+    await user.click(
+      await screen.findByRole("button", { name: "Sign out of old session" }),
+    );
+    expect(
+      await screen.findByText("Try signing out again"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Your old API-token browser session/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Sign out of old session" }),
+    ).toBeEnabled();
+  });
+
+  test("shows actionable recovery without requesting dashboard data and permits logout", async () => {
+    const projects = vi.fn(() => HttpResponse.json({ ok: true, tasks: [] }));
+    const logout = vi.fn(() => HttpResponse.json({ ok: true }));
+    server.use(
+      http.get("*/auth/session/status", migrationResponse),
+      http.all("*/projects/*", projects),
+      http.post("*/auth/logout", logout),
+    );
+    const user = userEvent.setup();
+    const { queryClient } = renderWithProviders(<AuthGate />, {
+      route: "/tasks",
+    });
+    queryClient.setQueryData(["old-project"], { private: true });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "account with project access",
+    );
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByText(/tila auth setup/)).toHaveTextContent(
+      "--project <project-id>",
+    );
+    expect(queryClient.getQueryData(["old-project"])).toBeUndefined();
+    expect(projects).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", { name: "Sign out of old session" }),
+    );
+    await waitFor(() => expect(logout).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Your old API-token browser session/),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+  });
+
+  test("clears the migration notice after successful account sign-in", async () => {
+    let signedIn = false;
+    server.use(
+      http.get("*/auth/session/status", () =>
+        signedIn
+          ? HttpResponse.json({ ok: true, projectId: "", capabilities: null })
+          : migrationResponse(),
+      ),
+      http.post("*/api/account/auth/sign-in/email", () => {
+        signedIn = true;
+        return HttpResponse.json({ user: { email: "owner@example.com" } });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "account with project access",
+    );
+    await user.type(screen.getByLabelText("Email"), "owner@example.com");
+    await user.type(screen.getByLabelText("Password"), "long-test-password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Your old API-token browser session/),
+      ).not.toBeInTheDocument(),
+    );
+    expect(signedIn).toBe(true);
+  });
+});

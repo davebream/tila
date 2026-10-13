@@ -44,7 +44,7 @@ authSessionExchange.post("/", (c) =>
       error: {
         code: "token-login-retired",
         message:
-          "Sign in with your account or run tila login. API tokens cannot create browser sessions.",
+          "API tokens cannot create browser sessions. Sign in with an account that has project membership, or ask your administrator for an invitation with project access. For first administrator setup, the infrastructure owner can run tila auth setup with --url, --email, and --project. Use tila login for CLI account access.",
         retryable: false,
       },
     },
