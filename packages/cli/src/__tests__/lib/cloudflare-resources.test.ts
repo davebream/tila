@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from "node:fs";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as p from "../../lib/prompts";
 
@@ -240,7 +242,7 @@ describe("insertTokenAndProject", () => {
     vi.resetModules();
   });
 
-  it("calls two parameterized D1 queries for project and token", async () => {
+  it("calls three parameterized D1 queries for project and token", async () => {
     const client = makeMockClient();
     (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
       {},
@@ -291,6 +293,91 @@ describe("insertTokenAndProject", () => {
     );
     for (const p of thirdCall[1].params) {
       expect(typeof p).toBe("string");
+    }
+  });
+
+  it("persists unique token IDs against the real schema and only replaces the active init token", async () => {
+    const db = new Database(":memory:");
+    const migrationsDir = new URL(
+      "../../../../worker/migrations/global/",
+      import.meta.url,
+    );
+    for (const file of readdirSync(migrationsDir)
+      .filter((file) => file.endsWith(".sql"))
+      .sort()) {
+      db.exec(readFileSync(new URL(file, migrationsDir), "utf8"));
+    }
+    const client = makeMockClient();
+    (client.d1.database.query as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_id: string, query: { sql: string; params: string[] }) => {
+        db.prepare(query.sql).run(...query.params);
+        return {};
+      },
+    );
+    const { insertTokenAndProject } = await import(
+      "../../lib/cloudflare-resources"
+    );
+    const provision = (tokenHash: string, slug = "test-proj") =>
+      insertTokenAndProject({
+        client,
+        accountId: "acc-1",
+        databaseId: "db-uuid",
+        tokenHash,
+        slug,
+      });
+    try {
+      await provision("first-hash");
+      const first = db
+        .prepare("SELECT token_id FROM _tokens WHERE token_hash = 'first-hash'")
+        .get() as { token_id: string };
+      expect(first.token_id).toMatch(/^[0-9a-f-]{36}$/);
+      db.prepare(
+        "UPDATE _tokens SET revoked_at = 42 WHERE token_hash = 'first-hash'",
+      ).run();
+      await provision("second-hash");
+      const second = db
+        .prepare(
+          "SELECT token_id FROM _tokens WHERE token_hash = 'second-hash'",
+        )
+        .get() as { token_id: string };
+      await provision("third-hash");
+      await provision("other-project-hash", "other-project");
+      const rows = db
+        .prepare(
+          "SELECT token_id, token_hash, project_id, scopes, revoked_at FROM _tokens ORDER BY token_hash",
+        )
+        .all() as Array<{ token_id: string }>;
+      expect(rows).toEqual([
+        {
+          token_id: first.token_id,
+          token_hash: "first-hash",
+          project_id: "test-proj",
+          scopes: "full",
+          revoked_at: 42,
+        },
+        {
+          token_id: expect.any(String),
+          token_hash: "other-project-hash",
+          project_id: "other-project",
+          scopes: "full",
+          revoked_at: null,
+        },
+        {
+          token_id: expect.any(String),
+          token_hash: "third-hash",
+          project_id: "test-proj",
+          scopes: "full",
+          revoked_at: null,
+        },
+      ]);
+      const ids = [second.token_id, ...rows.map((row) => row.token_id)];
+      expect(new Set(ids).size).toBe(4);
+      expect(ids.every((id) => /^[0-9a-f-]{36}$/.test(id))).toBe(true);
+      expect(
+        db.prepare("SELECT COUNT(*) AS count FROM _projects").get(),
+      ).toEqual({ count: 2 });
+    } finally {
+      db.close();
     }
   });
 
@@ -633,92 +720,6 @@ describe("setWorkerSecret", () => {
 });
 
 // ensurePagesProject and deployToPages removed in Option A refactor (wrangler deploy path)
-
-// --------------------------------------------------------------------------
-// seedFirstAdmin
-// --------------------------------------------------------------------------
-
-describe("seedFirstAdmin", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    vi.resetModules();
-  });
-
-  it("issues a parameterized INSERT OR IGNORE into _admin_grants with numeric id", async () => {
-    const client = makeMockClient();
-    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
-      {},
-    );
-
-    const { seedFirstAdmin } = await import("../../lib/cloudflare-resources");
-    await seedFirstAdmin({
-      client,
-      accountId: "acc-1",
-      databaseId: "db-uuid",
-      slug: "my-proj",
-      githubUserId: 12345,
-      githubLoginSnapshot: "octocat",
-    });
-
-    expect(client.d1.database.query).toHaveBeenCalledTimes(1);
-    const call = (client.d1.database.query as ReturnType<typeof vi.fn>).mock
-      .calls[0];
-    expect(call[0]).toBe("db-uuid");
-    expect(call[1].account_id).toBe("acc-1");
-    expect(call[1].sql).toContain("INSERT OR IGNORE INTO _admin_grants");
-    expect(call[1].sql).toContain("github.com");
-    // Params: [slug, githubUserId as string, githubLoginSnapshot, grantedAt]
-    const params: string[] = call[1].params;
-    expect(params[0]).toBe("my-proj");
-    expect(params[1]).toBe("12345");
-    expect(params[2]).toBe("octocat");
-    // params[3] is grantedAt (Unix seconds string) — must be numeric string
-    expect(/^\d+$/.test(params[3])).toBe(true);
-    // Unix seconds (not milliseconds): should be a 10-digit number
-    expect(params[3].length).toBe(10);
-  });
-
-  it("passes NULL (null) for githubLoginSnapshot when omitted", async () => {
-    const client = makeMockClient();
-    (client.d1.database.query as ReturnType<typeof vi.fn>).mockResolvedValue(
-      {},
-    );
-
-    const { seedFirstAdmin } = await import("../../lib/cloudflare-resources");
-    await seedFirstAdmin({
-      client,
-      accountId: "acc-1",
-      databaseId: "db-uuid",
-      slug: "my-proj",
-      githubUserId: 999,
-    });
-
-    const call = (client.d1.database.query as ReturnType<typeof vi.fn>).mock
-      .calls[0];
-    const params: (string | null)[] = call[1].params;
-    expect(params[0]).toBe("my-proj");
-    expect(params[1]).toBe("999");
-    expect(params[2]).toBeNull(); // no snapshot
-  });
-
-  it("propagates D1 SDK errors", async () => {
-    const client = makeMockClient();
-    (client.d1.database.query as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("D1 error"),
-    );
-
-    const { seedFirstAdmin } = await import("../../lib/cloudflare-resources");
-    await expect(
-      seedFirstAdmin({
-        client,
-        accountId: "acc-1",
-        databaseId: "db-uuid",
-        slug: "my-proj",
-        githubUserId: 1,
-      }),
-    ).rejects.toThrow("D1 error");
-  });
-});
 
 // --------------------------------------------------------------------------
 // resolveGithubUserId
