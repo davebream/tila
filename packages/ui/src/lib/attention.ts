@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import {
   deliveryFiltersFromSearch,
+  questionQueryFromSearch,
   queueQueryFromSearch,
   runtimeQueryFromSearch,
   taskFiltersFromSearch,
@@ -150,6 +151,8 @@ interface RecentExpiries {
 }
 
 const RUNTIME = "?filter=attention";
+/** The decisions inbox's default view, "Waiting on me". */
+const WAITING_ON_ME = "";
 
 function deliveryTotal(page: DeliveryListResponse): Observation {
   return page.total === undefined
@@ -157,6 +160,22 @@ function deliveryTotal(page: DeliveryListResponse): Observation {
         total: 0,
         complete: false,
         notApplicable: "This server does not report delivery totals.",
+      }
+    : { total: page.total, complete: true };
+}
+
+function questionTotal(page: QuestionListResult | null): Observation {
+  if (page === null)
+    return {
+      total: 0,
+      complete: true,
+      notApplicable: "This credential has no principal to wait on.",
+    };
+  return page.total === undefined
+    ? {
+        total: 0,
+        complete: false,
+        notApplicable: "This server does not report question totals.",
       }
     : { total: page.total, complete: true };
 }
@@ -220,33 +239,20 @@ export const ATTENTION_RULES: readonly AttentionRule[] = [
         requires: ["tasks:read"],
         surface: "questions",
       },
-      // Questions report no total: count one large page and say when it is
-      // only a floor.
       async (projectId) => {
-        const me = (await whoami()).principal_id;
-        if (!me) return null;
-        return listQuestions(projectId, {
-          responder_principal_id: me,
-          state: "open",
-          limit: 200,
-        });
+        const query = questionQueryFromSearch(
+          params(WAITING_ON_ME),
+          (await whoami()).principal_id,
+        );
+        return query && listQuestions(projectId, { ...query, limit: 1 });
       },
     ),
     noun: ["question waiting on you", "questions waiting on you"],
-    rule: "A worker asked and is waiting. Answer it, escalate it to an owner, or cancel it.",
-    severity: "amber",
-    link: fixed("decisions", ""),
-    observe: (data) =>
-      data === null
-        ? {
-            total: 0,
-            complete: true,
-            notApplicable: "This credential has no principal to wait on.",
-          }
-        : {
-            total: data.questions.length,
-            complete: data.next_after_id === null,
-          },
+    // An unanswered question stops the worker that asked it.
+    rule: "A worker stopped to ask and is waiting. Answer it, escalate it to an owner, or cancel it.",
+    severity: "red",
+    link: fixed("decisions", WAITING_ON_ME),
+    observe: questionTotal,
   }),
   defineRule({
     id: "work.failed",

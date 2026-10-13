@@ -22,7 +22,12 @@ import {
 } from "@/lib/operation-draft";
 import { type Rights, rights } from "@/lib/rights";
 import { formatDateTime, relativeTime } from "@/lib/time";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type {
   Question,
   QuestionCancelCommand,
@@ -131,7 +136,7 @@ function AnswerForm({
       }),
     onSuccess: async () => {
       discard();
-      await client.invalidateQueries({ queryKey: ["questions", project] });
+      await refreshDecisions(client, project);
     },
     onError: async (error) => {
       const kind = failureKind(error);
@@ -139,7 +144,7 @@ function AnswerForm({
         await client.invalidateQueries({ queryKey: ["whoami", project] });
       if (kind !== "unconfirmed") {
         update(releaseOperation);
-        await client.invalidateQueries({ queryKey: ["questions", project] });
+        await refreshDecisions(client, project);
       }
     },
   });
@@ -298,8 +303,7 @@ function EscalateForm({
           reason: input.reason,
         })),
       }),
-    onSettled: () =>
-      client.invalidateQueries({ queryKey: ["questions", project] }),
+    onSettled: () => refreshDecisions(client, project),
     onSuccess: () => {
       setReason("");
       setTarget("");
@@ -408,8 +412,7 @@ function CancelQuestion({
           reason: text,
         })),
       }),
-    onSettled: () =>
-      client.invalidateQueries({ queryKey: ["questions", project] }),
+    onSettled: () => refreshDecisions(client, project),
     onSuccess: () => setOpen(false),
   });
   return (
@@ -466,6 +469,14 @@ function CancelQuestion({
 }
 
 /** A worker question with its task/attempt correlation and every hand-over. */
+/** A decision changes the questions lists and the Overview's count of them. */
+function refreshDecisions(client: QueryClient, project: string) {
+  return Promise.all([
+    client.invalidateQueries({ queryKey: ["questions", project] }),
+    client.invalidateQueries({ queryKey: ["overview", project] }),
+  ]);
+}
+
 export function DecisionDetail({
   project,
   id,
