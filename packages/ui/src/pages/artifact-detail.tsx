@@ -20,7 +20,13 @@ import { formatDateTime } from "@/lib/time";
 import { encodeArtifactKey, formatBytes, parseArtifactKey } from "@/lib/utils";
 import { ExternalLink, Maximize2, Minimize2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router";
 
 const MAX_TEXT_PREVIEW = 50 * 1024;
 
@@ -41,6 +47,7 @@ type ContentState =
 
 function ArtifactVersionHistory({ artifactKey }: { artifactKey: string }) {
   const { projectId } = useAuth();
+  const { search } = useLocation();
   const [cursor, setCursor] = useState<string>();
   const history = useArtifactHistory(artifactKey, cursor);
 
@@ -78,7 +85,7 @@ function ArtifactVersionHistory({ artifactKey }: { artifactKey: string }) {
                 <TableRow key={item.r2_key}>
                   <TableCell>
                     <Link
-                      to={`/p/${projectId}/artifacts/${encodeArtifactKey(item.r2_key)}`}
+                      to={`/p/${projectId}/artifacts/${encodeArtifactKey(item.r2_key)}${search}`}
                       aria-current={
                         item.r2_key === artifactKey ? "page" : undefined
                       }
@@ -163,6 +170,8 @@ export function ArtifactDetailPage() {
   const { projectId } = useAuth();
   const params = useParams();
   const navigate = useNavigate();
+  // The list's filters, so closing returns to the view the drawer opened from.
+  const { search } = useLocation();
   const key = params["*"] ?? "";
   const parsed = parseArtifactKey(key);
 
@@ -240,12 +249,12 @@ export function ArtifactDetailPage() {
   }, [key, projectId]);
 
   if (!key) {
-    return <Navigate to={`/p/${projectId}/artifacts`} replace />;
+    return <Navigate to={`/p/${projectId}/artifacts${search}`} replace />;
   }
 
   return (
     <Drawer
-      onClose={() => navigate(`/p/${projectId}/artifacts`)}
+      onClose={() => navigate(`/p/${projectId}/artifacts${search}`)}
       title={
         parsed.entity ? (
           <span className="flex items-center gap-1.5">
