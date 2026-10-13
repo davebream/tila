@@ -299,6 +299,38 @@ describe("conversation prerequisites", () => {
     expect(
       screen.queryByText("Conversations are not configured"),
     ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("link", {
+        name: "Create one in Settings › Rooms",
+      }),
+    ).toHaveAttribute("href", "/p/test-project/settings/rooms");
+  });
+
+  test("lists archived rooms with a label, since their history stays readable", async () => {
+    const requests: string[] = [];
+    server.use(
+      http.get("*/projects/test-project/rooms", ({ request }) => {
+        requests.push(new URL(request.url).search);
+        return HttpResponse.json({
+          ok: true,
+          rooms: [
+            { id: "general", name: "General", archived: false },
+            { id: "old", name: "Old", archived: true },
+          ],
+        });
+      }),
+    );
+    renderRooms();
+    const nav = await screen.findByRole("navigation", {
+      name: "Conversation rooms",
+    });
+    expect(
+      await within(nav).findByRole("link", { name: "Old archived" }),
+    ).toBeInTheDocument();
+    expect(
+      within(nav).getByRole("link", { name: "General" }),
+    ).toBeInTheDocument();
+    expect(requests).toEqual(["?include_archived=true"]);
   });
 
   test("keeps a network failure distinct", async () => {

@@ -35,6 +35,8 @@ import { SettingsDefinitionsPage } from "@/pages/settings-definitions";
 import { SettingsDefinitionsReviewPage } from "@/pages/settings-definitions-review";
 import { SettingsDefinitionsRevisionPage } from "@/pages/settings-definitions-revision";
 import { SettingsDefinitionsSourcePage } from "@/pages/settings-definitions-source";
+import { SettingsRoomsPage } from "@/pages/settings-rooms";
+import { SettingsSignalGroupsPage } from "@/pages/settings-signal-groups";
 import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
 import { WorkspacePage } from "@/pages/workspace";
@@ -179,6 +181,11 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
         element={<SettingsDefinitionsRevisionPage />}
       />
       <Route path="settings/agents" element={<SettingsAgentsPage />} />
+      <Route path="settings/rooms" element={<SettingsRoomsPage />} />
+      <Route
+        path="settings/signal-groups"
+        element={<SettingsSignalGroupsPage />}
+      />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />
       </Route>

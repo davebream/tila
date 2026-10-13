@@ -234,8 +234,18 @@ export function SignalsPage() {
           Groups
         </h2>
         <p className="text-xs text-muted-foreground">
-          Read-only here; group editing belongs in Settings. Changing a group
-          never rewrites signals that were already sent.
+          Read-only here. Groups are created and edited in{" "}
+          {projectId ? (
+            <Link
+              className={linkClass}
+              to={`/p/${projectId}/settings/signal-groups`}
+            >
+              Settings › Signal groups
+            </Link>
+          ) : (
+            "Settings › Signal groups"
+          )}
+          . Changing a group never rewrites signals that were already sent.
         </p>
         {groups.isError ? (
           <TableError error={groups.error} onRetry={() => groups.refetch()} />

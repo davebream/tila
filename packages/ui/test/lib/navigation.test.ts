@@ -45,6 +45,8 @@ describe("matchNav", () => {
     ["/p/acme/settings", "settings", "settings"],
     ["/p/acme/settings/definitions", "settings", "definitions"],
     ["/p/acme/settings/agents", "settings", "agent-settings"],
+    ["/p/acme/settings/rooms", "settings", "room-settings"],
+    ["/p/acme/settings/signal-groups", "settings", "signal-group-settings"],
     ["/p/acme/overview", "overview", "overview"],
     ["tasks/task-1", "work", "tasks"],
   ])("%s belongs to %s › %s", (pathname, section, item) => {

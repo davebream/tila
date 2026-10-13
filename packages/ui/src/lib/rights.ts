@@ -59,6 +59,10 @@ export function rights(identity: WhoamiResponse | undefined, project: string) {
     decide: taskWrite,
     /** Register, edit and archive agents (maintainer, `agents:manage`). */
     manageAgents: manage && has("agents:manage"),
+    /** Create rooms, edit their policy and members (`conversations:manage`). */
+    manageRooms: manage && has("conversations:manage"),
+    /** Create, edit and delete signal groups (`signals:manage`). */
+    manageSignalGroups: manage && has("signals:manage"),
   };
 }
 

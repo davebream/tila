@@ -1,12 +1,18 @@
 import { useWhoami } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
-import { agentArchivePreview, listAgents } from "@/lib/api";
+import {
+  agentArchivePreview,
+  getRoom,
+  listAgents,
+  listRooms,
+  roomArchivePreview,
+} from "@/lib/api";
 import { failureKind } from "@/lib/mutation-errors";
 import { rights } from "@/lib/rights";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-// Queries and commands for the identity settings pages (#298).
+// Queries and commands for Settings › Agents, Rooms and Signal groups (#298).
 // Reads and writes never depend on the membership-admin capabilities; the
 // controls follow `rights()` and the server enforces every write again.
 
@@ -58,6 +64,40 @@ export function useAgentArchivePreview(id: string | null) {
   });
 }
 
+/** Every readable room, archived ones included. */
+export function useRoomSettings() {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["rooms", projectId, { includeArchived: true }],
+    queryFn: () => listRooms(projectId as string, { includeArchived: true }),
+    enabled: Boolean(projectId),
+    refetchInterval: 10_000,
+  });
+}
+
+/** One room with its members; shares the cache with the Rooms page. */
+export function useRoomDetail(id: string | null) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["room", projectId, id],
+    queryFn: () => getRoom(projectId as string, id as string),
+    enabled: Boolean(projectId) && Boolean(id),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useRoomArchivePreview(id: string | null) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["room-archive-preview", projectId, id],
+    queryFn: () => roomArchivePreview(projectId as string, id as string),
+    enabled: Boolean(projectId) && Boolean(id),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+}
+
 /** Re-read everything a settings write may have changed, by key prefix. */
 export function useInvalidateSettings() {
   const client = useQueryClient();
@@ -70,6 +110,8 @@ export function useInvalidateSettings() {
     );
   return {
     agents: () => invalidate("agents", "agent-archive-preview", "runtime-view"),
+    rooms: () => invalidate("rooms", "room", "room-archive-preview"),
+    groups: () => invalidate("signal-groups"),
     access: () => invalidate("whoami"),
   };
 }
