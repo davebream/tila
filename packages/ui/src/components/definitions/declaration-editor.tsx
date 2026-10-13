@@ -20,7 +20,13 @@ import {
   setIn,
   writeFields,
 } from "@tila/core";
-import { type FormEvent, type ReactNode, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useMemo,
+  useState,
+} from "react";
 
 const NAME = /^[A-Za-z0-9_-]+$/;
 
@@ -75,7 +81,14 @@ export function DeclarationEditor({
   children: (
     state: DeclarationState,
     update: (change: (decl: DefinitionTable) => DefinitionTable) => void,
-    names: { name: string; candidate: DefinitionDocument },
+    context: {
+      name: string;
+      candidate: DefinitionDocument;
+      /** Report (or clear) an input problem that must block saving. */
+      report: (key: string, problem: string | null) => void;
+      /** Whether a save was attempted, so pending problems may be shown. */
+      submitted: boolean;
+    },
   ) => ReactNode;
 }) {
   const original = originalName
@@ -88,6 +101,16 @@ export function DeclarationEditor({
     return { decl, fields: fieldTypes ? readFields(decl.fields) : null };
   });
   const [typed, setTyped] = useState<Map<number, string>>(new Map());
+  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const report = useCallback((key: string, problem: string | null) => {
+    setInputs((current) => {
+      if ((current[key] ?? null) === problem) return current;
+      const next = { ...current };
+      if (problem) next[key] = problem;
+      else delete next[key];
+      return next;
+    });
+  }, []);
   const [submitted, setSubmitted] = useState(false);
 
   const existing = isTable(doc[section])
@@ -120,7 +143,10 @@ export function DeclarationEditor({
   }, [candidate, section, name, nameError]);
 
   const blocked =
-    Boolean(nameError) || fieldProblems.size > 0 || typed.size > 0;
+    Boolean(nameError) ||
+    fieldProblems.size > 0 ||
+    typed.size > 0 ||
+    Object.keys(inputs).length > 0;
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -154,9 +180,8 @@ export function DeclarationEditor({
             onChange={(e) => setName(e.target.value.trim())}
           />
         )}
-        {children(state, update, { name, candidate })}
         {state.fields && fieldTypes && (
-          <section className="space-y-3 border-t border-border pt-4">
+          <section className="space-y-3">
             <h3 className="text-sm font-medium">Fields</h3>
             <FieldsEditor
               fields={state.fields}
@@ -166,6 +191,7 @@ export function DeclarationEditor({
             />
           </section>
         )}
+        {children(state, update, { name, candidate, report, submitted })}
         {problems.length > 0 && (
           <ProblemSummary
             title="The draft will not validate until these are fixed"

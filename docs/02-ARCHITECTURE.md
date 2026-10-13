@@ -1374,8 +1374,8 @@ composes schema fragments and explicitly submits TOML through `tila schema apply
 MCP `tila_schema_update` and the Worker schema endpoint use the same parser/ops.
 Adding a type/kind is a definition revision, not a database migration. The server
 increments `_schema_history.version`; the file's `schema_version` is separate.
-Revision-checked TOML writes are described in §2.5. Browser editors and structured
-definition writes remain tracked by §14 and #296/#297.
+Revision-checked TOML writes are described in §2.5. Settings › Definitions edits
+the same definition in the browser (§14.2); a typed structured input remains #296.
 
 ### 6.4 Adding a required parent to an existing work-unit type
 
@@ -1384,8 +1384,8 @@ Apply rejects a destructive diff without a strategy. The implemented strategies
 are `relax` and `force`; neither is an interactive migration/backfill engine.
 `migrate`, `default-parent` and automatic reparenting are not supported strategies.
 Conditional destructive applies bind to the reviewed revision and definition as
-described in §2.5. Broader affected-data reconciliation remains in #296; #297
-presents the impact without claiming automatic data repair.
+described in §2.5. Broader affected-data reconciliation remains in #296; the
+dashboard review presents the preview impact without claiming automatic data repair.
 
 ### 6.5 Adding a new artifact kind
 
@@ -2132,7 +2132,7 @@ Worker tracks daily write count in a `_quota` table (cheap: one row updated per 
 Acceptable. The framework's autopilot pulls `ANTHROPIC_API_KEY` from env at session start. Sub-agent invocations are independent API calls. No coordination with the user's interactive Claude Code session is needed; both call the same API with separate contexts. tila has no opinion or involvement here — LLM credentials never reach the Worker.
 
 ### 10.23 Editing the schema at runtime via CLI without editing toml
-The current schema CLI exposes show/diff/apply/status and submits an explicit TOML definition; the add-work-unit/add-field/add-artifact/add-reference-slot conveniences described in the historical design are not implemented. Applied server state is authoritative. #297 adds browser editors and #299 explicit file import/export; a local file must not silently overwrite subsequent server edits.
+The current schema CLI exposes show/diff/apply/status and submits an explicit TOML definition; the add-work-unit/add-field/add-artifact/add-reference-slot conveniences described in the historical design are not implemented. Applied server state is authoritative. Settings › Definitions provides browser editors (#297) and #299 owns explicit file import/export; a local file must not silently overwrite subsequent server edits.
 
 ### 10.24 R2 lifecycle expires an artifact while UI is rendering it
 UI fetches artifact metadata from D1 (`artifact_pointers`); fetches the blob from R2. If R2 returns 404 for an artifact the pointer references, the UI shows a "this artifact was deleted by lifecycle policy on <date>" placeholder, with the journal event still visible. The pointer row remains for audit; `tila doctor` can prune orphaned pointers if desired.
@@ -2767,11 +2767,26 @@ All rows below currently share `GET /schema`, `POST /schema/preview` and
 `POST /schema` (full TOML `definition`, optional `relax`/`force` strategy).
 CLI `schema show/diff/apply/status`, SDK `schema.get/apply`, MCP
 `tila_schema_update` and the schema resource consume this definition. SDK
-`schema.history()` and the dashboard's read-only Settings › Definitions page read
-`GET /schema/history` (`limit`, `before`). History is readable; restore is not
-delivered. #296 owns typed
-structured input, public preview/history/detail/restore and revision checking;
-#297 owns all form sections below; #299 owns explicit import/export.
+`schema.history()` reads `GET /schema/history` (`limit`, `before`).
+
+Settings › Definitions (#297) is the browser path for every row below. It keeps
+a per-tab draft as TOML text based on the applied revision, edits it with forms
+(work types, fields, lifecycle, reference slots, record types, artifact kinds,
+templates, hierarchy and vocabularies) or as source, and never requires a local
+file. Forms edit the raw TOML tree through `@tila/core` definition documents, so
+keys the schema does not model survive; they rewrite comments and layout, and
+the source editor keeps them. Validation is the shared core parser plus the
+server preview; the review page shows the typed changes and impact counts, and
+apply always sends `expected_revision` and `reviewed_definition` with an
+idempotency key. Destructive changes need a typed confirmation and are applied
+with `relax`. A stale apply (412) keeps the draft and offers a per-declaration
+rebase onto the latest revision. Restore loads a historical definition as a
+draft on the current revision and applies it as a new revision after the same
+review; there is no separate restore endpoint and history is never rewritten.
+Retiring a declaration removes it; stored rows stay readable as legacy data.
+A change that only touches comments or unknown keys records no revision.
+#296 still owns a typed structured input and revision detail endpoints; #299
+owns explicit import/export.
 
 | Setting / complete field group | Permission / lifecycle | Required browser editor and removal behavior |
 |---|---|---|
@@ -2837,7 +2852,7 @@ automatically an infrastructure credential. Failed authority lookup fails closed
 
 | Code / category | Read | Mutation and restrictions |
 |---|---|---|
-| S — definitions/policies | Project read; scoped `schema:read` | The inner route says `write` (participant), but mounted capability middleware requires `schema:write` at maintainer level for apply, including compatibility sessions via `compatibilityPolicy`. Preview uses participant-level `schema:preview`. Scoped credentials additionally need the explicit capability. Document this guard mismatch; #296/#297 must not infer writer apply access from the inner handler or silently change the effective threshold. |
+| S — definitions/policies | Project read; scoped `schema:read` | The inner route says `write` (participant), but mounted capability middleware requires `schema:write` at maintainer level for apply, including compatibility sessions via `compatibilityPolicy`. Preview uses participant-level `schema:preview`. Scoped credentials additionally need the explicit capability. Document this guard mismatch; #296/#297 must not infer writer apply access from the inner handler or silently change the effective threshold. The dashboard offers drafting and preview with `schema:preview` and Apply only with `schema:write` at maintainer level, independently of membership administration; the server enforces both again. |
 | M — agents / proposed profile selections | `agents:read`; binding details are manager/current-consumer restricted | `agents:manage` with maintainer ceiling (or existing full-token compatibility). Registration ownership/bind policy still applies. Proposed edit/archive uses the same management authority. |
 | C — rooms/membership | `conversations:read` plus room history policy/membership | `conversations:manage` (maintainer) for room/member management; publishing uses `conversations:publish` plus room admission and current runtime checks when acting as an agent. |
 | G — signal groups/history | Groups use read / `signals:read`; delivery history requires admin / `signals:manage` | Group PUT/DELETE requires admin (maintainer), scoped `signals:manage`. Sending and recipient acknowledgement use their distinct writer capabilities and identity checks. |

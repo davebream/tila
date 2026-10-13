@@ -6,9 +6,15 @@ import {
   declarationRows,
 } from "@/components/definitions/declaration-table";
 import {
+  ArtifactKindEditor,
+  StructureEditor,
+  TemplateEditor,
+} from "@/components/definitions/policy-editors";
+import {
   RecordTypeEditor,
   WorkTypeEditor,
 } from "@/components/definitions/type-editors";
+import { Button } from "@/components/ui/button";
 import { FormNotice } from "@/components/ui/form-fields";
 import { STARTER_DEFINITION } from "@/lib/definition-draft";
 import { stringAt, stringList, tableAt } from "@/lib/definition-values";
@@ -18,6 +24,7 @@ import {
   cloneDeclaration,
   copyName,
   declarationNames,
+  isTable,
   parseDefinitionDocument,
   readFields,
   removeDeclaration,
@@ -28,6 +35,50 @@ import {
 import type { RecordCatalogEntry, WorkCatalogEntry } from "@tila/schemas";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router";
+
+function StructureSummary({ doc }: { doc: DefinitionDocument }) {
+  const hierarchy = tableAt(doc, "hierarchy");
+  const rows: Array<[string, string]> = [
+    ["Hierarchy levels", stringList(hierarchy.levels).join(" → ") || "not set"],
+    [
+      "Maximum depth",
+      typeof hierarchy.max_depth === "number"
+        ? String(hierarchy.max_depth)
+        : "not set",
+    ],
+    [
+      "Artifact relationship types",
+      stringList(tableAt(doc, "artifact_relationships").types).join(", ") ||
+        "not set",
+    ],
+    [
+      "Task artifact reference slots",
+      stringList(tableAt(doc, "entity_artifact_references").slots).join(", ") ||
+        "not set",
+    ],
+  ];
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table
+        className="w-full text-left text-sm"
+        aria-label="Hierarchy and relationships"
+      >
+        <tbody>
+          {rows.map(([label, value]) => (
+            <tr key={label} className="border-t border-border first:border-t-0">
+              <th scope="row" className="w-1/3 p-3 font-normal">
+                {label}
+              </th>
+              <td className="p-3 font-mono text-xs text-muted-foreground">
+                {value}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function documentOf(source: string): DefinitionDocument | null {
   const parsed = parseDefinitionDocument(
@@ -210,7 +261,113 @@ export function DefinitionSections({
           onAdd={canEdit ? () => open("records", null) : undefined}
         />
       </section>
+      <section aria-labelledby="artifact-kinds-heading" className="space-y-2">
+        <h2
+          id="artifact-kinds-heading"
+          className="font-logo text-lg tracking-tight"
+        >
+          Artifact kinds
+        </h2>
+        <DeclarationTable
+          label="Artifact kinds"
+          noun="artifact kind"
+          rows={declarationRows("artifacts", doc ?? {}, base)}
+          columns={[
+            {
+              header: "MIME types",
+              cell: (row) => stringList(row.decl?.mime_types).join(", ") || "—",
+            },
+            {
+              header: "Retention",
+              cell: (row) => {
+                const days = row.decl?.retention_days;
+                return typeof days === "number" && days > 0
+                  ? `${days} days`
+                  : "never expires";
+              },
+            },
+            {
+              header: "Search",
+              cell: (row) =>
+                row.decl?.searchable === true
+                  ? stringAt(row.decl, "search_mode") || "none"
+                  : "not indexed",
+            },
+          ]}
+          actions={actionsFor("artifacts")}
+          onAdd={canEdit ? () => open("artifacts", null) : undefined}
+        />
+      </section>
+      <section aria-labelledby="templates-heading" className="space-y-2">
+        <h2 id="templates-heading" className="font-logo text-lg tracking-tight">
+          Templates
+        </h2>
+        <DeclarationTable
+          label="Templates"
+          noun="template"
+          rows={declarationRows("templates", doc ?? {}, base)}
+          columns={[
+            {
+              header: "Description",
+              cell: (row) => stringAt(row.decl ?? {}, "description") || "—",
+            },
+            {
+              header: "Creates",
+              cell: (row) => {
+                const entities = Object.values(
+                  tableAt(row.decl ?? {}, "entities"),
+                );
+                const types = entities.map((e) =>
+                  isTable(e) ? stringAt(e, "type") : "?",
+                );
+                return types.length ? types.join(", ") : "nothing";
+              },
+            },
+          ]}
+          actions={actionsFor("templates")}
+          onAdd={canEdit ? () => open("templates", null) : undefined}
+        />
+      </section>
+      <section aria-labelledby="structure-heading" className="space-y-2">
+        <h2 id="structure-heading" className="font-logo text-lg tracking-tight">
+          Hierarchy and relationships
+        </h2>
+        <StructureSummary doc={doc ?? {}} />
+        {canEdit && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => open("structure" as DeclarationSection, null)}
+          >
+            Edit hierarchy and relationships
+          </Button>
+        )}
+      </section>
       {children?.(context)}
+      {canEdit && doc && editing?.section === "artifacts" && (
+        <ArtifactKindEditor
+          key={editing.name ?? "new"}
+          name={editing.name}
+          doc={doc}
+          base={base}
+          onSave={context.save}
+          onClose={close}
+        />
+      )}
+      {canEdit && doc && editing?.section === "templates" && (
+        <TemplateEditor
+          key={editing.name ?? "new"}
+          name={editing.name}
+          doc={doc}
+          base={base}
+          onSave={context.save}
+          onClose={close}
+        />
+      )}
+      {canEdit && doc && (editing?.section as string) === "structure" && (
+        <StructureEditor doc={doc} onSave={context.save} onClose={close} />
+      )}
       {canEdit && doc && editing?.section === "work_units" && (
         <WorkTypeEditor
           key={editing.name ?? "new"}
