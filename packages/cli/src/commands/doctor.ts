@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { schema } from "@tila/ops-sqlite";
 import {
   DoctorProbeResponseSchema,
   DoctorSchemaResponseSchema,
@@ -13,6 +14,7 @@ import {
 } from "@tila/schemas";
 import c from "ansis";
 import { defineCommand } from "citty";
+import { getTableColumns, getTableName } from "drizzle-orm";
 import {
   InstanceKeyMismatchError,
   KeychainUnavailableError,
@@ -36,37 +38,12 @@ interface CheckResult {
 
 const JOURNAL_WARN_THRESHOLD = 10_000;
 
-const REQUIRED_SCHEMA_COLUMNS: Record<string, string[]> = {
-  claims: [
-    "resource",
-    "holder",
-    "machine",
-    "user",
-    "mode",
-    "fence",
-    "acquired_at",
-    "expires_at",
-    "metadata",
-  ],
-  journal: [
-    "seq",
-    "t",
-    "kind",
-    "resource",
-    "actor",
-    "fence",
-    "data",
-    "token_id",
-  ],
-  _schema_history: [
-    "version",
-    "definition",
-    "applied_at",
-    "applied_by",
-    "change_summary",
-    "strategy",
-  ],
-};
+const REQUIRED_SCHEMA_COLUMNS: Record<string, string[]> = Object.fromEntries(
+  [schema.claims, schema.journal, schema.schemaHistory].map((table) => [
+    getTableName(table),
+    Object.values(getTableColumns(table)).map((column) => column.name),
+  ]),
+);
 
 function findMissingSchemaColumns(
   columns: Record<string, Array<{ name: string }> | undefined>,
