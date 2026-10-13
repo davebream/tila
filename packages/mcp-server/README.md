@@ -53,7 +53,7 @@ The default catalog contains **nine workflow tools**. Primitive tools are opt-in
 | --- | --- |
 | `tila_queue` | Inspect, configure, enroll, edit, withdraw and claim managed work. |
 | `tila_question` | Ask, inspect, answer, escalate, cancel and link discussion for attempt questions; decisions never resume execution. |
-| `tila_attempt` | Accept, start, heartbeat, finish, suspend, resume, cancel, reconcile, retry and replace a stopped native session on the same attempt; list filters recover one owner's unfinished work. |
+| `tila_attempt` | Accept, start, heartbeat, finish, suspend, resume, cancel, reconcile, retry, replace a stopped native session on the same attempt and link corrective work to a finished result; list filters recover one owner's unfinished work. |
 
 Both are included in `workflow` and can be selected with `TILA_MCP_TOOLS=queue`. Each accepts a typed `request` with an `action`. Mutations require an idempotency key and current revision where applicable. A grant reserves capacity; acceptance must commit before launch. Cancellation requests do not stop processes. Replayed grants must have `grant_valid=true`.
 

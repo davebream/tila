@@ -19,6 +19,7 @@ health.get("/health", (c) => {
       "work-questions-v1",
       "attempt-control-v1",
       "attempt-session-replacement-v1",
+      "attempt-corrections-v1",
     ],
   });
 });

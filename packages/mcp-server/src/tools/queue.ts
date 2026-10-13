@@ -50,7 +50,7 @@ export function registerQueueTools(
   registerResultTool(
     server,
     "tila_attempt",
-    "Inspect attempts (list filters include principal_id, participant_id and active for recovering your own work); accept, bind a started session, heartbeat, finish, request/confirm suspension, request/claim resume, cancel, reconcile, retry or replace a stopped native session on the same attempt. Only the adapter may confirm quiescence/stopped execution. Requests do not stop processes or release capacity. Cancel/suspend/resume/retry need the owner, the enrolling principal or a maintainer. Rebind and force recovery require maintainer authority and a reason. Unknown execution must remain uncertain. Reuse operation keys after lost responses and inspect current grant validity.",
+    "Inspect attempts (list filters include principal_id, participant_id and active for recovering your own work); accept, bind a started session, heartbeat, finish, request/confirm suspension, request/claim resume, cancel, reconcile, retry, replace a stopped native session on the same attempt, or link corrective work to a finished attempt (correct; the original result is never rewritten). Only the adapter may confirm quiescence/stopped execution. Requests do not stop processes or release capacity. Cancel/suspend/resume/retry need the owner, the enrolling principal or a maintainer. Rebind and force recovery require maintainer authority and a reason. Unknown execution must remain uncertain. Reuse operation keys after lost responses and inspect current grant validity.",
     { request: AttemptRequestSchema },
     AttemptResultSchema,
     async ({ request }) => {

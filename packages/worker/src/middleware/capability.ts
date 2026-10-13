@@ -82,6 +82,7 @@ export function routeCapability(
     ],
     ["GET", /^\/attempts(?:\/[^/]+)?$/, "tasks:read"],
     ["POST", /^\/attempts\/[^/]+\/(?:rebind|force-recovery)$/, "schema:write"],
+    ["POST", /^\/attempts\/[^/]+\/correct$/, "tasks:write"],
     [
       "POST",
       /^\/attempts\/[^/]+\/(?:accept|started|heartbeat|finish|request-suspension|confirm-suspension|request-resume|claim-resume|request-cancellation|reconcile|retry|replace-session)$/,

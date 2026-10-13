@@ -1,5 +1,6 @@
 import { QuestionSchema } from "@tila/schemas";
 import {
+  AttemptCorrectionSchema,
   QueueEntrySchema,
   QueuePolicySchema,
   WorkAttemptSchema,
@@ -17,6 +18,7 @@ export function validateQueueBackupRow(
   table: string,
   row: Record<string, unknown>,
 ): void {
+  if (table === "attempt_corrections") AttemptCorrectionSchema.parse(row);
   if (table === "work_questions") {
     const q = QuestionSchema.parse(json(row.snapshot));
     if (
@@ -165,6 +167,24 @@ export function invalidateRestoredExecutions(
     const byAttempt = new Map(
       allAttempts.map((attempt) => [attempt.id, attempt]),
     );
+    for (const link of tx.select().from(schema.attemptCorrections).all()) {
+      if (byAttempt.get(link.attempt_id)?.state !== "terminal")
+        throw new QueueError(
+          "queue-conflict",
+          "Restored correction must reference a finished attempt",
+        );
+      if (
+        !tx
+          .select({ id: schema.entities.id })
+          .from(schema.entities)
+          .where(eq(schema.entities.id, link.task_id))
+          .get()
+      )
+        throw new QueueError(
+          "queue-conflict",
+          "Restored correction references a missing task",
+        );
+    }
     for (const entry of entries) {
       if (
         entry.state === "admitted" &&

@@ -129,6 +129,22 @@ export const AttemptReplaceSessionCommandSchema =
     session: AttemptSessionSchema,
     checkpoint: z.record(z.string(), z.unknown()).optional(),
   });
+/** Corrective work linked to a terminal attempt. The original result is never rewritten. */
+export const AttemptCorrectionSchema = z.object({
+  id: z.string(),
+  attempt_id: z.string(),
+  task_id: z.string(),
+  reason: z.string(),
+  principal_id: z.string(),
+  participant_id: z.string(),
+  created_at: z.number().int(),
+});
+export const AttemptCorrectCommandSchema = z.object({
+  idempotency_key: z.string().min(1).max(256),
+  /** The task that carries the corrective work; it may be the same task. */
+  task_id: z.string().min(1),
+  reason: z.string().min(1).max(2000),
+});
 export const AttemptViewSchema = z.object({
   attempt: WorkAttemptSchema,
   /** Current authority, recomputed even for a deduplicated command. */
@@ -139,6 +155,8 @@ export const AttemptViewSchema = z.object({
   current_revisions: AttemptRevisionSnapshotSchema.omit({
     at: true,
   }).optional(),
+  /** Corrective work linked to this attempt's result, oldest first. */
+  corrections: z.array(AttemptCorrectionSchema).optional(),
 });
 export type QueuePolicy = z.infer<typeof QueuePolicySchema>;
 export type QueueEntry = z.infer<typeof QueueEntrySchema>;
@@ -153,6 +171,8 @@ export type AttemptRevisions = z.infer<typeof AttemptRevisionsSchema>;
 export type AttemptReplaceSessionCommand = z.infer<
   typeof AttemptReplaceSessionCommandSchema
 >;
+export type AttemptCorrection = z.infer<typeof AttemptCorrectionSchema>;
+export type AttemptCorrectCommand = z.infer<typeof AttemptCorrectCommandSchema>;
 export type WorkAttempt = z.infer<typeof WorkAttemptSchema>;
 export type AttemptView = z.infer<typeof AttemptViewSchema>;
 export type QueueCommand = z.infer<typeof QueueCommandSchema>;
@@ -375,6 +395,7 @@ export const AttemptMutationSchemas = {
   retry: AttemptRetryCommandSchema,
   "force-recovery": AttemptForceCommandSchema,
   "replace-session": AttemptReplaceSessionCommandSchema,
+  correct: AttemptCorrectCommandSchema,
 } as const;
 
 export const QueueRequestSchema = z.discriminatedUnion("action", [
@@ -475,6 +496,11 @@ export const AttemptRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("replace-session"),
     id: z.string().min(1),
     command: AttemptReplaceSessionCommandSchema,
+  }),
+  z.object({
+    action: z.literal("correct"),
+    id: z.string().min(1),
+    command: AttemptCorrectCommandSchema,
   }),
 ]);
 export const QueueResultSchema = z.union([

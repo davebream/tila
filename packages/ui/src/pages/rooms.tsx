@@ -1,6 +1,7 @@
 import {
   SummaryLine,
   TraceBadges,
+  WorkResultBadge,
   ackLabel,
   wakeLabel,
 } from "@/components/delivery-trace";
@@ -504,7 +505,10 @@ function MessageDeliveries({
                         <TraceBadges trace={trace} />
                         <span>Wake: {wakeLabel(trace.wake).label}</span>
                         <span>{ackLabel(trace)[0]}</span>
-                        <span>Work result: not reported</span>
+                        <span className="inline-flex items-center gap-1">
+                          Work result:
+                          <WorkResultBadge result={trace.work_result} />
+                        </span>
                         <Link
                           className="text-signal-blue underline"
                           to={`/p/${project}/deliveries/${encodeURIComponent(delivery.agent_id)}/${encodeURIComponent(delivery.id)}`}

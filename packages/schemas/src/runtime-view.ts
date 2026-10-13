@@ -7,6 +7,7 @@ import {
 } from "./agent-binding";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { PresenceSchema } from "./presence";
+import { AttemptStateSchema } from "./queue";
 
 /** Two run IDs per row keep a page within one or two D1 lookups. */
 export const RUNTIME_VIEW_MAX_LIMIT = 50;
@@ -178,6 +179,24 @@ export const RuntimeCommandsSchema = z.object({
   stop: UnsupportedHostCommandSchema,
 });
 
+/** Unfinished work attempts owned by the current binding's participant. */
+export const RuntimeWorkAttemptSchema = z.object({
+  id: z.string(),
+  task_id: z.string(),
+  state: AttemptStateSchema,
+  fence: z.number().int().positive(),
+  lease_expires_at: z.number().int().nullable(),
+});
+export const RUNTIME_WORK_ATTEMPT_LIMIT = 5;
+export const RuntimeWorkAttemptsSchema = z.discriminatedUnion("detail", [
+  z.object({
+    detail: z.literal("full"),
+    total: z.number().int().positive(),
+    attempts: z.array(RuntimeWorkAttemptSchema).max(RUNTIME_WORK_ATTEMPT_LIMIT),
+  }),
+  /** Attempts exist but the caller cannot read tasks and claims. */
+  z.object({ detail: z.literal("redacted") }),
+]);
 export const RuntimeViewRowSchema = z.object({
   agent: z.object({
     id: AgentIdSchema,
@@ -187,8 +206,11 @@ export const RuntimeViewRowSchema = z.object({
   current: RuntimeOccupantSchema.nullable(),
   /** Latest binding that no longer holds the mailbox. */
   previous: RuntimeOccupantSchema.nullable(),
-  /** Reserved for work attempts (#303). Never inferred from runtime state. */
-  work_attempt: z.null(),
+  /**
+   * Durable attempts held by the current participant (#303). Read from attempt
+   * records, never inferred from runtime state; null when there are none.
+   */
+  work_attempt: RuntimeWorkAttemptsSchema.nullable(),
   commands: RuntimeCommandsSchema,
 });
 
@@ -233,6 +255,14 @@ export const AgentRuntimePageSchema = z.object({
         release_authorized: z.boolean(),
       }).nullable(),
       previous: RuntimePageOccupantSchema.nullable(),
+      /** Unredacted; the Worker redacts it for callers without task access. */
+      work: z
+        .object({
+          total: z.number().int().nonnegative(),
+          attempts: z.array(RuntimeWorkAttemptSchema),
+        })
+        .nullable()
+        .default(null),
     }),
   ),
   next_after: AgentIdSchema.nullable(),
@@ -259,6 +289,8 @@ export type RuntimeObservation = z.infer<typeof RuntimeObservationSchema>;
 export type RuntimeOccupant = z.infer<typeof RuntimeOccupantSchema>;
 export type RuntimeCommands = z.infer<typeof RuntimeCommandsSchema>;
 export type RuntimeViewRow = z.infer<typeof RuntimeViewRowSchema>;
+export type RuntimeWorkAttempt = z.infer<typeof RuntimeWorkAttemptSchema>;
+export type RuntimeWorkAttempts = z.infer<typeof RuntimeWorkAttemptsSchema>;
 export type RuntimeViewSources = z.infer<typeof RuntimeViewSourcesSchema>;
 export type RuntimeViewResponse = z.infer<typeof RuntimeViewResponseSchema>;
 export type AgentRuntimePage = z.infer<typeof AgentRuntimePageSchema>;

@@ -1,6 +1,7 @@
 import {
   type AttemptAuthorityCommand,
   AttemptAuthorityCommandSchema,
+  type AttemptCorrection,
   type AttemptFinishCommand,
   AttemptFinishCommandSchema,
   type AttemptListQuery,
@@ -14,7 +15,7 @@ import {
   type QueueEntry,
   type WorkAttempt,
 } from "@tila/schemas";
-import { and, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import { SchemaWriteError, resolveCurrentSchema } from "./constraint-ops";
 import { acquireInTransaction } from "./coordination-ops";
 import { updateInTransaction } from "./entity-ops";
@@ -166,7 +167,23 @@ export function view(
     grant_valid: grantValid(db, attempt, origin, now),
     assigner_principal_id: entry?.assigner ?? null,
     current_revisions: current,
+    corrections: corrections(db, attempt.id),
   };
+}
+/** Corrective work linked to an attempt, oldest first. */
+export function corrections(
+  db: ProjectDatabase,
+  attemptId: string,
+): AttemptCorrection[] {
+  return db
+    .select()
+    .from(schema.attemptCorrections)
+    .where(eq(schema.attemptCorrections.attempt_id, attemptId))
+    .orderBy(
+      asc(schema.attemptCorrections.created_at),
+      asc(schema.attemptCorrections.id),
+    )
+    .all();
 }
 export function assertOwner(
   attempt: WorkAttempt,

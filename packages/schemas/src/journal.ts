@@ -29,6 +29,7 @@ export const JournalEventKindSchema = z.enum([
   "attempt.cancellation_requested",
   "attempt.rebound",
   "attempt.session_replaced",
+  "attempt.corrected",
   "attempt.retried",
   "conversation.published",
   "conversation.acknowledged",

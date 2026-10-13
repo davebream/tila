@@ -70,11 +70,13 @@ export const PROJECT_BACKUP_TABLES = [
   "queue_operation_receipts",
   "work_questions",
   "question_receipts",
+  "attempt_corrections",
 ] as const;
 
 export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
+  attempt_corrections: ["id"],
   work_questions: ["id"],
   question_receipts: ["key"],
   journal_report_receipts: ["key"],
@@ -214,6 +216,7 @@ export async function semanticDigest(
 ): Promise<string> {
   const sections: string[] = [];
   for (const table of PROJECT_BACKUP_TABLES) {
+    if (migrationVersion < 40 && table === "attempt_corrections") continue;
     if (
       migrationVersion < 36 &&
       ["work_questions", "question_receipts"].includes(table)

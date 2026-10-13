@@ -62,6 +62,8 @@ export function executeAttemptRequest(
       return attempts.forceRecovery(input.id, input.command);
     case "replace-session":
       return attempts.replaceSession(input.id, input.command);
+    case "correct":
+      return attempts.correct(input.id, input.command);
   }
 }
 
@@ -95,5 +97,6 @@ export function attemptFacade(backend: AttemptBackend): AttemptBackend {
     retry: backend.retry.bind(backend),
     forceRecovery: backend.forceRecovery.bind(backend),
     replaceSession: backend.replaceSession.bind(backend),
+    correct: backend.correct.bind(backend),
   };
 }

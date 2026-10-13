@@ -1,5 +1,6 @@
 import type {
   AttemptAuthorityCommand,
+  AttemptCorrectCommand,
   AttemptFinishCommand,
   AttemptForceCommand,
   AttemptListQuery,
@@ -47,6 +48,8 @@ export interface AttemptBackend {
   rebind(id: string, command: AttemptRebindCommand): Promise<AttemptView>;
   retry(id: string, command: AttemptRetryCommand): Promise<AttemptView>;
   forceRecovery(id: string, command: AttemptForceCommand): Promise<AttemptView>;
+  /** Link corrective work to a finished attempt without changing its result. */
+  correct(id: string, command: AttemptCorrectCommand): Promise<AttemptView>;
   /** Attach a replacement native session to the same attempt; owner only. */
   replaceSession(
     id: string,

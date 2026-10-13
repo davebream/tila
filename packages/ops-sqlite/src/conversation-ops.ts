@@ -1102,6 +1102,7 @@ export function explainDelivery(
   id: string,
   a: ConversationAuthority,
   now = Date.now(),
+  workAccess: WorkAccess = allWork,
 ) {
   bodyAccess(a);
   if (!a.can_manage) activeBinding(db, agent, a, now);
@@ -1149,7 +1150,7 @@ export function explainDelivery(
     delivery: DeliverySchema.parse(d),
     attempts: attempts.map((v) => DispatchAttemptSchema.parse(v)),
     ...(message ? { message: messageRef(message) } : {}),
-    trace: deliveryTrace(db, d, attempts, now, new Map()),
+    trace: deliveryTrace(db, d, attempts, now, new Map(), message, workAccess),
   };
 }
 
@@ -1232,12 +1233,72 @@ function recipientStatus(
   cache.set(key, value);
   return value;
 }
+/** Resource access for linked work, supplied by the authenticated boundary. */
+export type WorkAccess = (taskId: string) => boolean;
+const allWork: WorkAccess = () => true;
+/** Reads the explicit result of the message's attempt; never infers one. */
+function workResult(
+  db: DB,
+  message: Message | undefined,
+  access: WorkAccess,
+): DeliveryTrace["work_result"] {
+  if (!message?.attempt_id) return { status: "not-reported" };
+  const attemptId = message.attempt_id;
+  const attempt = db
+    .select({
+      task_id: s.workAttempts.task_id,
+      state: s.workAttempts.state,
+      outcome: s.workAttempts.outcome,
+      finished_at: s.workAttempts.finished_at,
+    })
+    .from(s.workAttempts)
+    .where(eq(s.workAttempts.id, attemptId))
+    .get();
+  if (!attempt)
+    return {
+      status: "unlinked",
+      attempt_id: attemptId,
+      reason: "attempt-not-found",
+    };
+  if (!access(attempt.task_id)) return { status: "hidden" };
+  if (message.task_id && message.task_id !== attempt.task_id)
+    return {
+      status: "unlinked",
+      attempt_id: attemptId,
+      reason: "task-mismatch",
+    };
+  if (
+    attempt.state !== "terminal" ||
+    !attempt.outcome ||
+    attempt.finished_at === null
+  )
+    return {
+      status: "pending",
+      attempt_id: attemptId,
+      task_id: attempt.task_id,
+      attempt_state: attempt.state,
+    };
+  return {
+    status: "reported",
+    attempt_id: attemptId,
+    task_id: attempt.task_id,
+    outcome: attempt.outcome.status,
+    finished_at: attempt.finished_at,
+    corrected: !!db
+      .select({ id: s.attemptCorrections.id })
+      .from(s.attemptCorrections)
+      .where(eq(s.attemptCorrections.attempt_id, attemptId))
+      .get(),
+  };
+}
 function deliveryTrace(
   db: DB,
   d: RecipientRow,
   attempts: AttemptRow[],
   now: number,
   cache: Map<string, RecipientStatus>,
+  message?: Message,
+  workAccess: WorkAccess = allWork,
 ): DeliveryTrace {
   const last = attempts.at(-1);
   const delivery = DeliverySchema.parse(d);
@@ -1271,8 +1332,8 @@ function deliveryTrace(
             epoch: d.acked_epoch,
             disposition: delivery.disposition,
           },
-    // No work-result API exists yet; acknowledgement must never stand in for it.
-    work_result: { status: "not-reported" },
+    // Acknowledgement must never stand in for an explicit attempt result.
+    work_result: workResult(db, message, workAccess),
     recipient: recipientStatus(db, d, now, cache),
   };
 }
@@ -1291,6 +1352,7 @@ function traceItems(
   db: DB,
   rows: Array<{ delivery: RecipientRow; message: Message }>,
   now: number,
+  workAccess: WorkAccess = allWork,
 ) {
   const attempts = attemptsFor(
     db,
@@ -1306,6 +1368,8 @@ function traceItems(
       attempts.get(delivery.id) ?? [],
       now,
       cache,
+      message,
+      workAccess,
     ),
   }));
 }
@@ -1333,6 +1397,7 @@ export function listDeliveries(
   limit = 50,
   before?: { ordinal: number; id: string },
   now = Date.now(),
+  workAccess: WorkAccess = allWork,
 ) {
   bodyAccess(a);
   if (!a.can_manage)
@@ -1383,7 +1448,7 @@ export function listDeliveries(
       .where(matching)
       .get()?.count ?? 0;
   return {
-    deliveries: traceItems(db, rows.slice(0, pageSize), now),
+    deliveries: traceItems(db, rows.slice(0, pageSize), now, workAccess),
     has_more: rows.length > pageSize,
     total,
   };
@@ -1399,6 +1464,7 @@ export function messageDeliveries(
   message: string,
   a: ConversationAuthority,
   now = Date.now(),
+  workAccess: WorkAccess = allWork,
 ) {
   roomAccess(db, room, a);
   const row = db
@@ -1439,6 +1505,7 @@ export function messageDeliveries(
         .slice(0, MESSAGE_DELIVERY_LIMIT)
         .map((delivery) => ({ delivery, message: row.message })),
       now,
+      workAccess,
     ),
     has_more: rows.length > MESSAGE_DELIVERY_LIMIT,
   };
