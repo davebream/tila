@@ -69,7 +69,18 @@ it("checks current D1 responder membership before answering and before replay", 
     text: "Continue",
   };
   expect((await remote.get(q.id)).question.id).toBe(q.id);
-  expect((await remote.list({ state: "open" })).questions).toHaveLength(1);
+  expect(await remote.list({ state: "open" })).toMatchObject({
+    questions: [{ question: { id: q.id } }],
+    total: 1,
+  });
+  expect(
+    await remote.list({ responder_principal_id: principal, escalated: false }),
+  ).toMatchObject({ total: 1 });
+  expect(await remote.list({ escalated: true })).toMatchObject({
+    questions: [],
+    total: 0,
+  });
+  expect((await f.http("/questions?escalated=yes")).status).toBe(400);
   const path = `/questions/${q.id}/answer`;
   const answered = await f.http(path, input, "owner", "answer");
   expect(answered.status, await answered.clone().text()).toBe(200);

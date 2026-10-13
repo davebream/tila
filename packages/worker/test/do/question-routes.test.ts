@@ -68,7 +68,13 @@ it("checks capability restrictions before receipt replay and filters pending rea
   expect((await send("get", {}, q.id, restricted)).status).toBe(403);
   expect(
     await (await send("list", {}, undefined, restricted)).json(),
-  ).toMatchObject({ result: { questions: [] } });
+  ).toMatchObject({ result: { questions: [], total: 0 } });
+  const permitted = { ...restricted, restrictions: { task_types: ["issue"] } };
+  expect(
+    await (await send("list", { limit: 1 }, undefined, permitted)).json(),
+  ).toMatchObject({
+    result: { questions: [{ question: { id: q.id } }], total: 1 },
+  });
 });
 it("rejects missing routing authorization and non-owner escalation answers", async () => {
   const { command, q } = prepare(fixture.db);
