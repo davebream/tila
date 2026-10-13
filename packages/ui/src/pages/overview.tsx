@@ -10,6 +10,7 @@ import { useTimeTick } from "@/hooks/use-time-tick";
 import { ApiError } from "@/lib/api";
 import {
   type AttentionRow,
+  type ListLink,
   type OverviewView,
   countLabel,
 } from "@/lib/attention";
@@ -21,8 +22,8 @@ import { Link } from "react-router";
 const LINK =
   "rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue";
 
-function rowHref(prefix: string, row: AttentionRow) {
-  return `${prefix}/${row.rule.link.segment}${row.rule.link.search}`;
+function href(prefix: string, link: ListLink) {
+  return `${prefix}/${link.segment}${link.search}`;
 }
 
 function NextAction({ view, prefix }: { view: OverviewView; prefix: string }) {
@@ -37,7 +38,7 @@ function NextAction({ view, prefix }: { view: OverviewView; prefix: string }) {
         Next action
       </h2>
       <p className="text-sm">{next.rule.rule}</p>
-      <Link to={rowHref(prefix, next)} className={`${LINK} text-sm`}>
+      <Link to={href(prefix, next.state.link)} className={`${LINK} text-sm`}>
         View {next.state.complete ? "" : "at least "}
         {countLabel(next.rule, next.state.total)}
       </Link>
@@ -178,7 +179,8 @@ function Observed({ row, prefix }: { row: AttentionRow; prefix: string }) {
     case "not-configured":
       return (
         <span className="text-status-amber">
-          Not configured on this deployment.
+          {rule.source.label.charAt(0).toUpperCase()}
+          {rule.source.label.slice(1)}: not configured on this deployment.
         </span>
       );
     case "not-applicable":
@@ -197,7 +199,10 @@ function Observed({ row, prefix }: { row: AttentionRow; prefix: string }) {
               <Badge variant={rule.severity}>
                 {rule.severity === "red" ? "urgent" : "review"}
               </Badge>
-              <Link to={rowHref(prefix, row)} className={`${LINK} font-mono`}>
+              <Link
+                to={href(prefix, state.link)}
+                className={`${LINK} font-mono`}
+              >
                 {prefixText}
                 {countLabel(rule, state.total)}
               </Link>

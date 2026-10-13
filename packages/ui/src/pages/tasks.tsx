@@ -38,6 +38,7 @@ import { useDebouncedValue } from "@/hooks/use-debounce";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import type { TaskListSort } from "@/lib/api";
+import { taskFiltersFromSearch } from "@/lib/list-queries";
 import { catalogIndex, taskState, taskTitle } from "@/lib/presentation";
 import { classifyApiError } from "@/lib/query-state";
 import { sanitizeSnippet } from "@/lib/snippet";
@@ -152,6 +153,8 @@ export function TasksPage() {
 
   const typeParam = searchParams.get("type");
   const typeFilter = useMemo(() => parseList(typeParam), [typeParam]);
+  // Attention filters from Overview links; search cannot apply them.
+  const { blocked, outcome } = taskFiltersFromSearch(searchParams);
   const urlQ = (searchParams.get("q") ?? "").trim();
   const sort = parseSort(searchParams.get("sort")) ?? DEFAULT_SORT;
   const includeArchived = searchParams.get("archived") === "1";
@@ -194,8 +197,11 @@ export function TasksPage() {
     if (trimmed === syncedQ.current) return;
     syncedQ.current = trimmed;
     updateParamsRef.current((p) => {
-      if (trimmed) p.set("q", trimmed);
-      else p.delete("q");
+      if (trimmed) {
+        p.set("q", trimmed);
+        p.delete("blocked");
+        p.delete("outcome");
+      } else p.delete("q");
     });
   }, [debouncedQ]);
 
@@ -233,7 +239,13 @@ export function TasksPage() {
     updateParams((p) => {
       p.delete("type");
       p.delete("q");
+      p.delete("blocked");
+      p.delete("outcome");
     });
+  }
+
+  function clearParam(key: "blocked" | "outcome") {
+    updateParams((p) => p.delete(key));
   }
 
   // --- Data ---
@@ -246,6 +258,8 @@ export function TasksPage() {
     {
       type: typeFilter,
       archived: includeArchived,
+      blocked,
+      outcome,
       sort: SORT_FIELDS[sort.key],
       order: sort.dir,
       limit: PAGE_SIZE,
@@ -368,17 +382,34 @@ export function TasksPage() {
     const archivedScope =
       listQuery.data.scope?.archived ??
       (includeArchived ? "included" : "excluded");
-    summary = `${plural(total, "task", "tasks")} · ${archivedScope === "included" ? "including" : "excluding"} archived${restricted ? " · visible to this credential" : ""}`;
+    const outcomeTypes = listQuery.data.scope?.outcome_types;
+    const attention = [
+      blocked ? "waiting on prerequisites" : null,
+      outcome.length > 0
+        ? `${outcome.join(" or ")} outcome${outcomeTypes?.length ? ` (${outcomeTypes.join(", ")})` : ""}`
+        : null,
+    ]
+      .filter(Boolean)
+      .map((part) => ` · ${part}`)
+      .join("");
+    summary = `${plural(total, "task", "tasks")} · ${archivedScope === "included" ? "including" : "excluding"} archived${attention}${restricted ? " · visible to this credential" : ""}`;
     const paged = Boolean(after) || nextCursor !== null;
     if (paged && rows.length > 0) {
       position = pagePosition(paging.pageIndex, PAGE_SIZE, rows.length, total);
     }
   }
 
-  const hasFilters = typeFilter.length > 0 || searchMode;
+  const hasFilters =
+    typeFilter.length > 0 || searchMode || blocked || outcome.length > 0;
+  const noOutcomeTypes =
+    outcome.length > 0 && listQuery.data?.scope?.outcome_types?.length === 0;
   let emptyText: string;
   if (searchMode) {
     emptyText = `No tasks match “${urlQ}”.`;
+  } else if (noOutcomeTypes) {
+    emptyText = `No task type declares a ${outcome.join(" or ")} outcome, so none can match.`;
+  } else if (blocked && typeFilter.length === 0 && outcome.length === 0) {
+    emptyText = "No open tasks are waiting on prerequisites.";
   } else if (hasFilters) {
     emptyText = "No tasks match these filters.";
   } else if (catalogTotal === 0 || (catalogTotal === null && includeArchived)) {
@@ -437,7 +468,7 @@ export function TasksPage() {
             </label>
           </div>
         )}
-        {(typeFilter.length > 0 || qInput) && (
+        {(typeFilter.length > 0 || qInput || blocked || outcome.length > 0) && (
           <Button variant="ghost" size="sm" onClick={resetFilters}>
             Reset
           </Button>
@@ -481,6 +512,37 @@ export function TasksPage() {
               </button>
             </span>
           ))}
+        </div>
+      )}
+
+      {!searchMode && (blocked || outcome.length > 0) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {blocked && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue">
+              blocked: waiting on prerequisites
+              <button
+                type="button"
+                onClick={() => clearParam("blocked")}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                aria-label="Remove blocked filter"
+              >
+                <RemoveIcon />
+              </button>
+            </span>
+          )}
+          {outcome.length > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue">
+              outcome: {outcome.join(", ")}
+              <button
+                type="button"
+                onClick={() => clearParam("outcome")}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                aria-label="Remove outcome filter"
+              >
+                <RemoveIcon />
+              </button>
+            </span>
+          )}
         </div>
       )}
 

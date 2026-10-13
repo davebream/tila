@@ -23,6 +23,7 @@ import {
   searchArtifacts,
   searchTasks,
 } from "@/lib/api";
+import { type TaskFilterInput, taskListParams } from "@/lib/list-queries";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -73,10 +74,7 @@ export function useWorkCatalog(options?: { enabled?: boolean }) {
   });
 }
 
-export type TaskPageParams = {
-  type: string[];
-  /** Include archived tasks. The default page excludes them. */
-  archived: boolean;
+export type TaskPageParams = TaskFilterInput & {
   sort: TaskListSort;
   order: "asc" | "desc";
   limit: number;
@@ -96,8 +94,7 @@ export function useTaskPage(
     queryKey: ["task-page", projectId, params],
     queryFn: () =>
       listTasks(requireProjectId(projectId), {
-        type: params.type.length > 0 ? params.type : undefined,
-        archived: params.archived ? undefined : "0",
+        ...taskListParams(params),
         sort: params.sort,
         order: params.order,
         limit: params.limit,

@@ -456,4 +456,103 @@ describe("runtime detail and release outcomes", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  test("the attention filter shows its scan and keeps the filter in links", async () => {
+    const requests: URLSearchParams[] = [];
+    server.use(
+      http.get("*/projects/test-project/runtime-view", ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return HttpResponse.json(
+          view(
+            [
+              row(
+                fullOccupant({
+                  observation: observation({
+                    lifecycle: "expired",
+                    reasons: ["run-lease-lapsed"],
+                  }),
+                }),
+              ),
+            ],
+            { total: 1, scan: { agents: 12, complete: true } },
+          ),
+        );
+      }),
+    );
+    renderRuntime("/p/test-project/runtime?filter=attention");
+
+    expect(
+      await screen.findByText(
+        /1 agent needs attention · scanned all 12 agents/,
+      ),
+    ).toBeInTheDocument();
+    expect(requests[0].get("filter")).toBe("attention");
+    expect(
+      screen.getByRole("link", { name: "Show all agents" }),
+    ).toHaveAttribute("href", "/p/test-project/runtime");
+    const table = screen.getByRole("table", { name: "Runtime" });
+    expect(
+      within(table).getByRole("link", { name: "Reviewer" }),
+    ).toHaveAttribute(
+      "href",
+      "/p/test-project/runtime/worker?filter=attention",
+    );
+  });
+
+  test("a partial attention scan says the count is a floor", async () => {
+    server.use(
+      handler(() =>
+        view([], { total: 0, scan: { agents: 250, complete: false } }),
+      ),
+    );
+    renderRuntime("/p/test-project/runtime?filter=attention");
+
+    expect(
+      await screen.findByText(
+        "No agent among the first 250 needs attention; the rest were not checked.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("an attention view during a run-store outage is never an all-clear", async () => {
+    server.use(
+      handler(() =>
+        view([], {
+          sources: {
+            agents: "ok",
+            runs: "unavailable",
+            enrollments: "ok",
+            presence: "ok",
+          },
+          total: 0,
+          scan: { agents: 4, complete: true },
+        }),
+      ),
+    );
+    renderRuntime("/p/test-project/runtime?filter=attention");
+
+    expect(await screen.findByText(/Run data unavailable/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/at least 0 agents need attention/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No agent needs attention."),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a later page that emptied keeps the way back to the first page", async () => {
+    server.use(
+      handler(() =>
+        view([], { total: 2, scan: { agents: 4, complete: true } }),
+      ),
+    );
+    renderRuntime("/p/test-project/runtime?filter=attention&cursor=abc");
+
+    expect(
+      await screen.findByRole("button", { name: "First page" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No agent needs attention."),
+    ).not.toBeInTheDocument();
+  });
 });
