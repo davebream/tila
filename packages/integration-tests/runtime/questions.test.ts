@@ -131,6 +131,37 @@ for (const [name, run] of Object.entries(questionCases))
       run(drizzle(state.storage, { schema })),
     );
   });
+it("destroys a project that has an open question and report receipts", async () => {
+  const stub = bindings.PROJECT.get(bindings.PROJECT.newUniqueId());
+  await runInDurableObject(stub, (_instance, state) => {
+    const now = Date.now();
+    prepare(drizzle(state.storage, { schema }), now);
+    state.storage.sql.exec(
+      `INSERT INTO journal_report_receipts(key, project_id, principal_id, participant_id, request_hash, response, expires_at)
+       VALUES('report-1', 'p', 'worker', 'worker-host', 'hash', '{}', ?)`,
+      now + 60_000,
+    );
+    state.storage.sql.exec(
+      "INSERT INTO journal_report_rates(key, window_start, count) VALUES('worker', ?, 1)",
+      now,
+    );
+  });
+  const destroyed = await stub.fetch("https://project/admin/destroy", {
+    method: "POST",
+  });
+  expect(destroyed.status, await destroyed.clone().text()).toBe(200);
+  const { counts } = await (
+    await stub.fetch("https://project/admin/store-counts")
+  ).json<{ counts: { domain: Record<string, number> } }>();
+  expect(counts.domain).toMatchObject({
+    work_questions: 0,
+    question_receipts: 0,
+    journal_report_receipts: 0,
+    journal_report_rates: 0,
+  });
+  expect(Object.values(counts.domain).every((count) => count === 0)).toBe(true);
+});
+
 it("recovers an offline answer after DO eviction and acknowledges its journal position", async () => {
   const stub = bindings.PROJECT.get(bindings.PROJECT.newUniqueId());
   const { q, now } = await runInDurableObject(stub, (_instance, state) =>
