@@ -7,6 +7,7 @@ import {
   DeclarationEditor,
   type DeclarationState,
 } from "@/components/definitions/declaration-editor";
+import { ReferenceSlotsEditor } from "@/components/definitions/policy-editors";
 import { SelectField, TextField } from "@/components/ui/form-fields";
 import {
   RECORD_FIELD_TYPES,
@@ -25,6 +26,13 @@ import {
 import { LIFECYCLE_OUTCOMES } from "@tila/schemas";
 
 const PRESENTABLE = new Set(["string", "text", "enum"]);
+
+/** Allowed values of the lifecycle status field, if it is an enum. */
+function lifecycleStates(state: DeclarationState): string[] {
+  const field = stringAt(tableAt(state.decl, "lifecycle"), "field");
+  const entry = state.fields?.entries.find((f) => f.name === field);
+  return stringList(entry?.declaration.values);
+}
 
 function fieldOptions(state: DeclarationState, presentable = true) {
   return (state.fields?.entries ?? [])
@@ -230,6 +238,13 @@ export function WorkTypeEditor({
               />
             </EditorSection>
             <LifecycleEditor state={state} update={update} />
+            <ReferenceSlotsEditor
+              decl={state.decl}
+              doc={doc}
+              states={lifecycleStates(state)}
+              update={update}
+              report={current.report}
+            />
             <PresentationEditor
               state={state}
               update={update}

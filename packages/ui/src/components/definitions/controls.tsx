@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { TextAreaField } from "@/components/ui/form-fields";
+import { splitLines } from "@/lib/definition-values";
+import { type ReactNode, useState } from "react";
 
 /** A labelled native checkbox; keyboard and screen-reader behaviour for free. */
 export function CheckboxField({
@@ -101,5 +103,40 @@ export function EditorSection({
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * A list of strings edited as one item per line. The text is kept locally so
+ * blank lines while typing do not jump the cursor.
+ */
+export function LinesField({
+  label,
+  hint,
+  value,
+  error,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: readonly string[];
+  error?: string;
+  onChange: (value: string[]) => void;
+}) {
+  const [raw, setRaw] = useState(() => value.join("\n"));
+  return (
+    <TextAreaField
+      label={label}
+      hint={hint ? `${hint} One per line.` : "One per line."}
+      rows={Math.min(8, Math.max(3, value.length + 1))}
+      value={raw}
+      error={error}
+      spellCheck={false}
+      className="font-mono text-xs"
+      onChange={(e) => {
+        setRaw(e.target.value);
+        onChange(splitLines(e.target.value));
+      }}
+    />
   );
 }
