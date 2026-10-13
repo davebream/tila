@@ -122,8 +122,9 @@ Entity types (`task`, `issue`, `epic`, or a custom hierarchy) live in the applie
 **Editable settings contract — 2026-10-12.** UI, CLI and MCP must share validated,
 revision-checked service operations. Every ordinary project setting has a browser
 management path; missing editors/APIs remain tracked work, not file-only exceptions.
-TOML initialization and explicit import/export stay compatible; YAML is optional,
-and automatic Git/file synchronization is deferred. Configuration is persisted;
+TOML initialization and explicit import/export stay compatible; YAML is a second
+import/export format for definitions, and automatic Git/file synchronization is
+deferred. Configuration is persisted;
 runtime leases may also be persisted and still expire. Record definitions determine
 business meaning. Current authority overrides captured workflow revisions, and
 restore creates new validated state without restoring deleted bytes or revoked
@@ -131,7 +132,8 @@ access. DO, D1, R2 and hosts do not share one settings transaction. Provider sec
 remain host-owned; deployment bootstrap secrets remain operational configuration.
 See [architecture §14](02-ARCHITECTURE.md#section-14-editable-settings-and-entity-lifecycle-contract-293)
 for field coverage, existing permission thresholds, activation and lifecycle rules.
-#296–#299 own implementation; this decision does not claim those editors shipped.
+#296–#299 own implementation. Definition import and export shipped with #299
+(architecture §14.6); exporting agents, rooms and access settings has not.
 
 ---
 
