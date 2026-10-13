@@ -15,7 +15,11 @@ import { dirname, join, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { queueBackupOps } from "@tila/ops-sqlite";
-import { agentBindingOps, projectTransferOps } from "@tila/ops-sqlite";
+import {
+  LATEST_PROJECT_MIGRATION,
+  agentBindingOps,
+  projectTransferOps,
+} from "@tila/ops-sqlite";
 import {
   ArtifactCommitRecordSchema,
   ArtifactLifecycleRecordSchema,
@@ -40,7 +44,7 @@ export const SUPPORTED_BACKUP_FEATURES = new Set<string>([
   "managed-queue-v1",
   "work-questions-v1",
 ]);
-export const MAX_SUPPORTED_DO_MIGRATION = 36;
+export const MAX_SUPPORTED_DO_MIGRATION = LATEST_PROJECT_MIGRATION;
 
 export type LocalBackupEndpoint = {
   backend: "local";

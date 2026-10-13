@@ -122,12 +122,14 @@ export function createQueueRoutes(deps: RouterDeps) {
                   id,
                   QueueEditCommandSchema.parse(body),
                   origin,
+                  manage,
                 )
               : queueOps.withdraw(
                   deps.db,
                   id,
                   QueueRevisionCommandSchema.parse(body),
                   origin,
+                  manage,
                 ),
         });
       }

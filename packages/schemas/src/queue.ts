@@ -38,6 +38,9 @@ export const QueueEntrySchema = z.object({
   available_at: z.number().int(),
   created_at: z.number().int(),
   updated_at: z.number().int(),
+  /** Assigner identity; null for enrollments recorded before it was captured. */
+  enrolled_by_principal: z.string().nullable().default(null),
+  enrolled_by_participant: z.string().nullable().default(null),
 });
 export const AttemptStateSchema = z.enum([
   "reserved",
@@ -100,6 +103,8 @@ export const AttemptViewSchema = z.object({
   attempt: WorkAttemptSchema,
   /** Current authority, recomputed even for a deduplicated command. */
   grant_valid: z.boolean(),
+  /** Principal that enrolled the work; it may request cancellation and recovery. */
+  assigner_principal_id: z.string().nullable().optional(),
 });
 export type QueuePolicy = z.infer<typeof QueuePolicySchema>;
 export type QueueEntry = z.infer<typeof QueueEntrySchema>;

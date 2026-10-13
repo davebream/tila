@@ -109,7 +109,16 @@ export function view(
   now = Date.now(),
 ): AttemptView {
   const attempt = get(db, id);
-  return { attempt, grant_valid: grantValid(db, attempt, origin, now) };
+  const entry = db
+    .select({ assigner: schema.queueEntries.enrolled_by_principal })
+    .from(schema.queueEntries)
+    .where(eq(schema.queueEntries.id, attempt.entry_id))
+    .get();
+  return {
+    attempt,
+    grant_valid: grantValid(db, attempt, origin, now),
+    assigner_principal_id: entry?.assigner ?? null,
+  };
 }
 export function assertOwner(
   attempt: WorkAttempt,
@@ -585,6 +594,8 @@ export function finish(
       // Competing valid terminal commands observe the first committed outcome.
       if (attempt.state === "terminal") return;
       if (attempt.state === "suspended" || attempt.state === "resume_pending") {
+        // No live grant exists, so the recorded fence is the remaining authority proof.
+        assertOwner(attempt, origin, input.fence);
         checkRevision(attempt.revision, input.expected_revision);
         attempt = refence(tx, attempt, origin, now);
       } else assertAuthority(tx, attempt, input, origin, now);
@@ -613,7 +624,11 @@ export function finish(
   );
 }
 
-/** Caller has established execution authority or a confirmed stopped observation. */
+/**
+ * Caller has established execution authority or a confirmed stopped observation.
+ * Task writes run as the attempt owner; journal events record `actor`, which
+ * differs from the owner when a maintainer recovers the attempt.
+ */
 export function finishInTransaction(
   tx: ProjectTransaction,
   attempt: WorkAttempt,
@@ -621,9 +636,10 @@ export function finishInTransaction(
   origin: RequestOrigin,
   now: number,
   allowRetry = true,
+  actor: RequestOrigin = origin,
 ): void {
   transitionTask(tx, attempt, origin, outcome.status, now);
-  invalidateQuestions(tx, attempt.id, "attempt finished", origin, now);
+  invalidateQuestions(tx, attempt.id, "attempt finished", actor, now);
   change(
     tx,
     attempt,
@@ -646,8 +662,8 @@ export function finishInTransaction(
     tx,
     "attempt.finished",
     attempt.resource,
-    origin,
-    { attempt_id: attempt.id, outcome },
+    actor,
+    { attempt_id: attempt.id, outcome, ...ownerData(attempt, actor) },
     attempt.fence,
   );
   const entry = tx
@@ -677,12 +693,25 @@ export function finishInTransaction(
     scheduleRetryInTransaction(
       tx,
       attempt,
-      origin,
+      actor,
       now,
       now + backoff,
       "Configured retry-safe failure",
     );
   }
+}
+/** Names the execution owner on events recorded by a different actor. */
+export function ownerData(
+  attempt: WorkAttempt,
+  actor: RequestOrigin,
+): Record<string, string> {
+  return attempt.principal_id === actor.principalId &&
+    attempt.participant_id === actor.participantId
+    ? {}
+    : {
+        owner_principal_id: attempt.principal_id,
+        owner_participant_id: attempt.participant_id,
+      };
 }
 export function scheduleRetryInTransaction(
   tx: ProjectTransaction,
@@ -732,12 +761,13 @@ export function refence(
   attempt: WorkAttempt,
   owner: RequestOrigin,
   now: number,
+  actor: RequestOrigin = owner,
 ): WorkAttempt {
   invalidateQuestions(
     tx,
     attempt.id,
     "execution authority replaced",
-    owner,
+    actor,
     now,
   );
   revoke(tx, attempt);

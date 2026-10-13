@@ -24,6 +24,7 @@ export class QueueError extends Error {
       | "queue-invalid-state"
       | "queue-idempotency-conflict",
     message: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "QueueError";

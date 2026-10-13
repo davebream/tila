@@ -7,6 +7,7 @@ export * as schema from "./schema";
 // Migrations
 export {
   MIGRATIONS,
+  LATEST_PROJECT_MIGRATION,
   MIGRATION_BOOTSTRAP,
   MIGRATION_0001,
   MIGRATION_0002,

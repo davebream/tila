@@ -1504,6 +1504,13 @@ CREATE TABLE IF NOT EXISTS question_receipts (
 );
 `;
 
+/** #303: record the assigner. Existing enrollments keep NULL (owner or maintainer control only). */
+function runMigration0038(storage: MigrationStorage): void {
+  for (const column of ["enrolled_by_principal", "enrolled_by_participant"])
+    if (!columnExists(storage, "queue_entries", column))
+      storage.sql.exec(`ALTER TABLE queue_entries ADD COLUMN ${column} TEXT`);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1556,4 +1563,9 @@ CREATE INDEX IF NOT EXISTS idx_journal_custom_name ON journal(json_extract(data,
 CREATE INDEX IF NOT EXISTS idx_journal_custom_correlation ON journal(json_extract(data, '$.correlation_id'), seq) WHERE kind = 'custom.reported';
 `,
   },
+  { version: 38, run: runMigration0038 },
 ];
+
+/** Highest project migration; transfer metadata and backups report this version. */
+export const LATEST_PROJECT_MIGRATION: number =
+  MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

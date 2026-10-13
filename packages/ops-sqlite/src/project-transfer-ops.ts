@@ -4,6 +4,7 @@ import {
 } from "@tila/schemas";
 import type { ProjectTransferMode, ProjectTransferState } from "@tila/schemas";
 import { validateJournalReportBackupRow } from "./custom-journal-ops";
+import { LATEST_PROJECT_MIGRATION } from "./migrations-sql";
 import { validateQueueBackupRow } from "./queue-backup-ops";
 
 export interface SqlRows<T = Record<string, unknown>> {
@@ -209,7 +210,7 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
 
 export async function semanticDigest(
   sql: ProjectSqlStorage,
-  migrationVersion = 36,
+  migrationVersion = LATEST_PROJECT_MIGRATION,
 ): Promise<string> {
   const sections: string[] = [];
   for (const table of PROJECT_BACKUP_TABLES) {
@@ -263,6 +264,14 @@ export async function semanticDigest(
       const page = readSnapshotPage(sql, table, { offset, limit: 500 });
       for (const sourceRow of page.rows) {
         let row = sourceRow;
+        if (migrationVersion < 38 && table === "queue_entries") {
+          const {
+            enrolled_by_principal: _principal,
+            enrolled_by_participant: _participant,
+            ...legacyRow
+          } = row;
+          row = legacyRow;
+        }
         if (migrationVersion < 28 && table === "artifact_lineages") {
           const { destroyed_at: _destroyedAt, ...legacyRow } = row;
           row = legacyRow;

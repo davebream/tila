@@ -201,6 +201,7 @@ export function mapProjectError(err: Error): {
               : 409,
       code: err.code,
       retryable: false,
+      ...(err.details ? { extras: { details: err.details } } : {}),
     };
   if (err instanceof SchemaWriteError)
     return { status: 422, code: "constraint-violation", retryable: false };

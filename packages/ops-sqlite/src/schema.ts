@@ -903,6 +903,8 @@ export const queueEntries = sqliteTable(
     available_at: integer("available_at").notNull(),
     created_at: integer("created_at").notNull(),
     updated_at: integer("updated_at").notNull(),
+    enrolled_by_principal: text("enrolled_by_principal"),
+    enrolled_by_participant: text("enrolled_by_participant"),
   },
   (table) => [
     uniqueIndex("queue_entries_unfinished_task")
