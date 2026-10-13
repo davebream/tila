@@ -368,14 +368,14 @@ export function RecordsPage() {
               No record types defined.
             </p>
             <p className="mt-1 text-xs text-fg-faint">
-              Add a{" "}
-              <code className="rounded bg-card px-1 py-0.5 font-mono text-[11px]">
-                [records.&lt;type&gt;]
-              </code>{" "}
-              section to tila.schema.toml, then run{" "}
-              <code className="rounded bg-card px-1 py-0.5 font-mono text-[11px]">
-                tila schema apply
-              </code>
+              Add a record type in{" "}
+              <Link
+                to={`/p/${encodeURIComponent(projectId ?? "")}/settings/definitions`}
+                className="underline underline-offset-2"
+              >
+                Settings › Definitions
+              </Link>
+              , or import a definitions file there.
             </p>
           </div>
         )}

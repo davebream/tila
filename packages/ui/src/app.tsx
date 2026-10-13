@@ -33,6 +33,7 @@ import { SettingsPage } from "@/pages/settings";
 import { SettingsAgentsPage } from "@/pages/settings-agents";
 import { SettingsCredentialsPage } from "@/pages/settings-credentials";
 import { SettingsDefinitionsPage } from "@/pages/settings-definitions";
+import { SettingsDefinitionsImportPage } from "@/pages/settings-definitions-import";
 import { SettingsDefinitionsReviewPage } from "@/pages/settings-definitions-review";
 import { SettingsDefinitionsRevisionPage } from "@/pages/settings-definitions-revision";
 import { SettingsDefinitionsSourcePage } from "@/pages/settings-definitions-source";
@@ -180,6 +181,10 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route
         path="settings/definitions/source"
         element={<SettingsDefinitionsSourcePage />}
+      />
+      <Route
+        path="settings/definitions/import"
+        element={<SettingsDefinitionsImportPage />}
       />
       <Route
         path="settings/definitions/history/:version"

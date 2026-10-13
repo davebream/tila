@@ -5,6 +5,14 @@ import { SettingsDefinitionsSourcePage } from "@/pages/settings-definitions-sour
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Route, Routes } from "react-router";
+import {
+  type Sent,
+  appliedAt,
+  applyWith,
+  ok,
+  previewAt,
+  whoamiAs,
+} from "../fixtures/definitions";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor, within } from "../test-utils";
 
@@ -44,84 +52,6 @@ const TASK_AND_BUG = `${TASK}
 [work_units.bug]
 fields = [{ name = "title", type = "string", required = true }]
 `;
-
-/** Serve `GET /schema` from a mutable applied revision. */
-function appliedAt(state: { revision: number; source: string | null }) {
-  server.use(
-    http.get("*/projects/*/schema", () =>
-      HttpResponse.json({
-        ok: true,
-        schema:
-          state.source === null
-            ? null
-            : {
-                version: state.revision,
-                definition: state.source,
-                applied_at: Date.now(),
-                applied_by: "someone",
-              },
-        version: state.source === null ? null : state.revision,
-        revision: state.revision,
-      }),
-    ),
-  );
-}
-
-type Sent = { body: Record<string, unknown>; key: string | null };
-
-function previewAt(
-  revision: () => number,
-  answer: (definition: string) => Record<string, unknown> = () => ({
-    changes: [],
-    autoApplicable: true,
-  }),
-) {
-  const sent: string[] = [];
-  server.use(
-    http.post("*/projects/*/schema/preview", async ({ request }) => {
-      const { definition } = (await request.json()) as { definition: string };
-      sent.push(definition);
-      return HttpResponse.json({
-        ok: true,
-        revision: revision(),
-        reviewed_definition: definition,
-        ...answer(definition),
-      });
-    }),
-  );
-  return sent;
-}
-
-function applyWith(...responses: Array<() => Response>) {
-  const sent: Sent[] = [];
-  server.use(
-    http.post("*/projects/*/schema", async ({ request }) => {
-      sent.push({
-        body: (await request.json()) as Record<string, unknown>,
-        key: request.headers.get("Idempotency-Key"),
-      });
-      return (responses[sent.length - 1] ?? responses[responses.length - 1])();
-    }),
-  );
-  return sent;
-}
-
-const ok = (revision: number) => () =>
-  HttpResponse.json({ ok: true, version: revision, revision, changes: [] });
-
-function whoamiAs(role: string) {
-  server.use(
-    http.get("*/api/whoami", () =>
-      HttpResponse.json({
-        ok: true,
-        project_id: "test-project",
-        principal_id: `principal-${role}`,
-        token_name: "test-user",
-        role,
-      }),
-    ),
-  );
-}
 
 async function draftSource(
   user: ReturnType<typeof userEvent.setup>,

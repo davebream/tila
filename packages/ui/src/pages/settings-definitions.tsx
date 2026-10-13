@@ -1,5 +1,6 @@
 import { DefinitionSections } from "@/components/definitions/definition-sections";
 import { DraftBar } from "@/components/definitions/draft-bar";
+import { ProblemSummary } from "@/components/definitions/problem-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormNotice } from "@/components/ui/form-fields";
@@ -9,11 +10,18 @@ import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { listSchemaHistory } from "@/lib/api";
 import { STARTER_DEFINITION, useDefinitionDraft } from "@/lib/definition-draft";
+import {
+  downloadText,
+  exportFileName,
+  renderDefinitionExportText,
+} from "@/lib/definition-transfer";
+import type { DefinitionProblem } from "@/lib/mutation-errors";
 import { deriveSectionState } from "@/lib/query-state";
 import { formatDateTime, relativeTime } from "@/lib/time";
 import type { AppliedNotice } from "@/pages/settings-definitions-review";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { SchemaHistoryEntry } from "@tila/schemas";
+import { useState } from "react";
 import { Link, useLocation } from "react-router";
 
 const HISTORY_PAGE = 20;
@@ -37,9 +45,11 @@ function Heading() {
 
 /** A project with no applied definitions. */
 function FirstDefinitions({
+  base,
   canPreview,
   onStart,
 }: {
+  base: string;
   canPreview: boolean;
   onStart: () => void;
 }) {
@@ -49,12 +59,18 @@ function FirstDefinitions({
       {canPreview ? (
         <>
           <p className="text-muted-foreground">
-            Start a draft here, review it, then apply it as revision 1. No file
-            or terminal is needed.
+            Start a draft here, or import a starter file or an export from
+            another project. Either way you review it, then apply it as revision
+            1. No terminal is needed.
           </p>
-          <Button type="button" onClick={onStart}>
-            Start definitions
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={onStart}>
+              Start definitions
+            </Button>
+            <Button asChild variant="outline">
+              <Link to={`${base}/import`}>Import a file</Link>
+            </Button>
+          </div>
         </>
       ) : (
         <p className="text-muted-foreground">
@@ -171,6 +187,106 @@ function History({ base }: { base: string }) {
   );
 }
 
+/**
+ * Download or copy the applied definitions. The file carries the project and
+ * revision it came from; it is not a backup and holds no access settings.
+ */
+function ExportDefinitions({
+  project,
+  source,
+  revision,
+  appliedAt,
+}: {
+  project: string;
+  source: string;
+  revision: number;
+  appliedAt: number;
+}) {
+  const [problems, setProblems] = useState<DefinitionProblem[] | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function render(format: "toml" | "yaml") {
+    const rendered = await renderDefinitionExportText(
+      {
+        source,
+        projectId: project,
+        revision,
+        appliedAt,
+        exportedWith: "dashboard",
+      },
+      format,
+    );
+    if (!rendered.ok) {
+      setProblems(rendered.errors);
+      return null;
+    }
+    setProblems(null);
+    return rendered.text;
+  }
+
+  async function download(format: "toml" | "yaml") {
+    const text = await render(format);
+    if (text !== null)
+      downloadText(text, exportFileName(project, revision, format));
+  }
+
+  async function copy() {
+    const text = await render("toml");
+    if (text === null) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setProblems([
+        { message: "The browser did not allow copying; download instead." },
+      ]);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm">Export revision {revision}</span>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void download("toml")}
+        >
+          Download TOML
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void download("yaml")}
+        >
+          Download YAML
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => void copy()}
+        >
+          {copied ? "Copied" : "Copy TOML"}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Definitions only: agents, rooms, access, credentials and work are not
+        included, and comments are not kept. It is not a project backup.
+      </p>
+      {problems && (
+        <ProblemSummary
+          title="These definitions can't be exported"
+          problems={problems}
+        />
+      )}
+    </div>
+  );
+}
+
 function AppliedNoticeBanner({ notice }: { notice: AppliedNotice }) {
   return (
     <FormNotice tone="info">
@@ -230,6 +346,7 @@ export function SettingsDefinitionsPage() {
             </p>
           ) : (
             <FirstDefinitions
+              base={base}
               canPreview={ready && canPreview}
               onStart={() => edit(STARTER_DEFINITION, `${base}/source`)}
             />
@@ -263,11 +380,24 @@ export function SettingsDefinitionsPage() {
                       {data.schema.definition}
                     </pre>
                   </details>
-                  {ready && canPreview && !dirty && (
-                    <Button asChild size="sm" variant="outline">
-                      <Link to={`${base}/source`}>Edit source</Link>
-                    </Button>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {ready && canPreview && !dirty && (
+                      <>
+                        <Button asChild size="sm" variant="outline">
+                          <Link to={`${base}/source`}>Edit source</Link>
+                        </Button>
+                        <Button asChild size="sm" variant="outline">
+                          <Link to={`${base}/import`}>Import a file</Link>
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                  <ExportDefinitions
+                    project={project}
+                    source={data.schema.definition}
+                    revision={data.schema.version}
+                    appliedAt={data.schema.applied_at}
+                  />
                 </div>
               )
             }
