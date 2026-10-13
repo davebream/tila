@@ -1,10 +1,13 @@
 import { TilaSchemaTomlSchema } from "@tila/schemas";
 import { beforeEach, describe, expect, it } from "vitest";
+import { SchemaWriteError, resolveCurrentSchema } from "../src/constraint-ops";
 import { CredentialPolicyDenied } from "../src/credential-policy";
+import { EntityAlreadyExistsError } from "../src/entity-ops";
 import { applySchema } from "../src/schema-ops";
 import {
   TemplateInstantiateError,
   instantiateTemplate,
+  listTemplates,
   validateTemplateInstantiation,
 } from "../src/template-ops";
 import { type TestDb, createTestDb } from "./helpers";
@@ -343,4 +346,117 @@ it("authorizes every template task before writing any task, relationship, or jou
     fixture.rawDb.prepare("SELECT count(*) AS n FROM journal").get(),
   ).toEqual(before);
   fixture.rawDb.close();
+});
+
+describe("templateOps.instantiateTemplate — shared create path", () => {
+  it("indexes created tasks for search", () => {
+    applySchema(testDb.db, SCHEMA_WITH_TEMPLATE, "test-actor");
+    instantiateTemplate(testDb.db, {
+      templateName: "sprint",
+      rootId: "sprint-s",
+      vars: { name: "Search" },
+      origin: ORIGIN,
+    });
+    const rows = testDb.rawDb
+      .prepare(
+        "SELECT entity_id, name FROM entity_search_docs ORDER BY entity_id",
+      )
+      .all();
+    expect(rows).toEqual([
+      { entity_id: "sprint-s", name: "Sprint Search" },
+      { entity_id: "sprint-s-child", name: "Child of Search" },
+    ]);
+  });
+
+  it("reports a duplicate root as already-exists and writes nothing", () => {
+    applySchema(testDb.db, SCHEMA_WITH_TEMPLATE, "test-actor");
+    const input = {
+      templateName: "sprint",
+      rootId: "sprint-d",
+      vars: { name: "Dup" },
+      origin: ORIGIN,
+    };
+    instantiateTemplate(testDb.db, input);
+    const before = countTemplateJournal(testDb);
+    expect(() => instantiateTemplate(testDb.db, input)).toThrow(
+      EntityAlreadyExistsError,
+    );
+    expect(countEntities(testDb)).toBe(2);
+    expect(countTemplateJournal(testDb)).toBe(before);
+  });
+
+  it("validates required fields and lifecycle values like a single create", () => {
+    applySchema(
+      testDb.db,
+      `
+schema_version = 1
+[work_units.bug]
+label = "Bug"
+[work_units.bug.fields.title]
+type = "string"
+required = true
+[work_units.bug.fields.status]
+type = "enum"
+values = ["open", "done"]
+[work_units.bug.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done"]
+dependency_satisfied = ["done"]
+[templates.missing.entities.root]
+type = "bug"
+id_suffix = ""
+[templates.missing.entities.root.data]
+status = "open"
+[templates.badstate.entities.root]
+type = "bug"
+id_suffix = ""
+[templates.badstate.entities.root.data]
+title = "x"
+status = "{{state}}"
+`,
+      "test-actor",
+    );
+    expect(() =>
+      instantiateTemplate(testDb.db, {
+        templateName: "missing",
+        rootId: "b-1",
+        vars: {},
+        origin: ORIGIN,
+      }),
+    ).toThrow(SchemaWriteError);
+    expect(() =>
+      instantiateTemplate(testDb.db, {
+        templateName: "badstate",
+        rootId: "b-2",
+        vars: { state: "nope" },
+        origin: ORIGIN,
+      }),
+    ).toThrow(SchemaWriteError);
+    expect(countEntities(testDb)).toBe(0);
+  });
+});
+
+describe("templateOps.listTemplates", () => {
+  it("summarizes entities and the variables instantiation substitutes", () => {
+    applySchema(testDb.db, SCHEMA_WITH_TEMPLATE, "test-actor");
+    expect(listTemplates(resolveCurrentSchema(testDb.db))).toEqual([
+      {
+        name: "sprint",
+        type: "task",
+        description: "A task with one subtask",
+        entity_count: 2,
+        entity_types: ["task", "subtask"],
+        variables: ["name"],
+        entities: [
+          { key: "root", type: "task", id_suffix: "" },
+          { key: "child", type: "subtask", id_suffix: "-child" },
+        ],
+      },
+    ]);
+  });
+
+  it("returns no templates without a schema", () => {
+    expect(listTemplates(null)).toEqual([]);
+  });
 });

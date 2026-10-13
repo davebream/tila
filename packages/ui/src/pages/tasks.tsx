@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { TableError } from "@/components/ui/table-error";
 import { TableSkeleton } from "@/components/ui/table-skeleton";
+import { NewTaskLink } from "@/components/work/create-links";
 import {
   TASK_SEARCH_MIN_LENGTH,
   useTaskPage,
@@ -434,6 +435,7 @@ export function TasksPage() {
           <span className="font-mono text-[11px] text-fg-faint">{summary}</span>
         )}
         <LastRefreshed dataUpdatedAt={active.dataUpdatedAt} />
+        <NewTaskLink />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

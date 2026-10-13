@@ -99,16 +99,7 @@ export const McpCloseResultSchema = z.object({
     }),
   ),
 });
-const templates = ok.extend({
-  templates: z.array(
-    z.object({
-      name: z.string(),
-      type: z.string(),
-      description: z.string().nullable(),
-      variables: z.array(z.string()),
-    }),
-  ),
-});
+const templates = api.TemplateListResponseSchema;
 export const McpPrimitiveResults = {
   tila_room_list: conversations.RoomListResponseSchema,
   tila_room_history: conversations.RoomHistoryResponseSchema,

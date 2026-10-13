@@ -37,6 +37,8 @@ export function createCorsMiddleware(): MiddlewareHandler<AppEnv> {
         "X-Tila-Participant-Id",
         "X-Tila-Client-Name",
         "X-Tila-Conversation-Protocol",
+        // Retry-safe dashboard writes (task/record/template create and edit).
+        "Idempotency-Key",
       ],
       exposeHeaders: [
         "Server-Timing",

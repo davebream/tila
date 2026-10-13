@@ -1,5 +1,6 @@
 import { ProjectReportDetails } from "@/components/journal-report";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Drawer } from "@/components/ui/drawer";
 import {
@@ -20,6 +21,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InfoTip } from "@/components/ui/tooltip";
+import { TaskEditForm } from "@/components/work/task-edit";
+import { useWhoami } from "@/hooks/use-admin";
 import {
   useClaims,
   useTask,
@@ -29,13 +32,16 @@ import {
 } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
+import { inspectQueue } from "@/lib/api";
 import {
   type TypeDefinitions,
   resolveDefinitions,
   taskState,
 } from "@/lib/presentation";
 import { type SectionState, deriveSectionState } from "@/lib/query-state";
+import { rights } from "@/lib/rights";
 import { formatDateTime, relativeTime } from "@/lib/time";
+import { useQuery } from "@tanstack/react-query";
 import type {
   CatalogField,
   JournalResponse,
@@ -43,7 +49,7 @@ import type {
   WorkCatalogEntry,
 } from "@tila/schemas";
 import { presentedText, presentedTitle } from "@tila/schemas";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, Pencil } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 
@@ -183,6 +189,20 @@ export function TaskDetailPage() {
   const refsQuery = useTaskArtifactRefs(entityId);
 
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const editHintId = useId();
+  const [managedOverride, setManagedOverride] = useState(false);
+  const whoami = useWhoami();
+  const allowed = rights(whoami.data, projectId ?? "");
+  // Queue-managed work keeps its lifecycle with the attempt; content edits
+  // skip the claim. Unknown (query failed) falls back to the server's answer.
+  const queueQuery = useQuery({
+    queryKey: ["queue", projectId, { task_id: entityId }],
+    queryFn: () =>
+      inspectQueue(projectId ?? "", { task_id: entityId, limit: 10 }),
+    enabled: Boolean(projectId && entityId),
+    refetchInterval: 10_000,
+  });
 
   // Fields and Relationships both come from the task query, so a task failure
   // must reach both. Each section is otherwise derived from its own request.
@@ -218,6 +238,29 @@ export function TaskDetailPage() {
           defs.status === "declared" ? defs.entry : undefined,
         )
       : null;
+  const managed =
+    managedOverride ||
+    (queueQuery.data?.entries ?? []).some(
+      (view) =>
+        view.entry.task_id === entityId &&
+        (view.entry.state === "queued" || view.entry.state === "admitted"),
+    );
+  const editBlock: string | null = !entity
+    ? "pending"
+    : entity.archived
+      ? "Archived tasks cannot be edited."
+      : defs.status === "undeclared"
+        ? `Type ${entity.type} is not in the current schema, so its tasks are read-only here. Declare the type in Settings → Definitions to edit them.`
+        : defs.status !== "declared"
+          ? "Field definitions are unavailable, so the editor cannot be built."
+          : !whoami.data
+            ? "pending"
+            : !(managed
+                  ? allowed.editManagedTask(entity.type)
+                  : allowed.editTask(entity.type) ||
+                    allowed.editManagedTask(entity.type))
+              ? "This credential cannot edit tasks of this type."
+              : null;
   const summary = presentedText(data, presentation?.summary);
   const description = presentedText(data, presentation?.description);
 
@@ -352,12 +395,55 @@ export function TaskDetailPage() {
           )}
           {state && <Badge variant={state.variant}>{state.value}</Badge>}
         </div>
-        <Link
-          className={dataLinkClass}
-          to={`/p/${projectId}/queue?task_id=${encodeURIComponent(id ?? "")}`}
-        >
-          View or enroll in queue
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          {!editing && editBlock !== "pending" && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={editBlock !== null}
+              aria-describedby={editBlock ? editHintId : undefined}
+              onClick={() => setEditing(true)}
+            >
+              <Pencil aria-hidden="true" />
+              Edit
+            </Button>
+          )}
+          <Link
+            className={dataLinkClass}
+            to={`/p/${projectId}/queue?task_id=${encodeURIComponent(id ?? "")}`}
+          >
+            View or enroll in queue
+          </Link>
+        </div>
+        {!editing && editBlock && editBlock !== "pending" && (
+          <p id={editHintId} className="text-xs text-muted-foreground">
+            {editBlock}
+            {defs.status === "undeclared" && (
+              <>
+                {" "}
+                <Link
+                  className={dataLinkClass}
+                  to={`/p/${projectId}/settings/definitions`}
+                >
+                  Open definitions
+                </Link>
+              </>
+            )}
+          </p>
+        )}
+        {editing && entity && definition && whoami.data?.principal_id && (
+          <TaskSection title="Edit task">
+            <TaskEditForm
+              key={`${entity.id}:${managed}`}
+              entity={entity}
+              definition={definition}
+              managed={managed}
+              principal={whoami.data.principal_id}
+              onClose={() => setEditing(false)}
+              onManaged={() => setManagedOverride(true)}
+            />
+          </TaskSection>
+        )}
 
         {!subjectUnavailable && summary && (
           <TaskSection title="Summary">

@@ -329,6 +329,11 @@ export function namespacedTemplateMethods(
           ...t,
           name: stripPrefix(ns, t.name),
           type: stripPrefix(ns, t.type),
+          entity_types: t.entity_types.map((type) => stripPrefix(ns, type)),
+          entities: t.entities.map((e) => ({
+            ...e,
+            type: stripPrefix(ns, e.type),
+          })),
         })),
       };
     },

@@ -36,6 +36,21 @@ import type {
   WhoamiResponse,
 } from "@tila/schemas";
 import type {
+  AcquireRequest,
+  AcquireSuccessResponse,
+  CreateEntityRelationshipRequest,
+  CreateEntityRelationshipResponse,
+  CreateEntityRequest,
+  EntityResponse,
+  InstantiateTemplateRequest,
+  InstantiateTemplateResponse,
+  RecordCreateRequest,
+  RecordMutateResponse,
+  RecordSetRequest,
+  TemplateListResponse,
+  UpdateEntityRequest,
+} from "@tila/schemas";
+import type {
   ArtifactSearchResponse,
   EntityArtifactReferenceListResponse,
   EntityDetailResponse,
@@ -57,7 +72,10 @@ import type {
   UnifiedSearchResponse,
   WorkCatalogResponse,
 } from "@tila/schemas";
-import { GitHubLoginConfigResponseSchema } from "@tila/schemas";
+import {
+  GitHubLoginConfigResponseSchema,
+  TemplateListResponseSchema,
+} from "@tila/schemas";
 import {
   type JournalAppendRequest,
   JournalAppendRequestSchema,
@@ -1096,4 +1114,129 @@ export function correctAttempt(
   command: AttemptCorrectCommand,
 ): Promise<AttemptView> {
   return controlAttempt(projectId, { action: "correct", id, command });
+}
+
+// --- Work mutations (#305) ---
+// Every write goes through `mutate()`, so it carries the dashboard participant
+// id. Callers pass a stable idempotency key per logical submission so a retry
+// after a lost response is answered from the server's receipt.
+
+export async function createTask(
+  projectId: string,
+  body: CreateEntityRequest,
+  idempotencyKey?: string,
+): Promise<EntityResponse> {
+  return mutate<EntityResponse>(
+    "POST",
+    projectPath(projectId, "/tasks"),
+    body,
+    {
+      idempotencyKey,
+    },
+  );
+}
+
+/** Shallow-merge `data` into the task. Requires the current claim fence. */
+export async function patchTask(
+  projectId: string,
+  id: string,
+  body: UpdateEntityRequest,
+  idempotencyKey?: string,
+): Promise<EntityResponse> {
+  return mutate<EntityResponse>(
+    "PATCH",
+    projectPath(projectId, `/tasks/${encodeURIComponent(id)}`),
+    body,
+    { idempotencyKey },
+  );
+}
+
+export async function createTaskRelationship(
+  projectId: string,
+  body: CreateEntityRelationshipRequest,
+): Promise<CreateEntityRelationshipResponse> {
+  return mutate<CreateEntityRelationshipResponse>(
+    "POST",
+    projectPath(projectId, "/tasks/relationships"),
+    body,
+  );
+}
+
+/** Claim `resource` (`<type>:<id>`); re-acquiring as the same participant extends it. */
+export async function acquireClaim(
+  projectId: string,
+  body: AcquireRequest,
+): Promise<AcquireSuccessResponse> {
+  return mutate<AcquireSuccessResponse>(
+    "POST",
+    projectPath(projectId, "/claims/acquire"),
+    body,
+  );
+}
+
+export async function releaseClaim(
+  projectId: string,
+  body: { resource: string; fence: number },
+): Promise<unknown> {
+  return mutate<unknown>(
+    "POST",
+    projectPath(projectId, "/claims/release"),
+    body,
+  );
+}
+
+export async function listTemplates(
+  projectId: string,
+): Promise<TemplateListResponse> {
+  // Parsing fills fields an older server does not send yet.
+  return TemplateListResponseSchema.parse(
+    await request<unknown>(projectId, "/templates"),
+  );
+}
+
+export async function instantiateTemplate(
+  projectId: string,
+  body: InstantiateTemplateRequest,
+  idempotencyKey?: string,
+): Promise<InstantiateTemplateResponse> {
+  return mutate<InstantiateTemplateResponse>(
+    "POST",
+    projectPath(projectId, "/templates/instantiate"),
+    body,
+    { idempotencyKey },
+  );
+}
+
+/** First write of `key`; 409 when it already exists. */
+export async function createRecord(
+  projectId: string,
+  type: string,
+  body: RecordCreateRequest,
+  idempotencyKey?: string,
+): Promise<RecordMutateResponse> {
+  return mutate<RecordMutateResponse>(
+    "POST",
+    projectPath(projectId, `/records/${encodeURIComponent(type)}`),
+    body,
+    { idempotencyKey },
+  );
+}
+
+/** Full replace at the record's current fence (its write counter). */
+export async function putRecord(
+  projectId: string,
+  type: string,
+  key: string,
+  body: RecordSetRequest,
+  idempotencyKey?: string,
+): Promise<RecordMutateResponse> {
+  return mutate<RecordMutateResponse>(
+    "PUT",
+    projectPath(
+      projectId,
+      `/records/${encodeURIComponent(type)}/${encodeRecordKey(key)}`,
+    ),
+    body,
+    { idempotencyKey },
+  );
 }

@@ -52,6 +52,7 @@ function catalogFields(
     type: field.type,
     required: field.required ?? false,
     ...(field.values ? { values: field.values } : {}),
+    ...(field.default !== undefined ? { default: field.default } : {}),
   }));
 }
 

@@ -35,10 +35,13 @@ import { type ApplySchemaInput, ContinuityError } from "@tila/core";
 import {
   type GateRecord,
   type PresenceWithStatus,
-  parseTilaSchemaToml,
+  parseSchemaToml,
 } from "@tila/core";
-import { mapProjectError, signalOps } from "@tila/ops-sqlite";
-import type { ArtifactDeleteOptions } from "@tila/schemas";
+import { mapProjectError, signalOps, templateOps } from "@tila/ops-sqlite";
+import type {
+  ArtifactDeleteOptions,
+  TemplateListResponse,
+} from "@tila/schemas";
 import type {
   ArtifactReviewRequest,
   ArtifactReviewsQuery,
@@ -1129,61 +1132,16 @@ function createLocalTemplateMethods(project: EmbeddedProject) {
       };
     },
 
-    async list(): Promise<{
-      ok: true;
-      templates: Array<{
-        name: string;
-        type: string;
-        description: string | null;
-        variables: string[];
-      }>;
-    }> {
-      // Templates are declared in the applied schema; the embedded backend has
-      // no list op, so derive from the current schema definition. The stored
-      // definition is TOML (mirroring the DO `/template/list`, which parses via
-      // `constraintOps.resolveCurrentSchema`), so parse it with the core TOML
-      // parser — NOT JSON.parse.
+    async list(): Promise<TemplateListResponse> {
+      // Templates are declared in the applied schema; derive the same summaries
+      // the DO `/template/list` returns via the shared `templateOps.listTemplates`.
       const current = await project.getCurrentSchema();
       if (!current.definition) return { ok: true, templates: [] };
-      const parsed = parseTilaSchemaToml(current.definition) as {
-        templates?: Record<
-          string,
-          {
-            description?: string;
-            entities?: Record<string, { type: string; data?: unknown }>;
-          }
-        >;
+      const parsed = parseSchemaToml(current.definition);
+      return {
+        ok: true,
+        templates: templateOps.listTemplates(parsed.ok ? parsed.schema : null),
       };
-      // Derive `variables` by scanning each template's entity `data` for
-      // `{{name}}` placeholders — the same `/\{\{(\w+)\}\}/` substitution
-      // `templateOps.instantiateTemplate` applies (#5). This gives consumers a
-      // real, non-empty variable list to drive `instantiate(vars)` locally,
-      // rather than the previous silent `[]`.
-      const extractVars = (def: {
-        entities?: Record<string, { data?: unknown }>;
-      }): string[] => {
-        const found = new Set<string>();
-        const walk = (v: unknown): void => {
-          if (typeof v === "string") {
-            for (const m of v.matchAll(/\{\{(\w+)\}\}/g)) found.add(m[1]);
-          } else if (Array.isArray(v)) {
-            for (const item of v) walk(item);
-          } else if (v && typeof v === "object") {
-            for (const item of Object.values(v)) walk(item);
-          }
-        };
-        for (const ent of Object.values(def.entities ?? {})) walk(ent.data);
-        return [...found].sort();
-      };
-      const templates = Object.entries(parsed.templates ?? {}).map(
-        ([name, def]) => ({
-          name,
-          type: Object.values(def.entities ?? {})[0]?.type ?? "",
-          description: def.description ?? null,
-          variables: extractVars(def),
-        }),
-      );
-      return { ok: true, templates };
     },
   };
 }

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { TableError } from "@/components/ui/table-error";
 import { TableSkeleton } from "@/components/ui/table-skeleton";
+import { NewRecordLink } from "@/components/work/create-links";
 import { useRecordPage, useRecordTypes } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -318,6 +319,10 @@ export function RecordsPage() {
           <span className="font-mono text-[11px] text-fg-faint">{summary}</span>
         )}
         <LastRefreshed dataUpdatedAt={listQuery.dataUpdatedAt} />
+        <NewRecordLink
+          type={urlType}
+          declared={selectedEntry?.declaration === "declared"}
+        />
       </div>
 
       {typesState.phase === "pending" && (

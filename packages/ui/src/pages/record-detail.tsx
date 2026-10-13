@@ -24,6 +24,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InfoTip } from "@/components/ui/tooltip";
+import { RecordEditForm } from "@/components/work/record-editor";
+import { useWhoami } from "@/hooks/use-admin";
 import {
   useRecord,
   useRecordHistory,
@@ -35,11 +37,18 @@ import { useTimeTick } from "@/hooks/use-time-tick";
 import { type TypeDefinitions, resolveDefinitions } from "@/lib/presentation";
 import { deriveSectionState } from "@/lib/query-state";
 import { recordPageParams } from "@/lib/record-list";
+import { rights } from "@/lib/rights";
 import { formatDateTime, relativeTime } from "@/lib/time";
 import { ClassificationBadge } from "@/pages/records";
 import type { RecordCatalogEntry } from "@tila/schemas";
 import { presentedText, presentedTitle } from "@tila/schemas";
-import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2,
+  Pencil,
+} from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import {
   Link,
@@ -141,7 +150,7 @@ export function RecordDetailPage() {
     function onKeyDown(e: KeyboardEvent) {
       if (e.ctrlKey || e.metaKey) return;
       const tag = document.activeElement?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if ((e.key === "j" || e.key === "ArrowDown") && siblings.next) {
         e.preventDefault();
         goTo(siblings.next);
@@ -155,6 +164,10 @@ export function RecordDetailPage() {
   });
 
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const editHintId = useId();
+  const whoami = useWhoami();
+  const allowed = rights(whoami.data, projectId ?? "");
   const recordState = deriveSectionState(recordQuery);
   // A failed "Older revisions" request is reported beside the button; the
   // pages already loaded are still current.
@@ -207,6 +220,19 @@ export function RecordDetailPage() {
       (defs.status === "declared" && otherRows.length > 0));
 
   const historyItems = historyQuery.data?.pages.flatMap((p) => p.items) ?? [];
+
+  const editBlock: string | null =
+    !record || defs.status === "pending" || !whoami.data
+      ? "pending"
+      : record.archived === 1
+        ? "Archived records cannot be edited."
+        : defs.status === "undeclared"
+          ? `Type ${type} is not in the current schema, so its records are read-only here. Declare it in Settings → Definitions to edit them.`
+          : defs.status !== "declared"
+            ? "Field definitions are unavailable, so the editor cannot be built."
+            : !allowed.writeRecord(type, key)
+              ? "This credential cannot write this record."
+              : null;
 
   return (
     <Drawer
@@ -273,6 +299,42 @@ export function RecordDetailPage() {
           <ClassificationBadge entry={entry} />
           {record?.archived === 1 && <Badge variant="red">Archived</Badge>}
         </div>
+
+        {!editing && editBlock !== "pending" && (
+          <div className="space-y-1">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={editBlock !== null}
+              aria-describedby={editBlock ? editHintId : undefined}
+              onClick={() => setEditing(true)}
+            >
+              <Pencil aria-hidden="true" />
+              Edit
+            </Button>
+            {editBlock && (
+              <p id={editHintId} className="text-xs text-muted-foreground">
+                {editBlock}
+              </p>
+            )}
+          </div>
+        )}
+        {editing &&
+          record &&
+          definition &&
+          fence !== undefined &&
+          whoami.data?.principal_id && (
+            <section className="space-y-3" aria-label="Edit record">
+              <h2 className="tila-label">Edit record</h2>
+              <RecordEditForm
+                record={record}
+                fence={fence}
+                definition={definition}
+                principal={whoami.data.principal_id}
+                onClose={() => setEditing(false)}
+              />
+            </section>
+          )}
 
         {recordState.phase === "pending" && (
           <output className="block text-sm text-muted-foreground">

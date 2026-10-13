@@ -576,7 +576,7 @@ describe("namespacedTemplateMethods", () => {
     expect(body.root_id).toBe("r"); // NOT prefixed
   });
 
-  it("list strips templates[].name AND templates[].type", async () => {
+  it("list strips the namespace from template names and entity types", async () => {
     const responseBody = {
       ok: true,
       templates: [
@@ -584,7 +584,10 @@ describe("namespacedTemplateMethods", () => {
           name: "cp_deploy",
           type: "cp_task",
           description: null,
+          entity_count: 1,
+          entity_types: ["cp_task"],
           variables: [],
+          entities: [{ key: "root", type: "cp_task", id_suffix: "" }],
         },
       ],
     };
@@ -597,6 +600,8 @@ describe("namespacedTemplateMethods", () => {
 
     expect(result.templates[0].name).toBe("deploy");
     expect(result.templates[0].type).toBe("task");
+    expect(result.templates[0].entity_types).toEqual(["task"]);
+    expect(result.templates[0].entities[0].type).toBe("task");
   });
 });
 

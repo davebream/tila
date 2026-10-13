@@ -256,3 +256,31 @@ describe("buildRecordCatalog", () => {
     expect(catalog.scope.restricted).toBe(true);
   });
 });
+
+it("exposes declared field defaults without applying them", () => {
+  const withDefault = TilaSchemaTomlSchema.parse({
+    schema_version: 1,
+    work_units: {
+      bug: {
+        fields: {
+          severity: { type: "enum", values: ["low", "high"], default: "low" },
+          title: { type: "string" },
+        },
+      },
+    },
+  });
+  const catalog = buildWorkCatalog({
+    schema: { state: "ok", schema: withDefault },
+    counts: [],
+  });
+  expect(catalog.types[0].definition?.fields).toEqual([
+    {
+      name: "severity",
+      type: "enum",
+      required: false,
+      values: ["low", "high"],
+      default: "low",
+    },
+    { name: "title", type: "string", required: false },
+  ]);
+});

@@ -1211,6 +1211,30 @@ export type InstantiateTemplateResponse = z.infer<
   typeof InstantiateTemplateResponseSchema
 >;
 
+export const TemplateSummarySchema = z.object({
+  name: z.string(),
+  /** Type of the first declared entity (the root), or "" for none. Kept for MCP/SDK callers. */
+  type: z.string().default(""),
+  description: z.string().nullable(),
+  entity_count: z.number().int(),
+  entity_types: z.array(z.string()),
+  // Defaults keep a list from a server that predates these fields readable.
+  /** `{{name}}` placeholders in top-level string data values, sorted. */
+  variables: z.array(z.string()).default([]),
+  /** Declaration order; each created ID is `root_id + id_suffix`. */
+  entities: z
+    .array(
+      z.object({ key: z.string(), type: z.string(), id_suffix: z.string() }),
+    )
+    .default([]),
+});
+export type TemplateSummary = z.infer<typeof TemplateSummarySchema>;
+export const TemplateListResponseSchema = z.object({
+  ok: z.literal(true),
+  templates: z.array(TemplateSummarySchema),
+});
+export type TemplateListResponse = z.infer<typeof TemplateListResponseSchema>;
+
 // --- Repo Allowlist API ---
 
 export const GitHubRepositoryPermissionSchema = z.enum([

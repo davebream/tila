@@ -155,43 +155,17 @@ export function create(
   schemaVersion: number,
   origin: RequestOrigin,
 ): Entity {
-  const now = Date.now();
   // Validate + normalize tags before the transaction to avoid holding the lock
   const normalizedTags =
     input.tags !== undefined ? (TagsSchema.parse(input.tags) as string[]) : [];
 
   return db.transaction((tx) => {
-    const current = assertCurrentEntityWrite(tx, input.type, input.data);
-    assertArtifactReviewPolicy(tx, input.id, input.type, input.data.status);
-    try {
-      tx.insert(schema.entities)
-        .values({
-          id: input.id,
-          type: input.type,
-          schema_version: schemaVersion,
-          data: JSON.stringify(input.data),
-          archived: 0,
-          created_at: now,
-          updated_at: now,
-          created_by: input.created_by,
-        })
-        .run();
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        err.message.includes("UNIQUE constraint failed")
-      ) {
-        throw new EntityAlreadyExistsError(input.id);
-      }
-      throw err;
-    }
-
-    // Insert tags AFTER the entity-insert try/catch so a tag-PK collision
-    // is never misclassified as EntityAlreadyExistsError.
-    for (const tag of normalizedTags) {
-      tx.insert(schema.entityTags).values({ entity_id: input.id, tag }).run();
-    }
-
+    const entity = insertEntityInTransaction(
+      tx,
+      { ...input, tags: normalizedTags },
+      schemaVersion,
+      Date.now(),
+    );
     appendJournal(tx, {
       kind: "entity.created",
       resource: input.id,
@@ -201,34 +175,82 @@ export function create(
       source: origin.source,
       sourceVersion: origin.sourceVersion,
     });
-
-    // FTS5: index entity for full-text search (presentation title, else data.title, then data.name -- #412, #300)
-    const entityName = entitySearchText(
-      input.data as Record<string, unknown>,
-      current?.work_units[input.type]?.presentation,
-    );
-    tx.run(
-      sql`INSERT OR REPLACE INTO entity_search_docs(
-        entity_id, entity_type, name, indexed_at
-      ) VALUES(
-        ${input.id}, ${input.type}, ${entityName}, ${now}
-      )`,
-    );
-
-    // Construct the return value from validated inputs — no post-write SELECT needed.
-    const entity: Entity = {
-      id: input.id,
-      type: input.type,
-      schema_version: schemaVersion,
-      data: input.data,
-      archived: 0,
-      created_at: now,
-      updated_at: now,
-      created_by: input.created_by,
-      tags: normalizedTags,
-    };
     return entity;
   });
+}
+
+/**
+ * The validated insert shared by {@link create} and template instantiation:
+ * current-schema check, artifact review policy, row + tags, and the search
+ * document. Journaling stays with the caller (one `entity.created` per create,
+ * one `template.instantiated` per template).
+ */
+export function insertEntityInTransaction(
+  tx: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  input: {
+    id: string;
+    type: string;
+    data: Record<string, unknown>;
+    created_by: string;
+    tags: string[];
+  },
+  schemaVersion: number,
+  now: number,
+): Entity {
+  const current = assertCurrentEntityWrite(tx, input.type, input.data);
+  assertArtifactReviewPolicy(tx, input.id, input.type, input.data.status);
+  try {
+    tx.insert(schema.entities)
+      .values({
+        id: input.id,
+        type: input.type,
+        schema_version: schemaVersion,
+        data: JSON.stringify(input.data),
+        archived: 0,
+        created_at: now,
+        updated_at: now,
+        created_by: input.created_by,
+      })
+      .run();
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message.includes("UNIQUE constraint failed")
+    )
+      throw new EntityAlreadyExistsError(input.id);
+    throw err;
+  }
+
+  // Insert tags AFTER the entity-insert try/catch so a tag-PK collision
+  // is never misclassified as EntityAlreadyExistsError.
+  for (const tag of input.tags)
+    tx.insert(schema.entityTags).values({ entity_id: input.id, tag }).run();
+
+  // FTS5: index entity for full-text search (presentation title, else data.title, then data.name -- #412, #300)
+  const entityName = entitySearchText(
+    input.data,
+    current?.work_units[input.type]?.presentation,
+  );
+  tx.run(
+    sql`INSERT OR REPLACE INTO entity_search_docs(
+      entity_id, entity_type, name, indexed_at
+    ) VALUES(
+      ${input.id}, ${input.type}, ${entityName}, ${now}
+    )`,
+  );
+
+  // Construct the return value from validated inputs — no post-write SELECT needed.
+  return {
+    id: input.id,
+    type: input.type,
+    schema_version: schemaVersion,
+    data: input.data,
+    archived: 0,
+    created_at: now,
+    updated_at: now,
+    created_by: input.created_by,
+    tags: input.tags,
+  };
 }
 
 export function get(
