@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-13
+
+### Upgrade notes
+
+- Deploy the Worker and its bundled UI together, before upgrading clients. There is no new D1 migration. Shared DO/embedded migrations 37 to 40 apply on the first request after deploy; all four are additive.
+- Queue control is now restricted (the managed work queue from 0.6.0). Cancel, suspend, resume and retry requests are accepted only from the attempt's current owner, the principal that enrolled the work, or a maintainer. Queue `edit` and `withdraw` need the enroller or a maintainer. Other members get `403 queue-authority-lost`. Enrollments made before this release have no recorded enroller and fall back to owner or maintainer.
+- `journal:append` is a new capability. The worker preset includes it, but existing scoped credentials must be reissued to append project-reported events.
+- The runtime view's `work_attempt` and a delivery's `work_result` used to be constant (`null` and `not-reported`). They now carry real attempt data. Clients that relied on the constant values need the new shapes.
+- Backups from this Worker report migration 40 and require the `attempt-corrections-v1` feature, which `GET /health` advertises. Restore them with the 0.7.0 SDK or CLI; older versions refuse them before writing anything.
+- Projects open on the new Overview page instead of the task list (see Dashboard below).
+
+### Durable work attempts (#303)
+
+- `POST /attempts/:id/replace-session` attaches a new native session to the same attempt after the recorded one stopped. It issues a fresh fence, revokes the old one and keeps the attempt ID, so a provider restart no longer forces abandon-and-retry. `QueueExecutor` maps a `{ state: "replaced" }` adapter observation to it.
+- Attempts record the definition version and queue policy revision at admission, at each authorization and at the result. `GET /attempts/:id` returns them with `current_revisions`. When the current definition rejects a transition, the error names both versions.
+- Attempt lists accept `principal_id`, `participant_id` and `active`, filtered in SQL. `QueueExecutor.recoverable()` uses the owner filter.
+- `POST /attempts/:id/correct` links a finished attempt to the task that corrects it, without changing the original result. SQLite triggers now reject any change to the outcome of a terminal attempt and keep corrections append-only.
+- The runtime view lists up to five unfinished attempts per bound participant. Delivery traces report the linked attempt's result as `pending`, `reported`, `unlinked` or `hidden`.
+- All of this is available over HTTP, in the remote and embedded SDKs, as `tila attempt replace-session` and `tila attempt correct`, and through MCP `tila_attempt`. `GET /health` advertises `attempt-control-v1`, `attempt-session-replacement-v1` and `attempt-corrections-v1`.
+
+### Project-reported journal events (#383)
+
+- `POST /projects/:projectId/journal` appends an authenticated observation to the project journal, through HTTP, the SDK, the CLI, MCP and the dashboard. Reports never change tasks, claims, attempts, gates or capacity.
+- Claim-bound reports check live ownership and the fence. Each report has a seven-day idempotency receipt and is limited to 60 per principal and 300 per project per UTC minute. Local mode returns `unsupported-capability`.
+
+### Dashboard (#386, #387, #388, #389)
+
+- The twelve header tabs are grouped into Work, Conversations, Runtime and Settings. Old flat links redirect into the active project and keep their sub-path, query and fragment. The ⌘K palette now lists every page, and pages the credential cannot read are hidden.
+- The new Overview page runs eight attention checks: uncertain and suspended executions, expired execution leases, blocked tasks, failed or abandoned tasks, suppressed and recently expired deliveries, and agents whose runtime needs a check. Each count is the exact total of the list it links to. A check that failed or could not run is never shown as zero.
+- Settings has a read-only Definitions page with the applied revision, the work and record types and the revision history.
+- The attempt drawer shows captured and current revisions, lists corrections and can link a corrective task. Control buttons follow the new authority rule.
+
+### API
+
+- New list filters with exact totals: `GET /tasks?blocked=1`, `GET /tasks?outcome=failure,abandoned`, `GET /deliveries?wake=suppressed` and `expires_after`, `GET /queue?lease=expired`, and `GET /runtime-view?filter=attention`. All response changes are additive.
+
+### Fixes
+
+- Project destroy no longer fails for a project that has a worker question (#391). The question and journal-report tables were missing from the destroy list, so the foreign-key check rolled back the whole destroy. A drift test now compares that list with every table the migrations create.
+- Finishing a suspended attempt checks the command's fence against the recorded fence, not only the revision.
+- `reconcile` with `observation: "stopped"` can no longer record `success` for a reservation that was never accepted.
+- Maintainer force recovery and stopped reconciliation are journaled with the maintainer as actor and the owner named separately.
+- Retrying `enroll` under a new idempotency key while the first enrollment is unfinished returns `409 queue-conflict` naming the existing entry.
+
 ## [0.6.0] - 2026-10-12
 
 ### Upgrade notes
@@ -289,7 +333,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/davebream/tila/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/davebream/tila/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/davebream/tila/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/davebream/tila/compare/v0.3.0...v0.4.0
