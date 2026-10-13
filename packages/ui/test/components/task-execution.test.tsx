@@ -489,3 +489,103 @@ test("a follow-up task links back to the attempt and survives an interrupted lin
     reason: "Regression in login",
   });
 });
+
+test("a refused correction unlocks the reason and finishes on retry without a second task", async () => {
+  const user = userEvent.setup();
+  attempts = [
+    attempt({
+      id: "att-2",
+      state: "terminal",
+      finished_at: 10,
+      outcome: {
+        status: "failure",
+        evidence: [],
+        execution_stopped: true,
+        unresolved_external_execution: false,
+      },
+    }),
+  ];
+  const creates: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const corrections: Array<{ idempotency_key: string; reason: string }> = [];
+  server.use(
+    http.post("*/projects/test-project/tasks", async ({ request }) => {
+      const body = (await request.json()) as (typeof creates)[number];
+      creates.push(body);
+      return creates.length === 1
+        ? HttpResponse.json({ ok: true, entity: body })
+        : HttpResponse.json(
+            { ok: false, error: { code: "already-exists", message: "exists" } },
+            { status: 409 },
+          );
+    }),
+    http.get("*/projects/test-project/tasks/:id", ({ params }) =>
+      HttpResponse.json({
+        ok: true,
+        entity: {
+          id: params.id,
+          type: "bug",
+          schema_version: 1,
+          data:
+            params.id === creates[0]?.id
+              ? creates[0].data
+              : { title: "Login fails", status: "open" },
+          archived: 0,
+          created_at: 1,
+          updated_at: 1,
+          created_by: "dev",
+          tags: [],
+        },
+        relationships: [],
+      }),
+    ),
+    http.post("*/projects/test-project/tasks/relationships", () =>
+      HttpResponse.json({ ok: true, created: false }),
+    ),
+    http.post(
+      "*/projects/test-project/attempts/att-2/correct",
+      async ({ request }) => {
+        const body = (await request.json()) as (typeof corrections)[number];
+        corrections.push(body);
+        return corrections.length === 1
+          ? HttpResponse.json(
+              {
+                ok: false,
+                error: {
+                  code: "validation-error",
+                  message: "Reason too vague",
+                },
+              },
+              { status: 422 },
+            )
+          : HttpResponse.json({ ok: true, result: { attempt: attempts[0] } });
+      },
+    ),
+  );
+  renderWithProviders(
+    <Routes>
+      <Route path="/p/:projectId/tasks/:id" element={<TaskOrOpened />} />
+    </Routes>,
+    { route: "/p/test-project/tasks/BUG-1?follow_up=att-2" },
+  );
+  const drawer = await screen.findByRole("dialog", { name: "Follow-up task" });
+  const reason = await within(drawer).findByRole("textbox", {
+    name: /why is follow-up needed/i,
+  });
+  await user.type(reason, "x");
+  await user.click(within(drawer).getByRole("button", { name: "Create task" }));
+  expect(
+    await within(drawer).findByText(/Reason too vague/),
+  ).toBeInTheDocument();
+  expect(reason).toBeEnabled();
+  await user.clear(reason);
+  await user.type(reason, "Login regression after PR #12");
+  await user.click(within(drawer).getByRole("button", { name: "Retry" }));
+  await screen.findByText(/^Opened T-/);
+  expect(creates).toHaveLength(2);
+  expect(creates[1].id).toBe(creates[0].id);
+  expect(corrections).toHaveLength(2);
+  expect(corrections[1].reason).toBe("Login regression after PR #12");
+  expect(corrections[1].idempotency_key).not.toBe(
+    corrections[0].idempotency_key,
+  );
+});

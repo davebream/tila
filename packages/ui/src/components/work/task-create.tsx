@@ -156,6 +156,12 @@ async function sendCreate(
   return { id: command.body.id };
 }
 
+/**
+ * The task exists but a caller's `afterCreate` step failed. The create command
+ * stays frozen so Retry recognises the task and only repeats the steps.
+ */
+class AfterCreateError extends ApiError {}
+
 interface TaskCreateDrawerProps {
   /** Overrides the default close (dropping `create` from the URL). */
   onClose?: () => void;
@@ -274,7 +280,7 @@ export function TaskCreateDrawer({
       } catch (error) {
         // Keep the server's status so the retry/conflict handling still applies.
         if (!(error instanceof ApiError)) throw error;
-        throw new ApiError(
+        throw new AfterCreateError(
           error.code,
           `Task ${result.id} was created, but the follow-up step failed: ${error.message}. Retry finishes it without creating another task.`,
           error.details,
@@ -302,6 +308,7 @@ export function TaskCreateDrawer({
       const kind = failureKind(error);
       if (kind === "forbidden")
         void client.invalidateQueries({ queryKey: ["whoami", project] });
+      if (error instanceof AfterCreateError) return;
       // Anything the server definitely refused unfreezes the command so the
       // corrected input is sent with a new key.
       if (kind !== "unconfirmed") update(releaseOperation);

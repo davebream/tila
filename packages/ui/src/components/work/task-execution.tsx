@@ -200,17 +200,28 @@ function RetryAction({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [missing, setMissing] = useState(false);
-  const command = useRef<{ body: string; key: string } | null>(null);
-  const action = useAction(project, (input: { reason: string; key: string }) =>
-    controlAttempt(project, {
-      action: "retry",
-      id: attempt.id,
-      command: {
-        expected_revision: attempt.revision,
-        idempotency_key: input.key,
-        reason: input.reason,
-      },
-    }),
+  // The whole command is frozen per reason: a retried confirmation resends
+  // exactly what was sent, even if the attempt was refetched in between.
+  const command = useRef<{
+    body: string;
+    sent: {
+      expected_revision: number;
+      idempotency_key: string;
+      reason: string;
+    };
+  } | null>(null);
+  const action = useAction(
+    project,
+    (sent: {
+      expected_revision: number;
+      idempotency_key: string;
+      reason: string;
+    }) =>
+      controlAttempt(project, {
+        action: "retry",
+        id: attempt.id,
+        command: sent,
+      }),
   );
   const outcome = attempt.outcome?.status ?? "failure";
   return (
@@ -240,13 +251,19 @@ function RetryAction({
           const body = reason.trim();
           setMissing(!body);
           if (!body) return;
-          // Same reason, same key: a retried confirmation is not a second retry.
+          // Same reason, same command: a retried confirmation is not a second retry.
           if (command.current?.body !== body)
-            command.current = { body, key: crypto.randomUUID() };
-          action.mutate(
-            { reason: body, key: command.current.key },
-            { onSuccess: () => setOpen(false) },
-          );
+            command.current = {
+              body,
+              sent: {
+                expected_revision: attempt.revision,
+                idempotency_key: crypto.randomUUID(),
+                reason: body,
+              },
+            };
+          action.mutate(command.current.sent, {
+            onSuccess: () => setOpen(false),
+          });
         }}
         description={
           <div className="space-y-3">
@@ -280,14 +297,28 @@ function ReassignAction({
 }) {
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState(entry.target_principal ?? "");
+  // Frozen per dialog and per assignee: resending the same choice reuses its
+  // command; choosing someone else is a new request.
   const command = useRef(revision(entry.revision));
-  const action = useAction(project, (next: string | null) =>
-    controlQueue(project, {
+  const sent = useRef<{ target: string | null; key: string } | null>(null);
+  const action = useAction(project, (next: string | null) => {
+    if (!sent.current || sent.current.target !== next)
+      sent.current = {
+        target: next,
+        key: sent.current
+          ? crypto.randomUUID()
+          : command.current.idempotency_key,
+      };
+    return controlQueue(project, {
       action: "edit",
       id: entry.id,
-      command: { ...command.current, target_principal: next },
-    }),
-  );
+      command: {
+        expected_revision: command.current.expected_revision,
+        idempotency_key: sent.current.key,
+        target_principal: next,
+      },
+    });
+  });
   return (
     <>
       <Button
@@ -295,6 +326,7 @@ function ReassignAction({
         variant="outline"
         onClick={() => {
           command.current = revision(entry.revision);
+          sent.current = null;
           setTarget(entry.target_principal ?? "");
           action.reset();
           setOpen(true);

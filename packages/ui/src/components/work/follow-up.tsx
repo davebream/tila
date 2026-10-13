@@ -1,9 +1,11 @@
 import { TextAreaField } from "@/components/ui/form-fields";
 import { TaskCreateDrawer } from "@/components/work/task-create";
-import { correctAttempt, createTaskRelationship } from "@/lib/api";
+import { ApiError, correctAttempt, createTaskRelationship } from "@/lib/api";
+import { failureKind } from "@/lib/mutation-errors";
 import {
   editOperation,
   operationKey,
+  releaseOperation,
   stageOperation,
   useOperationDraft,
 } from "@/lib/operation-draft";
@@ -46,6 +48,19 @@ export function FollowUpDrawer({
   );
   // Read inside the create request, which may run after this render.
   const staged = useRef<Command | null>(draft.pending?.command ?? null);
+  const latest = useRef(draft);
+  latest.current = draft;
+  /** Freeze the correction for the current reason unless one is frozen. */
+  const freeze = () => {
+    if (staged.current) return staged.current;
+    const next = stageOperation(latest.current, (value, id) => ({
+      key: id,
+      reason: value.reason.trim(),
+    }));
+    staged.current = next.pending?.command ?? null;
+    update(() => next);
+    return staged.current;
+  };
   const titleField = presentation?.title ?? "title";
   const title = presentedTitle(task.data, presentation) ?? task.id;
 
@@ -59,30 +74,43 @@ export function FollowUpDrawer({
         fields: { [titleField]: `Follow-up: ${title}` },
       }}
       validate={() => {
-        const reason = draft.value.reason.trim();
-        if (!reason) return "Explain why follow-up work is needed.";
-        const next = stageOperation(draft, (value, id) => ({
-          key: id,
-          reason: value.reason.trim(),
-        }));
-        staged.current = next.pending?.command ?? null;
-        update(() => next);
+        if (!draft.value.reason.trim())
+          return "Explain why follow-up work is needed.";
+        freeze();
         return null;
       }}
       afterCreate={async (id) => {
-        const command = staged.current;
-        if (!command) throw new Error("The follow-up reason was lost.");
-        // `from` was discovered from `to`: the new task points at the original.
-        await createTaskRelationship(project, {
-          from_id: id,
-          to_id: task.id,
-          type: "discovered-from",
-        });
-        await correctAttempt(project, attemptId, {
-          idempotency_key: command.key,
-          task_id: id,
-          reason: command.reason,
-        });
+        const missing = () =>
+          new ApiError(
+            "validation-error",
+            "Explain why follow-up work is needed",
+            undefined,
+            400,
+          );
+        if (!latest.current.value.reason.trim()) throw missing();
+        const command = freeze();
+        if (!command) throw missing();
+        try {
+          // `from` was discovered from `to`: the new task points at the original.
+          await createTaskRelationship(project, {
+            from_id: id,
+            to_id: task.id,
+            type: "discovered-from",
+          });
+          await correctAttempt(project, attemptId, {
+            idempotency_key: command.key,
+            task_id: id,
+            reason: command.reason,
+          });
+        } catch (error) {
+          // A definite refusal unfreezes the reason so it can be corrected;
+          // the next Retry links the existing task with a new key.
+          if (failureKind(error) !== "unconfirmed") {
+            staged.current = null;
+            update(releaseOperation);
+          }
+          throw error;
+        }
         discard();
       }}
     >
