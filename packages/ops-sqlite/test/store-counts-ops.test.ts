@@ -17,6 +17,7 @@ const EXPECTED_DOMAIN_TABLES = [
   "queue_policy",
   "queue_entries",
   "work_attempts",
+  "attempt_corrections",
   "execution_reservations",
   "queue_operation_receipts",
   "work_questions",

@@ -285,3 +285,86 @@ values = ["open", "done", "cancelled"]
     local.close();
   }
 });
+
+it("restores correction links with the original terminal result", async () => {
+  const { root, source } = await fixture();
+  const { buildLocalResources } = await import("../local");
+  const open = () =>
+    createTilaLocal({
+      dbPath: source.dbPath,
+      artifactsPath: source.artifactsPath,
+      project: source.projectId,
+      org: "local",
+      identity: {
+        principal_id: "local:local",
+        participant_id: "backup-worker",
+        environment: {},
+      },
+      skipFilesystemCheck: true,
+    });
+  let local = await open();
+  let resources = buildLocalResources(local.project, local.artifacts);
+  await resources.schema.apply(
+    `schema_version = 1
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done", "cancelled"]
+dependency_satisfied = ["done"]
+[work_units.task.fields.status]
+type = "enum"
+values = ["open", "done", "cancelled"]
+`,
+    undefined,
+    { expected_revision: 0 },
+  );
+  await resources.tasks.create("hotfix", "task", { status: "open" });
+  await resources.queue.configure({
+    idempotency_key: "enable",
+    expected_revision: 0,
+    enabled: true,
+    paused: false,
+    execution_limit: 1,
+  });
+  await resources.queue.enroll({ idempotency_key: "enroll", task_id: "child" });
+  const grant = await resources.queue.claimNext({ idempotency_key: "claim" });
+  if (grant.kind !== "granted") throw new Error("No grant");
+  const accepted = await resources.attempts.accept(grant.attempt.id, {
+    idempotency_key: "accept",
+    expected_revision: grant.attempt.revision,
+    fence: grant.attempt.fence,
+  });
+  const outcome = {
+    status: "success" as const,
+    execution_stopped: true,
+    unresolved_external_execution: false,
+    evidence: ["release"],
+  };
+  const finished = await resources.attempts.finish(accepted.attempt.id, {
+    idempotency_key: "finish",
+    expected_revision: accepted.attempt.revision,
+    fence: accepted.attempt.fence,
+    outcome,
+  });
+  await resources.attempts.correct(finished.attempt.id, {
+    idempotency_key: "correct",
+    task_id: "hotfix",
+    reason: "regression after release",
+  });
+  local.close();
+  const archive = join(root, "corrections.tila-backup");
+  const manifest = await exportProjectBackup({ source, output: archive });
+  expect(manifest.required_features).toContain("attempt-corrections-v1");
+  await importProjectBackup({ archive, destination: source, replace: true });
+  local = await open();
+  resources = buildLocalResources(local.project, local.artifacts);
+  try {
+    const restored = await resources.attempts.get(finished.attempt.id);
+    expect(restored.attempt.outcome).toEqual(outcome);
+    expect(restored.corrections).toMatchObject([
+      { task_id: "hotfix", reason: "regression after release" },
+    ]);
+  } finally {
+    local.close();
+  }
+});

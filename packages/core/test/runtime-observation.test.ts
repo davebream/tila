@@ -123,6 +123,7 @@ function pageWith(
         previous: previous
           ? { binding: previous, detail, presence: presence(previous) }
           : null,
+        work: null,
       },
     ],
     next_after: null,
@@ -484,6 +485,27 @@ describe("capability and command helpers", () => {
 });
 
 describe("assembleRuntimeView", () => {
+  it("lists durable work attempts only for callers who may read tasks", () => {
+    const attempt = {
+      id: "attempt-1",
+      task_id: "task-1",
+      state: "running" as const,
+      fence: 7,
+      lease_expires_at: NOW + 60_000,
+    };
+    const page = pageWith(bindingFixture());
+    page.rows[0] = { ...page.rows[0], work: { total: 6, attempts: [attempt] } };
+    expect(assemble({ page, work_allowed: true }).rows[0].work_attempt).toEqual(
+      { detail: "full", total: 6, attempts: [attempt] },
+    );
+    expect(assemble({ page }).rows[0].work_attempt).toEqual({
+      detail: "redacted",
+    });
+    page.rows[0] = { ...page.rows[0], work: { total: 0, attempts: [] } };
+    expect(
+      assemble({ page, work_allowed: true }).rows[0].work_attempt,
+    ).toBeNull();
+  });
   it("projects full evidence for an authorized viewer", () => {
     const view = assemble();
     const row = view.rows[0];

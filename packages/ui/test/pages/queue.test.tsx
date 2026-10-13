@@ -4,7 +4,13 @@ import type { QueueInspection, WorkAttempt } from "@tila/schemas";
 import { http, HttpResponse } from "msw";
 import { Route, Routes } from "react-router";
 import { server } from "../mocks/server";
-import { act, renderWithProviders, screen, waitFor } from "../test-utils";
+import {
+  act,
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test-utils";
 
 const policy = {
   enabled: true,
@@ -391,6 +397,216 @@ it("requires a recovery reason and keeps session identity when rebinding ownersh
       session: current.session,
     }),
   );
+});
+
+const participantIdentity = (principal: string) =>
+  http.get("*/api/whoami", () =>
+    HttpResponse.json({
+      ok: true,
+      project_id: "test-project",
+      role: "participant",
+      principal_id: principal,
+      scopes: "*",
+      token_name: "browser",
+    }),
+  );
+
+it.each([
+  ["a participant who enrolled the work", "assigner", true],
+  ["a participant with no control authority", "bystander", false],
+] as const)("request controls for %s", async (_name, principal, allowed) => {
+  server.use(
+    participantIdentity(principal),
+    http.get("*/projects/test-project/attempts/attempt-one", () =>
+      HttpResponse.json({
+        result: {
+          attempt: current,
+          grant_valid: true,
+          assigner_principal_id: "assigner",
+        },
+      }),
+    ),
+  );
+  renderQueue("?attempt=attempt-one");
+  expect(await screen.findByText("Enrolled by")).toBeInTheDocument();
+  const refusal = /Only the attempt owner, the principal that enrolled/;
+  if (allowed) {
+    const button = await screen.findByRole("button", {
+      name: "Request cancellation",
+    });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText(refusal)).toBeNull();
+  } else {
+    // Controls the viewer may not use are absent, not disabled.
+    expect(await screen.findByText(refusal)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Request cancellation" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Retry stopped work" }),
+    ).toBeNull();
+  }
+});
+
+it("shows the server's refusal when authority cannot be checked locally", async () => {
+  const user = userEvent.setup();
+  server.use(
+    http.post(
+      "*/projects/test-project/attempts/attempt-one/request-cancellation",
+      () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "queue-authority-lost",
+              message:
+                "Only the attempt owner, the principal that enrolled the work, or a maintainer can request this",
+            },
+          },
+          { status: 403 },
+        ),
+    ),
+  );
+  renderQueue("?attempt=attempt-one");
+  await screen.findByRole("link", { name: "Open runtime session" });
+  await user.click(
+    await screen.findByRole("button", { name: "Request cancellation" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Only the attempt owner, the principal that enrolled the work, or a maintainer",
+  );
+});
+
+it("shows captured revisions and flags a definition change since authorization", async () => {
+  const at = Date.UTC(2026, 9, 1);
+  current = attempt({
+    revisions: {
+      reserved: { definition_version: 2, policy_revision: 1, at },
+      authorized: { definition_version: 2, policy_revision: 4, at },
+    },
+  });
+  server.use(
+    http.get("*/projects/test-project/attempts/attempt-one", () =>
+      HttpResponse.json({
+        result: {
+          attempt: current,
+          grant_valid: true,
+          current_revisions: { definition_version: 3, policy_revision: 4 },
+        },
+      }),
+    ),
+  );
+  renderQueue("?attempt=attempt-one");
+  const table = await screen.findByRole("table", {
+    name: "Governing revisions",
+  });
+  const [, reserved, authorized, finished] = within(table).getAllByRole("row");
+  expect(reserved).toHaveTextContent(/Reservedv2r1/);
+  expect(authorized).toHaveTextContent(/Authorizedv2r4/);
+  expect(finished).toHaveTextContent("Finished—");
+  expect(
+    screen.getByText(/Current: definition v3 · policy\s+r4/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/Definition changed since authorization/),
+  ).toHaveTextContent("v2 → v3");
+});
+
+it("marks revisions as not recorded for legacy attempts", async () => {
+  renderQueue("?attempt=attempt-one");
+  expect(
+    await screen.findByText(/Not recorded\. This attempt predates/),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("table", { name: "Governing revisions" }),
+  ).toBeNull();
+  expect(screen.queryByText(/Definition changed/)).toBeNull();
+});
+
+it("links corrective work to a finished attempt with a retry-safe key", async () => {
+  const user = userEvent.setup();
+  const outcome = {
+    status: "failure" as const,
+    reason: "Tests failed on main",
+    evidence: [],
+    execution_stopped: true,
+    unresolved_external_execution: false,
+  };
+  current = attempt({ state: "terminal", outcome, finished_at: Date.now() });
+  const corrections = [
+    {
+      id: "correction-1",
+      attempt_id: "attempt-one",
+      task_id: "task-fix-1",
+      reason: "Flaky fixture repaired",
+      principal_id: "human",
+      participant_id: "dashboard-a",
+      created_at: Date.UTC(2026, 9, 2),
+    },
+  ];
+  const commands: Array<Record<string, unknown>> = [];
+  server.use(
+    http.get("*/projects/test-project/attempts/attempt-one", () =>
+      HttpResponse.json({
+        result: { attempt: current, grant_valid: false, corrections },
+      }),
+    ),
+    http.post(
+      "*/projects/test-project/attempts/attempt-one/correct",
+      async ({ request }) => {
+        const command = (await request.json()) as Record<string, unknown>;
+        commands.push(command);
+        if (commands.length === 1)
+          return HttpResponse.json({}, { status: 503 });
+        corrections.push({
+          id: "correction-2",
+          attempt_id: "attempt-one",
+          task_id: String(command.task_id),
+          reason: String(command.reason),
+          principal_id: "human",
+          participant_id: "dashboard-b",
+          created_at: Date.UTC(2026, 9, 3),
+        });
+        return HttpResponse.json({
+          result: { attempt: current, grant_valid: false, corrections },
+        });
+      },
+    ),
+  );
+  renderQueue("?attempt=attempt-one");
+  const list = await screen.findByRole("list", { name: "Corrective work" });
+  expect(
+    within(list).getByRole("link", { name: "task-fix-1" }),
+  ).toHaveAttribute("href", "/p/test-project/tasks/task-fix-1");
+  expect(within(list).getByText("Flaky fixture repaired")).toBeInTheDocument();
+  expect(
+    screen.getByText(/original result stays unchanged/),
+  ).toBeInTheDocument();
+  const submit = screen.getByRole("button", { name: "Link corrective task" });
+  expect(submit).toBeDisabled();
+  await user.type(screen.getByLabelText("Corrective task ID"), "task-fix-2");
+  await user.type(
+    screen.getByLabelText("Correction reason"),
+    "Re-run with the repaired fixture",
+  );
+  await user.click(submit);
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  await user.click(submit);
+  expect(
+    await screen.findByText("Corrective task linked."),
+  ).toBeInTheDocument();
+  expect(commands).toHaveLength(2);
+  expect(commands[0]).toMatchObject({
+    task_id: "task-fix-2",
+    reason: "Re-run with the repaired fixture",
+    idempotency_key: expect.any(String),
+  });
+  expect(commands[1].idempotency_key).toBe(commands[0].idempotency_key);
+  expect(
+    await within(list).findByRole("link", { name: "task-fix-2" }),
+  ).toBeInTheDocument();
+  // The original result is never rewritten.
+  expect(screen.getByText("Result: failure")).toBeInTheDocument();
+  expect(screen.getByLabelText("Corrective task ID")).toHaveValue("");
 });
 
 it("warns about expired execution authority while retaining occupied capacity", async () => {

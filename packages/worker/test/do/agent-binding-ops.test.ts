@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as ops from "../../../ops-sqlite/src/agent-binding-ops";
 import * as questionOps from "../../../ops-sqlite/src/question-ops";
 import * as schema from "../../../ops-sqlite/src/schema";
+import { seedAttempt } from "../../../ops-sqlite/test/attempt-fixture";
 import {
   correlation,
   prepare,
@@ -110,6 +111,44 @@ describe("agent binding authority and epochs", () => {
         responder,
       ),
     ).toThrow();
+  });
+
+  it("projects the current participant's unfinished attempts into the runtime page", () => {
+    const runtime = run({
+      principal_id: "worker",
+      participant_id: "worker-process",
+      lease_expires_at: Math.floor(Date.now() / 1000) + 300,
+    });
+    ops.register(
+      f.db,
+      AgentRegistrationSchema.parse({
+        id: "attempt-worker",
+        name: "Worker",
+        bind_policy: [{ principal_id: "worker", agent_id: "attempt-worker" }],
+      }),
+      owner,
+    );
+    runtime.agent_id = "attempt-worker";
+    const page = () =>
+      ops
+        .runtimePage(f.db, owner, { agent: "attempt-worker", limit: 1 })
+        .rows.at(0)?.work;
+    ops.attach(f.db, "attempt-worker", input(), authority(runtime));
+    expect(page()).toBeNull();
+    // The fixture reserves attempts as worker / worker-process.
+    const attempt = seedAttempt(f.db, "assigned", Date.now());
+    expect(page()).toEqual({
+      total: 1,
+      attempts: [
+        {
+          id: attempt.id,
+          task_id: "assigned",
+          state: "reserved",
+          fence: attempt.fence,
+          lease_expires_at: attempt.lease_expires_at,
+        },
+      ],
+    });
   });
 
   it("requires a current agent-pinned run even for an owner", () => {

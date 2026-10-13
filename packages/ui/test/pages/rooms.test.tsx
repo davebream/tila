@@ -220,7 +220,9 @@ test.each([
       "href",
       `/p/test-project/deliveries/worker/${item.delivery.id}`,
     );
-    expect(screen.getByText("Work result: not reported")).toBeInTheDocument();
+    const recipients = screen.getByRole("list", { name: "Recipients" });
+    expect(within(recipients).getByText("Work result:")).toBeInTheDocument();
+    expect(within(recipients).getByText("Not reported")).toBeInTheDocument();
   }
   expect(requests).toEqual([
     `/projects/test-project/rooms/general/messages/${row.id}/deliveries`,
