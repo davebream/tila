@@ -99,6 +99,10 @@ questionRoutes.get("/", requirePermission("read"), (c) => {
   const parsed = QuestionListQuerySchema.safeParse({
     ...raw,
     ...(raw.limit ? { limit: Number(raw.limit) } : {}),
+    // Any other value reaches the schema, which rejects it.
+    ...(raw.escalated === "true" || raw.escalated === "false"
+      ? { escalated: raw.escalated === "true" }
+      : {}),
   });
   return parsed.success
     ? forward(c, "list", parsed.data)
