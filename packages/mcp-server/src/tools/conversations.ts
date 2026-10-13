@@ -5,7 +5,10 @@ import {
   AttachAgentBindingSchema,
   ConversationPageOptionsSchema,
   ConversationProtocolSchema,
+  CreateRoomSchema,
   PublishMessageSchema,
+  RoomMemberSchema,
+  UpdateRoomSchema,
 } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
@@ -90,6 +93,111 @@ export function registerConversationTools(
     { agent: AgentIdSchema, delivery_id: z.string().uuid() },
     async ({ agent, delivery_id }) =>
       text(await facade.inbox.explain(agent, delivery_id)),
+  );
+  const revision = z.number().int().positive();
+  const key = z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Reuse only when retrying the same request after a lost reply");
+  registerPrimitiveTool(
+    server,
+    "tila_room_get",
+    "Read a room's settings, revision and members. Archived rooms stay readable under their history policy.",
+    { room: AgentIdSchema },
+    async ({ room }) => text(await facade.conversations.get(room)),
+  );
+  registerPrimitiveTool(
+    server,
+    "tila_room_create",
+    "Create a room (managers). Identical settings replay; a different room under the same ID conflicts.",
+    { ...CreateRoomSchema.shape },
+    async (input) => text(await facade.conversations.create(input)),
+  );
+  registerPrimitiveTool(
+    server,
+    "tila_room_update",
+    "Change room settings against expected_revision. TTL and hop/pair budgets apply to later messages, wake budgets at the next dispatch, history policy immediately. Send all four budgets together.",
+    {
+      room: AgentIdSchema,
+      ...UpdateRoomSchema.shape,
+      idempotency_key: key,
+    },
+    async ({ room, idempotency_key, ...input }) =>
+      text(
+        await facade.conversations.update(room, input, {
+          idempotencyKey: idempotency_key,
+        }),
+      ),
+  );
+  registerPrimitiveTool(
+    server,
+    "tila_room_member_set",
+    "Add a member (agent:<id> or principal:<id>) or change its wake setting. Membership changes advance the room revision.",
+    {
+      room: AgentIdSchema,
+      member: RoomMemberSchema.shape.member,
+      wake: z.boolean().default(true),
+      expected_revision: revision.optional(),
+      idempotency_key: key,
+    },
+    async ({ room, member, wake, expected_revision, idempotency_key }) =>
+      text(
+        await facade.conversations.join(room, member, wake, {
+          expectedRevision: expected_revision,
+          idempotencyKey: idempotency_key,
+        }),
+      ),
+  );
+  registerPrimitiveTool(
+    server,
+    "tila_room_member_remove",
+    "Remove a member. Its access to members-only history ends immediately.",
+    {
+      room: AgentIdSchema,
+      member: RoomMemberSchema.shape.member,
+      expected_revision: revision.optional(),
+      idempotency_key: key,
+    },
+    async ({ room, member, expected_revision, idempotency_key }) =>
+      text(
+        await facade.conversations.leave(room, member, {
+          expectedRevision: expected_revision,
+          idempotencyKey: idempotency_key,
+        }),
+      ),
+  );
+  registerPrimitiveTool(
+    server,
+    "tila_room_archive_preview",
+    "Show what archiving a room would affect now: members, pending deliveries and messages.",
+    { room: AgentIdSchema },
+    async ({ room }) => text(await facade.conversations.archivePreview(room)),
+  );
+  registerPrimitiveTool(
+    server,
+    "tila_room_archive",
+    "Archive a room: publication stops now and wakes at the next dispatch. History stays readable and pending deliveries can be read and acknowledged until they expire.",
+    { room: AgentIdSchema, expected_revision: revision, idempotency_key: key },
+    async ({ room, expected_revision, idempotency_key }) =>
+      text(
+        await facade.conversations.archive(room, expected_revision, {
+          idempotencyKey: idempotency_key,
+        }),
+      ),
+  );
+  registerPrimitiveTool(
+    server,
+    "tila_room_unarchive",
+    "Restore publication in an archived room.",
+    { room: AgentIdSchema, expected_revision: revision, idempotency_key: key },
+    async ({ room, expected_revision, idempotency_key }) =>
+      text(
+        await facade.conversations.unarchive(room, expected_revision, {
+          idempotencyKey: idempotency_key,
+        }),
+      ),
   );
   registerPrimitiveTool(
     server,

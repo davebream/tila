@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TilaFacade } from "tila-sdk";
+import { registerAgentTools } from "./agents";
 import { registerArtifactTools } from "./artifacts";
 import { registerClaimTools } from "./claims";
 import { registerContinuityTools } from "./continuity";
@@ -34,6 +35,7 @@ export const GROUP_MAP: Record<string, RegisterFn> = {
   gates: registerGateTools,
   signals: registerSignalTools,
   conversations: registerConversationTools,
+  agents: registerAgentTools,
   artifacts: registerArtifactTools,
   records: registerRecordTools,
   presence: registerPresenceTools,

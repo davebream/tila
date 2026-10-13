@@ -41,7 +41,7 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (74)
+## Tools (89)
 
 The default catalog contains **nine workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
@@ -167,8 +167,8 @@ Artifact results expose provenance and review state; a matching hash does not es
 | `tila_signal_history` | List delivery and acknowledgement history (admin) |
 | `tila_signal_group_list` | List principal-based signal groups |
 | `tila_signal_group_get` | Get a signal group |
-| `tila_signal_group_set` | Create or replace a signal group (admin) |
-| `tila_signal_group_delete` | Delete a signal group (admin) |
+| `tila_signal_group_set` | Create or replace a signal group (admin); `expected_revision` 0 creates only, a positive value must match |
+| `tila_signal_group_delete` | Delete a signal group (admin) against an optional `expected_revision`; past deliveries are unchanged |
 
 ### Journal, Schema & Templates
 
@@ -249,6 +249,37 @@ Conversation protocol 1 is independent of runtime protocol 1. SDK requests send
 | `tila_inbox_watch` | Wait up to 25 seconds for publication, then re-poll with jitter |
 | `tila_inbox_explain` | Inspect delivery metadata and wake attempts |
 | `tila_agent_bind` | Attach the current run at the observed binding epoch |
+| `tila_room_get` | Read room settings, revision and members (archived rooms stay readable) |
+| `tila_room_create` | Create a room (managers) |
+| `tila_room_update` | Change settings against `expected_revision` |
+| `tila_room_member_set` | Add a member or change its wake setting; advances the room revision |
+| `tila_room_member_remove` | Remove a member |
+| `tila_room_archive_preview` | Show members, pending deliveries and messages an archive affects |
+| `tila_room_archive` | Stop publication and wakes; history stays readable |
+| `tila_room_unarchive` | Restore publication |
+
+Room settings writes name the revision you read. A stale revision fails with
+`revision-conflict` and the current revision instead of overwriting another change;
+reuse an `idempotency_key` only to retry the same request.
+
+### Agent management (`TILA_MCP_TOOLS=agents`)
+
+Opt-in identity management for agent managers. Configured identity and policy are
+separate from the observed binding: an update never replaces the active binding, and
+a profile selection applies to the next new attach. Archiving releases the reviewed
+binding (`expected_epoch` from the preview) in the same step; pending deliveries stay
+until they expire and attempts keep their own lifecycle. Host-local profile changes
+are not available through MCP.
+
+| Tool | Purpose |
+|------|---------|
+| `tila_agent_list` | List agents with observed bindings; managers may include archived agents |
+| `tila_agent_get` | Read configured identity, policy, revision and observed binding |
+| `tila_agent_register` | Register an agent mailbox |
+| `tila_agent_update` | Change name, binding grants or profile selection against `expected_revision` |
+| `tila_agent_archive_preview` | Show the binding, deliveries, rooms, questions and attempts an archive affects |
+| `tila_agent_archive` | Archive and release the reviewed binding |
+| `tila_agent_unarchive` | Restore the identity; nothing is revived |
 
 Fetched content is always labelled `peer-content`, never human approval. Acknowledge
 accepted processing before acting; declining is also an acknowledgement. Neither
