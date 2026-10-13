@@ -319,6 +319,14 @@ project destroy so a recreated resource never reuses a revision; restore re-stam
 restored rows from the destination counter. Backup digests of v41 snapshots ignore
 the new columns.
 
+D1 migration 0034 adds the same kind of revision to access settings:
+`_project_repos.access_policy_revision` and `oidc_policy_revision`, and
+`_projects.settings_revision` for the display name. Writes are conditional
+UPDATEs on the reviewed revision. These columns are not in the D1 backup column
+allowlist, so restored rows start again at revision 1. `_runtime_invitations` gains
+a public `invitation_id` (the bearer hash stays the primary key and is never
+listed), `created_at` and explicit revocation fields.
+
 ### Work questions (#304, project migration 36)
 
 | Table | Persisted content |

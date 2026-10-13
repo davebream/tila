@@ -197,6 +197,10 @@ The one permitted modal. Used only before an irreversible destructive action (re
 
 Settings that change through a review (project definitions) keep an unsaved draft. Identity settings (agents, rooms, signal groups) edit a copy in the drawer opened at the resource's revision; when another change lands first, the drawer keeps the edits, names the newer revision and offers Load latest or keeping only the changed fields on top of it. A sticky Slate Surface bar above the content states the base revision and the number of changes, and offers Review & apply, the source editor and Discard (confirmed inline). Each declaration opens in the right-hand drawer, which edits a copy: Save to draft writes it back, Cancel or Escape leaves the draft unchanged. Rows show their draft state with Signal Blue badges (new, changed) or an Amber badge and strikethrough (retired on apply). Validation problems render in one Status Red summary that takes focus after a failed submit.
 
+### One-time Secrets
+
+A newly issued credential, a rotated credential or a runtime invitation is shown once, inline, in an Amber-tinted panel that takes focus: a Space Grotesk title, a sentence saying it cannot be shown again, the value in monospace with a copy button, and a single "I stored it, hide the secret" button. The value lives only in the page's state. It is never written to session storage, a draft or the query cache, and it disappears when the panel is dismissed or the page is left. A request that fails without a confirmed answer is not retried automatically; the page asks the user to check the list and revoke and reissue if the item appeared.
+
 ### Capability-gated Controls
 
 Controls that require a server-granted capability are absent, not disabled, when the capability is missing. A short muted sentence explains what the viewer cannot manage. When the server reports the capability store as unavailable, the page shows one Status Red line, a muted explanation and a Retry button, and hides every control.

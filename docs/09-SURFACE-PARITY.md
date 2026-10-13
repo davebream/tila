@@ -44,7 +44,12 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 | Summary | Y | Y | Y | Y | MCP: also available as resource |
 | Unified search | Y | Y | Y | Y | Added by T7 |
 | Record CRUD | Y | Y | Y | Y | |
-| Token issue/list/revoke | Y | Y | - | - | Admin; not agent-facing |
+| Token issue/list/revoke/rotate | Y | Y | Y | read-only | Dashboard Settings › Credentials; MCP `tila_access_credentials` lists metadata only |
+| Membership grant/role/revoke/policy | Y | Y | Y | read-only | Dashboard Settings › Access; MCP `tila_access_members` |
+| Repository link and access/OIDC policy | Y | Y | Y | read-only | Dashboard Settings › Repositories; MCP `tila_access_repos` |
+| Service identities and workload bindings | Y | Y | Y | read-only | Dashboard Settings › Service identities; MCP `tila_access_service_accounts` |
+| Runtime enrollments and invitations | Y | Y | Y | - | Dashboard Settings › Runtime access; enrollment creation is CLI-only (device proof key) |
+| Project display name | Y | Y | Y | - | Dashboard Settings › General |
 | Doctor/reconcile | Y | Y | - | - | Admin; not agent-facing |
 | Reset | Y | Y | - | - | Destructive admin |
 | Runtime view (agents, bindings, runs, hosts, sessions) | Y | - | Y | - | Operator view; dashboard Runtime tab |
@@ -55,6 +60,7 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 ## Surface-Specific Exceptions
 
 **MCP intentional gaps:**
+- **Access and security mutations** -- Memberships, repository policy, service identities, credentials and runtime access are read-only through MCP. Agents should not grant themselves or others authority; owners change them in the dashboard, CLI or SDK.
 - **Artifact download** -- MCP agents upload artifacts (content addressed); downloading binary blobs is not an agent workflow.
 - **Artifact/index list** -- Use `tila_artifact_search` or `tila_search` for discovery; listing all artifacts is a human admin operation.
 - **Gate list** -- Gates are visible via `tila_task_show` (task detail includes gate status). A dedicated list is admin tooling.

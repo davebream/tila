@@ -991,6 +991,24 @@ After resolving the cause, rerunning skips existing tables, indexes, triggers an
 columns. For the interrupted `0027_scoped_credentials.sql` trigger failure,
 rerunning with the fixed CLI completes the migration and records it.
 
+### Access settings revisions (#298)
+
+`tila deploy` applies `0034_access_settings_revisions.sql` before uploading the
+Worker; with a separate pipeline, apply it first. It is additive: repository links
+gain `access_policy_revision` and `oidc_policy_revision`, projects gain
+`settings_revision` (all starting at 1), and runtime invitations gain a public
+`invitation_id` (backfilled for existing rows), `created_at`, `revoked_at` and
+`revoked_by`. A Worker deployed ahead of it fails every repository link read,
+including GitHub repository sign-in and mirrored membership, as well as project
+settings and invitations, so apply the migration first. The same release adds project (DO)
+migration 42, which every project applies on its first request.
+
+After deploy, repository and cookie-session owners see two behaviour changes:
+repository link and policy writes from an interactive session now need recent
+authentication (step-up), and a stale `expected_revision` returns 412
+`revision-conflict`. Clients that omit `expected_revision` keep the previous
+unconditional writes.
+
 ### Project bootstrap repair (#360)
 
 Upgrade the CLI and Worker together. `tila deploy` applies
