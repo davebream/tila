@@ -66,6 +66,8 @@ function query(c: Context<AppEnv>) {
   const result: Record<string, unknown> = { ...c.req.query() };
   for (const key of ["limit", "offset", "priority"])
     if (result[key] !== undefined) result[key] = Number(result[key]);
+  if (result.active === "true" || result.active === "false")
+    result.active = result.active === "true";
   if (typeof result.capabilities === "string") {
     try {
       result.capabilities = JSON.parse(result.capabilities);

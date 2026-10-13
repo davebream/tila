@@ -1,58 +1,11 @@
-import { SELF, evictDurableObject } from "cloudflare:test";
-import { SignJWT } from "jose";
+import { evictDurableObject } from "cloudflare:test";
 import { expect, it } from "vitest";
-import { ProjectMembershipStore } from "../../worker/src/d1";
-import { queueApiFixture as fixture } from "./queue-api-fixture";
+import { queueApiFixture as fixture, member } from "./queue-api-fixture";
 import { bindings } from "./setup";
 
 type Attempt = { id: string; revision: number; fence: number };
 const session = { provider: "fixture", id: "native", worktree: "/fixture" };
 
-/** A participant-role human member, so maintainer authority never applies. */
-async function member(project: string, userId: number) {
-  await new ProjectMembershipStore(bindings.DB).grant({
-    projectId: project,
-    principal: { provider: "github", host: "github.com", user_id: userId },
-    subjectKind: "human",
-    role: "participant",
-    actorPrincipalId: "fixture",
-  });
-  const now = Math.floor(Date.now() / 1000);
-  const key = Uint8Array.from(
-    atob(
-      bindings.GITHUB_SESSION_HMAC_KEY.replace(/-/g, "+").replace(/_/g, "/"),
-    ),
-    (c) => c.charCodeAt(0),
-  );
-  const token = `tila_s.${await new SignJWT({
-    jti: crypto.randomUUID(),
-    authorization_version: 2,
-    project_id: project,
-    github_host: "github.com",
-    github_repo_id: 42,
-    github_login: `user-${userId}`,
-    github_user_id: userId,
-    permission: "write",
-    issued_at: now,
-    expires_at: now + 3600,
-    iss: "tila",
-    aud: "tila",
-  })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .sign(key)}`;
-  const principal = `github:github.com:${userId}`;
-  const post = async (path: string, body: object, participant: string) =>
-    SELF.fetch(`https://worker/projects/${project}${path}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Tila-Participant-Id": participant,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-  return { principal, post };
-}
 async function result<T>(response: Response, status = 200): Promise<T> {
   expect(response.status, await response.clone().text()).toBe(status);
   return ((await response.json()) as { result: T }).result;

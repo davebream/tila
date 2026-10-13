@@ -98,6 +98,7 @@ export const attemptCommand = defineCommand({
       "rebind",
       "retry",
       "force-recovery",
+      "replace-session",
     ].map((action) => [action, operation("attempt", action)]),
   ),
 });

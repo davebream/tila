@@ -12,6 +12,7 @@ import {
   AttemptListQuerySchema,
   AttemptRebindCommandSchema,
   AttemptReconcileCommandSchema,
+  AttemptReplaceSessionCommandSchema,
   AttemptResumeCommandSchema,
   AttemptRetryCommandSchema,
   AttemptStartedCommandSchema,
@@ -169,6 +170,13 @@ export function createAttemptRoutes(deps: RouterDeps) {
             AttemptRetryCommandSchema.parse(body),
             origin,
             manage,
+          );
+        case "replace-session":
+          return attemptRecoveryOps.replaceSession(
+            deps.db,
+            id,
+            AttemptReplaceSessionCommandSchema.parse(body),
+            origin,
           );
         case "force-recovery":
           return attemptRecoveryOps.forceRecovery(

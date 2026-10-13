@@ -11,6 +11,7 @@ import type {
   AttemptForceCommand,
   AttemptRebindCommand,
   AttemptReconcileCommand,
+  AttemptReplaceSessionCommand,
   AttemptResumeCommand,
   AttemptRetryCommand,
   AttemptStartedCommand,
@@ -157,6 +158,12 @@ export class EmbeddedAttemptBackend implements AttemptBackend {
   async forceRecovery(id: string, input: AttemptForceCommand) {
     return this.withRetry(() =>
       attemptRecoveryOps.forceRecovery(this.db, id, input, this.origin(), true),
+    );
+  }
+
+  async replaceSession(id: string, input: AttemptReplaceSessionCommand) {
+    return this.withRetry(() =>
+      attemptRecoveryOps.replaceSession(this.db, id, input, this.origin()),
     );
   }
 }

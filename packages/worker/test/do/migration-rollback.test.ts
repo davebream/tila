@@ -255,6 +255,7 @@ describe("runMigrationsWithPitrRollback", () => {
                   "lease_expires_at",
                   "outcome",
                   "revision",
+                  "revisions",
                 ],
                 execution_reservations: [
                   "task_id",

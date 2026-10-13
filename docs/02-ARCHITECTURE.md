@@ -2851,7 +2851,7 @@ participant-level apply change requires an explicit authorization decision.
 | Code / resource | Current behavior and required activation contract |
 |---|---|
 | D — applied definitions | Current apply parses input, then diffs/commits inside a DO SQLite transaction, increments history `version`, and journals; no expected revision is checked. Current no-change/destructive outcomes remain documented. #296 adds atomic revision preconditions, reviewed destructive changes, idempotent retries and public history/restore. New writes use current validation; legacy reads retain supported lazy `default_for_legacy` behavior without bulk rewriting stored rows. Retiring a type must not conceal its remaining rows. |
-| T — templates | Instantiation validates and creates work/relationships using the active definition. Edits affect later instantiations only; previously created work is independent. Capture governing revisions for future attempts (#303), rather than treating template edits as task mutations. |
+| T — templates | Instantiation validates and creates work/relationships using the active definition. Edits affect later instantiations only; previously created work is independent. Attempts record the definition and queue-policy revisions in force at reservation, authorization and result (#303, migration 39) as audit evidence; template edits are not task mutations. |
 | A — artifact policy | New versioned writes/restores capture current retention at reservation. Existing unassigned revisions get one persisted policy snapshot through bounded backfill; already assigned expiry is not rewritten by later schema edits. Expired non-head revisions may be swept; live lineage heads are protected. Explicit deletion/lineage retirement uses durable intent/retry records and preserves metadata/provenance. Restore cannot recover deleted bytes or revive a destroyed lineage. Search policy changes do not promise automatic historical reindexing. |
 | I — stable identity / archive | Agent registration is currently immutable. #298 adds revision-checked rename/policy/archive; IDs and attribution remain stable. Required archive stops new assignments/publications/bindings as applicable, preserves references/pending work and exposes explicit cancellation/reassignment. It must invalidate affected authority rather than silently keep an archived identity active. Unarchive, if added, cannot revive old leases or revoked credentials. Project destruction is a separate root operation, never “archive”. |
 | R — rooms | Create/member management exists; policy update/archive is missing. Required updates check room revision. New TTL/budget settings apply to subsequent publications; already stored recipient/expiry snapshots remain evidence. Visibility/member revocation governs subsequent access immediately. Archive stops new publication/wake scheduling, preserves authorized history and pending delivery evidence; pending responsibilities require an explicit disposition, not silent deletion. |
@@ -2888,10 +2888,12 @@ historical evidence -> permitted inspection -> restore-as-new where supported
 ```
 
 The recovery query must recover durable pending work/questions and cursor history,
-not reconstruct completion from presence or terminal state. #303 owns controlled
-attachment of a replacement session to an existing attempt versus a new attempt;
-both require fresh authority, and a stale result/answer must be rejected. A later
-hotfix links a new task/attempt to the original result instead of rewriting it.
+not reconstruct completion from presence or terminal state. A replacement session
+attaches to the existing attempt through `replace-session`, or execution starts a
+new attempt through force recovery or retry (see "Session replacement, revisions
+and recovery queries"). Both paths require fresh authority, and a stale
+result/answer is rejected. A later hotfix links a new task/attempt to the
+original result instead of rewriting it.
 Attempt cancellation supersedes pending questions (#304) transactionally while
 retaining discussion and existing answer evidence. Replacement execution requires
 a linked question and fresh confirmation; see Durable questions and decisions.
@@ -3252,6 +3254,69 @@ unfinished returns `queue-conflict` naming the existing entry, in the message an
 in `details.entry_id`, so a client can reconcile an ambiguous failure.
 `GET /health` advertises `attempt-control-v1` when a Worker enforces these rules.
 
+### Session replacement, revisions and recovery queries (#303)
+
+An attempt can outlive a provider session. When the recorded native session
+stops and the same work continues in a new one, for example after a provider
+restart, the owner calls `replace-session`:
+
+- **Command:** the recorded fence and revision, a reason, `previous_session`,
+  `previous_stopped: true`, the new `session`, and an optional checkpoint.
+- **Caller:** only the exact owner (principal and participant). To change owners,
+  a maintainer rebinds first; rebind keeps the recorded session.
+- **States:** `running`, or `uncertain` after lease expiry. `previous_session`
+  must equal the recorded session, and the new session must differ (the same
+  session reconnects through `reconcile` with `observation: "running"`). A
+  pending cancellation is rejected; record the stopped outcome instead.
+- **Effect, in one transaction:** the old claim and fence are revoked, open
+  questions are superseded, a fresh fence is issued, and the session, checkpoint
+  and `revisions.authorized` are written. `attempt.session_replaced` records
+  the previous session and fence. The task lifecycle and outcome are untouched.
+- **Retries:** the receipt stores the issued fence. A replay returns current
+  state, and `grant_valid` is true only while that fence is still current.
+
+When the old session's state is unknown, or the attempt is already terminal, the
+work continues in a new attempt instead: force recovery or retry, then a fresh
+claim. That attempt has a new ID, a `predecessor_id` link, its own acceptance and
+no inherited checkpoint, questions or fence. Neither path inherits the old
+session's authority.
+
+Attempts record governing revisions in `revisions` (migration 39). Each snapshot
+holds the project schema history version (`definition_version`), the queue
+policy revision and a timestamp:
+
+| Snapshot | Written at |
+|---|---|
+| `reserved` | Admission |
+| `authorized` | Accept, claim-resume, reconnect, rebind and session replacement |
+| `finished` | The terminal result, including expiry of an unaccepted reservation |
+
+The same values appear on the matching journal events, and `GET /attempts/:id`
+adds `current_revisions` so clients can show drift. Snapshots are audit
+evidence only. They never authorize an operation or select older rules:
+
+| Change during an attempt | Effect |
+|---|---|
+| Queue paused or disabled | Blocks new grants and claim-resume only; accepted work can heartbeat and finish |
+| `lease_ms` changed | Applies at the next heartbeat or fresh grant |
+| Limits lowered | Never evicts live work |
+| Enrollment edited | Affects later resume and retry admission |
+| Definition changed | Applies at the next lifecycle transition |
+| Membership or credential revoked | The next request is rejected (401/403) before any receipt replay |
+
+When the current definition rejects a transition, such as a result whose
+lifecycle mapping or required fields no longer validate, the whole transaction
+rolls back and the attempt is unchanged. The error keeps its existing contract
+(`422 constraint-violation` for a field rule, `409 queue-conflict` when the
+lifecycle was removed), and its message now names the current and captured
+definition versions. Repair the definition, then finish or reconcile again.
+
+Attempt lists accept `principal_id`, `participant_id` and `active` filters
+(`active=true` selects every nonterminal state), backed by the
+`work_attempts_owner` index. A restarted wrapper finds its unfinished work with
+these filters instead of paging through the project. `GET /health` advertises
+`attempt-session-replacement-v1`.
+
 ### Managed queue public contract
 
 The SDK exposes `queue` and `attempts` alongside the existing task facade. The
@@ -3266,7 +3331,7 @@ conversation `dispatch` namespace remains independent. HTTP uses project-scoped
 | Queue HTTP | `GET /queue`, `GET /queue/policy` | `POST /queue/configure`, `/enroll`, `/claim`, `/entries/:id/edit`, `/entries/:id/withdraw` |
 | Attempt HTTP | `GET /attempts`, `GET /attempts/:id` | `POST /attempts/:id/<action>` |
 | SDK queue | `policy`, `inspect` | `configure`, `enroll`, `edit`, `withdraw`, `claimNext` |
-| SDK attempts | `get`, `list` | `accept`, `started`, `heartbeat`, `finish`, `requestSuspension`, `confirmSuspension`, `requestResume`, `claimResume`, `requestCancellation`, `reconcile`, `rebind`, `retry`, `forceRecovery` |
+| SDK attempts | `get`, `list` | `accept`, `started`, `heartbeat`, `finish`, `requestSuspension`, `confirmSuspension`, `requestResume`, `claimResume`, `requestCancellation`, `reconcile`, `rebind`, `retry`, `forceRecovery`, `replaceSession` |
 
 HTTP attempt actions use kebab case. Mutation bodies carry `idempotency_key` and,
 where applicable, `expected_revision` and `fence`. If supplied, the HTTP
@@ -3277,8 +3342,9 @@ current state and grant validity. An old claim or acceptance fence cannot become
 valid again after resume, rebind, expiry or restore. Read responses are not cached.
 
 Queue inspection supports state, type, priority, target and capability filters,
-plus `limit` (1–500) and `offset`. Attempt inspection supports task, enrollment and
-state filters with the same pagination bounds. Resource restrictions apply before
+plus `limit` (1–500) and `offset`. Attempt inspection supports task, enrollment,
+state, owner (`principal_id`, `participant_id`) and `active` filters with the
+same pagination bounds. Resource restrictions apply before
 pagination; restricted predecessors are not disclosed in block diagnostics.
 Scheduling capabilities are declared compatibility metadata, not authorization.
 A valid denial (`no_grant`: disabled, paused, empty, blocked or capacity exhausted)

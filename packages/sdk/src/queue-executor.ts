@@ -18,7 +18,17 @@ export type ExecutionObservation =
       session: AttemptSession;
       checkpoint: Record<string, unknown>;
     }
-  | { state: "stopped"; outcome: AttemptOutcome };
+  | { state: "stopped"; outcome: AttemptOutcome }
+  /**
+   * The recorded native session stopped and a replacement now runs the same
+   * attempt, for example after a provider session restart.
+   */
+  | {
+      state: "replaced";
+      session: AttemptSession;
+      reason: string;
+      checkpoint?: Record<string, unknown>;
+    };
 
 export interface ExecutionContext {
   /** Stop initiating external effects when aborted. Existing effects cannot be retracted. */
@@ -83,7 +93,14 @@ export class QueueExecutor {
   async recoverable(): Promise<WorkAttempt[]> {
     const result: WorkAttempt[] = [];
     for (let offset = 0; ; offset += 100) {
-      const page = await this.backend.attempts.list({ limit: 100, offset });
+      const page = await this.backend.attempts.list({
+        principal_id: this.options.principalId,
+        participant_id: this.options.participantId,
+        active: true,
+        limit: 100,
+        offset,
+      });
+      // Older servers ignore these filters; keep the local ownership check.
       result.push(
         ...page.filter((a) => a.state !== "terminal" && this.owned(a)),
       );
@@ -203,6 +220,26 @@ export class QueueExecutor {
     }
 
     const observed = await this.adapter.inspect(view.attempt);
+    if (observed.state === "replaced") {
+      // The adapter vouches that the recorded session stopped. The same attempt
+      // gets a fresh fence; the old session's authority is not inherited.
+      if (!view.attempt.session)
+        throw new QueueAuthorityLostError(
+          "No recorded session exists to replace; bind the session with started",
+        );
+      const input = {
+        ...this.revision(view),
+        fence: view.attempt.fence,
+        reason: observed.reason,
+        previous_session: view.attempt.session,
+        previous_stopped: true as const,
+        session: observed.session,
+        ...(observed.checkpoint ? { checkpoint: observed.checkpoint } : {}),
+      };
+      return this.command(() =>
+        this.backend.attempts.replaceSession(id, input),
+      );
+    }
     if (
       view.attempt.session &&
       "session" in observed &&

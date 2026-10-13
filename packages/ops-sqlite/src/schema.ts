@@ -958,6 +958,9 @@ export const workAttempts = sqliteTable(
     created_at: integer("created_at").notNull(),
     updated_at: integer("updated_at").notNull(),
     finished_at: integer("finished_at"),
+    revisions: text("revisions", { mode: "json" }).$type<
+      import("@tila/schemas").AttemptRevisions
+    >(),
   },
   (table) => [
     uniqueIndex("work_attempts_nonterminal_task")
@@ -965,6 +968,11 @@ export const workAttempts = sqliteTable(
       .where(sql`${table.state} != 'terminal'`),
     index("work_attempts_entry").on(table.entry_id, table.created_at),
     index("work_attempts_expiry").on(table.state, table.lease_expires_at),
+    index("work_attempts_owner").on(
+      table.principal_id,
+      table.participant_id,
+      table.state,
+    ),
   ],
 );
 export const executionReservations = sqliteTable("execution_reservations", {

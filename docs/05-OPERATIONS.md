@@ -2159,7 +2159,9 @@ remain revision-aware even if the queue is subsequently disabled.
 
 Use `tila queue inspect --json` for occupancy, oldest waiting age, blocked work
 and policy revision. `tila attempt list --data '{"state":"uncertain"}' --json`
-locates executions requiring reconciliation. Journal domain events retain grant
+locates executions requiring reconciliation. A restarted wrapper lists its own
+unfinished work with
+`tila attempt list --data '{"principal_id":"<principal>","participant_id":"<participant>","active":true}' --json`. Journal domain events retain grant
 denials, expiry, suspension, recovery and terminal outcomes. Queue/attempt history
 and safety-critical receipts are included in backup and are not removed by the
 seven-day generic deduplication sweep.
@@ -2182,7 +2184,17 @@ task; inspect it instead of enrolling again.
 
 For uncertain execution, inspect the recorded provider session first. Reconnect
 or rebind a confirmed live session; reconcile a confirmed stopped session with an
-explicit outcome. An unreachable session remains uncertain even when the work was
+explicit outcome. If the recorded session stopped but the work continues in a new
+provider session, the owner calls `tila attempt replace-session` with the recorded
+fence, the old session as `previous_session`, `previous_stopped: true` and the new
+session. The attempt keeps its ID and gets a fresh fence; the old session can no
+longer heartbeat or report a result.
+
+If a result fails with `422 constraint-violation` or `409 queue-conflict` and the
+message names a current and a captured definition version, the definition
+changed during the attempt and now rejects the lifecycle transition. Nothing was committed. Restore a lifecycle mapping or
+field rule that accepts the transition (as a new definition revision), then
+finish or reconcile again. An unreachable session remains uncertain even when the work was
 declared retry-safe. Maintainer force recovery requires a reason and records
 abandonment with unresolved external execution; it cannot kill an unreachable
 process. Reconcile restored suspended sessions with `observation: "suspended"`,

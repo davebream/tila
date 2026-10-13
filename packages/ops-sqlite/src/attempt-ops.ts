@@ -6,14 +6,16 @@ import {
   type AttemptListQuery,
   AttemptListQuerySchema,
   type AttemptOutcome,
+  type AttemptRevisionSnapshot,
+  type AttemptRevisions,
   type AttemptStartedCommand,
   AttemptStartedCommandSchema,
   type AttemptView,
   type QueueEntry,
   type WorkAttempt,
 } from "@tila/schemas";
-import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
-import { resolveCurrentSchema } from "./constraint-ops";
+import { and, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
+import { SchemaWriteError, resolveCurrentSchema } from "./constraint-ops";
 import { acquireInTransaction } from "./coordination-ops";
 import { updateInTransaction } from "./entity-ops";
 import type { RequestOrigin } from "./journal-ops";
@@ -44,30 +46,74 @@ export function list(
   allowsTask: (id: string) => boolean = () => true,
 ): WorkAttempt[] {
   const options = AttemptListQuerySchema.parse(raw);
-  return db
-    .select()
-    .from(schema.workAttempts)
-    .where(
-      and(
-        options.state
-          ? eq(schema.workAttempts.state, options.state)
-          : undefined,
-        options.task_id
-          ? eq(schema.workAttempts.task_id, options.task_id)
-          : undefined,
-        options.entry_id
-          ? eq(schema.workAttempts.entry_id, options.entry_id)
-          : undefined,
-      ),
-    )
-    .orderBy(
-      desc(schema.workAttempts.fence),
-      desc(schema.workAttempts.created_at),
-      desc(schema.workAttempts.id),
-    )
-    .all()
-    .filter((attempt) => allowsTask(attempt.task_id))
-    .slice(options.offset, options.offset + options.limit);
+  const a = schema.workAttempts;
+  const where = and(
+    options.state ? eq(a.state, options.state) : undefined,
+    options.task_id ? eq(a.task_id, options.task_id) : undefined,
+    options.entry_id ? eq(a.entry_id, options.entry_id) : undefined,
+    options.principal_id ? eq(a.principal_id, options.principal_id) : undefined,
+    options.participant_id
+      ? eq(a.participant_id, options.participant_id)
+      : undefined,
+    options.active === undefined
+      ? undefined
+      : options.active
+        ? ne(a.state, "terminal")
+        : eq(a.state, "terminal"),
+  );
+  // Resource access is applied before pagination; scan bounded batches so a
+  // mostly hidden history never loads every attempt at once.
+  const wanted = options.offset + options.limit;
+  const rows: WorkAttempt[] = [];
+  for (let skip = 0; rows.length < wanted; skip += LIST_BATCH) {
+    const batch = db
+      .select()
+      .from(a)
+      .where(where)
+      .orderBy(desc(a.fence), desc(a.created_at), desc(a.id))
+      .limit(LIST_BATCH)
+      .offset(skip)
+      .all();
+    rows.push(...batch.filter((attempt) => allowsTask(attempt.task_id)));
+    if (batch.length < LIST_BATCH) break;
+  }
+  return rows.slice(options.offset, wanted);
+}
+const LIST_BATCH = 200;
+/** Definition and policy revisions in force now. Audit evidence, never authority. */
+export function governingRevisions(
+  db: ProjectDatabase,
+  now: number,
+): AttemptRevisionSnapshot {
+  const definition = db
+    .select({
+      version: sql<number | null>`max(${schema.schemaHistory.version})`,
+    })
+    .from(schema.schemaHistory)
+    .get();
+  const policy = db
+    .select({ revision: schema.queuePolicy.revision })
+    .from(schema.queuePolicy)
+    .where(eq(schema.queuePolicy.singleton, 1))
+    .get();
+  return {
+    definition_version: definition?.version ?? null,
+    policy_revision: policy?.revision ?? 0,
+    at: now,
+  };
+}
+export function captureRevisions(
+  attempt: WorkAttempt,
+  key: keyof AttemptRevisions,
+  snapshot: AttemptRevisionSnapshot,
+): AttemptRevisions {
+  return { ...(attempt.revisions ?? {}), [key]: snapshot };
+}
+export function revisionData(snapshot: AttemptRevisionSnapshot) {
+  return {
+    definition_version: snapshot.definition_version,
+    policy_revision: snapshot.policy_revision,
+  };
 }
 export function grantValid(
   db: ProjectDatabase,
@@ -114,10 +160,12 @@ export function view(
     .from(schema.queueEntries)
     .where(eq(schema.queueEntries.id, attempt.entry_id))
     .get();
+  const { at: _at, ...current } = governingRevisions(db, now);
   return {
     attempt,
     grant_valid: grantValid(db, attempt, origin, now),
     assigner_principal_id: entry?.assigner ?? null,
+    current_revisions: current,
   };
 }
 export function assertOwner(
@@ -202,15 +250,19 @@ export function transitionTask(
     );
   const lifecycle = resolveCurrentSchema(tx)?.work_units[task.type]?.lifecycle;
   if (!lifecycle)
-    throw new QueueError(
-      "queue-conflict",
-      "Task lifecycle configuration was removed; reconcile its execution result",
+    throw definitionConflict(
+      tx,
+      attempt,
+      transition,
+      "Task lifecycle configuration was removed",
+      now,
     );
   const target =
     transition === "start"
       ? lifecycle.on_start
       : lifecycle.outcomes?.[transition];
-  if (target !== undefined)
+  if (target === undefined) return;
+  try {
     updateInTransaction(
       tx,
       task.id,
@@ -221,6 +273,40 @@ export function transitionTask(
       now,
       attempt.id,
     );
+  } catch (error) {
+    if (!(error instanceof SchemaWriteError)) throw error;
+    // Keep the constraint-violation contract; only add the revision context.
+    throw new SchemaWriteError(
+      definitionConflict(tx, attempt, transition, error.message, now).message,
+    );
+  }
+}
+/**
+ * Transitions validate against the current definition. A captured revision is
+ * reported for diagnosis; it never selects older rules.
+ */
+function definitionConflict(
+  tx: ProjectTransaction,
+  attempt: WorkAttempt,
+  transition: string,
+  reason: string,
+  now: number,
+): QueueError {
+  const current = governingRevisions(tx, now).definition_version;
+  const captured = (
+    attempt.revisions?.authorized ?? attempt.revisions?.reserved
+  )?.definition_version;
+  return new QueueError(
+    "queue-conflict",
+    `Current definition v${current ?? "none"} rejects the ${transition} transition for task ${attempt.task_id}${
+      captured === undefined ? "" : ` (attempt captured v${captured ?? "none"})`
+    }: ${reason}. Repair the definition, then retry or reconcile.`,
+    {
+      transition,
+      current_definition_version: current,
+      captured_definition_version: captured ?? null,
+    },
+  );
 }
 
 /** Only admission calls this primitive, inside the capacity/eligibility transaction. */
@@ -258,6 +344,7 @@ export function reserveInTransaction(
   if (liveClaim && liveClaim.expires_at > now)
     throw new QueueError("queue-conflict", "Task already has a live claim");
   const id = crypto.randomUUID();
+  const snapshot = governingRevisions(tx, now);
   const grant = acquireInTransaction(
     tx,
     resource,
@@ -283,6 +370,7 @@ export function reserveInTransaction(
       predecessor_id: predecessorId ?? null,
       created_at: now,
       updated_at: now,
+      revisions: { reserved: snapshot },
     })
     .run();
   tx.insert(schema.executionReservations)
@@ -313,7 +401,7 @@ export function reserveInTransaction(
     "attempt.reserved",
     resource,
     origin,
-    { attempt_id: id, entry_id: entry.id },
+    { attempt_id: id, entry_id: entry.id, ...revisionData(snapshot) },
     grant.fence,
   );
   return get(tx, id);
@@ -369,6 +457,11 @@ export function expireInTransaction(
           state: "terminal",
           lease_expires_at: null,
           finished_at: now,
+          revisions: captureRevisions(
+            attempt,
+            "finished",
+            governingRevisions(tx, now),
+          ),
           outcome: {
             status: "abandoned",
             reason:
@@ -489,13 +582,23 @@ export function accept(
           "Cancellation requested before acceptance",
         );
       transitionTask(tx, attempt, origin, "start", now);
-      change(tx, attempt, { state: "starting", accepted_at: now }, now);
+      const snapshot = governingRevisions(tx, now);
+      change(
+        tx,
+        attempt,
+        {
+          state: "starting",
+          accepted_at: now,
+          revisions: captureRevisions(attempt, "authorized", snapshot),
+        },
+        now,
+      );
       event(
         tx,
         "attempt.accepted",
         attempt.resource,
         origin,
-        { attempt_id: id },
+        { attempt_id: id, ...revisionData(snapshot) },
         attempt.fence,
       );
     },
@@ -640,10 +743,17 @@ export function finishInTransaction(
 ): void {
   transitionTask(tx, attempt, origin, outcome.status, now);
   invalidateQuestions(tx, attempt.id, "attempt finished", actor, now);
+  const snapshot = governingRevisions(tx, now);
   change(
     tx,
     attempt,
-    { state: "terminal", outcome, finished_at: now, lease_expires_at: null },
+    {
+      state: "terminal",
+      outcome,
+      finished_at: now,
+      lease_expires_at: null,
+      revisions: captureRevisions(attempt, "finished", snapshot),
+    },
     now,
   );
   revoke(tx, attempt);
@@ -663,7 +773,12 @@ export function finishInTransaction(
     "attempt.finished",
     attempt.resource,
     actor,
-    { attempt_id: attempt.id, outcome, ...ownerData(attempt, actor) },
+    {
+      attempt_id: attempt.id,
+      outcome,
+      ...ownerData(attempt, actor),
+      ...revisionData(snapshot),
+    },
     attempt.fence,
   );
   const entry = tx
@@ -762,6 +877,7 @@ export function refence(
   owner: RequestOrigin,
   now: number,
   actor: RequestOrigin = owner,
+  extra: Partial<typeof schema.workAttempts.$inferInsert> = {},
 ): WorkAttempt {
   invalidateQuestions(
     tx,
@@ -794,6 +910,7 @@ export function refence(
       lease_expires_at: grant.expires_at,
       principal_id: owner.principalId,
       participant_id: owner.participantId,
+      ...extra,
     },
     now,
   );

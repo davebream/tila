@@ -5,6 +5,8 @@ import {
   AttemptRebindCommandSchema,
   type AttemptReconcileCommand,
   AttemptReconcileCommandSchema,
+  type AttemptReplaceSessionCommand,
+  AttemptReplaceSessionCommandSchema,
   type AttemptResumeCommand,
   AttemptResumeCommandSchema,
   type AttemptResumeResult,
@@ -346,7 +348,20 @@ export function claimResume(
         )
           return denied("blocked");
         const renewed = attempts.refence(tx, attempt, origin, now);
-        attempts.change(tx, renewed, { state: "starting" }, now);
+        const revisions = attempts.governingRevisions(tx, now);
+        attempts.change(
+          tx,
+          renewed,
+          {
+            state: "starting",
+            revisions: attempts.captureRevisions(
+              renewed,
+              "authorized",
+              revisions,
+            ),
+          },
+          now,
+        );
         tx.update(schema.executionReservations)
           .set({ execution_held: true, updated_at: now })
           .where(eq(schema.executionReservations.task_id, attempt.task_id))
@@ -356,7 +371,11 @@ export function claimResume(
           "attempt.resumed",
           attempt.resource,
           origin,
-          { attempt_id: id, checkpoint: attempt.checkpoint },
+          {
+            attempt_id: id,
+            checkpoint: attempt.checkpoint,
+            ...attempts.revisionData(revisions),
+          },
           renewed.fence,
         );
         return { attempt_id: id, fence: renewed.fence };
@@ -467,8 +486,14 @@ export function reconcile(
             "queue-conflict",
             "Reconnection must identify the same recorded execution",
           );
-        const rebound = attempts.refence(tx, attempt, owner, now, origin);
-        attempts.change(tx, rebound, { session: input.session }, now);
+        const rebound = attempts.refence(tx, attempt, owner, now, origin, {
+          session: input.session,
+          revisions: attempts.captureRevisions(
+            attempt,
+            "authorized",
+            attempts.governingRevisions(tx, now),
+          ),
+        });
         event(
           tx,
           "attempt.rebound",
@@ -570,6 +595,13 @@ export function rebind(
         },
         now,
         origin,
+        {
+          revisions: attempts.captureRevisions(
+            attempt,
+            "authorized",
+            attempts.governingRevisions(tx, now),
+          ),
+        },
       );
       event(
         tx,
@@ -721,4 +753,84 @@ export function forceRecovery(
     now,
     anyone,
   );
+}
+/**
+ * Bind a replacement native session to the same attempt after the recorded one
+ * stopped, for example when a provider session restarts. Only the current owner
+ * may do this; it receives a fresh fence and the old session's authority,
+ * questions and grant are retired. To change owners, rebind first.
+ */
+export function replaceSession(
+  db: ProjectDatabase,
+  id: string,
+  raw: AttemptReplaceSessionCommand,
+  origin: RequestOrigin,
+  now = Date.now(),
+): AttemptView {
+  const input = AttemptReplaceSessionCommandSchema.parse(raw);
+  attempts.expire(db, now);
+  return db.transaction((tx) => {
+    const attempt = attempts.get(tx, id);
+    attempts.assertOwner(attempt, origin);
+    const result = command(
+      tx,
+      `replace-session:${id}`,
+      origin,
+      input,
+      () => {
+        attempts.assertOwner(attempt, origin, input.fence);
+        checkRevision(attempt.revision, input.expected_revision);
+        requireState(attempt, ["running", "uncertain"]);
+        if (
+          !attempt.session ||
+          canonicalJson(attempt.session) !==
+            canonicalJson(input.previous_session)
+        )
+          throw new QueueError(
+            "queue-conflict",
+            "The previous session must be the recorded session",
+          );
+        if (canonicalJson(attempt.session) === canonicalJson(input.session))
+          throw new QueueError(
+            "queue-invalid-state",
+            "The same session reconnects through reconcile with observation running",
+          );
+        if (attempt.cancellation_requested)
+          throw new QueueError(
+            "queue-invalid-state",
+            "Cancellation is pending; record the stopped outcome instead",
+          );
+        const snapshot = attempts.governingRevisions(tx, now);
+        const renewed = attempts.refence(tx, attempt, origin, now, origin, {
+          session: input.session,
+          checkpoint: input.checkpoint ?? attempt.checkpoint,
+          revisions: attempts.captureRevisions(attempt, "authorized", snapshot),
+        });
+        event(
+          tx,
+          "attempt.session_replaced",
+          attempt.resource,
+          origin,
+          {
+            attempt_id: id,
+            reason: input.reason,
+            previous_session: attempt.session,
+            session: input.session,
+            previous_fence: attempt.fence,
+            ...attempts.revisionData(snapshot),
+          },
+          renewed.fence,
+        );
+        return { attempt_id: id, fence: renewed.fence };
+      },
+      { attempt_id: id, entry_id: attempt.entry_id },
+      now,
+    );
+    const view = attempts.view(tx, id, origin, now);
+    // A replayed receipt never authorizes a later grant.
+    return {
+      ...view,
+      grant_valid: view.grant_valid && result.fence === view.attempt.fence,
+    };
+  });
 }

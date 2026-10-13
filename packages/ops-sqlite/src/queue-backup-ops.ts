@@ -62,6 +62,10 @@ export function validateQueueBackupRow(
       session: row.session === null ? null : json(row.session),
       checkpoint: row.checkpoint === null ? null : json(row.checkpoint),
       outcome: row.outcome === null ? null : json(row.outcome),
+      revisions:
+        row.revisions === null || row.revisions === undefined
+          ? null
+          : json(row.revisions),
       cancellation_requested: boolean.parse(row.cancellation_requested),
       suspension_requested: boolean.parse(row.suspension_requested),
     });

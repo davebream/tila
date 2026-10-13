@@ -66,6 +66,22 @@ export const AttemptOutcomeSchema = z.object({
   execution_stopped: z.boolean(),
   unresolved_external_execution: z.boolean().default(false),
 });
+/**
+ * Definition and policy revisions in force at a transition. Audit evidence only:
+ * transitions always validate against current rules and current authority.
+ */
+export const AttemptRevisionSnapshotSchema = z.object({
+  /** Project schema history version; null before any definition was applied. */
+  definition_version: z.number().int().nonnegative().nullable(),
+  policy_revision: z.number().int().nonnegative(),
+  at: z.number().int(),
+});
+export const AttemptRevisionsSchema = z.object({
+  reserved: AttemptRevisionSnapshotSchema.optional(),
+  /** Latest grant of execution authority: accept, resume, reconnect, rebind or session replacement. */
+  authorized: AttemptRevisionSnapshotSchema.optional(),
+  finished: AttemptRevisionSnapshotSchema.optional(),
+});
 export const WorkAttemptSchema = z.object({
   id: z.string(),
   entry_id: z.string(),
@@ -87,6 +103,8 @@ export const WorkAttemptSchema = z.object({
   created_at: z.number().int(),
   updated_at: z.number().int(),
   finished_at: z.number().int().nullable(),
+  /** Null for attempts recorded before revision capture. */
+  revisions: AttemptRevisionsSchema.nullable().default(null),
 });
 export const AttemptAuthorityCommandSchema = QueueRevisionCommandSchema.extend({
   fence: z.number().int().positive(),
@@ -99,12 +117,28 @@ export const AttemptStartedCommandSchema = AttemptAuthorityCommandSchema.extend(
 export const AttemptFinishCommandSchema = AttemptAuthorityCommandSchema.extend({
   outcome: AttemptOutcomeSchema,
 });
+/**
+ * Attach a replacement native session to the same attempt. The caller confirms
+ * the recorded session has stopped; the attempt receives a fresh fence.
+ */
+export const AttemptReplaceSessionCommandSchema =
+  AttemptAuthorityCommandSchema.extend({
+    reason: z.string().min(1).max(2000),
+    previous_session: AttemptSessionSchema,
+    previous_stopped: z.literal(true),
+    session: AttemptSessionSchema,
+    checkpoint: z.record(z.string(), z.unknown()).optional(),
+  });
 export const AttemptViewSchema = z.object({
   attempt: WorkAttemptSchema,
   /** Current authority, recomputed even for a deduplicated command. */
   grant_valid: z.boolean(),
   /** Principal that enrolled the work; it may request cancellation and recovery. */
   assigner_principal_id: z.string().nullable().optional(),
+  /** Revisions in force now, for comparison with the captured ones. */
+  current_revisions: AttemptRevisionSnapshotSchema.omit({
+    at: true,
+  }).optional(),
 });
 export type QueuePolicy = z.infer<typeof QueuePolicySchema>;
 export type QueueEntry = z.infer<typeof QueueEntrySchema>;
@@ -112,6 +146,13 @@ export type QueueRetryPolicy = z.infer<typeof QueueRetryPolicySchema>;
 export type AttemptState = z.infer<typeof AttemptStateSchema>;
 export type AttemptSession = z.infer<typeof AttemptSessionSchema>;
 export type AttemptOutcome = z.infer<typeof AttemptOutcomeSchema>;
+export type AttemptRevisionSnapshot = z.infer<
+  typeof AttemptRevisionSnapshotSchema
+>;
+export type AttemptRevisions = z.infer<typeof AttemptRevisionsSchema>;
+export type AttemptReplaceSessionCommand = z.infer<
+  typeof AttemptReplaceSessionCommandSchema
+>;
 export type WorkAttempt = z.infer<typeof WorkAttemptSchema>;
 export type AttemptView = z.infer<typeof AttemptViewSchema>;
 export type QueueCommand = z.infer<typeof QueueCommandSchema>;
@@ -302,6 +343,11 @@ export const AttemptListQuerySchema = z.object({
   task_id: z.string().optional(),
   entry_id: z.string().optional(),
   state: AttemptStateSchema.optional(),
+  /** Execution owner filters, for recovering one wrapper's work after a restart. */
+  principal_id: z.string().optional(),
+  participant_id: z.string().optional(),
+  /** true: every nonterminal state; false: terminal only. */
+  active: z.boolean().optional(),
   limit: z.number().int().min(1).max(500).default(100),
   offset: z.number().int().min(0).default(0),
 });
@@ -328,6 +374,7 @@ export const AttemptMutationSchemas = {
   rebind: AttemptRebindCommandSchema,
   retry: AttemptRetryCommandSchema,
   "force-recovery": AttemptForceCommandSchema,
+  "replace-session": AttemptReplaceSessionCommandSchema,
 } as const;
 
 export const QueueRequestSchema = z.discriminatedUnion("action", [
@@ -423,6 +470,11 @@ export const AttemptRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("force-recovery"),
     id: z.string().min(1),
     command: AttemptForceCommandSchema,
+  }),
+  z.object({
+    action: z.literal("replace-session"),
+    id: z.string().min(1),
+    command: AttemptReplaceSessionCommandSchema,
   }),
 ]);
 export const QueueResultSchema = z.union([
