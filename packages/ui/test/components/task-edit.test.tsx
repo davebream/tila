@@ -271,3 +271,67 @@ test("viewers see why editing is unavailable", async () => {
     screen.getByText("This credential cannot edit tasks of this type."),
   ).toBeInTheDocument();
 });
+
+test("closing the editor before the claim arrives releases it", async () => {
+  const user = userEvent.setup();
+  let answer: () => void = () => undefined;
+  server.use(
+    http.post("*/projects/test-project/claims/acquire", async () => {
+      await new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      return HttpResponse.json({
+        ok: true,
+        fence: 9,
+        expires_at: Date.now() + 600_000,
+        participant_id: "dashboard-x",
+      });
+    }),
+  );
+  renderTask();
+  await user.click(await screen.findByRole("button", { name: "Edit" }));
+  await screen.findByText(/Claiming this task for editing/);
+  await user.click(screen.getByRole("button", { name: "Discard changes" }));
+  answer();
+  await waitFor(() =>
+    expect(releases).toEqual([{ resource: "bug:BUG-1", fence: 9 }]),
+  );
+});
+
+test("a lost save that was applied is not sent again after the claim changed", async () => {
+  const user = userEvent.setup();
+  let fence = 4;
+  server.use(
+    http.post("*/projects/test-project/claims/acquire", () =>
+      HttpResponse.json({
+        ok: true,
+        fence: fence++,
+        expires_at: Date.now() + 600_000,
+        participant_id: "dashboard-x",
+      }),
+    ),
+    http.patch("*/projects/test-project/tasks/BUG-1", async ({ request }) => {
+      const body = (await request.json()) as { data: Record<string, unknown> };
+      patches.push({ body, key: request.headers.get("Idempotency-Key") });
+      task = { ...task, data: { ...task.data, ...body.data }, updated_at: 300 };
+      return HttpResponse.error(); // Applied, but the response was lost.
+    }),
+  );
+  renderTask();
+  await user.click(await screen.findByRole("button", { name: "Edit" }));
+  await screen.findByText(/You hold the edit claim/);
+  const notes = screen.getByRole("textbox", { name: /notes/i });
+  await user.clear(notes);
+  await user.type(notes, "saved");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(
+    await screen.findByText(/did not confirm the save/),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Retry save" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: /save/i }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(patches).toHaveLength(1);
+});

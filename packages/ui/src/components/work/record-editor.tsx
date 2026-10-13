@@ -88,7 +88,13 @@ export function RecordCreateDrawer() {
   };
 
   const submit = useMutation({
-    mutationFn: async (staged: NonNullable<typeof draft.pending>) => {
+    mutationFn: async ({
+      staged,
+      retry,
+    }: {
+      staged: NonNullable<typeof draft.pending>;
+      retry: boolean;
+    }) => {
       const command = staged.command;
       try {
         await createRecord(
@@ -102,8 +108,10 @@ export function RecordCreateDrawer() {
           staged.id,
         );
       } catch (error) {
-        // A lost response may hide our own create: the same value means done.
-        if (failureKind(error) !== "conflict") throw error;
+        // Only a retry can meet its own earlier create (the response was
+        // lost); then the same value means done. A first send that conflicts
+        // found someone else's record.
+        if (!retry || failureKind(error) !== "conflict") throw error;
         const existing = await getRecord(project, type, command.key);
         if (!sameJson(existing.record.value, command.value)) throw error;
       }
@@ -125,7 +133,8 @@ export function RecordCreateDrawer() {
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (draft.pending) return submit.mutate(draft.pending);
+    if (draft.pending)
+      return submit.mutate({ staged: draft.pending, retry: true });
     const key = value.key.trim();
     if (!key) return setErrors({ key: "Enter a key." });
     if (!allowed.writeRecord(type, key))
@@ -139,7 +148,7 @@ export function RecordCreateDrawer() {
       ...(value.message.trim() ? { message: value.message.trim() } : {}),
     }));
     update(() => next);
-    if (next.pending) submit.mutate(next.pending);
+    if (next.pending) submit.mutate({ staged: next.pending, retry: false });
   }
 
   const kind = submit.isError ? failureKind(submit.error) : null;

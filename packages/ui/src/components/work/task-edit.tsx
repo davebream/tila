@@ -50,6 +50,19 @@ type Command = z.infer<typeof Command>;
 
 type Lease = { fence: number; expires_at: number } | null;
 
+/** Whether the task already holds everything `command` would write. */
+function editApplied(
+  command: Command,
+  current: { data: Record<string, unknown>; tags?: string[] },
+): boolean {
+  const tags = (list: readonly string[] | undefined) =>
+    [...(list ?? [])].sort().join("\n");
+  return (
+    Object.keys(changedData(command.data, current.data)).length === 0 &&
+    (!command.tags || tags(command.tags) === tags(current.tags))
+  );
+}
+
 class ChangedElsewhere extends Error {
   constructor() {
     super("This task changed after you started editing.");
@@ -102,6 +115,9 @@ export function TaskEditForm({
   const [lease, setLease] = useState<Lease>(null);
   const leaseRef = useRef<Lease>(null);
   leaseRef.current = lease;
+  // Set once the editor closes: a claim that arrives afterwards is released
+  // at once instead of blocking the task until it expires.
+  const closedRef = useRef(false);
   const stale = value.base !== entity.updated_at;
 
   const claim = useMutation({
@@ -112,7 +128,15 @@ export function TaskEditForm({
         ttl_ms: EDIT_CLAIM_TTL_MS,
         metadata: { purpose: "dashboard-edit" },
       }),
-    onSuccess: (result) => setLease(result),
+    onSuccess: (result) => {
+      if (closedRef.current) {
+        void releaseClaim(project, { resource, fence: result.fence }).catch(
+          () => undefined,
+        );
+        return;
+      }
+      setLease(result);
+    },
     onError: (error) => {
       if (error instanceof ApiError && error.code === "queue-managed-work")
         onManaged();
@@ -122,8 +146,10 @@ export function TaskEditForm({
   // Take the claim when an unmanaged edit opens; give it back when it closes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once per form
   useEffect(() => {
+    closedRef.current = false;
     if (!managed) claim.mutate();
     return () => {
+      closedRef.current = true;
       const held = leaseRef.current;
       if (held)
         void releaseClaim(project, { resource, fence: held.fence }).catch(
@@ -147,28 +173,39 @@ export function TaskEditForm({
         setLease(held);
         fence = held.fence;
       }
-      const current = await getTaskDetail(project, entity.id);
-      // A retry of our own write sees our update_at, which is not a conflict.
-      if (
-        current.entity.updated_at !== command.base &&
-        JSON.stringify(
-          changedData(
-            command.data,
-            current.entity.data as Record<string, unknown>,
-          ),
-        ) !== "{}"
-      )
-        throw new ChangedElsewhere();
-      return patchTask(
-        project,
-        entity.id,
-        {
-          data: command.data,
-          fence,
-          ...(command.tags ? { tags: command.tags } : {}),
-        },
-        staged.id,
-      );
+      const read = async () =>
+        (await getTaskDetail(project, entity.id)).entity as {
+          data: Record<string, unknown>;
+          tags?: string[];
+          updated_at: number;
+        };
+      const current = await read();
+      // A retry may find its own earlier write already applied (the response
+      // was lost); then there is nothing left to send.
+      if (editApplied(command, current)) return;
+      if (current.updated_at !== command.base) throw new ChangedElsewhere();
+      try {
+        await patchTask(
+          project,
+          entity.id,
+          {
+            data: command.data,
+            fence,
+            ...(command.tags ? { tags: command.tags } : {}),
+          },
+          staged.id,
+        );
+      } catch (error) {
+        // Same key, different body (a new fence after the claim expired):
+        // decide from the stored task, not from the refusal.
+        if (
+          error instanceof ApiError &&
+          error.code === "idempotency-key-conflict" &&
+          editApplied(command, await read())
+        )
+          return;
+        throw error;
+      }
     },
     onSuccess: async () => {
       await Promise.all([

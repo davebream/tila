@@ -106,20 +106,22 @@ function sameData(
 }
 
 /**
- * Send a frozen create command. A retry after a lost response may find the
- * task already there: when it matches what this command sent, the earlier
- * attempt succeeded and the result is the same task.
+ * Send a frozen create command. Only a retry of a command that was already
+ * sent may find its own task in place (the first response was lost); then a
+ * task matching what this command sent means the earlier send succeeded. On a
+ * first send, "already exists" is always someone else's task.
  */
 async function sendCreate(
   projectId: string,
   command: Command,
   key: string,
+  retry: boolean,
 ): Promise<{ id: string; linkError?: string }> {
   if (command.kind === "template") {
     try {
       await instantiateTemplate(projectId, command.body, key);
     } catch (error) {
-      if (failureKind(error) !== "exists") throw error;
+      if (!retry || failureKind(error) !== "exists") throw error;
       const root = await getTaskDetail(projectId, command.body.root_id);
       if (root.entity.type !== command.root_type) throw error;
     }
@@ -128,11 +130,13 @@ async function sendCreate(
   try {
     await createTask(projectId, command.body, key);
   } catch (error) {
-    if (failureKind(error) !== "exists") throw error;
+    if (!retry || failureKind(error) !== "exists") throw error;
     const existing = await getTaskDetail(projectId, command.body.id);
     if (
       existing.entity.type !== command.body.type ||
-      !sameData(command.body.data, existing.entity.data)
+      !sameData(command.body.data, existing.entity.data) ||
+      [...(existing.entity.tags ?? [])].sort().join("\n") !==
+        [...(command.body.tags ?? [])].sort().join("\n")
     )
       throw error;
   }
@@ -232,8 +236,13 @@ export function TaskCreateDrawer({
     });
 
   const submit = useMutation({
-    mutationFn: async (staged: NonNullable<typeof draft.pending>) =>
-      sendCreate(project, staged.command, staged.id),
+    mutationFn: async ({
+      staged,
+      retry,
+    }: {
+      staged: NonNullable<typeof draft.pending>;
+      retry: boolean;
+    }) => sendCreate(project, staged.command, staged.id, retry),
     onSuccess: async (result) => {
       await Promise.all([
         client.invalidateQueries({ queryKey: ["task-page", project] }),
@@ -263,7 +272,8 @@ export function TaskCreateDrawer({
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (draft.pending) {
-      submit.mutate(draft.pending);
+      // A frozen command was sent before; its outcome is unknown.
+      submit.mutate({ staged: draft.pending, retry: true });
       return;
     }
     setLinkError(null);
@@ -316,7 +326,7 @@ export function TaskCreateDrawer({
     }
     setErrors({});
     update(() => next);
-    if (next.pending) submit.mutate(next.pending);
+    if (next.pending) submit.mutate({ staged: next.pending, retry: false });
   }
 
   const kind = submit.isError ? failureKind(submit.error) : null;
@@ -495,8 +505,9 @@ export function TaskCreateDrawer({
         )}
         {kind === "exists" && (
           <FormNotice>
-            A different task already uses this ID. Change the ID under Advanced
-            and create again.
+            {value.mode === "template"
+              ? "A task with one of these IDs already exists. Change the root task ID and create again."
+              : "A different task already uses this ID. Change the ID under Advanced and create again."}
           </FormNotice>
         )}
         {(kind === "invalid" || kind === "conflict") && (

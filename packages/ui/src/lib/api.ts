@@ -72,7 +72,10 @@ import type {
   UnifiedSearchResponse,
   WorkCatalogResponse,
 } from "@tila/schemas";
-import { GitHubLoginConfigResponseSchema } from "@tila/schemas";
+import {
+  GitHubLoginConfigResponseSchema,
+  TemplateListResponseSchema,
+} from "@tila/schemas";
 import {
   type JournalAppendRequest,
   JournalAppendRequestSchema,
@@ -1185,7 +1188,10 @@ export async function releaseClaim(
 export async function listTemplates(
   projectId: string,
 ): Promise<TemplateListResponse> {
-  return request<TemplateListResponse>(projectId, "/templates");
+  // Parsing fills fields an older server does not send yet.
+  return TemplateListResponseSchema.parse(
+    await request<unknown>(projectId, "/templates"),
+  );
 }
 
 export async function instantiateTemplate(

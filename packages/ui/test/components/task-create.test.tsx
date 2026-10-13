@@ -300,3 +300,50 @@ test("the task list offers creation only to credentials that may create a type",
     await screen.findByRole("link", { name: /new task/i }),
   ).toHaveAttribute("href", "/p/test-project/tasks?create=task");
 });
+
+test("a first template send that finds the root taken is not reported as created", async () => {
+  const user = userEvent.setup();
+  server.use(
+    http.post("*/projects/test-project/templates/instantiate", () =>
+      HttpResponse.json(
+        { ok: false, error: { code: "already-exists", message: "exists" } },
+        { status: 409 },
+      ),
+    ),
+    // An earlier, unrelated instantiation left a task of the same type there.
+    http.get("*/projects/test-project/tasks/:id", ({ params }) =>
+      HttpResponse.json({
+        ok: true,
+        entity: {
+          id: params.id,
+          type: "bug",
+          schema_version: 1,
+          data: { title: "Fix billing" },
+          archived: 0,
+          created_at: 1,
+          updated_at: 1,
+          created_by: "other",
+          tags: [],
+        },
+        relationships: [],
+      }),
+    ),
+  );
+  renderCreate();
+  await user.click(await screen.findByRole("radio", { name: "From template" }));
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: /template/i }),
+    "hotfix",
+  );
+  const root = screen.getByRole("textbox", { name: /root task id/i });
+  await user.clear(root);
+  await user.type(root, "HF-1");
+  await user.type(screen.getByRole("textbox", { name: /area/i }), "login");
+  await user.click(
+    screen.getByRole("button", { name: "Create from template" }),
+  );
+  expect(
+    await screen.findByText(/A task with one of these IDs already exists/),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/^Opened/)).not.toBeInTheDocument();
+});

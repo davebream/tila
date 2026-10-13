@@ -31,6 +31,12 @@ const CONFLICT_CODES = new Set([
   "question-correlation-conflict",
   "claim-held",
   "claim-not-held",
+  "already-held",
+  // The key was used with a different body: the subject changed between
+  // sends, so the outcome must be re-read rather than reported as invalid.
+  "idempotency-key-conflict",
+  "queue-idempotency-conflict",
+  "question-idempotency-conflict",
 ]);
 
 export function failureKind(error: unknown): FailureKind {
@@ -43,8 +49,8 @@ export function failureKind(error: unknown): FailureKind {
     // A lost execution grant is a state change, not missing access.
     return error.code === "queue-authority-lost" ? "conflict" : "forbidden";
   }
-  if (error.status === 409 || error.status === 412) return "conflict";
   if (CONFLICT_CODES.has(error.code)) return "conflict";
+  if (error.status === 409 || error.status === 412) return "conflict";
   return "invalid";
 }
 
