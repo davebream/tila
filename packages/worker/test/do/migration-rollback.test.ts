@@ -243,6 +243,8 @@ describe("runMigrationsWithPitrRollback", () => {
                   "enqueue_order",
                   "revision",
                   "retry_policy",
+                  "enrolled_by_principal",
+                  "enrolled_by_participant",
                 ],
                 work_attempts: [
                   "id",
