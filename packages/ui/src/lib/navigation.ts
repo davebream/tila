@@ -1,7 +1,10 @@
 import {
   type Capability,
   type CredentialPolicy,
+  PROJECT_ROLE_RANK,
+  type ProjectRole,
   RESTRICTED_CREDENTIAL_SURFACES,
+  type SessionCapabilities,
   type WhoamiResponse,
   hasNamespaceRestrictions,
 } from "@tila/schemas";
@@ -17,7 +20,7 @@ export type SectionId =
   | "runtime"
   | "settings";
 
-export interface NavItem {
+export interface NavItem extends AccessTarget {
   id: string;
   label: string;
   /** Path below `/p/:projectId/`, without a leading slash. */
@@ -32,10 +35,24 @@ export interface NavItem {
   end?: boolean;
 }
 
+/** The boolean flags of `SessionCapabilities`, one per owner-level editor. */
+export type SessionFlag = {
+  [K in keyof SessionCapabilities]-?: SessionCapabilities[K] extends boolean
+    ? K
+    : never;
+}[keyof SessionCapabilities];
+
 /** Anything gated on capabilities and the restricted-credential surfaces. */
 export interface AccessTarget {
   requires: readonly Capability[];
   surface?: string;
+  /**
+   * Session flags from `/auth/session/status`; the item needs at least one.
+   * Owner-level editors whose reads are owner-only use these.
+   */
+  flags?: readonly SessionFlag[];
+  /** Lowest project role that can use the page at all. */
+  minRole?: ProjectRole;
 }
 
 export interface NavSection {
@@ -184,6 +201,32 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         end: true,
       },
       {
+        id: "general",
+        label: "General",
+        segment: "settings/general",
+        requires: ["summary:read"],
+        surface: "project-settings",
+        keywords: ["project name", "display name", "rename"],
+      },
+      {
+        id: "repositories",
+        label: "Repositories",
+        segment: "settings/repositories",
+        requires: ["repository-policy:read"],
+        surface: "repos",
+        flags: ["repository_policy_manage"],
+        keywords: ["github", "oidc", "actions", "access policy"],
+      },
+      {
+        id: "service-identities",
+        label: "Service identities",
+        segment: "settings/service-identities",
+        requires: ["service-accounts:read"],
+        surface: "service-accounts",
+        flags: ["service_accounts_manage", "workload_bindings_manage"],
+        keywords: ["service accounts", "workload bindings", "ci"],
+      },
+      {
         id: "definitions",
         label: "Definitions",
         segment: "settings/definitions",
@@ -280,13 +323,26 @@ export function isRestricted(identity: WhoamiResponse | undefined): boolean {
 export function navVisibility(
   identity: WhoamiResponse | undefined,
   projectId: string | null,
+  /** Session flags; unknown (null or omitted) keeps flagged items visible. */
+  session?: SessionCapabilities | null,
 ): (item: AccessTarget) => boolean {
+  const flagged = (item: AccessTarget) =>
+    !item.flags?.length ||
+    !session ||
+    item.flags.some((flag) => session[flag] === true);
+  const own = projectId && identity?.project_id === projectId;
+  const role = own ? identity?.role : undefined;
+  const ranked = (item: AccessTarget) =>
+    !item.minRole ||
+    !role ||
+    PROJECT_ROLE_RANK[role] >= PROJECT_ROLE_RANK[item.minRole];
   const policy = identity?.policy as CredentialPolicy | undefined;
-  if (!policy || !projectId || identity?.project_id !== projectId)
-    return () => true;
+  if (!policy || !own) return (item) => flagged(item) && ranked(item);
   const capabilities = new Set<string>(policy.capabilities);
   const restricted = hasNamespaceRestrictions(policy);
   return (item) =>
+    flagged(item) &&
+    ranked(item) &&
     item.requires.every((cap) => capabilities.has(cap)) &&
     (!restricted ||
       item.surface === undefined ||

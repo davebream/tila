@@ -45,13 +45,20 @@ import type {
   ArtifactReviewsResponse,
 } from "@tila/schemas";
 import type {
+  CredentialPolicy,
   MembershipGrantRequest,
   ProjectMembership,
   ProjectMembershipMode,
   ProjectRole,
+  ProjectSettings,
+  RepoAccessPolicy,
+  RepoLink,
+  RepoOidcPolicy,
   SessionCapabilities,
   TokenListItem,
+  UpdateProjectSettings,
   WhoamiResponse,
+  WorkloadBindingRequest,
 } from "@tila/schemas";
 import type {
   AcquireRequest,
@@ -1593,5 +1600,177 @@ export function deleteSignalGroup(
     ),
     undefined,
     { idempotencyKey },
+  );
+}
+
+// --- Access settings (#298) ---
+// Owner-level editors. Writes from a cookie session older than the step-up
+// window answer 403 `step-up-required`; revisioned ones answer 412
+// `revision-conflict` with the current revision.
+
+/** The project's display metadata; IDs and creation provenance are fixed. */
+export async function getProjectSettings(
+  projectId: string,
+): Promise<ProjectSettings> {
+  return (
+    await request<{ ok: true; settings: ProjectSettings }>(
+      projectId,
+      "/project-settings",
+    )
+  ).settings;
+}
+
+export async function updateProjectSettings(
+  projectId: string,
+  body: UpdateProjectSettings,
+): Promise<ProjectSettings> {
+  return (
+    await mutate<{ ok: true; settings: ProjectSettings }>(
+      "PATCH",
+      projectPath(projectId, "/project-settings"),
+      body,
+    )
+  ).settings;
+}
+
+/** A linked repository is addressed by its host and numeric GitHub ID. */
+export type RepoTarget = { host: string; repoId: number };
+
+const repoPath = ({ host, repoId }: RepoTarget, rest = "", query = "") =>
+  `/api/repos/${repoId}${rest}?host=${encodeURIComponent(host)}${query}`;
+
+/** Repositories linked to the session's project, with both policies. */
+export async function listRepoLinks(): Promise<RepoLink[]> {
+  return (await requestAbsolute<{ ok: true; repos: RepoLink[] }>("/api/repos"))
+    .repos;
+}
+
+/** The server resolves the repository ID through GitHub. */
+export function registerRepo(body: {
+  owner: string;
+  repo: string;
+  github_host: string;
+}): Promise<{ ok: true; github_repo_id: number; full_name: string }> {
+  return mutate("POST", "/api/repos", body);
+}
+
+export function setRepoAccessPolicy(
+  target: RepoTarget,
+  body: RepoAccessPolicy & { expected_revision: number },
+): Promise<{ ok: true; policy: RepoAccessPolicy; revision?: number }> {
+  return mutate("PUT", repoPath(target, "/access-policy"), body);
+}
+
+export function setRepoOidcPolicy(
+  target: RepoTarget,
+  body: RepoOidcPolicy & { expected_revision: number },
+): Promise<{ ok: true; policy: RepoOidcPolicy; revision?: number }> {
+  return mutate("PUT", repoPath(target, "/oidc-policy"), body);
+}
+
+/** Removes the link only; explicit memberships stay. */
+export function removeRepoLink(
+  target: RepoTarget,
+  expectedRevision: number,
+): Promise<{ ok: true }> {
+  return mutate(
+    "DELETE",
+    repoPath(target, "", `&expected_revision=${expectedRevision}`),
+  );
+}
+
+export interface WorkloadBinding extends WorkloadBindingRequest {
+  binding_id: string;
+  principal_id: string;
+  project_id: string;
+  created_at: number;
+  created_by: string;
+  revoked_at: number | null;
+}
+
+const servicePath = (projectId: string, principalId: string, rest = "") =>
+  projectPath(
+    projectId,
+    `/service-accounts/${encodeURIComponent(principalId)}${rest}`,
+  );
+
+export function createServiceAccount(
+  projectId: string,
+  body: { name: string; display_name: string; role: ProjectRole },
+): Promise<{ ok: true; service_account: ServiceAccount }> {
+  return mutate("POST", projectPath(projectId, "/service-accounts"), body);
+}
+
+export function renameServiceAccount(
+  projectId: string,
+  principalId: string,
+  displayName: string,
+): Promise<{ ok: true; service_account: ServiceAccount }> {
+  return mutate("PATCH", servicePath(projectId, principalId), {
+    display_name: displayName,
+  });
+}
+
+/** Stops its credentials and workload exchanges; attribution is kept. */
+export function revokeServiceAccount(
+  projectId: string,
+  principalId: string,
+): Promise<{ ok: true }> {
+  return mutate("DELETE", servicePath(projectId, principalId));
+}
+
+export async function listWorkloadBindings(
+  projectId: string,
+  principalId: string,
+): Promise<WorkloadBinding[]> {
+  return (
+    await request<{ ok: true; bindings: WorkloadBinding[] }>(
+      projectId,
+      `/service-accounts/${encodeURIComponent(principalId)}/workload-bindings`,
+    )
+  ).bindings;
+}
+
+export function createWorkloadBinding(
+  projectId: string,
+  principalId: string,
+  body: WorkloadBindingRequest,
+): Promise<{ ok: true; binding: WorkloadBinding }> {
+  return mutate(
+    "POST",
+    servicePath(projectId, principalId, "/workload-bindings"),
+    body,
+  );
+}
+
+export function updateWorkloadBinding(
+  projectId: string,
+  principalId: string,
+  bindingId: string,
+  policy: CredentialPolicy,
+): Promise<{ ok: true; binding: WorkloadBinding }> {
+  return mutate(
+    "PATCH",
+    servicePath(
+      projectId,
+      principalId,
+      `/workload-bindings/${encodeURIComponent(bindingId)}`,
+    ),
+    { policy },
+  );
+}
+
+export function revokeWorkloadBinding(
+  projectId: string,
+  principalId: string,
+  bindingId: string,
+): Promise<{ ok: true }> {
+  return mutate(
+    "DELETE",
+    servicePath(
+      projectId,
+      principalId,
+      `/workload-bindings/${encodeURIComponent(bindingId)}`,
+    ),
   );
 }

@@ -14,6 +14,7 @@ import {
   updateMembershipRole,
   whoami,
 } from "@/lib/api";
+import type { SessionFlag } from "@/lib/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   MembershipGrantRequest,
@@ -32,12 +33,20 @@ function requireProjectId(projectId: string | null): string {
 
 export function useAdminCapabilities() {
   const { capabilities, projectId } = useAuth();
+  // Absent flags (an older server) read as false: the editor stays hidden.
+  const flag = (name: SessionFlag) => capabilities?.[name] === true;
   return {
     projectId,
     capabilities,
-    canManageMemberships: capabilities?.memberships_manage === true,
-    canManageCredentials: capabilities?.credentials_manage === true,
+    canManageMemberships: flag("memberships_manage"),
+    canManageCredentials: flag("credentials_manage"),
     membershipAvailable: capabilities?.membership_available !== false,
+    /** Settings › General: rename the project (`project:configure`). */
+    canConfigureProject: flag("project_configure"),
+    /** Settings › Repositories: read and change repository links. */
+    canManageRepositories: flag("repository_policy_manage"),
+    canManageServiceAccounts: flag("service_accounts_manage"),
+    canManageWorkloadBindings: flag("workload_bindings_manage"),
   };
 }
 

@@ -35,7 +35,10 @@ import { SettingsDefinitionsPage } from "@/pages/settings-definitions";
 import { SettingsDefinitionsReviewPage } from "@/pages/settings-definitions-review";
 import { SettingsDefinitionsRevisionPage } from "@/pages/settings-definitions-revision";
 import { SettingsDefinitionsSourcePage } from "@/pages/settings-definitions-source";
+import { SettingsGeneralPage } from "@/pages/settings-general";
+import { SettingsRepositoriesPage } from "@/pages/settings-repositories";
 import { SettingsRoomsPage } from "@/pages/settings-rooms";
+import { SettingsServiceIdentitiesPage } from "@/pages/settings-service-identities";
 import { SettingsSignalGroupsPage } from "@/pages/settings-signal-groups";
 import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
@@ -179,6 +182,15 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route
         path="settings/definitions/history/:version"
         element={<SettingsDefinitionsRevisionPage />}
+      />
+      <Route path="settings/general" element={<SettingsGeneralPage />} />
+      <Route
+        path="settings/repositories"
+        element={<SettingsRepositoriesPage />}
+      />
+      <Route
+        path="settings/service-identities"
+        element={<SettingsServiceIdentitiesPage />}
       />
       <Route path="settings/agents" element={<SettingsAgentsPage />} />
       <Route path="settings/rooms" element={<SettingsRoomsPage />} />

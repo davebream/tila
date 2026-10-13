@@ -214,6 +214,7 @@ describe("Layout navigation", () => {
                   "agents:read",
                   "conversations:read",
                   "signals:read",
+                  "summary:read",
                 ].includes(cap),
             ),
           },

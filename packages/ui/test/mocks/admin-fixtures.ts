@@ -182,6 +182,15 @@ export function sessionStatusWith(
   capabilities: Partial<{
     memberships_manage: boolean;
     credentials_manage: boolean;
+    credentials_read: boolean;
+    credentials_issue: boolean;
+    credentials_rotate: boolean;
+    credentials_revoke: boolean;
+    service_accounts_manage: boolean;
+    workload_bindings_manage: boolean;
+    repository_policy_manage: boolean;
+    project_configure: boolean;
+    runtime_access_manage: boolean;
     membership_available: boolean;
     auth_method: "github" | "token";
     authenticated_at: number;
