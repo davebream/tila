@@ -12,11 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Upgrade notes
 
 - Deploy the Worker and its bundled UI together, before upgrading clients. There is no new D1 migration. Shared DO/embedded migrations 37 to 40 apply on the first request after deploy; all four are additive.
-- Queue control is now restricted. Cancel, suspend, resume and retry requests are accepted only from the attempt's current owner, the principal that enrolled the work, or a maintainer. Queue `edit` and `withdraw` need the enroller or a maintainer. Other members get `403 queue-authority-lost`. Enrollments made before this release have no recorded enroller and fall back to owner or maintainer.
+- Queue control is now restricted (the managed work queue from 0.6.0). Cancel, suspend, resume and retry requests are accepted only from the attempt's current owner, the principal that enrolled the work, or a maintainer. Queue `edit` and `withdraw` need the enroller or a maintainer. Other members get `403 queue-authority-lost`. Enrollments made before this release have no recorded enroller and fall back to owner or maintainer.
 - `journal:append` is a new capability. The worker preset includes it, but existing scoped credentials must be reissued to append project-reported events.
 - The runtime view's `work_attempt` and a delivery's `work_result` used to be constant (`null` and `not-reported`). They now carry real attempt data. Clients that relied on the constant values need the new shapes.
-- Backups from this Worker report migration 40 and require `attempt-corrections-v1`. Restore them with the 0.7.0 SDK or CLI; older versions refuse them before writing anything.
-- Projects open on the new Overview page instead of the task list.
+- Backups from this Worker report migration 40 and require the `attempt-corrections-v1` feature, which `GET /health` advertises. Restore them with the 0.7.0 SDK or CLI; older versions refuse them before writing anything.
+- Projects open on the new Overview page instead of the task list (see Dashboard below).
 
 ### Durable work attempts (#303)
 
@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /projects/:projectId/journal` appends an authenticated observation to the project journal, through HTTP, the SDK, the CLI, MCP and the dashboard. Reports never change tasks, claims, attempts, gates or capacity.
 - Claim-bound reports check live ownership and the fence. Each report has a seven-day idempotency receipt and is limited to 60 per principal and 300 per project per UTC minute. Local mode returns `unsupported-capability`.
 
-### Dashboard (#306)
+### Dashboard (#386, #387, #388, #389)
 
 - The twelve header tabs are grouped into Work, Conversations, Runtime and Settings. Old flat links redirect into the active project and keep their sub-path, query and fragment. The ⌘K palette now lists every page, and pages the credential cannot read are hidden.
 - The new Overview page runs eight attention checks: uncertain and suspended executions, expired execution leases, blocked tasks, failed or abandoned tasks, suppressed and recently expired deliveries, and agents whose runtime needs a check. Each count is the exact total of the list it links to. A check that failed or could not run is never shown as zero.
@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixes
 
-- Project destroy no longer fails for a project that has a worker question. The question and journal-report tables were missing from the destroy list, so the foreign-key check rolled back the whole destroy. A drift test now compares that list with every table the migrations create.
+- Project destroy no longer fails for a project that has a worker question (#391). The question and journal-report tables were missing from the destroy list, so the foreign-key check rolled back the whole destroy. A drift test now compares that list with every table the migrations create.
 - Finishing a suspended attempt checks the command's fence against the recorded fence, not only the revision.
 - `reconcile` with `observation: "stopped"` can no longer record `success` for a reservation that was never accepted.
 - Maintainer force recovery and stopped reconciliation are journaled with the maintainer as actor and the owner named separately.
