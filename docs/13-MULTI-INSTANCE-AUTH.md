@@ -188,17 +188,32 @@ Full behavior, the precedence interaction, and rollback: [`docs/07-GITHUB-SCOPED
 
 ### `HASH_PEPPER` rotation
 
-D1 API token digests are HMAC-SHA-256 over the token when the `HASH_PEPPER` secret is set
-(plain SHA-256 when unset) — `packages/worker/src/lib/hash-token.ts`.
+D1 API token digests are HMAC-SHA-256 over the token when `HASH_PEPPER` is set,
+and plain SHA-256 when unset. Setting it for the first time and rotating it both
+require a maintenance window: there is no dual-pepper verification path. Scoped
+token overlap does not make old-pepper hashes valid under a new pepper.
 
-> **Current behavior is not zero-downtime.** Setting or rotating `HASH_PEPPER` changes the digest of
-> **every** token. Pre-existing D1 API tokens hashed under the old configuration stop validating and
-> **must be re-issued**; cookie/workspace sessions re-authenticate within their TTL. A zero-downtime
-> **dual-verify** path (verify against the current *and* previous pepper during a rotation window) is
-> a **tracked follow-up and is not yet implemented** — do not rotate `HASH_PEPPER` expecting graceful
-> degradation. This is stated in the `hash-token.ts` activation note.
+Affected credentials include scoped and legacy D1 tokens, legacy cookie/workspace
+sessions, runtime invitations/enrollment/run credentials, and D1-backed workload
+exchanges. Human-account authentication and its independent recovery secret are
+not peppered; signed session JWTs are also independent. Keep their signing/auth
+secrets unchanged. Legacy cookies must sign in through current human accounts;
+do not promise automatic reauthentication or renewal.
 
-Operational runbook: [`docs/05-OPERATIONS.md`](05-OPERATIONS.md) § Auth: Revocation & Pepper Rotation.
+Use the [operational cutover runbook](05-OPERATIONS.md#rotate-hash_pepper): prove
+canonical owner access and infrastructure recovery, inventory every consumer,
+migrate legacy full-token consumers to scoped credentials before cutover, pause
+work, change the pepper, rotate/reissue affected credentials, and verify before
+resuming. It includes exact API requests, lost-response recovery, runtime/workload
+replacement and rollback limits. Never rewrite stored hashes or restore old
+revocation state. Restoring an old pepper can reactivate unrevoked old credentials
+while rejecting replacements issued under the new pepper.
+
+The required local Cloudflare rehearsal is
+`packages/integration-tests/runtime/hash-pepper-cutover.test.ts`. Production
+activation remains a separate explicit gate, with sanitized results recorded in
+#307. Conversation activation uses `CONVERSATION_CURSOR_KEY` independently and
+must not silently trigger a credential migration.
 
 ## Credential Providers
 

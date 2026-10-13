@@ -700,24 +700,265 @@ GC is normally required. If tombstone growth is ever a concern, confirm the cron
 
 ### Rotate `HASH_PEPPER`
 
-> **`HASH_PEPPER` rotation is a breaking change — not zero-downtime.** Setting or rotating it changes
-> every token digest; a zero-downtime dual-verify path is a tracked follow-up that is not yet
-> implemented. See [`docs/13`](13-MULTI-INSTANCE-AUTH.md) § Migration Guide for the rationale.
+**Use a maintenance window. Setting a previously absent pepper is also a rotation.**
+D1 bearer tokens and legacy cookie/workspace session lookups use
+`hashToken(raw, HASH_PEPPER)`. Changing the secret makes existing digests unusable;
+there is no previous-pepper fallback. A scoped token's overlap window does not
+bridge different peppers. Do not use this procedure merely to enable conversations:
+use the independent `CONVERSATION_CURSOR_KEY` described under
+[Durable conversation operations](#durable-conversation-operations).
 
-Steps:
+This procedure uses existing APIs and requires a current human owner in every
+project. It does not introduce an offline hash rewrite, a new token issuer, or
+zero-downtime verification. An old digest cannot be converted to a new digest
+without the original plaintext.
 
-1. Set the new secret: `wrangler secret put HASH_PEPPER` (enter the new value at the prompt).
-2. **Re-issue every D1 API token** — tokens hashed under the old pepper no longer validate. Notify
-   token holders and issue replacements via the normal token-creation flow.
-3. Cookie/workspace sessions re-authenticate automatically within their TTL; no action needed beyond
-   informing users they may be prompted to log in again.
+#### 1. Inventory and prove recovery before changing anything
 
-Do not rotate `HASH_PEPPER` expecting a grace period — plan the re-issue before rotating.
+Inventory **all projects in this deployment**, including inactive consumers that
+may restart later. Keep a private checklist with project, credential/enrollment ID,
+current token ID, principal, role/policy, expiry, proof-key thumbprint if bound,
+consumer location, responsible operator, and replacement/verification status.
+`/api/tokens` uses the human session’s selected project; select and verify the
+project before every inventory, issuance or rotation batch. Never include plaintext credentials, cookies, password-reset links, stored credential digests or
+secret values in the checklist or issue evidence.
 
-`tila project create` writes the first project token straight to D1, so it must
-hash it the way the Worker does. On a Worker with `HASH_PEPPER`, run it with the
-same value in `TILA_HASH_PEPPER` (environment or `~/.tila/.env`); otherwise the
-new token is rejected. The CLI never prints or stores the value.
+| Inventory class | Source and required action |
+|---|---|
+| Legacy full tokens | `GET /api/tokens` entries with `legacy:true` and `scopes:"full"` (runtime entries are also marked legacy by this listing; classify `runtime-v1` separately). Move each consumer to a named human/service scoped credential, test its intended operations, then `DELETE /api/tokens/:name`. A replacement service has an intentional new principal: transfer required memberships/room access and finish old claims/runs before retiring it. |
+| Scoped personal/service tokens | Same inventory, `legacy:false` (after selecting that project). Record `token_id`, `credential_id`, principal, policy and expiry. Preserve the consumer's proof key. Rotate after the pepper changes. Human-owned tokens are also visible at `GET /api/account/tokens?projectId=...`. |
+| Legacy browser/workspace sessions | Inventory clients still using `tila_session`. They must sign in through current human accounts; token-to-cookie exchange is retired. They do not automatically repair themselves after a pepper change. Retire their source credentials where applicable. |
+| Runtime installations, runs and pending invitations | `GET /projects/:projectId/runtime/enrollments` and `/runtime/runs`; operators also inventory their locally retained setup invitations. Drain runs, revoke old installations and issue new invitations. Pending old invitations cannot be redeemed under the new pepper. |
+| Workload exchanges | Inventory workload bindings and each CI/provider consumer. Obtain a fresh signed upstream assertion and re-exchange after cutover. Already exchanged assertions cannot be replayed, and workload credentials cannot use ordinary token rotation. |
+
+Human account passwords, `tila-account` sessions/device logins, account recovery
+links, and signed GitHub/OIDC session JWTs do **not** use `HASH_PEPPER`. Their
+independent secrets and authorization checks still apply. Keep `AUTH_SECRET`,
+`INFRA_ADMIN_TOKEN`, `GITHUB_SESSION_HMAC_KEY` and any dedicated conversation key
+unchanged. A JWT consumer with a configured workload binding instead receives a
+D1-backed credential and belongs in the affected workload row above.
+
+Before proceeding:
+
+1. Verify a human account can freshly sign in, select **each** project, read its
+   tasks and memberships, and manage its scoped credentials as canonical owner.
+   Bootstrap an account with `POST /api/account/setup` only when no human account
+   exists; otherwise use the existing account/membership administration workflows.
+   Setup is not an overwrite or repair command for existing accounts.
+2. Prove infrastructure recovery in the isolated rehearsal, and verify the
+   production operator holds the correct independent `INFRA_ADMIN_TOKEN` and
+   Cloudflare access for the explicitly selected Worker. Recovery is
+   `POST /api/account/recovery/owner` with `{ "email": "owner@example.com" }`,
+   authenticated with that infrastructure token. Its one-use URL resets the
+   account password; it does not create missing project ownership.
+3. Migrate and revoke legacy full-token consumers **before** changing the pepper.
+   Use `POST /projects/:projectId/service-accounts` to create a service where needed, then
+   `POST /api/tokens` with `name`, `principal_id`, the reviewed
+   `policy`, optional `expires_at` and existing `jkt`. Use `POST /api/account/tokens` for personal tokens (`projectId`, `name`,
+   `policy`, `expiresAt`); `/api/tokens` issuance accepts service principals only.
+   Fresh human owners can issue
+   scoped tokens, but cannot mint legacy full tokens. Do not solve that by
+   re-running project creation or editing D1 hashes.
+4. Secure a recoverable copy of the old pepper if one exists, the planned new
+   pepper, and a normal backup. A backup is not authorization to restore old
+   authentication/revocation state. For first activation record only “previously
+   unset”. Pause CI, automation, connectors and credential issuers; drain work,
+   close runs, release claims and reconcile pending deliveries before cutover.
+
+**Stop** for an unknown consumer, missing owner, untested recovery, missing proof
+key, unresolved active work or unverified Worker/account selection. A green
+`/api/health` alone proves none of these prerequisites.
+
+#### 2. Private operator session and exact API requests
+
+The examples below run in **bash** (`bash` from a fish terminal). Work in a private
+terminal without tracing or recording. Use the actual Worker origin, project ID
+and deployed Worker name; independently check these against the deployment
+inventory before touching a secret. Temporary files contain credentials and must
+not enter logs, backups, shell history, commits or issue attachments.
+
+```bash
+set +x
+set -euo pipefail
+umask 077
+cutover_dir=$(mktemp -d)
+trap 'rm -rf -- "$cutover_dir"' EXIT
+read -r -p 'Worker origin (https://...): ' cutover_origin
+read -r -p 'Project ID: ' cutover_project
+read -r -p 'Worker name: ' cutover_worker
+export CUTOVER_DIR="$cutover_dir"
+
+# Each response goes to a private file, never to the terminal.
+# Stop on HTTP failures; inspect only error code/message, not a successful secret response.
+cutover_request() {
+  local method="$1" path="$2"
+  shift 2
+  curl --silent --show-error --fail-with-body \
+    --request "$method" "$cutover_origin$path" \
+    --header "Origin: $cutover_origin" \
+    --header 'Content-Type: application/json' \
+    --header 'X-Tila-Participant-Id: pepper-cutover' \
+    --cookie "$cutover_dir/cookies" --cookie-jar "$cutover_dir/cookies" \
+    --output "$cutover_dir/response.json" "$@"
+}
+
+# Hidden input, JSON encoding and file permissions protect password material.
+python3 - <<'PYLOGIN'
+import getpass, json, os
+from pathlib import Path
+Path(os.environ["CUTOVER_DIR"], "login.json").write_text(json.dumps({
+    "email": input("Owner email: "), "password": getpass.getpass("Password: ")
+}))
+PYLOGIN
+cutover_request POST /api/account/auth/sign-in/email \
+  --data-binary "@$cutover_dir/login.json"
+rm "$cutover_dir/login.json"
+jq -n --arg project "$cutover_project" '{project_id:$project}' > "$cutover_dir/select.json"
+cutover_request POST /api/workspace/select --data-binary "@$cutover_dir/select.json"
+cutover_request GET "/projects/$cutover_project/tasks"
+cutover_request GET "/api/tokens"
+jq '[.tokens[] | {name,legacy,scopes,token_id,credential_id,principal_id,policy,expires_at}]' \
+  "$cutover_dir/response.json" > "$cutover_dir/inventory.json"
+```
+
+Require 200 for login, project selection and reads. Protect the cookie jar like a
+password. Repeat selection/inventory for every project. Copy only reviewed
+non-secret inventory fields to the operator checklist. The generic API examples
+below use URL-safe credential names; percent-encode other names as path segments.
+
+The infrastructure recovery request uses a private curl configuration, keeping
+its bearer value out of process arguments:
+
+```bash
+read -rs -p 'Infrastructure token: ' cutover_infra
+printf '\n'
+printf 'header = "Authorization: Bearer %s"\n' "$cutover_infra" > "$cutover_dir/infra.conf"
+unset cutover_infra
+read -r -p 'Existing owner email: ' cutover_email
+jq -n --arg email "$cutover_email" '{email:$email}' > "$cutover_dir/recovery.json"
+cutover_request POST /api/account/recovery/owner \
+  --config "$cutover_dir/infra.conf" --data-binary "@$cutover_dir/recovery.json"
+```
+
+Require 200 and handle `response.json`'s `url` privately. Open its recovery page,
+or submit its fragment as `token` with a new `password` to
+`POST /api/account/recovery/accept` (200). Reuse must fail. Recovery invalidates
+old human sessions; sign in again and select the project. Wrong infrastructure
+authority must fail (403; 404 if the endpoint is not configured). Do not publish
+or print the recovery URL as evidence.
+
+#### 3. Change the pepper, replace credentials, then resume
+
+Only after all prerequisites pass, use the secret prompt for the named Worker:
+
+```bash
+pnpm --filter @tila/worker exec wrangler secret put HASH_PEPPER --name "$cutover_worker"
+```
+
+Enter the new value from the private secret store. Do not rotate other secrets or
+redeploy through ad hoc Wrangler deployment commands. Allow the secret update to
+complete before verification. Request failures or mixed observed behavior keep
+the maintenance window open; do not assume all isolates changed at once.
+
+Freshly sign in as the verified human owner and select the project again. A
+pre-cutover affected token must fail an ordinary protected request (401); the
+owner's task/membership reads must succeed. Rotate each **ordinary scoped**
+credential, using the current token ID from a fresh inventory:
+
+```bash
+read -r -p 'Scoped credential name: ' cutover_name
+read -r -p 'Current token ID: ' cutover_token_id
+jq -n --arg id "$cutover_token_id" \
+  '{expected_token_id:$id,overlap_seconds:0}' > "$cutover_dir/rotate.json"
+cutover_request POST "/api/tokens/$cutover_name/rotate" \
+  --data-binary "@$cutover_dir/rotate.json"
+```
+
+Require 201. Deliver the returned `token` directly from the private file to the
+consumer's secret store; retain only the returned IDs in the checklist. Compare
+`credential_id`, `principal_id`, `policy` and `expires_at` to the inventory. The
+existing proof binding is preserved; the consumer must still hold its private
+key. Prove the intended read/write operation succeeds and a forbidden operation
+still fails before marking that consumer ready. A 409 means the version changed:
+read the current inventory and reconcile; never blindly retry the old ID.
+
+| Consumer | Replacement after the pepper changes |
+|---|---|
+| Human-owned scoped token | Project owner rotation above, or a fresh human login using `POST /api/account/tokens/:name?projectId=...` with the same rotation body. |
+| Legacy browser session | Sign in through current human accounts. There is no background renewal guarantee for `tila_session`. |
+| Shared runtime installation | Revoke old enrollment with `POST /projects/:projectId/runtime/enrollments/:id/revoke` and `{}` (200). Issue `POST /projects/:projectId/runtime/invitations` with `{ "name": "host" }` and its reviewed `policy` (200); deliver `invitation` privately to normal runtime setup in a new isolated runtime home. Redeem with installation proof, then start a fresh run. Do not delete unrelated local runtime state. |
+| Personal runtime installation | Use its original authorized sponsor and retained installation proof/operation IDs to rerun the existing enrollment flow, where that authentication path supports it. Otherwise explicitly revoke and replace through an owner-issued shared invitation. Verify the replacement identity and its required bindings rather than silently treating it as the old run. |
+| Bound OIDC workload | Obtain a new provider assertion, then `POST /api/auth/oidc/exchange` with `project_id`, `oidc_token`, and the existing proof/runtime fields where applicable (200). Keep assertion material in a private request file. For GitHub Actions use the existing `/api/auth/github/exchange-oidc` flow. A replay returns 409; ordinary scoped rotation is not supported for these credentials. |
+
+New runtime installations can have new service principals and runs always have
+new participant authority. Restore their intended agent/room bindings explicitly;
+do not transfer stale claims or fenced writes. Pending old invitations remain
+stored until expiry: keep their values private and verify rejection under the new
+pepper. There is no public invitation-revocation endpoint; before restoring an old
+pepper, require all outstanding old invitations to have expired. An incomplete
+invitation inventory blocks that rollback. Existing scoped
+consumers retain their canonical principals through rotation.
+
+With a dedicated `CONVERSATION_CURSOR_KEY` held constant, send and read a message
+with authorized principals and verify existing history/cursors still work. If
+conversations previously derived their key from `HASH_PEPPER`, expect old cursors
+to fail with `invalid-cursor`; restart pagination. This procedure does not
+implicitly authorize enabling conversations on an unconfigured deployment.
+
+Resume consumers individually only after their checks pass. Keep unavailable
+consumers paused with an assigned operator. `tila project create` on a peppered
+deployment requires the matching private `TILA_HASH_PEPPER`; it is not this
+procedure's recovery path for existing projects.
+
+#### 4. Interruption and rollback
+
+| Interruption | Recovery and verification |
+|---|---|
+| Secret changed, no replacements issued | Use the independent human login or infrastructure owner recovery. Prefer continuing. If aborting, explicitly restore the old pepper (or delete `HASH_PEPPER` only if previously absent), then recheck every consumer and revocation. Never delete an existing prior pepper as a rollback shortcut. |
+| Rotation returned but plaintext was lost | Inventory the current `token_id`, rotate that version again with zero overlap, and deliver the new plaintext once. The first result cannot be fetched or replayed. The old expected ID must return 409. |
+| Some consumers already replaced | Keep the new pepper and finish recovery. Removing it rejects new credentials. Restoring it does not undo rotation retirement or revocation; consumers can end up with no usable version under the old configuration. |
+| Runtime setup interrupted | Use setup's saved operation/proof state only when its authorization is still valid. Old pepper-hashed invitations cannot recover a shared enrollment under the new pepper; use the explicit replacement flow above. |
+
+For an approved abort before replacement, the explicit commands are
+`wrangler secret put HASH_PEPPER --name <worker>` (supply the previous value), or
+`wrangler secret delete HASH_PEPPER --name <worker>` **only for a previously unset
+pepper**, through the same package-local Wrangler invocation above. Verify the
+Worker target again. Do not restore D1/project snapshots or undo revocations to
+make old credentials work. An unchanged, unrevoked old token can become valid
+again when its old pepper returns; invalid hashing was never revocation.
+
+#### Rehearsal evidence and production activation gate (#307)
+
+`packages/integration-tests/runtime/hash-pepper-cutover.test.ts` rehearses the
+procedure with synthetic credentials, a real local Worker and D1/DO storage. It
+changes bindings over the same existing database, exercises owner recovery and
+lost-response recovery, checks scoped authority/proof preservation, replaces
+runtime credentials, and verifies signed OIDC re-exchange. Only the external OIDC
+discovery/JWKS transport uses a fixture; authentication is not mocked. The suite
+also covers rollback, old-credential rejection and conversation send/read with an
+unchanged dedicated key. Run it with:
+
+```bash
+pnpm --filter @tila/integration-tests test:runtime hash-pepper-cutover
+pnpm test:runtime
+```
+
+**Production activation: outstanding; this runbook and local rehearsal do not
+set/rotate any production secret.** Record the following separately for an
+explicitly authorized production execution:
+
+| Evidence | Record without secrets |
+|---|---|
+| Identity | UTC date, operator, deployment/Worker, tested commit, deployed health release/commit and API compatibility |
+| Preparation | All-project inventory reviewed, legacy migration complete, recovery verified, consumers paused |
+| Cutover | Previous pepper state (unset/set only), owner login and principal/membership checks, replacement IDs and each consumer's protected-operation result |
+| Conversations | Authorized send/read, preserved history, cursor behavior, existing-principal access; health alone is insufficient |
+| Recovery/result | Rehearsal test command/results, interruption and rollback outcomes, unresolved consumers, resumed/paused status, explicit production performed/not-performed decision |
+
+The local fixture does not prove production secret propagation, provider
+availability, consumer rollout, or live installation rebinding. Attach only
+sanitized results to #307 after review; never attach private request/response
+files. Cold-read the status update without relying on session context.
 
 ## Troubleshooting
 
