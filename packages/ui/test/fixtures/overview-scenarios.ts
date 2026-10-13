@@ -154,7 +154,8 @@ export const SCENARIOS: OverviewScenario[] = [
       blocked: 3,
     },
     expected: "attention",
-    next: "/p/test-project/tasks?outcome=failure,abandoned",
+    // Both are amber; the larger count leads.
+    next: "/p/test-project/tasks?blocked=1",
   },
   {
     // S3: everything is unreachable.

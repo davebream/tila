@@ -186,4 +186,37 @@ describe("Layout navigation", () => {
       await screen.findByRole("dialog", { name: "Command palette" }),
     ).toBeInTheDocument();
   });
+
+  test("a section narrowed to one page does not mark a hidden page as that page", async () => {
+    server.use(
+      http.get("*/api/whoami", () =>
+        HttpResponse.json({
+          ok: true,
+          project_id: "test-project",
+          token_name: "viewer",
+          scopes: "read",
+          role: "viewer",
+          policy: {
+            role: "viewer",
+            capabilities: CAPABILITIES.filter(
+              (cap) => cap.endsWith(":read") && cap !== "schema:read",
+            ),
+          },
+        }),
+      ),
+    );
+    renderWithProviders(<AuthGate />, {
+      route: "/p/test-project/settings/definitions",
+    });
+
+    const primary = await screen.findByRole("navigation", { name: "Primary" });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("navigation", { name: "Settings" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      within(primary).getByRole("link", { name: "Settings" }),
+    ).toHaveAttribute("aria-current", "true");
+  });
 });

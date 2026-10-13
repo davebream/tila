@@ -513,4 +513,46 @@ describe("runtime detail and release outcomes", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  test("an attention view during a run-store outage is never an all-clear", async () => {
+    server.use(
+      handler(() =>
+        view([], {
+          sources: {
+            agents: "ok",
+            runs: "unavailable",
+            enrollments: "ok",
+            presence: "ok",
+          },
+          total: 0,
+          scan: { agents: 4, complete: true },
+        }),
+      ),
+    );
+    renderRuntime("/p/test-project/runtime?filter=attention");
+
+    expect(await screen.findByText(/Run data unavailable/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/at least 0 agents need attention/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No agent needs attention."),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a later page that emptied keeps the way back to the first page", async () => {
+    server.use(
+      handler(() =>
+        view([], { total: 2, scan: { agents: 4, complete: true } }),
+      ),
+    );
+    renderRuntime("/p/test-project/runtime?filter=attention&cursor=abc");
+
+    expect(
+      await screen.findByRole("button", { name: "First page" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No agent needs attention."),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -153,8 +153,11 @@ describe("OverviewPage", () => {
     const next = await screen.findByRole("region", { name: "Next action" });
     expect(
       within(next).getByRole("link", {
-        name: "View 1 task that failed or was abandoned",
+        name: "View 3 open tasks waiting on prerequisites",
       }),
+    ).toHaveAttribute("href", "/p/test-project/tasks?blocked=1");
+    expect(
+      screen.getByRole("link", { name: "1 task that failed or was abandoned" }),
     ).toHaveAttribute(
       "href",
       "/p/test-project/tasks?outcome=failure,abandoned",
