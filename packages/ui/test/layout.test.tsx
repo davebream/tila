@@ -160,4 +160,15 @@ describe("Layout navigation", () => {
     expect(within(dialog).queryByText("Go to Runtime")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Go to Rooms")).not.toBeInTheDocument();
   });
+
+  test("⌘K also works with Caps Lock on", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AuthGate />, { route: "/p/test-project/tasks" });
+    await screen.findByRole("navigation", { name: "Primary" });
+
+    await user.keyboard("{Meta>}K{/Meta}");
+    expect(
+      await screen.findByRole("dialog", { name: "Command palette" }),
+    ).toBeInTheDocument();
+  });
 });

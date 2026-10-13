@@ -1,4 +1,8 @@
-import { EntityAlias, LegacyRedirect } from "@/components/legacy-redirect";
+import {
+  EntityAlias,
+  LegacyRedirect,
+  ProjectHome,
+} from "@/components/legacy-redirect";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -30,6 +34,10 @@ function renderAt(entries: string[]) {
         <Route
           path="/p/:projectId/entities/*"
           element={<EntityAlias projectId="acme" />}
+        />
+        <Route
+          path="/p/:projectId"
+          element={<ProjectHome projectId="acme" />}
         />
         <Route path="/p/:projectId/*" element={<Probe />} />
         <Route path="*" element={<LegacyRedirect projectId="acme" />} />
@@ -88,5 +96,19 @@ describe("EntityAlias", () => {
     renderAt(["/p/acme/entities/task-1?sort=updated"]);
     await screen.findByRole("button", { name: "Back" });
     expect(href()).toBe("/p/acme/tasks/task-1?sort=updated");
+  });
+});
+
+describe("project-scoped aliases keep the project in the URL", () => {
+  test("an entity link for another project stays in that project", async () => {
+    renderAt(["/p/other/entities/task-1?sort=updated"]);
+    await screen.findByRole("button", { name: "Back" });
+    expect(href()).toBe("/p/other/tasks/task-1?sort=updated");
+  });
+
+  test("a bare project URL opens that project's default page", async () => {
+    renderAt(["/p/other"]);
+    await screen.findByRole("button", { name: "Back" });
+    expect(currentLocation.pathname).toMatch(/^\/p\/other\/[a-z]+$/);
   });
 });
