@@ -167,6 +167,35 @@ export function deriveObservation(
   };
 }
 
+/** Why a mailbox occupant needs a person's attention. */
+export type RuntimeAttention =
+  | "mailbox-expired"
+  | "mailbox-unknown"
+  | "host-offline"
+  | "host-stale";
+
+/**
+ * The attention rule for one observed occupant: its authority lapsed, could
+ * not be confirmed, or its host stopped reporting while it still holds the
+ * mailbox. An unreachable run store is a source outage reported separately,
+ * not evidence about the occupant, so it never counts here.
+ */
+export function runtimeAttention(
+  observation: RuntimeObservation,
+): RuntimeAttention | null {
+  const { lifecycle, host_liveness, reasons } = observation;
+  if (lifecycle === "expired") return "mailbox-expired";
+  if (lifecycle === "unknown")
+    return reasons.includes("run-source-unavailable")
+      ? null
+      : "mailbox-unknown";
+  if (lifecycle === "attached" && host_liveness === "offline")
+    return "host-offline";
+  if (lifecycle === "attached" && host_liveness === "stale")
+    return "host-stale";
+  return null;
+}
+
 export const UNSUPPORTED_HOST_COMMAND = {
   supported: false,
   reason: "no-host-adapter-command",

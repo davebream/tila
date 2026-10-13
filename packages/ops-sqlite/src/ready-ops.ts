@@ -183,6 +183,43 @@ export function evaluateReadiness(
   return { ready: reasons.length === 0, reasons };
 }
 
+const DEPENDENCY_REASONS: ReadonlySet<WorkBlockReason["code"]> = new Set([
+  "dependency-unsatisfied",
+  "dependency-missing",
+  "dependency-cycle",
+  "dependency-lifecycle-unconfigured",
+]);
+
+/** The entity is in a terminal state: its lifecycle's, or legacy `closed`. */
+export function isTerminal(
+  snapshot: ReadinessSnapshot,
+  entity: Entity,
+): boolean {
+  const lifecycle = snapshot.definition?.work_units[entity.type]?.lifecycle;
+  const state = entity.data[lifecycle?.field ?? "status"];
+  return lifecycle
+    ? typeof state === "string" && lifecycle.terminal.includes(state)
+    : state === "closed";
+}
+
+/**
+ * Open work held back by its prerequisites: not archived, not terminal, and
+ * readiness reports an unresolved, missing, cyclic or unconfigured
+ * predecessor. Pending gates and the task's own state do not count. Uses
+ * `evaluateReadiness` per task, so it always agrees with queue block reasons.
+ */
+export function blockedTaskIds(snapshot: ReadinessSnapshot): Set<string> {
+  const blocked = new Set<string>();
+  for (const entity of snapshot.entities.values()) {
+    if (entity.archived || isTerminal(snapshot, entity)) continue;
+    if (!snapshot.predecessors.has(entity.id)) continue;
+    const { reasons } = evaluateReadiness(snapshot, entity.id);
+    if (reasons.some((reason) => DEPENDENCY_REASONS.has(reason.code)))
+      blocked.add(entity.id);
+  }
+  return blocked;
+}
+
 export function computeReadyEntities(
   db: Db,
   opts?: {

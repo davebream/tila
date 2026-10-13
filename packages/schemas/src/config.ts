@@ -127,6 +127,16 @@ const ReferenceSlotSchema = z.object({
 
 export type ReferenceSlot = z.infer<typeof ReferenceSlotSchema>;
 
+/** Terminal outcomes a work type's lifecycle can name a state for. */
+export const LIFECYCLE_OUTCOMES = [
+  "success",
+  "failure",
+  "cancelled",
+  "abandoned",
+] as const;
+export const LifecycleOutcomeSchema = z.enum(LIFECYCLE_OUTCOMES);
+export type LifecycleOutcome = z.infer<typeof LifecycleOutcomeSchema>;
+
 export const WorkLifecycleSchema = z.object({
   field: z.string().min(1),
   dispatchable: z.array(z.string().min(1)).min(1),

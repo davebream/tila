@@ -153,6 +153,8 @@ export {
   capabilityState,
   deriveObservation,
   deriveReleaseCommand,
+  runtimeAttention,
+  type RuntimeAttention,
   assembleRuntimeView,
   UNSUPPORTED_HOST_COMMAND,
   type BindingViewer,

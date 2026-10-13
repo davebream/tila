@@ -532,7 +532,13 @@ export * from "./conversation";
 export * from "./connector";
 
 export * from "./human-account";
-export { WorkLifecycleSchema, type WorkLifecycle } from "./config";
+export {
+  LIFECYCLE_OUTCOMES,
+  LifecycleOutcomeSchema,
+  type LifecycleOutcome,
+  WorkLifecycleSchema,
+  type WorkLifecycle,
+} from "./config";
 export {
   WorkBlockReasonSchema,
   WorkReadinessSchema,
