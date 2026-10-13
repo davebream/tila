@@ -9,6 +9,7 @@ import { ConfirmAction } from "@/components/ui/confirm-action";
 import { FormNotice } from "@/components/ui/form-fields";
 import { type SchemaApplyCommand, applySchema, previewSchema } from "@/lib/api";
 import {
+  type DefinitionDraftValue,
   appliedSchemaQueryKey,
   definitionChanges,
   useDefinitionDraft,
@@ -16,8 +17,88 @@ import {
 import { failureMessage, schemaFailure } from "@/lib/mutation-errors";
 import { releaseOperation, stageOperation } from "@/lib/operation-draft";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import {
+  type DefinitionUnitComparison,
+  compareDefinitionUnits,
+  parseDefinitionDocument,
+} from "@tila/core";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
+
+/** Declarations a draft adds, changes and removes relative to its base. */
+function unitComparison(
+  baseSource: string,
+  source: string,
+): DefinitionUnitComparison | null {
+  const base = baseSource.trim()
+    ? parseDefinitionDocument(baseSource)
+    : { ok: true as const, doc: {} };
+  const next = parseDefinitionDocument(source);
+  if (!base.ok || !next.ok) return null;
+  return compareDefinitionUnits(base.doc, next.doc);
+}
+
+function UnitList({ label, units }: { label: string; units: string[] }) {
+  if (units.length === 0) return null;
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">
+        {label} ({units.length})
+      </dt>
+      <dd className="font-mono text-xs">{units.join(", ")}</dd>
+    </div>
+  );
+}
+
+/** What an imported file does to the declarations of its base revision. */
+function ImportSummary({
+  importedFrom,
+  units,
+  baseRevision,
+}: {
+  importedFrom: NonNullable<DefinitionDraftValue["importedFrom"]>;
+  units: DefinitionUnitComparison | null;
+  baseRevision: number;
+}) {
+  return (
+    <section
+      aria-label="Imported file"
+      className="space-y-2 rounded-lg border border-border p-3 text-sm"
+    >
+      <p>
+        This draft imports{" "}
+        <span className="font-medium">{importedFrom.name}</span> (
+        {importedFrom.format.toUpperCase()},{" "}
+        {importedFrom.mode === "merge"
+          ? "merged: declarations the file doesn't mention are kept"
+          : "replacing the whole definition"}
+        ) onto revision {baseRevision}.
+      </p>
+      {importedFrom.warnings.map((warning) => (
+        <FormNotice key={warning} tone="warning">
+          {warning}
+        </FormNotice>
+      ))}
+      {units && (
+        <dl className="space-y-1">
+          <UnitList label="Added" units={units.added} />
+          <UnitList label="Changed" units={units.changed} />
+          <UnitList label="Removed" units={units.removed} />
+          {importedFrom.mode === "merge" && units.unchanged.length > 0 && (
+            <div>
+              <dt className="text-xs text-muted-foreground">
+                Unchanged ({units.unchanged.length})
+              </dt>
+              <dd className="text-xs text-muted-foreground">
+                Kept as applied, including everything the file doesn't mention.
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </section>
+  );
+}
 
 export type AppliedNotice =
   | { kind: "applied"; revision: number }
@@ -60,7 +141,22 @@ export function SettingsDefinitionsReviewPage() {
     canApply,
   } = useDefinitionDraft();
   const [confirming, setConfirming] = useState(false);
+  const [removalsConfirmed, setRemovalsConfirmed] = useState(false);
+  const removalsId = useId();
   const back = `/p/${encodeURIComponent(project)}/settings/definitions`;
+  const units = useMemo(
+    () =>
+      value.importedFrom
+        ? unitComparison(value.baseSource, value.source)
+        : null,
+    [value.importedFrom, value.baseSource, value.source],
+  );
+  // An import never removes a declaration without an explicit confirmation,
+  // even when the server would treat the removal as non-destructive.
+  const removals = units?.removed ?? [];
+  const removalSignature = removals.join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the removal list changes
+  useEffect(() => setRemovalsConfirmed(false), [removalSignature]);
 
   const preview = useQuery({
     queryKey: ["schema-preview", project, value.source],
@@ -183,6 +279,14 @@ export function SettingsDefinitionsReviewPage() {
     <div className="space-y-6 p-3 md:p-6">
       {heading}
 
+      {value.importedFrom && (
+        <ImportSummary
+          importedFrom={value.importedFrom}
+          units={units}
+          baseRevision={value.baseRevision}
+        />
+      )}
+
       {value.restoredFrom !== null && (
         <FormNotice tone="info">
           This draft restores revision {value.restoredFrom}. Applying it records
@@ -277,12 +381,37 @@ export function SettingsDefinitionsReviewPage() {
         </FormNotice>
       )}
 
+      {!conflict && removals.length > 0 && !draft.pending && canApply && (
+        <div className="flex items-start gap-2 rounded-lg border border-status-amber/40 p-3 text-sm">
+          <input
+            id={removalsId}
+            type="checkbox"
+            checked={removalsConfirmed}
+            onChange={(event) => setRemovalsConfirmed(event.target.checked)}
+            className="mt-1"
+          />
+          <label htmlFor={removalsId}>
+            Remove {removals.length}{" "}
+            {removals.length === 1 ? "declaration" : "declarations"} the
+            imported file doesn't contain:{" "}
+            <span className="font-mono text-xs">{removals.join(", ")}</span>.
+            Existing tasks and records stay readable as legacy data.
+          </label>
+        </div>
+      )}
+
       {!conflict && (
         <div className="flex flex-wrap items-center gap-2">
           {canApply ? (
             <Button
               type="button"
-              disabled={busy || (!draft.pending && (!reviewed || previewAhead))}
+              disabled={
+                busy ||
+                (!draft.pending &&
+                  (!reviewed ||
+                    previewAhead ||
+                    (removals.length > 0 && !removalsConfirmed)))
+              }
               onClick={() =>
                 draft.pending || !destructive ? submit() : setConfirming(true)
               }

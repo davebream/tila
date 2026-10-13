@@ -13,6 +13,7 @@ import {
   type SchemaChange,
   type SchemaParseError,
   diffSchemas,
+  findForbiddenDefinitionContent,
   parseDefinitionDocument,
   parseSchemaToml,
   serializeDefinitionDocument,
@@ -35,6 +36,19 @@ export const DefinitionDraftValue = z.object({
   source: z.string(),
   /** Set when the draft restores a historical revision. */
   restoredFrom: z.number().int().positive().nullable(),
+  /**
+   * Set when the draft came from an imported file. Optional so drafts saved
+   * before import existed still load.
+   */
+  importedFrom: z
+    .object({
+      name: z.string(),
+      format: z.enum(["toml", "yaml"]),
+      mode: z.enum(["merge", "replace"]),
+      warnings: z.array(z.string()).default([]),
+    })
+    .nullable()
+    .optional(),
 });
 export type DefinitionDraftValue = z.infer<typeof DefinitionDraftValue>;
 
@@ -87,7 +101,7 @@ export function useDefinitionDraft() {
       : null;
   const { draft, update, discard } = useOperationDraft(
     key,
-    () => ({
+    (): DefinitionDraftValue => ({
       baseRevision: current?.revision ?? 0,
       baseSource: current?.source ?? "",
       source: current?.source ?? "",
@@ -97,7 +111,9 @@ export function useDefinitionDraft() {
   );
   const value = draft.value;
   const dirty =
-    value.source !== value.baseSource || value.restoredFrom !== null;
+    value.source !== value.baseSource ||
+    value.restoredFrom !== null ||
+    Boolean(value.importedFrom);
 
   // An untouched draft tracks whatever is applied now.
   const behind =
@@ -187,6 +203,9 @@ export function analyzeDraft(value: DefinitionDraftValue): DraftAnalysis {
   const document = parseDefinitionDocument(value.source);
   if (!document.ok)
     return { ok: false, problems: document.errors, syntax: true };
+  const forbidden = findForbiddenDefinitionContent(document.doc);
+  if (forbidden.length > 0)
+    return { ok: false, problems: forbidden, syntax: false };
   const parsed = parseSchemaToml(value.source);
   if (!parsed.ok) return { ok: false, problems: parsed.errors, syntax: false };
   return {

@@ -46,7 +46,8 @@ export function DraftBar({
           <span className="text-muted-foreground">
             on revision {value.baseRevision}
             {value.restoredFrom !== null &&
-              `, restoring revision ${value.restoredFrom}`}{" "}
+              `, restoring revision ${value.restoredFrom}`}
+            {value.importedFrom && `, imported from ${value.importedFrom.name}`}{" "}
             · {summary}
           </span>
         </p>
@@ -101,9 +102,9 @@ export function DraftBar({
       )}
       {definitionHasComments(value.baseSource) && (
         <p className="text-xs text-muted-foreground">
-          The applied TOML has comments. Form edits and merges rewrite the
-          definition without them; text changed in the source editor keeps them.
-          History keeps every applied text.
+          The applied TOML has comments. Form edits, merges and imports rewrite
+          the definition without them; text changed in the source editor keeps
+          them. History keeps every applied text.
         </p>
       )}
     </section>

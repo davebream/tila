@@ -474,7 +474,7 @@ export function RecordDetailPage() {
                   </TableRow>
                   <TableRow>
                     <FieldLabel>
-                      <InfoTip content="Schema version from tila.schema.toml when this record was last written">
+                      <InfoTip content="Definitions revision applied when this record was last written">
                         Schema Version
                       </InfoTip>
                     </FieldLabel>

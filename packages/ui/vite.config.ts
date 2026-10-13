@@ -21,6 +21,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      // The subpath must precede "@tila/core", which would prefix-match it.
+      "@tila/core/definition-yaml": path.resolve(
+        __dirname,
+        "../core/src/definition-yaml.ts",
+      ),
       "@tila/core": path.resolve(__dirname, "../core/src/index.ts"),
       "@tila/schemas": path.resolve(__dirname, "../schemas/src/index.ts"),
     },
