@@ -180,9 +180,8 @@ export function DeclarationEditor({
             onChange={(e) => setName(e.target.value.trim())}
           />
         )}
-        {children(state, update, { name, candidate, report, submitted })}
         {state.fields && fieldTypes && (
-          <section className="space-y-3 border-t border-border pt-4">
+          <section className="space-y-3">
             <h3 className="text-sm font-medium">Fields</h3>
             <FieldsEditor
               fields={state.fields}
@@ -192,6 +191,7 @@ export function DeclarationEditor({
             />
           </section>
         )}
+        {children(state, update, { name, candidate, report, submitted })}
         {problems.length > 0 && (
           <ProblemSummary
             title="The draft will not validate until these are fixed"
