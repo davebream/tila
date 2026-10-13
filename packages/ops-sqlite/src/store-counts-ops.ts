@@ -8,6 +8,8 @@ import type * as schema from "./schema";
  * `_schema_history` is excluded from the domain set and returned separately as a diagnostic.
  */
 export const DOMAIN_TABLE_NAMES = [
+  "question_receipts",
+  "work_questions",
   "queue_operation_receipts",
   "execution_reservations",
   "work_attempts",
@@ -38,6 +40,8 @@ export const DOMAIN_TABLE_NAMES = [
   "artifact_relationships",
   "journal",
   "journal_cursors",
+  "journal_report_receipts",
+  "journal_report_rates",
   "handoffs",
   "handoff_references",
   "_journal_archive_watermark",
@@ -98,6 +102,8 @@ export function countStoreRows(
       work_attempts: countTable(db, "work_attempts"),
       execution_reservations: countTable(db, "execution_reservations"),
       queue_operation_receipts: countTable(db, "queue_operation_receipts"),
+      work_questions: countTable(db, "work_questions"),
+      question_receipts: countTable(db, "question_receipts"),
       rooms: countTable(db, "rooms"),
       room_members: countTable(db, "room_members"),
       threads: countTable(db, "threads"),
@@ -129,6 +135,8 @@ export function countStoreRows(
       artifact_relationships: countTable(db, "artifact_relationships"),
       journal: countTable(db, "journal"),
       journal_cursors: countTable(db, "journal_cursors"),
+      journal_report_receipts: countTable(db, "journal_report_receipts"),
+      journal_report_rates: countTable(db, "journal_report_rates"),
       handoffs: countTable(db, "handoffs"),
       handoff_references: countTable(db, "handoff_references"),
       _journal_archive_watermark: countTable(db, "_journal_archive_watermark"),
