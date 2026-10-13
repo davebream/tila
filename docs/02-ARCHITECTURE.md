@@ -623,7 +623,7 @@ The three relationship tables (`entity_relationships`, `entity_artifact_referenc
 
 DDL migrations to either DO SQLite or D1 are explicit, require Cloudflare account credentials, and run via `tila worker upgrade`. They are never auto-applied. The DO's SQLite migrations are bundled with the Worker code and applied on first use of each DO (via the DO's `blockConcurrencyWhile(initFn)`); D1 migrations apply via Wrangler at deploy time.
 
-Entity-level schema changes (adding `task`, removing `bug`, adding required field `priority`) use `tila schema apply` with `_schema_history` as the audit log. The DDL is unaffected — these changes only modify `data` interpretation rules.
+Entity-level schema changes (adding `task`, removing `bug`, adding required field `priority`) are definition revisions made in Settings › Definitions, `tila schema import` or `tila schema apply`, with `_schema_history` as the audit log. The DDL is unaffected — these changes only modify `data` interpretation rules.
 
 Configuration reads and previews return `revision` (zero before the first apply). This is the applied-definition history version, distinct from the format's `schema_version`. Send `expected_revision` on apply to reject stale edits atomically with HTTP 412 `schema-revision-conflict`. Destructive conditional writes also require `reviewed_definition` from preview and an explicit `relax` or `force` strategy. Tila compares parsed definitions, so whitespace changes are harmless; the review is a precondition, not an authorization credential.
 
@@ -631,7 +631,9 @@ Preview changes are typed (`SchemaPreviewChangeSchema`) and carry impact counts 
 
 `@tila/core` also exports the editable definition document used by the dashboard: `parseDefinitionDocument`/`serializeDefinitionDocument` keep the raw TOML table tree, so keys the schema does not model survive an edit, and `rebaseDefinition` merges a draft onto a newer revision one declaration at a time. Serialization keeps values but not comments or layout. Validation remains `parseSchemaToml` and the server preview.
 
-The SDK exposes `schema.preview(definition)`, `schema.apply(definition, strategy, { expected_revision, reviewed_definition, idempotency_key })` and paginated `schema.history({ limit, before })`. CLI users can save `tila schema diff --json` to a review file and pass it with `tila schema apply --review <file> --strategy force --idempotency-key <stable-key>`. MCP exposes `tila_schema_preview` and the same conditional fields on `tila_schema_update`. History is retained remotely and locally. Embedded databases now apply the previously skipped canonical migration 21 to add the transactional receipt table; the legacy local response-cache table remains intact. Legacy unconditional applies remain compatible; they do not provide stale-editor protection.
+The SDK exposes `schema.preview(definition)`, `schema.apply(definition, strategy, { expected_revision, reviewed_definition, idempotency_key })` and paginated `schema.history({ limit, before })`. CLI users can save `tila schema diff --json` to a review file and pass it with `tila schema apply --review <file> --strategy force --idempotency-key <stable-key>`. MCP exposes `tila_schema_preview` and the same conditional fields on `tila_schema_update`. History is retained remotely and locally. Embedded databases now apply the previously skipped canonical migration 21 to add the transactional receipt table; the legacy local response-cache table remains intact. Legacy unconditional applies remain compatible; they do not provide stale-editor protection, and `tila schema apply` now warns when it sends one.
+
+Every new definition write (preview and apply) passes a guard before it is parsed: a definition or reviewed copy over 256 KiB (`DEFINITION_MAX_BYTES`) returns 413 `payload-too-large`, and credentials, a `[tila_export]` table or a client connection file return 400 `schema-parse-error` with one path per problem. The Worker also caps schema request bodies ahead of the idempotency middleware. Stored definitions are never re-checked on read. `tila schema import` and `tila schema export` move definitions in and out as TOML or YAML through the same preview and conditional apply; §14.6 has the contract.
 
 Apply receipts commit with the configuration and journal in project SQLite. An exact retry returns the recorded result, even after the applied revision advances; a reused key with different input is rejected. Schema commands bypass D1 response replay so current authorization is checked before the receipt is read. Entity create/update validation reads the current definition inside its write transaction; Worker cache freshness is not a correctness boundary.
 
@@ -1369,9 +1371,11 @@ Unconfigured types retain legacy readiness (`status != closed`, archived predece
 
 ### 6.3 Adding a new work-unit type
 
-The applied definition in project DO SQLite is authoritative. Today the CLI
-composes schema fragments and explicitly submits TOML through `tila schema apply`;
-MCP `tila_schema_update` and the Worker schema endpoint use the same parser/ops.
+The applied definition in project DO SQLite is authoritative. The CLI previews
+and applies a file (or the composed `*.schema.toml` fragments) with
+`tila schema import`, which merges by default (§14.6); `tila schema apply` still
+submits the fragments as the whole definition. MCP `tila_schema_update` and the
+Worker schema endpoint use the same parser/ops.
 Adding a type/kind is a definition revision, not a database migration. The server
 increments `_schema_history.version`; the file's `schema_version` is separate.
 Revision-checked TOML writes are described in §2.5. Settings › Definitions edits
@@ -1979,8 +1983,11 @@ tila journal show <seq>
 
 # Schema
 tila schema show
+tila schema status                  # local *.schema.toml vs the server, by declaration
 tila schema diff
-tila schema apply [--strategy=<strategy>]
+tila schema import [file] [--mode=merge|replace] [--expected-revision=<n>]
+tila schema export [--format=toml|yaml] [--output=<file>]
+tila schema apply [--strategy=<strategy>]   # legacy whole-definition replace
 
 # Lifecycle
 tila lifecycle show
@@ -2087,7 +2094,7 @@ Applied definitions, operation receipts and their journal event commit in one pr
 Product release, physical database migration, serialized schema-format version and applied definition revision are distinct. A high history revision does not by itself mean an older client cannot parse the format. Preserve existing compatibility checks; #296 owns the explicit settings-client transition, and #307 reports immutable release/protocol identity. Do not restore old definitions as a database downgrade.
 
 ### 10.7 User runs concurrent `tila schema apply` from two machines
-Both callers send the revision they read as `expected_revision`. The first transaction commits; the second receives `schema-revision-conflict` and must read/preview again. Legacy callers that omit the precondition retain unconditional behavior. There is no schema claim or cross-store transaction in this path.
+Both callers send the revision they read as `expected_revision` (`tila schema import --expected-revision <n>` does). The first transaction commits; the second receives `schema-revision-conflict` and must read/preview again. Legacy callers that omit the precondition retain unconditional behavior. There is no schema claim or cross-store transaction in this path.
 
 ### 10.8 Lease TTL too short, agent loses lease mid-work
 Renew loop runs every TTL/3 (default: every 60s for a 180s lease, every 200s for a 600s lease). If three consecutive renews fail, the agent aborts its current critical section and surfaces the issue.
@@ -2132,7 +2139,7 @@ Worker tracks daily write count in a `_quota` table (cheap: one row updated per 
 Acceptable. The framework's autopilot pulls `ANTHROPIC_API_KEY` from env at session start. Sub-agent invocations are independent API calls. No coordination with the user's interactive Claude Code session is needed; both call the same API with separate contexts. tila has no opinion or involvement here — LLM credentials never reach the Worker.
 
 ### 10.23 Editing the schema at runtime via CLI without editing toml
-The current schema CLI exposes show/diff/apply/status and submits an explicit TOML definition; the add-work-unit/add-field/add-artifact/add-reference-slot conveniences described in the historical design are not implemented. Applied server state is authoritative. Settings › Definitions provides browser editors (#297) and #299 owns explicit file import/export; a local file must not silently overwrite subsequent server edits.
+The current schema CLI exposes show/diff/apply/status and submits an explicit TOML definition; the add-work-unit/add-field/add-artifact/add-reference-slot conveniences described in the historical design are not implemented. Applied server state is authoritative. Settings › Definitions provides browser editors (#297), and files move in and out only through explicit import and export (#299, §14.6), so a local file never silently overwrites later server edits.
 
 ### 10.24 R2 lifecycle expires an artifact while UI is rendering it
 UI fetches artifact metadata from D1 (`artifact_pointers`); fetches the blob from R2. If R2 returns 404 for an artifact the pointer references, the UI shows a "this artifact was deleted by lifecycle policy on <date>" placeholder, with the journal event still visible. The pointer row remains for audit; `tila doctor` can prune orphaned pointers if desired.
@@ -2785,8 +2792,8 @@ draft on the current revision and applies it as a new revision after the same
 review; there is no separate restore endpoint and history is never rewritten.
 Retiring a declaration removes it; stored rows stay readable as legacy data.
 A change that only touches comments or unknown keys records no revision.
-#296 still owns a typed structured input and revision detail endpoints; #299
-owns explicit import/export.
+#296 still owns a typed structured input and revision detail endpoints. Import
+and export are in §14.6.
 
 | Setting / complete field group | Permission / lifecycle | Required browser editor and removal behavior |
 |---|---|---|
@@ -2846,7 +2853,7 @@ destructive confirmation, fed by an archive preview.
 
 | Field group / authority | Current surface | Boundary and management path |
 |---|---|---|
-| `TilaProjectConfig`: `project_id`, `backend`, `worker_url`, `instance.instance_key`; `schema_version`, `tila_version`, `created_at` | Local project connection file; CLI init/link/switch/config get | Client connection/format metadata. Show project/instance context, but do not import these fields as shared definitions or silently retarget a client. `config set` is a stub, not a delivered editor. #299 must label/remap references explicitly. |
+| `TilaProjectConfig`: `project_id`, `backend`, `worker_url`, `instance.instance_key`; `schema_version`, `tila_version`, `created_at` | Local project connection file; CLI init/link/switch/config get | Client connection/format metadata. Show project/instance context, but do not import these fields as shared definitions or silently retarget a client. `config set` is a stub, not a delivered editor. Definition import rejects this file with a `client-connection-file` error, and definitions name none of these identities (§14.6). |
 | `TilaProjectConfig`: `auth.mode`, `github.host/owner/repo/repo_id`; `local.db_path/artifacts_path/org` | Local auth selection and local-backend compatibility | Connection/bootstrap hints and local storage locations, not overrides of server membership/repository policy. Keep current consumers; local/auth retirement is separate work. |
 | `TilaProjectConfig`: `cloudflare.account_id`, `custom_domain`, `backends.entity/coordination/artifact/auth`; infrastructure account/name, D1 ID, R2 bucket, Worker URL, Pages name, app/installation IDs, infra slug | Deployment metadata; CLI infra/provision/deploy and project configure | Infrastructure ownership, routing and backend placement. Operational configuration, not ordinary project Settings. Read-only diagnostics may link to the runbook (#307); do not promise live backend switching. |
 | `CredentialProfile`: ID/revision, harness, launcher, config directory, credential-store kind, endpoint, environment allowlist, account reference; profile-file format/revision map | Host profile store; CLI profile/client-lifecycle operations | H. Non-secret project selection belongs in #298; host mutation requires a negotiated #283 adapter command and confirmed applied revision. Launcher/config paths remain host-local. Remote profile management is not implemented. |
@@ -2898,7 +2905,7 @@ participant-level apply change requires an explicit authorization decision.
 
 | Code / resource | Current behavior and required activation contract |
 |---|---|
-| D — applied definitions | Current apply parses input, then diffs/commits inside a DO SQLite transaction, increments history `version`, and journals; no expected revision is checked. Current no-change/destructive outcomes remain documented. #296 adds atomic revision preconditions, reviewed destructive changes, idempotent retries and public history/restore. New writes use current validation; legacy reads retain supported lazy `default_for_legacy` behavior without bulk rewriting stored rows. Retiring a type must not conceal its remaining rows. |
+| D — applied definitions | Apply parses input, then diffs/commits inside a DO SQLite transaction, increments history `version`, and journals. `expected_revision` is checked in the same transaction (412 on mismatch), destructive conditional writes bind to the previewed `reviewed_definition`, and retries replay their receipt. Writes without `expected_revision` stay unconditional except on managed-queue projects (428). No-change and destructive outcomes remain documented; history is public and restore applies an old definition as a new revision. New writes use current validation; legacy reads retain supported lazy `default_for_legacy` behavior without bulk rewriting stored rows. Retiring a type must not conceal its remaining rows. |
 | T — templates | Instantiation validates and creates work/relationships using the active definition. Edits affect later instantiations only; previously created work is independent. Attempts record the definition and queue-policy revisions in force at reservation, authorization and result (#303, migration 39) as audit evidence; template edits are not task mutations. |
 | A — artifact policy | New versioned writes/restores capture current retention at reservation. Existing unassigned revisions get one persisted policy snapshot through bounded backfill; already assigned expiry is not rewritten by later schema edits. Expired non-head revisions may be swept; live lineage heads are protected. Explicit deletion/lineage retirement uses durable intent/retry records and preserves metadata/provenance. Restore cannot recover deleted bytes or revive a destroyed lineage. Search policy changes do not promise automatic historical reindexing. |
 | I — stable identity / archive | Rename, grants and profile selection are revision-checked updates; IDs and attribution stay stable. Archive, in one DO transaction, checks the revision and the reviewed `expected_epoch` of the active binding (`stale-binding` if the occupant changed), releases that binding and advances the epoch so the running session loses agent authority, supersedes the agent's open questions, stops dispatch, and refuses new runs, attaches, publications and room membership. Pending deliveries remain as evidence until their TTL; unfinished attempts keep their own lifecycle and need an explicit cancel or reassignment in Queue. Unarchive restores the identity only: no binding, lease or expired delivery is revived, and an attach must use the current epoch. Project destruction is a separate root operation, never “archive”. |
@@ -2989,19 +2996,63 @@ deployment, host profile, deleted blob or independently committed setting.
 
 ### 14.6 Import/export and acceptance traceability
 
-TOML remains the first supported initialization/import format. Required #299 import
-is explicit preview/apply against current server revision. Merge preserves omitted
-sections; replacement must enumerate and confirm removals. Starting a client or
-deploying must not silently reapply a stale bootstrap file. YAML is optional and
-must normalize to the same schema. Automatic file synchronization and Git-managed
-authority are deferred, not a second authority mode implied by this contract.
+Import and export cover applied definitions only (#299). Agents, rooms, signal
+groups, access settings and credentials are not in the file; exporting them, with
+explicit identity remapping, is follow-up work. Server state stays authoritative:
+starting a client, deploying, provisioning or `init` never reads a definitions
+file, and Git-managed or automatically synchronized files remain deferred.
 
-Export includes current effective permitted definitions/non-secret settings with
-format, revision and provenance metadata. Cross-project identity references require
-explicit remapping. Exclude token/provider/bootstrap secrets, proof material,
-leases/claims, delivery queues, work results and private message content. Preserve
-supported fields semantically; do not promise comments or byte-identical TOML.
-Full recovery remains the separate #192 backup/restore contract and permissions.
+An import is planned on the client against the revision it just read
+(`planDefinitionImport` in `@tila/core`), then goes through the normal preview
+and revision-checked apply, so a change in between returns 412. A unit is one
+named declaration in `work_units`, `records`, `artifacts` or `templates`, or any
+other whole top-level key (`hierarchy`, `schema_version`, an unmodeled key).
+
+| Mode | Behaviour |
+|---|---|
+| `merge` (default) | Each unit in the file replaces the same unit; units the file omits are kept. A declaration is replaced whole, so fields it drops are removals the preview reports. An empty section changes nothing. `schema_version` comes from the file, else the project. |
+| `replace` | The file becomes the whole definition. Every removed unit is listed and must be confirmed (`--confirm-removals`, or the dashboard checkbox), including template removals the server treats as non-destructive. |
+
+The result is validated as a complete definition before preview; any error means
+nothing is drafted or written. Destructive changes still need the typed
+confirmation and a strategy. An import that only changes comments or unmodeled
+keys records no revision.
+
+TOML and YAML are supported (`.toml`, `.yaml`, `.yml`; pasted text is detected).
+YAML is read with the 1.2 core schema and normalizes to the same document as
+TOML; several documents, custom tags, aliases, merge keys and nulls are rejected.
+The server stores and validates TOML only, so clients convert YAML first. The
+adapter is the `@tila/core/definition-yaml` entry, which keeps the `yaml`
+library out of the Worker, Durable Object and SDK bundles.
+
+Export (`tila schema export`, Settings › Definitions) writes the applied
+definition with a `[tila_export]` table: `format = "tila-definitions"`,
+`format_version`, `project_id`, `revision`, `exported_at`, and optionally
+`applied_at` and `exported_with`. Import checks `format` and `format_version`
+(a newer version is refused), warns when a same-project export is older than the
+applied revision, and removes the table. A comment header says the file holds
+definitions only and is not a backup. Values and unmodeled keys survive; comments
+and layout do not. Definitions name no project identities, so nothing needs
+remapping; `records.*.schema_ref` and template entity `data` are copied verbatim
+and listed in the header. A stored definition that contains credentials is
+refused rather than redacted. Full recovery remains the separate #192
+backup/restore contract and permissions.
+
+Every new definition write (preview and apply, from any client) passes a guard;
+stored text is never re-checked on read.
+
+| Rejected input | Response |
+|---|---|
+| A definition or reviewed copy over 256 KiB (`DEFINITION_MAX_BYTES`); a request body over 1 MiB + 64 KiB, checked before the idempotency middleware reads it | 413 `payload-too-large` |
+| Credential-shaped values (tila, GitHub, AWS and Slack tokens, API keys, JWTs, private keys) or credential-named keys holding a value | 400 `schema-parse-error`, one entry per path; the value is never echoed |
+| A `[tila_export]` table (import removes it) or a client connection file (`.tila/config.toml`) | 400 `schema-parse-error` |
+
+`tila schema status` compares local `*.schema.toml` files with the server by unit
+(`up-to-date`, `differs`, `unknown`) instead of treating the file as pending.
+`tila schema apply` without a revision still sends the files as the whole
+definition, and warns. MCP import/export is follow-up work;
+`tila_schema_preview` plus a conditional `tila_schema_update` already give
+preview-then-apply.
 
 | Scenario / child ownership | Contract review and acceptance probes |
 |---|---|

@@ -75,7 +75,7 @@ Artifacts are keyed by sha256. Upload the same content twice and it's stored onc
 ### Typed records: structured state, not ad-hoc JSON
 
 ```bash
-# Declare record types in tila.schema.toml, then read and write them:
+# Declare record types in Settings › Definitions (or import tila.schema.toml), then read and write them:
 $ tila record set service api ./api.yaml
 # => Created record service:api  revision=1  fence=1
 
