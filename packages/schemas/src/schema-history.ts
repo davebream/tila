@@ -12,6 +12,15 @@ export const SchemaHistorySchema = z.object({
 
 export type SchemaHistory = z.infer<typeof SchemaHistorySchema>;
 
+/** A stored revision as listed by `GET /schema/history`. */
+export const SchemaHistoryEntrySchema = SchemaHistorySchema.extend({
+  /** JSON-encoded list of readable changes; absent on very old rows. */
+  change_summary: z.string().nullable().optional(),
+  strategy: z.string().nullable().optional(),
+});
+
+export type SchemaHistoryEntry = z.infer<typeof SchemaHistoryEntrySchema>;
+
 // Apply strategy for schema evolution (v0.1: relax and force only)
 // v0.2 strategies (migrate, default-parent, backfill) are not in scope for v0.1
 

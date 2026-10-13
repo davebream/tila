@@ -8,6 +8,36 @@ import {
   searchHandler,
 } from "./tasks";
 
+/** A queue inspection with no entries; `counts` overrides individual groups. */
+export function emptyQueue(counts: Partial<Record<string, number>> = {}) {
+  return {
+    policy: {
+      enabled: true,
+      paused: false,
+      execution_limit: null,
+      wip_limit: null,
+      lease_ms: 60_000,
+      revision: 1,
+    },
+    counts: {
+      backlog: 0,
+      active: 0,
+      suspended: 0,
+      uncertain: 0,
+      terminal: 0,
+      execution: 0,
+      wip: 0,
+      oldest_waiting_age_ms: null,
+      ...counts,
+    },
+    entries: [],
+    total: 0,
+    limit: 1,
+    offset: 0,
+    effective_capabilities: [],
+  };
+}
+
 export const handlers = [
   http.get("*/api/auth/github/login-config", () =>
     HttpResponse.json({ ok: true, enabled: false }),
@@ -207,6 +237,19 @@ export const handlers = [
       },
     });
   }),
+
+  // Applied definitions: none by default (a fresh project).
+  http.get("*/projects/*/schema", () =>
+    HttpResponse.json({ ok: true, schema: null, version: null, revision: 0 }),
+  ),
+  http.get("*/projects/*/schema/history", () =>
+    HttpResponse.json({ ok: true, entries: [] }),
+  ),
+
+  // Execution queue: empty by default.
+  http.get("*/projects/*/queue", () =>
+    HttpResponse.json({ ok: true, result: emptyQueue() }),
+  ),
 
   // Identity for capability-aware navigation: an owner without a scoped
   // policy, so every destination is visible.

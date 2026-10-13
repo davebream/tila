@@ -2756,8 +2756,9 @@ All rows below currently share `GET /schema`, `POST /schema/preview` and
 `POST /schema` (full TOML `definition`, optional `relax`/`force` strategy).
 CLI `schema show/diff/apply/status`, SDK `schema.get/apply`, MCP
 `tila_schema_update` and the schema resource consume this definition. SDK
-`schema.history()` exists but the public Worker does **not** mount its history
-endpoint; a client method is not delivered history access. #296 owns typed
+`schema.history()` and the dashboard's read-only Settings › Definitions page read
+`GET /schema/history` (`limit`, `before`). History is readable; restore is not
+delivered. #296 owns typed
 structured input, public preview/history/detail/restore and revision checking;
 #297 owns all form sections below; #299 owns explicit import/export.
 
@@ -3023,6 +3024,57 @@ corpus and may drift under concurrent writes. Each kind stops at depth 1000.
   namespace-restricted credentials; tasks and records are filtered by the same
   restriction conditions as lists. `/search/reindex` stays denied.
 - `total` is the number of results in the page, not a match count.
+
+### 14.9 Dashboard navigation and Overview (#306)
+
+The dashboard groups its pages into five sections. Every page keeps its URL, so
+deep links and bookmarks still open the same view.
+
+| Section | Pages (path below `/p/:projectId/`) |
+|---|---|
+| Overview | `overview` (the project's default page) |
+| Work | `tasks`, `queue`, `records`, `artifacts`, `journal` |
+| Conversations | `rooms`, `deliveries`, `signals` |
+| Runtime | `runtime`, `agents`, `presence` |
+| Settings | `settings` (access), `settings/definitions` (read-only definitions) |
+
+- **Old links redirect.** Flat URLs from before project-scoped routes
+  (`/tasks/:id`, `/rooms/:id?thread=…`, `/entities/:id`) move below the active
+  project with their sub-path, query and fragment, replacing the history entry.
+  `entities/:id` opens that task.
+- **Visibility is a convenience.** Sections and command-palette entries the
+  caller's effective policy cannot read are hidden; namespace-restricted
+  credentials only see the surfaces the Worker allows them. A deep link to a
+  hidden page still renders that page's own forbidden state.
+
+**The Overview separates observed facts from attention rules.** Each rule reads
+an exact, caller-scoped count from a server list and states why a non-zero count
+needs a person. The count links to the list it was counted from.
+
+| Rule | Observed fact | Links to |
+|---|---|---|
+| `execution.uncertain` | Queue entries whose execution outcome is uncertain | `queue?state=uncertain` |
+| `execution.suspended` | Queue entries whose execution is suspended | `queue?state=suspended` |
+
+Rules for blocked or failed work, delivery problems and stale runtime
+observations need list filters with exact totals first. Workflow-attempt and
+decision rules wait for list pages that can show them.
+
+The page states are derived in order:
+
+1. **Attention:** a rule found something. The most urgent finding (red before
+   amber, then the larger count) is the next action.
+2. **Setup:** `GET /schema` returns no applied schema and the catalogs report
+   no tasks or records. The page links to Settings › Definitions and access
+   management instead of asking for a local schema file.
+3. **Pending:** a check is still loading. No count is shown yet.
+4. **Unchecked:** the caller's access includes no check.
+5. **Unknown:** no check completed.
+6. **Partial:** nothing found, but a check failed, is stale, scanned only part
+   of its data, or lacks deployment configuration. This is never an all-clear.
+7. **Idle:** every check completed and found nothing.
+
+A forbidden check is listed as "not checked with your access", never as zero.
 
 ## Managed execution foundations
 

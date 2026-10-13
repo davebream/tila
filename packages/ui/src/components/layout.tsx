@@ -26,7 +26,6 @@ import { ErrorBoundary } from "./error-boundary";
 import { Button } from "./ui/button";
 import { CommandPalette } from "./ui/command-palette";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { WelcomeBanner } from "./ui/welcome-banner";
 
 type Density = "compact" | "comfortable" | "cozy";
 type Theme = "dark" | "light" | "system";
@@ -344,6 +343,7 @@ function SectionNav({
         <NavLink
           key={item.id}
           to={`${prefix}/${item.segment}`}
+          end={item.end}
           className={({ isActive }) =>
             `${NAV_LINK} ${isActive ? NAV_LINK_ACTIVE : NAV_LINK_IDLE}`
           }
@@ -477,7 +477,6 @@ export function Layout() {
         <SectionNav section={activeSection} prefix={prefix} />
       )}
       <main id="main-content" className="flex-1">
-        <WelcomeBanner />
         <ErrorBoundary>
           <Outlet />
         </ErrorBoundary>

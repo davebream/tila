@@ -10,7 +10,12 @@ import {
 // command palette (#306). Sections group the existing project URLs; no page
 // moved, so every deep link keeps resolving to the same view.
 
-export type SectionId = "work" | "conversations" | "runtime" | "settings";
+export type SectionId =
+  | "overview"
+  | "work"
+  | "conversations"
+  | "runtime"
+  | "settings";
 
 export interface NavItem {
   id: string;
@@ -23,6 +28,14 @@ export interface NavItem {
   surface?: string;
   /** Extra palette search terms. */
   keywords?: readonly string[];
+  /** Active only on the exact path, not on nested pages below it. */
+  end?: boolean;
+}
+
+/** Anything gated on capabilities and the restricted-credential surfaces. */
+export interface AccessTarget {
+  requires: readonly Capability[];
+  surface?: string;
 }
 
 export interface NavSection {
@@ -33,6 +46,19 @@ export interface NavSection {
 }
 
 export const NAV_SECTIONS: readonly NavSection[] = [
+  {
+    id: "overview",
+    label: "Overview",
+    items: [
+      {
+        id: "overview",
+        label: "Overview",
+        segment: "overview",
+        requires: [],
+        keywords: ["attention", "home", "setup"],
+      },
+    ],
+  },
   {
     id: "work",
     label: "Work",
@@ -143,17 +169,26 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     items: [
       {
         id: "settings",
-        label: "Settings",
+        label: "Access",
         segment: "settings",
         requires: [],
-        keywords: ["members", "credentials", "tokens", "access"],
+        keywords: ["settings", "members", "credentials", "tokens"],
+        end: true,
+      },
+      {
+        id: "definitions",
+        label: "Definitions",
+        segment: "settings/definitions",
+        requires: ["schema:read"],
+        surface: "schema",
+        keywords: ["schema", "types", "fields", "lifecycle"],
       },
     ],
   },
 ];
 
 /** Where a project opens when no specific page was requested. */
-export const DEFAULT_SEGMENT = "tasks";
+export const DEFAULT_SEGMENT = "overview";
 
 export function defaultProjectPath(projectId: string): string {
   return `/p/${projectId}/${DEFAULT_SEGMENT}`;
@@ -213,7 +248,7 @@ export function isRestricted(identity: WhoamiResponse | undefined): boolean {
 export function navVisibility(
   identity: WhoamiResponse | undefined,
   projectId: string | null,
-): (item: NavItem) => boolean {
+): (item: AccessTarget) => boolean {
   const policy = identity?.policy as CredentialPolicy | undefined;
   if (!policy || !projectId || identity?.project_id !== projectId)
     return () => true;

@@ -2,7 +2,6 @@ import { AuthGate } from "@/app";
 import userEvent from "@testing-library/user-event";
 import { CAPABILITIES } from "@tila/schemas";
 import { http, HttpResponse } from "msw";
-import { adminHandlers } from "./mocks/admin-fixtures";
 import { server } from "./mocks/server";
 import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 
@@ -34,6 +33,7 @@ describe("Layout navigation", () => {
     const primary = await screen.findByRole("navigation", { name: "Primary" });
     const links = within(primary).getAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual([
+      "Overview",
       "Work",
       "Conversations",
       "Runtime",
@@ -74,16 +74,31 @@ describe("Layout navigation", () => {
   });
 
   test("a single-page section is the current page without a sub-navigation", async () => {
-    server.use(...adminHandlers());
-    renderWithProviders(<AuthGate />, { route: "/p/test-project/settings" });
+    renderWithProviders(<AuthGate />, { route: "/p/test-project/overview" });
 
     const primary = await screen.findByRole("navigation", { name: "Primary" });
     expect(
-      within(primary).getByRole("link", { name: "Settings" }),
+      within(primary).getByRole("link", { name: "Overview" }),
     ).toHaveAttribute("aria-current", "page");
     expect(
-      screen.queryByRole("navigation", { name: "Settings" }),
+      screen.queryByRole("navigation", { name: "Overview" }),
     ).not.toBeInTheDocument();
+  });
+
+  test("a nested settings page marks only itself as current", async () => {
+    renderWithProviders(<AuthGate />, {
+      route: "/p/test-project/settings/definitions",
+    });
+
+    const settings = await screen.findByRole("navigation", {
+      name: "Settings",
+    });
+    expect(
+      within(settings).getByRole("link", { name: "Definitions" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      within(settings).getByRole("link", { name: "Access" }),
+    ).not.toHaveAttribute("aria-current");
   });
 
   test("a restricted credential only sees the surfaces it can read", async () => {
@@ -96,7 +111,7 @@ describe("Layout navigation", () => {
         within(primary)
           .getAllByRole("link")
           .map((link) => link.textContent),
-      ).toEqual(["Work", "Settings"]),
+      ).toEqual(["Overview", "Work", "Settings"]),
     );
     const work = screen.getByRole("navigation", { name: "Work" });
     expect(

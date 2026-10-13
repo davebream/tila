@@ -46,6 +46,10 @@ import type {
   RecordHistoryResponse,
   RecordListResponse,
   RecordTypesResponse,
+  SchemaGetResponse,
+  SchemaHistory,
+  SchemaHistoryEntry,
+  SchemaHistoryResponse,
   SignalGroupsResponse,
   SignalHistoryResponse,
   StateListResponse,
@@ -579,6 +583,34 @@ export async function workspaceSelect(
 
 function encodeRecordKey(key: string): string {
   return key.split("/").map(encodeURIComponent).join("/");
+}
+
+/** `GET /schema` over HTTP: the applied revision, or null when none was. */
+export type AppliedSchemaResponse = Omit<SchemaGetResponse, "schema"> & {
+  schema: SchemaHistory | null;
+};
+
+/** The applied project definitions; `schema` is null when none was applied. */
+export async function getSchema(
+  projectId: string,
+): Promise<AppliedSchemaResponse> {
+  return request<AppliedSchemaResponse>(projectId, "/schema");
+}
+
+/** `GET /schema/history` over HTTP: stored revisions, newest first. */
+export type SchemaHistoryList = Omit<SchemaHistoryResponse, "entries"> & {
+  entries: SchemaHistoryEntry[];
+};
+
+/** Applied definition revisions, newest first; `before` pages by revision. */
+export async function listSchemaHistory(
+  projectId: string,
+  params: { limit?: number; before?: number } = {},
+): Promise<SchemaHistoryList> {
+  return request<SchemaHistoryList>(projectId, "/schema/history", {
+    limit: params.limit === undefined ? undefined : String(params.limit),
+    before: params.before === undefined ? undefined : String(params.before),
+  });
 }
 
 export async function listRecordTypes(

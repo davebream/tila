@@ -83,6 +83,8 @@ export {
 export {
   SchemaHistorySchema,
   type SchemaHistory,
+  SchemaHistoryEntrySchema,
+  type SchemaHistoryEntry,
   ApplyStrategySchema,
   type ApplyStrategy,
 } from "./schema-history";

@@ -2,11 +2,19 @@ import { AuthGate } from "@/app";
 import { renderWithProviders, screen } from "./test-utils";
 
 describe("App routing", () => {
-  test("/ redirects to /tasks", async () => {
+  test("/ opens the project overview", async () => {
     renderWithProviders(<AuthGate />, { route: "/" });
 
-    const heading = await screen.findByRole("heading", { name: /Tasks/i });
+    const heading = await screen.findByRole("heading", { name: "Overview" });
     expect(heading).toBeInTheDocument();
+  });
+
+  test("an unknown project path opens the overview", async () => {
+    renderWithProviders(<AuthGate />, { route: "/p/test-project/nowhere" });
+
+    expect(
+      await screen.findByRole("heading", { name: "Overview" }),
+    ).toBeInTheDocument();
   });
 
   test("/tasks shows tasks page", async () => {
