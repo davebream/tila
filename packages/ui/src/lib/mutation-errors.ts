@@ -32,10 +32,11 @@ const CONFLICT_CODES = new Set([
   "claim-held",
   "claim-not-held",
   "already-held",
-  // Settings writes (#298): a stale revision, an agent archived meanwhile, or
-  // an archive whose reviewed binding occupant changed.
+  // Settings writes (#298): a stale revision, an identity archived meanwhile,
+  // or an archive whose reviewed binding occupant changed.
   "revision-conflict",
   "agent-archived",
+  "room-archived",
   "stale-binding",
   // The key was used with a different body: the subject changed between
   // sends, so the outcome must be re-read rather than reported as invalid.

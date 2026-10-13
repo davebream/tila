@@ -208,7 +208,7 @@ describe("CommandPalette", () => {
     renderWithProviders(<PaletteHarness />);
 
     await user.type(await screen.findByRole("combobox"), "go to");
-    expect(await screen.findByText("Go to Rooms")).toBeInTheDocument();
+    expect(await screen.findByText("Go to Journal")).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.queryByText(/Search all tasks/)).not.toBeInTheDocument(),
     );
@@ -279,13 +279,15 @@ describe("CommandPalette", () => {
       "Presence",
       "Access",
       "Definitions",
+      "Signal groups",
     ])
       expect(
         (await screen.findAllByText(`Go to ${page}`)).length,
       ).toBeGreaterThan(0);
-    // Runtime › Agents and Settings › Agents share a label; the section
+    // Settings pages share labels with the pages they configure; the section
     // beside each tells them apart.
     expect(screen.getAllByText("Go to Agents")).toHaveLength(2);
+    expect(screen.getAllByText("Go to Rooms")).toHaveLength(2);
   });
 
   test("finds pages by section and keyword", async () => {

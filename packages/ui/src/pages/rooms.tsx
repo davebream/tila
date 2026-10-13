@@ -6,21 +6,23 @@ import {
   wakeLabel,
 } from "@/components/delivery-trace";
 import { ReplyComposer } from "@/components/reply-composer";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { QuerySection } from "@/components/ui/query-section";
 import { useWhoami } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
+import { useRoomSettings } from "@/hooks/use-identities";
 import {
   ApiError,
   getRoom,
   listRoomThreads,
-  listRooms,
   messageDeliveries,
   roomHistory,
 } from "@/lib/api";
 import { draftKey, mergeMessages } from "@/lib/conversation-draft";
 import { deriveSectionState } from "@/lib/query-state";
+import { rights } from "@/lib/rights";
 import {
   useInfiniteQuery,
   useQuery,
@@ -33,12 +35,9 @@ import { Link, useParams, useSearchParams } from "react-router";
 export function RoomsPage() {
   const { projectId } = useAuth();
   const { roomId } = useParams();
-  const rooms = useQuery({
-    queryKey: ["rooms", projectId],
-    queryFn: () => listRooms(projectId as string),
-    enabled: !!projectId,
-    refetchInterval: 10000,
-  });
+  // Archived rooms stay listed: their history remains readable.
+  const rooms = useRoomSettings();
+  const manage = rights(useWhoami().data, projectId ?? "").manageRooms;
   // Distinct from an empty room list or a network failure: the deployment
   // lacks the conversation signing secret. Polling continues, so the page
   // recovers once an operator sets it.
@@ -62,14 +61,30 @@ export function RoomsPage() {
               className="block rounded-md border border-border p-3 hover:bg-muted aria-[current=page]:text-signal-blue"
             >
               {room.name}
-              {room.archived && " (archived)"}
+              {room.archived && (
+                <>
+                  {" "}
+                  <Badge variant="gray" className="ml-1">
+                    archived
+                  </Badge>
+                </>
+              )}
             </Link>
           ))}
         </nav>
         {rooms.data?.rooms.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            No accessible rooms. Create a room and enroll members through the
-            CLI.
+            No accessible rooms.{" "}
+            {manage ? (
+              <Link
+                className="text-signal-blue underline"
+                to={`/p/${projectId}/settings/rooms`}
+              >
+                Create one in Settings › Rooms
+              </Link>
+            ) : (
+              "A maintainer creates rooms and adds members in Settings › Rooms."
+            )}
           </p>
         )}
       </aside>
@@ -93,7 +108,7 @@ export function RoomsPage() {
  * The server only includes `details.reason` for callers that can manage
  * conversations, so remediation steps are shown to exactly those callers.
  */
-function ConversationsNotConfigured({ error }: { error: unknown }) {
+export function ConversationsNotConfigured({ error }: { error: unknown }) {
   const details =
     error instanceof ApiError ? (error.details as { reason?: unknown }) : null;
   const reason = details?.reason;

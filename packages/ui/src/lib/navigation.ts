@@ -199,6 +199,22 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         surface: "agents",
         keywords: ["register agent", "binding grants", "profile", "archive"],
       },
+      {
+        id: "room-settings",
+        label: "Rooms",
+        segment: "settings/rooms",
+        requires: ["conversations:read"],
+        surface: "rooms",
+        keywords: ["create room", "room members", "history policy", "budgets"],
+      },
+      {
+        id: "signal-group-settings",
+        label: "Signal groups",
+        segment: "settings/signal-groups",
+        requires: ["signals:read"],
+        surface: "signals",
+        keywords: ["groups", "recipients"],
+      },
     ],
   },
 ];

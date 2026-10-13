@@ -107,6 +107,9 @@ describe("SignalsPage", () => {
     expect(screen.getByText(/^in (1m|5\ds)$/)).toBeInTheDocument();
     expect(screen.getByText(/acked: Bob · mcp · linux-b/)).toBeInTheDocument();
     expect(screen.getByText("principal-b")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Settings › Signal groups" }),
+    ).toHaveAttribute("href", "/p/test-project/settings/signal-groups");
   });
 
   test("shows the admin authorization error returned by history", async () => {

@@ -209,7 +209,12 @@ describe("Layout navigation", () => {
             capabilities: CAPABILITIES.filter(
               (cap) =>
                 cap.endsWith(":read") &&
-                !["schema:read", "agents:read"].includes(cap),
+                ![
+                  "schema:read",
+                  "agents:read",
+                  "conversations:read",
+                  "signals:read",
+                ].includes(cap),
             ),
           },
         }),

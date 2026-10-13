@@ -24,12 +24,17 @@ import type {
   QueueListQuery,
   QueuePolicy,
   QueueRequest,
+  Room,
+  RoomArchivePreview,
   RoomHistoryResponseSchema,
   RoomListResponseSchema,
   RoomResponseSchema,
   RuntimeViewResponseSchema,
+  SetSignalGroupRequest,
+  SignalGroup,
   ThreadSchema,
   UpdateAgent,
+  UpdateRoom,
   WorkAttempt,
 } from "@tila/schemas";
 import type {
@@ -999,21 +1004,24 @@ export async function githubUserLookup(
   return { id: data.id, login: data.login };
 }
 
-// Durable conversations use body operation IDs; never attach Idempotency-Key.
+// Publication uses body operation IDs and rejects Idempotency-Key. Room, agent
+// and signal-group settings writes take one (see "Identity settings" below).
 export type RoomHistory = (typeof RoomHistoryResponseSchema)["_output"];
 export type DeliveryInspection =
   (typeof DeliveryExplainResponseSchema)["_output"];
 export type AgentList = (typeof AgentListResponseSchema)["_output"];
 export type AgentView = AgentList["agents"][number];
+export type RoomDetail = (typeof RoomResponseSchema)["_output"];
+/** Archived rooms are listed on request; room history policy still applies. */
 export function listRooms(
   projectId: string,
+  options: { includeArchived?: boolean } = {},
 ): Promise<(typeof RoomListResponseSchema)["_output"]> {
-  return request(projectId, "/rooms");
+  return request(projectId, "/rooms", {
+    include_archived: options.includeArchived ? "true" : undefined,
+  });
 }
-export function getRoom(
-  projectId: string,
-  room: string,
-): Promise<(typeof RoomResponseSchema)["_output"]> {
+export function getRoom(projectId: string, room: string): Promise<RoomDetail> {
   return request(projectId, `/rooms/${encodeURIComponent(room)}`);
 }
 export function listRoomThreads(
@@ -1398,13 +1406,16 @@ export async function questionAction(
 }
 
 // --- Identity settings (#298) ---
-// Agents carry a settings revision. Every write here sends the revision it was
-// reviewed against (a stale one answers 412 `revision-conflict` with the
-// current revision) and an Idempotency-Key: a retry of the same request with
-// the same key replays the original answer.
+// Agents, rooms and signal groups carry a settings revision. Every write here
+// sends the revision it was reviewed against (a stale one answers 412
+// `revision-conflict` with the current revision) and an Idempotency-Key: a
+// retry of the same request with the same key replays the original answer.
 
 const agentPath = (projectId: string, id: string, rest = "") =>
   projectPath(projectId, `/agents/${encodeURIComponent(id)}${rest}`);
+const roomPath = (projectId: string, id: string, rest = "") =>
+  projectPath(projectId, `/rooms/${encodeURIComponent(id)}${rest}`);
+
 export function registerAgent(
   projectId: string,
   body: AgentRegistration,
@@ -1459,6 +1470,128 @@ export function unarchiveAgent(
     "POST",
     agentPath(projectId, id, "/unarchive"),
     { expected_revision: expectedRevision },
+    { idempotencyKey },
+  );
+}
+
+export type RoomCreate = {
+  id: string;
+  name: string;
+  history_policy: Room["history_policy"];
+  delivery_ttl_seconds: number;
+  budgets: Room["budgets"];
+};
+
+export function createRoom(
+  projectId: string,
+  body: RoomCreate,
+  idempotencyKey: string,
+): Promise<{ ok: true; room: Room }> {
+  return mutate("POST", projectPath(projectId, "/rooms"), body, {
+    idempotencyKey,
+  });
+}
+
+export function updateRoom(
+  projectId: string,
+  id: string,
+  body: UpdateRoom,
+  idempotencyKey: string,
+): Promise<{ ok: true; room: Room }> {
+  return mutate("PATCH", roomPath(projectId, id), body, { idempotencyKey });
+}
+
+/** Add a member or change its wake; answers the room at its new revision. */
+export function setRoomMember(
+  projectId: string,
+  id: string,
+  member: string,
+  body: { wake: boolean; expected_revision: number },
+  idempotencyKey: string,
+): Promise<{ ok: true; room: Room }> {
+  return mutate(
+    "PUT",
+    roomPath(projectId, id, `/members/${encodeURIComponent(member)}`),
+    body,
+    { idempotencyKey },
+  );
+}
+
+export function removeRoomMember(
+  projectId: string,
+  id: string,
+  member: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<{ ok: true; room: Room }> {
+  return mutate(
+    "DELETE",
+    roomPath(
+      projectId,
+      id,
+      `/members/${encodeURIComponent(member)}?expected_revision=${expectedRevision}`,
+    ),
+    undefined,
+    { idempotencyKey },
+  );
+}
+
+export async function roomArchivePreview(
+  projectId: string,
+  id: string,
+): Promise<RoomArchivePreview> {
+  return (
+    await request<{ ok: true; preview: RoomArchivePreview }>(
+      projectId,
+      `/rooms/${encodeURIComponent(id)}/archive-preview`,
+    )
+  ).preview;
+}
+
+export function setRoomArchived(
+  projectId: string,
+  id: string,
+  archived: boolean,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<{ ok: true; room: Room }> {
+  return mutate(
+    "POST",
+    roomPath(projectId, id, archived ? "/archive" : "/unarchive"),
+    { expected_revision: expectedRevision },
+    { idempotencyKey },
+  );
+}
+
+/** `expected_revision` 0 creates only; a positive one must be current. */
+export function putSignalGroup(
+  projectId: string,
+  id: string,
+  body: SetSignalGroupRequest & { expected_revision: number },
+  idempotencyKey: string,
+): Promise<{ ok: true; group: SignalGroup }> {
+  return mutate(
+    "PUT",
+    projectPath(projectId, `/signals/groups/${encodeURIComponent(id)}`),
+    body,
+    { idempotencyKey },
+  );
+}
+
+/** Stops later sends to the group; past deliveries keep their recipients. */
+export function deleteSignalGroup(
+  projectId: string,
+  id: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<{ ok: true }> {
+  return mutate(
+    "DELETE",
+    projectPath(
+      projectId,
+      `/signals/groups/${encodeURIComponent(id)}?expected_revision=${expectedRevision}`,
+    ),
+    undefined,
     { idempotencyKey },
   );
 }

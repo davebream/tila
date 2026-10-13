@@ -66,6 +66,23 @@ const KIND_GROUPS: FilterGroup[] = [
     ],
   },
   {
+    label: "Settings",
+    options: [
+      "agent.registered",
+      "agent.updated",
+      "agent.archived",
+      "agent.unarchived",
+      "room.created",
+      "room.updated",
+      "room.members_changed",
+      "room.archived",
+      "room.unarchived",
+      "signal_group.created",
+      "signal_group.updated",
+      "signal_group.deleted",
+    ],
+  },
+  {
     label: "Other",
     options: [
       "schema.applied",
