@@ -53,6 +53,20 @@ function createTestDb() {
   return { db, sqlite };
 }
 
+function seedTask(db: ReturnType<typeof createTestDb>["db"], id: string): void {
+  db.insert(schema.entities)
+    .values({
+      id,
+      type: "task",
+      schema_version: 1,
+      data: "{}",
+      created_at: 1,
+      updated_at: 1,
+      created_by: "test",
+    })
+    .run();
+}
+
 function makeDeps(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   ctx: unknown,
@@ -72,6 +86,7 @@ describe("GET /admin/pointer-keys", () => {
   const now = Date.now();
 
   function seedPointers(db: ReturnType<typeof createTestDb>["db"]): void {
+    for (const id of ["T-1", "T-2", "T-3"]) seedTask(db, id);
     db.insert(schema.artifactPointers)
       .values([
         {
@@ -257,6 +272,7 @@ describe("GET /admin/store-counts", () => {
     const { db } = createTestDb();
 
     const now = Date.now();
+    seedTask(db, "T-1");
     db.insert(schema.artifactPointers)
       .values({
         r2_key: "produced/T-1/abc123.txt",
@@ -279,9 +295,10 @@ describe("GET /admin/store-counts", () => {
       counts: { domain: Record<string, number>; schemaHistory: number };
     };
     expect(body.counts.domain.artifact_pointers).toBe(1);
+    expect(body.counts.domain.entities).toBe(1);
     // All others should be 0
     for (const [key, val] of Object.entries(body.counts.domain)) {
-      if (key !== "artifact_pointers") {
+      if (key !== "artifact_pointers" && key !== "entities") {
         expect(val).toBe(0);
       }
     }
@@ -298,6 +315,7 @@ describe("POST /admin/destroy", () => {
     const callOrder: string[] = [];
 
     const now = Date.now();
+    seedTask(db, "T-1");
     db.insert(schema.artifactPointers)
       .values({
         r2_key: "produced/T-1/abc123.txt",

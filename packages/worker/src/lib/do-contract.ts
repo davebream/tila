@@ -32,6 +32,7 @@ export const DO_PATHS = {
   // Artifact routes
   artifactPointer: "/artifact/pointer",
   artifactPointers: "/artifact/pointers",
+  artifactMeta: "/artifact/meta",
   artifactPointerMeta: "/artifact/pointer-meta",
   artifactList: "/artifact/list",
   artifactLatest: "/artifact/latest",

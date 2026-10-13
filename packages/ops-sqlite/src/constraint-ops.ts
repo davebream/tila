@@ -139,6 +139,8 @@ export function checkArtifactKindDeclared(
   schema: TilaSchemaToml,
   kind: string,
 ): ConstraintResult {
+  if (kind === "record-snapshot-canonical" || kind === "record-snapshot-source")
+    return { ok: true };
   const artifacts = schema.artifacts;
   if (!artifacts) return { ok: true };
   if (!(kind in artifacts)) {

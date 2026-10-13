@@ -1554,6 +1554,101 @@ function runMigration0040(storage: MigrationStorage): void {
   installTransferGuards(storage, ["attempt_corrections"]);
 }
 
+/**
+ * Snapshot pointers have record resources, not entity IDs. Rebuild the parent
+ * without the obsolete FK and retain task integrity with conditional guards.
+ * Runs in the migration runner's transaction with FK enforcement still enabled.
+ */
+function runMigration0041(storage: MigrationStorage): void {
+  const definition = storage.sql
+    .exec(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'artifact_pointers'",
+    )
+    .toArray() as { sql: string }[];
+  const original = definition[0]?.sql;
+  if (!original) throw new Error("artifact_pointers is missing");
+  const withoutFk = original.replace(
+    /,\s*FOREIGN KEY \(resource\) REFERENCES entities\(id\)/i,
+    "",
+  );
+  if (withoutFk !== original) {
+    const deferred = storage.sql
+      .exec("PRAGMA defer_foreign_keys")
+      .toArray() as { defer_foreign_keys: number }[];
+    storage.sql.exec("PRAGMA defer_foreign_keys = ON");
+    try {
+      const objects = storage.sql
+        .exec(
+          "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND ((type = 'index' AND tbl_name = 'artifact_pointers') OR (type = 'trigger' AND (tbl_name IN ('artifact_pointers', 'artifact_tags') OR instr(sql, 'artifact_pointers') > 0)))",
+        )
+        .toArray() as { type: string; name: string; sql: string }[];
+      // External triggers can make ALTER TABLE fail while the parent is absent.
+      // Tag guards must also be suspended while DROP cascades and tags are restored.
+      for (const object of objects) {
+        assertIdentifier(object.name);
+        if (object.type === "trigger")
+          storage.sql.exec(`DROP TRIGGER "${object.name}"`);
+      }
+      storage.sql.exec(
+        "CREATE TABLE _migration0041_artifact_tags AS SELECT * FROM artifact_tags",
+      );
+      storage.sql.exec(
+        withoutFk.replace(
+          /CREATE TABLE (?:IF NOT EXISTS )?["`]?artifact_pointers["`]?/i,
+          "CREATE TABLE _migration0041_artifact_pointers",
+        ),
+      );
+      storage.sql.exec(
+        "INSERT INTO _migration0041_artifact_pointers SELECT * FROM artifact_pointers",
+      );
+      storage.sql.exec("DROP TABLE artifact_pointers");
+      storage.sql.exec(
+        "ALTER TABLE _migration0041_artifact_pointers RENAME TO artifact_pointers",
+      );
+      // ON DELETE CASCADE remains active even with deferred constraint checks.
+      storage.sql.exec(
+        "INSERT OR IGNORE INTO artifact_tags SELECT * FROM _migration0041_artifact_tags",
+      );
+      storage.sql.exec("DROP TABLE _migration0041_artifact_tags");
+      for (const object of objects) storage.sql.exec(object.sql);
+      if (storage.sql.exec("PRAGMA foreign_key_check").toArray().length)
+        throw new Error("Snapshot migration left invalid foreign keys");
+    } finally {
+      // PRAGMA state is not rolled back with a savepoint. Clear the deferred
+      // counter after the verified rebuild (or before the runner rolls back),
+      // and restore the caller's setting so a failed migration cannot leak it.
+      storage.sql.exec("PRAGMA defer_foreign_keys = OFF");
+      if (deferred[0]?.defer_foreign_keys)
+        storage.sql.exec("PRAGMA defer_foreign_keys = ON");
+    }
+  }
+
+  // A resource is either a task ID, a system snapshot record resource, or NULL.
+  // Source preuploads intentionally precede the record; schema validation is
+  // performed by shared ops. Canonical pointers require a persisted record.
+  const invalidResource = `NEW.resource IS NOT NULL AND NOT (
+    (NEW.resource NOT LIKE '%/%' AND EXISTS (SELECT 1 FROM entities WHERE id = NEW.resource))
+    OR (NEW.kind = 'record-snapshot-source' AND NEW.resource GLOB 'record:?*/?*')
+    OR (NEW.kind = 'record-snapshot-canonical' AND EXISTS (
+      SELECT 1 FROM records WHERE 'record:' || type || '/' || key = NEW.resource
+    ))
+  )`;
+  for (const operation of ["INSERT", "UPDATE OF resource, kind"]) {
+    const suffix = operation === "INSERT" ? "insert" : "update";
+    storage.sql.exec(`CREATE TRIGGER IF NOT EXISTS artifact_resource_${suffix}
+      BEFORE ${operation} ON artifact_pointers WHEN ${invalidResource}
+      BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed'); END;`);
+  }
+  for (const operation of ["DELETE", "UPDATE OF id"]) {
+    const suffix = operation === "DELETE" ? "delete" : "update";
+    const changed = operation === "DELETE" ? "1" : "NEW.id IS NOT OLD.id";
+    storage.sql.exec(`CREATE TRIGGER IF NOT EXISTS artifact_task_${suffix}
+      BEFORE ${operation} ON entities
+      WHEN ${changed} AND EXISTS (SELECT 1 FROM artifact_pointers WHERE resource = OLD.id)
+      BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed'); END;`);
+  }
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1609,6 +1704,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_custom_correlation ON journal(json_extrac
   { version: 38, run: runMigration0038 },
   { version: 39, run: runMigration0039 },
   { version: 40, run: runMigration0040 },
+  { version: 41, run: runMigration0041 },
 ];
 
 /** Highest project migration; transfer metadata and backups report this version. */

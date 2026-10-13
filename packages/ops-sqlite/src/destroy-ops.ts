@@ -21,7 +21,9 @@ export interface RawSqlExecutor {
  * corrupts the object. Deleting rows keeps the schema intact.
  *
  * `defer_foreign_keys = ON` allows any delete order within the implicit
- * transaction; deleting the `*_search_docs` base tables fires the FTS5 cleanup
+ * transaction for foreign keys. DOMAIN_TABLE_NAMES orders pointers before
+ * tasks because ownership triggers are immediate. Deleting the
+ * `*_search_docs` base tables fires the FTS5 cleanup
  * triggers, so the virtual `*_fts` tables are cleaned up too.
  *
  * The caller is responsible for the transactional/output-gate semantics (e.g. a

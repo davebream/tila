@@ -28,9 +28,9 @@ export const DOMAIN_TABLE_NAMES = [
 
   "agent_bindings",
   "agents",
+  "artifact_pointers",
   "entities",
   "entity_relationships",
-  "artifact_pointers",
   "artifact_lineages",
   "artifact_revision_operations",
   "artifact_revisions",

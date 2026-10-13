@@ -23,7 +23,11 @@ import {
   sql,
 } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import { SearchQueryError, validateFtsQuery } from "./artifact-ops";
+import {
+  SearchQueryError,
+  upsertPointerInTransaction,
+  validateFtsQuery,
+} from "./artifact-ops";
 import { recordRestrictionCondition } from "./credential-policy";
 import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { assertResourceFence } from "./fence-ops";
@@ -291,7 +295,39 @@ function bumpFence(tx: RecordWriteTx, resource: string): number {
   return fenceRow?.current_fence ?? 1;
 }
 
-/** Insert a record_revisions row. */
+/** The caller owns the transaction that creates/stamps the revision. */
+function upsertRecordSnapshot(
+  tx: RecordWriteTx,
+  revision: {
+    type: string;
+    key: string;
+    value_json: string;
+    value_sha256: string;
+    created_at: number;
+  },
+  artifactKey: string,
+  origin: RequestOrigin,
+): void {
+  upsertPointerInTransaction(
+    tx,
+    {
+      r2_key: artifactKey,
+      resource: formatRecordResource(revision.type, revision.key),
+      kind: "record-snapshot-canonical",
+      sha256: revision.value_sha256,
+      bytes: new TextEncoder().encode(revision.value_json).byteLength,
+      fence: null,
+      mime_type: "application/json",
+      produced_at: revision.created_at,
+      produced_by: origin.principalId,
+      expires_at: null,
+    },
+    origin,
+    "artifact.produced",
+  );
+}
+
+/** Insert a record revision and its optional canonical snapshot pointer. */
 function insertRevisionRow(
   tx: RecordWriteTx,
   args: {
@@ -329,6 +365,9 @@ function insertRevisionRow(
       source_version: args.origin.sourceVersion ?? null,
     })
     .run();
+  if (args.canonical_artifact_key) {
+    upsertRecordSnapshot(tx, args, args.canonical_artifact_key, args.origin);
+  }
 }
 
 /**
@@ -1737,6 +1776,7 @@ export function stampArtifacts(
     canonical_artifact_key: string;
     source_artifact_key: string | null;
   },
+  origin: RequestOrigin,
 ): void {
   db.transaction((tx) => {
     // Verify the exact revision exists before modifying
@@ -1755,6 +1795,8 @@ export function stampArtifacts(
     if (!existing) {
       throw new RevisionNotFoundError(input.type, input.key, input.revision);
     }
+
+    upsertRecordSnapshot(tx, existing, input.canonical_artifact_key, origin);
 
     // Update artifact keys on the revision row
     tx.update(schema.recordRevisions)

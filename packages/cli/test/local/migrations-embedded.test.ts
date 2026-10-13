@@ -249,6 +249,12 @@ describe("OLD-style local DB version-reshuffle (Step 4c — KNOWN LIMITATION)", 
         PRIMARY KEY (from_key, type),
         FOREIGN KEY (from_key) REFERENCES artifact_pointers(r2_key)
       );
+      -- v18 is recorded below, so its tag table must exist in this fixture.
+      CREATE TABLE artifact_tags (
+        artifact_key TEXT NOT NULL, tag TEXT NOT NULL,
+        PRIMARY KEY (artifact_key, tag),
+        FOREIGN KEY (artifact_key) REFERENCES artifact_pointers(r2_key) ON DELETE CASCADE
+      );
       CREATE TABLE _idempotency (
         key TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
         response_json TEXT NOT NULL, status_code INTEGER NOT NULL

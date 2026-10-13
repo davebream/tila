@@ -82,8 +82,8 @@ export interface TestDb {
 /**
  * Create an in-memory SQLite database with all DO migrations applied.
  *
- * Default: `foreignKeys = "off"` mirrors the DO runtime where FK enforcement
- * is disabled and explicit deletes are tested instead.
+ * Legacy tests default to foreign keys off. The actual DO runtime enforces
+ * foreign keys; integrity and migration regressions must explicitly enable them.
  */
 export function createTestDb(opts: CreateTestDbOptions = {}): TestDb {
   const sqlite = new Database(":memory:");

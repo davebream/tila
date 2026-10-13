@@ -18,6 +18,14 @@ function makeMockStorage(opts: {
   const storage = {
     sql: {
       exec(statement: string, ..._bindings: unknown[]): SqlExecResult {
+        if (statement.startsWith("SELECT sql FROM sqlite_master"))
+          return {
+            toArray: () => [
+              {
+                sql: "CREATE TABLE artifact_pointers (r2_key TEXT PRIMARY KEY, resource TEXT)",
+              },
+            ],
+          };
         if (failOnSql && statement.includes(failOnSql)) {
           throw new Error(`Deliberate SQL failure: ${failOnSql}`);
         }
@@ -59,6 +67,14 @@ function makeStatefulStorage(opts: {
   const storage = {
     sql: {
       exec(statement: string, ...bindings: unknown[]): SqlExecResult {
+        if (statement.startsWith("SELECT sql FROM sqlite_master"))
+          return {
+            toArray: () => [
+              {
+                sql: "CREATE TABLE artifact_pointers (r2_key TEXT PRIMARY KEY, resource TEXT)",
+              },
+            ],
+          };
         if (statement.includes("SELECT version FROM _migrations")) {
           return {
             toArray: () => versions.map((version) => ({ version })),
@@ -142,6 +158,14 @@ describe("runMigrationsWithPitrRollback", () => {
     const storage = {
       sql: {
         exec(statement: string, ..._bindings: unknown[]): SqlExecResult {
+          if (statement.startsWith("SELECT sql FROM sqlite_master"))
+            return {
+              toArray: () => [
+                {
+                  sql: "CREATE TABLE artifact_pointers (r2_key TEXT PRIMARY KEY, resource TEXT)",
+                },
+              ],
+            };
           if (/^\s*(SELECT|PRAGMA)\b/i.test(statement)) {
             // _migrations: return all versions applied so no migrations run
             if (statement.includes("FROM _migrations")) {

@@ -41,10 +41,12 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
 
   app.post("/artifact/resolve-resource", async (c) => {
-    const body = z.object({ resource: z.string() }).parse(await c.req.json());
+    const body = z
+      .object({ resource: z.string(), kind: z.string().optional() })
+      .parse(await c.req.json());
     return c.json({
       ok: true,
-      resource: resolveArtifactResource(deps.db, body.resource),
+      resource: resolveArtifactResource(deps.db, body.resource, body.kind),
     });
   });
 

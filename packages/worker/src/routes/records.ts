@@ -1,5 +1,6 @@
 import { catalogOps } from "@tila/ops-sqlite";
 import {
+  type ArtifactRevision,
   ListCursorSchema,
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
@@ -71,30 +72,31 @@ async function validateSourceArtifactKey(
     const resource = `record:${type}/${key}`;
     const { response: res, json: body } = await forwardTypedDO<{
       ok: boolean;
-      pointers: Array<{ r2_key: string }>;
+      pointer?: ArtifactRevision;
     }>(
       stub,
-      DO_PATHS.artifactPointers,
+      DO_PATHS.artifactMeta,
       "GET",
       undefined,
-      {
-        resource,
-        kind: "record-snapshot-source",
-        limit: "100",
-      },
+      { key: sourceKey },
       analyticsCtx,
     );
-    if (!res.ok) {
-      return { ok: false, message: "Failed to validate source artifact key" };
-    }
-    if (!body.ok || !body.pointers) {
-      return { ok: false, message: "Failed to validate source artifact key" };
-    }
-    const found = body.pointers.some((p) => p.r2_key === sourceKey);
+    const pointer = body.pointer;
+    // Identical source and canonical JSON share a content-addressed key. The
+    // first upload determines the pointer kind, so either snapshot kind is valid.
+    const found =
+      res.ok &&
+      body.ok &&
+      pointer?.r2_key === sourceKey &&
+      pointer.resource === resource &&
+      (pointer.kind === "record-snapshot-source" ||
+        pointer.kind === "record-snapshot-canonical") &&
+      pointer.tombstoned === 0 &&
+      pointer.blob_deleted_at == null;
     if (!found) {
       return {
         ok: false,
-        message: `source_artifact_key "${sourceKey}" not found with kind "record-snapshot-source" and resource "${resource}"`,
+        message: `source_artifact_key "${sourceKey}" not found as an available snapshot artifact for resource "${resource}"`,
       };
     }
     return { ok: true };
@@ -620,6 +622,7 @@ records.patch("/:type/:key{.+}", requirePermission("write"), async (c) => {
           sha256,
           bytes: snapshot.bytes,
           actor,
+          ...identityPayload(c),
         },
         undefined,
         analyticsCtx,

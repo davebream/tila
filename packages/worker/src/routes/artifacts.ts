@@ -85,7 +85,13 @@ function sanitizeArtifactExtension(ext: string | null | undefined): string {
  * no slash, so reject those characters at the Worker boundary, mirroring the
  * entity-id DB constraint.
  */
-export function isUnsafeArtifactResource(resource: string): boolean {
+export function isUnsafeArtifactResource(
+  resource: string,
+  kind?: string,
+): boolean {
+  // The DO validates the record type/key and snapshot declaration before R2.
+  if (kind === "record-snapshot-source" && resource.startsWith("record:"))
+    return false;
   return resource.includes("/") || resource.includes("..");
 }
 
@@ -126,7 +132,11 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
   } = parsed.data;
   let resource = rawResource;
 
-  if (resource && fence === undefined) {
+  if (
+    resource &&
+    fence === undefined &&
+    !(kind === "record-snapshot-source" && resource.startsWith("record:"))
+  ) {
     return c.json(
       {
         ok: false,
@@ -140,7 +150,7 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
     );
   }
 
-  if (resource && isUnsafeArtifactResource(resource)) {
+  if (resource && isUnsafeArtifactResource(resource, kind)) {
     return c.json(
       {
         ok: false,
@@ -168,7 +178,7 @@ artifacts.post("/text", requirePermission("write"), async (c) => {
       c.get("doStub"),
       "/artifact/resolve-resource",
       "POST",
-      { resource },
+      { resource, kind },
       undefined,
       analyticsCtxFrom(c),
     );
@@ -308,7 +318,7 @@ artifacts.post("/", requirePermission("write"), async (c) => {
   }
 
   let resource = formData.get("resource") as string | null;
-  if (resource && isUnsafeArtifactResource(resource)) {
+  if (resource && isUnsafeArtifactResource(resource, kind)) {
     return c.json(
       {
         ok: false,
@@ -334,7 +344,11 @@ artifacts.post("/", requirePermission("write"), async (c) => {
       // invalid JSON -- ignore and leave tags undefined
     }
   }
-  if (resource && fence === null) {
+  if (
+    resource &&
+    fence === null &&
+    !(kind === "record-snapshot-source" && resource.startsWith("record:"))
+  ) {
     return c.json(
       {
         ok: false,
@@ -376,7 +390,7 @@ artifacts.post("/", requirePermission("write"), async (c) => {
       c.get("doStub"),
       "/artifact/resolve-resource",
       "POST",
-      { resource },
+      { resource, kind },
       undefined,
       analyticsCtxFrom(c),
     );

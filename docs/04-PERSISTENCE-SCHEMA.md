@@ -9,7 +9,7 @@ erDiagram
     %% --- per-project DO SQLite tables ---
     entities ||--o{ entity_relationships : "from_id / to_id"
     entities ||--o{ entity_artifact_references : "consults"
-    entities ||--o{ artifact_pointers : "produces (resource FK)"
+    entities ||..o{ artifact_pointers : "task resource guards"
 
     entity_artifact_references }o--|| artifact_pointers : "references"
 
@@ -55,7 +55,7 @@ erDiagram
 
     artifact_pointers {
         text r2_key PK "CHECK has slashes"
-        text resource FK "NULL for source artifacts"
+        text resource "Task ID, record resource, or NULL"
         text kind "artifacts type"
         text sha256
         int bytes
@@ -162,9 +162,11 @@ erDiagram
 
 **Global D1 is narrow.** The global D1 instance holds 14 account-wide tables shared across all tila projects in a Cloudflare account: `_projects`, `_tokens`, `_idempotency`, plus the auth/session tables added for multi-instance auth (`_sessions`, `_project_repos`, `_rate_limits`, `_github_app_config`, `_revoked_jti`, `_revoked_subjects`, `_oidc_principals`, `_admin_grants`, `_deployment_meta`) and canonical authorization (`_project_memberships`, `_membership_events`). The Worker reads these to authenticate requests, resolve current project membership, and route to the right DO. `_project_memberships` has at most one active row per project/principal; `_membership_events` is append-only audit history. Legacy `_admin_grants` and `_oidc_principals` are retained as historical migration inputs, not live authorization sources.
 
-**Solid lines are foreign-key relationships inside one storage layer.** Within DO SQLite, `entities.id` is referenced by `entity_relationships.from_id`/`to_id`, `entity_artifact_references.entity_id`, and `artifact_pointers.resource`. Within global D1, `_projects.project_id` is referenced by `_tokens.project_id`.
+**Solid lines are foreign-key relationships inside one storage layer.** Within DO SQLite, `entities.id` is referenced by `entity_relationships.from_id`/`to_id` and `entity_artifact_references.entity_id`. Within global D1, `_projects.project_id` is referenced by `_tokens.project_id`.
 
 **Dashed/soft lines (`}o--o{`) are cross-store or string-based references.** `journal.resource` is a string like `task:T-142`; it is not an enforced FK because the journal is append-only and must survive the archival of the entity it references. `claims.resource` and `fences.resource` reference entities by string for the same reason — fence counters must persist after entities are deleted to prevent reuse.
+
+**Artifact ownership uses conditional guards.** Migration 41 replaces the task-only foreign key on `artifact_pointers.resource` with database triggers. Task pointers retain existing-owner and deletion/update protection. Canonical snapshot pointers require an existing `record:<type>/<key>` owner; source snapshots may precede record creation. Shared operations validate record resource syntax and require a declared snapshot type for source preuploads.
 
 **The R2 boundary.** `artifact_pointers` is the DO record; `R2_object` is the blob. The R2 key is the linkage. Maintaining consistency across this boundary is the Worker's job: every artifact write is R2 first (content-addressed, idempotent), then DO transaction (pointer row + journal event + required-reference edges). Failure between the two is reconciled on next `tila doctor --reconcile`. See Architecture §3a.6.
 
@@ -180,16 +182,17 @@ The 2024 design held entities in D1 and only coordination state in the DO. The 2
 
 D1 still exists for things that genuinely need cross-project scope: API tokens (must be readable before contacting any DO, to authenticate), idempotency keys (cross-request scope), project registry (a directory of projects in the account).
 
-## Two artifact flavors, one table
+## Artifact ownership in one table
 
-`artifact_pointers` holds both produced artifacts and source artifacts. The discriminator is `resource`:
+`artifact_pointers` holds task artifacts, project-level sources, and record snapshots:
 
 | Flavor | `resource` | `fence` | R2 prefix | Lifecycle |
 |---|---|---|---|---|
-| Produced | `task:T-142` (or any work-unit type prefix) | non-NULL (claim was held) | `tasks/T-142/<sha>.ext` (per work-unit type) | `expires_at` set from schema's per-kind `retention_days` |
+| Task artifact | `T-142` (bare ID; typed aliases normalize on write) | non-NULL (claim was held) | `produced/T-142/<sha>.ext` | `expires_at` set from schema's per-kind `retention_days` |
 | Source | NULL | NULL (no claim held during upload) | `sources/<sha>.ext` | `expires_at` NULL = keep indefinitely |
+| Record snapshot | `record:<type>/<key>` | NULL | `produced/record:<type>/<key>/<sha>.ext` | Canonical snapshots have no expiry; source uploads retain their upload policy |
 
-A consumer reading `artifact_pointers` filters on `WHERE resource IS NOT NULL` for produced artifacts or `WHERE resource IS NULL` for project-level sources. Two partial indexes keep both queries fast.
+`resource IS NULL` identifies project-level sources. Non-NULL resources include both task artifacts and record snapshots; use the system snapshot kinds to distinguish record snapshots. Source and canonical JSON with identical bytes and extension share one content-addressed pointer.
 
 ## Three relationship tables, three distinct directions
 
