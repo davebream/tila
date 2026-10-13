@@ -103,6 +103,8 @@ export const QuestionListQuerySchema = z
     requester_principal_id: Id.optional(),
     responder_principal_id: Id.optional(),
     state: QuestionStateSchema.optional(),
+    /** Only questions escalated to an owner (true) or never escalated (false). */
+    escalated: z.boolean().optional(),
     after_id: z.string().uuid().optional(),
     limit: z.number().int().min(1).max(200).default(100),
   })
@@ -110,6 +112,8 @@ export const QuestionListQuerySchema = z
 export const QuestionListResultSchema = z.object({
   questions: z.array(QuestionViewSchema),
   next_after_id: z.string().uuid().nullable(),
+  /** Every question matching the filters, across all pages. */
+  total: z.number().int().nonnegative().optional(),
 });
 export const QuestionMutationSchemas = {
   ask: QuestionAskCommandSchema,

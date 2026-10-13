@@ -14,6 +14,7 @@ import {
   SCENARIOS,
   type SourceBody,
   deliveryPage,
+  questionPage,
   runtimeView,
   sourceBodies,
   taskPage,
@@ -203,6 +204,30 @@ describe("rule observations", () => {
     expect(
       ruleRow(rule("delivery.wake-suppressed"), ready(page)),
     ).toMatchObject({ kind: "not-applicable" });
+  });
+
+  test("open decisions count the inbox total and link to the inbox", () => {
+    const decisions = rule("decisions.waiting");
+    expect(decisions.severity).toBe("red");
+    expect(ruleRow(decisions, ready(questionPage(250)))).toMatchObject({
+      kind: "ready",
+      total: 250,
+      complete: true,
+      link: { segment: "decisions", search: "" },
+    });
+  });
+
+  test("decisions are not shown as zero without a total or a principal", () => {
+    const decisions = rule("decisions.waiting");
+    const { total: _total, ...page } = questionPage(0);
+    expect(ruleRow(decisions, ready(page))).toMatchObject({
+      kind: "not-applicable",
+      reason: "This server does not report question totals.",
+    });
+    expect(ruleRow(decisions, ready(null))).toMatchObject({
+      kind: "not-applicable",
+      reason: "This credential has no principal to wait on.",
+    });
   });
 
   test("unconfigured conversations are not an outage", () => {

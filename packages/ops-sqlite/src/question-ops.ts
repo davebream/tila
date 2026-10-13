@@ -1,4 +1,5 @@
 import {
+  type CredentialPolicy,
   type Question,
   type QuestionAnswerCommand,
   QuestionAnswerCommandSchema,
@@ -18,13 +19,14 @@ import {
   type QuestionView,
   canonicalJson,
 } from "@tila/schemas";
-import { and, eq, gt } from "drizzle-orm";
+import { and, count, eq, gt, sql } from "drizzle-orm";
 import * as attempts from "./attempt-ops";
 import {
   type ConversationAuthority,
   activeBinding,
   getRoom,
 } from "./conversation-ops";
+import { taskIdAccessCondition } from "./credential-policy";
 import type { RequestOrigin } from "./journal-ops";
 import { saveQuestion } from "./question-state-ops";
 import {
@@ -107,49 +109,42 @@ export function list(
   db: ProjectDatabase,
   raw: QuestionListQuery,
   a: QuestionAuthority,
-  allowsTask: (id: string) => boolean = () => true,
+  /** The caller's credential; its task restrictions hide questions. */
+  policy?: CredentialPolicy,
 ): QuestionListResult {
   const q = QuestionListQuerySchema.parse(raw);
-  const rows: Array<typeof schema.workQuestions.$inferSelect> = [];
-  let after = q.after_id;
-  // Bound each SQLite page, including when authorization filters out most rows.
-  while (rows.length <= q.limit) {
-    const batch = db
-      .select()
-      .from(schema.workQuestions)
-      .where(
-        and(
-          q.task_id ? eq(schema.workQuestions.task_id, q.task_id) : undefined,
-          q.attempt_id
-            ? eq(schema.workQuestions.attempt_id, q.attempt_id)
-            : undefined,
-          q.requester_principal_id
-            ? eq(
-                schema.workQuestions.requester_principal_id,
-                q.requester_principal_id,
-              )
-            : undefined,
-          q.responder_principal_id
-            ? eq(
-                schema.workQuestions.responder_principal_id,
-                q.responder_principal_id,
-              )
-            : undefined,
-          q.state ? eq(schema.workQuestions.state, q.state) : undefined,
-          after ? gt(schema.workQuestions.id, after) : undefined,
-        ),
-      )
-      .orderBy(schema.workQuestions.id)
-      .limit(200)
-      .all();
-    rows.push(...batch.filter((row) => allowsTask(row.task_id)));
-    if (batch.length < 200) break;
-    after = batch.at(-1)?.id;
-  }
+  const t = schema.workQuestions;
+  const matching = and(
+    q.task_id ? eq(t.task_id, q.task_id) : undefined,
+    q.attempt_id ? eq(t.attempt_id, q.attempt_id) : undefined,
+    q.requester_principal_id
+      ? eq(t.requester_principal_id, q.requester_principal_id)
+      : undefined,
+    q.responder_principal_id
+      ? eq(t.responder_principal_id, q.responder_principal_id)
+      : undefined,
+    q.state ? eq(t.state, q.state) : undefined,
+    // json_extract reads JSON booleans as 1 and 0.
+    q.escalated === undefined
+      ? undefined
+      : sql`json_extract(${t.snapshot}, '$.escalated') = ${q.escalated ? 1 : 0}`,
+    taskIdAccessCondition(db, t.task_id, policy),
+  );
+  const rows = db
+    .select({ id: t.id })
+    .from(t)
+    .where(and(matching, q.after_id ? gt(t.id, q.after_id) : undefined))
+    .orderBy(t.id)
+    .limit(q.limit + 1)
+    .all();
   const page = rows.slice(0, q.limit);
+  // Same filters, no page window: the count a summary can link to this list.
+  const total =
+    db.select({ count: count() }).from(t).where(matching).get()?.count ?? 0;
   return {
     questions: page.map((row) => view(db, row.id, a)),
     next_after_id: rows.length > q.limit ? (page.at(-1)?.id ?? null) : null,
+    total,
   };
 }
 function receipt(

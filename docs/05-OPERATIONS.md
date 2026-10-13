@@ -2746,9 +2746,10 @@ Discussion linking supplies `discussion: {room_id, message_id}`. Each command
 also requires its stable operation key. Responder principals must have current
 project membership; escalated responders must be owners.
 
-List filters include task, attempt, requester principal, responder principal, and
-state. Continue a page with `after_id` equal to `next_after_id` and unchanged
-filters. Use journal replay with its fixed `through_seq` for recovery across
+List filters include task, attempt, requester principal, responder principal,
+state, and `escalated` (`true` or `false`). Each page reports `total`, the number
+of questions matching the same filters across all pages. Continue a page with
+`after_id` equal to `next_after_id` and unchanged filters. Use journal replay with its fixed `through_seq` for recovery across
 concurrent writes; acknowledge only processed changes. Reads never acknowledge.
 
 If `answer_applicable` is false, keep the answer as evidence. Reconcile execution

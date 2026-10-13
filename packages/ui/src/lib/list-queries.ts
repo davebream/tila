@@ -2,6 +2,7 @@ import {
   type DeliveryListQuery,
   LIFECYCLE_OUTCOMES,
   type LifecycleOutcome,
+  type QuestionListQuery,
   type QueueListQuery,
 } from "@tila/schemas";
 
@@ -101,5 +102,44 @@ export function runtimeQueryFromSearch(
   return {
     cursor: params.get("cursor") ?? undefined,
     filter: params.get("filter") === "attention" ? "attention" : undefined,
+  };
+}
+
+export const DECISION_VIEWS = [
+  "mine",
+  "open",
+  "answered",
+  "cancelled",
+  "superseded",
+] as const;
+export type DecisionView = (typeof DECISION_VIEWS)[number];
+
+/** The decisions inbox view; "Waiting on me" is the default. */
+export function decisionViewFromSearch(params: URLSearchParams): DecisionView {
+  const view = params.get("view");
+  return DECISION_VIEWS.find((value) => value === view) ?? "mine";
+}
+
+export type DecisionListQuery = Pick<
+  QuestionListQuery,
+  "state" | "responder_principal_id" | "escalated"
+>;
+
+/**
+ * "Waiting on me" is the open questions routed to the signed-in principal;
+ * an escalation routes a question to one named owner, so it is included. Null
+ * when the caller has no principal: nothing can be waiting on it.
+ */
+export function questionQueryFromSearch(
+  params: URLSearchParams,
+  me: string | undefined,
+): DecisionListQuery | null {
+  const view = decisionViewFromSearch(params);
+  if (view === "mine" && !me) return null;
+  return {
+    ...(view === "mine"
+      ? { state: "open", responder_principal_id: me }
+      : { state: view }),
+    ...(params.get("escalated") === "1" ? { escalated: true } : {}),
   };
 }

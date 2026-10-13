@@ -1,4 +1,4 @@
-import type { Question } from "@tila/schemas";
+import type { CredentialPolicy, Question } from "@tila/schemas";
 import { expect } from "vitest";
 import * as attempts from "../src/attempt-ops";
 import * as recovery from "../src/attempt-recovery-ops";
@@ -339,8 +339,56 @@ export const questionCases: Record<string, (db: ProjectDatabase) => void> = {
       first.questions[0].question.id,
     );
     expect(second.next_after_id).toBeNull();
-    expect(questions.list(db, {}, responder, () => false).questions).toEqual(
-      [],
+    expect(
+      questions.list(db, {}, responder, readerOf(["other"])).questions,
+    ).toEqual([]);
+  },
+  "reports a total equal to the rows reached by walking every page": (db) => {
+    const { q, command } = prepare(db);
+    for (const key of ["second", "third"])
+      questions.ask(
+        db,
+        { ...command, id: crypto.randomUUID(), idempotency_key: key },
+        worker,
+      );
+    questions.escalate(
+      db,
+      q.id,
+      { ...correlation(q), responder_principal_id: "owner", reason: "budget" },
+      responder,
     );
+    const seen: string[] = [];
+    const totals: Array<number | undefined> = [];
+    let after: string | undefined;
+    do {
+      const page = questions.list(db, { after_id: after, limit: 1 }, responder);
+      seen.push(...page.questions.map((item) => item.question.id));
+      totals.push(page.total);
+      after = page.next_after_id ?? undefined;
+    } while (after);
+    expect(new Set(seen).size).toBe(3);
+    expect(totals).toEqual([3, 3, 3]);
+    const total = (
+      query: Parameters<typeof questions.list>[1],
+      policy?: CredentialPolicy,
+    ) => questions.list(db, { ...query, limit: 1 }, responder, policy).total;
+    expect(
+      total({ state: "open", responder_principal_id: "orchestrator" }),
+    ).toBe(2);
+    expect(total({ escalated: true })).toBe(1);
+    expect(total({ escalated: false })).toBe(2);
+    expect(total({ escalated: true, responder_principal_id: "owner" })).toBe(1);
+    expect(total({}, readerOf(["issue"]))).toBe(3);
+    expect(total({}, readerOf(["other"]))).toBe(0);
+    expect(total({}, readerOf([]))).toBe(0);
+    expect(total({}, { role: "viewer", capabilities: ["tasks:read"] })).toBe(3);
   },
 };
+/** A credential that may read only tasks of these types. */
+function readerOf(task_types: string[]): CredentialPolicy {
+  return {
+    role: "viewer",
+    capabilities: ["tasks:read"],
+    restrictions: { task_types },
+  };
+}

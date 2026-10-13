@@ -30,7 +30,7 @@ export interface ScenarioSources {
   suppressed: Source<number>;
   /** Total of `GET /deliveries?state=expired&expires_after=…`. */
   expired: Source<number>;
-  /** Open questions waiting on the caller (`GET /questions`). */
+  /** Total of `GET /questions?state=open&responder_principal_id=<caller>`. */
   questions: Source<number>;
   /** `GET /runtime-view?filter=attention`. */
   runtime: Source<{
@@ -186,6 +186,33 @@ export const SCENARIOS: OverviewScenario[] = [
     expected: "attention",
     next: "/p/test-project/queue?state=suspended",
   },
+  {
+    // S4: a worker stopped mid-task to ask which migration to run, and the
+    // question was routed to the person looking at the Overview.
+    name: "S4 worker waiting on an answer",
+    schema: applied,
+    work: [declaredEntry("bug", 3)],
+    records: [],
+    sources: {
+      ...QUIET,
+      queue: { active: 1 },
+      blocked: 4,
+      questions: 2,
+    },
+    expected: "attention",
+    // The question stops the worker, so it outranks the larger amber count.
+    next: "/p/test-project/decisions",
+  },
+  {
+    // S4: the questions request failed, so nobody knows whether a worker is
+    // waiting. That is not "nothing waiting".
+    name: "S4 decisions request failed",
+    schema: applied,
+    work: [declaredEntry("bug", 3)],
+    records: [],
+    sources: { ...QUIET, questions: "outage" },
+    expected: "partial",
+  },
 ];
 
 // --- Response bodies, shared by pure and rendered tests ---
@@ -238,6 +265,9 @@ export const runtimeView = (
   scan: { agents: 10, complete: data.complete ?? true },
 });
 
+/** The principal the Overview's questions are routed to. */
+export const ME = "github:example:1";
+
 /** `count` open questions waiting on the test principal. */
 export const openQuestions = (count: number) =>
   Array.from({ length: count }, (_, i) => ({
@@ -252,7 +282,7 @@ export const openQuestions = (count: number) =>
       requester: { principal_id: "worker", participant_id: "w" },
       session: null,
       requester_binding: null,
-      responder_principal_id: "github:example:1",
+      responder_principal_id: ME,
       escalated: false,
       state: "open",
       revision: 1,
@@ -265,6 +295,16 @@ export const openQuestions = (count: number) =>
       updated_at: 1,
     },
   }));
+
+/** A one-question page of `total` open questions, as read with `limit=1`. */
+export const questionPage = (total: number) => {
+  const questions = openQuestions(Math.min(total, 1));
+  return {
+    questions,
+    next_after_id: total > 1 ? questions[0].question.id : null,
+    total,
+  };
+};
 
 export type SourceBody = { failure: SourceFailure } | { data: unknown };
 
@@ -294,8 +334,8 @@ export function sourceBodies(
     "deliveries-suppressed": body(sources.suppressed, deliveryPage),
     "deliveries-expired": body(sources.expired, deliveryPage),
     runtime: body(sources.runtime, runtimeView),
-    "questions-mine": body(sources.questions, (count) => ({
-      result: { questions: openQuestions(count), next_after_id: null },
+    "questions-mine": body(sources.questions, (total) => ({
+      result: questionPage(total),
     })),
   };
 }
