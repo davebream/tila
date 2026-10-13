@@ -243,3 +243,33 @@ test("opens a delivery trace without fetching or acknowledging the mailbox", asy
     `GET /projects/test-project/inbox/worker/deliveries/${item.delivery.id}`,
   ]);
 });
+
+test("attention filters from the Overview reach the server and can be removed", async () => {
+  setup();
+  const user = userEvent.setup();
+  const requests: URLSearchParams[] = [];
+  server.use(
+    http.get(deliveriesUrl, ({ request }) => {
+      requests.push(new URL(request.url).searchParams);
+      return HttpResponse.json({
+        ok: true,
+        deliveries: [traceItem(1)],
+        has_more: false,
+        cursor: null,
+        total: 5,
+      });
+    }),
+  );
+  renderPage(
+    "/p/test-project/deliveries?state=expired&expires_after=1700000000000&wake=suppressed",
+  );
+
+  expect(await screen.findByText("5 deliveries match")).toBeInTheDocument();
+  expect(requests[0].get("expires_after")).toBe("1700000000000");
+  expect(requests[0].get("wake")).toBe("suppressed");
+  expect(requests[0].get("state")).toBe("expired");
+
+  await user.click(screen.getByRole("button", { name: "Remove wake filter" }));
+  await waitFor(() => expect(requests.at(-1)?.get("wake")).toBeNull());
+  expect(requests.at(-1)?.get("expires_after")).toBe("1700000000000");
+});

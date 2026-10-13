@@ -10,9 +10,22 @@ import {
 } from "@/lib/attention";
 import type { ErrorKind, SectionState } from "@/lib/query-state";
 import type { RecordTypesResponse, WorkCatalogResponse } from "@tila/schemas";
-import { SCENARIOS } from "../fixtures/overview-scenarios";
+import {
+  SCENARIOS,
+  type SourceBody,
+  deliveryPage,
+  runtimeView,
+  sourceBodies,
+  taskPage,
+} from "../fixtures/overview-scenarios";
 
-const [uncertain, suspended] = ATTENTION_RULES;
+const rule = (id: string) => {
+  const found = ATTENTION_RULES.find((r) => r.id === id);
+  if (!found) throw new Error(`no rule ${id}`);
+  return found;
+};
+const uncertain = rule("execution.uncertain");
+const suspended = rule("execution.suspended");
 
 function ready<T>(data: T, stale = false): SectionState<T> {
   return {
@@ -37,6 +50,7 @@ const readyRow = (total: number, extra: Partial<RowState> = {}): RowState =>
     kind: "ready",
     total,
     complete: true,
+    link: { segment: "queue", search: "" },
     updatedAt: 1_000,
     stale: null,
     ...extra,
@@ -49,10 +63,20 @@ function rows(...states: RowState[]): AttentionRow[] {
   }));
 }
 
+/** What each source's `fetch` resolves to, from its HTTP response body. */
+function fetched(id: string, body: SourceBody): SectionState<unknown> {
+  if ("failure" in body)
+    return body.failure === "outage"
+      ? failed("unavailable", "do-unreachable")
+      : failed("unavailable", "config-unavailable");
+  const data = body.data as { result?: unknown };
+  if (id === "queue" || id === "queue-lease") return ready(data.result);
+  if (id === "deliveries-expired") return ready({ page: data, since: 0 });
+  return ready(data);
+}
+
 function evaluate(scenario: (typeof SCENARIOS)[number]) {
-  const queue: SectionState<unknown> = scenario.queue
-    ? ready(scenario.queue)
-    : failed("unavailable", "do-unreachable");
+  const bodies = sourceBodies(scenario.sources);
   const work: WorkCatalogResponse = {
     ok: true,
     types: scenario.work,
@@ -64,9 +88,9 @@ function evaluate(scenario: (typeof SCENARIOS)[number]) {
     entries: scenario.records,
   };
   return evaluateOverview({
-    rows: ATTENTION_RULES.map((rule) => ({
-      rule,
-      state: ruleRow(rule, queue),
+    rows: ATTENTION_RULES.map((r) => ({
+      rule: r,
+      state: ruleRow(r, fetched(r.source.id, bodies[r.source.id])),
     })),
     unconfigured: isUnconfigured({
       schema: ready<AppliedSchemaResponse>(scenario.schema),
@@ -75,6 +99,11 @@ function evaluate(scenario: (typeof SCENARIOS)[number]) {
     }),
   });
 }
+
+test("every rule's source has a scenario body", () => {
+  const bodies = sourceBodies(SCENARIOS[0].sources);
+  for (const r of ATTENTION_RULES) expect(bodies[r.source.id]).toBeDefined();
+});
 
 describe("scenario fixtures", () => {
   test.each(SCENARIOS.map((s) => [s.name, s] as const))(
@@ -86,7 +115,7 @@ describe("scenario fixtures", () => {
         const next = view.next;
         expect(next).not.toBeNull();
         expect(
-          `/p/test-project/${next?.rule.link.segment}${next?.rule.link.search}`,
+          `/p/test-project/${next?.state.link.segment}${next?.state.link.search}`,
         ).toBe(scenario.next);
       }
     },
@@ -132,6 +161,75 @@ describe("ruleRow", () => {
     );
     expect(row).toMatchObject({ kind: "ready", total: 0 });
     expect(row.kind === "ready" && row.stale).toBeTruthy();
+  });
+});
+
+describe("rule observations", () => {
+  test("failed work is not applicable when no type declares the outcome", () => {
+    expect(ruleRow(rule("work.failed"), ready(taskPage(0, [])))).toMatchObject({
+      kind: "not-applicable",
+    });
+    expect(
+      ruleRow(rule("work.failed"), ready(taskPage(2, ["bug", "story"]))),
+    ).toMatchObject({ kind: "ready", total: 2, scope: "types: bug, story" });
+  });
+
+  test("blocked work links to the same filter it counted", () => {
+    expect(ruleRow(rule("work.blocked"), ready(taskPage(7)))).toMatchObject({
+      kind: "ready",
+      total: 7,
+      link: { segment: "tasks", search: "?blocked=1" },
+    });
+  });
+
+  test("expired deliveries link with the cutoff their count used", () => {
+    const row = ruleRow(
+      rule("delivery.expired-recent"),
+      ready({ page: deliveryPage(3), since: 1_700_000_000_000 }),
+    );
+    expect(row).toMatchObject({
+      kind: "ready",
+      total: 3,
+      link: {
+        segment: "deliveries",
+        search: "?state=expired&expires_after=1700000000000",
+      },
+    });
+  });
+
+  test("a server without delivery totals is not shown as zero", () => {
+    const { total: _total, ...page } = deliveryPage(0);
+    expect(
+      ruleRow(rule("delivery.wake-suppressed"), ready(page)),
+    ).toMatchObject({ kind: "not-applicable" });
+  });
+
+  test("unconfigured conversations are not an outage", () => {
+    expect(
+      ruleRow(
+        rule("delivery.wake-suppressed"),
+        failed("unavailable", "config-unavailable"),
+      ),
+    ).toEqual({ kind: "not-configured" });
+  });
+
+  test.each<[string, Parameters<typeof runtimeView>[0], string | undefined]>([
+    ["a complete scan", { total: 2 }, undefined],
+    ["a partial scan", { total: 2, complete: false }, "first 10 agents only"],
+    [
+      "a run-store outage",
+      { total: 0, runs: "unavailable" },
+      "run records unavailable",
+    ],
+  ])("runtime counts state %s", (_name, view, scope) => {
+    const row = ruleRow(rule("runtime.occupant"), ready(runtimeView(view)));
+    expect(row).toMatchObject({
+      kind: "ready",
+      total: view.total,
+      complete: scope === undefined,
+      link: { segment: "runtime", search: "?filter=attention" },
+    });
+    expect(row.kind === "ready" && row.scope).toBe(scope ?? undefined);
   });
 });
 

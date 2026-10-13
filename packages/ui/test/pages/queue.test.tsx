@@ -416,3 +416,28 @@ it("warns about expired execution authority while retaining occupied capacity", 
   ).toBeInTheDocument();
   expect(screen.getByText("1 / 20")).toBeInTheDocument();
 });
+
+it("the lapsed-lease filter reaches the server and can be cleared", async () => {
+  const user = userEvent.setup();
+  const requests: URLSearchParams[] = [];
+  server.use(
+    http.get("*/projects/test-project/queue", ({ request }) => {
+      const query = new URL(request.url).searchParams;
+      requests.push(query);
+      return HttpResponse.json({
+        result: { ...data, total: 0, offset: 0, entries: [] },
+      });
+    }),
+  );
+  renderQueue("?lease=expired");
+
+  expect(
+    await screen.findByText(
+      /Showing executions still starting or running past their lease/,
+    ),
+  ).toBeInTheDocument();
+  await waitFor(() => expect(requests.at(-1)?.get("lease")).toBe("expired"));
+
+  await user.click(screen.getByRole("button", { name: "Show all work" }));
+  await waitFor(() => expect(requests.at(-1)?.get("lease")).toBeNull());
+});

@@ -4,13 +4,15 @@ import { http, HttpResponse, delay } from "msw";
 import { Route, Routes } from "react-router";
 import {
   type OverviewScenario,
+  QUIET,
   SCENARIOS,
+  type ScenarioSources,
+  sourceHandlers,
 } from "../fixtures/overview-scenarios";
-import { emptyQueue } from "../mocks/handlers";
 import { recordTypesHandler } from "../mocks/records";
 import { server } from "../mocks/server";
 import { catalogHandler } from "../mocks/tasks";
-import { renderWithProviders, screen, within } from "../test-utils";
+import { renderWithProviders, screen, waitFor, within } from "../test-utils";
 
 function renderOverview() {
   return renderWithProviders(
@@ -21,33 +23,20 @@ function renderOverview() {
   );
 }
 
-function queueHandler(
-  body: () => Response | Promise<Response>,
-  onRequest?: (params: URLSearchParams) => void,
+type Seen = { path: string; params: URLSearchParams };
+
+function useScenario(
+  scenario: OverviewScenario,
+  sources: ScenarioSources = scenario.sources,
 ) {
-  return http.get("*/projects/*/queue", async ({ request }) => {
-    onRequest?.(new URL(request.url).searchParams);
-    return body();
-  });
-}
-
-const queueUnavailable = () =>
-  HttpResponse.json(
-    { ok: false, error: { code: "do-unreachable", message: "down" } },
-    { status: 503 },
-  );
-
-function useScenario(scenario: OverviewScenario) {
+  const seen: Seen[] = [];
   server.use(
     http.get("*/projects/*/schema", () => HttpResponse.json(scenario.schema)),
     catalogHandler(scenario.work),
     recordTypesHandler(scenario.records),
-    queueHandler(() =>
-      scenario.queue
-        ? HttpResponse.json({ ok: true, result: scenario.queue })
-        : queueUnavailable(),
-    ),
+    ...sourceHandlers(sources, (path, params) => seen.push({ path, params })),
   );
+  return seen;
 }
 
 const scenario = (name: string) => {
@@ -55,6 +44,30 @@ const scenario = (name: string) => {
   if (!found) throw new Error(`no scenario ${name}`);
   return found;
 };
+
+function identity(capabilities: readonly string[], restricted = false) {
+  server.use(
+    http.get("*/api/whoami", () =>
+      HttpResponse.json({
+        ok: true,
+        project_id: "test-project",
+        token_name: "limited",
+        scopes: "read",
+        role: "participant",
+        policy: {
+          role: "participant",
+          capabilities,
+          ...(restricted ? { restrictions: { task_types: ["bug"] } } : {}),
+        },
+      }),
+    ),
+  );
+}
+
+const hrefs = (table: HTMLElement) =>
+  within(table)
+    .getAllByRole("link")
+    .map((link) => link.getAttribute("href"));
 
 describe("OverviewPage", () => {
   test("a new project guides the user into settings", async () => {
@@ -85,18 +98,34 @@ describe("OverviewPage", () => {
       await screen.findByText("Nothing needs attention."),
     ).toBeInTheDocument();
     const table = screen.getByRole("table", { name: "Attention checks" });
-    expect(
-      within(table).getByText("No executions with an uncertain outcome"),
-    ).toBeInTheDocument();
-    expect(
-      within(table).getByText("No suspended executions"),
-    ).toBeInTheDocument();
+    for (const text of [
+      "No executions with an uncertain outcome",
+      "No open tasks waiting on prerequisites",
+      "No pending deliveries no longer being woken",
+      "No agents whose mailbox occupant needs a check",
+    ])
+      expect(within(table).getByText(text)).toBeInTheDocument();
     expect(
       screen.queryByRole("region", { name: "Set up this project" }),
     ).not.toBeInTheDocument();
   });
 
-  test("the next action links to the matching filtered list", async () => {
+  test("unconfigured conversations make a quiet project partial, not idle", async () => {
+    useScenario(scenario("S1 quiet project with conversations"));
+    renderOverview();
+
+    expect(
+      await screen.findByText(/Nothing found in the checks that completed/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Deliveries: not configured on this deployment."),
+    ).toHaveLength(2);
+    expect(
+      screen.queryByText("Nothing needs attention."),
+    ).not.toBeInTheDocument();
+  });
+
+  test("the next action and every finding link to the matching filtered list", async () => {
     useScenario(scenario("S2"));
     renderOverview();
 
@@ -106,43 +135,57 @@ describe("OverviewPage", () => {
         name: "View 2 executions with an uncertain outcome",
       }),
     ).toHaveAttribute("href", "/p/test-project/queue?state=uncertain");
-
-    const table = screen.getByRole("table", { name: "Attention checks" });
-    const links = within(table).getAllByRole("link");
-    expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/p/test-project/queue?state=uncertain",
-      "/p/test-project/queue?state=suspended",
-    ]);
+    await waitFor(() =>
+      expect(
+        hrefs(screen.getByRole("table", { name: "Attention checks" })),
+      ).toEqual([
+        "/p/test-project/queue?state=uncertain",
+        "/p/test-project/queue?lease=expired",
+        "/p/test-project/runtime?filter=attention",
+      ]),
+    );
   });
 
-  test("an outage is an unknown state, never a reassuring zero", async () => {
-    useScenario(scenario("S3"));
+  test("a finding during an outage leads, with the outage called out", async () => {
+    useScenario(scenario("S3 failed hotfix"));
+    renderOverview();
+
+    const next = await screen.findByRole("region", { name: "Next action" });
+    expect(
+      within(next).getByRole("link", {
+        name: "View 1 task that failed or was abandoned",
+      }),
+    ).toHaveAttribute(
+      "href",
+      "/p/test-project/tasks?outcome=failure,abandoned",
+    );
+    expect(
+      await screen.findByText(/Some checks did not complete/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Could not load the execution queue/).length,
+    ).toBe(3);
+  });
+
+  test("a total outage is an unknown state, never a reassuring zero", async () => {
+    useScenario(scenario("S3 total outage"));
     renderOverview();
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Current state unknown.");
     expect(
-      screen.getAllByText(/Could not load the execution queue/).length,
-    ).toBeGreaterThan(0);
-    expect(
       screen.queryByText("Nothing needs attention."),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText(/^No .*executions/)).not.toBeInTheDocument();
+    const table = screen.getByRole("table", { name: "Attention checks" });
+    expect(within(table).queryByText(/^No /)).not.toBeInTheDocument();
+    expect(within(table).getAllByText(/Current state unknown/)).toHaveLength(8);
   });
 
-  test("counts come from one bounded request, however large", async () => {
-    const requests: URLSearchParams[] = [];
-    useScenario(scenario("S1 configured"));
-    server.use(
-      queueHandler(
-        () =>
-          HttpResponse.json({
-            ok: true,
-            result: emptyQueue({ uncertain: 10_000 }),
-          }),
-        (params) => requests.push(params),
-      ),
-    );
+  test("every count is one bounded request, however large", async () => {
+    const seen = useScenario(scenario("S1 configured"), {
+      ...QUIET,
+      queue: { uncertain: 10_000 },
+    });
     renderOverview();
 
     expect(
@@ -150,15 +193,57 @@ describe("OverviewPage", () => {
         name: "View 10,000 executions with an uncertain outcome",
       }),
     ).toBeInTheDocument();
-    expect(requests).toHaveLength(1);
-    expect(requests[0].get("limit")).toBe("1");
-    expect(requests[0].get("state")).toBeNull();
+    await waitFor(() => expect(seen).toHaveLength(7));
+    for (const { params } of seen) expect(params.get("limit")).toBe("1");
+    const paths = seen.map(({ path }) => path.split("/").at(-1)).sort();
+    expect(paths).toEqual([
+      "deliveries",
+      "deliveries",
+      "queue",
+      "queue",
+      "runtime-view",
+      "tasks",
+      "tasks",
+    ]);
+  });
+
+  test("each count uses the same filters as the list it links to", async () => {
+    const seen = useScenario(scenario("S1 configured"), {
+      ...QUIET,
+      blocked: 4,
+      expired: 2,
+    });
+    renderOverview();
+
+    const table = await screen.findByRole("table", {
+      name: "Attention checks",
+    });
+    const expiredLink = await within(table).findByRole("link", {
+      name: /deliveries expired unacknowledged/,
+    });
+    const linked = new URL(expiredLink.getAttribute("href") ?? "", "http://x")
+      .searchParams;
+    const expiredRequest = seen.find(
+      ({ params }) => params.get("state") === "expired",
+    );
+    expect(expiredRequest?.params.get("expires_after")).toBe(
+      linked.get("expires_after"),
+    );
+
+    const blockedRequest = seen.find(({ params }) => params.has("blocked"));
+    expect(blockedRequest?.params.get("blocked")).toBe("1");
+    expect(blockedRequest?.params.get("archived")).toBe("0");
+    expect(
+      within(table).getByRole("link", {
+        name: "4 open tasks waiting on prerequisites",
+      }),
+    ).toHaveAttribute("href", "/p/test-project/tasks?blocked=1");
   });
 
   test("while loading it never shows a count", async () => {
     useScenario(scenario("S1 configured"));
     server.use(
-      queueHandler(async () => {
+      http.get("*/projects/*/queue", async () => {
         await delay("infinite");
         return HttpResponse.json({});
       }),
@@ -168,22 +253,28 @@ describe("OverviewPage", () => {
     expect(
       await screen.findByText("Checking what needs attention…"),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/^No .*executions/)).not.toBeInTheDocument();
     expect(
       screen.queryByText("Nothing needs attention."),
     ).not.toBeInTheDocument();
   });
 
-  test("a source the credential cannot read is listed as not checked", async () => {
+  test("checks the credential cannot use are skipped and listed", async () => {
+    const seen = useScenario(scenario("S1 configured"));
+    identity(CAPABILITIES.filter((cap) => cap.endsWith(":read")));
+    renderOverview();
+
+    expect(
+      await screen.findByText("Not checked with your access: deliveries."),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("Nothing needs attention."),
+    ).toBeInTheDocument();
+    expect(seen.some(({ path }) => path.endsWith("/deliveries"))).toBe(false);
+  });
+
+  test("a credential that can check nothing is told so", async () => {
     useScenario(scenario("S1 configured"));
-    server.use(
-      queueHandler(() =>
-        HttpResponse.json(
-          { ok: false, error: { code: "permission-denied", message: "no" } },
-          { status: 403 },
-        ),
-      ),
-    );
+    identity([]);
     renderOverview();
 
     expect(
@@ -192,31 +283,13 @@ describe("OverviewPage", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Not checked with your access: the execution queue."),
-    ).toBeInTheDocument();
-    expect(
       screen.queryByText("Nothing needs attention."),
     ).not.toBeInTheDocument();
   });
 
   test("a restricted credential is told what its counts cover", async () => {
-    useScenario(scenario("S2"));
-    server.use(
-      http.get("*/api/whoami", () =>
-        HttpResponse.json({
-          ok: true,
-          project_id: "test-project",
-          token_name: "bug-bot",
-          scopes: "write",
-          role: "participant",
-          policy: {
-            role: "participant",
-            capabilities: [...CAPABILITIES],
-            restrictions: { task_types: ["bug"] },
-          },
-        }),
-      ),
-    );
+    const seen = useScenario(scenario("S2"));
+    identity([...CAPABILITIES], true);
     renderOverview();
 
     expect(
@@ -225,7 +298,10 @@ describe("OverviewPage", () => {
     expect(
       await screen.findByRole("region", { name: "Next action" }),
     ).toBeInTheDocument();
-    // Definitions are not a surface restricted credentials may read.
+    // Restricted credentials may not call these surfaces at all.
+    expect(
+      seen.some(({ path }) => /\/(deliveries|runtime-view)$/.test(path)),
+    ).toBe(false);
     expect(screen.queryByText("Definitions")).not.toBeInTheDocument();
   });
 
