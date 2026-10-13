@@ -48,7 +48,8 @@ export class RemoteQuestionBackend implements QuestionBackend {
         .map(([k, v]) => [k, String(v)]),
     );
     return QuestionListResultSchema.parse(
-      (await this.client.get<{ result: unknown }>(this.base, params)).result,
+      (await this.client.get<{ result: unknown }>(this.base, { query: params }))
+        .result,
     );
   }
   answer(id: string, command: QuestionAnswerCommand) {
