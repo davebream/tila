@@ -47,6 +47,14 @@ export function useAdminCapabilities() {
     canManageRepositories: flag("repository_policy_manage"),
     canManageServiceAccounts: flag("service_accounts_manage"),
     canManageWorkloadBindings: flag("workload_bindings_manage"),
+    // An older server reports only `credentials_manage` (list and revoke).
+    canReadCredentials: flag("credentials_read") || flag("credentials_manage"),
+    canIssueCredentials: flag("credentials_issue"),
+    canRotateCredentials: flag("credentials_rotate"),
+    canRevokeCredentials:
+      flag("credentials_revoke") || flag("credentials_manage"),
+    /** Shared runtime invitations and revoking any installation (owner). */
+    canManageRuntimeAccess: flag("runtime_access_manage"),
   };
 }
 
@@ -108,11 +116,11 @@ export function useServiceAccounts() {
 }
 
 export function useTokens() {
-  const { projectId, canManageCredentials } = useAdminCapabilities();
+  const { projectId, canReadCredentials } = useAdminCapabilities();
   return useQuery({
     queryKey: ["tokens", projectId],
     queryFn: () => listTokens(),
-    enabled: Boolean(projectId) && canManageCredentials,
+    enabled: Boolean(projectId) && canReadCredentials,
   });
 }
 

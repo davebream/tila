@@ -31,6 +31,7 @@ import { RoomsPage } from "@/pages/rooms";
 import { RuntimePage } from "@/pages/runtime";
 import { SettingsPage } from "@/pages/settings";
 import { SettingsAgentsPage } from "@/pages/settings-agents";
+import { SettingsCredentialsPage } from "@/pages/settings-credentials";
 import { SettingsDefinitionsPage } from "@/pages/settings-definitions";
 import { SettingsDefinitionsReviewPage } from "@/pages/settings-definitions-review";
 import { SettingsDefinitionsRevisionPage } from "@/pages/settings-definitions-revision";
@@ -38,6 +39,7 @@ import { SettingsDefinitionsSourcePage } from "@/pages/settings-definitions-sour
 import { SettingsGeneralPage } from "@/pages/settings-general";
 import { SettingsRepositoriesPage } from "@/pages/settings-repositories";
 import { SettingsRoomsPage } from "@/pages/settings-rooms";
+import { SettingsRuntimeAccessPage } from "@/pages/settings-runtime-access";
 import { SettingsServiceIdentitiesPage } from "@/pages/settings-service-identities";
 import { SettingsSignalGroupsPage } from "@/pages/settings-signal-groups";
 import { SignalsPage } from "@/pages/signals";
@@ -191,6 +193,14 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route
         path="settings/service-identities"
         element={<SettingsServiceIdentitiesPage />}
+      />
+      <Route
+        path="settings/credentials"
+        element={<SettingsCredentialsPage />}
+      />
+      <Route
+        path="settings/runtime-access"
+        element={<SettingsRuntimeAccessPage />}
       />
       <Route path="settings/agents" element={<SettingsAgentsPage />} />
       <Route path="settings/rooms" element={<SettingsRoomsPage />} />

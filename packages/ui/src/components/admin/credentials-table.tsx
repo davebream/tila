@@ -47,7 +47,19 @@ interface CredentialsTableProps {
   serviceAccounts: ServiceAccount[];
   isLoading: boolean;
   pendingName: string | null;
-  onRevoke: (name: string) => Promise<void>;
+  /** Revoke is offered only with this handler (`credentials_revoke`). */
+  onRevoke?: (name: string) => Promise<void>;
+  /** Rotate is offered only with this handler (`credentials_rotate`). */
+  onRotate?: (token: TokenListItem) => void;
+}
+
+/** Scoped credentials rotate by version; legacy project tokens cannot. */
+export function rotatable(token: TokenListItem, now: number): boolean {
+  return (
+    !token.legacy &&
+    Boolean(token.token_id) &&
+    credentialStatus(token, now) === "active"
+  );
 }
 
 export function CredentialsTable({
@@ -56,6 +68,7 @@ export function CredentialsTable({
   isLoading,
   pendingName,
   onRevoke,
+  onRotate,
 }: CredentialsTableProps) {
   const [revoking, setRevoking] = useState<TokenListItem | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
@@ -77,7 +90,7 @@ export function CredentialsTable({
   }
 
   async function confirmRevoke() {
-    if (!revoking) return;
+    if (!revoking || !onRevoke) return;
     setRevokeError(null);
     try {
       await onRevoke(revoking.name);
@@ -214,20 +227,33 @@ export function CredentialsTable({
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      {status !== "revoked" && (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          className="text-status-red"
-                          disabled={busy}
-                          onClick={() => {
-                            setRevokeError(null);
-                            setRevoking(token);
-                          }}
-                        >
-                          Revoke
-                        </Button>
-                      )}
+                      <div className="flex justify-end gap-1">
+                        {onRotate && rotatable(token, now) && (
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            aria-label={`Rotate ${token.name}`}
+                            disabled={busy}
+                            onClick={() => onRotate(token)}
+                          >
+                            Rotate
+                          </Button>
+                        )}
+                        {onRevoke && status !== "revoked" && (
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="text-status-red"
+                            disabled={busy}
+                            onClick={() => {
+                              setRevokeError(null);
+                              setRevoking(token);
+                            }}
+                          >
+                            Revoke
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -239,12 +265,13 @@ export function CredentialsTable({
 
       <div className="space-y-1 text-xs text-muted-foreground">
         <p>
-          Issuance and rotation are not available in the browser. Issue
-          credentials from the CLI:
+          Rotating issues a new secret and retires the previous one after the
+          overlap you choose. Revoking a credential also deletes every session
+          minted from it. The CLI offers the same commands:
         </p>
         {[
-          "tila service-account create --name <name> --display-name <label>",
           "tila token issue --principal service:<uuid> --preset read-only",
+          "tila token rotate <name> --expected-token-id <id>",
         ].map((cmd) => (
           <div key={cmd} className="group/row flex items-center gap-1">
             <code className="tila-code font-mono text-[11px] text-fg-strong">
@@ -253,7 +280,6 @@ export function CredentialsTable({
             <CopyButton value={cmd} />
           </div>
         ))}
-        <p>Revoking a credential also deletes every session minted from it.</p>
       </div>
 
       <ConfirmAction

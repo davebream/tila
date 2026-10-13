@@ -105,27 +105,6 @@ describe("SettingsPage", () => {
     expect(within(table).getByText("revoked")).toBeInTheDocument();
   });
 
-  test("credentials: status badges, principal join, legacy marker, no secrets", async () => {
-    server.use(...adminHandlers("explicit"));
-    renderSettings();
-
-    const table = await screen.findByRole("table", { name: "Credentials" });
-    const active = (await within(table).findByText("ci-token")).closest("tr");
-    const expired = within(table).getByText("old-token").closest("tr");
-    const legacy = within(table).getByText("bootstrap").closest("tr");
-    expect(active && within(active).getByText("active")).toBeInTheDocument();
-    expect(active && within(active).getByText("CI bot")).toBeInTheDocument();
-    expect(expired && within(expired).getByText("expired")).toBeInTheDocument();
-    expect(legacy && within(legacy).getByText("legacy")).toBeInTheDocument();
-    expect(legacy && within(legacy).getByText("revoked")).toBeInTheDocument();
-    // A revoked credential has no revoke action
-    expect(
-      legacy && within(legacy).queryByRole("button", { name: "Revoke" }),
-    ).toBeNull();
-    expect(screen.getByText(/tila token issue/)).toBeInTheDocument();
-    expect(screen.queryByText(/tila_/)).not.toBeInTheDocument();
-  });
-
   test("unavailable policy store: renders the fail-closed state with no controls", async () => {
     let membershipCalls = 0;
     server.use(
@@ -150,10 +129,9 @@ describe("SettingsPage", () => {
     expect(membershipCalls).toBe(0);
   });
 
-  test("without credentials_manage no credential request is made and no revoke control renders", async () => {
+  test("credentials live on their own page: Access links there and never requests them", async () => {
     let tokenCalls = 0;
     server.use(
-      sessionStatusWith({ credentials_manage: false }),
       http.get("*/api/tokens", () => {
         tokenCalls += 1;
         return HttpResponse.json({ ok: true, tokens });
@@ -164,14 +142,13 @@ describe("SettingsPage", () => {
 
     await screen.findByRole("table", { name: "Members" });
     expect(
-      screen.getByText(/cannot manage its credentials/),
-    ).toBeInTheDocument();
+      screen.getByRole("link", { name: "Settings › Credentials" }),
+    ).toHaveAttribute("href", "/p/test-project/settings/credentials");
     expect(
       screen.queryByRole("table", { name: "Credentials" }),
     ).not.toBeInTheDocument();
     expect(tokenCalls).toBe(0);
   });
-
   test("without memberships_manage the grant form and member actions are absent", async () => {
     let membershipCalls = 0;
     server.use(
@@ -184,8 +161,9 @@ describe("SettingsPage", () => {
     );
     renderSettings();
 
-    await screen.findByRole("table", { name: "Credentials" });
-    expect(screen.getByText(/cannot manage its members/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/cannot manage its members/),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Grant membership" })).toBeNull();
     expect(membershipCalls).toBe(0);
   });
@@ -277,35 +255,6 @@ describe("SettingsPage", () => {
     if (!row) throw new Error("row missing");
     expect(within(row).getByRole("button", { name: "Revoke" })).toBeDisabled();
     expect(within(row).getByRole("combobox")).toBeDisabled();
-  });
-
-  test("revoking a credential requires typing its name and calls DELETE /api/tokens/:name", async () => {
-    const user = userEvent.setup();
-    let revoked: string | null = null;
-    server.use(
-      ...adminHandlers("explicit"),
-      http.delete("*/api/tokens/:name", ({ params }) => {
-        revoked = String(params.name);
-        return HttpResponse.json({
-          ok: true,
-          name: params.name,
-          revoked_at: Math.floor(Date.now() / 1000),
-        });
-      }),
-    );
-    renderSettings();
-
-    const table = await screen.findByRole("table", { name: "Credentials" });
-    const row = (await within(table).findByText("ci-token")).closest("tr");
-    if (!row) throw new Error("row missing");
-    await user.click(within(row).getByRole("button", { name: "Revoke" }));
-    const dialog = await screen.findByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: "Revoke" });
-    expect(confirm).toBeDisabled();
-    await user.type(within(dialog).getByRole("textbox"), "ci-token");
-    expect(confirm).toBeEnabled();
-    await user.click(confirm);
-    await waitFor(() => expect(revoked).toBe("ci-token"));
   });
 
   test("step-up-required shows the banner and stashes a resume target on sign-in", async () => {
@@ -590,22 +539,5 @@ describe("SettingsPage failure states", () => {
     expect(
       screen.queryByRole("table", { name: "Members" }),
     ).not.toBeInTheDocument();
-  });
-
-  test("a failed credentials refresh keeps the table and states it is stale", async () => {
-    server.use(...adminHandlers("explicit"));
-    const { queryClient } = renderSettings();
-
-    const table = await screen.findByRole("table", { name: "Credentials" });
-    await within(table).findByText("ci-token");
-
-    server.use(http.get("*/api/tokens", unavailable));
-    await act(() => queryClient.invalidateQueries({ queryKey: ["tokens"] }));
-
-    expect(
-      await screen.findByText(/Showing credentials from .* Refresh failed/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "Credentials" })).toBe(table);
-    expect(within(table).getByText("ci-token")).toBeInTheDocument();
   });
 });
