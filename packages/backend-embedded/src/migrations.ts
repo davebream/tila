@@ -79,24 +79,30 @@ export function runEmbeddedMigrations(storage: MigrationStorage): void {
   const now = Date.now();
   for (const migration of EMBEDDED_MIGRATIONS) {
     if (applied.has(migration.version)) continue;
-    if ("run" in migration) {
-      migration.run(storage);
-    } else {
-      storage.sql.exec(migration.sql);
+    // Table rebuilds must share a transaction with their bookkeeping. The
+    // write lock also prevents two local runtimes from rebuilding concurrently.
+    storage.sql.exec("BEGIN IMMEDIATE");
+    try {
+      const alreadyApplied =
+        storage.sql
+          .exec(
+            "SELECT 1 AS applied FROM _migrations WHERE version = ?",
+            migration.version,
+          )
+          .toArray().length > 0;
+      if (!alreadyApplied) {
+        if ("run" in migration) migration.run(storage);
+        else storage.sql.exec(migration.sql);
+        storage.sql.exec(
+          "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
+          migration.version,
+          now,
+        );
+      }
+      storage.sql.exec("COMMIT");
+    } catch (error) {
+      storage.sql.exec("ROLLBACK");
+      throw error;
     }
-    // Record only AFTER the migration succeeds — a throw above leaves this
-    // version unrecorded so a re-run resumes cleanly (R4).
-    //
-    // INSERT OR IGNORE (not a bare INSERT): if two runtimes open the SAME FRESH
-    // DB concurrently, both can run a given migration before either records it,
-    // and the loser would otherwise throw SQLITE_CONSTRAINT_PRIMARYKEY here
-    // (`version` is INTEGER PRIMARY KEY) — a spurious open failure. Migration
-    // bodies are already idempotent (CREATE TABLE/INDEX IF NOT EXISTS), so
-    // ignoring the duplicate bookkeeping row is safe.
-    storage.sql.exec(
-      "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
-      migration.version,
-      now,
-    );
   }
 }

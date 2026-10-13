@@ -6,8 +6,6 @@ import {
   readCredentialPolicy,
 } from "@tila/ops-sqlite";
 import {
-  type RequestOrigin,
-  artifactOps,
   constraintOps,
   recordOps,
   schemaOps,
@@ -22,7 +20,6 @@ import {
   RecordSetRequestSchema,
   RecordUnarchiveRequestSchema,
   RecordValueSchema,
-  formatRecordResource,
   parseTagFilter,
 } from "@tila/schemas";
 import { Hono } from "hono";
@@ -47,34 +44,6 @@ function serializeRecord(result: recordOps.RecordRow) {
     updated_by: result.updated_by,
     tags: result.tags,
   };
-}
-
-function upsertCanonicalSnapshot(
-  deps: RouterDeps,
-  type: string,
-  key: string,
-  canonicalArtifactKey: string,
-  valueSha256: string,
-  origin: RequestOrigin,
-): void {
-  const resource = formatRecordResource(type, key);
-  artifactOps.upsertPointer(
-    deps.db,
-    {
-      r2_key: canonicalArtifactKey,
-      resource,
-      kind: "record-snapshot-canonical",
-      sha256: valueSha256,
-      bytes: 0,
-      fence: null,
-      mime_type: "application/json",
-      produced_at: Date.now(),
-      produced_by: origin.principalId,
-      expires_at: null,
-    },
-    origin,
-    "artifact.produced",
-  );
 }
 
 type ValidateRecordWriteResult =
@@ -177,17 +146,6 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       provenance,
     );
 
-    if (canonicalArtifactKey !== null) {
-      upsertCanonicalSnapshot(
-        deps,
-        type,
-        body.key,
-        canonicalArtifactKey,
-        result.value_sha256,
-        provenance,
-      );
-    }
-
     c.header("X-Rows-Affected", "1");
     return c.json(
       {
@@ -243,17 +201,6 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       setProvenance,
       idempotencyFrom(c),
     );
-
-    if (canonicalArtifactKey !== null) {
-      upsertCanonicalSnapshot(
-        deps,
-        type,
-        key,
-        canonicalArtifactKey,
-        result.value_sha256,
-        setProvenance,
-      );
-    }
 
     return jsonOkRows(
       c,
@@ -319,17 +266,6 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       },
       putProvenance,
     );
-
-    if (canonicalArtifactKey !== null) {
-      upsertCanonicalSnapshot(
-        deps,
-        type,
-        key,
-        canonicalArtifactKey,
-        result.value_sha256,
-        putProvenance,
-      );
-    }
 
     return jsonOkRows(
       c,
@@ -508,34 +444,18 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       );
     }
 
-    const actor = body.actor ?? c.req.header("x-actor") ?? "anonymous";
     const stampOrigin = originFromBody(body as Record<string, unknown>);
 
-    recordOps.stampArtifacts(deps.db, {
-      type,
-      key,
-      revision: body.revision,
-      canonical_artifact_key: body.canonical_artifact_key,
-      source_artifact_key: body.source_artifact_key ?? null,
-    });
-
-    const resource = formatRecordResource(type, key);
-    artifactOps.upsertPointer(
+    recordOps.stampArtifacts(
       deps.db,
       {
-        r2_key: body.canonical_artifact_key,
-        resource,
-        kind: "record-snapshot-canonical",
-        sha256: body.sha256,
-        bytes: body.bytes ?? 0,
-        fence: null,
-        mime_type: "application/json",
-        produced_at: Date.now(),
-        produced_by: actor,
-        expires_at: null,
+        type,
+        key,
+        revision: body.revision,
+        canonical_artifact_key: body.canonical_artifact_key,
+        source_artifact_key: body.source_artifact_key ?? null,
       },
       stampOrigin,
-      "artifact.produced",
     );
 
     return c.json({ ok: true });

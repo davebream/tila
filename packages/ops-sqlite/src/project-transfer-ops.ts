@@ -29,6 +29,8 @@ export const PROJECT_BACKUP_TABLES = [
   "_conversation_state",
 
   "entities",
+  // Snapshot pointer guards require their record owner during restore.
+  "records",
   "artifact_pointers",
   "artifact_lineages",
   "artifact_revision_operations",
@@ -36,7 +38,6 @@ export const PROJECT_BACKUP_TABLES = [
   "artifact_lifecycle_operations",
   "artifact_retention_state",
   "artifact_reviews",
-  "records",
   "_schema_history",
   "claims",
   "fences",
