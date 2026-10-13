@@ -1,3 +1,4 @@
+import { DefinitionSections } from "@/components/definitions/definition-sections";
 import { DraftBar } from "@/components/definitions/draft-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,12 +13,7 @@ import { deriveSectionState } from "@/lib/query-state";
 import { formatDateTime, relativeTime } from "@/lib/time";
 import type { AppliedNotice } from "@/pages/settings-definitions-review";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import type {
-  CatalogField,
-  RecordCatalogEntry,
-  SchemaHistoryEntry,
-  WorkCatalogEntry,
-} from "@tila/schemas";
+import type { SchemaHistoryEntry } from "@tila/schemas";
 import { Link, useLocation } from "react-router";
 
 const HISTORY_PAGE = 20;
@@ -69,115 +65,6 @@ function FirstDefinitions({
         Tasks and records can still be written without definitions; they are
         just not validated.
       </p>
-    </div>
-  );
-}
-
-function fieldSummary(fields: CatalogField[]): string {
-  if (fields.length === 0) return "No fields";
-  return fields
-    .map((f) => `${f.name}: ${f.type}${f.required ? "" : "?"}`)
-    .join(", ");
-}
-
-function WorkTypes({ types }: { types: WorkCatalogEntry[] }) {
-  if (types.length === 0)
-    return <p className="py-3 text-sm text-muted-foreground">No work types.</p>;
-  return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-left text-sm" aria-label="Work types">
-        <thead className="bg-card text-xs text-muted-foreground">
-          <tr>
-            <th className={TH}>Type</th>
-            <th className={TH}>Fields</th>
-            <th className={TH}>Lifecycle</th>
-            <th className={`${TH} text-right`}>Tasks</th>
-          </tr>
-        </thead>
-        <tbody>
-          {types.map((type) => {
-            const lifecycle = type.definition?.lifecycle;
-            return (
-              <tr key={type.type} className="border-t border-border align-top">
-                <th scope="row" className="p-3 font-mono font-normal">
-                  {type.type}
-                  {type.declaration !== "declared" && (
-                    <Badge variant="gray" className="ml-2">
-                      {type.declaration === "undeclared"
-                        ? "not in schema"
-                        : "unknown"}
-                    </Badge>
-                  )}
-                </th>
-                <td className="p-3 font-mono text-xs text-muted-foreground">
-                  {type.definition ? fieldSummary(type.definition.fields) : "—"}
-                </td>
-                <td className="p-3 font-mono text-xs text-muted-foreground">
-                  {lifecycle
-                    ? `${lifecycle.field}: ${lifecycle.dispatchable.join(", ")} → ${lifecycle.terminal.join(", ")}`
-                    : "—"}
-                </td>
-                <td className="p-3 text-right font-mono">
-                  {type.count.toLocaleString("en-US")}
-                  {type.archived_count > 0 && (
-                    <span className="block text-[11px] text-muted-foreground">
-                      +{type.archived_count.toLocaleString("en-US")} archived
-                    </span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function RecordTypes({ entries }: { entries: RecordCatalogEntry[] }) {
-  if (entries.length === 0)
-    return (
-      <p className="py-3 text-sm text-muted-foreground">No record types.</p>
-    );
-  return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-left text-sm" aria-label="Record types">
-        <thead className="bg-card text-xs text-muted-foreground">
-          <tr>
-            <th className={TH}>Type</th>
-            <th className={TH}>Fields</th>
-            <th className={TH}>Format</th>
-            <th className={`${TH} text-right`}>Records</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry) => (
-            <tr key={entry.type} className="border-t border-border align-top">
-              <th scope="row" className="p-3 font-mono font-normal">
-                {entry.type}
-                {entry.declaration !== "declared" && (
-                  <Badge variant="gray" className="ml-2">
-                    {entry.declaration === "undeclared"
-                      ? "not in schema"
-                      : "unknown"}
-                  </Badge>
-                )}
-              </th>
-              <td className="p-3 font-mono text-xs text-muted-foreground">
-                {entry.definition ? fieldSummary(entry.definition.fields) : "—"}
-              </td>
-              <td className="p-3 font-mono text-xs text-muted-foreground">
-                {entry.definition
-                  ? `${entry.definition.format}, ${entry.definition.history} history`
-                  : "—"}
-              </td>
-              <td className="p-3 text-right font-mono">
-                {entry.count.toLocaleString("en-US")}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -393,39 +280,20 @@ export function SettingsDefinitionsPage() {
         )}
       </section>
 
-      <section aria-labelledby="work-types-heading" className="space-y-2">
-        <h2
-          id="work-types-heading"
-          className="font-logo text-lg tracking-tight"
-        >
-          Work types
-        </h2>
-        <QuerySection
-          state={deriveSectionState(work, { isEmpty: () => false })}
-          label="work types"
-          empty="No work types."
-          onRetry={() => work.refetch()}
-        >
-          {(data) => <WorkTypes types={data.types} />}
-        </QuerySection>
-      </section>
-
-      <section aria-labelledby="record-types-heading" className="space-y-2">
-        <h2
-          id="record-types-heading"
-          className="font-logo text-lg tracking-tight"
-        >
-          Record types
-        </h2>
-        <QuerySection
-          state={deriveSectionState(records, { isEmpty: () => false })}
-          label="record types"
-          empty="No record types."
-          onRetry={() => records.refetch()}
-        >
-          {(data) => <RecordTypes entries={data.entries ?? []} />}
-        </QuerySection>
-      </section>
+      <DefinitionSections
+        source={dirty ? value.source : (current?.source ?? "")}
+        baseSource={current?.source ?? ""}
+        editable={ready && canPreview}
+        onChange={(source) => edit(source)}
+        work={work.data?.types}
+        records={records.data?.entries}
+      />
+      {(work.isError || records.isError) && (
+        <FormNotice tone="warning">
+          Stored task or record counts could not be loaded; the definitions
+          above are complete.
+        </FormNotice>
+      )}
 
       <section aria-labelledby="history-heading" className="space-y-2">
         <h2 id="history-heading" className="font-logo text-lg tracking-tight">

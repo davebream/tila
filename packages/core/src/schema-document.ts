@@ -321,6 +321,11 @@ function canonical(value: unknown): string {
   return JSON.stringify(sort(value) ?? null);
 }
 
+/** Deep equality ignoring key order; dates compare by instant. */
+export function sameDefinitionValue(a: unknown, b: unknown): boolean {
+  return canonical(a) === canonical(b);
+}
+
 function rebaseUnits(...docs: DefinitionDocument[]): RebaseUnit[] {
   const units = new Map<string, RebaseUnit>();
   for (const doc of docs) {
