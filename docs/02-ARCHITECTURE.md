@@ -2662,8 +2662,13 @@ fetches, acknowledges, sweeps or wakes anything.
 
 Each trace keeps the facts separate: `stored`, `wake` (latest attempt outcome,
 attempt count, re-wakes, suppression), `fetched`, `acknowledged` and
-`work_result`. `work_result` is always `not-reported` until an explicit result API
-exists (#303/#304); acknowledgement never fills it. `state` is the effective
+`work_result`. `work_result` reads the explicit result of the attempt named by the
+message's `attempt_id` (#303); acknowledgement never fills it. It is
+`not-reported` when the message names no attempt, `pending` while the attempt is
+unfinished, `reported` with the outcome once it finished (and `corrected` when
+corrective work was linked), `unlinked` when the attempt is missing or belongs to
+a different task than the message names, and `hidden` when the caller cannot read
+the attempt's task. `state` is the effective
 state, so an unswept pending delivery past its TTL reads `expired` while room
 history keeps the message. `recipient.status` reports the targeted binding as
 `active`, `offline` (lease lapsed), `replaced`, `released`, `expired` or `none`.
@@ -2722,8 +2727,10 @@ APIs remain supported where implemented; this contract neither retires them nor
 pretends their unsupported conversation/runtime methods work.
 
 Conceptual relationships below are **not new database foreign keys**. Attempts,
-assignments and correlated decisions are required by #303/#304, not implemented
-by the optional `attempt_id` on a conversation message.
+assignments and correlated decisions live in the managed queue and question
+tables (#303/#304). A conversation message's optional `attempt_id` only lets a
+delivery trace read that attempt's explicit result; it never creates or
+completes work.
 
 ```text
 definition revision --validates--> task / record --references--> artifact revision
@@ -2913,7 +2920,7 @@ deployment, host profile, deleted blob or independently committed setting.
 | Access/credential/profile version | D1 membership/policy/credential state and host profile revisions have separate owners; saved values explain provenance, not current permission. |
 | Principal / durable agent | Authentication identity versus stable project mailbox/work identity. A principal can operate more than one agent subject to binding policy. |
 | Participant / runtime run | Participant identifies a concrete coordination session; D1 run identifies its short-lived runtime credential lifecycle. Neither is a work attempt. |
-| Work attempt / native session | Planned durable execution of an assignment (#303) versus a replaceable provider session on a host. One task can have multiple attempts; an attempt can survive session replacement. |
+| Work attempt / native session | Durable execution of an assignment (#303) versus a replaceable provider session on a host. One task can have multiple attempts; an attempt survives session replacement through `replace-session`. |
 | Binding epoch / fence | Agent-consumer generation rejects replaced occupants; resource fence rejects stale claimed writes. Neither substitutes for the other or for live membership. |
 | Release / protocol / database migration | Product build identity, negotiated wire capability and physical storage schema are independent of all the above (#307). |
 
@@ -3316,6 +3323,37 @@ Attempt lists accept `principal_id`, `participant_id` and `active` filters
 `work_attempts_owner` index. A restarted wrapper finds its unfinished work with
 these filters instead of paging through the project. `GET /health` advertises
 `attempt-session-replacement-v1`.
+
+### Corrections and result projections (#303)
+
+A terminal attempt's result is permanent. Application code never rewrites it,
+and migration 40 adds a trigger that rejects changes to `state`, `outcome` or
+`finished_at` on a terminal row. When a regression is found after an accepted
+result, the follow-up is linked instead:
+
+- `POST /attempts/:id/correct` with `{ idempotency_key, task_id, reason }`
+  appends an `attempt_corrections` row. The attempt must be terminal (any
+  outcome); the corrective task must exist and not be archived, and may be the
+  same task or a new one, queued or not.
+- The caller needs task write access to both tasks. A pair can be linked once;
+  replays return the same view. Links are append-only (a trigger rejects
+  updates) and `attempt.corrected` is journaled on the original attempt.
+- `GET /attempts/:id` lists `corrections` oldest first. The original outcome,
+  evidence and revisions are unchanged.
+
+Two read projections now show attempt evidence, read from attempt records and
+never inferred from runtime or delivery state:
+
+- The runtime view's `work_attempt` lists up to five unfinished attempts held by
+  the current binding's principal and participant, with the total. Callers
+  without `tasks:read` and `claims:read` get `{ "detail": "redacted" }`; rows
+  without unfinished attempts get `null`.
+- Delivery traces report `work_result` from the message's `attempt_id`, as
+  described in "Delivery tracing".
+
+Backups include `attempt_corrections` and declare `attempt-corrections-v1`.
+Restore checks that every correction references a finished attempt and an
+existing task. `GET /health` advertises `attempt-corrections-v1`.
 
 ### Managed queue public contract
 

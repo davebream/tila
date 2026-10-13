@@ -324,14 +324,15 @@ readable; unsupported feature versions fail closed. Restore validates question
 projections/correlation, retains decisions and discussion, and invalidates old
 execution applicability before releasing the transfer lock.
 
-### Work attempt history (#303, project migrations 38–39)
+### Work attempt history (#303, project migrations 38–40)
 
 | Migration | Change |
 |---|---|
 | 38 | `queue_entries.enrolled_by_principal` and `enrolled_by_participant` record the assigner. Both are nullable; existing enrollments stay `NULL` and are treated as having no recorded assigner. |
 | 39 | `work_attempts.revisions` holds JSON revision snapshots (`reserved`, `authorized`, `finished`); `NULL` for attempts recorded earlier. Index `work_attempts_owner(principal_id, participant_id, state)` serves owner-filtered recovery lists. |
+| 40 | `attempt_corrections(id, attempt_id, task_id, reason, principal_id, participant_id, created_at)`, unique per attempt and task, links corrective work to a terminal attempt. A trigger keeps it append-only; another rejects changes to `state`, `outcome` or `finished_at` on terminal `work_attempts` rows. Backups declare `attempt-corrections-v1`. |
 
-Migrations 38 and 39 are additive and shared by DO SQLite, Node and Bun embedded stores.
+Migrations 38–40 are additive and shared by DO SQLite, Node and Bun embedded stores.
 Transfer metadata and backups report the latest project migration instead of a
 hard-coded number. Backups made before these migrations restore with `NULL`
 assigners and revisions, and their semantic digest is computed without the new
