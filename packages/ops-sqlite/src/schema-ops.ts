@@ -7,11 +7,14 @@ import {
   parseTilaSchemaToml,
 } from "@tila/core";
 import {
+  type ArtifactPolicyImpact,
   SchemaApplyRequestSchema,
   type SchemaHistory,
+  type SchemaPreviewChange,
+  type TilaSchemaToml,
   canonicalJson,
 } from "@tila/schemas";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { type SQL, and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { withDoIdempotency } from "./do-idempotency-ops";
 import { refreshPresentedSearchTitles } from "./entity-search-text";
@@ -21,40 +24,16 @@ import * as schema from "./schema";
 export { SchemaParseException };
 
 /**
- * A schema change enriched with database impact counts.
- * Removal changes carry actual row counts from the database;
- * all other change kinds pass through unmodified.
+ * A schema change enriched with database impact counts (see
+ * `SchemaPreviewChangeSchema`). Removals carry the rows they affect, added
+ * fields with `default_for_legacy` carry the rows that will read the default
+ * lazily, and artifact policy edits carry their effect on stored artifacts.
  *
- * Note: `field-removed` entityCount uses `json_extract` to detect key presence.
- * `json_extract` returns SQL NULL for both "key absent" and "value is JSON null",
- * so impact counts may slightly undercount entities where the field value is
- * explicitly set to null.
+ * Note: field counts use `json_extract` to detect key presence. It returns SQL
+ * NULL for both "key absent" and "value is JSON null", so removal counts may
+ * slightly undercount rows whose value is explicitly null.
  */
-export type PreviewSchemaChange =
-  | Exclude<
-      SchemaChange,
-      | { kind: "work-unit-removed" }
-      | { kind: "field-removed" }
-      | { kind: "record-type-removed" }
-      | { kind: "record-field-removed" }
-    >
-  | { kind: "work-unit-removed"; unitType: string; entityCount: number }
-  | {
-      kind: "field-removed";
-      unitType: string;
-      fieldName: string;
-      entityCount: number;
-    }
-  | {
-      kind: "record-type-removed";
-      typeName: string;
-      recordCount: number;
-    }
-  | {
-      kind: "record-field-removed";
-      typeName: string;
-      fieldName: string;
-    };
+export type PreviewSchemaChange = SchemaPreviewChange;
 
 export type PreviewSchemaResult = {
   revision: number;
@@ -414,70 +393,9 @@ function previewSchemaInTransaction(
   const prevParsed = parseTilaSchemaToml(currentRow.definition);
   const diff = diffSchemas(prevParsed, nextParsed);
 
-  // Enrich each change with DB counts for removal operations
-  const enriched: PreviewSchemaChange[] = diff.changes.map((change) => {
-    switch (change.kind) {
-      case "work-unit-removed": {
-        const row = db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.entities)
-          .where(
-            and(
-              eq(schema.entities.type, change.unitType),
-              eq(schema.entities.archived, 0),
-            ),
-          )
-          .get();
-        return {
-          kind: "work-unit-removed",
-          unitType: change.unitType,
-          entityCount: row?.count ?? 0,
-        };
-      }
-
-      case "field-removed": {
-        const fieldPath = `$.${change.fieldName}`;
-        const row = db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.entities)
-          .where(
-            and(
-              eq(schema.entities.type, change.unitType),
-              sql`json_extract(${schema.entities.data}, ${fieldPath}) IS NOT NULL`,
-              eq(schema.entities.archived, 0),
-            ),
-          )
-          .get();
-        return {
-          kind: "field-removed",
-          unitType: change.unitType,
-          fieldName: change.fieldName,
-          entityCount: row?.count ?? 0,
-        };
-      }
-
-      case "record-type-removed": {
-        const row = db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.records)
-          .where(
-            and(
-              eq(schema.records.type, change.typeName),
-              eq(schema.records.archived, 0),
-            ),
-          )
-          .get();
-        return {
-          kind: "record-type-removed",
-          typeName: change.typeName,
-          recordCount: row?.count ?? 0,
-        };
-      }
-
-      default:
-        return change as PreviewSchemaChange;
-    }
-  });
+  const enriched = diff.changes.map((change) =>
+    enrichPreviewChange(db, change, prevParsed, nextParsed),
+  );
 
   return {
     revision: currentRow.version,
@@ -485,4 +403,197 @@ function previewSchemaInTransaction(
     changes: enriched,
     autoApplicable: diff.autoApplicable,
   };
+}
+
+type Db = BaseSQLiteDatabase<"sync", unknown, typeof schema>;
+
+function countEntities(db: Db, type: string, archived: 0 | 1, where?: SQL) {
+  return (
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.entities)
+      .where(
+        and(
+          eq(schema.entities.type, type),
+          eq(schema.entities.archived, archived),
+          where,
+        ),
+      )
+      .get()?.count ?? 0
+  );
+}
+
+function countRecords(db: Db, type: string, archived: 0 | 1, where?: SQL) {
+  return (
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.records)
+      .where(
+        and(
+          eq(schema.records.type, type),
+          eq(schema.records.archived, archived),
+          where,
+        ),
+      )
+      .get()?.count ?? 0
+  );
+}
+
+/** Rows whose JSON column has (or lacks) a non-null value at `field`. */
+function jsonKey(
+  column: typeof schema.entities.data | typeof schema.records.value_json,
+  field: string,
+  present: boolean,
+): SQL {
+  return present
+    ? sql`json_extract(${column}, ${`$.${field}`}) IS NOT NULL`
+    : sql`json_extract(${column}, ${`$.${field}`}) IS NULL`;
+}
+
+function liveArtifacts(db: Db, kind: string): number {
+  return (
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.artifactPointers)
+      .where(
+        and(
+          eq(schema.artifactPointers.kind, kind),
+          eq(schema.artifactPointers.tombstoned, 0),
+        ),
+      )
+      .get()?.count ?? 0
+  );
+}
+
+function artifactPolicyImpact(
+  db: Db,
+  kind: string,
+  before: NonNullable<TilaSchemaToml["artifacts"]>[string],
+  after: NonNullable<TilaSchemaToml["artifacts"]>[string],
+): ArtifactPolicyImpact {
+  const impact: ArtifactPolicyImpact = {
+    liveArtifacts: liveArtifacts(db, kind),
+    searchChanged:
+      before.searchable !== after.searchable ||
+      before.search_mode !== after.search_mode,
+  };
+  if (before.retention_days !== after.retention_days) {
+    const pending =
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.artifactRevisions)
+        .innerJoin(
+          schema.artifactLineages,
+          eq(schema.artifactLineages.id, schema.artifactRevisions.lineage_id),
+        )
+        .where(
+          and(
+            eq(schema.artifactLineages.kind, kind),
+            eq(schema.artifactRevisions.retention_assigned, 0),
+          ),
+        )
+        .get()?.count ?? 0;
+    const snapshot = db.select().from(schema.artifactRetentionState).get();
+    impact.retention = {
+      from: before.retention_days,
+      to: after.retention_days,
+      pendingBackfill: pending,
+      pendingBackfillUsesNewPolicy: !snapshot,
+    };
+  }
+  return impact;
+}
+
+function enrichPreviewChange(
+  db: Db,
+  change: SchemaChange,
+  previous: TilaSchemaToml,
+  next: TilaSchemaToml,
+): PreviewSchemaChange {
+  switch (change.kind) {
+    case "work-unit-removed":
+      return {
+        ...change,
+        entityCount: countEntities(db, change.unitType, 0),
+        archivedCount: countEntities(db, change.unitType, 1),
+      };
+    case "field-removed":
+      return {
+        ...change,
+        entityCount: countEntities(
+          db,
+          change.unitType,
+          0,
+          jsonKey(schema.entities.data, change.fieldName, true),
+        ),
+      };
+    case "field-added":
+      if (change.declaration.default_for_legacy === undefined) return change;
+      return {
+        ...change,
+        legacyDefaultCount: countEntities(
+          db,
+          change.unitType,
+          0,
+          jsonKey(schema.entities.data, change.fieldName, false),
+        ),
+      };
+    case "record-type-removed":
+      return {
+        ...change,
+        recordCount: countRecords(db, change.typeName, 0),
+        archivedCount: countRecords(db, change.typeName, 1),
+      };
+    case "record-field-removed":
+      return {
+        ...change,
+        recordCount: countRecords(
+          db,
+          change.typeName,
+          0,
+          jsonKey(schema.records.value_json, change.fieldName, true),
+        ),
+      };
+    case "record-field-added":
+      if (change.declaration.default_for_legacy === undefined) return change;
+      return {
+        ...change,
+        legacyDefaultCount: countRecords(
+          db,
+          change.typeName,
+          0,
+          jsonKey(schema.records.value_json, change.fieldName, false),
+        ),
+      };
+    case "artifact-kind-removed":
+      return {
+        ...change,
+        artifactCount: liveArtifacts(db, change.artifactKind),
+        lineageCount:
+          db
+            .select({ count: sql<number>`count(*)` })
+            .from(schema.artifactLineages)
+            .where(
+              and(
+                eq(schema.artifactLineages.kind, change.artifactKind),
+                isNull(schema.artifactLineages.destroyed_at),
+              ),
+            )
+            .get()?.count ?? 0,
+      };
+    case "definition-changed": {
+      const kind = change.path.startsWith("artifacts.")
+        ? change.path.slice("artifacts.".length)
+        : undefined;
+      const before = kind ? previous.artifacts?.[kind] : undefined;
+      const after = kind ? next.artifacts?.[kind] : undefined;
+      if (!kind || !before || !after) return change;
+      return {
+        ...change,
+        impact: artifactPolicyImpact(db, kind, before, after),
+      };
+    }
+    default:
+      return change;
+  }
 }

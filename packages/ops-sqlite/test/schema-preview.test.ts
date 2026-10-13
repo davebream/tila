@@ -390,3 +390,200 @@ type = "string"
     });
   });
 });
+
+describe("previewSchema impact for settings editors", () => {
+  const ARTIFACTS = (retention: number, extra = "") => `
+schema_version = 1
+
+[work_units.task]
+[work_units.task.fields.title]
+type = "string"
+required = true
+
+[artifacts.plan]
+mime_types = ["text/markdown"]
+retention_days = ${retention}
+${extra}
+[artifacts.patch]
+mime_types = ["text/x-patch"]
+retention_days = 7
+`;
+
+  function insertArtifact(key: string, kind: string, tombstoned = 0) {
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO artifact_pointers
+           (r2_key, kind, sha256, bytes, mime_type, produced_at, produced_by, tombstoned)
+         VALUES (?, ?, 'abc', 1, 'text/markdown', 0, 'test-actor', ?)`,
+      )
+      .run(`${kind}/${key}/abc.md`, kind, tombstoned);
+  }
+
+  function insertPendingRevision(key: string, lineage: string, kind: string) {
+    testDb.rawDb
+      .prepare(
+        "INSERT OR IGNORE INTO artifact_lineages (id, project_id, kind) VALUES (?, 'p', ?)",
+      )
+      .run(lineage, kind);
+    testDb.rawDb
+      .prepare(
+        "INSERT INTO artifact_revisions (r2_key, lineage_id, revision, metadata, retention_assigned) VALUES (?, ?, 1, '{}', 0)",
+      )
+      .run(key, lineage);
+  }
+
+  it("explains a shortened retention without rewriting existing expiry", () => {
+    applyInitialSchema(ARTIFACTS(30));
+    insertArtifact("a1", "plan");
+    insertArtifact("a2", "plan");
+    insertArtifact("a3", "plan", 1);
+    insertArtifact("p1", "patch");
+    insertPendingRevision("r1", "lin-1", "plan");
+
+    const result = previewSchema(testDb.db, ARTIFACTS(7));
+    const change = result.changes.find(
+      (c) => c.kind === "definition-changed" && c.path === "artifacts.plan",
+    );
+    expect(change).toMatchObject({
+      destructive: true,
+      impact: {
+        liveArtifacts: 2,
+        searchChanged: false,
+        retention: {
+          from: 30,
+          to: 7,
+          pendingBackfill: 1,
+          pendingBackfillUsesNewPolicy: true,
+        },
+      },
+    });
+    expect(result.autoApplicable).toBe(false);
+  });
+
+  it("reports that a policy snapshot already fixes pending retention", () => {
+    applyInitialSchema(ARTIFACTS(30));
+    testDb.rawDb
+      .prepare(
+        `INSERT INTO artifact_retention_state (id, policy, complete) VALUES (1, '{"plan":30}', 0)`,
+      )
+      .run();
+    const change = previewSchema(testDb.db, ARTIFACTS(7)).changes.find(
+      (c) => c.kind === "definition-changed",
+    );
+    expect(change).toMatchObject({
+      impact: { retention: { pendingBackfillUsesNewPolicy: false } },
+    });
+  });
+
+  it("flags search changes and omits retention when it is unchanged", () => {
+    applyInitialSchema(ARTIFACTS(30));
+    const change = previewSchema(
+      testDb.db,
+      ARTIFACTS(30, 'searchable = true\nsearch_mode = "full_text"\n'),
+    ).changes.find((c) => c.kind === "definition-changed");
+    expect(change).toMatchObject({ impact: { searchChanged: true } });
+    if (change?.kind === "definition-changed") {
+      expect(change.impact?.retention).toBeUndefined();
+    }
+  });
+
+  it("counts live artifacts and lineages for a removed kind", () => {
+    applyInitialSchema(ARTIFACTS(30));
+    insertArtifact("p1", "patch");
+    insertArtifact("p2", "patch", 1);
+    insertPendingRevision("r1", "lin-patch", "patch");
+    const without = ARTIFACTS(30).replace(/\[artifacts\.patch\][\s\S]*$/, "");
+    const change = previewSchema(testDb.db, without).changes.find(
+      (c) => c.kind === "artifact-kind-removed",
+    );
+    expect(change).toMatchObject({
+      artifactKind: "patch",
+      artifactCount: 1,
+      lineageCount: 1,
+    });
+  });
+
+  it("counts archived tasks of a removed type and lazy legacy defaults", () => {
+    applyInitialSchema(INITIAL_SCHEMA_TOML);
+    for (const id of ["bug-0", "bug-1"]) {
+      create(
+        testDb.db,
+        { id, type: "bug", data: { title: id }, created_by: "test-actor" },
+        1,
+        testOrigin("test-actor"),
+      );
+    }
+    testDb.rawDb
+      .prepare("UPDATE entities SET archived = 1 WHERE id = 'bug-0'")
+      .run();
+    create(
+      testDb.db,
+      {
+        id: "task-0",
+        type: "task",
+        data: { title: "t", status: "open" },
+        created_by: "test-actor",
+      },
+      1,
+      testOrigin("test-actor"),
+    );
+
+    const removed = previewSchema(testDb.db, SCHEMA_WITHOUT_BUG_TOML).changes;
+    expect(removed).toContainEqual(
+      expect.objectContaining({
+        kind: "work-unit-removed",
+        entityCount: 1,
+        archivedCount: 1,
+      }),
+    );
+
+    const withPriority = `${INITIAL_SCHEMA_TOML}
+[work_units.task.fields.priority]
+type = "string"
+required = true
+default_for_legacy = "normal"
+`;
+    const added = previewSchema(testDb.db, withPriority).changes;
+    expect(added).toContainEqual(
+      expect.objectContaining({
+        kind: "field-added",
+        fieldName: "priority",
+        legacyDefaultCount: 1,
+      }),
+    );
+  });
+
+  it("counts records that hold a removed record field", async () => {
+    applyInitialSchema(SCHEMA_WITH_RECORDS_TOML);
+    await createRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "a",
+        value: { env: "prod" },
+        schema_version: 1,
+        actor: "test-actor",
+      },
+      testOrigin("test-actor"),
+    );
+    await createRecord(
+      testDb.db,
+      {
+        type: "config",
+        key: "b",
+        value: {},
+        schema_version: 1,
+        actor: "test-actor",
+      },
+      testOrigin("test-actor"),
+    );
+    const without = SCHEMA_WITH_RECORDS_TOML.replace(
+      '[records.config.fields.env]\ntype = "string"\n',
+      "",
+    );
+    const change = previewSchema(testDb.db, without).changes.find(
+      (c) => c.kind === "record-field-removed",
+    );
+    expect(change).toMatchObject({ fieldName: "env", recordCount: 1 });
+  });
+});

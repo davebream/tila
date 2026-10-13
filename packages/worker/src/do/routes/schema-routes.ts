@@ -102,7 +102,9 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
       });
     } catch (e) {
       if (e instanceof schemaOps.SchemaParseException) {
-        return jsonError(c, 400, "schema-parse-error", e.message);
+        return jsonError(c, 400, "schema-parse-error", e.message, {
+          errors: e.errors,
+        });
       }
       throw e;
     }
@@ -141,7 +143,9 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
       return c.json({ ok: true, ...result });
     } catch (e) {
       if (e instanceof schemaOps.SchemaParseException) {
-        return jsonError(c, 400, "schema-parse-error", e.message);
+        return jsonError(c, 400, "schema-parse-error", e.message, {
+          errors: e.errors,
+        });
       }
       throw e;
     }

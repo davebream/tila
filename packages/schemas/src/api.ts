@@ -1406,11 +1406,131 @@ export const SchemaApplyRequestSchema = z
   );
 export type SchemaApplyRequest = z.infer<typeof SchemaApplyRequestSchema>;
 
+/** A definition problem with the dotted path or TOML position it concerns. */
+export const SchemaParseErrorSchema = z.object({
+  message: z.string(),
+  path: z.string().optional(),
+  line: z.number().int().optional(),
+  column: z.number().int().optional(),
+});
+export type SchemaParseErrorItem = z.infer<typeof SchemaParseErrorSchema>;
+
+const PreviewFieldDeclarationSchema = z.object({
+  type: z.string(),
+  required: z.boolean().optional(),
+  default: z.unknown().optional(),
+  default_for_legacy: z.unknown().optional(),
+  values: z.array(z.string()).optional(),
+});
+
+/**
+ * What changing an artifact kind's policy does to stored artifacts. Expiry
+ * already assigned to existing artifacts is never rewritten; only new writes,
+ * and legacy revisions still waiting for a retention snapshot, can pick up a
+ * new `retention_days`.
+ */
+export const ArtifactPolicyImpactSchema = z.object({
+  /** Live (not tombstoned) artifacts of this kind. Their expiry is unchanged. */
+  liveArtifacts: z.number().int().nonnegative(),
+  retention: z
+    .object({
+      from: z.number().int(),
+      to: z.number().int(),
+      /** Legacy revisions not yet given an expiry by the retention backfill. */
+      pendingBackfill: z.number().int().nonnegative(),
+      /**
+       * False once the backfill has snapshotted the policy: pending revisions
+       * then keep the snapshot, not this new value.
+       */
+      pendingBackfillUsesNewPolicy: z.boolean(),
+    })
+    .optional(),
+  /** Search settings changed; already indexed content is not reindexed. */
+  searchChanged: z.boolean(),
+});
+export type ArtifactPolicyImpact = z.infer<typeof ArtifactPolicyImpactSchema>;
+
+/** One semantic change in a definition preview, with database impact counts. */
+export const SchemaPreviewChangeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("work-unit-added"), unitType: z.string() }),
+  z.object({
+    kind: z.literal("work-unit-removed"),
+    unitType: z.string(),
+    /** Unarchived tasks of this type; they stay readable as legacy rows. */
+    entityCount: z.number().int(),
+    archivedCount: z.number().int().optional(),
+  }),
+  z.object({
+    kind: z.literal("field-added"),
+    unitType: z.string(),
+    fieldName: z.string(),
+    declaration: PreviewFieldDeclarationSchema,
+    /** Existing tasks without the field that will read `default_for_legacy`. */
+    legacyDefaultCount: z.number().int().optional(),
+  }),
+  z.object({
+    kind: z.literal("field-removed"),
+    unitType: z.string(),
+    fieldName: z.string(),
+    entityCount: z.number().int(),
+  }),
+  z.object({
+    kind: z.literal("field-required-added"),
+    unitType: z.string(),
+    fieldName: z.string(),
+    declaration: PreviewFieldDeclarationSchema,
+  }),
+  z.object({
+    kind: z.literal("artifact-kind-added"),
+    artifactKind: z.string(),
+  }),
+  z.object({
+    kind: z.literal("artifact-kind-removed"),
+    artifactKind: z.string(),
+    /** Live artifacts of this kind. Removing the kind deletes no blobs. */
+    artifactCount: z.number().int(),
+    lineageCount: z.number().int().optional(),
+  }),
+  z.object({ kind: z.literal("record-type-added"), typeName: z.string() }),
+  z.object({
+    kind: z.literal("record-type-removed"),
+    typeName: z.string(),
+    recordCount: z.number().int(),
+    archivedCount: z.number().int().optional(),
+  }),
+  z.object({
+    kind: z.literal("record-field-added"),
+    typeName: z.string(),
+    fieldName: z.string(),
+    declaration: PreviewFieldDeclarationSchema,
+    legacyDefaultCount: z.number().int().optional(),
+  }),
+  z.object({
+    kind: z.literal("record-field-removed"),
+    typeName: z.string(),
+    fieldName: z.string(),
+    recordCount: z.number().int().optional(),
+  }),
+  z.object({
+    kind: z.literal("record-field-required-added"),
+    typeName: z.string(),
+    fieldName: z.string(),
+    declaration: PreviewFieldDeclarationSchema,
+  }),
+  z.object({
+    kind: z.literal("definition-changed"),
+    path: z.string(),
+    destructive: z.boolean(),
+    impact: ArtifactPolicyImpactSchema.optional(),
+  }),
+]);
+export type SchemaPreviewChange = z.infer<typeof SchemaPreviewChangeSchema>;
+
 export const SchemaPreviewResponseSchema = z.object({
   ok: z.literal(true),
   revision: z.number().int().nonnegative(),
   reviewed_definition: z.string(),
-  changes: z.array(z.unknown()),
+  changes: z.array(SchemaPreviewChangeSchema),
   autoApplicable: z.boolean(),
 });
 export type SchemaPreviewResponse = z.infer<typeof SchemaPreviewResponseSchema>;
