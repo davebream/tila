@@ -21,7 +21,21 @@ function renderDefinitions() {
 
 const revision = (version: number) => ({
   version,
-  definition: `[work_units.bug]\n# revision ${version}\n`,
+  definition: `schema_version = 1
+# revision ${version}
+[work_units.bug]
+fields = [
+  { name = "title", type = "string", required = true },
+  { name = "status", type = "enum", values = ["open", "closed"] },
+]
+[work_units.bug.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["closed"]
+dependency_satisfied = ["closed"]
+
+[records.config]
+`,
   applied_at: Date.now() - version * 60_000,
   applied_by: `user-${version}`,
   change_summary: JSON.stringify([`Change ${version}`]),
@@ -90,7 +104,10 @@ describe("SettingsDefinitionsPage", () => {
       ),
     ).toBeInTheDocument();
     const work = await screen.findByRole("table", { name: "Work types" });
-    expect(within(work).getByText("title: string")).toBeInTheDocument();
+    expect(
+      within(work).getByText("title: string, status: enum?"),
+    ).toBeInTheDocument();
+    expect(within(work).getByText("3")).toBeInTheDocument();
     expect(within(work).getByText("status: open → closed")).toBeInTheDocument();
     expect(
       await screen.findByRole("table", { name: "Record types" }),

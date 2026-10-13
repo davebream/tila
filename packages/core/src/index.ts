@@ -107,6 +107,7 @@ export {
   rebaseDefinition,
   removeDeclaration,
   removeField,
+  sameDefinitionValue,
   serializeDefinitionDocument,
   setIn,
   writeFields,
