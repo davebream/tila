@@ -23,7 +23,12 @@ import {
 import { type Rights, rights } from "@/lib/rights";
 import { formatDateTime, relativeTime } from "@/lib/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Question, WhoamiResponse } from "@tila/schemas";
+import type {
+  Question,
+  QuestionCancelCommand,
+  QuestionEscalateCommand,
+  WhoamiResponse,
+} from "@tila/schemas";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { Link } from "react-router";
 import { z } from "zod";
@@ -249,13 +254,17 @@ function UnsentAnswer({
   );
 }
 
-/** One idempotency key per distinct input; resubmitting the same input reuses it. */
-function useStableKey() {
-  const ref = useRef<{ body: string; key: string } | null>(null);
-  return (body: string) => {
+/**
+ * One frozen command per distinct input. Resubmitting the same input resends
+ * exactly the first command (key and correlation), even if the question was
+ * refetched since, so the server's receipt answers a lost response.
+ */
+function useFrozenCommand<C>() {
+  const ref = useRef<{ body: string; command: C } | null>(null);
+  return (body: string, build: (key: string) => C): C => {
     if (ref.current?.body !== body)
-      ref.current = { body, key: crypto.randomUUID() };
-    return ref.current.key;
+      ref.current = { body, command: build(crypto.randomUUID()) };
+    return ref.current.command;
   };
 }
 
@@ -277,17 +286,17 @@ function EscalateForm({
   const [target, setTarget] = useState("");
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const keyFor = useStableKey();
+  const freeze = useFrozenCommand<QuestionEscalateCommand>();
   const send = useMutation({
     mutationFn: (input: { target: string; reason: string }) =>
       questionAction(project, question.id, {
         action: "escalate",
-        command: {
+        command: freeze(JSON.stringify(input), (key) => ({
           ...correlation(question),
-          idempotency_key: keyFor(JSON.stringify(input)),
+          idempotency_key: key,
           responder_principal_id: input.target,
           reason: input.reason,
-        },
+        })),
       }),
     onSettled: () =>
       client.invalidateQueries({ queryKey: ["questions", project] }),
@@ -388,16 +397,16 @@ function CancelQuestion({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [missing, setMissing] = useState(false);
-  const keyFor = useStableKey();
+  const freeze = useFrozenCommand<QuestionCancelCommand>();
   const send = useMutation({
     mutationFn: (text: string) =>
       questionAction(project, question.id, {
         action: "cancel",
-        command: {
+        command: freeze(text, (key) => ({
           ...correlation(question),
-          idempotency_key: keyFor(text),
+          idempotency_key: key,
           reason: text,
-        },
+        })),
       }),
     onSettled: () =>
       client.invalidateQueries({ queryKey: ["questions", project] }),
