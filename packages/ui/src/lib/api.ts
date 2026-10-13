@@ -1,5 +1,10 @@
 import type {
+  Agent,
+  AgentArchivePreview,
+  AgentArchiveResult,
   AgentListResponseSchema,
+  AgentRegistration,
+  ArchiveAgent,
   AttemptCorrectCommand,
   AttemptRequest,
   AttemptView,
@@ -24,6 +29,7 @@ import type {
   RoomResponseSchema,
   RuntimeViewResponseSchema,
   ThreadSchema,
+  UpdateAgent,
   WorkAttempt,
 } from "@tila/schemas";
 import type {
@@ -998,6 +1004,7 @@ export type RoomHistory = (typeof RoomHistoryResponseSchema)["_output"];
 export type DeliveryInspection =
   (typeof DeliveryExplainResponseSchema)["_output"];
 export type AgentList = (typeof AgentListResponseSchema)["_output"];
+export type AgentView = AgentList["agents"][number];
 export function listRooms(
   projectId: string,
 ): Promise<(typeof RoomListResponseSchema)["_output"]> {
@@ -1043,8 +1050,14 @@ export function publishReply(
     body,
   );
 }
-export function listAgents(projectId: string): Promise<AgentList> {
-  return request(projectId, "/agents");
+/** `includeArchived` is honored for agent managers only. */
+export function listAgents(
+  projectId: string,
+  options: { includeArchived?: boolean } = {},
+): Promise<AgentList> {
+  return request(projectId, "/agents", {
+    include_archived: options.includeArchived ? "true" : undefined,
+  });
 }
 /** Aggregate counts for readers; per-recipient traces for managers. */
 export function messageDeliveries(
@@ -1382,4 +1395,70 @@ export async function questionAction(
       { idempotencyKey: input.command.idempotency_key },
     )
   ).result;
+}
+
+// --- Identity settings (#298) ---
+// Agents carry a settings revision. Every write here sends the revision it was
+// reviewed against (a stale one answers 412 `revision-conflict` with the
+// current revision) and an Idempotency-Key: a retry of the same request with
+// the same key replays the original answer.
+
+const agentPath = (projectId: string, id: string, rest = "") =>
+  projectPath(projectId, `/agents/${encodeURIComponent(id)}${rest}`);
+export function registerAgent(
+  projectId: string,
+  body: AgentRegistration,
+  idempotencyKey: string,
+): Promise<{ ok: true; agent: Agent }> {
+  return mutate("POST", projectPath(projectId, "/agents"), body, {
+    idempotencyKey,
+  });
+}
+
+/** Configured identity and policy only; never touches the active binding. */
+export function updateAgent(
+  projectId: string,
+  id: string,
+  body: UpdateAgent,
+  idempotencyKey: string,
+): Promise<{ ok: true; agent: Agent }> {
+  return mutate("PATCH", agentPath(projectId, id), body, { idempotencyKey });
+}
+
+export async function agentArchivePreview(
+  projectId: string,
+  id: string,
+): Promise<AgentArchivePreview> {
+  return (
+    await request<{ ok: true; preview: AgentArchivePreview }>(
+      projectId,
+      `/agents/${encodeURIComponent(id)}/archive-preview`,
+    )
+  ).preview;
+}
+
+/** With an active binding, `expected_epoch` must name the reviewed occupant. */
+export function archiveAgent(
+  projectId: string,
+  id: string,
+  body: ArchiveAgent,
+  idempotencyKey: string,
+): Promise<{ ok: true } & AgentArchiveResult> {
+  return mutate("POST", agentPath(projectId, id, "/archive"), body, {
+    idempotencyKey,
+  });
+}
+
+export function unarchiveAgent(
+  projectId: string,
+  id: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<{ ok: true; agent: Agent }> {
+  return mutate(
+    "POST",
+    agentPath(projectId, id, "/unarchive"),
+    { expected_revision: expectedRevision },
+    { idempotencyKey },
+  );
 }

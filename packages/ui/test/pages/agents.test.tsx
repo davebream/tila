@@ -174,3 +174,31 @@ test("links each agent to its deliveries instead of asking for a delivery UUID",
   ).toHaveAttribute("href", "/p/test-project/deliveries");
   expect(screen.queryByLabelText("Delivery ID")).toBeNull();
 });
+
+test("points managers, and only managers, to Settings › Agents", async () => {
+  server.use(agentsHandler(null));
+  const { unmount } = renderAgents();
+  expect(
+    await screen.findByRole("link", {
+      name: "Manage agents in Settings › Agents",
+    }),
+  ).toHaveAttribute("href", "/p/test-project/settings/agents");
+  unmount();
+
+  server.use(
+    http.get("*/api/whoami", () =>
+      HttpResponse.json({
+        ok: true,
+        project_id: "test-project",
+        token_name: "viewer",
+        scopes: "read",
+        role: "viewer",
+      }),
+    ),
+  );
+  renderAgents();
+  expect(await screen.findByText("Reviewer")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: /Settings › Agents/ }),
+  ).not.toBeInTheDocument();
+});

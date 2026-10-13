@@ -191,6 +191,14 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         surface: "schema",
         keywords: ["schema", "types", "fields", "lifecycle"],
       },
+      {
+        id: "agent-settings",
+        label: "Agents",
+        segment: "settings/agents",
+        requires: ["agents:read"],
+        surface: "agents",
+        keywords: ["register agent", "binding grants", "profile", "archive"],
+      },
     ],
   },
 ];

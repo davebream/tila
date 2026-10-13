@@ -30,6 +30,7 @@ import { RecordsPage } from "@/pages/records";
 import { RoomsPage } from "@/pages/rooms";
 import { RuntimePage } from "@/pages/runtime";
 import { SettingsPage } from "@/pages/settings";
+import { SettingsAgentsPage } from "@/pages/settings-agents";
 import { SettingsDefinitionsPage } from "@/pages/settings-definitions";
 import { SettingsDefinitionsReviewPage } from "@/pages/settings-definitions-review";
 import { SettingsDefinitionsRevisionPage } from "@/pages/settings-definitions-revision";
@@ -177,6 +178,7 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
         path="settings/definitions/history/:version"
         element={<SettingsDefinitionsRevisionPage />}
       />
+      <Route path="settings/agents" element={<SettingsAgentsPage />} />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />
       </Route>

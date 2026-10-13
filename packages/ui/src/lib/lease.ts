@@ -20,6 +20,14 @@ export type BindingView =
       redacted: boolean;
     };
 
+export const BINDING_LABEL: Record<BindingView["kind"], string> = {
+  none: "No binding",
+  attached: "Attached",
+  expired: "Expired",
+  replaced: "Replaced",
+  released: "Released",
+};
+
 export function deriveBindingView(
   binding: AgentBinding,
   nowMs: number,

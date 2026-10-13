@@ -32,6 +32,11 @@ const CONFLICT_CODES = new Set([
   "claim-held",
   "claim-not-held",
   "already-held",
+  // Settings writes (#298): a stale revision, an agent archived meanwhile, or
+  // an archive whose reviewed binding occupant changed.
+  "revision-conflict",
+  "agent-archived",
+  "stale-binding",
   // The key was used with a different body: the subject changed between
   // sends, so the outcome must be re-read rather than reported as invalid.
   "idempotency-key-conflict",
@@ -56,6 +61,20 @@ export function failureKind(error: unknown): FailureKind {
 
 export function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The request failed.";
+}
+
+/**
+ * A `revision-conflict` answer: the write named a revision that is no longer
+ * current. `revision` is the current one, or null when the resource no longer
+ * exists. Null for any other failure.
+ */
+export function revisionConflict(
+  error: unknown,
+): { revision: number | null } | null {
+  if (!(error instanceof ApiError) || error.code !== "revision-conflict")
+    return null;
+  const revision = error.body?.revision;
+  return { revision: typeof revision === "number" ? revision : null };
 }
 
 /** A definition problem the server or the client parser reported. */
