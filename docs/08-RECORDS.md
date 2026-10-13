@@ -1218,8 +1218,11 @@ Worker canonicalizes the submitted JSON value and writes the canonical artifact
 before forwarding the mutation to the DO.
 
 If `source_artifact_key` is provided, validate that the record type uses
-`history = "snapshot"` and that the artifact pointer exists with system kind
-`record-snapshot-source` for resource `record:<type>/<key>`.
+`history = "snapshot"` and that an available snapshot artifact exists for resource
+`record:<type>/<key>`. Source uploads use the system kind `record-snapshot-source`.
+When source bytes exactly match canonical JSON, both share one content-addressed
+key; an existing `record-snapshot-canonical` pointer is also accepted for that
+same record resource.
 
 ### Patch Request
 
