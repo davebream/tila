@@ -141,6 +141,7 @@ const readOnly = new Set([
   "schema show",
   "schema status",
   "schema diff",
+  "schema export",
   "template list",
   "template show",
   "template diff",
@@ -300,7 +301,9 @@ export async function describeCommands(
       mutating: isMutating(path),
       output_kind: isProtocol(path)
         ? "protocol"
-        : path === "artifact get" || path === "auth token"
+        : path === "artifact get" ||
+            path === "auth token" ||
+            path === "schema export"
           ? "raw-or-data"
           : "data",
       args: Object.entries(args).map(([name, value]) => ({

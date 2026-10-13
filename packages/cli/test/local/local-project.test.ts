@@ -472,6 +472,26 @@ type = "string"
       const result = await project.applySchema({ definition });
       expect(result.noChange).toBe(true);
     });
+
+    it("previewSchema reports changes against the applied revision", async () => {
+      const definition = `
+schema_version = 1
+
+[work_units.task.fields.status]
+type = "string"
+`;
+      await project.applySchema({ definition });
+      const preview = await project.previewSchema(
+        `${definition}\n[work_units.bug.fields.title]\ntype = "string"\n`,
+      );
+      expect(preview.revision).toBe(1);
+      expect(preview.changes).toContainEqual(
+        expect.objectContaining({ kind: "work-unit-added", unitType: "bug" }),
+      );
+      expect((await project.getCurrentSchema()).applied_at).toEqual(
+        expect.any(Number),
+      );
+    });
   });
 
   // --- SummaryBackend ---

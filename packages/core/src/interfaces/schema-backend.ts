@@ -1,9 +1,13 @@
 // packages/core/src/interfaces/schema-backend.ts
 
+import type { SchemaPreviewChange } from "@tila/schemas";
+
 export interface SchemaRecord {
   version: number | null;
   revision?: number;
   definition: string | null;
+  /** Epoch milliseconds the current revision was applied, when known. */
+  applied_at?: number | null;
 }
 
 export interface ApplySchemaInput {
@@ -26,7 +30,17 @@ export interface ApplySchemaOutput {
   hint?: string;
 }
 
+/** Server preview of a definition against the data and revision applied now. */
+export interface SchemaPreviewResult {
+  /** Revision the preview evaluated; send it as `expected_revision`. */
+  revision: number;
+  reviewed_definition: string;
+  changes: SchemaPreviewChange[];
+  autoApplicable: boolean;
+}
+
 export interface SchemaBackend {
   getCurrentSchema(): Promise<SchemaRecord>;
+  previewSchema(definition: string): Promise<SchemaPreviewResult>;
   applySchema(input: ApplySchemaInput): Promise<ApplySchemaOutput>;
 }

@@ -304,6 +304,48 @@ describe("RemoteBackend", () => {
     });
   });
 
+  describe("SchemaBackend", () => {
+    it("getCurrentSchema() returns the stored TOML, revision and applied time", async () => {
+      client.get.mockResolvedValue({
+        ok: true,
+        schema: {
+          version: 3,
+          definition: "schema_version = 1\n",
+          applied_at: 1234,
+          applied_by: "cli",
+        },
+        version: 3,
+        revision: 3,
+      });
+      const backend = await createBackend(client);
+      expect(await backend.getCurrentSchema()).toEqual({
+        version: 3,
+        revision: 3,
+        definition: "schema_version = 1\n",
+        applied_at: 1234,
+      });
+    });
+
+    it("previewSchema() posts the definition and drops the envelope flag", async () => {
+      const preview = {
+        revision: 2,
+        reviewed_definition: "schema_version = 1\n",
+        changes: [{ kind: "work-unit-added", unitType: "bug" }],
+        autoApplicable: true,
+      };
+      client.post.mockResolvedValue({ ok: true, ...preview });
+      const backend = await createBackend(client);
+      expect(await backend.previewSchema("schema_version = 1\n")).toEqual(
+        preview,
+      );
+      expect(client.post).toHaveBeenCalledWith(
+        "/projects/proj-test/schema/preview",
+        { definition: "schema_version = 1\n" },
+        expect.objectContaining({ validate: true }),
+      );
+    });
+  });
+
   describe("CoordinationBackend", () => {
     it("acquire() maps response to AcquireResult", async () => {
       client.post.mockResolvedValue({

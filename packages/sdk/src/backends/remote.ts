@@ -35,6 +35,7 @@ import type {
   RelationshipInput,
   RenewResult,
   SchemaBackend,
+  SchemaPreviewResult,
   SchemaRecord,
   SendSignalInput,
   SetRecordInput,
@@ -45,6 +46,7 @@ import type {
 import {
   ArtifactRevisionSchema,
   type JournalAppendRequest,
+  SchemaPreviewResponseSchema,
 } from "@tila/schemas";
 import type {
   ArtifactReviewRequest,
@@ -159,6 +161,7 @@ const SchemaShowResponseSchema = z.object({
   ok: z.literal(true),
   schema: z.record(z.string(), z.unknown()).nullable(),
   version: z.number().int().nullable(),
+  revision: z.number().int().nonnegative().optional(),
 });
 
 const SchemaApplyLenientSchema = z.object({
@@ -834,13 +837,26 @@ export class RemoteBackend
     });
     return {
       version: result.version,
-      revision: result.version ?? 0,
+      revision: result.revision ?? result.version ?? 0,
       definition: result.schema
         ? typeof result.schema.definition === "string"
           ? result.schema.definition
           : JSON.stringify(result.schema)
         : null,
+      applied_at:
+        typeof result.schema?.applied_at === "number"
+          ? result.schema.applied_at
+          : null,
     };
+  }
+
+  async previewSchema(definition: string): Promise<SchemaPreviewResult> {
+    const { ok: _ok, ...preview } = await this.client.post(
+      `/projects/${this.projectId}/schema/preview`,
+      { definition },
+      { schema: SchemaPreviewResponseSchema, validate: true },
+    );
+    return preview;
   }
 
   async applySchema(input: ApplySchemaInput): Promise<ApplySchemaOutput> {
