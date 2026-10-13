@@ -227,6 +227,25 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         keywords: ["service accounts", "workload bindings", "ci"],
       },
       {
+        id: "credentials",
+        label: "Credentials",
+        segment: "settings/credentials",
+        requires: ["tokens:read"],
+        surface: "tokens",
+        flags: ["credentials_read", "credentials_manage", "credentials_issue"],
+        keywords: ["tokens", "api keys", "issue", "rotate"],
+      },
+      {
+        id: "runtime-access",
+        label: "Runtime access",
+        segment: "settings/runtime-access",
+        requires: [],
+        surface: "runtime",
+        // Viewers cannot sponsor installations; owners also see invitations.
+        minRole: "participant",
+        keywords: ["installations", "machines", "enrollments", "invitations"],
+      },
+      {
         id: "definitions",
         label: "Definitions",
         segment: "settings/definitions",

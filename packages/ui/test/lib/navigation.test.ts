@@ -48,6 +48,8 @@ describe("matchNav", () => {
     ["/p/acme/settings/general", "settings", "general"],
     ["/p/acme/settings/repositories", "settings", "repositories"],
     ["/p/acme/settings/service-identities", "settings", "service-identities"],
+    ["/p/acme/settings/credentials", "settings", "credentials"],
+    ["/p/acme/settings/runtime-access", "settings", "runtime-access"],
     ["/p/acme/settings/rooms", "settings", "room-settings"],
     ["/p/acme/settings/signal-groups", "settings", "signal-group-settings"],
     ["/p/acme/overview", "overview", "overview"],
@@ -182,6 +184,24 @@ describe("session flags", () => {
       ),
     );
     expect(bindings).toContain("service-identities");
+  });
+
+  test("credentials follow their read or issue flag; runtime access needs a participant", () => {
+    const flags = session({ credentials_issue: true });
+    expect(ids(navVisibility(owner, "test-project", flags))).toContain(
+      "credentials",
+    );
+    expect(
+      ids(navVisibility(owner, "test-project", session({}))),
+    ).not.toContain("credentials");
+    const viewer = { ...owner, role: "viewer" as const };
+    expect(
+      ids(navVisibility(viewer, "test-project", session({}))),
+    ).not.toContain("runtime-access");
+    const participant = { ...owner, role: "participant" as const };
+    expect(
+      ids(navVisibility(participant, "test-project", session({}))),
+    ).toContain("runtime-access");
   });
 
   test("unknown session flags keep flagged items visible rather than guessing", () => {

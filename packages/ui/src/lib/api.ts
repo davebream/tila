@@ -54,7 +54,10 @@ import type {
   RepoAccessPolicy,
   RepoLink,
   RepoOidcPolicy,
+  RuntimeEnrollment,
+  RuntimeInvitation,
   SessionCapabilities,
+  TokenIssueRequest,
   TokenListItem,
   UpdateProjectSettings,
   WhoamiResponse,
@@ -257,7 +260,9 @@ async function request<T>(
   }
   const conversation = /^\/(rooms|inbox|deliveries)(\/|$)/.test(path);
   const runtime =
-    /^\/(agents|runtime-view|queue|attempts|questions)(\/|$)/.test(path);
+    /^\/(agents|runtime-view|runtime|queue|attempts|questions)(\/|$)/.test(
+      path,
+    );
   let response: Response;
   try {
     response = await fetch(url.toString(), {
@@ -1771,6 +1776,100 @@ export function revokeWorkloadBinding(
       projectId,
       principalId,
       `/workload-bindings/${encodeURIComponent(bindingId)}`,
+    ),
+  );
+}
+
+/**
+ * A newly issued or rotated credential. `token` is the secret: it is returned
+ * once and must never be stored (no draft, session storage or query cache).
+ */
+export type IssuedCredential = {
+  token: string;
+  credential_id: string;
+  token_id: string;
+  principal_id: string;
+  name: string;
+  created_at: number;
+  expires_at: number | null;
+  policy?: CredentialPolicy;
+};
+
+/** Not idempotent: a lost answer cannot be replayed, only checked in the list. */
+export function issueCredential(
+  body: TokenIssueRequest,
+): Promise<{ ok: true } & IssuedCredential> {
+  return mutate("POST", "/api/tokens", body);
+}
+
+/** Compare-and-swap on the listed version; the old secret retires after the overlap. */
+export function rotateCredential(
+  name: string,
+  body: { expected_token_id: string; overlap_seconds: number },
+): Promise<{ ok: true } & IssuedCredential> {
+  return mutate("POST", `/api/tokens/${encodeURIComponent(name)}/rotate`, body);
+}
+
+/** Owners see every installation; other members those they sponsor. */
+export async function listRuntimeEnrollments(
+  projectId: string,
+): Promise<RuntimeEnrollment[]> {
+  return (
+    await request<{ ok: true; enrollments: RuntimeEnrollment[] }>(
+      projectId,
+      "/runtime/enrollments",
+    )
+  ).enrollments;
+}
+
+/** Ends the installation's credentials and its agent bindings. */
+export function revokeRuntimeEnrollment(
+  projectId: string,
+  enrollmentId: string,
+): Promise<{ ok: true }> {
+  return mutate(
+    "POST",
+    projectPath(
+      projectId,
+      `/runtime/enrollments/${encodeURIComponent(enrollmentId)}/revoke`,
+    ),
+  );
+}
+
+export async function listRuntimeInvitations(
+  projectId: string,
+): Promise<RuntimeInvitation[]> {
+  return (
+    await request<{ ok: true; invitations: RuntimeInvitation[] }>(
+      projectId,
+      "/runtime/invitations",
+    )
+  ).invitations;
+}
+
+/** `invitation` is the bearer secret, shown once. */
+export function createRuntimeInvitation(
+  projectId: string,
+  body: { name: string; policy?: CredentialPolicy },
+): Promise<{
+  ok: true;
+  invitation: string;
+  expires_at: number;
+  invitation_id?: string;
+}> {
+  return mutate("POST", projectPath(projectId, "/runtime/invitations"), body);
+}
+
+/** Stops later redemption; installations already enrolled stay. */
+export function revokeRuntimeInvitation(
+  projectId: string,
+  invitationId: string,
+): Promise<{ ok: true; revoked: boolean }> {
+  return mutate(
+    "POST",
+    projectPath(
+      projectId,
+      `/runtime/invitations/${encodeURIComponent(invitationId)}/revoke`,
     ),
   );
 }

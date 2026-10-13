@@ -1,4 +1,3 @@
-import { CredentialsTable } from "@/components/admin/credentials-table";
 import { GrantMemberForm } from "@/components/admin/grant-member-form";
 import { MembersTable } from "@/components/admin/members-table";
 import { MembershipEvents } from "@/components/admin/membership-events";
@@ -18,10 +17,8 @@ import {
   useMembershipRepos,
   useMemberships,
   useRevokeMembership,
-  useRevokeToken,
   useServiceAccounts,
   useSetMembershipPolicy,
-  useTokens,
   useUpdateMembershipRole,
   useWhoami,
 } from "@/hooks/use-admin";
@@ -33,6 +30,7 @@ import type {
   ProjectRole,
 } from "@tila/schemas";
 import { useId, useState } from "react";
+import { Link } from "react-router";
 
 const MODES: ProjectMembershipMode[] = [
   "explicit",
@@ -84,7 +82,7 @@ export function SettingsPage() {
     projectId,
     capabilities,
     canManageMemberships,
-    canManageCredentials,
+    canReadCredentials,
     membershipAvailable,
   } = useAdminCapabilities();
   const [stepUp, setStepUp] = useState(false);
@@ -146,20 +144,17 @@ export function SettingsPage() {
           </p>
         </section>
       )}
-      {canManageCredentials ? (
-        <CredentialsSection track={trackStepUp} />
-      ) : (
-        <section aria-labelledby="credentials-heading" className="space-y-2">
-          <h2
-            id="credentials-heading"
-            className="font-logo text-lg tracking-tight"
+      {canReadCredentials && (
+        <p className="text-sm text-muted-foreground">
+          API credentials are managed in{" "}
+          <Link
+            className="text-signal-blue underline"
+            to={`/p/${projectId}/settings/credentials`}
           >
-            Credentials
-          </h2>
-          <p className="py-6 text-center text-muted-foreground">
-            You can view this project but cannot manage its credentials.
-          </p>
-        </section>
+            Settings › Credentials
+          </Link>
+          .
+        </p>
       )}
     </div>
   );
@@ -375,49 +370,6 @@ function MembersSection({
         error={modeError}
         onConfirm={() => pendingMode && applyMode(pendingMode)}
       />
-    </section>
-  );
-}
-
-function CredentialsSection({ track }: { track: Track }) {
-  const tokens = useTokens();
-  const serviceAccounts = useServiceAccounts();
-  const revoke = useRevokeToken();
-  const list = tokens.data?.tokens ?? [];
-  const tokensState = deriveSectionState(tokens);
-
-  return (
-    <section aria-labelledby="credentials-heading" className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h2
-          id="credentials-heading"
-          className="font-logo text-lg tracking-tight"
-        >
-          Credentials
-        </h2>
-        {list.length > 0 && (
-          <span className="tila-num rounded-full border border-border bg-card px-[7px] py-px font-mono text-[11px] text-fg-faint">
-            {list.length}
-          </span>
-        )}
-        <LastRefreshed dataUpdatedAt={tokens.dataUpdatedAt} />
-      </div>
-      <SectionStatus
-        state={tokensState}
-        label="credentials"
-        onRetry={() => void tokens.refetch()}
-      />
-      {tokensState.phase !== "failed" && (
-        <CredentialsTable
-          tokens={list}
-          serviceAccounts={serviceAccounts.data?.service_accounts ?? []}
-          isLoading={tokens.isLoading}
-          pendingName={revoke.isPending ? (revoke.variables ?? null) : null}
-          onRevoke={(name) =>
-            track(revoke.mutateAsync(name)).then(() => undefined)
-          }
-        />
-      )}
     </section>
   );
 }

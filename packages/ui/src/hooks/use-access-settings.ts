@@ -3,6 +3,8 @@ import { useAuth } from "@/hooks/use-auth";
 import {
   getProjectSettings,
   listRepoLinks,
+  listRuntimeEnrollments,
+  listRuntimeInvitations,
   listServiceAccounts,
   listWorkloadBindings,
 } from "@/lib/api";
@@ -50,6 +52,26 @@ export function useWorkloadBindings(principalId: string, enabled: boolean) {
   });
 }
 
+/** Owners see every installation; other members only those they sponsor. */
+export function useRuntimeEnrollments() {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["runtime-enrollments", projectId],
+    queryFn: () => listRuntimeEnrollments(projectId as string),
+    enabled: Boolean(projectId),
+  });
+}
+
+/** Owner-only; listed invitations never include their secret. */
+export function useRuntimeInvitations(enabled: boolean) {
+  const { projectId } = useAuth();
+  return useQuery({
+    queryKey: ["runtime-invitations", projectId],
+    queryFn: () => listRuntimeInvitations(projectId as string),
+    enabled: Boolean(projectId) && enabled,
+  });
+}
+
 /** Re-read what an access write may have changed, by key prefix. */
 export function useInvalidateAccess() {
   const client = useQueryClient();
@@ -65,6 +87,13 @@ export function useInvalidateAccess() {
     repos: () => invalidate("repo-links", "membership-repos"),
     services: () =>
       invalidate("service-accounts", "workload-bindings", "memberships"),
+    runtime: () =>
+      invalidate(
+        "runtime-enrollments",
+        "runtime-invitations",
+        "runtime-view",
+        "agents",
+      ),
     access: () => invalidate("whoami"),
   };
 }
