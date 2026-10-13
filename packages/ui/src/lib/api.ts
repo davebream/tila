@@ -1371,6 +1371,7 @@ export async function listQuestions(
     responder_principal_id?: string;
     requester_principal_id?: string;
     state?: Question["state"];
+    escalated?: boolean;
     after_id?: string;
     limit?: number;
   },
@@ -1378,6 +1379,8 @@ export async function listQuestions(
   return (
     await request<{ result: QuestionListResult }>(projectId, "/questions", {
       ...query,
+      escalated:
+        query.escalated === undefined ? undefined : String(query.escalated),
       limit: query.limit === undefined ? undefined : String(query.limit),
     })
   ).result;

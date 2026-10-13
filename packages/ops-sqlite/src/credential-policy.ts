@@ -7,7 +7,11 @@ import {
   permitsTask,
 } from "@tila/schemas";
 import { type SQL, and, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { type BaseSQLiteDatabase, alias } from "drizzle-orm/sqlite-core";
+import {
+  type AnySQLiteColumn,
+  type BaseSQLiteDatabase,
+  alias,
+} from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
 
 type DB = BaseSQLiteDatabase<"sync", unknown, typeof schema>;
@@ -81,6 +85,26 @@ export function assertTaskAccess(
   if (!entity || !permitsTask(policy.restrictions, entity.type))
     throw new CredentialPolicyDenied();
   return entity;
+}
+/**
+ * The SQL form of `assertTaskAccess` for a column holding task ids: the task's
+ * own type must be permitted. Task rows are never deleted and task id columns
+ * reference them, so existence needs no check of its own.
+ */
+export function taskIdAccessCondition(
+  db: DB,
+  column: AnySQLiteColumn,
+  policy?: CredentialPolicy,
+): SQL | undefined {
+  const types = policy?.restrictions?.task_types;
+  if (types === undefined) return undefined;
+  return inArray(
+    column,
+    db
+      .select({ id: schema.entities.id })
+      .from(schema.entities)
+      .where(inArray(schema.entities.type, types)),
+  );
 }
 export function assertResourceAccess(
   db: DB,

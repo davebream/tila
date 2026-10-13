@@ -3,6 +3,7 @@ import { CAPABILITIES } from "@tila/schemas";
 import { http, HttpResponse, delay } from "msw";
 import { Route, Routes } from "react-router";
 import {
+  ME,
   type OverviewScenario,
   QUIET,
   SCENARIOS,
@@ -31,6 +32,17 @@ function useScenario(
 ) {
   const seen: Seen[] = [];
   server.use(
+    // An owner signed in as a principal questions can be routed to.
+    http.get("*/api/whoami", () =>
+      HttpResponse.json({
+        ok: true,
+        project_id: "test-project",
+        token_name: "test-user",
+        scopes: "admin",
+        role: "owner",
+        principal_id: ME,
+      }),
+    ),
     http.get("*/projects/*/schema", () => HttpResponse.json(scenario.schema)),
     catalogHandler(scenario.work),
     recordTypesHandler(scenario.records),
@@ -54,6 +66,7 @@ function identity(capabilities: readonly string[], restricted = false) {
         token_name: "limited",
         scopes: "read",
         role: "participant",
+        principal_id: ME,
         policy: {
           role: "participant",
           capabilities,
@@ -101,6 +114,7 @@ describe("OverviewPage", () => {
     for (const text of [
       "No executions with an uncertain outcome",
       "No open tasks waiting on prerequisites",
+      "No questions waiting on you",
       "No pending deliveries no longer being woken",
       "No agents whose mailbox occupant needs a check",
     ])
@@ -141,6 +155,7 @@ describe("OverviewPage", () => {
       ).toEqual([
         "/p/test-project/queue?state=uncertain",
         "/p/test-project/queue?lease=expired",
+        "/p/test-project/decisions",
         "/p/test-project/runtime?filter=attention",
       ]),
     );
@@ -181,7 +196,7 @@ describe("OverviewPage", () => {
     ).not.toBeInTheDocument();
     const table = screen.getByRole("table", { name: "Attention checks" });
     expect(within(table).queryByText(/^No /)).not.toBeInTheDocument();
-    expect(within(table).getAllByText(/Current state unknown/)).toHaveLength(8);
+    expect(within(table).getAllByText(/Current state unknown/)).toHaveLength(9);
   });
 
   test("every count is one bounded request, however large", async () => {
@@ -196,12 +211,13 @@ describe("OverviewPage", () => {
         name: "View 10,000 executions with an uncertain outcome",
       }),
     ).toBeInTheDocument();
-    await waitFor(() => expect(seen).toHaveLength(7));
+    await waitFor(() => expect(seen).toHaveLength(8));
     for (const { params } of seen) expect(params.get("limit")).toBe("1");
     const paths = seen.map(({ path }) => path.split("/").at(-1)).sort();
     expect(paths).toEqual([
       "deliveries",
       "deliveries",
+      "questions",
       "queue",
       "queue",
       "runtime-view",
@@ -215,6 +231,7 @@ describe("OverviewPage", () => {
       ...QUIET,
       blocked: 4,
       expired: 2,
+      questions: 3,
     });
     renderOverview();
 
@@ -241,6 +258,69 @@ describe("OverviewPage", () => {
         name: "4 open tasks waiting on prerequisites",
       }),
     ).toHaveAttribute("href", "/p/test-project/tasks?blocked=1");
+
+    // The inbox's default view is "Waiting on me": open and routed to me.
+    const questionsRequest = seen.find(({ path }) =>
+      path.endsWith("/questions"),
+    );
+    expect(Object.fromEntries(questionsRequest?.params ?? [])).toEqual({
+      state: "open",
+      responder_principal_id: ME,
+      limit: "1",
+    });
+    expect(
+      within(table).getByRole("link", {
+        name: "3 questions waiting on you",
+      }),
+    ).toHaveAttribute("href", "/p/test-project/decisions");
+  });
+
+  test("a worker waiting on an answer is the next action", async () => {
+    useScenario(scenario("S4 worker waiting"));
+    renderOverview();
+
+    const next = await screen.findByRole("region", { name: "Next action" });
+    expect(
+      within(next).getByRole("link", {
+        name: "View 2 questions waiting on you",
+      }),
+    ).toHaveAttribute("href", "/p/test-project/decisions");
+  });
+
+  test("a failed questions request is unknown, never zero", async () => {
+    useScenario(scenario("S4 decisions request failed"));
+    renderOverview();
+
+    expect(
+      await screen.findByText(/Could not load decisions/),
+    ).toHaveTextContent("Could not load decisions. Current state unknown.");
+    expect(
+      screen.queryByText("No questions waiting on you"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Nothing needs attention."),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a credential without a principal is not asked about questions", async () => {
+    const seen = useScenario(scenario("S1 configured"));
+    server.use(
+      http.get("*/api/whoami", () =>
+        HttpResponse.json({
+          ok: true,
+          project_id: "test-project",
+          token_name: "test-user",
+          scopes: "admin",
+          role: "owner",
+        }),
+      ),
+    );
+    renderOverview();
+
+    expect(
+      await screen.findByText("This credential has no principal to wait on."),
+    ).toBeInTheDocument();
+    expect(seen.some(({ path }) => path.endsWith("/questions"))).toBe(false);
   });
 
   test("while loading it never shows a count", async () => {
@@ -305,6 +385,11 @@ describe("OverviewPage", () => {
     expect(
       seen.some(({ path }) => /\/(deliveries|runtime-view)$/.test(path)),
     ).toBe(false);
+    // Questions are filtered by task type on the server, so they stay checked.
+    expect(seen.some(({ path }) => path.endsWith("/questions"))).toBe(true);
+    expect(
+      screen.getByRole("link", { name: "1 question waiting on you" }),
+    ).toHaveAttribute("href", "/p/test-project/decisions");
     expect(screen.queryByText("Definitions")).not.toBeInTheDocument();
   });
 

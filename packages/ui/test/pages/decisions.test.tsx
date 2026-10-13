@@ -95,10 +95,16 @@ beforeEach(() => {
         (!params.get("state") || params.get("state") === question.state) &&
         (!params.get("responder_principal_id") ||
           params.get("responder_principal_id") ===
-            question.responder_principal_id);
+            question.responder_principal_id) &&
+        (!params.get("escalated") ||
+          params.get("escalated") === String(question.escalated));
       return HttpResponse.json({
         ok: true,
-        result: { questions: match ? [view()] : [], next_after_id: null },
+        result: {
+          questions: match ? [view()] : [],
+          next_after_id: null,
+          total: match ? 1 : 0,
+        },
       });
     }),
     http.get("*/projects/test-project/questions/:id", () =>
@@ -116,6 +122,32 @@ test("the inbox lists open questions waiting on the signed-in principal", async 
   expect(within(table).getByText(`${ME} (you)`)).toBeInTheDocument();
   expect(listed[0].get("responder_principal_id")).toBe(ME);
   expect(listed[0].get("state")).toBe("open");
+  expect(screen.getByText("1 question matches")).toBeInTheDocument();
+});
+
+test("escalated only is filtered by the server, so its total is exact", async () => {
+  question = makeQuestion({ escalated: true });
+  const user = userEvent.setup();
+  renderDecisions("/p/test-project/decisions?view=open");
+  await screen.findByRole("table", { name: "All open" });
+  expect(listed.at(-1)?.has("escalated")).toBe(false);
+
+  await user.click(screen.getByRole("button", { name: "Escalated only" }));
+  await waitFor(() =>
+    expect(Object.fromEntries(listed.at(-1) ?? [])).toEqual({
+      state: "open",
+      escalated: "true",
+      limit: "50",
+    }),
+  );
+  expect(await screen.findByText("1 question matches")).toBeInTheDocument();
+
+  question = makeQuestion();
+  await user.click(screen.getByRole("link", { name: "Waiting on me" }));
+  expect(
+    await screen.findByText("No escalated questions in this view."),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/question matches/)).not.toBeInTheDocument();
 });
 
 test("answers with the question's correlation and a matching idempotency key", async () => {

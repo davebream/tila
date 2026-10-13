@@ -17,15 +17,18 @@ import { useWhoami } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import { listQuestions } from "@/lib/api";
+import {
+  type DecisionView,
+  decisionViewFromSearch,
+  questionQueryFromSearch,
+} from "@/lib/list-queries";
 import { failureKind, failureMessage } from "@/lib/mutation-errors";
 import { formatDateTime, relativeTime } from "@/lib/time";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { Question } from "@tila/schemas";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 
-type View = "mine" | "open" | "answered" | "cancelled" | "superseded";
-
-const VIEWS: Array<{ id: View; label: string; empty: string }> = [
+const VIEWS: Array<{ id: DecisionView; label: string; empty: string }> = [
   {
     id: "mine",
     label: "Waiting on me",
@@ -43,10 +46,6 @@ const VIEWS: Array<{ id: View; label: string; empty: string }> = [
 
 const PAGE = 50;
 
-function parseView(value: string | null): View {
-  return VIEWS.some((v) => v.id === value) ? (value as View) : "mine";
-}
-
 /**
  * Questions workers asked about their attempts. "Waiting on me" is the inbox:
  * open questions whose designated responder is the signed-in principal,
@@ -59,32 +58,33 @@ export function DecisionsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
-  const view = parseView(params.get("view"));
+  const view = decisionViewFromSearch(params);
   const escalatedOnly = params.get("escalated") === "1";
   const whoami = useWhoami();
   const me = whoami.data?.principal_id;
+  // The Overview counts "Waiting on me" from this same query.
+  const filters = questionQueryFromSearch(params, me);
   const { questionId } = useParams<{ questionId: string }>();
 
   const query = useInfiniteQuery({
-    queryKey: ["questions", project, "inbox", view, me ?? null],
+    queryKey: ["questions", project, "inbox", filters],
     queryFn: ({ pageParam }) =>
       listQuestions(project, {
-        state: view === "mine" ? "open" : view,
-        responder_principal_id: view === "mine" ? me : undefined,
+        ...filters,
         after_id: pageParam ?? undefined,
         limit: PAGE,
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_after_id,
-    enabled: Boolean(projectId) && (view !== "mine" || Boolean(me)),
+    enabled: Boolean(projectId) && filters !== null,
     refetchInterval: 10_000,
   });
 
   // IDs are UUIDs, so server order is not chronological; newest first here.
   const rows: Question[] = (query.data?.pages ?? [])
     .flatMap((page) => page.questions.map((item) => item.question))
-    .filter((q) => !escalatedOnly || q.escalated)
     .sort((a, b) => b.created_at - a.created_at);
+  const total = query.data?.pages[0]?.total;
   const current = VIEWS.find((v) => v.id === view) ?? VIEWS[0];
   const link = (next: Record<string, string | null>) => {
     const search = new URLSearchParams(location.search);
@@ -162,6 +162,12 @@ export function DecisionsPage() {
         </p>
       )}
 
+      {query.isSuccess && total !== undefined && total > 0 && (
+        <p className="font-mono text-[11px] text-fg-faint">
+          {total.toLocaleString("en-US")}{" "}
+          {total === 1 ? "question matches" : "questions match"}
+        </p>
+      )}
       {rows.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-border">
           <Table aria-label={current.label}>

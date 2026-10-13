@@ -77,7 +77,7 @@ export function createQuestionRoutes(deps: RouterDeps) {
     if (request.action === "list")
       return c.json({
         ok: true,
-        result: questionOps.list(deps.db, request.query, authority, allowsTask),
+        result: questionOps.list(deps.db, request.query, authority, credential),
       });
     const task =
       request.action === "ask"
