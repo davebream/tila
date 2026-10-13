@@ -122,16 +122,21 @@ export function registerSignalTools(
   registerPrimitiveTool(
     server,
     "tila_signal_group_set",
-    "Create or replace a named principal-based signal group. Requires project admin permission.",
+    "Create or replace a named principal-based signal group. Requires project admin permission. expected_revision 0 creates only; a positive value must match the revision you read. Edits affect later sends only.",
     {
       group_id: z.string(),
       name: z.string(),
       principal_ids: z.array(z.string()).max(500),
+      expected_revision: z.number().int().nonnegative().optional(),
     },
-    async ({ group_id, name, principal_ids }) => {
+    async ({ group_id, name, principal_ids, expected_revision }) => {
       try {
         return textResult(
-          await signals.groups.set(group_id, { name, principal_ids }),
+          await signals.groups.set(group_id, {
+            name,
+            principal_ids,
+            expected_revision,
+          }),
         );
       } catch (err) {
         throw toMcpError(err);
@@ -142,11 +147,16 @@ export function registerSignalTools(
   registerPrimitiveTool(
     server,
     "tila_signal_group_delete",
-    "Delete a named signal group. Requires project admin permission.",
-    { group_id: z.string() },
-    async ({ group_id }) => {
+    "Delete a named signal group. Requires project admin permission. Past deliveries are never changed.",
+    {
+      group_id: z.string(),
+      expected_revision: z.number().int().positive().optional(),
+    },
+    async ({ group_id, expected_revision }) => {
       try {
-        return textResult(await signals.groups.delete(group_id));
+        return textResult(
+          await signals.groups.delete(group_id, { expected_revision }),
+        );
       } catch (err) {
         throw toMcpError(err);
       }

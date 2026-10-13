@@ -895,18 +895,26 @@ function createLocalSignalMethods(project: EmbeddedProject) {
       },
       async set(
         groupId: string,
-        input: { name: string; principal_ids: string[] },
+        input: {
+          name: string;
+          principal_ids: string[];
+          expected_revision?: number;
+        },
+        _options: { idempotencyKey?: string } = {},
       ): Promise<SignalGroupResponse> {
         const id = SignalGroupIdSchema.parse(groupId);
         const body = SetSignalGroupRequestSchema.parse(input);
         return {
           ok: true,
-          group: await project.setSignalGroup(id, body),
+          group: await asApiError(() => project.setSignalGroup(id, body)),
         };
       },
-      async delete(groupId: string) {
+      async delete(
+        groupId: string,
+        options: { expected_revision?: number } = {},
+      ) {
         const id = SignalGroupIdSchema.parse(groupId);
-        if (!(await project.deleteSignalGroup(id))) {
+        if (!(await asApiError(() => project.deleteSignalGroup(id, options)))) {
           throw new TilaApiError(
             404,
             "signal-group-not-found",
@@ -918,6 +926,24 @@ function createLocalSignalMethods(project: EmbeddedProject) {
       },
     },
   };
+}
+
+/** Surface shared-ops domain errors (e.g. `revision-conflict`) as API errors. */
+async function asApiError<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    const mapped = error instanceof Error ? mapProjectError(error) : null;
+    if (mapped)
+      throw new TilaApiError(
+        mapped.status,
+        toTilaErrorCode(mapped.code),
+        (error as Error).message,
+        mapped.retryable,
+        mapped.extras,
+      );
+    throw error;
+  }
 }
 
 /** Journal methods (mirrors `createJournalMethods` in `journal.ts`). */

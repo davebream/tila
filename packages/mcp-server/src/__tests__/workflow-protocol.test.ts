@@ -157,7 +157,7 @@ it("lists exactly nine default tools, validates real calls, and preserves the ex
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(68);
+  expect((await all.listTools()).tools).toHaveLength(83);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -535,7 +535,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(70);
+  expect(listed).toHaveLength(85);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -765,6 +765,21 @@ title = "Evidence"
       binding_epoch: 1,
       disposition: "declined",
     },
+    tila_agent_list: {},
+    tila_agent_get: { agent: "worker" },
+    tila_agent_register: { id: "worker", name: "Worker" },
+    tila_agent_update: { agent: "worker", expected_revision: 1, name: "W" },
+    tila_agent_archive_preview: { agent: "worker" },
+    tila_agent_archive: { agent: "worker", expected_revision: 1 },
+    tila_agent_unarchive: { agent: "worker", expected_revision: 1 },
+    tila_room_get: { room: "general" },
+    tila_room_create: { id: "general", name: "General" },
+    tila_room_update: { room: "general", expected_revision: 1, name: "G" },
+    tila_room_member_set: { room: "general", member: "agent:worker" },
+    tila_room_member_remove: { room: "general", member: "agent:worker" },
+    tila_room_archive_preview: { room: "general" },
+    tila_room_archive: { room: "general", expected_revision: 1 },
+    tila_room_unarchive: { room: "general", expected_revision: 1 },
     tila_agent_bind: {
       agent: "worker",
       expected_epoch: 0,

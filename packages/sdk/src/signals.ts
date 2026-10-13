@@ -69,17 +69,38 @@ export function createSignalMethods(client: TilaClient, projectId: string) {
           validate: true,
         });
       },
-      async set(groupId: string, input: SetSignalGroupRequest) {
+      /**
+       * `expected_revision` 0 creates only; a positive value must match the
+       * current revision. Omitted keeps the legacy unconditional replace.
+       */
+      async set(
+        groupId: string,
+        input: SetSignalGroupRequest,
+        options: { idempotencyKey?: string } = {},
+      ) {
         const id = SignalGroupIdSchema.parse(groupId);
         const body = SetSignalGroupRequestSchema.parse(input);
         return client.put(`${base}/groups/${encodeURIComponent(id)}`, body, {
+          idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
           schema: SignalGroupResponseSchema,
           validate: true,
         });
       },
-      async delete(groupId: string) {
+      /** Never cancels or rewrites past deliveries. */
+      async delete(
+        groupId: string,
+        options: { expected_revision?: number } = {},
+      ) {
         const id = SignalGroupIdSchema.parse(groupId);
+        const expected =
+          SetSignalGroupRequestSchema.shape.expected_revision.parse(
+            options.expected_revision,
+          );
         return client.delete(`${base}/groups/${encodeURIComponent(id)}`, {
+          query: {
+            expected_revision:
+              expected === undefined ? undefined : String(expected),
+          },
           schema: AckSignalResponseSchema,
           validate: true,
         });

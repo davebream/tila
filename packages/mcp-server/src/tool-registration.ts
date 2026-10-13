@@ -15,6 +15,11 @@ const reads = new Set([
   "tila_schema_preview",
   "tila_room_list",
   "tila_room_history",
+  "tila_room_get",
+  "tila_room_archive_preview",
+  "tila_agent_list",
+  "tila_agent_get",
+  "tila_agent_archive_preview",
   "tila_inbox_fetch",
   "tila_inbox_watch",
   "tila_inbox_explain",
@@ -50,6 +55,8 @@ const reads = new Set([
 ]);
 const additive = new Set([
   "tila_journal_append",
+  "tila_agent_register",
+  "tila_room_create",
   "tila_room_publish",
   "tila_task_create",
   "tila_artifact_put",
@@ -61,6 +68,18 @@ const additive = new Set([
 ]);
 const idempotent = new Set([
   "tila_queue",
+  // Revision-checked settings writes replay with their idempotency key and
+  // otherwise conflict rather than applying twice.
+  "tila_agent_register",
+  "tila_agent_update",
+  "tila_agent_archive",
+  "tila_agent_unarchive",
+  "tila_room_create",
+  "tila_room_update",
+  "tila_room_member_set",
+  "tila_room_member_remove",
+  "tila_room_archive",
+  "tila_room_unarchive",
   "tila_attempt",
   "tila_question",
   "tila_room_publish",
@@ -155,6 +174,16 @@ export function recoveryFor(error: unknown, readOnly = false): McpRecovery {
           : "Inspect the agent and selected profile. Start an authorized run and attach using the current binding epoch before retrying.",
     };
   }
+  if (["revision-conflict", "agent-archived", "room-archived"].includes(code))
+    return {
+      code,
+      message,
+      retry_safety: "after_recovery",
+      recovery_action:
+        code === "revision-conflict"
+          ? "Another change landed. Read the resource again, review its current settings and revision, then retry against that revision with a new idempotency key."
+          : "The resource is archived. Unarchive it explicitly if the change is still needed; archived history stays readable.",
+    };
   if (
     [
       "stale-fence",

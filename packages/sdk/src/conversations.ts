@@ -17,16 +17,27 @@ import {
   MessagePublishResponseSchema,
   NativeSessionRefSchema,
   PublishMessageSchema,
+  RoomArchivePreviewResponseSchema,
   RoomHistoryResponseSchema,
   RoomListResponseSchema,
   RoomResponseSchema,
+  RoomRevisionSchema,
+  RoomSchema,
   SetRoomMemberSchema,
   ThreadSchema,
+  UpdateRoomSchema,
 } from "@tila/schemas";
 import { z } from "zod";
-import { UnsupportedCapabilityError } from "./agents";
+import { UnsupportedCapabilityError, type WriteOptions } from "./agents";
 import type { TilaClient } from "./client";
 const ok = z.object({ ok: z.literal(true) });
+// Pre-#298 servers answer membership changes with `{ ok }` only.
+const memberResult = z.object({
+  ok: z.literal(true),
+  room: RoomSchema.optional(),
+});
+const key = (write: WriteOptions) =>
+  write.idempotencyKey ?? crypto.randomUUID();
 type Page = z.input<typeof ConversationPageOptionsSchema>;
 const options = <T>(schema: z.ZodType<T, unknown>, protocol = 1) => ({
   schema,
@@ -48,8 +59,12 @@ export function createConversationMethods(
   const base = `/projects/${encodeURIComponent(projectId)}/rooms`;
   const path = (room: string) => `${base}/${encode(room)}`;
   return {
-    list: (protocol = 1) =>
-      client.get(base, options(RoomListResponseSchema, protocol)),
+    /** `includeArchived` lists archived rooms the caller may read. */
+    list: (protocol = 1, read: { includeArchived?: boolean } = {}) =>
+      client.get(base, {
+        ...options(RoomListResponseSchema, protocol),
+        query: { include_archived: read.includeArchived ? "true" : undefined },
+      }),
     create: (input: z.input<typeof CreateRoomSchema>, protocol = 1) =>
       client.post(
         base,
@@ -58,16 +73,74 @@ export function createConversationMethods(
       ),
     get: (room: string, protocol = 1) =>
       client.get(path(room), options(RoomResponseSchema, protocol)),
-    join: (room: string, member: string, wake = true) =>
+    /** Membership is room policy: a change advances the room revision. */
+    join: (
+      room: string,
+      member: string,
+      wake = true,
+      write: WriteOptions & { expectedRevision?: number } = {},
+    ) =>
       client.put(
         `${path(room)}/members/${encodeURIComponent(member)}`,
-        SetRoomMemberSchema.parse({ wake }),
-        options(ok),
+        SetRoomMemberSchema.parse({
+          wake,
+          expected_revision: write.expectedRevision,
+        }),
+        { ...options(memberResult), idempotencyKey: key(write) },
       ),
-    leave: (room: string, member: string) =>
-      client.delete(
-        `${path(room)}/members/${encodeURIComponent(member)}`,
-        options(ok),
+    leave: (
+      room: string,
+      member: string,
+      write: WriteOptions & { expectedRevision?: number } = {},
+    ) =>
+      client.delete(`${path(room)}/members/${encodeURIComponent(member)}`, {
+        ...options(memberResult),
+        idempotencyKey: key(write),
+        query: {
+          expected_revision:
+            write.expectedRevision === undefined
+              ? undefined
+              : String(write.expectedRevision),
+        },
+      }),
+    /**
+     * Revision-checked settings change. TTL and hop/pair budgets apply to
+     * later messages, wake budgets at the next dispatch.
+     */
+    update: (
+      room: string,
+      input: z.input<typeof UpdateRoomSchema>,
+      write: WriteOptions = {},
+    ) =>
+      client.patch(path(room), UpdateRoomSchema.parse(input), {
+        ...options(RoomResponseSchema),
+        idempotencyKey: key(write),
+      }),
+    archivePreview: (room: string) =>
+      client.get(
+        `${path(room)}/archive-preview`,
+        options(RoomArchivePreviewResponseSchema),
+      ),
+    /** Stops publication and wakes; history stays readable. */
+    archive: (
+      room: string,
+      expectedRevision: number,
+      write: WriteOptions = {},
+    ) =>
+      client.post(
+        `${path(room)}/archive`,
+        RoomRevisionSchema.parse({ expected_revision: expectedRevision }),
+        { ...options(RoomResponseSchema), idempotencyKey: key(write) },
+      ),
+    unarchive: (
+      room: string,
+      expectedRevision: number,
+      write: WriteOptions = {},
+    ) =>
+      client.post(
+        `${path(room)}/unarchive`,
+        RoomRevisionSchema.parse({ expected_revision: expectedRevision }),
+        { ...options(RoomResponseSchema), idempotencyKey: key(write) },
       ),
     threads: (room: string) =>
       client.get(
@@ -223,6 +296,10 @@ export function createUnsupportedConversationMethods(): ReturnType<
     get: unsupported,
     join: unsupported,
     leave: unsupported,
+    update: unsupported,
+    archivePreview: unsupported,
+    archive: unsupported,
+    unarchive: unsupported,
     threads: unsupported,
     createThread: unsupported,
     history: unsupported,

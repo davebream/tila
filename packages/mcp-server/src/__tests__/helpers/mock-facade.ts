@@ -75,7 +75,11 @@ export type MockFacadeShape = {
     | "createThread"
     | "history"
     | "publish"
-    | "deliveries",
+    | "deliveries"
+    | "update"
+    | "archivePreview"
+    | "archive"
+    | "unarchive",
     Mock
   >;
   inbox: Record<
@@ -84,7 +88,16 @@ export type MockFacadeShape = {
   >;
   dispatch: Record<"status" | "lease" | "report", Mock>;
   agents: Record<
-    "list" | "get" | "register" | "bind" | "release" | "runtimeView",
+    | "list"
+    | "get"
+    | "update"
+    | "archivePreview"
+    | "archive"
+    | "unarchive"
+    | "register"
+    | "bind"
+    | "release"
+    | "runtimeView",
     Mock
   >;
   tasks: Record<
@@ -186,6 +199,10 @@ export function createMockFacade(): MockFacadeShape {
       "history",
       "publish",
       "deliveries",
+      "update",
+      "archivePreview",
+      "archive",
+      "unarchive",
     ),
     inbox: fns("fetch", "ack", "watch", "explain", "resume", "deliveries"),
     queue: fns(
@@ -226,7 +243,18 @@ export function createMockFacade(): MockFacadeShape {
       "correct",
     ),
     dispatch: fns("status", "lease", "report"),
-    agents: fns("list", "get", "register", "bind", "release", "runtimeView"),
+    agents: fns(
+      "list",
+      "get",
+      "update",
+      "archivePreview",
+      "archive",
+      "unarchive",
+      "register",
+      "bind",
+      "release",
+      "runtimeView",
+    ),
     tasks: fns(
       "create",
       "get",

@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { AgentBindingResponseSchema } from "./agent-binding";
+import {
+  AgentArchivePreviewResponseSchema,
+  AgentArchiveResponseSchema,
+  AgentBindingResponseSchema,
+  AgentGetResponseSchema,
+  AgentListResponseSchema,
+  AgentResponseSchema,
+} from "./agent-binding";
 import * as api from "./api";
 import {
   ArtifactReviewResponseSchema,
@@ -109,6 +116,25 @@ export const McpPrimitiveResults = {
   tila_inbox_watch: conversations.InboxWatchResponseSchema,
   tila_inbox_explain: conversations.DeliveryExplainResponseSchema,
   tila_agent_bind: AgentBindingResponseSchema,
+  tila_agent_list: AgentListResponseSchema,
+  tila_agent_get: AgentGetResponseSchema,
+  tila_agent_register: AgentResponseSchema,
+  tila_agent_update: AgentResponseSchema,
+  tila_agent_archive_preview: AgentArchivePreviewResponseSchema,
+  tila_agent_archive: AgentArchiveResponseSchema,
+  tila_agent_unarchive: AgentResponseSchema,
+  tila_room_get: conversations.RoomResponseSchema,
+  tila_room_create: conversations.RoomResponseSchema,
+  tila_room_update: conversations.RoomResponseSchema,
+  tila_room_member_set: ok.extend({
+    room: conversations.RoomSchema.optional(),
+  }),
+  tila_room_member_remove: ok.extend({
+    room: conversations.RoomSchema.optional(),
+  }),
+  tila_room_archive_preview: conversations.RoomArchivePreviewResponseSchema,
+  tila_room_archive: conversations.RoomResponseSchema,
+  tila_room_unarchive: conversations.RoomResponseSchema,
   tila_task_create: api.EntityResponseSchema,
   tila_task_list: z.union([
     api.CompactEntityListResponseSchema.extend(pagination),

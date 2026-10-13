@@ -2,6 +2,7 @@ import type { Signal, SignalTarget } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { TILA_ERRORS } from "tila-sdk";
 import { resolveContext } from "../context";
+import { integerFlag } from "../lib/expected-revision";
 import {
   boundedItems,
   failWithCliError,
@@ -134,6 +135,15 @@ const groupSetCommand = defineCommand({
       type: "string",
       description: "Comma-separated principal IDs",
     },
+    "expected-revision": {
+      type: "string",
+      description: "Revision you reviewed; omitted replaces unconditionally",
+    },
+    create: {
+      type: "boolean",
+      default: false,
+      description: "Fail if the group already exists",
+    },
     ...jsonArg,
   },
   async run({ args }) {
@@ -145,6 +155,10 @@ const groupDeleteCommand = defineCommand({
   meta: { name: "delete", description: "Delete a signal group (admin)" },
   args: {
     id: { type: "positional", description: "Group ID", required: true },
+    "expected-revision": {
+      type: "string",
+      description: "Revision you reviewed; past deliveries are never changed",
+    },
     ...jsonArg,
   },
   async run({ args }) {
@@ -302,12 +316,17 @@ export const signalHandlers = {
     context: Promise<SignalContext> | SignalContext = resolveContext(),
   ) => {
     const { signal } = await context;
+    if (args.create && args["expected-revision"] !== undefined)
+      throw new Error("Use either --create or --expected-revision");
     const group = await signal.setSignalGroup(args.id as string, {
       name: args.name as string,
       principal_ids: String(args.principals ?? "")
         .split(",")
         .map((value) => value.trim())
         .filter(Boolean),
+      expected_revision: args.create
+        ? 0
+        : integerFlag("expected-revision", args["expected-revision"] as string),
     });
     if (args.json) return printJson({ ok: true, group });
     outputText(`Signal group saved: ${group.id}`);
@@ -317,7 +336,12 @@ export const signalHandlers = {
     context: Promise<SignalContext> | SignalContext = resolveContext(),
   ) => {
     const { signal } = await context;
-    await signal.deleteSignalGroup(args.id as string);
+    await signal.deleteSignalGroup(args.id as string, {
+      expected_revision: integerFlag(
+        "expected-revision",
+        args["expected-revision"] as string | undefined,
+      ),
+    });
     if (args.json) return printJson({ ok: true });
     outputText("Signal group deleted.");
   },
