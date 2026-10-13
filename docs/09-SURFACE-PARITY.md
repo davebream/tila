@@ -48,6 +48,9 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 | Doctor/reconcile | Y | Y | - | - | Admin; not agent-facing |
 | Reset | Y | Y | - | - | Destructive admin |
 | Runtime view (agents, bindings, runs, hosts, sessions) | Y | - | Y | - | Operator view; dashboard Runtime tab |
+| Agent register/update/archive/unarchive | Y | Y | Y | Y | MCP opt-in `agents` group; dashboard Settings › Agents |
+| Room create/update/members/archive | Y | Y | Y | Y | Dashboard Settings › Rooms |
+| Signal group set/delete with revision | Y | Y | Y | Y | Dashboard Settings › Signal groups |
 
 ## Surface-Specific Exceptions
 
