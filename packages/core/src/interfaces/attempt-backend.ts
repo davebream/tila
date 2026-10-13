@@ -5,6 +5,7 @@ import type {
   AttemptListQuery,
   AttemptRebindCommand,
   AttemptReconcileCommand,
+  AttemptReplaceSessionCommand,
   AttemptResumeCommand,
   AttemptResumeResult,
   AttemptRetryCommand,
@@ -46,5 +47,10 @@ export interface AttemptBackend {
   rebind(id: string, command: AttemptRebindCommand): Promise<AttemptView>;
   retry(id: string, command: AttemptRetryCommand): Promise<AttemptView>;
   forceRecovery(id: string, command: AttemptForceCommand): Promise<AttemptView>;
+  /** Attach a replacement native session to the same attempt; owner only. */
+  replaceSession(
+    id: string,
+    command: AttemptReplaceSessionCommand,
+  ): Promise<AttemptView>;
   finish(id: string, command: AttemptFinishCommand): Promise<AttemptView>;
 }

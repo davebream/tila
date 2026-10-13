@@ -6,6 +6,7 @@ import {
   type AttemptListQuery,
   type AttemptRebindCommand,
   type AttemptReconcileCommand,
+  type AttemptReplaceSessionCommand,
   type AttemptResumeCommand,
   AttemptResumeResultSchema,
   type AttemptRetryCommand,
@@ -173,5 +174,8 @@ export class RemoteAttemptBackend implements AttemptBackend {
   }
   forceRecovery(id: string, input: AttemptForceCommand) {
     return this.mutate(id, "force-recovery", input, AttemptViewSchema);
+  }
+  replaceSession(id: string, input: AttemptReplaceSessionCommand) {
+    return this.mutate(id, "replace-session", input, AttemptViewSchema);
   }
 }

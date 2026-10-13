@@ -1511,6 +1511,15 @@ function runMigration0038(storage: MigrationStorage): void {
       storage.sql.exec(`ALTER TABLE queue_entries ADD COLUMN ${column} TEXT`);
 }
 
+/** #303: governing revision snapshots and owner-filtered recovery queries. */
+function runMigration0039(storage: MigrationStorage): void {
+  if (!columnExists(storage, "work_attempts", "revisions"))
+    storage.sql.exec("ALTER TABLE work_attempts ADD COLUMN revisions TEXT");
+  storage.sql.exec(
+    "CREATE INDEX IF NOT EXISTS work_attempts_owner ON work_attempts(principal_id, participant_id, state)",
+  );
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1564,6 +1573,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_custom_correlation ON journal(json_extrac
 `,
   },
   { version: 38, run: runMigration0038 },
+  { version: 39, run: runMigration0039 },
 ];
 
 /** Highest project migration; transfer metadata and backups report this version. */

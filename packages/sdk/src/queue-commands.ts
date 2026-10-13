@@ -60,6 +60,8 @@ export function executeAttemptRequest(
       return attempts.retry(input.id, input.command);
     case "force-recovery":
       return attempts.forceRecovery(input.id, input.command);
+    case "replace-session":
+      return attempts.replaceSession(input.id, input.command);
   }
 }
 
@@ -92,5 +94,6 @@ export function attemptFacade(backend: AttemptBackend): AttemptBackend {
     rebind: backend.rebind.bind(backend),
     retry: backend.retry.bind(backend),
     forceRecovery: backend.forceRecovery.bind(backend),
+    replaceSession: backend.replaceSession.bind(backend),
   };
 }

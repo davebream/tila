@@ -14,6 +14,11 @@ health.get("/health", (c) => {
     commit: BUILD_COMMIT,
     apiVersion: API_VERSION,
     minCliVersion: MIN_CLI_VERSION,
-    features: ["managed-queue-v1", "work-questions-v1", "attempt-control-v1"],
+    features: [
+      "managed-queue-v1",
+      "work-questions-v1",
+      "attempt-control-v1",
+      "attempt-session-replacement-v1",
+    ],
   });
 });
