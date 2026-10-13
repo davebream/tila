@@ -259,14 +259,14 @@ describe("isUnconfigured", () => {
     ).toBe(true);
   });
 
-  test("unreadable records do not block it", () => {
+  test("unreadable records are not evidence of an empty project", () => {
     expect(
       isUnconfigured({
         schema: noSchema,
         work: noWork,
         records: failed("forbidden"),
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test.each<[string, Partial<Parameters<typeof isUnconfigured>[0]>]>([
