@@ -1,7 +1,10 @@
 import {
   AgentIdSchema,
   AgentRegistrationSchema,
+  ArchiveAgentSchema,
   AttachAgentBindingSchema,
+  UnarchiveAgentSchema,
+  UpdateAgentSchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { RuntimeDenied, RuntimeStore } from "../d1";
@@ -11,7 +14,7 @@ import {
   runtimeIdentity,
 } from "../lib/agent-authority";
 import { analyticsCtxFrom } from "../lib/analytics";
-import { forwardToDO } from "../lib/do-forward";
+import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import type { Env, HonoVariables } from "../types";
 
@@ -24,7 +27,9 @@ agents.all("*", async (c) => {
   const relative = c.req.path
     .replace(/^\/projects\/[^/]+/, "")
     .replace(/\/$/, "");
-  const match = relative.match(/^\/agents(?:\/([^/]+)(?:\/(bind|release))?)?$/);
+  const match = relative.match(
+    /^\/agents(?:\/([^/]+)(?:\/(bind|release|archive|unarchive|archive-preview))?)?$/,
+  );
   if (!match) return c.notFound();
   const id = match[1];
   const action = match[2];
@@ -41,9 +46,19 @@ agents.all("*", async (c) => {
       400,
     );
   const authority = agentAuthorityFor(c);
-  const headers = () => agentAuthorityHeaders(authority);
+  const headers = () => ({
+    ...agentAuthorityHeaders(authority),
+    ...idempotencyHeaders(c),
+  });
   let body: unknown;
-  if (c.req.method === "POST") {
+  if (c.req.method === "PATCH") {
+    if (!id || action) return c.notFound();
+    const parsed = UpdateAgentSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) return zodValidationError(c, parsed.error);
+    body = parsed.data;
+  } else if (c.req.method === "POST") {
     const raw = await c.req.json().catch(() => null);
     if (!id) {
       const parsed = AgentRegistrationSchema.safeParse(raw);
@@ -112,14 +127,24 @@ agents.all("*", async (c) => {
       }
       body = parsed.data;
     } else if (action === "release") body = raw;
-    else return c.notFound();
-  } else if (c.req.method !== "GET" || action) return c.notFound();
+    else if (action === "archive" || action === "unarchive") {
+      const parsed = (
+        action === "archive" ? ArchiveAgentSchema : UnarchiveAgentSchema
+      ).safeParse(raw);
+      if (!parsed.success) return zodValidationError(c, parsed.error);
+      body = parsed.data;
+    } else return c.notFound();
+  } else if (c.req.method !== "GET" || (action && action !== "archive-preview"))
+    return c.notFound();
+  const includeArchived = c.req.query("include_archived");
   const response = await forwardToDO(
     c.get("doStub"),
     relative,
     c.req.method,
     body,
-    undefined,
+    c.req.method === "GET" && includeArchived === "true"
+      ? { include_archived: "true" }
+      : undefined,
     analyticsCtxFrom(c),
     headers(),
   );

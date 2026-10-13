@@ -60,6 +60,8 @@ export * as readyOps from "./ready-ops";
 export * as gateOps from "./gate-ops";
 export * as signalOps from "./signal-ops";
 export * as agentBindingOps from "./agent-binding-ops";
+export * as configRevisionOps from "./config-revision-ops";
+export { RevisionConflictError } from "./config-revision-ops";
 export * as recordOps from "./record-ops";
 export * as catalogOps from "./catalog-ops";
 export * as searchPageOps from "./search-page-ops";

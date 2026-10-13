@@ -490,4 +490,49 @@ describe("signal groups", () => {
       ).count,
     ).toBe(0);
   });
+
+  it("checks expected revisions and never reuses one after delete and recreate", () => {
+    const { db, sqlite } = createTestDb();
+    const admin = actor("principal-admin", "participant-admin");
+    const set = (expected: number | undefined, members = ["principal-b"]) =>
+      signalOps.setGroup(db, "reviewers", "Reviewers", members, admin, NOW, {
+        expectedRevision: expected,
+      });
+    const created = set(0);
+    expect(() => set(0)).toThrow(/current revision/);
+    // Same audience: no new revision.
+    expect(set(created.revision).revision).toBe(created.revision);
+    const edited = set(created.revision, ["principal-c"]);
+    expect(edited.revision).toBeGreaterThan(created.revision);
+    expect(() => set(created.revision, ["principal-d"])).toThrow(
+      /current revision/,
+    );
+    expect(() =>
+      signalOps.deleteGroup(db, "reviewers", admin, created.revision),
+    ).toThrow(/current revision/);
+    expect(signalOps.deleteGroup(db, "reviewers", admin, edited.revision)).toBe(
+      true,
+    );
+    // A recreated group gets a fresh revision, so an editor still holding the
+    // deleted group's revision conflicts instead of overwriting it.
+    const recreated = set(0);
+    expect(recreated.revision).toBeGreaterThan(edited.revision);
+    expect(() => set(edited.revision, ["principal-x"])).toThrow(
+      /current revision/,
+    );
+    expect(() => set(1)).toThrow(/current revision/);
+    const kinds = (
+      sqlite
+        .prepare(
+          "SELECT kind, data FROM journal WHERE kind LIKE 'signal_group.%' ORDER BY seq",
+        )
+        .all() as { kind: string; data: string }[]
+    ).map((row) => row.kind);
+    expect(kinds).toEqual([
+      "signal_group.created",
+      "signal_group.updated",
+      "signal_group.deleted",
+      "signal_group.created",
+    ]);
+  });
 });

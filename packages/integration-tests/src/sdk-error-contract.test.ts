@@ -206,6 +206,9 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "signal-group-not-found",
     "no-active-recipients",
     "signal-expired",
+    "revision-conflict",
+    "agent-archived",
+    "room-archived",
   ]);
 
   it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {

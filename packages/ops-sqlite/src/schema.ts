@@ -21,8 +21,17 @@ export const agents = sqliteTable("agents", {
     .notNull(),
   binding_epoch: integer("binding_epoch").notNull().default(0),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  revision: integer("revision").notNull().default(1),
+  profile_selection: text("profile_selection", {
+    mode: "json",
+  }).$type<Agent["profile_selection"]>(),
   created_at: integer("created_at").notNull(),
   updated_at: integer("updated_at").notNull(),
+});
+/** Project-wide settings revision counter (#298); never part of a backup. */
+export const configRevisionSeq = sqliteTable("_config_revision_seq", {
+  singleton: integer("singleton").primaryKey(),
+  value: integer("value").notNull(),
 });
 export const agentBindings = sqliteTable(
   "agent_bindings",
@@ -418,6 +427,7 @@ export const gates = sqliteTable(
 export const signalGroups = sqliteTable("signal_groups", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  revision: integer("revision").notNull().default(1),
   created_at: integer("created_at").notNull(),
   updated_at: integer("updated_at").notNull(),
   created_by_principal_id: text("created_by_principal_id").notNull(),
@@ -764,6 +774,7 @@ export const rooms = sqliteTable("rooms", {
     .$type<import("@tila/schemas").Room["budgets"]>()
     .notNull(),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  revision: integer("revision").notNull().default(1),
   next_seq: integer("next_seq").notNull().default(0),
   created_at: integer("created_at").notNull(),
   updated_at: integer("updated_at").notNull(),

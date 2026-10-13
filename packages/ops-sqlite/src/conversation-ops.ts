@@ -13,8 +13,11 @@ import {
   MessageSchema,
   OutboxEntrySchema,
   type PublishMessage,
+  type Room,
+  type RoomArchivePreview,
   RoomSchema,
   type RuntimeIdentity,
+  type UpdateRoom,
 } from "@tila/schemas";
 import {
   and,
@@ -33,7 +36,9 @@ import {
 } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { authorizeRun, current } from "./agent-binding-ops";
+import { checkRevision, nextRevision } from "./config-revision-ops";
 import { clearLease, rearm } from "./conversation-state-ops";
+import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
 import { appendJournal } from "./journal-ops";
 import { canonicalJson } from "./project-transfer-ops";
 import * as s from "./schema";
@@ -112,6 +117,10 @@ function memberKey(a: ConversationAuthority) {
     ? `agent:${a.runtime.agent_id}`
     : `principal:${a.principal_id}`;
 }
+/**
+ * Archived rooms keep authorized history readable; writes (publication and
+ * thread creation) stop. Settings and membership stay manageable.
+ */
 function roomAccess(
   db: DB,
   id: string,
@@ -120,7 +129,9 @@ function roomAccess(
 ) {
   bodyAccess(a);
   const row = db.select().from(s.rooms).where(eq(s.rooms.id, id)).get();
-  if (!row || row.archived) fail("not-found", "Room not found", 404);
+  if (!row) fail("not-found", "Room not found", 404);
+  if (write && row.archived)
+    fail("room-archived", "Room is archived; its history stays readable", 409);
   if (write || (row.history_policy === "members" && !a.can_manage)) {
     const member = db
       .select()
@@ -136,15 +147,48 @@ function roomAccess(
   }
   return RoomSchema.parse(row);
 }
+function requireManage(
+  a: ConversationAuthority,
+  message = "Managing rooms requires conversations:manage",
+) {
+  bodyAccess(a);
+  if (!a.can_manage) fail("permission-denied", message);
+}
+type RoomJournalKind =
+  | "room.created"
+  | "room.updated"
+  | "room.members_changed"
+  | "room.archived"
+  | "room.unarchived";
+function roomEvent(
+  tx: Parameters<Parameters<DB["transaction"]>[0]>[0],
+  kind: RoomJournalKind,
+  id: string,
+  a: ConversationAuthority,
+  data: Record<string, unknown>,
+) {
+  appendJournal(tx, {
+    kind,
+    resource: `room:${id}`,
+    actor: "",
+    principalId: a.principal_id,
+    participantId: a.participant_id,
+    environment: {},
+    data,
+  });
+}
+function roomRow(db: DB, id: string) {
+  const row = db.select().from(s.rooms).where(eq(s.rooms.id, id)).get();
+  if (!row) fail("not-found", "Room not found", 404);
+  return RoomSchema.parse(row);
+}
 export function createRoom(
   db: DB,
   input: CreateRoom,
   a: ConversationAuthority,
   now = Date.now(),
 ) {
-  bodyAccess(a);
-  if (!a.can_manage)
-    fail("permission-denied", "Managing rooms requires conversations:manage");
+  requireManage(a);
   return db.transaction((tx) => {
     const prior = tx
       .select()
@@ -152,8 +196,15 @@ export function createRoom(
       .where(eq(s.rooms.id, input.id))
       .get();
     if (prior) {
+      if (prior.archived)
+        fail(
+          "room-archived",
+          "Room ID belongs to an archived room; unarchive it instead",
+          409,
+        );
       const {
         archived: _a,
+        revision: _r,
         created_at: _c,
         updated_at: _u,
         ...request
@@ -162,9 +213,11 @@ export function createRoom(
         fail("conflict", "Room already exists with different settings", 409);
       return RoomSchema.parse(prior);
     }
+    const revision = nextRevision(tx);
     tx.insert(s.rooms)
-      .values({ ...input, created_at: now, updated_at: now })
+      .values({ ...input, revision, created_at: now, updated_at: now })
       .run();
+    roomEvent(tx, "room.created", input.id, a, { revision });
     tx.insert(s.roomMembers)
       .values({
         room_id: input.id,
@@ -176,7 +229,11 @@ export function createRoom(
     return roomAccess(tx, input.id, a);
   });
 }
-export function listRooms(db: DB, a: ConversationAuthority) {
+export function listRooms(
+  db: DB,
+  a: ConversationAuthority,
+  options: { includeArchived?: boolean } = {},
+) {
   bodyAccess(a);
   const memberships = new Set(
     db
@@ -189,7 +246,7 @@ export function listRooms(db: DB, a: ConversationAuthority) {
   return db
     .select()
     .from(s.rooms)
-    .where(eq(s.rooms.archived, false))
+    .where(options.includeArchived ? undefined : eq(s.rooms.archived, false))
     .orderBy(s.rooms.id)
     .all()
     .filter(
@@ -210,6 +267,11 @@ export function getRoom(db: DB, id: string, a: ConversationAuthority) {
       .all(),
   };
 }
+/**
+ * Membership is room policy (admission, history visibility, wake fan-out), so a
+ * change advances the room revision. Removing an archived agent always works;
+ * adding one does not. `wake: null` removes the member.
+ */
 export function setMember(
   db: DB,
   id: string,
@@ -217,35 +279,178 @@ export function setMember(
   wake: boolean | null,
   a: ConversationAuthority,
   now = Date.now(),
-) {
-  bodyAccess(a);
-  if (!a.can_manage)
-    fail(
-      "permission-denied",
-      "Managing membership requires conversations:manage",
-    );
-  roomAccess(db, id, a);
-  if (member.startsWith("agent:")) {
-    const agent = db
-      .select()
-      .from(s.agents)
-      .where(eq(s.agents.id, member.slice(6)))
-      .get();
-    if (!agent || agent.archived) fail("not-found", "Agent not found", 404);
-  }
-  const where = and(
-    eq(s.roomMembers.room_id, id),
-    eq(s.roomMembers.member, member),
+  options: {
+    expectedRevision?: number;
+    idempotency?: DoIdempotency<Room>;
+  } = {},
+): Room {
+  requireManage(a, "Managing membership requires conversations:manage");
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, options.idempotency, () => {
+        const room = roomRow(tx, id);
+        if (options.expectedRevision !== undefined)
+          checkRevision(`room:${id}`, room.revision, options.expectedRevision);
+        if (wake !== null && member.startsWith("agent:")) {
+          const agent = tx
+            .select()
+            .from(s.agents)
+            .where(eq(s.agents.id, member.slice(6)))
+            .get();
+          if (!agent) fail("not-found", "Agent not found", 404);
+          if (agent.archived)
+            fail("agent-archived", "Archived agents cannot join rooms", 409);
+        }
+        const where = and(
+          eq(s.roomMembers.room_id, id),
+          eq(s.roomMembers.member, member),
+        );
+        const existing = tx.select().from(s.roomMembers).where(where).get();
+        if (wake === null ? !existing : existing?.wake === wake) return room;
+        if (wake === null) tx.delete(s.roomMembers).where(where).run();
+        else
+          tx.insert(s.roomMembers)
+            .values({ room_id: id, member, wake, joined_at: now })
+            .onConflictDoUpdate({
+              target: [s.roomMembers.room_id, s.roomMembers.member],
+              set: { wake },
+            })
+            .run();
+        const revision = nextRevision(tx);
+        tx.update(s.rooms).set({ revision }).where(eq(s.rooms.id, id)).run();
+        roomEvent(tx, "room.members_changed", id, a, {
+          revision,
+          change: wake === null ? "removed" : existing ? "updated" : "added",
+        });
+        return roomRow(tx, id);
+      }).result,
   );
-  if (wake === null) db.delete(s.roomMembers).where(where).run();
-  else
-    db.insert(s.roomMembers)
-      .values({ room_id: id, member, wake, joined_at: now })
-      .onConflictDoUpdate({
-        target: [s.roomMembers.room_id, s.roomMembers.member],
-        set: { wake },
-      })
-      .run();
+}
+/**
+ * Revision-checked settings change. TTL and pair/hop budgets apply to later
+ * publications; wake budgets to the next dispatch lease; `history_policy`
+ * to reads immediately. Stored deliveries keep their snapshots.
+ */
+export function updateRoom(
+  db: DB,
+  id: string,
+  input: UpdateRoom,
+  a: ConversationAuthority,
+  idempotency?: DoIdempotency<Room>,
+  now = Date.now(),
+): Room {
+  requireManage(a);
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, idempotency, () => {
+        const room = roomRow(tx, id);
+        checkRevision(`room:${id}`, room.revision, input.expected_revision);
+        const { expected_revision: _expected, ...requested } = input;
+        const changed: Partial<
+          Pick<
+            Room,
+            "name" | "history_policy" | "delivery_ttl_seconds" | "budgets"
+          >
+        > = {};
+        for (const key of [
+          "name",
+          "history_policy",
+          "delivery_ttl_seconds",
+          "budgets",
+        ] as const)
+          if (
+            requested[key] !== undefined &&
+            canonicalJson(requested[key]) !== canonicalJson(room[key])
+          )
+            Object.assign(changed, { [key]: requested[key] });
+        const fields = Object.keys(changed);
+        if (!fields.length) return room;
+        const revision = nextRevision(tx);
+        tx.update(s.rooms)
+          .set({ ...changed, revision, updated_at: now })
+          .where(eq(s.rooms.id, id))
+          .run();
+        roomEvent(tx, "room.updated", id, a, { revision, changed: fields });
+        return roomRow(tx, id);
+      }).result,
+  );
+}
+function roomPending(db: DB, id: string, now: number) {
+  return (
+    db
+      .select({ n: count() })
+      .from(s.messageRecipients)
+      .innerJoin(s.messages, eq(s.messages.id, s.messageRecipients.message_id))
+      .where(
+        and(
+          eq(s.messages.room_id, id),
+          eq(s.messageRecipients.state, "pending"),
+          gt(s.messageRecipients.expires_at, now),
+        ),
+      )
+      .get()?.n ?? 0
+  );
+}
+export function archivePreview(
+  db: DB,
+  id: string,
+  a: ConversationAuthority,
+  now = Date.now(),
+): RoomArchivePreview {
+  requireManage(a);
+  const room = roomRow(db, id);
+  return {
+    room_id: id,
+    revision: room.revision,
+    archived: room.archived,
+    members:
+      db
+        .select({ n: count() })
+        .from(s.roomMembers)
+        .where(eq(s.roomMembers.room_id, id))
+        .get()?.n ?? 0,
+    pending_deliveries: roomPending(db, id, now),
+    messages:
+      db
+        .select({ n: count() })
+        .from(s.messages)
+        .where(eq(s.messages.room_id, id))
+        .get()?.n ?? 0,
+  };
+}
+/**
+ * Stops publication and thread creation now and wakes at the next dispatch
+ * lease. History stays readable under the room policy; pending deliveries can
+ * still be fetched and acknowledged until their TTL, and are never deleted.
+ */
+export function setArchived(
+  db: DB,
+  id: string,
+  archived: boolean,
+  expectedRevision: number,
+  a: ConversationAuthority,
+  idempotency?: DoIdempotency<Room>,
+  now = Date.now(),
+): Room {
+  requireManage(a);
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, idempotency, () => {
+        const room = roomRow(tx, id);
+        checkRevision(`room:${id}`, room.revision, expectedRevision);
+        if (room.archived === archived) return room;
+        const revision = nextRevision(tx);
+        tx.update(s.rooms)
+          .set({ archived, revision, updated_at: now })
+          .where(eq(s.rooms.id, id))
+          .run();
+        roomEvent(tx, archived ? "room.archived" : "room.unarchived", id, a, {
+          revision,
+          ...(archived ? { pending_deliveries: roomPending(tx, id, now) } : {}),
+        });
+        return roomRow(tx, id);
+      }).result,
+  );
 }
 export function createThread(
   db: DB,
@@ -482,6 +687,14 @@ export async function publish(
       .from(s.roomMembers)
       .where(eq(s.roomMembers.room_id, roomId))
       .all();
+    const archivedAgents = new Set(
+      tx
+        .select({ id: s.agents.id })
+        .from(s.agents)
+        .where(eq(s.agents.archived, true))
+        .all()
+        .map(({ id }) => id),
+    );
     const recipients = new Map<
       string,
       { agent: string; binding: string | null; epoch: number | null }
@@ -493,6 +706,8 @@ export async function publish(
     ) => {
       if (!members.some((m) => m.member === `agent:${agent}`))
         fail("permission-denied", "Recipients must belong to the room");
+      if (archivedAgents.has(agent))
+        fail("agent-archived", "Recipient agent is archived", 409);
       if (binding) {
         const target = current(tx, agent);
         if (
@@ -510,7 +725,11 @@ export async function publish(
     for (const target of targets) {
       if (target.kind === "room") {
         for (const m of members)
-          if (m.wake && m.member.startsWith("agent:"))
+          if (
+            m.wake &&
+            m.member.startsWith("agent:") &&
+            !archivedAgents.has(m.member.slice(6))
+          )
             add(m.member.slice(6), null, null);
       } else
         add(
@@ -929,6 +1148,8 @@ export function leaseDispatch(
         and(
           pendingWhere(agent, b, now),
           isNull(s.messageRecipients.wake_suppressed),
+          // Archived rooms stop waking; their deliveries remain fetchable.
+          eq(s.rooms.archived, false),
         ),
       )
       .orderBy(s.messageRecipients.ordinal, s.messageRecipients.id)

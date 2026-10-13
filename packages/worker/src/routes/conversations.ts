@@ -7,7 +7,7 @@ import {
   CURSOR_KEY_MIN_LENGTH,
   resolveConversationCursorKey,
 } from "../lib/conversation-cursor-key";
-import { forwardToDO } from "../lib/do-forward";
+import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { principalIdFor } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 export const conversations = new Hono<{
@@ -194,6 +194,7 @@ conversations.all("*", async (c) => {
     {
       "X-Tila-Conversation-Authority": JSON.stringify(authority),
       "X-Tila-Conversation-Cursor-Key": cursorKey,
+      ...idempotencyHeaders(c),
     },
   );
   // A long poll must not return mailbox metadata after run revocation.

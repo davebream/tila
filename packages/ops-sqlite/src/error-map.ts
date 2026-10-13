@@ -1,6 +1,7 @@
 import { ContinuityError, FenceError } from "@tila/core";
 import { AgentBindingError } from "./agent-binding-ops";
 import { ArtifactReviewError } from "./artifact-review-ops";
+import { RevisionConflictError } from "./config-revision-ops";
 import { SchemaWriteError } from "./constraint-ops";
 import { ConversationError } from "./conversation-ops";
 import { DoIdempotencyConflictError } from "./do-idempotency-ops";
@@ -185,6 +186,13 @@ export function mapProjectError(err: Error): {
   retryable: boolean;
   extras?: Record<string, unknown>;
 } | null {
+  if (err instanceof RevisionConflictError)
+    return {
+      status: 412,
+      code: "revision-conflict",
+      retryable: false,
+      extras: { revision: err.revision, resource: err.resource },
+    };
   if (err instanceof ConversationError || err instanceof AgentBindingError)
     return { status: err.status, code: err.code, retryable: false };
   if (err instanceof QuestionError)

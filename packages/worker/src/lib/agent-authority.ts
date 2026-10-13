@@ -29,16 +29,21 @@ export function agentAuthorityFor(
   const token = c.get("tokenResult");
   const policy = c.get("credentialPolicy");
   const role = c.get("effectiveRole");
+  const runtime = runtimeIdentity(
+    token.kind === "d1-token" ? token.runtime : undefined,
+  );
   return {
     principal_id: principalIdFor(token),
+    participant_id:
+      runtime?.participant_id ??
+      c.get("participantId") ??
+      principalIdFor(token),
     can_manage: policy
       ? policy.capabilities.includes("agents:manage")
       : (token.kind === "d1-token" && token.scopes === "full") ||
         (role !== undefined &&
           PROJECT_ROLE_RANK[role] >= PROJECT_ROLE_RANK.maintainer),
-    runtime: runtimeIdentity(
-      token.kind === "d1-token" ? token.runtime : undefined,
-    ),
+    runtime,
     acting_runtime: null as ReturnType<typeof runtimeIdentity>,
     terminal_run_id: null as string | null,
   };

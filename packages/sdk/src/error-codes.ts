@@ -23,6 +23,10 @@ export const TILA_ERRORS = {
   SCHEMA_REVISION_CONFLICT: "schema-revision-conflict",
   SCHEMA_REVIEW_REQUIRED: "schema-review-required",
   SCHEMA_REVIEW_MISMATCH: "schema-review-mismatch",
+  // Settings resources (agents, rooms, signal groups): stale expected_revision.
+  REVISION_CONFLICT: "revision-conflict",
+  AGENT_ARCHIVED: "agent-archived",
+  ROOM_ARCHIVED: "room-archived",
   UNSUPPORTED_PROTOCOL: "unsupported-protocol",
   CURSOR_EXPIRED: "cursor-expired",
   DELIVERY_EXPIRED: "delivery-expired",

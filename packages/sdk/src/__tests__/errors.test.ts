@@ -151,3 +151,45 @@ describe("DPoP error codes (WI-G)", () => {
     expect(toTilaErrorCode("dpop-invalid")).not.toBe("UNKNOWN");
   });
 });
+
+describe("readApiError", () => {
+  it("keeps the current revision from a settings conflict", async () => {
+    const { readApiError } = await import("../errors");
+    const error = await readApiError(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: "revision-conflict",
+            message: "agent:worker changed; current revision is 7",
+            retryable: false,
+            revision: 7,
+            resource: "agent:worker",
+          },
+        }),
+        { status: 412 },
+      ),
+    );
+    expect(error).toMatchObject({
+      status: 412,
+      code: TILA_ERRORS.REVISION_CONFLICT,
+      retryable: false,
+      extras: { revision: 7, resource: "agent:worker" },
+    });
+  });
+
+  it("accepts envelopes that omit retryable", async () => {
+    const { readApiError } = await import("../errors");
+    const error = await readApiError(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: { code: "last-owner", message: "Keep one owner" },
+        }),
+        { status: 409 },
+      ),
+    );
+    expect(error).toMatchObject({ status: 409, retryable: false });
+    expect(error.message).toBe("Keep one owner");
+  });
+});

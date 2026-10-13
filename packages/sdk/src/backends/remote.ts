@@ -796,7 +796,11 @@ export class RemoteBackend
 
   async setSignalGroup(
     groupId: string,
-    input: { name: string; principal_ids: string[] },
+    input: {
+      name: string;
+      principal_ids: string[];
+      expected_revision?: number;
+    },
   ) {
     const result = await this.client.put(
       `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
@@ -806,9 +810,16 @@ export class RemoteBackend
     return result.group;
   }
 
-  async deleteSignalGroup(groupId: string) {
+  async deleteSignalGroup(
+    groupId: string,
+    options: { expected_revision?: number } = {},
+  ) {
+    const query =
+      options.expected_revision === undefined
+        ? ""
+        : `?expected_revision=${options.expected_revision}`;
     await this.client.delete(
-      `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}`,
+      `/projects/${this.projectId}/signals/groups/${encodeURIComponent(groupId)}${query}`,
       { schema: OkSchema, validate: true },
     );
     return true;
