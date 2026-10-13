@@ -46,6 +46,16 @@ const TaskDetailPage = lazy(() =>
     default: m.TaskDetailPage,
   })),
 );
+const TaskCreateDrawer = lazy(() =>
+  import("@/components/work/task-create").then((m) => ({
+    default: m.TaskCreateDrawer,
+  })),
+);
+const RecordCreateDrawer = lazy(() =>
+  import("@/components/work/record-editor").then((m) => ({
+    default: m.RecordCreateDrawer,
+  })),
+);
 const RecordDetailPage = lazy(() =>
   import("@/pages/record-detail").then((m) => ({
     default: m.RecordDetailPage,
@@ -67,12 +77,18 @@ const queryClient = new QueryClient({
 });
 
 function TasksWithDrawer() {
+  const [searchParams] = useSearchParams();
   return (
     <>
       <TasksPage />
       <Suspense>
         <Outlet />
       </Suspense>
+      {searchParams.get("create") === "task" && (
+        <Suspense>
+          <TaskCreateDrawer />
+        </Suspense>
+      )}
     </>
   );
 }
@@ -89,12 +105,18 @@ function ArtifactsWithDrawer() {
 }
 
 function RecordsWithDrawer() {
+  const [searchParams] = useSearchParams();
   return (
     <>
       <RecordsPage />
       <Suspense>
         <Outlet />
       </Suspense>
+      {searchParams.get("create") === "record" && searchParams.get("type") && (
+        <Suspense>
+          <RecordCreateDrawer />
+        </Suspense>
+      )}
     </>
   );
 }

@@ -118,6 +118,24 @@ export function CommandPalette({
         });
       }
 
+    // Opens the create drawer; the drawer explains when this credential
+    // cannot create tasks, and the server enforces it again.
+    const tasksItem = NAV_SECTIONS.flatMap((s) => s.items).find(
+      (item) => item.id === "tasks",
+    );
+    if (
+      tasksItem &&
+      (!isVisible || isVisible(tasksItem)) &&
+      (!q || ["new task", "create task"].some((term) => term.includes(q)))
+    )
+      result.push({
+        id: "action:new-task",
+        label: "New task",
+        meta: "Create a task or start from a template",
+        group: "navigation",
+        href: `${prefix}/tasks?create=task`,
+      });
+
     const shortcuts: PaletteItem[] = [
       {
         id: "shortcut:j-k",

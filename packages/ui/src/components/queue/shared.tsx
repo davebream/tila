@@ -1,6 +1,5 @@
 import { ApiError } from "@/lib/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { WhoamiResponse } from "@tila/schemas";
 import { type InputHTMLAttributes, useId } from "react";
 export const inputClass =
   "rounded-md border border-border bg-background px-3 py-2 text-sm w-full";
@@ -52,20 +51,4 @@ export function useAction<T>(
     },
   });
 }
-export function rights(identity: WhoamiResponse | undefined, project: string) {
-  const role = identity?.project_id === project ? identity.role : undefined;
-  const write = !!role && role !== "viewer" && identity?.permission !== "read";
-  const has = (...caps: string[]) =>
-    !identity?.policy ||
-    caps.every((cap) =>
-      (identity.policy?.capabilities as string[]).includes(cap),
-    );
-  const manage = write && (role === "maintainer" || role === "owner");
-  return {
-    edit: write && has("tasks:write"),
-    operate: write && has("tasks:write", "claims:renew"),
-    configure: manage && has("schema:write"),
-    reconcile: manage && has("tasks:write", "claims:renew"),
-    force: manage && has("tasks:write", "claims:acquire", "schema:write"),
-  };
-}
+export { rights } from "@/lib/rights";
