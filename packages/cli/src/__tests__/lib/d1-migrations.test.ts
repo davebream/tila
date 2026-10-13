@@ -325,6 +325,10 @@ describe("applyD1Migrations", () => {
             .all(),
         ).toEqual([
           { name: "credentials_legacy_name" },
+          { name: "project_settings_revision_insert" },
+          { name: "project_settings_revision_update" },
+          { name: "repo_settings_revision_insert" },
+          { name: "repo_settings_revision_update" },
           { name: "tokens_credential_name" },
         ]);
         expect(
