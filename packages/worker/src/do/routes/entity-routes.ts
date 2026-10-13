@@ -21,13 +21,15 @@ import {
 } from "@tila/ops-sqlite";
 import {
   ArchiveRequestSchema,
+  type LifecycleOutcome,
+  LifecycleOutcomeSchema,
   type SearchKind,
   UpdateEntityRequestSchema,
   parseTagFilter,
 } from "@tila/schemas";
 import { eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import { filterFields } from "./entity-response";
 import { originFromBody } from "./origin";
 import {
@@ -229,8 +231,25 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     const restrictions = readCredentialPolicy(
       c.req.header("X-Tila-Credential-Policy"),
     )?.restrictions;
+    const blocked = c.req.query("blocked") === "1";
+    const outcomeRaw = c.req.query("outcome");
+    let outcome: LifecycleOutcome[] | undefined;
+    if (outcomeRaw !== undefined) {
+      const parsed = z
+        .array(LifecycleOutcomeSchema)
+        .min(1)
+        .safeParse(outcomeRaw.split(","));
+      if (!parsed.success)
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          "outcome must be a comma list of lifecycle outcomes",
+        );
+      outcome = parsed.data;
+    }
 
-    const { entities, total, next_cursor } = entityOps.list(
+    const { entities, total, next_cursor, outcome_types } = entityOps.list(
       db,
       {
         restrictions,
@@ -243,6 +262,8 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         offset,
         cursor,
         ...(tagFilter?.length ? { tagFilter } : {}),
+        ...(blocked ? { blocked } : {}),
+        ...(outcome ? { outcome } : {}),
       },
       deps.enrichOpts(),
     );
@@ -261,6 +282,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
           : archived === undefined
             ? { archived: "included" as const }
             : {}),
+        ...(outcome_types ? { outcome_types } : {}),
       },
     };
 

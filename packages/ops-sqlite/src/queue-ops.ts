@@ -538,6 +538,18 @@ function group(
   if (attempt?.state === "uncertain") return "uncertain";
   return "active";
 }
+/**
+ * A starting or running attempt past its execution lease. Expiry processing
+ * later turns it uncertain; until then this is the scoped view of the
+ * `expired_execution_leases` diagnostic.
+ */
+function leaseLapsed(attempt: WorkAttempt | undefined, now: number) {
+  return (
+    (attempt?.state === "starting" || attempt?.state === "running") &&
+    attempt.lease_expires_at !== null &&
+    attempt.lease_expires_at <= now
+  );
+}
 /** Project-wide operational totals in the retained journal's last 24 hours. */
 export function diagnostics(db: ProjectDatabase, now = Date.now()) {
   const since = now - 86_400_000;
@@ -657,7 +669,10 @@ export function inspect(
           entry.target_principal === query.target_principal) &&
         (!query.capability ||
           entry.required_capabilities.includes(query.capability)) &&
-        (query.priority === undefined || entry.priority === query.priority),
+        (query.priority === undefined || entry.priority === query.priority) &&
+        (!query.lease ||
+          (group(entry, latest.get(entry.id)) === "active" &&
+            leaseLapsed(latest.get(entry.id), now))),
     );
     return {
       policy: policy(tx),

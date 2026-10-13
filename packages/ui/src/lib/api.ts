@@ -970,9 +970,15 @@ export function messageDeliveries(
 /** Browse delivery traces newest first. Requires conversations:manage. */
 export function listDeliveries(
   projectId: string,
-  filters: DeliveryListQuery & { cursor?: string } = {},
+  filters: DeliveryListQuery & { cursor?: string; limit?: number } = {},
 ): Promise<DeliveryListResponse> {
-  return request(projectId, "/deliveries", { ...filters, limit: "50" });
+  const { expires_after, limit, ...rest } = filters;
+  return request(projectId, "/deliveries", {
+    ...rest,
+    expires_after:
+      expires_after === undefined ? undefined : String(expires_after),
+    limit: String(limit ?? 50),
+  });
 }
 export type RuntimeView = (typeof RuntimeViewResponseSchema)["_output"];
 export function getRuntimeView(

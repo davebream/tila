@@ -255,6 +255,8 @@ export function createConversationRoutes(deps: RouterDeps) {
       message: c.req.query("message") || undefined,
       id: c.req.query("id") || undefined,
       state: c.req.query("state") || undefined,
+      wake: c.req.query("wake") || undefined,
+      expires_after: c.req.query("expires_after") || undefined,
     });
     const scope = JSON.stringify([
       "deliveries",
@@ -266,6 +268,11 @@ export function createConversationRoutes(deps: RouterDeps) {
       filters.message ?? null,
       filters.id ?? null,
       filters.state ?? null,
+      // Appended only when set, so cursors from before these filters still verify.
+      ...(filters.wake ? [`wake:${filters.wake}`] : []),
+      ...(filters.expires_after === undefined
+        ? []
+        : [`expires_after:${filters.expires_after}`]),
     ]);
     const generation = ops.cursorGeneration(deps.db);
     const cursor = c.req.query("cursor");

@@ -13,8 +13,10 @@ import {
   CatalogIncompleteSchema,
   RecordCatalogEntrySchema,
   ResultScopeSchema,
+  TaskListScopeSchema,
 } from "./catalog";
 import { ClaimModeSchema } from "./claim";
+import { LIFECYCLE_OUTCOMES, LifecycleOutcomeSchema } from "./config";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
 import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
@@ -215,7 +217,7 @@ export const PaginatedEntityListResponseSchema = z.object({
   has_more: z.boolean(),
   /** Opaque keyset cursor for the next page, or null on the last page. */
   next_cursor: z.string().nullable().optional(),
-  scope: ResultScopeSchema.optional(),
+  scope: TaskListScopeSchema.optional(),
 });
 
 export type PaginatedEntityListResponse = z.infer<
@@ -247,6 +249,21 @@ export const TaskListQuerySchema = z
       .optional(),
     sort: z.enum(TASK_LIST_SORTS).optional(),
     order: z.enum(["asc", "desc"]).optional(),
+    /** `1`: only open tasks with an unresolved, missing or cyclic prerequisite. */
+    blocked: z.literal("1").optional(),
+    /** Comma list: tasks in the state their type's lifecycle names for it. */
+    outcome: z
+      .string()
+      .refine(
+        (value) =>
+          value
+            .split(",")
+            .every(
+              (outcome) => LifecycleOutcomeSchema.safeParse(outcome).success,
+            ),
+        { message: `outcome must list ${LIFECYCLE_OUTCOMES.join(", ")}` },
+      )
+      .optional(),
   })
   .refine((q) => !(q.cursor && q.offset && q.offset !== "0"), {
     message: "cursor and offset cannot be combined",
@@ -309,7 +326,7 @@ export const PaginatedCompactEntityListResponseSchema = z.object({
   offset: z.number().int(),
   has_more: z.boolean(),
   next_cursor: z.string().nullable().optional(),
-  scope: ResultScopeSchema.optional(),
+  scope: TaskListScopeSchema.optional(),
 });
 
 export type PaginatedCompactEntityListResponse = z.infer<

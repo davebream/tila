@@ -3056,9 +3056,26 @@ needs a person. The count links to the list it was counted from.
 | `execution.uncertain` | Queue entries whose execution outcome is uncertain | `queue?state=uncertain` |
 | `execution.suspended` | Queue entries whose execution is suspended | `queue?state=suspended` |
 
-Rules for blocked or failed work, delivery problems and stale runtime
-observations need list filters with exact totals first. Workflow-attempt and
-decision rules wait for list pages that can show them.
+Workflow-attempt and decision rules wait for list pages that can show them.
+
+**Attention filters.** These list parameters give the Overview exact,
+caller-scoped counts for problems that a plain status filter cannot express.
+Each list's `total` counts every match across pages, so a count and the list it
+links to always agree.
+
+| Request | Matches |
+|---|---|
+| `GET /tasks?blocked=1` | Open tasks (not archived, not terminal) whose readiness reports an unresolved, missing, cyclic or lifecycle-unconfigured prerequisite. Soft blocks count; pending gates and the task's own state do not. A visible task blocked by a task the caller cannot see counts, without revealing it. |
+| `GET /tasks?outcome=failure,abandoned` | Tasks whose declared lifecycle field holds the state their type names for one of those outcomes. `scope.outcome_types` lists the visible types that declare one; an empty list means nothing can match, not that nothing failed. |
+| `GET /deliveries?state=pending&wake=suppressed` | Pending deliveries whose wakes stopped (stall, budget, hop or pair limit) until someone resumes them. |
+| `GET /deliveries?state=expired&expires_after=<ms>` | Deliveries that expired after that time, including pending rows past their TTL. Expired rows are never deleted, so an unbounded count would only grow. |
+| `GET /queue?lease=expired` | Entries whose latest attempt is starting or running past its execution lease: the caller-scoped view of the `expired_execution_leases` diagnostic. |
+| `GET /runtime-view?filter=attention` | Agents whose current occupant expired, cannot be confirmed, or whose host stopped reporting while attached (`runtimeAttention` in `@tila/core`). A run-store outage is reported in `sources`, not counted. The Worker scans at most 250 agents per request; `scan.complete` is false beyond that and `total` is then a floor. |
+
+`blocked`, `outcome`, `wake` and `expires_after` are bound to list cursors, so a
+cursor issued for one filter is rejected under another. The SDK exposes the
+runtime and delivery filters; the task filters are HTTP-only for now because the
+local backend's list contract does not carry them yet.
 
 The page states are derived in order:
 

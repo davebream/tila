@@ -24,6 +24,7 @@ import {
   gt,
   gte,
   inArray,
+  isNotNull,
   isNull,
   lt,
   lte,
@@ -1162,6 +1163,9 @@ export interface DeliveryFilters {
   message?: string;
   id?: string;
   state?: "pending" | "acked" | "expired";
+  wake?: "suppressed";
+  /** Epoch ms; only deliveries expiring after it. */
+  expires_after?: number;
 }
 /** Wake attempts per delivery, oldest first. Attempts store delivery IDs as JSON. */
 function attemptsFor(db: DB, ids: string[]) {
@@ -1338,20 +1342,27 @@ export function listDeliveries(
     );
   const r = s.messageRecipients;
   const pageSize = Math.min(100, Math.max(1, limit));
+  const matching = and(
+    filters.agent ? eq(r.agent_id, filters.agent) : undefined,
+    filters.room ? eq(s.messages.room_id, filters.room) : undefined,
+    filters.thread ? eq(s.messages.thread_id, filters.thread) : undefined,
+    filters.message ? eq(r.message_id, filters.message) : undefined,
+    filters.id
+      ? or(eq(r.id, filters.id), eq(r.message_id, filters.id))
+      : undefined,
+    stateWhere(filters.state, now),
+    filters.wake === "suppressed" ? isNotNull(r.wake_suppressed) : undefined,
+    filters.expires_after === undefined
+      ? undefined
+      : gt(r.expires_at, filters.expires_after),
+  );
   const rows = db
     .select({ delivery: r, message: s.messages.message })
     .from(r)
     .innerJoin(s.messages, eq(s.messages.id, r.message_id))
     .where(
       and(
-        filters.agent ? eq(r.agent_id, filters.agent) : undefined,
-        filters.room ? eq(s.messages.room_id, filters.room) : undefined,
-        filters.thread ? eq(s.messages.thread_id, filters.thread) : undefined,
-        filters.message ? eq(r.message_id, filters.message) : undefined,
-        filters.id
-          ? or(eq(r.id, filters.id), eq(r.message_id, filters.id))
-          : undefined,
-        stateWhere(filters.state, now),
+        matching,
         before
           ? or(
               lt(r.ordinal, before.ordinal),
@@ -1363,9 +1374,18 @@ export function listDeliveries(
     .orderBy(desc(r.ordinal), desc(r.id))
     .limit(pageSize + 1)
     .all();
+  // Same filters, no page window: the count a summary can link to this list.
+  const total =
+    db
+      .select({ count: count() })
+      .from(r)
+      .innerJoin(s.messages, eq(s.messages.id, r.message_id))
+      .where(matching)
+      .get()?.count ?? 0;
   return {
     deliveries: traceItems(db, rows.slice(0, pageSize), now),
     has_more: rows.length > pageSize,
+    total,
   };
 }
 const MESSAGE_DELIVERY_LIMIT = 200;

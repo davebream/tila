@@ -32,6 +32,17 @@ export const ResultScopeSchema = z.object({
 });
 export type ResultScope = z.infer<typeof ResultScopeSchema>;
 
+/** Scope of a task list page. */
+export const TaskListScopeSchema = ResultScopeSchema.extend({
+  /**
+   * With an `outcome` filter: the visible types whose lifecycle declares one
+   * of the requested outcomes. Empty means no type can match, which is not
+   * the same as no task being in that outcome.
+   */
+  outcome_types: z.array(z.string()).optional(),
+});
+export type TaskListScope = z.infer<typeof TaskListScopeSchema>;
+
 export const CatalogIncompleteSchema = z.object({
   /** `unavailable`: the schema could not be fetched. `invalid`: it was fetched but does not parse or validate. */
   declared_types: z.enum(["unavailable", "invalid"]).optional(),
