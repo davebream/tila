@@ -183,13 +183,6 @@ export function evaluateReadiness(
   return { ready: reasons.length === 0, reasons };
 }
 
-const DEPENDENCY_REASONS: ReadonlySet<WorkBlockReason["code"]> = new Set([
-  "dependency-unsatisfied",
-  "dependency-missing",
-  "dependency-cycle",
-  "dependency-lifecycle-unconfigured",
-]);
-
 /** The entity is in a terminal state: its lifecycle's, or legacy `closed`. */
 export function isTerminal(
   snapshot: ReadinessSnapshot,
@@ -203,19 +196,156 @@ export function isTerminal(
 }
 
 /**
+ * Whether `id`, as a predecessor, holds back a dependent. `strict` is the
+ * dependent's mode: work with a declared lifecycle also rejects missing and
+ * lifecycle-unconfigured predecessors. Mirrors the per-predecessor checks in
+ * `evaluateReadiness`.
+ */
+function holdsBack(
+  snapshot: ReadinessSnapshot,
+  id: string,
+  strict: boolean,
+): boolean {
+  const predecessor = snapshot.entities.get(id);
+  if (!predecessor) return strict;
+  const mapping = snapshot.definition?.work_units[predecessor.type]?.lifecycle;
+  if (mapping) {
+    const value = predecessor.data[mapping.field];
+    return (
+      typeof value !== "string" || !mapping.dependency_satisfied.includes(value)
+    );
+  }
+  if (strict) return true;
+  return (
+    !predecessor.archived &&
+    predecessor.data.status !== undefined &&
+    predecessor.data.status !== null &&
+    predecessor.data.status !== "closed"
+  );
+}
+
+interface Component {
+  /** Members that hold back a strict or a legacy dependent. */
+  strictProblems: number;
+  legacyProblems: number;
+  /** Some ancestor outside this component holds back a dependent. */
+  upstreamStrict: boolean;
+  upstreamLegacy: boolean;
+  /** This component or one of its ancestors contains a cycle. */
+  reachesCycle: boolean;
+}
+
+/**
  * Open work held back by its prerequisites: not archived, not terminal, and
- * readiness reports an unresolved, missing, cyclic or unconfigured
- * predecessor. Pending gates and the task's own state do not count. Uses
- * `evaluateReadiness` per task, so it always agrees with queue block reasons.
+ * `evaluateReadiness` would report an unresolved, missing, cyclic or
+ * lifecycle-unconfigured predecessor. Pending gates and the task's own state
+ * do not count.
+ *
+ * Instead of one ancestor walk per task, this condenses the predecessor graph
+ * into strongly connected components once (iterative Tarjan, so long chains
+ * cannot overflow the stack) and propagates "an ancestor holds back" and
+ * "an ancestor is cyclic" in a single pass: O(tasks + edges).
  */
 export function blockedTaskIds(snapshot: ReadinessSnapshot): Set<string> {
+  const predecessorsOf = (id: string) => snapshot.predecessors.get(id) ?? [];
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const componentOf = new Map<string, number>();
+  const components: Component[] = [];
+  let counter = 0;
+
+  const close = (root: string) => {
+    const id = components.length;
+    const members: string[] = [];
+    let member: string | undefined;
+    do {
+      member = stack.pop() as string;
+      onStack.delete(member);
+      componentOf.set(member, id);
+      members.push(member);
+    } while (member !== root);
+    const upstream = new Set<number>();
+    let cyclic = members.length > 1;
+    for (const m of members)
+      for (const p of predecessorsOf(m)) {
+        const c = componentOf.get(p) as number;
+        if (c === id) cyclic = true;
+        else upstream.add(c);
+      }
+    const above = [...upstream].map((c) => components[c]);
+    const reaches = (c: Component, mode: "strict" | "legacy") =>
+      (mode === "strict" ? c.strictProblems : c.legacyProblems) > 0 ||
+      (mode === "strict" ? c.upstreamStrict : c.upstreamLegacy);
+    components.push({
+      strictProblems: members.filter((m) => holdsBack(snapshot, m, true))
+        .length,
+      legacyProblems: members.filter((m) => holdsBack(snapshot, m, false))
+        .length,
+      upstreamStrict: above.some((c) => reaches(c, "strict")),
+      upstreamLegacy: above.some((c) => reaches(c, "legacy")),
+      reachesCycle: cyclic || above.some((c) => c.reachesCycle),
+    });
+  };
+
+  const roots = new Set<string>(snapshot.entities.keys());
+  for (const [to, from] of snapshot.predecessors) {
+    roots.add(to);
+    for (const id of from) roots.add(id);
+  }
+  for (const root of roots) {
+    if (index.has(root)) continue;
+    const frames: Array<{ id: string; next: number }> = [];
+    const open = (id: string) => {
+      index.set(id, counter);
+      low.set(id, counter);
+      counter++;
+      stack.push(id);
+      onStack.add(id);
+      frames.push({ id, next: 0 });
+    };
+    open(root);
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      const predecessors = predecessorsOf(frame.id);
+      if (frame.next < predecessors.length) {
+        const p = predecessors[frame.next++];
+        if (!index.has(p)) open(p);
+        else if (onStack.has(p))
+          low.set(
+            frame.id,
+            Math.min(low.get(frame.id) as number, index.get(p) as number),
+          );
+        continue;
+      }
+      frames.pop();
+      if (low.get(frame.id) === index.get(frame.id)) close(frame.id);
+      const parent = frames[frames.length - 1];
+      if (parent)
+        low.set(
+          parent.id,
+          Math.min(low.get(parent.id) as number, low.get(frame.id) as number),
+        );
+    }
+  }
+
   const blocked = new Set<string>();
   for (const entity of snapshot.entities.values()) {
     if (entity.archived || isTerminal(snapshot, entity)) continue;
-    if (!snapshot.predecessors.has(entity.id)) continue;
-    const { reasons } = evaluateReadiness(snapshot, entity.id);
-    if (reasons.some((reason) => DEPENDENCY_REASONS.has(reason.code)))
-      blocked.add(entity.id);
+    const component = components[componentOf.get(entity.id) as number];
+    const strict =
+      snapshot.definition?.work_units[entity.type]?.lifecycle !== undefined;
+    // Other members of its own cycle are also its predecessors.
+    const others = strict
+      ? component.strictProblems -
+        (holdsBack(snapshot, entity.id, true) ? 1 : 0)
+      : component.legacyProblems -
+        (holdsBack(snapshot, entity.id, false) ? 1 : 0);
+    const held = strict
+      ? component.reachesCycle || component.upstreamStrict || others > 0
+      : component.upstreamLegacy || others > 0;
+    if (held) blocked.add(entity.id);
   }
   return blocked;
 }
