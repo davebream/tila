@@ -222,6 +222,7 @@ export function createMockFacade(): MockFacadeShape {
       "rebind",
       "retry",
       "forceRecovery",
+      "replaceSession",
     ),
     dispatch: fns("status", "lease", "report"),
     agents: fns("list", "get", "register", "bind", "release", "runtimeView"),

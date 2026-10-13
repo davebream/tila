@@ -143,6 +143,28 @@ describe("repository execution helper with real embedded queue", () => {
     expect(spy.mock.calls[0]).toEqual(spy.mock.calls[1]);
     expect(f.adapter.start).toHaveBeenCalledTimes(1);
   });
+  it("attaches a restarted provider session to the same attempt without relaunching", async () => {
+    const f = await fixture();
+    expect((await f.executor().step(f.id)).attempt.state).toBe("running");
+    const before = (await f.backend.attempts.get(f.id)).attempt;
+    f.observe({
+      state: "replaced",
+      reason: "provider session restarted",
+      session: { provider: "fixture", id: "session-2" },
+    });
+    const replaced = await f.executor().step(f.id);
+    expect(replaced.attempt.id).toBe(f.id);
+    expect(replaced.attempt.session?.id).toBe("session-2");
+    expect(replaced.attempt.fence).toBeGreaterThan(before.fence);
+    expect(replaced.attempt.outcome).toBeNull();
+    expect(f.adapter.start).toHaveBeenCalledTimes(1);
+    f.observe({
+      state: "running",
+      session: { provider: "fixture", id: "session-2" },
+    });
+    expect((await f.executor().step(f.id)).attempt.state).toBe("running");
+    expect((await f.executor().recoverable()).map((a) => a.id)).toEqual([f.id]);
+  });
   it("keeps unknown execution uncertain without a replacement", async () => {
     const f = await fixture();
     f.observe({

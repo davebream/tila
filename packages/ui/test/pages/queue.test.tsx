@@ -40,6 +40,7 @@ const attempt = (over: Partial<WorkAttempt> = {}): WorkAttempt => ({
   created_at: Date.now(),
   updated_at: Date.now(),
   finished_at: null,
+  revisions: null,
   ...over,
 });
 function entries(count: number): QueueInspection["entries"] {

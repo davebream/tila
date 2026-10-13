@@ -164,6 +164,53 @@ export function queueConformance(
       },
     );
     scenario(
+      "replaces a stopped native session on the same attempt and finds owned work",
+      async ({ queue, attempts, createTask }) => {
+        await queue.configure({
+          ...key(),
+          expected_revision: 0,
+          enabled: true,
+          paused: false,
+          execution_limit: 1,
+        });
+        await createTask("one");
+        await queue.enroll({ ...key(), task_id: "one" });
+        let a = granted(await queue.claimNext(key()));
+        a = (await attempts.accept(a.id, authority(a))).attempt;
+        const session = { provider: "conformance-fixture", id: "first" };
+        a = (await attempts.started(a.id, { ...authority(a), session }))
+          .attempt;
+        const old = authority(a);
+        const replaced = await attempts.replaceSession(a.id, {
+          ...authority(a),
+          reason: "Provider session restarted",
+          previous_session: session,
+          previous_stopped: true,
+          session: { ...session, id: "second" },
+        });
+        expect(replaced.attempt.id).toBe(a.id);
+        expect(replaced.attempt.session?.id).toBe("second");
+        expect(replaced.grant_valid).toBe(true);
+        expect(replaced.attempt.revisions?.authorized).toBeDefined();
+        await expect(attempts.heartbeat(a.id, old)).rejects.toMatchObject({
+          code: "queue-authority-lost",
+        });
+        const owned = await attempts.list({
+          principal_id: a.principal_id,
+          participant_id: a.participant_id,
+          active: true,
+        });
+        expect(owned.map((attempt) => attempt.id)).toEqual([a.id]);
+        expect(
+          await attempts.list({
+            principal_id: a.principal_id,
+            participant_id: "another-wrapper",
+            active: true,
+          }),
+        ).toEqual([]);
+      },
+    );
+    scenario(
       "holds unknown execution and requires explicit force recovery before replacement",
       async ({ queue, attempts, createTask }) => {
         await queue.configure({

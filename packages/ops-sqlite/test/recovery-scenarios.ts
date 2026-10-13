@@ -1064,4 +1064,243 @@ recoveryScenarios.push(
       assert.equal(data.owner_participant_id, origin.participantId);
     },
   },
+  {
+    name: "a replacement native session keeps the attempt and retires the old session's authority",
+    run(db) {
+      const { now, attempt } = setup(db);
+      const replacement = { ...session, id: "session-2" };
+      const command = {
+        ...authority(attempt),
+        reason: "provider session restarted",
+        previous_session: session,
+        previous_stopped: true as const,
+        session: replacement,
+      };
+      const result = recovery.replaceSession(
+        db,
+        attempt.id,
+        command,
+        origin,
+        now,
+      );
+      assert.equal(result.attempt.id, attempt.id);
+      assert.equal(result.attempt.state, "running");
+      assert.equal(result.attempt.outcome, null);
+      assert.deepEqual(result.attempt.session, replacement);
+      assert.ok(result.attempt.fence > attempt.fence);
+      assert.equal(result.grant_valid, true);
+      assert.ok(result.attempt.revisions?.authorized);
+      // The old session's fence no longer authorizes anything.
+      assert.throws(() =>
+        attempts.heartbeat(db, attempt.id, authority(attempt), origin, now),
+      );
+      assert.throws(() =>
+        attempts.finish(
+          db,
+          attempt.id,
+          {
+            ...authority(attempt),
+            expected_revision: result.attempt.revision,
+            outcome: { ...outcome, status: "success" },
+          },
+          origin,
+          now,
+        ),
+      );
+      assert.deepEqual(
+        recovery.replaceSession(db, attempt.id, command, origin, now),
+        result,
+      );
+      const replaced = db
+        .select()
+        .from(schema.journal)
+        .where(eq(schema.journal.kind, "attempt.session_replaced"))
+        .all();
+      assert.equal(replaced.length, 1);
+      assert.deepEqual(
+        JSON.parse(replaced[0]?.data ?? "{}").previous_session,
+        session,
+      );
+      assert.equal(queue.getEntry(db, attempt.entry_id).state, "admitted");
+    },
+  },
+  {
+    name: "session replacement requires the owner, the recorded session and no pending cancellation",
+    run(db) {
+      const { now, attempt } = setup(db);
+      const replace = (
+        current: WorkAttempt,
+        over: Record<string, unknown> = {},
+        who = origin,
+      ) =>
+        recovery.replaceSession(
+          db,
+          current.id,
+          {
+            ...authority(current),
+            reason: "restart",
+            previous_session: session,
+            previous_stopped: true as const,
+            session: { ...session, id: "next" },
+            ...over,
+          },
+          who,
+          now,
+        );
+      assert.throws(
+        () => replace(attempt, { previous_session: { ...session, id: "x" } }),
+        /recorded session/,
+      );
+      assert.throws(() => replace(attempt, { session }), /reconcile/);
+      assert.throws(
+        () =>
+          replace(attempt, {}, { ...origin, participantId: "other-process" }),
+        /another execution authority/,
+      );
+      const reserved = seedAttempt(db, "second", now);
+      assert.throws(() => replace(reserved), /unavailable while reserved/);
+      const cancelled = recovery.requestCancellation(
+        db,
+        attempt.id,
+        revision(attempt),
+        origin,
+        false,
+        now,
+      ).attempt;
+      assert.throws(() => replace(cancelled), /Cancellation is pending/);
+    },
+  },
+  {
+    name: "a native restart after lease expiry reattaches without completing the attempt",
+    run(db) {
+      const { now, attempt } = setup(db);
+      attempts.expire(db, now + 60_000);
+      const uncertain = attempts.get(db, attempt.id);
+      assert.equal(uncertain.state, "uncertain");
+      const result = recovery.replaceSession(
+        db,
+        attempt.id,
+        {
+          ...authority(uncertain),
+          reason: "wrapper restarted the provider session",
+          previous_session: session,
+          previous_stopped: true,
+          session: { ...session, id: "restarted" },
+          checkpoint: { step: "resume" },
+        },
+        origin,
+        now + 60_001,
+      );
+      assert.equal(result.attempt.state, "running");
+      assert.equal(result.attempt.finished_at, null);
+      assert.deepEqual(result.attempt.checkpoint, { step: "resume" });
+      assert.equal(result.grant_valid, true);
+      assert.deepEqual(queue.occupancy(db), { execution: 1, wip: 1 });
+    },
+  },
+  {
+    name: "attempts record the definition and policy revisions in force at each transition",
+    run(db) {
+      const { now, attempt } = setup(db);
+      const reserved = attempts.get(db, attempt.id).revisions;
+      assert.equal(reserved?.reserved?.definition_version, 1);
+      assert.equal(reserved?.reserved?.policy_revision, 0);
+      assert.equal(reserved?.authorized?.policy_revision, 1);
+      const definition = `${lifecycleDefinition}\n[work_units.issue.fields.note]\ntype = "string"\n`;
+      configs.applySchema(db, definition, "maintainer", "force", undefined, {
+        expected_revision: 1,
+        reviewed_definition: definition,
+      });
+      const view = attempts.view(db, attempt.id, origin, now);
+      assert.deepEqual(view.current_revisions, {
+        definition_version: 2,
+        policy_revision: 1,
+      });
+      const finished = attempts.finish(
+        db,
+        attempt.id,
+        { ...authority(attempt), outcome: { ...outcome, status: "success" } },
+        origin,
+        now,
+      ).attempt;
+      assert.equal(finished.revisions?.reserved?.definition_version, 1);
+      assert.equal(finished.revisions?.authorized?.definition_version, 1);
+      assert.equal(finished.revisions?.finished?.definition_version, 2);
+      const event = db
+        .select()
+        .from(schema.journal)
+        .where(eq(schema.journal.kind, "attempt.finished"))
+        .get();
+      assert.equal(JSON.parse(event?.data ?? "{}").definition_version, 2);
+    },
+  },
+  {
+    name: "a definition change that rejects a result names both versions and changes nothing",
+    run(db) {
+      const { now, attempt } = setup(db);
+      const definition = `${lifecycleDefinition}\n[work_units.issue.fields.required_new]\ntype = "string"\nrequired = true\n`;
+      configs.applySchema(db, definition, "maintainer", "force", undefined, {
+        expected_revision: 1,
+        reviewed_definition: definition,
+      });
+      const before = attempts.get(db, attempt.id);
+      assert.throws(
+        () =>
+          attempts.finish(
+            db,
+            attempt.id,
+            {
+              ...authority(attempt),
+              outcome: { ...outcome, status: "success" },
+            },
+            origin,
+            now,
+          ),
+        /Current definition v2 rejects the success transition .*captured v1/,
+      );
+      assert.deepEqual(attempts.get(db, attempt.id), before);
+      assert.deepEqual(queue.occupancy(db), { execution: 1, wip: 1 });
+    },
+  },
+  {
+    name: "owner filters find one wrapper's unfinished work and keep every attempt's history",
+    run(db) {
+      const { now, attempt } = setup(db, true);
+      attempts.finish(
+        db,
+        attempt.id,
+        { ...authority(attempt), outcome },
+        origin,
+        now,
+      );
+      const second = queue.claimNext(
+        db,
+        { idempotency_key: "second" },
+        origin,
+        undefined,
+        now + 5_000,
+      );
+      if (second.kind !== "granted") throw new Error("grant");
+      const mine = {
+        principal_id: origin.principalId,
+        participant_id: origin.participantId,
+      };
+      assert.deepEqual(
+        attempts.list(db, { ...mine, active: true }).map((a) => a.id),
+        [second.attempt.id],
+      );
+      assert.deepEqual(
+        attempts.list(db, { ...mine, active: false }).map((a) => a.id),
+        [attempt.id],
+      );
+      assert.deepEqual(
+        attempts.list(db, { ...mine, participant_id: "someone-else" }),
+        [],
+      );
+      const history = attempts.list(db, { task_id: attempt.task_id });
+      assert.equal(history.length, 2);
+      assert.equal(history[1]?.outcome?.status, "failure");
+      assert.equal(history[0]?.predecessor_id, attempt.id);
+    },
+  },
 );

@@ -268,3 +268,55 @@ it("the generic seven-day sweep preserves execution receipts and uncertain capac
   expect(db.select().from(schema.queueOperationReceipts).all()).toHaveLength(1);
   expect(db.select().from(schema.executionReservations).all()).toHaveLength(1);
 });
+
+it("pages owner and access filtered attempt history in bounded batches", () => {
+  const { db } = fixture;
+  const now = Date.now();
+  const hidden = seedAttempt(db, "hidden", now);
+  const visible = seedAttempt(db, "visible", now);
+  const insert = fixture.rawDb.prepare(
+    `INSERT INTO work_attempts (id,entry_id,task_id,resource,principal_id,participant_id,state,revision,fence,outcome,created_at,updated_at,finished_at)
+     VALUES (?,?,?,?,?,?,'terminal',1,?,?,?,?,?)`,
+  );
+  const outcome = JSON.stringify(stopped);
+  for (let i = 0; i < 450; i++)
+    insert.run(
+      `hidden-${i}`,
+      hidden.entry_id,
+      "hidden",
+      hidden.resource,
+      "worker",
+      "worker-process",
+      10_000 + i,
+      outcome,
+      now,
+      now,
+      now,
+    );
+  for (let i = 0; i < 3; i++)
+    insert.run(
+      `visible-${i}`,
+      visible.entry_id,
+      "visible",
+      visible.resource,
+      "other",
+      "other-process",
+      100 + i,
+      outcome,
+      now,
+      now,
+      now,
+    );
+  const page = attempts.list(
+    db,
+    { active: false, limit: 2, offset: 1 },
+    (task) => task === "visible",
+  );
+  expect(page.map((a) => a.id)).toEqual(["visible-1", "visible-0"]);
+  expect(
+    attempts
+      .list(db, { principal_id: "worker", active: true })
+      .map((a) => a.task_id)
+      .sort(),
+  ).toEqual(["hidden", "visible"]);
+});
