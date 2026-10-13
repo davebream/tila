@@ -77,7 +77,7 @@ export function createIdempotencyMiddleware(deps?: {
     const key = `dp:${projectId}:${caller}:${c.req.method}:${c.req.path}:${clientKey}`;
     if (
       c.get("credentialPolicy") ||
-      /^\/projects\/[^/]+\/(?:schema|queue|attempts|questions|claims)(?:\/|$)/.test(
+      /^\/projects\/[^/]+\/(?:schema|queue|attempts|questions|claims|agents|rooms|signals\/groups)(?:\/|$)/.test(
         c.req.path,
       )
     ) {

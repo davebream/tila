@@ -24,10 +24,13 @@ function rawExecutor(rawDb: TestDb["rawDb"]) {
 }
 
 // Tables a project destroy intentionally leaves alone or clears separately:
-// migration bookkeeping, DO-only request dedup, the transfer lock, and the FTS5
-// virtual tables (plus their shadow tables), which the *_search_docs triggers clean.
+// migration bookkeeping, DO-only request dedup, the transfer lock, the settings
+// revision counter (kept monotonic so a stale editor never matches a recreated
+// resource), and the FTS5 virtual tables (plus their shadow tables), which the
+// *_search_docs triggers clean.
 const NON_DOMAIN_TABLES = new Set([
   "_migrations",
+  "_config_revision_seq",
   "_schema_history",
   "_do_idempotency",
   "_project_transfer_state",

@@ -249,6 +249,11 @@ projectRoutes.use("/*", async (c, next) => {
   }
   return next();
 });
+// Settings writes on agents and rooms commit DO-side idempotency receipts
+// after current authorization (see the receipt paths in the middleware).
+const settingsIdempotency = createIdempotencyMiddleware();
+projectRoutes.use("/agents/*", settingsIdempotency);
+projectRoutes.use("/rooms/*", settingsIdempotency);
 projectRoutes.route("/agents", agents);
 projectRoutes.route("/runtime-view", runtimeView);
 projectRoutes.route("/rooms", conversations);

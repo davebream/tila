@@ -7,6 +7,9 @@ import type {
 import { SignalTargetSchema } from "@tila/schemas";
 import { and, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { checkRevision, nextRevision } from "./config-revision-ops";
+import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
+import { appendJournal } from "./journal-ops";
 import * as schema from "./schema";
 
 type SignalDb = BaseSQLiteDatabase<"sync", unknown, typeof schema>;
@@ -381,6 +384,7 @@ function toGroup(db: SignalDb, row: typeof schema.signalGroups.$inferSelect) {
       .all()
       .map((member) => member.principal_id)
       .sort(),
+    revision: row.revision,
     created_at: row.created_at,
     updated_at: row.updated_at,
   } satisfies SignalGroup;
@@ -404,71 +408,153 @@ export function getGroup(db: SignalDb, groupId: string): SignalGroup | null {
   return row ? toGroup(db, row) : null;
 }
 
+type GroupActor = Pick<SignalIdentity, "principal_id" | "participant_id">;
+function groupEvent(
+  tx: Parameters<Parameters<SignalDb["transaction"]>[0]>[0],
+  kind:
+    | "signal_group.created"
+    | "signal_group.updated"
+    | "signal_group.deleted",
+  groupId: string,
+  actor: GroupActor,
+  data: Record<string, unknown>,
+) {
+  appendJournal(tx, {
+    kind,
+    resource: `signal-group:${groupId}`,
+    actor: "",
+    principalId: actor.principal_id,
+    participantId: actor.participant_id,
+    environment: {},
+    data,
+  });
+}
+
+/**
+ * Replace a group's name and audience. `expectedRevision` 0 creates only; a
+ * positive value must match the current revision; omitted keeps the legacy
+ * unconditional upsert. Edits affect later sends only: past deliveries keep
+ * their snapshotted recipients.
+ */
 export function setGroup(
   db: SignalDb,
   groupId: string,
   name: string,
   principalIds: string[],
-  actor: Pick<SignalIdentity, "principal_id" | "participant_id">,
+  actor: GroupActor,
   now: number = Date.now(),
+  options: {
+    expectedRevision?: number;
+    idempotency?: DoIdempotency<SignalGroup>;
+  } = {},
 ): SignalGroup {
   const members = [...new Set(principalIds)].sort();
-  db.transaction((tx) => {
-    tx.insert(schema.signalGroups)
-      .values({
-        id: groupId,
-        name,
-        created_at: now,
-        updated_at: now,
-        created_by_principal_id: actor.principal_id,
-        created_by_participant_id: actor.participant_id,
-        updated_by_principal_id: actor.principal_id,
-        updated_by_participant_id: actor.participant_id,
-      })
-      .onConflictDoUpdate({
-        target: schema.signalGroups.id,
-        set: {
-          name,
-          updated_at: now,
-          updated_by_principal_id: actor.principal_id,
-          updated_by_participant_id: actor.participant_id,
-        },
-      })
-      .run();
-    tx.delete(schema.signalGroupMembers)
-      .where(eq(schema.signalGroupMembers.group_id, groupId))
-      .run();
-    if (members.length > 0) {
-      tx.insert(schema.signalGroupMembers)
-        .values(
-          members.map((principalId) => ({
-            group_id: groupId,
-            principal_id: principalId,
-            added_at: now,
-            added_by_principal_id: actor.principal_id,
-            added_by_participant_id: actor.participant_id,
-          })),
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, options.idempotency, () => {
+        const row = tx
+          .select()
+          .from(schema.signalGroups)
+          .where(eq(schema.signalGroups.id, groupId))
+          .get();
+        const existing = row ? toGroup(tx, row) : null;
+        if (options.expectedRevision !== undefined)
+          checkRevision(
+            `signal-group:${groupId}`,
+            existing?.revision ?? null,
+            options.expectedRevision,
+          );
+        if (
+          existing &&
+          existing.name === name &&
+          existing.principal_ids.join("\n") === members.join("\n")
         )
-        .run();
-    }
-  });
-  return getGroup(db, groupId) as SignalGroup;
+          return existing;
+        const revision = nextRevision(tx);
+        tx.insert(schema.signalGroups)
+          .values({
+            id: groupId,
+            name,
+            revision,
+            created_at: now,
+            updated_at: now,
+            created_by_principal_id: actor.principal_id,
+            created_by_participant_id: actor.participant_id,
+            updated_by_principal_id: actor.principal_id,
+            updated_by_participant_id: actor.participant_id,
+          })
+          .onConflictDoUpdate({
+            target: schema.signalGroups.id,
+            set: {
+              name,
+              revision,
+              updated_at: now,
+              updated_by_principal_id: actor.principal_id,
+              updated_by_participant_id: actor.participant_id,
+            },
+          })
+          .run();
+        tx.delete(schema.signalGroupMembers)
+          .where(eq(schema.signalGroupMembers.group_id, groupId))
+          .run();
+        if (members.length > 0) {
+          tx.insert(schema.signalGroupMembers)
+            .values(
+              members.map((principalId) => ({
+                group_id: groupId,
+                principal_id: principalId,
+                added_at: now,
+                added_by_principal_id: actor.principal_id,
+                added_by_participant_id: actor.participant_id,
+              })),
+            )
+            .run();
+        }
+        groupEvent(
+          tx,
+          existing ? "signal_group.updated" : "signal_group.created",
+          groupId,
+          actor,
+          { revision, member_count: members.length },
+        );
+        return getGroup(tx, groupId) as SignalGroup;
+      }).result,
+  );
 }
 
-export function deleteGroup(db: SignalDb, groupId: string): boolean {
+/** Deleting an audience never cancels or rewrites past deliveries. */
+export function deleteGroup(
+  db: SignalDb,
+  groupId: string,
+  actor?: GroupActor,
+  expectedRevision?: number,
+): boolean {
   return db.transaction((tx) => {
     const exists = tx
-      .select({ id: schema.signalGroups.id })
+      .select({
+        id: schema.signalGroups.id,
+        revision: schema.signalGroups.revision,
+      })
       .from(schema.signalGroups)
       .where(eq(schema.signalGroups.id, groupId))
       .get();
     if (!exists) return false;
+    if (expectedRevision !== undefined)
+      checkRevision(
+        `signal-group:${groupId}`,
+        exists.revision,
+        expectedRevision,
+      );
     tx.delete(schema.signalGroupMembers)
       .where(eq(schema.signalGroupMembers.group_id, groupId))
       .run();
     tx.delete(schema.signalGroups)
       .where(eq(schema.signalGroups.id, groupId))
       .run();
+    if (actor)
+      groupEvent(tx, "signal_group.deleted", groupId, actor, {
+        revision: exists.revision,
+      });
     return true;
   });
 }

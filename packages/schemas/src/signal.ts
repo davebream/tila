@@ -95,6 +95,8 @@ export const SignalGroupSchema = z.object({
   id: SignalGroupIdSchema,
   name: z.string().min(1).max(128),
   principal_ids: z.array(PrincipalIdSchema),
+  // 0 means a pre-#298 server reported no revision.
+  revision: z.number().int().nonnegative().default(0),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -103,6 +105,9 @@ export type SignalGroup = z.infer<typeof SignalGroupSchema>;
 export const SetSignalGroupRequestSchema = z.object({
   name: z.string().min(1).max(128),
   principal_ids: z.array(PrincipalIdSchema).max(500),
+  // 0 = create only; a positive value must match the current revision.
+  // Omitted keeps the legacy unconditional upsert.
+  expected_revision: z.number().int().nonnegative().optional(),
 });
 export type SetSignalGroupRequest = z.infer<typeof SetSignalGroupRequestSchema>;
 

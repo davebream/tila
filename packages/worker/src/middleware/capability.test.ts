@@ -162,6 +162,27 @@ describe("route capability inventory", () => {
     expect(routeCapability("POST", "/projects/p/deliveries")).toBeNull();
     expect(routeCapability("GET", "/projects/p/deliveries/id")).toBeNull();
   });
+  it("maps agent and room settings writes to their management capability", () => {
+    for (const [method, path, capability] of [
+      ["PATCH", "/projects/p/agents/worker", "agents:manage"],
+      ["POST", "/projects/p/agents/worker/archive", "agents:manage"],
+      ["POST", "/projects/p/agents/worker/unarchive", "agents:manage"],
+      ["GET", "/projects/p/agents/worker/archive-preview", "agents:manage"],
+      ["GET", "/projects/p/agents/worker", "agents:read"],
+      ["PATCH", "/projects/p/rooms/general", "conversations:manage"],
+      ["POST", "/projects/p/rooms/general/archive", "conversations:manage"],
+      ["POST", "/projects/p/rooms/general/unarchive", "conversations:manage"],
+      [
+        "GET",
+        "/projects/p/rooms/general/archive-preview",
+        "conversations:manage",
+      ],
+      ["PUT", "/projects/p/signals/groups/reviewers", "signals:manage"],
+    ] as const)
+      expect(routeCapability(method, path)).toBe(capability);
+    expect(routeCapability("DELETE", "/projects/p/agents/worker")).toBeNull();
+    expect(routeCapability("PATCH", "/projects/p/rooms")).toBeNull();
+  });
 });
 
 describe("policy intersections", () => {

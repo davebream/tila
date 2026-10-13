@@ -1649,6 +1649,28 @@ function runMigration0041(storage: MigrationStorage): void {
   }
 }
 
+/**
+ * #298: per-resource settings revisions for agents, rooms and signal groups,
+ * the agent's configured profile selection, and one project-wide counter so a
+ * recreated resource never reuses a revision. Existing rows start at 1.
+ */
+function runMigration0042(storage: MigrationStorage): void {
+  for (const table of ["agents", "rooms", "signal_groups"])
+    if (!columnExists(storage, table, "revision"))
+      storage.sql.exec(
+        `ALTER TABLE ${table} ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1)`,
+      );
+  if (!columnExists(storage, "agents", "profile_selection"))
+    storage.sql.exec("ALTER TABLE agents ADD COLUMN profile_selection TEXT");
+  storage.sql.exec(`
+CREATE TABLE IF NOT EXISTS _config_revision_seq (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  value INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO _config_revision_seq (singleton, value) VALUES (1, 1);
+`);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1705,6 +1727,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_custom_correlation ON journal(json_extrac
   { version: 39, run: runMigration0039 },
   { version: 40, run: runMigration0040 },
   { version: 41, run: runMigration0041 },
+  { version: 42, run: runMigration0042 },
 ];
 
 /** Highest project migration; transfer metadata and backups report this version. */

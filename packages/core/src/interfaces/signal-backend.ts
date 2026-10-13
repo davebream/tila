@@ -22,9 +22,17 @@ export interface SignalBackend {
   ): Promise<{ found: boolean; authorized: boolean; expired: boolean }>;
   listSignalGroups(): Promise<SignalGroup[]>;
   getSignalGroup(groupId: string): Promise<SignalGroup | null>;
+  /** `expected_revision` 0 creates only; omitted is an unconditional upsert. */
   setSignalGroup(
     groupId: string,
-    input: { name: string; principal_ids: string[] },
+    input: {
+      name: string;
+      principal_ids: string[];
+      expected_revision?: number;
+    },
   ): Promise<SignalGroup>;
-  deleteSignalGroup(groupId: string): Promise<boolean>;
+  deleteSignalGroup(
+    groupId: string,
+    options?: { expected_revision?: number },
+  ): Promise<boolean>;
 }

@@ -428,3 +428,58 @@ describe("createIdempotencyMiddleware", () => {
     expect(getHandlerCount()).toBe(1);
   });
 });
+
+describe("DO-receipt paths", () => {
+  it("leave agent, room and signal-group settings replay to the DO", async () => {
+    const fake = new FakeIdempotencyStore();
+    let checks = 0;
+    const check = fake.check.bind(fake);
+    fake.check = async (...args) => {
+      checks++;
+      return check(...args);
+    };
+    const forwarded: string[] = [];
+    const app = new Hono<{
+      Variables: {
+        projectId: string;
+        principalId: string;
+        participantId: string;
+        idempotencyKey: string;
+      };
+    }>();
+    app.use("/*", async (c, next) => {
+      c.set("projectId", "p1");
+      c.set("principalId", "principal-1");
+      c.set("participantId", "participant-1");
+      await next();
+    });
+    app.use("/*", createIdempotencyMiddleware({ makeStore: () => fake }));
+    app.all("/*", (c) => {
+      forwarded.push(c.get("idempotencyKey"));
+      return c.json({ ok: true });
+    });
+    for (const [method, path] of [
+      ["PATCH", "/projects/p1/agents/worker"],
+      ["POST", "/projects/p1/rooms/general/archive"],
+      ["PUT", "/projects/p1/signals/groups/reviewers"],
+    ] as const) {
+      const request = {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "client-key",
+        },
+        body: JSON.stringify({ expected_revision: 1 }),
+      };
+      await app.request(path, request);
+      const replay = await app.request(path, request);
+      // The handler (and so the DO's authorization) runs on every retry.
+      expect(replay.headers.get("Idempotency-Replayed")).toBeNull();
+    }
+    expect(checks).toBe(0);
+    expect(forwarded).toHaveLength(6);
+    expect(forwarded[0]).toBe(
+      'dp:p1:["principal-1","participant-1"]:PATCH:/projects/p1/agents/worker:client-key',
+    );
+  });
+});

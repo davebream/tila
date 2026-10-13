@@ -268,6 +268,17 @@ export async function semanticDigest(
       const page = readSnapshotPage(sql, table, { offset, limit: 500 });
       for (const sourceRow of page.rows) {
         let row = sourceRow;
+        if (
+          migrationVersion < 42 &&
+          (table === "agents" || table === "rooms" || table === "signal_groups")
+        ) {
+          const {
+            revision: _revision,
+            profile_selection: _selection,
+            ...legacyRow
+          } = row;
+          row = legacyRow;
+        }
         if (migrationVersion < 39 && table === "work_attempts") {
           const { revisions: _revisions, ...legacyRow } = row;
           row = legacyRow;

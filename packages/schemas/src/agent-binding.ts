@@ -114,6 +114,38 @@ export const AgentRegistrationResponseSchema = z.object({
   ok: z.literal(true),
   agent: AgentSchema,
 });
+export const AgentResponseSchema = AgentRegistrationResponseSchema;
+/** What archiving would affect now; counts are evidence, not reservations. */
+export const AgentArchivePreviewSchema = z.object({
+  agent_id: AgentIdSchema,
+  revision: z.number().int().nonnegative(),
+  archived: z.boolean(),
+  binding: AgentBindingSummarySchema.nullable(),
+  pending_deliveries: z.number().int().nonnegative(),
+  rooms: z.array(AgentIdSchema),
+  open_questions: z.number().int().nonnegative(),
+  unfinished_attempts: z.number().int().nonnegative(),
+});
+export const AgentArchivePreviewResponseSchema = z.object({
+  ok: z.literal(true),
+  preview: AgentArchivePreviewSchema,
+});
+export const AgentArchiveResponseSchema = z.object({
+  ok: z.literal(true),
+  agent: AgentSchema,
+  released: z
+    .object({
+      consumer_binding_id: z.string().uuid(),
+      binding_epoch: z.number().int().positive(),
+    })
+    .nullable(),
+  pending_deliveries: z.number().int().nonnegative(),
+});
+export type AgentArchivePreview = z.infer<typeof AgentArchivePreviewSchema>;
+export type AgentArchiveResult = Omit<
+  z.infer<typeof AgentArchiveResponseSchema>,
+  "ok"
+>;
 export const AgentBindingResponseSchema = z.object({
   ok: z.literal(true),
   binding: z.union([ConsumerBindingSchema, AgentBindingSummarySchema]),

@@ -65,6 +65,7 @@ export function invalidateAgentQuestions(
   agentId: string,
   origin: RequestOrigin,
   now: number,
+  reason = "requesting agent binding replaced",
 ): void {
   const attempts = new Set(
     tx
@@ -78,12 +79,5 @@ export function invalidateAgentQuestions(
       )
       .map((row) => row.attempt_id),
   );
-  for (const id of attempts)
-    invalidateQuestions(
-      tx,
-      id,
-      "requesting agent binding replaced",
-      origin,
-      now,
-    );
+  for (const id of attempts) invalidateQuestions(tx, id, reason, origin, now);
 }

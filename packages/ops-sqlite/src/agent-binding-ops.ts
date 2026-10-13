@@ -1,20 +1,33 @@
 import { bindingDetailVisible, summarizeBinding } from "@tila/core";
 import {
+  type Agent,
+  type AgentArchivePreview,
+  type AgentArchiveResult,
   type AgentRegistration,
   type AgentRuntimePage,
   AgentSchema,
+  type ArchiveAgent,
   type AttachAgentBinding,
   type ConsumerBinding,
   ConsumerBindingSchema,
   RUNTIME_WORK_ATTEMPT_LIMIT,
   type RuntimeIdentity,
+  type UpdateAgent,
 } from "@tila/schemas";
 import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
+  checkRevision,
+  nextRevision,
+  refreshRestoredRevisions,
+} from "./config-revision-ops";
+import {
+  clearLease,
   invalidateRestoredConversations,
   rearm,
 } from "./conversation-state-ops";
+import { type DoIdempotency, withDoIdempotency } from "./do-idempotency-ops";
+import { appendJournal } from "./journal-ops";
 import { canonicalJson } from "./project-transfer-ops";
 import { invalidateAgentQuestions } from "./question-state-ops";
 import * as schema from "./schema";
@@ -23,6 +36,8 @@ type DB = BaseSQLiteDatabase<"sync", unknown, typeof schema>;
 type BindingRow = typeof schema.agentBindings.$inferSelect;
 export interface AgentAuthority {
   principal_id: string;
+  /** Journal attribution for management writes; defaults to the principal. */
+  participant_id?: string;
   can_manage: boolean;
   runtime: RuntimeIdentity | null;
   acting_runtime?: RuntimeIdentity | null;
@@ -54,6 +69,41 @@ function agent(db: DB, id: string) {
     fail("permission-denied", "Agent is not accessible");
   return AgentSchema.parse(row);
 }
+/** Management reads see archived agents; only managers reach this. */
+function managed(db: DB, id: string) {
+  const row = db
+    .select()
+    .from(schema.agents)
+    .where(eq(schema.agents.id, id))
+    .get();
+  if (!row) fail("not-found", "Agent not found", 404);
+  return AgentSchema.parse(row);
+}
+function requireManage(authority: AgentAuthority) {
+  if (!authority.can_manage)
+    fail("permission-denied", "Managing agents requires agents:manage");
+}
+function journal(
+  tx: Parameters<Parameters<DB["transaction"]>[0]>[0],
+  kind:
+    | "agent.registered"
+    | "agent.updated"
+    | "agent.archived"
+    | "agent.unarchived",
+  id: string,
+  authority: AgentAuthority,
+  data: Record<string, unknown>,
+) {
+  appendJournal(tx, {
+    kind,
+    resource: `agent:${id}`,
+    actor: "",
+    principalId: authority.principal_id,
+    participantId: authority.participant_id ?? authority.principal_id,
+    environment: {},
+    data,
+  });
+}
 function binding(row: BindingRow): ConsumerBinding {
   return ConsumerBindingSchema.parse({
     ...JSON.parse(row.attachment_json),
@@ -83,8 +133,7 @@ export function register(
   authority: AgentAuthority,
   now = Date.now(),
 ) {
-  if (!authority.can_manage)
-    fail("permission-denied", "Managing agents requires agents:manage");
+  requireManage(authority);
   return db.transaction((tx) => {
     const existing = tx
       .select()
@@ -92,26 +141,256 @@ export function register(
       .where(eq(schema.agents.id, input.id))
       .get();
     if (existing) {
+      if (existing.archived)
+        fail(
+          "agent-archived",
+          "Agent ID belongs to an archived agent; unarchive it instead",
+          409,
+        );
       if (
         existing.owner_principal_id !== authority.principal_id ||
         existing.name !== input.name ||
-        canonicalJson(existing.bind_policy) !==
-          canonicalJson(input.bind_policy) ||
-        existing.archived
+        canonicalJson(existing.bind_policy) !== canonicalJson(input.bind_policy)
       )
-        fail("conflict", "Agent ID is already registered", 409);
+        fail(
+          "conflict",
+          "Agent ID is already registered with different settings; use agent update to change them",
+          409,
+        );
       return AgentSchema.parse(existing);
     }
+    const revision = nextRevision(tx);
     tx.insert(schema.agents)
       .values({
         ...input,
         owner_principal_id: authority.principal_id,
+        revision,
         created_at: now,
         updated_at: now,
       })
       .run();
+    journal(tx, "agent.registered", input.id, authority, { revision });
     return agent(tx, input.id);
   });
+}
+/**
+ * Revision-checked change of the configured identity/policy. Never touches the
+ * active binding: narrowing `bind_policy` takes effect at the holder's next
+ * mailbox operation, a profile selection at the next new attach.
+ */
+export function update(
+  db: DB,
+  id: string,
+  input: UpdateAgent,
+  authority: AgentAuthority,
+  idempotency?: DoIdempotency<Agent>,
+  now = Date.now(),
+): Agent {
+  requireManage(authority);
+  if (input.bind_policy?.some((grant) => grant.agent_id !== id))
+    fail("validation-error", "Binding grants must name this agent", 400);
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, idempotency, () => {
+        const row = managed(tx, id);
+        checkRevision(`agent:${id}`, row.revision, input.expected_revision);
+        if (row.archived)
+          fail("agent-archived", "Unarchive the agent before editing it", 409);
+        const changed: Partial<
+          Pick<Agent, "name" | "bind_policy" | "profile_selection">
+        > = {};
+        if (input.name !== undefined && input.name !== row.name)
+          changed.name = input.name;
+        if (
+          input.bind_policy !== undefined &&
+          canonicalJson(input.bind_policy) !== canonicalJson(row.bind_policy)
+        )
+          changed.bind_policy = input.bind_policy;
+        if (
+          input.profile_selection !== undefined &&
+          canonicalJson(input.profile_selection) !==
+            canonicalJson(row.profile_selection)
+        )
+          changed.profile_selection = input.profile_selection;
+        const fields = Object.keys(changed);
+        if (!fields.length) return row;
+        const revision = nextRevision(tx);
+        tx.update(schema.agents)
+          .set({ ...changed, revision, updated_at: now })
+          .where(eq(schema.agents.id, id))
+          .run();
+        journal(tx, "agent.updated", id, authority, {
+          revision,
+          changed: fields,
+        });
+        return managed(tx, id);
+      }).result,
+  );
+}
+function pendingDeliveries(db: DB, id: string, now: number) {
+  return (
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.messageRecipients)
+      .where(
+        and(
+          eq(schema.messageRecipients.agent_id, id),
+          eq(schema.messageRecipients.state, "pending"),
+          gt(schema.messageRecipients.expires_at, now),
+        ),
+      )
+      .get()?.n ?? 0
+  );
+}
+/** Effects of archiving now, for the confirmation a manager reviews. */
+export function archivePreview(
+  db: DB,
+  id: string,
+  authority: AgentAuthority,
+  now = Date.now(),
+): AgentArchivePreview {
+  requireManage(authority);
+  const row = managed(db, id);
+  const active = current(db, id);
+  return {
+    agent_id: id,
+    revision: row.revision,
+    archived: row.archived,
+    binding: active ? summarizeBinding(active) : null,
+    pending_deliveries: pendingDeliveries(db, id, now),
+    rooms: db
+      .select({ room: schema.roomMembers.room_id })
+      .from(schema.roomMembers)
+      .where(eq(schema.roomMembers.member, `agent:${id}`))
+      .orderBy(schema.roomMembers.room_id)
+      .all()
+      .map(({ room }) => room),
+    open_questions: db
+      .select({ snapshot: schema.workQuestions.snapshot })
+      .from(schema.workQuestions)
+      .where(eq(schema.workQuestions.state, "open"))
+      .all()
+      .filter(
+        ({ snapshot }) =>
+          snapshot.requester_binding?.agent_id === id &&
+          !snapshot.invalidation_reason,
+      ).length,
+    unfinished_attempts: active ? (workFor(db, active)?.total ?? 0) : 0,
+  };
+}
+/**
+ * Archive in one transaction: release the active binding (the reviewed
+ * occupant, `expected_epoch`) and advance the epoch so the running session
+ * loses agent authority immediately; supersede its open questions and stop
+ * dispatch. Pending deliveries remain as evidence until their TTL; attempts
+ * keep their own lifecycle and need an explicit cancel or reassignment.
+ */
+export function archive(
+  db: DB,
+  id: string,
+  input: ArchiveAgent,
+  authority: AgentAuthority,
+  idempotency?: DoIdempotency<AgentArchiveResult>,
+  now = Date.now(),
+): AgentArchiveResult {
+  requireManage(authority);
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, idempotency, () => {
+        const row = managed(tx, id);
+        checkRevision(`agent:${id}`, row.revision, input.expected_revision);
+        if (row.archived)
+          return {
+            agent: row,
+            released: null,
+            pending_deliveries: pendingDeliveries(tx, id, now),
+          };
+        const active = current(tx, id);
+        if (active && input.expected_epoch !== active.binding_epoch)
+          fail(
+            "stale-binding",
+            "The active binding changed; review it before archiving",
+            409,
+          );
+        if (active)
+          tx.update(schema.agentBindings)
+            .set({ state: "released", updated_at: now })
+            .where(
+              eq(
+                schema.agentBindings.consumer_binding_id,
+                active.consumer_binding_id,
+              ),
+            )
+            .run();
+        invalidateAgentQuestions(
+          tx,
+          id,
+          {
+            principalId: authority.principal_id,
+            participantId: authority.participant_id ?? authority.principal_id,
+            actor: authority.principal_id,
+            environment: {},
+          },
+          now,
+          "requesting agent archived",
+        );
+        tx.update(schema.dispatchOutbox)
+          .set({ state: "quiet", ...clearLease, updated_at: now })
+          .where(eq(schema.dispatchOutbox.agent_id, id))
+          .run();
+        const revision = nextRevision(tx);
+        tx.update(schema.agents)
+          .set({
+            archived: true,
+            revision,
+            binding_epoch: row.binding_epoch + 1,
+            updated_at: now,
+          })
+          .where(eq(schema.agents.id, id))
+          .run();
+        const released = active
+          ? {
+              consumer_binding_id: active.consumer_binding_id,
+              binding_epoch: active.binding_epoch,
+            }
+          : null;
+        journal(tx, "agent.archived", id, authority, {
+          revision,
+          released_binding_epoch: released?.binding_epoch ?? null,
+        });
+        return {
+          agent: managed(tx, id),
+          released,
+          pending_deliveries: pendingDeliveries(tx, id, now),
+        };
+      }).result,
+  );
+}
+/** Restores the identity only. No lease, binding or expired delivery revives. */
+export function unarchive(
+  db: DB,
+  id: string,
+  expectedRevision: number,
+  authority: AgentAuthority,
+  idempotency?: DoIdempotency<Agent>,
+  now = Date.now(),
+): Agent {
+  requireManage(authority);
+  return db.transaction(
+    (tx) =>
+      withDoIdempotency(tx, idempotency, () => {
+        const row = managed(tx, id);
+        checkRevision(`agent:${id}`, row.revision, expectedRevision);
+        if (!row.archived) return row;
+        const revision = nextRevision(tx);
+        tx.update(schema.agents)
+          .set({ archived: false, revision, updated_at: now })
+          .where(eq(schema.agents.id, id))
+          .run();
+        journal(tx, "agent.unarchived", id, authority, { revision });
+        return managed(tx, id);
+      }).result,
+  );
 }
 export function current(db: DB, id: string) {
   const row = db
@@ -133,8 +412,16 @@ function viewer(authority: AgentAuthority) {
     run_id: authority.runtime?.run_id ?? null,
   };
 }
-export function view(db: DB, id: string, authority: AgentAuthority) {
-  const value = agent(db, id);
+export function view(
+  db: DB,
+  id: string,
+  authority: AgentAuthority,
+  options: { includeArchived?: boolean } = {},
+) {
+  const value =
+    options.includeArchived && authority.can_manage
+      ? managed(db, id)
+      : agent(db, id);
   const active = current(db, id);
   const full = bindingDetailVisible(
     value.owner_principal_id,
@@ -142,18 +429,25 @@ export function view(db: DB, id: string, authority: AgentAuthority) {
     viewer(authority),
   );
   return {
-    agent: full ? value : { ...value, bind_policy: [] },
+    agent: full
+      ? value
+      : { ...value, bind_policy: [], profile_selection: null },
     binding: !active || full ? active : summarizeBinding(active),
   };
 }
-export function list(db: DB, authority: AgentAuthority) {
+export function list(
+  db: DB,
+  authority: AgentAuthority,
+  options: { includeArchived?: boolean } = {},
+) {
+  const archived = options.includeArchived && authority.can_manage;
   return db
     .select({ id: schema.agents.id })
     .from(schema.agents)
-    .where(eq(schema.agents.archived, false))
+    .where(archived ? undefined : eq(schema.agents.archived, false))
     .orderBy(schema.agents.id)
     .all()
-    .map(({ id }) => view(db, id, authority));
+    .map(({ id }) => view(db, id, authority, { includeArchived: archived }));
 }
 function actingRun(
   id: string,
@@ -265,6 +559,21 @@ export function attach(
     }
     if (input.expected_epoch !== value.binding_epoch)
       fail("stale-binding", "Agent binding epoch changed", 409);
+    // A configured selection governs new bindings only; the renewal above keeps
+    // an attached run's recorded evidence unchanged.
+    const selection = value.profile_selection;
+    if (
+      selection &&
+      (details.profile?.profile_id !== selection.profile_id ||
+        (selection.account_ref !== null &&
+          details.profile?.account_ref !== selection.account_ref) ||
+        (selection.host_ref !== null &&
+          runtime.enrollment_id !== selection.host_ref))
+    )
+      fail(
+        "profile-mismatch",
+        "This attach does not match the agent's selected profile, account or host",
+      );
     const previous = current(tx, id);
     if (
       previous &&
@@ -585,6 +894,7 @@ export function invalidateRestoredBindings(db: DB, now = Date.now()) {
       .set({ state: "expired", updated_at: now })
       .run();
     invalidateRestoredConversations(tx, now);
+    refreshRestoredRevisions(tx);
     if (state)
       tx.update(schema.projectTransferState)
         .set({ applying: state.applying })

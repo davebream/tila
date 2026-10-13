@@ -5,7 +5,7 @@ import {
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { analyticsCtxFrom } from "../lib/analytics";
-import { forwardToDO } from "../lib/do-forward";
+import { forwardToDO, idempotencyHeaders } from "../lib/do-forward";
 import { zodValidationError } from "../lib/validation";
 import { requirePermission } from "../middleware/permission";
 import { identityPayload } from "../middleware/request-identity";
@@ -109,17 +109,24 @@ signals.put("/groups/:groupId", requirePermission("admin"), async (c) => {
     { ...input.data, actor: actor(c) },
     undefined,
     analyticsCtxFrom(c),
+    idempotencyHeaders(c),
   );
 });
 
 signals.delete("/groups/:groupId", requirePermission("admin"), async (c) => {
   const groupId = SignalGroupIdSchema.safeParse(c.req.param("groupId"));
   if (!groupId.success) return zodValidationError(c, groupId.error);
+  const raw = c.req.query("expected_revision");
+  const expected =
+    SetSignalGroupRequestSchema.shape.expected_revision.safeParse(
+      raw === undefined ? undefined : Number(raw),
+    );
+  if (!expected.success) return zodValidationError(c, expected.error);
   return forwardToDO(
     c.get("doStub"),
     `/signal/groups/${encodeURIComponent(groupId.data)}`,
     "DELETE",
-    undefined,
+    { actor: actor(c), expected_revision: expected.data },
     undefined,
     analyticsCtxFrom(c),
   );

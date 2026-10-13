@@ -6,7 +6,7 @@ import {
   SignalIdentitySchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
-import { formatZodIssues, jsonError } from "./responses";
+import { formatZodIssues, idempotencyFrom, jsonError } from "./responses";
 import type { ProjectSubRouter, RouterDeps } from "./types";
 
 export function createSignalRoutes(deps: RouterDeps): ProjectSubRouter {
@@ -125,15 +125,31 @@ export function createSignalRoutes(deps: RouterDeps): ProjectSubRouter {
         input.data.name,
         input.data.principal_ids,
         actor.data,
+        Date.now(),
+        {
+          expectedRevision: input.data.expected_revision,
+          idempotency: idempotencyFrom(c),
+        },
       ),
     });
   });
 
-  app.delete("/signal/groups/:groupId", (c) => {
+  app.delete("/signal/groups/:groupId", async (c) => {
     const groupId = SignalGroupIdSchema.safeParse(c.req.param("groupId"));
-    if (!groupId.success)
+    const raw = (await c.req.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    const actor = SignalIdentitySchema.optional().safeParse(raw.actor);
+    const expected =
+      SetSignalGroupRequestSchema.shape.expected_revision.safeParse(
+        raw.expected_revision,
+      );
+    if (!groupId.success || !actor.success || !expected.success)
       return jsonError(c, 400, "validation-error", "Invalid signal group ID");
-    if (!signalOps.deleteGroup(deps.db, groupId.data)) {
+    if (
+      !signalOps.deleteGroup(deps.db, groupId.data, actor.data, expected.data)
+    ) {
       return jsonError(
         c,
         404,

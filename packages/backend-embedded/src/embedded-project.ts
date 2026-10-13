@@ -743,7 +743,11 @@ export class EmbeddedProject
 
   async setSignalGroup(
     groupId: string,
-    input: { name: string; principal_ids: string[] },
+    input: {
+      name: string;
+      principal_ids: string[];
+      expected_revision?: number;
+    },
   ) {
     return signalOps.setGroup(
       this.db,
@@ -751,11 +755,21 @@ export class EmbeddedProject
       input.name,
       input.principal_ids,
       this.identity,
+      Date.now(),
+      { expectedRevision: input.expected_revision },
     );
   }
 
-  async deleteSignalGroup(groupId: string) {
-    return signalOps.deleteGroup(this.db, groupId);
+  async deleteSignalGroup(
+    groupId: string,
+    options: { expected_revision?: number } = {},
+  ) {
+    return signalOps.deleteGroup(
+      this.db,
+      groupId,
+      this.identity,
+      options.expected_revision,
+    );
   }
 
   // ---------- SchemaBackend ----------

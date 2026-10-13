@@ -1,5 +1,7 @@
 import {
   CredentialPolicyDenied,
+  DoIdempotencyConflictError,
+  RevisionConflictError,
   agentBindingOps,
   assertTaskAccess,
   conversationOps as ops,
@@ -14,8 +16,10 @@ import {
   DispatchReportSchema,
   PublishMessageSchema,
   RoomMemberSchema,
+  RoomRevisionSchema,
   RuntimeIdentitySchema,
   SetRoomMemberSchema,
+  UpdateRoomSchema,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -23,7 +27,7 @@ import {
   readConversationCursor,
   signConversationCursor,
 } from "./conversation-cursor";
-import { jsonError } from "./responses";
+import { idempotencyFrom, jsonError } from "./responses";
 import type { RouterDeps } from "./types";
 const Authority = z
   .object({
@@ -88,6 +92,18 @@ export function createConversationRoutes(deps: RouterDeps) {
       return jsonError(c, error.status, error.code, error.message, {
         reason: error.code.toUpperCase().replace(/-/g, "_"),
       });
+    if (error instanceof RevisionConflictError)
+      return jsonError(c, 412, "revision-conflict", error.message, {
+        revision: error.revision,
+        resource: error.resource,
+      });
+    if (error instanceof DoIdempotencyConflictError)
+      return jsonError(
+        c,
+        422,
+        "idempotency-key-conflict",
+        "Idempotency-Key reused with a different request body",
+      );
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       const tooLarge =
         error instanceof z.ZodError &&
@@ -110,7 +126,12 @@ export function createConversationRoutes(deps: RouterDeps) {
     throw error;
   });
   app.get("/rooms", (c) =>
-    c.json({ ok: true, rooms: ops.listRooms(deps.db, c.get("authority")) }),
+    c.json({
+      ok: true,
+      rooms: ops.listRooms(deps.db, c.get("authority"), {
+        includeArchived: c.req.query("include_archived") === "true",
+      }),
+    }),
   );
   app.post("/rooms", async (c) =>
     c.json({
@@ -132,26 +153,81 @@ export function createConversationRoutes(deps: RouterDeps) {
       ),
     }),
   );
+  app.patch("/rooms/:room", async (c) =>
+    c.json({
+      ok: true,
+      room: ops.updateRoom(
+        deps.db,
+        AgentIdSchema.parse(c.req.param("room")),
+        UpdateRoomSchema.parse(await c.req.json()),
+        c.get("authority"),
+        idempotencyFrom(c),
+      ),
+    }),
+  );
+  app.get("/rooms/:room/archive-preview", (c) =>
+    c.json({
+      ok: true,
+      preview: ops.archivePreview(
+        deps.db,
+        AgentIdSchema.parse(c.req.param("room")),
+        c.get("authority"),
+      ),
+    }),
+  );
+  for (const action of ["archive", "unarchive"] as const)
+    app.post(`/rooms/:room/${action}`, async (c) =>
+      c.json({
+        ok: true,
+        room: ops.setArchived(
+          deps.db,
+          AgentIdSchema.parse(c.req.param("room")),
+          action === "archive",
+          RoomRevisionSchema.parse(await c.req.json()).expected_revision,
+          c.get("authority"),
+          idempotencyFrom(c),
+        ),
+      }),
+    );
   app.put("/rooms/:room/members/:member", async (c) => {
     const member = RoomMemberSchema.shape.member.parse(c.req.param("member"));
-    ops.setMember(
-      deps.db,
-      AgentIdSchema.parse(c.req.param("room")),
-      member,
-      SetRoomMemberSchema.parse(await c.req.json()).wake,
-      c.get("authority"),
-    );
-    return c.json({ ok: true });
+    const input = SetRoomMemberSchema.parse(await c.req.json());
+    return c.json({
+      ok: true,
+      room: ops.setMember(
+        deps.db,
+        AgentIdSchema.parse(c.req.param("room")),
+        member,
+        input.wake,
+        c.get("authority"),
+        Date.now(),
+        {
+          expectedRevision: input.expected_revision,
+          idempotency: idempotencyFrom(c),
+        },
+      ),
+    });
   });
   app.delete("/rooms/:room/members/:member", (c) => {
-    ops.setMember(
-      deps.db,
-      AgentIdSchema.parse(c.req.param("room")),
-      RoomMemberSchema.shape.member.parse(c.req.param("member")),
-      null,
-      c.get("authority"),
-    );
-    return c.json({ ok: true });
+    const expected = c.req.query("expected_revision");
+    return c.json({
+      ok: true,
+      room: ops.setMember(
+        deps.db,
+        AgentIdSchema.parse(c.req.param("room")),
+        RoomMemberSchema.shape.member.parse(c.req.param("member")),
+        null,
+        c.get("authority"),
+        Date.now(),
+        {
+          expectedRevision:
+            expected === undefined
+              ? undefined
+              : z.coerce.number().int().positive().parse(expected),
+          idempotency: idempotencyFrom(c),
+        },
+      ),
+    });
   });
   app.get("/rooms/:room/threads", (c) =>
     c.json({
