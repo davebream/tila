@@ -184,6 +184,70 @@ describe("TasksPage list", () => {
   });
 });
 
+describe("TasksPage attention filters", () => {
+  test("blocked comes from the URL, is sent with the default scope and can be removed", async () => {
+    const user = userEvent.setup();
+    const requests = captureListRequests();
+    renderTasks("/p/test-project/tasks?blocked=1");
+
+    expect(
+      await screen.findByText(
+        "3 tasks · excluding archived · waiting on prerequisites",
+      ),
+    ).toBeInTheDocument();
+    expect(requests.at(-1)?.get("blocked")).toBe("1");
+    expect(requests.at(-1)?.get("archived")).toBe("0");
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove blocked filter" }),
+    );
+    await waitFor(() => expect(urlParam("blocked")).toBeNull());
+    expect(requests.at(-1)?.get("blocked")).toBeNull();
+  });
+
+  test("an outcome no type declares says nothing can match", async () => {
+    const requests: URLSearchParams[] = [];
+    server.use(
+      http.get("*/projects/*/tasks", ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          ok: true,
+          entities: [],
+          total: 0,
+          limit: 100,
+          offset: 0,
+          has_more: false,
+          next_cursor: null,
+          scope: { restricted: false, archived: "excluded", outcome_types: [] },
+        });
+      }),
+    );
+    renderTasks("/p/test-project/tasks?outcome=failure,abandoned");
+
+    expect(
+      await screen.findByText(
+        "No task type declares a failure or abandoned outcome, so none can match.",
+      ),
+    ).toBeInTheDocument();
+    expect(requests.at(-1)?.get("outcome")).toBe("failure,abandoned");
+  });
+
+  test("searching drops the filters search cannot apply", async () => {
+    const user = userEvent.setup();
+    captureListRequests();
+    renderTasks("/p/test-project/tasks?blocked=1&outcome=failure");
+    await screen.findByRole("button", { name: "Remove blocked filter" });
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search tasks" }),
+      "auth",
+    );
+    await waitFor(() => expect(urlParam("q")).toBe("auth"));
+    expect(urlParam("blocked")).toBeNull();
+    expect(urlParam("outcome")).toBeNull();
+  });
+});
+
 describe("TasksPage presentation", () => {
   test("titles come from presentation metadata; a missing title is a dash", async () => {
     server.use(

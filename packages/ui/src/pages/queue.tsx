@@ -316,6 +316,18 @@ export function QueuePage() {
           </button>
         </SectionNotice>
       )}
+      {params.get("lease") === "expired" && (
+        <SectionNotice>
+          Showing executions still starting or running past their lease.{" "}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => change("lease", "")}
+          >
+            Show all work
+          </button>
+        </SectionNotice>
+      )}
       <QuerySection
         state={deriveSectionState(query)}
         label="queue"

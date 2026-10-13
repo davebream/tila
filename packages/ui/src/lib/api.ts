@@ -285,6 +285,8 @@ export async function listTasks(
     offset?: number;
     /** Opaque keyset cursor from a previous page's `next_cursor`. */
     cursor?: string;
+    blocked?: "1";
+    outcome?: string[];
   },
 ): Promise<EntityListResponse | PaginatedEntityListResponse> {
   const stringParams: Record<string, string | undefined> = {};
@@ -306,6 +308,8 @@ export async function listTasks(
   if (params?.limit !== undefined) stringParams.limit = String(params.limit);
   if (params?.offset !== undefined) stringParams.offset = String(params.offset);
   if (params?.cursor) stringParams.cursor = params.cursor;
+  if (params?.blocked) stringParams.blocked = params.blocked;
+  if (params?.outcome?.length) stringParams.outcome = params.outcome.join(",");
   return request<EntityListResponse | PaginatedEntityListResponse>(
     projectId,
     "/tasks",
@@ -983,11 +987,17 @@ export function listDeliveries(
 export type RuntimeView = (typeof RuntimeViewResponseSchema)["_output"];
 export function getRuntimeView(
   projectId: string,
-  params: { cursor?: string; agent?: string; limit?: number } = {},
+  params: {
+    cursor?: string;
+    agent?: string;
+    limit?: number;
+    filter?: "attention";
+  } = {},
 ): Promise<RuntimeView> {
   return request(projectId, "/runtime-view", {
     cursor: params.cursor,
     agent: params.agent,
+    filter: params.filter,
     limit: params.limit === undefined ? undefined : String(params.limit),
   });
 }
