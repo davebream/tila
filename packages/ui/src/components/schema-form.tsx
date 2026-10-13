@@ -44,7 +44,7 @@ export function SchemaForm({
         const label = (
           <>
             <span className="font-mono">{field.name}</span>
-            {roles[field.name] && (
+            {roles[field.name] && roles[field.name] !== field.name && (
               <span className="text-muted-foreground">
                 {" "}
                 · {roles[field.name]}

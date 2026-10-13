@@ -201,7 +201,7 @@ export function TaskDetailPage() {
     queryFn: () =>
       inspectQueue(projectId ?? "", { task_id: entityId, limit: 10 }),
     enabled: Boolean(projectId && entityId),
-    staleTime: 10_000,
+    refetchInterval: 10_000,
   });
 
   // Fields and Relationships both come from the task query, so a task failure
