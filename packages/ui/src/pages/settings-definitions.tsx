@@ -1,19 +1,24 @@
+import { DraftBar } from "@/components/definitions/draft-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FormNotice } from "@/components/ui/form-fields";
 import { QuerySection } from "@/components/ui/query-section";
 import { useRecordTypes, useWorkCatalog } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useTimeTick } from "@/hooks/use-time-tick";
-import { getSchema, listSchemaHistory } from "@/lib/api";
+import { listSchemaHistory } from "@/lib/api";
+import { STARTER_DEFINITION, useDefinitionDraft } from "@/lib/definition-draft";
 import { deriveSectionState } from "@/lib/query-state";
 import { formatDateTime, relativeTime } from "@/lib/time";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { AppliedNotice } from "@/pages/settings-definitions-review";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import type {
   CatalogField,
   RecordCatalogEntry,
   SchemaHistoryEntry,
   WorkCatalogEntry,
 } from "@tila/schemas";
+import { Link, useLocation } from "react-router";
 
 const HISTORY_PAGE = 20;
 
@@ -26,25 +31,40 @@ function Heading() {
         Definitions
       </h1>
       <p className="text-sm text-muted-foreground">
-        The work and record types, fields and lifecycles this project applies.
-        Read-only here; editing in the browser is planned.
+        The work and record types, fields, templates and artifact policies this
+        project applies. Changes are drafted here, reviewed against current data
+        and applied as a new revision.
       </p>
     </header>
   );
 }
 
-/** How to apply definitions until the browser editor exists. */
-function CliFallback() {
+/** A project with no applied definitions. */
+function FirstDefinitions({
+  canPreview,
+  onStart,
+}: {
+  canPreview: boolean;
+  onStart: () => void;
+}) {
   return (
     <div className="space-y-2 rounded-lg border border-border bg-card p-4 text-sm">
       <p>No definitions have been applied to this project.</p>
-      <p className="text-muted-foreground">
-        Until definitions can be edited here, apply them from a checkout with
-        the CLI. Preview first, then apply against revision 0:
-      </p>
-      <pre className="overflow-x-auto rounded-md bg-background p-3 font-mono text-xs">
-        {"tila schema diff\ntila schema apply --expected-revision 0"}
-      </pre>
+      {canPreview ? (
+        <>
+          <p className="text-muted-foreground">
+            Start a draft here, review it, then apply it as revision 1. No file
+            or terminal is needed.
+          </p>
+          <Button type="button" onClick={onStart}>
+            Start definitions
+          </Button>
+        </>
+      ) : (
+        <p className="text-muted-foreground">
+          Someone with definition access can start them from this page.
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         Tasks and records can still be written without definitions; they are
         just not validated.
@@ -172,7 +192,7 @@ function changes(entry: SchemaHistoryEntry): string[] {
   }
 }
 
-function History() {
+function History({ base }: { base: string }) {
   const { projectId } = useAuth();
   const project = projectId ?? "";
   const history = useInfiniteQuery({
@@ -220,7 +240,13 @@ function History() {
                       className="border-t border-border align-top"
                     >
                       <th scope="row" className="p-3 font-mono font-normal">
-                        {entry.version}
+                        <Link
+                          to={`${base}/history/${entry.version}`}
+                          className="underline-offset-2 hover:underline"
+                          aria-label={`Revision ${entry.version}`}
+                        >
+                          {entry.version}
+                        </Link>
                         {entry.strategy && (
                           <Badge variant="amber" className="ml-2">
                             {entry.strategy}
@@ -258,16 +284,33 @@ function History() {
   );
 }
 
+function AppliedNoticeBanner({ notice }: { notice: AppliedNotice }) {
+  return (
+    <FormNotice tone="info">
+      {notice.kind === "applied"
+        ? `Applied as revision ${notice.revision}.`
+        : "Nothing changed in the definition itself (only comments or keys outside the definition format differ), so no revision was recorded."}
+    </FormNotice>
+  );
+}
+
 export function SettingsDefinitionsPage() {
   useTimeTick();
-  const { projectId } = useAuth();
-  const project = projectId ?? "";
-  const schema = useQuery({
-    queryKey: ["overview", project, "schema"],
-    queryFn: () => getSchema(project),
-    enabled: Boolean(projectId),
-    refetchInterval: 30_000,
-  });
+  const location = useLocation();
+  const notice = (location.state as { definitions?: AppliedNotice } | null)
+    ?.definitions;
+  const {
+    project,
+    applied: schema,
+    current,
+    ready,
+    value,
+    dirty,
+    edit,
+    discard,
+    canPreview,
+  } = useDefinitionDraft();
+  const base = `/p/${encodeURIComponent(project)}/settings/definitions`;
   const work = useWorkCatalog();
   const records = useRecordTypes();
   const schemaState = deriveSectionState(schema, {
@@ -277,6 +320,15 @@ export function SettingsDefinitionsPage() {
   return (
     <div className="space-y-8 p-3 md:p-6">
       <Heading />
+      {notice && !dirty && <AppliedNoticeBanner notice={notice} />}
+      {ready && canPreview && dirty && (
+        <DraftBar
+          base={base}
+          value={value}
+          stale={current !== null && current.revision !== value.baseRevision}
+          onDiscard={discard}
+        />
+      )}
 
       <section aria-labelledby="applied-heading" className="space-y-2">
         <h2 id="applied-heading" className="font-logo text-lg tracking-tight">
@@ -285,7 +337,16 @@ export function SettingsDefinitionsPage() {
         {schemaState.phase === "ready" &&
         schemaState.empty &&
         !schemaState.stale ? (
-          <CliFallback />
+          dirty ? (
+            <p className="text-sm text-muted-foreground">
+              Nothing applied yet. Your draft becomes revision 1.
+            </p>
+          ) : (
+            <FirstDefinitions
+              canPreview={ready && canPreview}
+              onStart={() => edit(STARTER_DEFINITION, `${base}/source`)}
+            />
+          )
         ) : (
           <QuerySection
             state={schemaState}
@@ -315,10 +376,20 @@ export function SettingsDefinitionsPage() {
                       {data.schema.definition}
                     </pre>
                   </details>
+                  {ready && canPreview && !dirty && (
+                    <Button asChild size="sm" variant="outline">
+                      <Link to={`${base}/source`}>Edit source</Link>
+                    </Button>
+                  )}
                 </div>
               )
             }
           </QuerySection>
+        )}
+        {ready && !canPreview && (
+          <p className="text-xs text-muted-foreground">
+            Your access can read definitions but not change them.
+          </p>
         )}
       </section>
 
@@ -360,7 +431,7 @@ export function SettingsDefinitionsPage() {
         <h2 id="history-heading" className="font-logo text-lg tracking-tight">
           History
         </h2>
-        <History />
+        <History base={base} />
       </section>
     </div>
   );

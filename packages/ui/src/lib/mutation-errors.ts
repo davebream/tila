@@ -57,3 +57,58 @@ export function failureKind(error: unknown): FailureKind {
 export function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The request failed.";
 }
+
+/** A definition problem the server or the client parser reported. */
+export type DefinitionProblem = {
+  message: string;
+  path?: string;
+  line?: number;
+  column?: number;
+};
+
+/**
+ * How a failed definition preview or apply should be handled:
+ * - `parse`: the definition is invalid; show each problem and keep the draft.
+ * - `conflict`: another revision was applied; rebase the draft onto it.
+ * - `review`: the reviewed preview no longer matches what was sent, or a
+ *   destructive change needs one; preview again before applying.
+ * - otherwise the generic kinds from `failureKind`.
+ */
+export type SchemaFailure =
+  | { kind: "parse"; problems: DefinitionProblem[] }
+  | { kind: "conflict"; revision: number | null }
+  | { kind: "review" }
+  | { kind: Exclude<FailureKind, "conflict"> };
+
+export function schemaFailure(error: unknown): SchemaFailure {
+  if (error instanceof ApiError) {
+    const body = error.body ?? {};
+    if (error.code === "schema-parse-error") {
+      const problems = Array.isArray(body.errors)
+        ? (body.errors as DefinitionProblem[]).filter(
+            (p) => typeof p?.message === "string",
+          )
+        : [];
+      return {
+        kind: "parse",
+        problems: problems.length ? problems : [{ message: error.message }],
+      };
+    }
+    if (error.code === "schema-revision-conflict") {
+      return {
+        kind: "conflict",
+        revision: typeof body.revision === "number" ? body.revision : null,
+      };
+    }
+    if (
+      error.code === "schema-review-mismatch" ||
+      error.code === "schema-review-required" ||
+      error.code === "schema-revision-required" ||
+      error.code === "schema-destructive"
+    ) {
+      return { kind: "review" };
+    }
+  }
+  const kind = failureKind(error);
+  return kind === "conflict" ? { kind: "conflict", revision: null } : { kind };
+}

@@ -69,10 +69,12 @@ import type {
   RecordHistoryResponse,
   RecordListResponse,
   RecordTypesResponse,
+  SchemaApplyResponse,
   SchemaGetResponse,
   SchemaHistory,
   SchemaHistoryEntry,
   SchemaHistoryResponse,
+  SchemaPreviewResponse,
   SignalGroupsResponse,
   SignalHistoryResponse,
   StateListResponse,
@@ -105,6 +107,11 @@ export class ApiError extends Error {
     public readonly details?: unknown,
     /** HTTP status of the failed response; absent for network failures. */
     public readonly status?: number,
+    /**
+     * The whole `error` object. Some routes put structured extras beside
+     * `code` and `message` (a schema conflict's `revision`, parse `errors`).
+     */
+    public readonly body?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -124,6 +131,7 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
   let code = `http-${response.status}`;
   let message = `HTTP ${response.status}`;
   let details: unknown;
+  let extras: Record<string, unknown> | undefined;
   try {
     const body = (await response.json()) as {
       error?: { code?: string; message?: string; details?: unknown };
@@ -131,12 +139,13 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
     if (body.error?.code) code = body.error.code;
     if (body.error?.message) message = body.error.message;
     details = body.error?.details;
+    if (body.error && typeof body.error === "object") extras = body.error;
   } catch {
     /* ignore parse errors */
   }
   if (response.status === 429) code = "rate-limited";
   if (response.status === 401) code = "not-configured";
-  return new ApiError(code, message, details, response.status);
+  return new ApiError(code, message, details, response.status, extras);
 }
 
 const PARTICIPANT_KEY = "tila.participantId";
@@ -626,6 +635,43 @@ export async function getSchema(
   projectId: string,
 ): Promise<AppliedSchemaResponse> {
   return request<AppliedSchemaResponse>(projectId, "/schema");
+}
+
+/** Semantic changes and impact of `definition` against the applied revision. */
+export async function previewSchema(
+  projectId: string,
+  definition: string,
+): Promise<SchemaPreviewResponse> {
+  return mutate<SchemaPreviewResponse>(
+    "POST",
+    projectPath(projectId, "/schema/preview"),
+    { definition },
+  );
+}
+
+/** `POST /schema` body the dashboard sends: always revision-checked. */
+export type SchemaApplyCommand = {
+  definition: string;
+  expected_revision: number;
+  reviewed_definition: string;
+  strategy?: "relax" | "force";
+};
+
+/**
+ * Apply a reviewed definition. The idempotency key makes a retry after a lost
+ * response replay the server's receipt instead of recording a second revision.
+ */
+export async function applySchema(
+  projectId: string,
+  command: SchemaApplyCommand,
+  idempotencyKey: string,
+): Promise<SchemaApplyResponse> {
+  return mutate<SchemaApplyResponse>(
+    "POST",
+    projectPath(projectId, "/schema"),
+    command,
+    { idempotencyKey },
+  );
 }
 
 /** `GET /schema/history` over HTTP: stored revisions, newest first. */
