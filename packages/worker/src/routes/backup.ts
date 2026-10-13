@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { RuntimeStore } from "../d1";
 import { CredentialStore } from "../d1";
+import { createRestoreRevisionStatements } from "../d1/restore-revisions";
 import { forwardToDO } from "../lib/do-forward";
 import { generateToken } from "../lib/hash";
 import { hashToken } from "../lib/hash-token";
@@ -448,7 +449,12 @@ export function createBackupRoutes(options: {
         },
         404,
       );
-    const statements: D1PreparedStatement[] = [];
+    const revisions = createRestoreRevisionStatements(
+      c.env.DB,
+      projectId,
+      (body.sections._projects?.length ?? 0) > 0,
+    );
+    const statements: D1PreparedStatement[] = [revisions.advance];
     for (const table of [...D1_BACKUP_TABLES].reverse()) {
       if (table !== "_projects" && table !== "_github_app_config") {
         statements.push(
@@ -495,6 +501,7 @@ export function createBackupRoutes(options: {
         );
       }
     }
+    statements.push(...revisions.assign);
     await new RuntimeStore(c.env.DB).revokeProject(projectId, callerOwner(c));
     // Restoring membership/binding metadata must not resurrect old credentials.
     await new CredentialStore(c.env.DB).revokeProjectCredentials(projectId, {

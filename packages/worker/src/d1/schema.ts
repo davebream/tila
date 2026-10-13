@@ -30,6 +30,15 @@ export const projects = sqliteTable("_projects", {
   settings_revision: integer("settings_revision").notNull().default(1),
 });
 
+// Destination-local revision history; never exported, restored, or cascaded.
+export const projectSettingsRevisionWatermarks = sqliteTable(
+  "_project_settings_revision_watermarks",
+  {
+    project_id: text("project_id").primaryKey().notNull(),
+    revision: integer("revision").notNull(),
+  },
+);
+
 // --- _tokens ---
 export const tokens = sqliteTable(
   "_tokens",
