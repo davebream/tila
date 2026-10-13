@@ -11,6 +11,7 @@ import {
   releaseAgentBinding,
 } from "@/lib/api";
 import { leaseCountdown, leaseExpiryMs } from "@/lib/lease";
+import { runtimeQueryFromSearch } from "@/lib/list-queries";
 import { deriveSectionState } from "@/lib/query-state";
 import { relativeTime } from "@/lib/time";
 import {
@@ -258,10 +259,17 @@ export function RuntimePage() {
   const { agentId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const cursor = searchParams.get("cursor") ?? undefined;
+  const { cursor, filter } = runtimeQueryFromSearch(searchParams);
+  // Drawer links and paging keep the filter and page they came from.
+  const listSearch = searchParams.toString() ? `?${searchParams}` : "";
+  const page = (next: string | null) =>
+    setSearchParams({
+      ...(filter ? { filter } : {}),
+      ...(next ? { cursor: next } : {}),
+    });
   const query = useQuery({
-    queryKey: ["runtime-view", projectId, cursor ?? null],
-    queryFn: () => getRuntimeView(projectId as string, { cursor }),
+    queryKey: ["runtime-view", projectId, cursor ?? null, filter ?? null],
+    queryFn: () => getRuntimeView(projectId as string, { cursor, filter }),
     enabled: !!projectId,
     refetchInterval: 5000,
   });
@@ -278,15 +286,45 @@ export function RuntimePage() {
           mailbox. Runtime state never marks work complete.
         </p>
       </header>
+      {filter && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span className="inline-flex items-center rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue">
+            filter: occupants needing attention
+          </span>
+          <Link
+            to={`/p/${projectId}/runtime`}
+            className="text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover"
+          >
+            Show all agents
+          </Link>
+        </p>
+      )}
       <QuerySection
         state={state}
         label="runtime observations"
-        empty="No agents registered."
+        empty={
+          filter
+            ? query.data?.scan?.complete === false
+              ? `No agent among the first ${query.data.scan.agents} needs attention; the rest were not checked.`
+              : "No agent needs attention."
+            : "No agents registered."
+        }
         onRetry={() => query.refetch()}
       >
         {(data) => (
           <>
             <SourceNotices sources={data.sources} />
+            {filter && data.total !== undefined && data.scan && (
+              <p className="font-mono text-[11px] text-fg-faint">
+                {data.scan.complete ? "" : "at least "}
+                {data.total.toLocaleString("en-US")}{" "}
+                {data.total === 1 ? "agent needs" : "agents need"} attention ·
+                scanned{" "}
+                {data.scan.complete
+                  ? `all ${data.scan.agents} agents`
+                  : `the first ${data.scan.agents} agents`}
+              </p>
+            )}
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-left text-sm" aria-label="Runtime">
                 <thead className="bg-card">
@@ -319,7 +357,7 @@ export function RuntimePage() {
                         <th className="p-3 font-medium" scope="row">
                           <Link
                             className="hover:underline"
-                            to={`/p/${projectId}/runtime/${encodeURIComponent(row.agent.id)}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`}
+                            to={`/p/${projectId}/runtime/${encodeURIComponent(row.agent.id)}${listSearch}`}
                           >
                             {row.agent.name}
                           </Link>
@@ -374,11 +412,7 @@ export function RuntimePage() {
             </div>
             <nav className="flex gap-2" aria-label="Runtime pages">
               {cursor && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSearchParams({})}
-                >
+                <Button variant="outline" size="sm" onClick={() => page(null)}>
                   First page
                 </Button>
               )}
@@ -386,9 +420,7 @@ export function RuntimePage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    setSearchParams({ cursor: data.next_cursor as string })
-                  }
+                  onClick={() => page(data.next_cursor)}
                 >
                   Next page
                 </Button>
@@ -400,11 +432,7 @@ export function RuntimePage() {
       {projectId && agentId && (
         <Drawer
           title={agentId}
-          onClose={() =>
-            navigate(
-              `/p/${projectId}/runtime${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
-            )
-          }
+          onClose={() => navigate(`/p/${projectId}/runtime${listSearch}`)}
         >
           <RuntimeDetail project={projectId} agent={agentId} />
         </Drawer>

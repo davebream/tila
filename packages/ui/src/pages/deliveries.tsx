@@ -10,7 +10,9 @@ import { Drawer } from "@/components/ui/drawer";
 import { QuerySection } from "@/components/ui/query-section";
 import { useAuth } from "@/hooks/use-auth";
 import { listAgents, listDeliveries, listRooms } from "@/lib/api";
+import { deliveryFiltersFromSearch } from "@/lib/list-queries";
 import { deriveSectionState } from "@/lib/query-state";
+import { formatDateTime } from "@/lib/time";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { DeliveryListQuery, DeliveryTraceItem } from "@tila/schemas";
 import { useRef, useState } from "react";
@@ -23,6 +25,30 @@ const STATE_LABEL = {
   expired: "Expired",
 } as const;
 
+function FilterChip({
+  label,
+  remove,
+  onRemove,
+}: {
+  label: string;
+  remove: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue">
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+        aria-label={remove}
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
 export function DeliveriesPage() {
   const { projectId } = useAuth();
   const { agentId, deliveryId } = useParams();
@@ -31,13 +57,7 @@ export function DeliveriesPage() {
   const returnFocus = useRef<HTMLElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const project = projectId as string;
-  const state = params.get("state");
-  const filters: DeliveryListQuery = {
-    agent: params.get("agent") || undefined,
-    room: params.get("room") || undefined,
-    id: params.get("id") || undefined,
-    state: STATES.find((value) => value === state),
-  };
+  const filters: DeliveryListQuery = deliveryFiltersFromSearch(params);
   const [search, setSearch] = useState(filters.id ?? "");
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -66,6 +86,7 @@ export function DeliveriesPage() {
     retry: false,
   });
   const rows = deliveries.data?.pages.flatMap((page) => page.deliveries) ?? [];
+  const total = deliveries.data?.pages[0]?.total;
   const filtered = Object.values(filters).some(Boolean);
   // Conversations need at least one agent and one room before anything can be delivered.
   const unavailable =
@@ -183,6 +204,24 @@ export function DeliveriesPage() {
           </Button>
         )}
       </form>
+      {(filters.wake || filters.expires_after !== undefined) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {filters.wake && (
+            <FilterChip
+              label="wake: suppressed until resumed"
+              remove="Remove wake filter"
+              onRemove={() => setFilter("wake", "")}
+            />
+          )}
+          {filters.expires_after !== undefined && (
+            <FilterChip
+              label={`expired after ${formatDateTime(filters.expires_after)}`}
+              remove="Remove expiry filter"
+              onRemove={() => setFilter("expires_after", "")}
+            />
+          )}
+        </div>
+      )}
       {unavailable && (
         <div className="rounded-md border border-border p-4 text-sm">
           <p>Conversations are not set up in this project yet.</p>
@@ -210,6 +249,12 @@ export function DeliveriesPage() {
       >
         {() => (
           <div className="space-y-3">
+            {total !== undefined && (
+              <p className="font-mono text-[11px] text-fg-faint">
+                {total.toLocaleString("en-US")}{" "}
+                {total === 1 ? "delivery matches" : "deliveries match"}
+              </p>
+            )}
             <div className="overflow-x-auto rounded-lg border border-border">
               <table
                 className="w-full text-left text-sm"
