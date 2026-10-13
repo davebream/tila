@@ -157,4 +157,6 @@ values = ["open", "done"]
   } finally {
     sdk.close();
   }
-}, 30000);
+  // Every step spawns `bun src/index.ts`, which compiles the CLI from source;
+  // under parallel CI load the whole journey can pass 30s without hanging.
+}, 90_000);
