@@ -3083,6 +3083,7 @@ needs a person. The count links to the list it was counted from.
 |---|---|---|---|
 | `execution.uncertain` | red | Queue entries whose execution outcome is uncertain | `queue?state=uncertain` |
 | `execution.lease-lapsed` | red | Executions starting or running past their lease | `queue?lease=expired` |
+| `decisions.waiting` | red | Open questions routed to the caller, including escalations to them | `decisions` (the inbox's "Waiting on me" view) |
 | `work.blocked` | amber | Open tasks waiting on prerequisites | `tasks?blocked=1` |
 | `work.failed` | amber | Unarchived tasks in their type's failure or abandoned state | `tasks?outcome=failure,abandoned` |
 | `execution.suspended` | amber | Queue entries whose execution is suspended | `queue?state=suspended` |
@@ -3096,9 +3097,12 @@ The expired-deliveries cutoff is fixed when the count is read, and the link
 carries that exact cutoff. `work.failed` is not applicable, rather than zero,
 when no type declares either outcome. Failure states are terminal, so a
 failed task keeps counting until it is archived; the rule says so and is amber
-rather than a standing red alarm.
+rather than a standing red alarm. `decisions.waiting` is red because the worker
+that asked stops until someone answers. It is not applicable when the credential
+has no principal, since nothing can be routed to it. Escalation reroutes a
+question to one named owner, so filtering by responder covers it.
 
-Workflow-attempt and decision rules wait for list pages that can show them.
+Workflow-attempt rules wait for a list page that can show them.
 
 **Attention filters.** These list parameters give the Overview exact,
 caller-scoped counts for problems that a plain status filter cannot express.
@@ -3112,6 +3116,7 @@ links to always agree.
 | `GET /deliveries?state=pending&wake=suppressed` | Pending deliveries whose wakes stopped (stall, budget, hop or pair limit) until someone resumes them. |
 | `GET /deliveries?state=expired&expires_after=<ms>` | Deliveries that expired after that time, including pending rows past their TTL. Expired rows are never deleted, so an unbounded count would only grow. |
 | `GET /queue?lease=expired` | Entries whose latest attempt is starting or running past its execution lease: the caller-scoped view of the `expired_execution_leases` diagnostic. |
+| `GET /questions?state=open&responder_principal_id=<caller>` | Open questions whose current responder is the caller. `total` applies the same task-type restriction as the rows, so a namespace-restricted credential counts only questions on tasks it can read. `escalated=true\|false` narrows any question list the same way. |
 | `GET /runtime-view?filter=attention` | Agents whose current occupant expired, cannot be confirmed, or whose host stopped reporting while attached (`runtimeAttention` in `@tila/core`). A run-store outage is reported in `sources`, not counted. The Worker scans at most 250 agents per request; `scan.complete` is false beyond that and `total` is then a floor. |
 
 `blocked`, `outcome`, `wake` and `expires_after` are bound to list cursors, so a
