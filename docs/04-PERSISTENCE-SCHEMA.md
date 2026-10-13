@@ -309,6 +309,16 @@ table. Restore clears active leases/context, rotates cursor generation and advan
 agent epochs before releasing the project transfer lock. Embedded stores use the
 same migration while public local-mode conversation operations remain unsupported.
 
+### Settings revisions (#298, project migration 42)
+
+`agents`, `rooms` and `signal_groups` gain a `revision` column and `agents` a
+nullable `profile_selection` (JSON: profile ID, optional enrollment and account
+reference). Existing rows start at revision 1. New revisions come from the
+single-row `_config_revision_seq` counter, which is excluded from backups and from
+project destroy so a recreated resource never reuses a revision; restore re-stamps
+restored rows from the destination counter. Backup digests of v41 snapshots ignore
+the new columns.
+
 ### Work questions (#304, project migration 36)
 
 | Table | Persisted content |
