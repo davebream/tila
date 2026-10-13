@@ -9,7 +9,7 @@ Coordination primitives that prevent races.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.8.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Deploy with the 0.8.0 `tila deploy`, which applies D1 migrations 0033 and 0034 before the Worker; a Worker deployed ahead of 0034 cannot read repository links or sign users in through GitHub repositories. Read the [upgrade notes](CHANGELOG.md#080---2026-10-13) before deploying.
+> **Status:** v0.8.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Deploy with the 0.8.0 `tila deploy`, which applies D1 migrations 0033 and 0034 before the Worker; a Worker deployed ahead of 0034 cannot read repository links or sign users in through GitHub repositories. Back up projects first, and expect a slower first request per project while migrations run. Read the [upgrade notes](CHANGELOG.md#080---2026-10-13) before deploying.
 
 </div>
 
