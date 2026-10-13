@@ -47,6 +47,8 @@ export function useAction<T>(
       await Promise.all([
         client.invalidateQueries({ queryKey: ["queue", project] }),
         client.invalidateQueries({ queryKey: ["queue-attempt", project] }),
+        // Finishing, cancelling or re-fencing an attempt supersedes its questions.
+        client.invalidateQueries({ queryKey: ["questions", project] }),
       ]);
     },
   });

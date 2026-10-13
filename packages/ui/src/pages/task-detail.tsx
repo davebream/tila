@@ -1,4 +1,5 @@
 import { ProjectReportDetails } from "@/components/journal-report";
+import { AttemptDetail } from "@/components/queue/attempt-detail";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -21,7 +22,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InfoTip } from "@/components/ui/tooltip";
+import { FollowUpDrawer } from "@/components/work/follow-up";
 import { TaskEditForm } from "@/components/work/task-edit";
+import { TaskExecution } from "@/components/work/task-execution";
 import { useWhoami } from "@/hooks/use-admin";
 import {
   useClaims,
@@ -51,7 +54,13 @@ import type {
 import { presentedText, presentedTitle } from "@tila/schemas";
 import { Maximize2, Minimize2, Pencil } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router";
 
 const dataLinkClass =
   "rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue";
@@ -177,6 +186,19 @@ export function TaskDetailPage() {
   const listLink = {
     pathname: `/p/${projectId}/tasks`,
     search: location.search,
+  };
+  const [searchParams, setSearchParams] = useSearchParams();
+  const attemptId = searchParams.get("attempt");
+  const followUpId = searchParams.get("follow_up");
+  const withParam = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set(key, value);
+    return `${location.pathname}?${next}`;
+  };
+  const dropParam = (key: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete(key);
+    setSearchParams(next);
   };
   const taskLink = (taskId: string) => ({
     pathname: `/p/${projectId}/tasks/${taskId}`,
@@ -457,6 +479,26 @@ export function TaskDetailPage() {
             <p className="whitespace-pre-wrap text-sm text-foreground">
               {description}
             </p>
+          </TaskSection>
+        )}
+
+        {!subjectUnavailable && entity && (
+          <TaskSection title="Execution">
+            <TaskExecution
+              project={projectId ?? ""}
+              taskId={entity.id}
+              state={state}
+              queue={queueQuery}
+              identity={whoami.data}
+              allowed={allowed}
+              canFollowUp={
+                defs.status === "declared" &&
+                allowed.createTask(entity.type) &&
+                Boolean(whoami.data?.principal_id)
+              }
+              attemptLink={(id) => withParam("attempt", id)}
+              followUpLink={(id) => withParam("follow_up", id)}
+            />
           </TaskSection>
         )}
 
@@ -825,6 +867,26 @@ export function TaskDetailPage() {
           </>
         )}
       </div>
+      {attemptId && projectId && (
+        <AttemptDetail
+          key={attemptId}
+          project={projectId}
+          id={attemptId}
+          identity={whoami.data}
+          close={() => dropParam("attempt")}
+        />
+      )}
+      {followUpId && projectId && entity && whoami.data?.principal_id && (
+        <FollowUpDrawer
+          key={followUpId}
+          project={projectId}
+          principal={whoami.data.principal_id}
+          task={entity}
+          attemptId={followUpId}
+          presentation={presentation}
+          close={() => dropParam("follow_up")}
+        />
+      )}
     </Drawer>
   );
 }

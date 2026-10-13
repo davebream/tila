@@ -251,6 +251,17 @@ export const handlers = [
     HttpResponse.json({ ok: true, result: emptyQueue() }),
   ),
 
+  // Work attempts and questions: none by default.
+  http.get("*/projects/*/attempts", () =>
+    HttpResponse.json({ ok: true, result: [] }),
+  ),
+  http.get("*/projects/*/questions", () =>
+    HttpResponse.json({
+      ok: true,
+      result: { questions: [], next_after_id: null },
+    }),
+  ),
+
   // Identity for capability-aware navigation: an owner without a scoped
   // policy, so every destination is visible.
   http.get("*/api/whoami", () =>
