@@ -18,7 +18,7 @@ vi.mock("../lib/github-client", () => ({
 
 // Mock RepoAllowlistStore
 const mockRegister = vi.fn().mockResolvedValue(undefined);
-const mockRemove = vi.fn().mockResolvedValue(undefined);
+const mockRemove = vi.fn().mockResolvedValue({ status: "removed" });
 const mockGetAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 const mockSetAccessPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
 const mockGetOidcPolicy = vi.fn().mockResolvedValue({ status: "not-found" });
@@ -411,6 +411,7 @@ describe("GET and PUT /api/repos/:repoId/access-policy", () => {
       "github.com",
       12345,
       policy,
+      undefined,
     );
   });
 
@@ -489,6 +490,7 @@ describe("GET and PUT /api/repos/:repoId/oidc-policy", () => {
       "github.com",
       12345,
       oidcPolicy,
+      undefined,
     );
   });
 
@@ -589,7 +591,12 @@ describe("DELETE /api/repos/:repoId", () => {
     };
     expect(body.ok).toBe(true);
     expect(body.github_repo_id).toBe(12345);
-    expect(mockRemove).toHaveBeenCalledWith("proj-1", "github.com", 12345);
+    expect(mockRemove).toHaveBeenCalledWith(
+      "proj-1",
+      "github.com",
+      12345,
+      undefined,
+    );
   });
 
   it("returns 403 for non-full scope d1-token (gate denies)", async () => {
@@ -618,7 +625,7 @@ describe("DELETE /api/repos/:repoId", () => {
   });
 
   it("returns 200 even when repo not found (idempotent delete)", async () => {
-    mockRemove.mockResolvedValue(undefined);
+    mockRemove.mockResolvedValue({ status: "not-found" });
 
     const app = createApp();
     const res = await app.request(

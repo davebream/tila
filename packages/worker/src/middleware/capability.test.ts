@@ -183,6 +183,16 @@ describe("route capability inventory", () => {
     expect(routeCapability("DELETE", "/projects/p/agents/worker")).toBeNull();
     expect(routeCapability("PATCH", "/projects/p/rooms")).toBeNull();
   });
+
+  it("separates reading the project name from renaming it", () => {
+    expect(routeCapability("GET", "/projects/p/project-settings")).toBe(
+      "summary:read",
+    );
+    expect(routeCapability("PATCH", "/projects/p/project-settings")).toBe(
+      "project:configure",
+    );
+    expect(capabilityRole("project:configure")).toBe("owner");
+  });
 });
 
 describe("policy intersections", () => {

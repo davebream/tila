@@ -30,6 +30,7 @@ import { createAuthMiddleware } from "../middleware/auth";
 import { csrfGuard } from "../middleware/csrf";
 import { mirroredCandidateForToken } from "../middleware/membership";
 import { principalIdFor } from "../middleware/request-identity";
+import { requireProjectOwnerHttp } from "../middleware/require-project-owner";
 import type { Env, HonoVariables } from "../types";
 
 type AppEnv = { Bindings: Env; Variables: HonoVariables };
@@ -140,15 +141,57 @@ runtimeRoutes.post("/projects/:projectId/runtime/invitations", async (c) => {
       "Invitation exceeds caller authority",
     );
   const { token, secret } = await runtimeSecret(c);
-  const expires_at = await new RuntimeStore(c.env.DB).invite(
+  const { expires_at, invitation_id } = await new RuntimeStore(c.env.DB).invite(
     c.get("projectId"),
     principalIdFor(c.get("tokenResult")),
     parsed.data.name,
     policy,
     secret.hash,
   );
-  return c.json({ ok: true, invitation: token, expires_at });
+  return c.json({ ok: true, invitation: token, expires_at, invitation_id });
 });
+// Owners list shared invitations without their bearer values.
+runtimeRoutes.get("/projects/:projectId/runtime/invitations", async (c) => {
+  if (runtimeAuthority(c))
+    throw new RuntimeDenied(
+      "runtime-purpose-denied",
+      "Runtime credentials cannot administer installations",
+    );
+  const denied = await requireProjectOwnerHttp(c);
+  if (denied) return denied;
+  return c.json({
+    ok: true,
+    invitations: await new RuntimeStore(c.env.DB).listInvitations(
+      c.get("projectId"),
+    ),
+  });
+});
+// Stops later redemption; enrollments already redeemed are revoked separately.
+runtimeRoutes.post(
+  "/projects/:projectId/runtime/invitations/:invitationId/revoke",
+  async (c) => {
+    const denied = await runtimeOperator(c, true);
+    if (denied) return denied;
+    const result = await new RuntimeStore(c.env.DB).revokeInvitation(
+      c.get("projectId"),
+      c.req.param("invitationId"),
+      principalIdFor(c.get("tokenResult")),
+    );
+    if (result === "not-found")
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: "not-found",
+            message: "Invitation not found",
+            retryable: false,
+          },
+        },
+        404,
+      );
+    return c.json({ ok: true, revoked: result === "revoked" });
+  },
+);
 runtimeRoutes.get("/projects/:projectId/runtime/enrollments", async (c) =>
   c.json({ ok: true, enrollments: await runtimeVisibleEnrollments(c) }),
 );

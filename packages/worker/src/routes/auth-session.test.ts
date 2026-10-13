@@ -495,6 +495,18 @@ describe("GET /auth/session/status capabilities (#102)", () => {
     const caps = await status(cookie());
     expect(caps.memberships_manage).toBe(true);
     expect(caps.credentials_manage).toBe(true);
+    // #298: every owner-level editor follows the same explicit-owner rule.
+    expect(caps).toMatchObject({
+      credentials_read: true,
+      credentials_issue: true,
+      credentials_rotate: true,
+      credentials_revoke: true,
+      service_accounts_manage: true,
+      workload_bindings_manage: true,
+      repository_policy_manage: true,
+      project_configure: true,
+      runtime_access_manage: true,
+    });
     expect(caps.membership_available).toBe(true);
     expect(caps.auth_method).toBe("github");
     expect(caps.authenticated_at).toBe(session.authenticatedAt);
@@ -513,6 +525,12 @@ describe("GET /auth/session/status capabilities (#102)", () => {
     const caps = await status(cookie());
     expect(caps.memberships_manage).toBe(false);
     expect(caps.credentials_manage).toBe(false);
+    expect(caps).toMatchObject({
+      credentials_issue: false,
+      repository_policy_manage: false,
+      project_configure: false,
+      runtime_access_manage: false,
+    });
     expect(caps.membership_available).toBe(true);
   });
 

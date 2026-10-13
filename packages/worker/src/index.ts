@@ -46,6 +46,7 @@ import { infra } from "./routes/infra";
 import { journal } from "./routes/journal";
 import { memberships } from "./routes/memberships";
 import { presence } from "./routes/presence";
+import { projectSettings } from "./routes/project-settings";
 import { questionRoutes } from "./routes/questions";
 import { attemptRoutes, queueRoutes } from "./routes/queue";
 import { records } from "./routes/records";
@@ -263,6 +264,7 @@ projectRoutes.route("/deliveries", conversations);
 projectRoutes.use("/*", createIdempotencyMiddleware());
 projectRoutes.use("/*", createCacheMiddleware());
 projectRoutes.route("/service-accounts", serviceAccountRoutes);
+projectRoutes.route("/project-settings", projectSettings);
 projectRoutes.route("/tasks", entities); // canonical
 // @deprecated -- use /tasks going forward; kept for backward compatibility
 projectRoutes.route("/entities", entities); // @deprecated

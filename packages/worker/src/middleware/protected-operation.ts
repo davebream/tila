@@ -165,6 +165,12 @@ export const STEP_UP_PROTECTED = [
   "POST /api/tokens",
   "DELETE /api/tokens/:name",
   "POST /api/tokens/:name/rotate",
+  "POST /api/repos",
+  "PUT /api/repos/:repoId/access-policy",
+  "PUT /api/repos/:repoId/oidc-policy",
+  "DELETE /api/repos/:repoId",
+  "PATCH /projects/:projectId/project-settings",
+  "POST /projects/:projectId/runtime/invitations/:invitationId/revoke",
 ] as const;
 
 export function stepUpMaxAgeMs(

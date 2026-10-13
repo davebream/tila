@@ -61,6 +61,8 @@ export const CAPABILITIES = [
   "repository-policy:read",
   "repository-policy:manage",
   "project:inspect",
+  // Owner-level display metadata such as the project name (#298); not root.
+  "project:configure",
   "project:restart",
   "project:export",
   "project:import",

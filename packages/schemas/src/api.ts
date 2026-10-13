@@ -1323,6 +1323,8 @@ export const RepoAccessPolicyResponseSchema = z.object({
   ok: z.literal(true),
   github_repo_id: z.number().int().positive(),
   policy: RepoAccessPolicySchema,
+  /** Present since #298; send it back as `expected_revision`. */
+  revision: z.number().int().positive().optional(),
 });
 export type RepoAccessPolicyResponse = z.infer<
   typeof RepoAccessPolicyResponseSchema
@@ -1362,7 +1364,59 @@ export const RepoOidcPolicyResponseSchema = z.object({
   ok: z.literal(true),
   github_repo_id: z.number().int().positive(),
   policy: RepoOidcPolicySchema,
+  /** Present since #298; send it back as `expected_revision`. */
+  revision: z.number().int().positive().optional(),
 });
+
+/**
+ * Optional precondition accepted alongside repository policy writes and link
+ * removal (#298). Omitted keeps the legacy unconditional write.
+ */
+export const RepoPolicyPreconditionSchema = z.object({
+  expected_revision: z.number().int().positive().optional(),
+});
+
+/** One linked repository with both policies and their revisions (owner view). */
+export const RepoLinkSchema = z.object({
+  github_host: z.string(),
+  github_owner: z.string(),
+  github_repo: z.string(),
+  github_repo_id: z.number().int().positive(),
+  created_at: z.number().int(),
+  created_by: z.string(),
+  /** Null when the stored policy fails validation; fix it with a full write. */
+  access_policy: RepoAccessPolicySchema.nullable(),
+  access_policy_revision: z.number().int().positive(),
+  oidc_policy: RepoOidcPolicySchema.nullable(),
+  oidc_policy_revision: z.number().int().positive(),
+});
+export type RepoLink = z.infer<typeof RepoLinkSchema>;
+export const RepoListResponseSchema = z.object({
+  ok: z.literal(true),
+  repos: z.array(RepoLinkSchema),
+});
+export type RepoListResponse = z.infer<typeof RepoListResponseSchema>;
+
+/** Browser-editable project metadata (#298). IDs and provenance are read-only. */
+export const ProjectSettingsSchema = z.object({
+  project_id: z.string(),
+  display_name: z.string().nullable(),
+  created_at: z.number(),
+  created_by: z.string(),
+  revision: z.number().int().positive(),
+});
+export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
+export const ProjectSettingsResponseSchema = z.object({
+  ok: z.literal(true),
+  settings: ProjectSettingsSchema,
+});
+export const UpdateProjectSettingsSchema = z
+  .object({
+    expected_revision: z.number().int().positive(),
+    display_name: z.string().trim().min(1).max(100).nullable(),
+  })
+  .strict();
+export type UpdateProjectSettings = z.infer<typeof UpdateProjectSettingsSchema>;
 export type RepoOidcPolicyResponse = z.infer<
   typeof RepoOidcPolicyResponseSchema
 >;

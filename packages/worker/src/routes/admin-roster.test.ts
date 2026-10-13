@@ -166,13 +166,27 @@ vi.mock("../d1", () => {
       return { membership: membershipRow(row), created: true };
     }
 
-    async revoke(params: { membershipId: string; actorPrincipalId: string }) {
+    async revoke(params: {
+      projectId: string;
+      membershipId: string;
+      actorPrincipalId: string;
+      allowLastOwner?: boolean;
+    }) {
       const userId = Number(params.membershipId.replace("membership-", ""));
       const row = storeState.grants.find(
         (candidate) =>
           candidate.github_user_id === userId && candidate.revoked_at === null,
       );
       if (!row) return null;
+      // Mirrors the canonical store: another active owner must remain.
+      const others = storeState.grants.filter(
+        (candidate) =>
+          candidate !== row &&
+          candidate.project_id === params.projectId &&
+          candidate.revoked_at === null,
+      );
+      if (!params.allowLastOwner && others.length === 0)
+        return { status: "last-owner" as const };
       const actorMatch = params.actorPrincipalId.match(/:(\d+)$/);
       row.revoked_at = Math.floor(Date.now() / 1000);
       row.revoked_by_user_id = actorMatch ? Number(actorMatch[1]) : null;
