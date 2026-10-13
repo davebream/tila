@@ -477,6 +477,7 @@ it("filters entries whose starting or running attempt is past its lease", () => 
     queue.inspect(db, { lease: "expired" }, undefined, lapsed - 1).total,
   ).toBe(0);
   expect(queue.inspect(db, {}, undefined, lapsed).total).toBe(ids.length);
+});
 
 it("records the assigner and keeps ambiguous enrollment retries to one logical assignment", () => {
   const { db } = fixture;
