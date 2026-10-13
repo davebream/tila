@@ -29,7 +29,7 @@ const revision = (version: number) => ({
 });
 
 describe("SettingsDefinitionsPage", () => {
-  test("a project without definitions shows the CLI fallback", async () => {
+  test("a project without definitions offers to start them in the browser", async () => {
     renderDefinitions();
 
     expect(
@@ -38,7 +38,7 @@ describe("SettingsDefinitionsPage", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/tila schema apply --expected-revision 0/),
+      await screen.findByRole("button", { name: "Start definitions" }),
     ).toBeInTheDocument();
     expect(
       await screen.findByText("No revisions applied yet."),

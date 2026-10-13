@@ -28,6 +28,10 @@ export function rights(identity: WhoamiResponse | undefined, project: string) {
     edit: taskWrite,
     operate: write && has("tasks:write", "claims:renew"),
     configure: manage && has("schema:write"),
+    /** Preview definition changes (participant threshold, `schema:preview`). */
+    previewDefinitions: write && has("schema:preview"),
+    /** Apply definitions (maintainer threshold, `schema:write`); not owner-only. */
+    applyDefinitions: manage && has("schema:write"),
     reconcile: manage && has("tasks:write", "claims:renew"),
     force: manage && has("tasks:write", "claims:acquire", "schema:write"),
     /** Create a task of `type` (create never needs a claim). */
