@@ -30,6 +30,8 @@ export interface ScenarioSources {
   suppressed: Source<number>;
   /** Total of `GET /deliveries?state=expired&expires_after=…`. */
   expired: Source<number>;
+  /** Open questions waiting on the caller (`GET /questions`). */
+  questions: Source<number>;
   /** `GET /runtime-view?filter=attention`. */
   runtime: Source<{
     total: number;
@@ -77,6 +79,7 @@ export const QUIET: ScenarioSources = {
   suppressed: 0,
   expired: 0,
   runtime: { total: 0 },
+  questions: 0,
 };
 
 const DOWN: ScenarioSources = {
@@ -87,6 +90,7 @@ const DOWN: ScenarioSources = {
   suppressed: "outage",
   expired: "outage",
   runtime: "outage",
+  questions: "outage",
 };
 
 const NO_CONVERSATIONS: Partial<ScenarioSources> = {
@@ -135,6 +139,8 @@ export const SCENARIOS: OverviewScenario[] = [
       queue: { uncertain: 2, active: 1 },
       lease: 1,
       runtime: { total: 1 },
+      // The worker asked a question before its session dropped.
+      questions: 1,
     },
     expected: "attention",
     next: "/p/test-project/queue?state=uncertain",
@@ -232,6 +238,34 @@ export const runtimeView = (
   scan: { agents: 10, complete: data.complete ?? true },
 });
 
+/** `count` open questions waiting on the test principal. */
+export const openQuestions = (count: number) =>
+  Array.from({ length: count }, (_, i) => ({
+    answer_applicable: false,
+    question: {
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      text: `Question ${i + 1}`,
+      task_id: "bug-1",
+      attempt_id: "att-1",
+      attempt_revision: 1,
+      attempt_fence: 1,
+      requester: { principal_id: "worker", participant_id: "w" },
+      session: null,
+      requester_binding: null,
+      responder_principal_id: "github:example:1",
+      escalated: false,
+      state: "open",
+      revision: 1,
+      answer: null,
+      routing: [],
+      discussion: [],
+      predecessor_id: null,
+      invalidation_reason: null,
+      created_at: 1,
+      updated_at: 1,
+    },
+  }));
+
 export type SourceBody = { failure: SourceFailure } | { data: unknown };
 
 /**
@@ -260,6 +294,9 @@ export function sourceBodies(
     "deliveries-suppressed": body(sources.suppressed, deliveryPage),
     "deliveries-expired": body(sources.expired, deliveryPage),
     runtime: body(sources.runtime, runtimeView),
+    "questions-mine": body(sources.questions, (count) => ({
+      result: { questions: openQuestions(count), next_after_id: null },
+    })),
   };
 }
 
@@ -302,6 +339,10 @@ export function sourceHandlers(
     http.get("*/projects/*/runtime-view", ({ request }) => {
       seen(request);
       return respond(bodies.runtime);
+    }),
+    http.get("*/projects/*/questions", ({ request }) => {
+      seen(request);
+      return respond(bodies["questions-mine"]);
     }),
   ];
 }

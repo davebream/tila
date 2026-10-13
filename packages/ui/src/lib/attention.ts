@@ -5,7 +5,9 @@ import {
   getRuntimeView,
   inspectQueue,
   listDeliveries,
+  listQuestions,
   listTasks,
+  whoami,
 } from "@/lib/api";
 import {
   deliveryFiltersFromSearch,
@@ -19,6 +21,7 @@ import type { ErrorKind, SectionState, StaleInfo } from "@/lib/query-state";
 import type {
   DeliveryListResponse,
   PaginatedEntityListResponse,
+  QuestionListResult,
   QueueInspection,
   RecordTypesResponse,
   WorkCatalogResponse,
@@ -207,6 +210,43 @@ export const ATTENTION_RULES: readonly AttentionRule[] = [
     severity: "red",
     link: fixed("queue", LEASE_LAPSED),
     observe: (data) => ({ total: data.total, complete: true }),
+  }),
+  defineRule({
+    id: "decisions.waiting",
+    source: listSource<QuestionListResult | null>(
+      {
+        id: "questions-mine",
+        label: "decisions",
+        requires: ["tasks:read"],
+        surface: "questions",
+      },
+      // Questions report no total: count one large page and say when it is
+      // only a floor.
+      async (projectId) => {
+        const me = (await whoami()).principal_id;
+        if (!me) return null;
+        return listQuestions(projectId, {
+          responder_principal_id: me,
+          state: "open",
+          limit: 200,
+        });
+      },
+    ),
+    noun: ["question waiting on you", "questions waiting on you"],
+    rule: "A worker asked and is waiting. Answer it, escalate it to an owner, or cancel it.",
+    severity: "amber",
+    link: fixed("decisions", ""),
+    observe: (data) =>
+      data === null
+        ? {
+            total: 0,
+            complete: true,
+            notApplicable: "This credential has no principal to wait on.",
+          }
+        : {
+            total: data.questions.length,
+            complete: data.next_after_id === null,
+          },
   }),
   defineRule({
     id: "work.failed",

@@ -9,6 +9,9 @@ import type {
   MessageDeliveriesResponse,
   MessagePublishResponseSchema,
   Question,
+  QuestionAnswerCommand,
+  QuestionCancelCommand,
+  QuestionEscalateCommand,
   QuestionListResult,
   QuestionView,
   QueueEntry,
@@ -1296,6 +1299,28 @@ export async function getQuestion(
     await request<{ result: QuestionView }>(
       projectId,
       `/questions/${encodeURIComponent(id)}`,
+    )
+  ).result;
+}
+
+/** The server requires the header key, when sent, to equal the command's key. */
+export async function questionAction(
+  projectId: string,
+  id: string,
+  input:
+    | { action: "answer"; command: QuestionAnswerCommand }
+    | { action: "escalate"; command: QuestionEscalateCommand }
+    | { action: "cancel"; command: QuestionCancelCommand },
+): Promise<QuestionView> {
+  return (
+    await mutate<{ result: QuestionView }>(
+      "POST",
+      projectPath(
+        projectId,
+        `/questions/${encodeURIComponent(id)}/${input.action}`,
+      ),
+      input.command,
+      { idempotencyKey: input.command.idempotency_key },
     )
   ).result;
 }

@@ -70,7 +70,8 @@ function fetched(id: string, body: SourceBody): SectionState<unknown> {
       ? failed("unavailable", "do-unreachable")
       : failed("unavailable", "config-unavailable");
   const data = body.data as { result?: unknown };
-  if (id === "queue" || id === "queue-lease") return ready(data.result);
+  if (id === "queue" || id === "queue-lease" || id === "questions-mine")
+    return ready(data.result);
   if (id === "deliveries-expired") return ready({ page: data, since: 0 });
   return ready(data);
 }
