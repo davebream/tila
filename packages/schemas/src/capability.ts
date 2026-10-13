@@ -293,6 +293,23 @@ export function hasNamespaceRestrictions(policy: CredentialPolicy): boolean {
   );
 }
 
+/**
+ * Project surfaces a namespace-restricted credential may call. Every other
+ * surface would leak cross-namespace data, so the Worker denies it outright;
+ * exact `/search` is also allowed because the DO filters each result kind.
+ */
+export const RESTRICTED_CREDENTIAL_SURFACES = [
+  "tasks",
+  "records",
+  "claims",
+  "templates",
+  "queue",
+  "attempts",
+  "questions",
+] as const;
+export type RestrictedCredentialSurface =
+  (typeof RESTRICTED_CREDENTIAL_SURFACES)[number];
+
 /** True only when every grant in child is contained in parent. */
 export function policyContains(
   parent: CredentialPolicy,
