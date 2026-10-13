@@ -493,8 +493,14 @@ describe("tila project create (cloudflare)", () => {
       json: true,
     });
 
-    expect(mockRunFirstAdminSeed).toHaveBeenCalledWith(
-      expect.objectContaining({ flag: "octocat", slug: "test-project" }),
+    expect(mockRunFirstAdminSeed).toHaveBeenCalledWith({
+      flag: "octocat",
+      slug: "test-project",
+      client: mockCreateCliClient.mock.results.at(-1)?.value,
+    });
+    expect(mockCreateCliClient).toHaveBeenCalledWith(
+      INFRA_CONFIG.worker_url,
+      "tila_mock-raw-token",
     );
     expect(mockApplySeedOutcome).toHaveBeenCalledWith(
       expect.objectContaining({ seeded: true }),

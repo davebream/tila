@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixes
+
+- `tila project create` assigns a UUID to the bootstrap token and seeds `--admin-github-user` through the Worker's canonical membership API, including an audit event. Seeding requires a reachable Worker; an existing lower role causes a partial failure without changing that role (#360).
+- D1 migration `0033_project_bootstrap_repair.sql` fills missing token IDs and imports unambiguous legacy bootstrap owners. Existing membership history, revocations and malformed canonical identities prevent automatic owner recovery; the operations guide describes verification and explicit repair.
+
 ## [0.7.0] - 2026-10-13
 
 ### Upgrade notes

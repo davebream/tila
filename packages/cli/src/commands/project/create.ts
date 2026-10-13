@@ -206,7 +206,7 @@ async function runCloudflareProvisioning(
   // Seed failure is FATAL when the flag was supplied — an empty roster is the
   // chicken-and-egg state this flow exists to eliminate.
   // Rollback note: no compensating delete on failure. _projects and _tokens
-  // are already inserted and INSERT OR IGNORE makes a re-run idempotent.
+  // are already inserted; the membership API makes the owner grant idempotent.
   // Recovery path: re-run `project create` or use the --token fallback (C5).
   let firstAdminSeedResult: Awaited<
     ReturnType<typeof runFirstAdminSeed>
@@ -215,9 +215,7 @@ async function runCloudflareProvisioning(
     if (s) s.start("Seeding first admin...");
     firstAdminSeedResult = await runFirstAdminSeed({
       flag: adminGithubUser,
-      client: cf,
-      accountId,
-      databaseId: d1DatabaseId,
+      client: createCliClient(workerUrl, rawToken),
       slug,
     });
     if (s)
@@ -386,11 +384,11 @@ async function runLocalProvisioning(
   if (adminGithubUser) {
     if (json) {
       p.log.warn(
-        "--admin-github-user is ignored for local backends (_admin_grants is a D1-only table)",
+        "--admin-github-user is ignored for local backends (project memberships require a remote Worker)",
       );
     } else {
       p.log.warn(
-        "--admin-github-user is ignored for local backends. The _admin_grants table is D1-only (cloud projects only).",
+        "--admin-github-user is ignored for local backends. Project memberships require a remote Worker (cloud projects only).",
       );
     }
   }

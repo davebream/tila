@@ -1,140 +1,188 @@
+import type { ProjectMembership } from "@tila/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCliClient } from "../../lib/client-factory";
 
-// Mock the cloudflare-resources module so we can control seedFirstAdmin and resolveGithubUserId
 const mockResolveGithubUserId = vi.fn();
-const mockSeedFirstAdmin = vi.fn();
 vi.mock("../../lib/cloudflare-resources", () => ({
   resolveGithubUserId: (...args: unknown[]) => mockResolveGithubUserId(...args),
-  seedFirstAdmin: (...args: unknown[]) => mockSeedFirstAdmin(...args),
-  // keep other exports as stubs
-  insertTokenAndProject: vi.fn(),
-  insertGithubAppConfig: vi.fn(),
-  queryD1: vi.fn(),
-  resolveZoneId: vi.fn(),
-  createCustomDomain: vi.fn(),
-  ensureD1Database: vi.fn(),
-  applyD1Migrations: vi.fn(),
-  ensureR2Bucket: vi.fn(),
-  applyR2Lifecycle: vi.fn(),
-  setWorkerSecret: vi.fn(),
-  setWorkerSecrets: vi.fn(),
-  deleteWorkerSecret: vi.fn(),
-  deletePagesProject: vi.fn(),
 }));
 
-// Minimal Cloudflare client mock
-function makeMockClient() {
+function grantResponse(
+  overrides: Partial<ProjectMembership> = {},
+  created = true,
+) {
   return {
-    d1: { database: { query: vi.fn() } },
+    ok: true,
+    created,
+    membership: {
+      membership_id: "61728627-2d74-4ec0-8a52-bc8c59bf0036",
+      project_id: "my-proj",
+      principal_id: "github:github.com:583231",
+      provider: "github",
+      identity_host: "github.com",
+      subject_id: "583231",
+      subject_kind: "human",
+      role: "owner",
+      display_name: "octocat",
+      granted_by: "token:bootstrap-id",
+      granted_at: 1791820000000,
+      revoked_by: null,
+      revoked_at: null,
+      ...overrides,
+    },
   };
+}
+
+async function seed(flag = "octocat") {
+  const { runFirstAdminSeed } = await import("../../lib/seed-first-admin-flow");
+  return runFirstAdminSeed({
+    flag,
+    client: createCliClient("https://worker.example", "tila_test_bootstrap"),
+    slug: "my-proj",
+  });
 }
 
 describe("runFirstAdminSeed", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("success path: resolves login and seeds admin, returns seeded:true + githubUserId", async () => {
     mockResolveGithubUserId.mockResolvedValue(583231);
-    mockSeedFirstAdmin.mockResolvedValue(undefined);
+  });
+  afterEach(() => vi.restoreAllMocks());
 
-    const { runFirstAdminSeed } = await import(
-      "../../lib/seed-first-admin-flow"
-    );
-    const client = makeMockClient();
-    const result = await runFirstAdminSeed({
-      flag: "octocat",
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      client: client as any,
-      accountId: "acc-1",
-      databaseId: "db-uuid",
-      slug: "my-proj",
+  it("resolves a login and grants an audited owner membership through the Worker", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json(grantResponse()));
+    expect(await seed()).toEqual({
+      seeded: true,
+      githubUserId: 583231,
+      login: "octocat",
     });
-
-    expect(result.seeded).toBe(true);
-    expect(result.githubUserId).toBe(583231);
-    expect(result.login).toBe("octocat");
-    expect(result.error).toBeUndefined();
     expect(mockResolveGithubUserId).toHaveBeenCalledWith("octocat");
-    expect(mockSeedFirstAdmin).toHaveBeenCalledWith(
-      expect.objectContaining({
-        slug: "my-proj",
-        githubUserId: 583231,
-      }),
-    );
-  });
-
-  it("success path with numeric id: passes through without treating as login", async () => {
-    mockResolveGithubUserId.mockResolvedValue(12345);
-    mockSeedFirstAdmin.mockResolvedValue(undefined);
-
-    const { runFirstAdminSeed } = await import(
-      "../../lib/seed-first-admin-flow"
-    );
-    const client = makeMockClient();
-    const result = await runFirstAdminSeed({
-      flag: "12345",
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      client: client as any,
-      accountId: "acc-1",
-      databaseId: "db-uuid",
-      slug: "my-proj",
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe("https://worker.example/projects/my-proj/memberships");
+    expect(options?.method).toBe("POST");
+    expect(options?.headers).toMatchObject({
+      Authorization: "Bearer tila_test_bootstrap",
     });
-
-    expect(result.seeded).toBe(true);
-    expect(result.githubUserId).toBe(12345);
-    expect(mockResolveGithubUserId).toHaveBeenCalledWith("12345");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      principal: {
+        provider: "github",
+        host: "github.com",
+        user_id: 583231,
+        login: "octocat",
+      },
+      subject_kind: "human",
+      role: "owner",
+    });
   });
 
-  it("resolution failure: returns seeded:false with error message", async () => {
+  it("seeds a numeric identity without a login snapshot", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json(grantResponse()));
+    expect(await seed("583231")).toEqual({
+      seeded: true,
+      githubUserId: 583231,
+    });
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).principal).toEqual({
+      provider: "github",
+      host: "github.com",
+      user_id: 583231,
+    });
+  });
+
+  it("accepts an existing owner without another grant", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(grantResponse({}, false)),
+    );
+    expect(await seed()).toMatchObject({ seeded: true });
+  });
+
+  it.each(["viewer", "participant", "maintainer"] as const)(
+    "fails when the persisted role is %s",
+    async (role) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json(grantResponse({ role }, false)));
+      expect(await seed()).toMatchObject({
+        seeded: false,
+        error: expect.stringContaining("Explicitly update"),
+      });
+      expect(fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { project_id: "another-project" },
+    { principal_id: "github:github.com:99", subject_id: "99" },
+    { provider: "oidc" as const },
+    { identity_host: "another.example" },
+    { subject_kind: "service" as const },
+    { revoked_at: 1791820000000 },
+  ])(
+    "rejects a membership that differs from the requested active GitHub owner: %j",
+    async (overrides) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        Response.json(grantResponse(overrides)),
+      );
+      expect(await seed()).toMatchObject({
+        seeded: false,
+        error: expect.stringContaining("does not match"),
+      });
+    },
+  );
+
+  it("validates the response with the shared schema", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, created: true }),
+    );
+    expect(await seed()).toMatchObject({
+      seeded: false,
+      error: expect.any(String),
+    });
+  });
+
+  it("does not call the Worker when GitHub resolution fails", async () => {
     mockResolveGithubUserId.mockRejectedValue(
       new Error("GitHub user not found"),
     );
-
-    const { runFirstAdminSeed } = await import(
-      "../../lib/seed-first-admin-flow"
-    );
-    const client = makeMockClient();
-    const result = await runFirstAdminSeed({
-      flag: "unknownuser",
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      client: client as any,
-      accountId: "acc-1",
-      databaseId: "db-uuid",
-      slug: "my-proj",
+    const fetch = vi.spyOn(globalThis, "fetch");
+    expect(await seed()).toEqual({
+      seeded: false,
+      error: "GitHub user not found",
     });
-
-    expect(result.seeded).toBe(false);
-    expect(result.error).toMatch(/GitHub user not found/i);
-    expect(result.githubUserId).toBeUndefined();
-    expect(mockSeedFirstAdmin).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("seed failure: returns seeded:false with error message", async () => {
-    mockResolveGithubUserId.mockResolvedValue(999);
-    mockSeedFirstAdmin.mockRejectedValue(new Error("D1 write failed"));
-
-    const { runFirstAdminSeed } = await import(
-      "../../lib/seed-first-admin-flow"
+  it("reports rejected bootstrap authentication as seed failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        {
+          ok: false,
+          error: {
+            code: "unauthorized",
+            message: "Invalid token",
+            retryable: false,
+          },
+        },
+        { status: 401 },
+      ),
     );
-    const client = makeMockClient();
-    const result = await runFirstAdminSeed({
-      flag: "someuser",
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      client: client as any,
-      accountId: "acc-1",
-      databaseId: "db-uuid",
-      slug: "my-proj",
+    expect(await seed()).toMatchObject({
+      seeded: false,
+      error: expect.stringContaining("Invalid token"),
     });
+  });
 
-    expect(result.seeded).toBe(false);
-    expect(result.error).toMatch(/D1 write failed/i);
-    expect(result.githubUserId).toBeUndefined();
+  it("reports an unreachable Worker as seed failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("Worker unreachable"),
+    );
+    expect(await seed()).toMatchObject({
+      seeded: false,
+      error: expect.stringContaining("Network error connecting"),
+    });
   });
 });
 
