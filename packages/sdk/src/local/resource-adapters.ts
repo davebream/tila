@@ -1077,10 +1077,22 @@ function createLocalSchemaMethods(
       };
     },
     async preview(definition: string) {
-      return {
-        ok: true as const,
-        ...(await project.previewSchema(definition)),
-      };
+      try {
+        return {
+          ok: true as const,
+          ...(await project.previewSchema(definition)),
+        };
+      } catch (error) {
+        const mapped = error instanceof Error ? mapProjectError(error) : null;
+        if (mapped)
+          throw new TilaApiError(
+            mapped.status,
+            toTilaErrorCode(mapped.code),
+            (error as Error).message,
+            mapped.retryable,
+          );
+        throw error;
+      }
     },
     async history(opts?: { limit?: string; before?: string }) {
       const limit = Number(opts?.limit ?? 50);

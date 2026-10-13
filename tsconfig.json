@@ -13,6 +13,7 @@
     "paths": {
       "@tila/schemas": ["./packages/schemas/src/index.ts"],
       "@tila/core": ["./packages/core/src/index.ts"],
+      "@tila/core/definition-yaml": ["./packages/core/src/definition-yaml.ts"],
       "@tila/ops-sqlite": ["./packages/ops-sqlite/src/index.ts"],
       "@tila/backend-embedded": ["./packages/backend-embedded/src/index.ts"],
       "tila-sdk": ["./packages/sdk/src/index.ts"],

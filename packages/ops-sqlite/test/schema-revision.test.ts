@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { create } from "../src/entity-ops";
 import {
+  DefinitionTooLargeError,
+  SchemaParseException,
   applySchema,
   getCurrentSchema,
   listSchemaHistory,
@@ -150,5 +152,59 @@ describe("revision-aware configuration", () => {
     expect(
       fixture.rawDb.prepare("SELECT count(*) AS n FROM entities").get(),
     ).toEqual({ n: 0 });
+  });
+
+  describe("new-write guard", () => {
+    const secret = `${initial}\n[extra]\napi_key = "plain-value"\n`;
+    const exported = `${initial}\n[tila_export]\nformat = "tila-definitions"\nformat_version = 1\n`;
+    const clientConfig = `project_id = "p"\nworker_url = "https://x"\n${initial}`;
+    const oversize = `${initial}\nnote = "${"x".repeat(256 * 1024)}"\n`;
+
+    it.each([
+      ["a credential", secret, "extra.api_key"],
+      ["export metadata", exported, "tila_export"],
+      ["a client connection file", clientConfig, undefined],
+    ])("rejects %s on preview and apply without writing", (_n, text, path) => {
+      for (const write of [
+        () => previewSchema(fixture.db, text),
+        () =>
+          applySchema(fixture.db, text, "alice", undefined, testOrigin(), {
+            expected_revision: 0,
+          }),
+      ]) {
+        try {
+          write();
+          expect.unreachable();
+        } catch (error) {
+          expect(error).toBeInstanceOf(SchemaParseException);
+          expect((error as SchemaParseException).errors[0].path).toBe(path);
+          expect((error as Error).message).not.toContain("plain-value");
+        }
+      }
+      expect(listSchemaHistory(fixture.db)).toHaveLength(0);
+    });
+
+    it("rejects oversize definitions and reviewed copies", () => {
+      expect(() => previewSchema(fixture.db, oversize)).toThrow(
+        DefinitionTooLargeError,
+      );
+      expect(() =>
+        applySchema(fixture.db, initial, "alice", undefined, testOrigin(), {
+          expected_revision: 0,
+          reviewed_definition: oversize,
+        }),
+      ).toThrow(DefinitionTooLargeError);
+      expect(listSchemaHistory(fixture.db)).toHaveLength(0);
+    });
+
+    it("still reads a stored definition the guard would now reject", () => {
+      fixture.rawDb
+        .prepare(
+          "INSERT INTO _schema_history (version, definition, applied_at, applied_by) VALUES (1, ?, 0, 'legacy')",
+        )
+        .run(secret);
+      expect(getCurrentSchema(fixture.db)?.definition).toBe(secret);
+      expect(previewSchema(fixture.db, initial).revision).toBe(1);
+    });
   });
 });

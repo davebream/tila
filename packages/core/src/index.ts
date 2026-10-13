@@ -104,6 +104,8 @@ export {
   parseDefinitionDocument,
   putField,
   readFields,
+  compareDefinitionUnits,
+  definitionUnits,
   rebaseDefinition,
   removeDeclaration,
   removeField,
@@ -119,7 +121,34 @@ export {
   type FieldShape,
   type ParseDefinitionDocumentResult,
   type RebaseResult,
+  type RebaseUnit,
+  type DefinitionUnitComparison,
 } from "./schema-document";
+
+// Explicit definition import/export (YAML adapter: @tila/core/definition-yaml)
+export {
+  definitionFormatFromName,
+  definitionSizeError,
+  definitionVerbatimPaths,
+  findForbiddenDefinitionContent,
+  looksLikeClientConfig,
+  planDefinitionImport,
+  prepareDefinitionExport,
+  readDefinitionTree,
+  readTomlDefinition,
+  renderTomlDefinitionExport,
+  type DefinitionExportInput,
+  type DefinitionFormat,
+  type DefinitionImportContext,
+  type DefinitionImportMode,
+  type DefinitionImportPlan,
+  type DefinitionImportUnits,
+  type DefinitionTransferError,
+  type DefinitionTransferErrorCode,
+  type PreparedDefinitionExport,
+  type ReadDefinitionResult,
+  type RenderedDefinitionExport,
+} from "./definition-transfer";
 
 // Artifact text normalization for full-text search indexing
 export {

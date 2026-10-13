@@ -72,3 +72,36 @@ it("returns the TOML position of a syntax error", async () => {
   };
   expect(json.error.errors[0].line).toBeGreaterThan(0);
 });
+
+it.each([
+  ["/schema/preview", {}],
+  [
+    "/schema/apply",
+    {
+      applied_by: "test",
+      principal_id: "maintainer",
+      participant_id: "maintainer-ui",
+    },
+  ],
+])("%s rejects credentials and oversize definitions", async (path, extra) => {
+  const secret = await post(path, {
+    ...extra,
+    definition: 'schema_version = 1\n[extra]\npassword = "hunter2"\n',
+  });
+  expect(secret.status).toBe(400);
+  const json = (await secret.json()) as {
+    error: { code: string; errors: { path?: string }[] };
+  };
+  expect(json.error.code).toBe("schema-parse-error");
+  expect(json.error.errors[0].path).toBe("extra.password");
+  expect(JSON.stringify(json)).not.toContain("hunter2");
+
+  const oversize = await post(path, {
+    ...extra,
+    definition: `schema_version = 1\nnote = "${"x".repeat(256 * 1024)}"\n`,
+  });
+  expect(oversize.status).toBe(413);
+  expect(
+    ((await oversize.json()) as { error: { code: string } }).error.code,
+  ).toBe("payload-too-large");
+});
