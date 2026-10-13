@@ -1,3 +1,5 @@
+import { schema } from "@tila/ops-sqlite";
+import { getTableColumns, getTableName } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the CLI local backend (src/local) to avoid the bun:sqlite import
@@ -100,37 +102,12 @@ function defaultSchemaDiagnostic() {
       applied_at: 123,
     })),
     tables: ["claims", "journal", "_schema_history"],
-    columns: {
-      claims: [
-        "resource",
-        "holder",
-        "machine",
-        "user",
-        "mode",
-        "fence",
-        "acquired_at",
-        "expires_at",
-        "metadata",
-      ].map(column),
-      journal: [
-        "seq",
-        "t",
-        "kind",
-        "resource",
-        "actor",
-        "fence",
-        "data",
-        "token_id",
-      ].map(column),
-      _schema_history: [
-        "version",
-        "definition",
-        "applied_at",
-        "applied_by",
-        "change_summary",
-        "strategy",
-      ].map(column),
-    },
+    columns: Object.fromEntries(
+      [schema.claims, schema.journal, schema.schemaHistory].map((table) => [
+        getTableName(table),
+        Object.values(getTableColumns(table)).map((col) => column(col.name)),
+      ]),
+    ),
   };
 }
 
@@ -154,6 +131,22 @@ function buildMockContext(authMode: string, workerUrl: string) {
       request: vi.fn(),
     },
   };
+}
+
+function contextWithSchemaDiagnostic(report = defaultSchemaDiagnostic()) {
+  const ctx = buildMockContext("tila-token", "https://test.workers.dev");
+  ctx.client.get.mockResolvedValueOnce({ version: "0.1.0" });
+  ctx.client.get.mockResolvedValueOnce({
+    token_name: "test-token",
+    project_id: "test-proj",
+  });
+  ctx.client.get.mockResolvedValueOnce({
+    doRttMs: 10,
+    r2Reachable: true,
+    doHealth: { expiredClaimsCount: 0, journalRows: 100, maxSeq: 100 },
+  });
+  ctx.client.get.mockResolvedValueOnce(report);
+  return ctx;
 }
 
 function getNoteContent(): string {
@@ -262,30 +255,94 @@ describe("doctor GitHub App checks", () => {
     expect(output).toContain("DO schema ok");
   });
 
-  it("reports schema drift when required columns are missing", async () => {
-    const ctx = buildMockContext("tila-token", "https://test.workers.dev");
+  it("accepts current claims without retired identity columns", async () => {
+    const report = defaultSchemaDiagnostic();
+    const names = report.columns.claims.map((col) => col.name);
+    expect(names).toEqual(
+      expect.arrayContaining(["principal_id", "participant_id", "environment"]),
+    );
+    for (const retired of ["holder", "machine", "user"]) {
+      expect(names).not.toContain(retired);
+    }
 
-    ctx.client.get.mockResolvedValueOnce({ version: "0.1.0" });
-    ctx.client.get.mockResolvedValueOnce({
-      token_name: "test-token",
-      project_id: "test-proj",
-    });
-    ctx.client.get.mockResolvedValueOnce({
-      doRttMs: 10,
-      r2Reachable: true,
-      doHealth: { expiredClaimsCount: 0, journalRows: 100, maxSeq: 100 },
-    });
-    ctx.client.get.mockResolvedValueOnce({
-      ...defaultSchemaDiagnostic(),
-      columns: {
-        ...defaultSchemaDiagnostic().columns,
-        claims: ["resource", "holder"].map(column),
-      },
-    });
+    const output = await runDoctor(contextWithSchemaDiagnostic(report));
+    expect(output).toContain("DO schema ok");
+    expect(output).not.toContain("DO schema drift");
+  });
 
-    const output = await runDoctor(ctx);
-    expect(output).toMatch(/DO schema drift/i);
-    expect(output).toContain("claims.machine");
+  it.each(["principal_id", "participant_id", "environment"])(
+    "reports schema drift when claims.%s is missing",
+    async (missing) => {
+      const report = defaultSchemaDiagnostic();
+      report.columns.claims = report.columns.claims.filter(
+        (col) => col.name !== missing,
+      );
+
+      const output = await runDoctor(contextWithSchemaDiagnostic(report));
+      expect(output).toContain(`DO schema drift: missing claims.${missing}`);
+      expect(output).not.toContain("DO schema ok");
+    },
+  );
+
+  it("rejects the legacy claims layout", async () => {
+    const report = defaultSchemaDiagnostic();
+    report.columns.claims = [
+      "resource",
+      "holder",
+      "machine",
+      "user",
+      "mode",
+      "fence",
+      "acquired_at",
+      "expires_at",
+      "metadata",
+    ].map(column);
+
+    const output = await runDoctor(contextWithSchemaDiagnostic(report));
+    expect(output).toContain(
+      "DO schema drift: missing claims.principal_id, claims.participant_id, claims.environment",
+    );
+  });
+
+  it.each(["claims", "journal", "_schema_history"])(
+    "reports schema drift when the %s table is missing",
+    async (table) => {
+      const report = defaultSchemaDiagnostic();
+      const missing = report.columns[table].map(
+        (col) => `${table}.${col.name}`,
+      );
+      delete report.columns[table];
+      report.tables = report.tables.filter((name) => name !== table);
+
+      const output = await runDoctor(contextWithSchemaDiagnostic(report));
+      expect(output).toContain(
+        `DO schema drift: missing ${missing.join(", ")}`,
+      );
+    },
+  );
+
+  it.each(["source", "source_version"])(
+    "reports schema drift when journal.%s is missing",
+    async (missing) => {
+      const report = defaultSchemaDiagnostic();
+      report.columns.journal = report.columns.journal.filter(
+        (col) => col.name !== missing,
+      );
+
+      const output = await runDoctor(contextWithSchemaDiagnostic(report));
+      expect(output).toContain(`DO schema drift: missing journal.${missing}`);
+    },
+  );
+
+  it("allows additional deployed columns", async () => {
+    const report = defaultSchemaDiagnostic();
+    for (const columns of Object.values(report.columns)) {
+      columns.push(column("future_column"));
+    }
+
+    const output = await runDoctor(contextWithSchemaDiagnostic(report));
+    expect(output).toContain("DO schema ok");
+    expect(output).not.toContain("DO schema drift");
   });
 
   it("reports fail when local config is missing", async () => {

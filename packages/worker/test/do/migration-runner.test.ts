@@ -1,6 +1,7 @@
 import { MIGRATIONS, MIGRATION_BOOTSTRAP } from "@tila/ops-sqlite";
 import type { MigrationStorage } from "@tila/ops-sqlite";
 import Database from "better-sqlite3";
+import { getTableColumns, getTableName } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
@@ -74,6 +75,29 @@ function indexes(sqlite: InstanceType<typeof Database>): string[] {
 }
 
 describe("migration runner", () => {
+  it("keeps doctor table definitions aligned with the migrated database", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      runProjectMigrations(createStorage(sqlite));
+
+      for (const table of [
+        schema.claims,
+        schema.journal,
+        schema.schemaHistory,
+      ]) {
+        const tableName = getTableName(table);
+        const expected = Object.values(getTableColumns(table)).map(
+          (column) => column.name,
+        );
+        expect(columns(sqlite, tableName).sort(), tableName).toEqual(
+          expected.sort(),
+        );
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it("applies all migrations on a fresh database", () => {
     const sqlite = new Database(":memory:");
     runProjectMigrations(createStorage(sqlite));
