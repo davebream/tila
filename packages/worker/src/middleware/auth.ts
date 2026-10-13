@@ -36,6 +36,7 @@ import {
   D1RevokedSubjectsStore,
   D1SessionStore,
   D1TokenStore,
+  ProjectMembershipStore,
   type RateLimitStoreInterface,
   canonicalizePrincipal,
 } from "../d1";
@@ -673,6 +674,35 @@ export function createAuthMiddleware(
               tokenId: source.tokenId,
               name: scoped.name,
             });
+          } else if (
+            source.scopes === "full" &&
+            source.tokenId &&
+            source.projectId === sessionResult.projectId &&
+            sessionResult.principalId === `token:${source.tokenId}` &&
+            !(
+              c.req.method === "POST" &&
+              (c.req.path === "/auth/logout" ||
+                c.req.path === "/auth/session/logout")
+            ) &&
+            !(await new ProjectMembershipStore(c.env.DB).resolve(
+              sessionResult.projectId,
+              sessionResult.principalId,
+            ))
+          ) {
+            // Legacy bearer bootstrap authority never becomes cookie authority.
+            // Inspect the live source and membership, not session snapshots.
+            return c.json(
+              {
+                ok: false,
+                error: {
+                  code: "account-migration-required",
+                  message:
+                    "This legacy API-token browser session requires an account with project membership. Ask your administrator for an invitation with project access. To create the first administrator, the infrastructure owner can run tila auth setup with --url, --email, and --project.",
+                  retryable: false,
+                },
+              },
+              401,
+            );
           }
         } catch {
           return c.json(
