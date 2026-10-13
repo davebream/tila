@@ -305,12 +305,18 @@ export const DeliveryListQuerySchema = z.object({
   /** Matches a delivery ID or a message ID. */
   id: z.string().uuid().optional(),
   state: DeliveryStateSchema.optional(),
+  /** `suppressed`: wakes stopped (stall, budget, hop or pair limit) until resumed. */
+  wake: z.literal("suppressed").optional(),
+  /** Only deliveries whose expiry, in epoch ms, is later than this. */
+  expires_after: z.coerce.number().int().nonnegative().optional(),
 });
 export const DeliveryListResponseSchema = z.object({
   ok: z.literal(true),
   deliveries: z.array(DeliveryTraceItemSchema),
   has_more: z.boolean(),
   cursor: z.string().nullable(),
+  /** Every delivery matching the filters, across all pages. */
+  total: z.number().int().nonnegative().optional(),
 });
 /** Readers get aggregate counts only; recipients and bindings need manage. */
 export const MessageDeliveriesResponseSchema = z.discriminatedUnion(

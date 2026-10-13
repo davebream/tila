@@ -14,6 +14,9 @@ export const RUNTIME_VIEW_DEFAULT_LIMIT = 25;
 /** Presence rows older than this are stale; matches the presence API TTL. */
 export const RUNTIME_PRESENCE_TTL_MS = 60_000;
 
+/** Agents an attention filter scans per request; beyond it the scan is partial. */
+export const RUNTIME_ATTENTION_SCAN_LIMIT = 250;
+
 export const RuntimeViewQuerySchema = z
   .object({
     limit: z.coerce
@@ -24,8 +27,17 @@ export const RuntimeViewQuerySchema = z
       .default(RUNTIME_VIEW_DEFAULT_LIMIT),
     cursor: z.string().min(1).max(200).optional(),
     agent: AgentIdSchema.optional(),
+    /**
+     * `attention`: only agents whose current occupant expired, cannot be
+     * confirmed, or whose host stopped reporting. Adds `total` and `scan`.
+     */
+    filter: z.literal("attention").optional(),
   })
-  .strict();
+  .strict()
+  .refine((query) => !(query.filter && query.agent), {
+    message: "filter and agent cannot be combined",
+    path: ["filter"],
+  });
 
 export const RuntimeSourceStatusSchema = z.enum([
   "ok",
@@ -194,6 +206,15 @@ export const RuntimeViewResponseSchema = z.object({
   sources: RuntimeViewSourcesSchema,
   rows: z.array(RuntimeViewRowSchema),
   next_cursor: z.string().nullable(),
+  /** With a filter: matching agents across every page of the scan. */
+  total: z.number().int().nonnegative().optional(),
+  /** With a filter: agents examined, and whether that was all of them. */
+  scan: z
+    .object({
+      agents: z.number().int().nonnegative(),
+      complete: z.boolean(),
+    })
+    .optional(),
 });
 
 // Internal Worker-to-DO envelope. Bindings are unredacted here; the Worker

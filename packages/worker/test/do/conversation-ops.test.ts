@@ -663,5 +663,146 @@ describe("durable conversations", () => {
         ),
       ).toThrow(/membership/);
     });
+    it("reports a total equal to the rows reached by walking every page", async () => {
+      attach(acting);
+      ops.createRoom(
+        f.db,
+        CreateRoomSchema.parse({ id: "other", name: "Other" }),
+        owner,
+        now,
+      );
+      ops.setMember(f.db, "other", "agent:worker", true, owner, now);
+      for (let i = 0; i < 5; i++) await publish(`op-${i}`, {}, now + i);
+      await ops.publish(f.db, "other", message("elsewhere"), owner, now + 5);
+      const filters = { room: "general" };
+      const seen: string[] = [];
+      const totals: number[] = [];
+      let before: { ordinal: number; id: string } | undefined;
+      for (;;) {
+        const page = ops.listDeliveries(f.db, owner, filters, 2, before, now);
+        totals.push(page.total);
+        seen.push(...page.deliveries.map((d) => d.delivery.id));
+        if (!page.has_more) break;
+        const last = required(page.deliveries.at(-1)).delivery;
+        before = { ordinal: last.ordinal, id: last.id };
+      }
+      expect(new Set(seen).size).toBe(5);
+      // Every page reports the same total: the filter, not the page window.
+      expect(totals).toEqual([5, 5, 5]);
+      expect(ops.listDeliveries(f.db, owner, {}, 2, undefined, now).total).toBe(
+        6,
+      );
+      expect(
+        ops.listDeliveries(f.db, owner, { state: "acked" }, 2, undefined, now)
+          .total,
+      ).toBe(0);
+    });
+    it("filters to deliveries whose wakes are suppressed", async () => {
+      attach(acting);
+      // Past the pair budget the agent's own exchanges arrive wake-suppressed.
+      for (let n = 0; n < 11; n++)
+        await ops.publish(
+          f.db,
+          "general",
+          message(`pair-${n}`),
+          acting,
+          now + n,
+        );
+      const all = ops.listDeliveries(f.db, owner, {}, 50, undefined, now + 20);
+      const expected = all.deliveries
+        .filter((d) => d.trace.wake.suppressed !== null)
+        .map((d) => d.delivery.id);
+      expect(expected.length).toBeGreaterThan(0);
+      expect(expected.length).toBeLessThan(all.deliveries.length);
+      const suppressed = ops.listDeliveries(
+        f.db,
+        owner,
+        { wake: "suppressed" },
+        50,
+        undefined,
+        now + 20,
+      );
+      expect(suppressed.deliveries.map((d) => d.delivery.id)).toEqual(expected);
+      expect(suppressed.total).toBe(expected.length);
+      expect(
+        suppressed.deliveries.every((d) => d.trace.wake.suppressed === "pair"),
+      ).toBe(true);
+    });
+    it("counts swept and lazily expired deliveries that expire after a cutoff", async () => {
+      attach(acting);
+      const ids: Record<string, string> = {};
+      // Each delivery expires `ttl` after it was published.
+      for (const [op, offset] of [
+        ["old", 0],
+        ["swept", 10],
+        ["lazy", 20],
+        ["live", 30],
+      ] as const)
+        ids[op] = (await publish(op, {}, now + offset)).message.id;
+      // The sweep turns old and swept into stored `expired` rows.
+      expect(ops.expireDeliveries(f.db, now + ttl + 15)).toBe(2);
+      // At read time lazy is past its TTL but still stored as pending.
+      const readAt = now + ttl + 25;
+      const page = ops.listDeliveries(
+        f.db,
+        owner,
+        { state: "expired", expires_after: now + ttl + 5 },
+        50,
+        undefined,
+        readAt,
+      );
+      expect(page.deliveries.map((d) => d.message.id)).toEqual([
+        ids.lazy,
+        ids.swept,
+      ]);
+      expect(page.deliveries.map((d) => d.trace.state)).toEqual([
+        "expired",
+        "expired",
+      ]);
+      expect(page.total).toBe(2);
+      expect(
+        f.sqlite
+          .prepare(
+            "SELECT state FROM message_recipients WHERE message_id = ? OR message_id = ? ORDER BY expires_at",
+          )
+          .all(ids.swept, ids.lazy),
+      ).toEqual([{ state: "expired" }, { state: "pending" }]);
+      // Without the cutoff the older swept row is included too.
+      expect(
+        ops.listDeliveries(
+          f.db,
+          owner,
+          { state: "expired" },
+          50,
+          undefined,
+          readAt,
+        ).total,
+      ).toBe(3);
+      // The cutoff is exclusive: a row expiring exactly at it is left out.
+      expect(
+        ops
+          .listDeliveries(
+            f.db,
+            owner,
+            { state: "expired", expires_after: now + ttl + 20 },
+            50,
+            undefined,
+            readAt,
+          )
+          .deliveries.map((d) => d.message.id),
+      ).toEqual([]);
+      expect(
+        ops
+          .listDeliveries(
+            f.db,
+            owner,
+            { expires_after: now + ttl + 20 },
+            50,
+            undefined,
+            readAt,
+          )
+          .deliveries.map((d) => d.message.id),
+      ).toEqual([ids.live]);
+    });
   });
 });

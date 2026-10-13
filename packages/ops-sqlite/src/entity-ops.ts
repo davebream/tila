@@ -10,8 +10,8 @@ import type {
   Entity,
   RecordSearchResult,
 } from "@tila/schemas";
-import { TagsSchema, presentedTitle } from "@tila/schemas";
-import type { TilaSchemaToml } from "@tila/schemas";
+import { TagsSchema, permitsTask, presentedTitle } from "@tila/schemas";
+import type { LifecycleOutcome, TilaSchemaToml } from "@tila/schemas";
 import {
   type SQL,
   and,
@@ -20,6 +20,7 @@ import {
   eq,
   getTableColumns,
   inArray,
+  or,
   sql,
 } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -50,6 +51,7 @@ import {
   fingerprint,
 } from "./list-cursor";
 import { assertUnmanagedArchive, checkManagedWrite } from "./managed-work";
+import { blockedTaskIds, readReadinessSnapshot } from "./ready-ops";
 import { searchRecords } from "./record-ops";
 import * as schema from "./schema";
 import { SchemaCorruptError } from "./schema-errors";
@@ -326,12 +328,60 @@ export function list(
     cursor?: string;
     tag?: string;
     tagFilter?: string[];
+    /** Only open tasks held back by their prerequisites (`blockedTaskIds`). */
+    blocked?: boolean;
+    /** Only tasks in the state their type's lifecycle names for an outcome. */
+    outcome?: LifecycleOutcome[];
   },
   enrichOpts?: EnrichOpts,
-): { entities: Entity[]; total: number; next_cursor: string | null } {
+): {
+  entities: Entity[];
+  total: number;
+  next_cursor: string | null;
+  /** With `outcome`: visible types whose lifecycle declares one of them. */
+  outcome_types?: string[];
+} {
   const conditions: SQL[] = [];
   const restricted = taskRestrictionCondition(db, filter?.restrictions);
   if (restricted) conditions.push(restricted);
+
+  if (filter?.blocked) {
+    // One bound JSON array keeps the statement size independent of the count.
+    const ids = [...blockedTaskIds(readReadinessSnapshot(db))];
+    conditions.push(
+      sql`${schema.entities.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`,
+    );
+  }
+  let outcomeTypes: string[] | undefined;
+  if (filter?.outcome?.length) {
+    const requestedTypes =
+      filter.type === undefined ? undefined : [filter.type].flat();
+    const matches: SQL[] = [];
+    outcomeTypes = [];
+    const units = resolveCurrentSchema(db)?.work_units ?? {};
+    for (const [type, unit] of Object.entries(units)) {
+      const lifecycle = unit.lifecycle;
+      if (!lifecycle?.outcomes) continue;
+      if (!permitsTask(filter.restrictions, type)) continue;
+      if (requestedTypes && !requestedTypes.includes(type)) continue;
+      const states = filter.outcome
+        .map((outcome) => lifecycle.outcomes?.[outcome])
+        .filter((state): state is string => state !== undefined);
+      if (states.length === 0) continue;
+      outcomeTypes.push(type);
+      // Match the field by exact key, as readiness does: a JSON path would
+      // read a field named `a.b` as a nested lookup.
+      matches.push(
+        sql`(${schema.entities.type} = ${type} AND EXISTS (SELECT 1 FROM json_each(${schema.entities.data}) WHERE json_each.key = ${lifecycle.field} AND json_each.value IN (${sql.join(
+          states.map((state) => sql`${state}`),
+          sql.raw(", "),
+        )})))`,
+      );
+    }
+    outcomeTypes.sort();
+    // No declaring type: nothing can match, and `outcome_types` says why.
+    conditions.push(or(...matches) ?? sql`0`);
+  }
 
   if (filter?.type) {
     if (Array.isArray(filter.type)) {
@@ -393,6 +443,11 @@ export function list(
     dataFilter: filter?.dataFilter ?? null,
     tag: filter?.tag ?? null,
     tagFilter: filter?.tagFilter?.map((t) => t.toLowerCase()).sort() ?? null,
+    // Added only when set, so cursors issued before these filters stay valid.
+    ...(filter?.blocked ? { blocked: true } : {}),
+    ...(filter?.outcome?.length
+      ? { outcome: filter.outcome.slice().sort() }
+      : {}),
     sort,
     order: dir,
   });
@@ -470,9 +525,11 @@ export function list(
     }
   }
 
-  if (!enrichOpts) return { entities, total, next_cursor };
+  const outcome = outcomeTypes ? { outcome_types: outcomeTypes } : {};
+  if (!enrichOpts) return { entities, total, next_cursor, ...outcome };
   const cache = new Map<number, TilaSchemaToml | null>();
   return {
+    ...outcome,
     entities: entities.map((e) => enrichEntity(e, cache, enrichOpts)),
     total,
     next_cursor,

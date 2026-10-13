@@ -41,7 +41,13 @@ export function createAgentMethods(client: TilaClient, projectId: string) {
       ),
     /** Authorized runtime projection: bindings, runs, hosts and sessions. */
     runtimeView: (
-      options: { limit?: number; cursor?: string; agent?: string } = {},
+      options: {
+        limit?: number;
+        cursor?: string;
+        agent?: string;
+        /** `attention`: only agents whose occupant needs a person. */
+        filter?: "attention";
+      } = {},
     ) => {
       const query = RuntimeViewQuerySchema.parse(options);
       return client.get(
@@ -51,6 +57,7 @@ export function createAgentMethods(client: TilaClient, projectId: string) {
             limit: String(query.limit),
             cursor: query.cursor,
             agent: query.agent,
+            filter: query.filter,
           },
           schema: RuntimeViewResponseSchema,
           validate: true,

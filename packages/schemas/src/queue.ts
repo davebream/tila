@@ -150,6 +150,8 @@ export const QueueListQuerySchema = z.object({
   target_principal: z.string().optional(),
   capability: z.string().optional(),
   priority: z.number().int().optional(),
+  /** `expired`: the latest attempt is starting or running past its lease. */
+  lease: z.literal("expired").optional(),
   capabilities: CapabilitiesSchema.optional(),
   limit: z.number().int().min(1).max(500).default(100),
   offset: z.number().int().min(0).default(0),

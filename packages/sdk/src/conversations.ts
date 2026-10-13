@@ -157,13 +157,18 @@ export function createInboxMethods(client: TilaClient, projectId: string) {
       client.post(`${delivery(agent, id)}/resume`, {}, options(ok)),
     /** Browse delivery traces newest first; requires conversations:manage. */
     deliveries: (raw: z.input<typeof DeliveryListQuerySchema> & Page = {}) => {
-      const filters = DeliveryListQuerySchema.parse(raw);
+      const { expires_after, ...filters } = DeliveryListQuerySchema.parse(raw);
       return client.get(
         `/projects/${encodeURIComponent(projectId)}/deliveries`,
         {
           ...options(DeliveryListResponseSchema),
           ...page(raw),
-          query: { ...page(raw).query, ...filters },
+          query: {
+            ...page(raw).query,
+            ...filters,
+            expires_after:
+              expires_after === undefined ? undefined : String(expires_after),
+          },
         },
       );
     },

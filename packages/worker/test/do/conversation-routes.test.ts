@@ -245,3 +245,71 @@ it("browses delivery traces with scoped cursors and keeps reader views to counts
   expect(full.restricted).toBe(false);
   expect(full.deliveries).toHaveLength(1);
 });
+
+it("returns delivery totals and binds wake and expiry filters into cursors", async () => {
+  const ids: string[] = [];
+  for (const body of ["one", "two", "three"])
+    ids.push(
+      (
+        await ops.publish(
+          f.db,
+          "general",
+          PublishMessageSchema.parse({ client_op_id: body, body }),
+          owner,
+        )
+      ).message.id,
+    );
+  f.sqlite
+    .prepare(
+      "UPDATE message_recipients SET wake_suppressed = 'stalled' WHERE message_id IN (?, ?)",
+    )
+    .run(ids[1], ids[2]);
+  const list = async (query: string) =>
+    app.request(`/deliveries?${query}`, { headers: headers(owner) });
+  type Page = {
+    deliveries: { message: { seq: number } }[];
+    has_more: boolean;
+    cursor: string | null;
+    total: number;
+  };
+  const all = (await (await list("limit=1")).json()) as Page;
+  expect(all.total).toBe(3);
+  expect(all.deliveries).toHaveLength(1);
+  const first = (await (await list("wake=suppressed&limit=1")).json()) as Page;
+  expect(first.deliveries.map((d) => d.message.seq)).toEqual([3]);
+  expect(first).toMatchObject({ has_more: true, total: 2 });
+  const cursor = encodeURIComponent(first.cursor ?? "");
+  const second = (await (
+    await list(`wake=suppressed&limit=1&cursor=${cursor}`)
+  ).json()) as Page;
+  expect(second.deliveries.map((d) => d.message.seq)).toEqual([2]);
+  expect(second).toMatchObject({ cursor: null, total: 2 });
+  // A cursor only verifies against the filters it was issued for.
+  const dropped = await list(`limit=1&cursor=${cursor}`);
+  expect(dropped.status).toBe(400);
+  expect(await dropped.json()).toMatchObject({
+    error: { code: "invalid-cursor" },
+  });
+  const added = await list(
+    `wake=suppressed&limit=1&cursor=${encodeURIComponent(all.cursor ?? "")}`,
+  );
+  expect(added.status).toBe(400);
+  const expiring = (await (
+    await list("expires_after=0&limit=1")
+  ).json()) as Page;
+  expect(expiring.total).toBe(3);
+  const expiryCursor = encodeURIComponent(expiring.cursor ?? "");
+  expect(
+    (await list(`expires_after=0&limit=1&cursor=${expiryCursor}`)).status,
+  ).toBe(200);
+  expect(
+    (await list(`expires_after=1&limit=1&cursor=${expiryCursor}`)).status,
+  ).toBe(400);
+  for (const invalid of ["wake=stalled", "wake=all", "expires_after=-1"]) {
+    const response = await list(invalid);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "validation-error" },
+    });
+  }
+});

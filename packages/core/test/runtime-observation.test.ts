@@ -1,6 +1,7 @@
 import {
   type AgentRuntimePage,
   type ConsumerBinding,
+  type RuntimeObservation,
   RuntimeObservationReasonSchema,
   RuntimeViewResponseSchema,
 } from "@tila/schemas";
@@ -14,6 +15,7 @@ import {
   capabilityState,
   deriveObservation,
   deriveReleaseCommand,
+  runtimeAttention,
   summarizeBinding,
 } from "../src/runtime-observation";
 
@@ -309,6 +311,135 @@ describe("deriveObservation", () => {
   it("never uses task-progress or verification wording", () => {
     for (const value of RuntimeObservationReasonSchema.options)
       expect(value).not.toMatch(/complete|idle|done|verified/);
+  });
+});
+
+describe("runtimeAttention", () => {
+  const observation = (
+    over: Partial<RuntimeObservation> = {},
+  ): RuntimeObservation => ({
+    lifecycle: "attached",
+    detail: "full",
+    host_liveness: "online",
+    liveness_basis: "run-lease",
+    reasons: [],
+    last_observed_at: NOW - 1_000,
+    changes_at: NOW + 60_000,
+    ...over,
+  });
+
+  it("flags an expired occupant as mailbox-expired", () => {
+    expect(
+      runtimeAttention(
+        observation({
+          lifecycle: "expired",
+          host_liveness: "offline",
+          reasons: ["run-lease-lapsed"],
+        }),
+      ),
+    ).toBe("mailbox-expired");
+  });
+
+  it.each(["run-not-found", "epoch-mismatch"] as const)(
+    "flags an occupant that cannot be confirmed (%s) as mailbox-unknown",
+    (reason) => {
+      expect(
+        runtimeAttention(
+          observation({
+            lifecycle: "unknown",
+            host_liveness: "unknown",
+            liveness_basis: "none",
+            reasons: [reason],
+          }),
+        ),
+      ).toBe("mailbox-unknown");
+    },
+  );
+
+  it("does not flag an occupant that is unknown only because runs are unavailable", () => {
+    expect(
+      runtimeAttention(
+        observation({
+          lifecycle: "unknown",
+          host_liveness: "unknown",
+          liveness_basis: "none",
+          reasons: ["run-source-unavailable"],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("flags an attached occupant whose host went offline", () => {
+    expect(runtimeAttention(observation({ host_liveness: "offline" }))).toBe(
+      "host-offline",
+    );
+  });
+
+  it("flags an attached occupant whose host presence went stale", () => {
+    expect(
+      runtimeAttention(
+        observation({ host_liveness: "stale", liveness_basis: "presence" }),
+      ),
+    ).toBe("host-stale");
+  });
+
+  it("does not flag an attached occupant with an online host", () => {
+    expect(runtimeAttention(observation())).toBeNull();
+  });
+
+  it.each(["released", "replaced"] as const)(
+    "does not flag a %s occupant",
+    (lifecycle) => {
+      expect(
+        runtimeAttention(observation({ lifecycle, host_liveness: "offline" })),
+      ).toBeNull();
+    },
+  );
+
+  it("agrees with observations derived from D1 authority", () => {
+    const base = {
+      binding: bindingFixture(),
+      detail: "full" as const,
+      agent_epoch: 2,
+      authority: runAuthority,
+      presence: notReported,
+    };
+    expect(runtimeAttention(deriveObservation(base, NOW))).toBeNull();
+    expect(
+      runtimeAttention(deriveObservation(base, (NOW_S + 300) * 1000)),
+    ).toBe("mailbox-expired");
+    expect(
+      runtimeAttention(
+        deriveObservation(
+          {
+            ...base,
+            presence: {
+              status: "reported",
+              last_seen: NOW - 120_000,
+              active: false,
+              environment: {},
+            },
+          },
+          NOW,
+        ),
+      ),
+    ).toBe("host-stale");
+    expect(
+      runtimeAttention(
+        deriveObservation(
+          {
+            ...base,
+            authority: {
+              source: "run-source-unavailable",
+              run_state: "unknown",
+              lease_expires_at: NOW_S + 300,
+              enrollment_revoked: null,
+            },
+          },
+          NOW,
+        ),
+      ),
+    ).toBeNull();
   });
 });
 
