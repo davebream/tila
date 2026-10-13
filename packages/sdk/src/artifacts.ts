@@ -133,7 +133,7 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
               formData.append("lineage_id", opts.lineageId);
             if (opts.lineageFence !== undefined)
               formData.append("lineage_fence", String(opts.lineageFence));
-            formData.append("file", uploadFile);
+            formData.append("file", uploadFile, "blob");
             formData.append("kind", opts.kind);
             formData.append("mime_type", opts.mimeType as string);
             if (opts.resource) formData.append("resource", opts.resource);
@@ -149,11 +149,10 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
         }
 
         // File | Blob branch — synchronous validation
-        const contentType =
-          opts.mimeType || (input instanceof File ? input.type : "") || "";
+        const contentType = opts.mimeType || input.type;
         if (!contentType) {
           throw new TypeError(
-            "contentType is required for uploads when file.type is absent. Pass opts.mimeType explicitly.",
+            "contentType is required for uploads when File.type or Blob.type is empty. Pass opts.mimeType explicitly.",
           );
         }
 
@@ -162,7 +161,11 @@ export function createArtifactMethods(client: TilaClient, projectId: string) {
           formData.append("lineage_id", opts.lineageId);
         if (opts.lineageFence !== undefined)
           formData.append("lineage_fence", String(opts.lineageFence));
-        formData.append("file", input);
+        formData.append(
+          "file",
+          input,
+          input instanceof File && input.name ? input.name : "blob",
+        );
         formData.append("kind", opts.kind);
         formData.append("mime_type", contentType);
         if (opts.resource) formData.append("resource", opts.resource);
