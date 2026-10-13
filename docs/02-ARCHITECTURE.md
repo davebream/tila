@@ -3109,10 +3109,10 @@ A forbidden check is listed as "not checked with your access", never as zero.
 
 ## Managed execution foundations
 
-Managed dispatch is under construction and is not yet an advertised capability.
-Adding lifecycle metadata does not enroll or launch a task. The shared SQLite
-migration adds durable queue entries, attempts, execution/WIP reservations and
-command receipts; subsequent delivery adds admission and public interfaces.
+Managed dispatch is advertised as `managed-queue-v1` and stays disabled until a
+maintainer enables a project. Adding lifecycle metadata does not enroll or launch
+a task. Shared SQLite migrations hold durable queue entries, attempts,
+execution/WIP reservations and command receipts.
 
 An attempt has a separate identity from its task, enrollment, participant and
 provider session. A reservation holds capacity before acceptance. Acceptance
@@ -3162,13 +3162,11 @@ nonterminal lifecycle changes require the current execution authority. Ordinary
 content edits use an explicit zero-fence content path on managed tasks and never
 grant execution authority. Supplying a positive fence continues to require a
 live matching claim, so stale execution writes are rejected. Unmanaged tasks
-retain their existing claim behavior. Public client integration follows in B3.
+retain their existing claim behavior.
 
 Once enabled, managed configuration permanently requires revision-aware writes,
-even after dispatch is disabled. Migration 33 preserves that marker. Internal
-DO transport and embedded facades share the same operations; public capability
-advertisement and rollout remain gated on completion of the recovery and public
-API contract.
+even after dispatch is disabled. Migration 33 preserves that marker. The DO
+transport and embedded facades share the same operations.
 
 ### Suspension, cancellation and recovery
 
@@ -3197,9 +3195,11 @@ Reconciliation records an observed running, stopped or unknown execution. Runnin
 observations must match the recorded session and issue fresh authority without
 releasing occupied capacity. Unknown observations retain uncertainty and both
 reservations. A confirmed stopped observation can commit an explicit outcome.
-The owner may reconnect; changing execution ownership requires maintainer
-authority, a reason and the same recorded session. Membership and resource access
-are enforced by the authenticated transport, outside the project transaction.
+Like a finish, it cannot record a result for a reservation that was never
+accepted, except a cancellation that was requested before launch. The owner may
+reconnect; changing execution ownership requires maintainer authority, a reason
+and the same recorded session. Membership and resource access are enforced by
+the authenticated transport, outside the project transaction.
 
 Automatic retries are opt-in through `retry_safe`, default to three total
 attempts, and use exponential backoff starting at five seconds and capped at
@@ -3220,8 +3220,37 @@ mappings leave task status unchanged and can leave replacement work blocked.
 Schema or gate conflicts roll back the entire result/recovery transaction.
 
 These operations share the SQLite domain implementation and embedded facade.
-Public transport, backup restore protections and advertised capability remain
-gated on the complete backend interface milestone.
+
+### Attempt control authority (#303)
+
+Enrollment records the assigner: the principal and participant that enrolled the
+work (`enrolled_by_principal`, `enrolled_by_participant`; migration 38). Requests
+to cancel, suspend or resume an attempt, and explicit retry, are accepted from
+three callers:
+
+- the attempt's current owner (principal and participant)
+- the assigner principal
+- a maintainer or owner
+
+Editing or withdrawing an enrollment is limited to the assigner or a maintainer.
+A former owner is none of these, so after a rebind, resume or retry it cannot
+cancel or otherwise steer the replacement execution. The check runs before the
+receipt lookup, so replaying an earlier receipt is also rejected once authority
+has moved. Enrollments created before migration 38 have no recorded assigner:
+control requests fall back to owner or maintainer, and edit/withdraw keep the
+earlier task-writer behavior.
+
+Control requests carry no fence. `expected_revision` covers it, because every
+new fence also bumps the attempt revision. Finishing suspended work, which has
+no live grant, requires the latest recorded fence.
+
+When a maintainer forces recovery or records a stopped reconciliation, the
+journal names the maintainer as the actor and the execution owner in
+`owner_principal_id`/`owner_participant_id`. Task transitions still run under
+the owner's fence. Retrying an enrollment under a new key while the first is
+unfinished returns `queue-conflict` naming the existing entry, in the message and
+in `details.entry_id`, so a client can reconcile an ambiguous failure.
+`GET /health` advertises `attempt-control-v1` when a Worker enforces these rules.
 
 ### Managed queue public contract
 

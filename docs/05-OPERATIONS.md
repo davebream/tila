@@ -2170,6 +2170,16 @@ does not evict work. Cancellation is a request until the adapter reports stopped
 execution or another valid terminal outcome. Do not manually delete reservations
 to free slots while execution may still exist.
 
+Cancellation, suspension, resume and explicit retry requests must come from the
+attempt's current owner, the principal that enrolled the work, or a maintainer.
+Edit and withdraw belong to the enrolling principal or a maintainer. Other
+members, including a worker whose attempt was rebound or replaced, get
+`403 queue-authority-lost`. Work enrolled before this rule (migration 38) has no
+recorded enroller; it accepts control from the owner or a maintainer only. If an
+`enroll` retry under a new idempotency key returns `409 queue-conflict`, the
+message and `details.entry_id` name the enrollment that already exists for the
+task; inspect it instead of enrolling again.
+
 For uncertain execution, inspect the recorded provider session first. Reconnect
 or rebind a confirmed live session; reconcile a confirmed stopped session with an
 explicit outcome. An unreachable session remains uncertain even when the work was

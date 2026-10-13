@@ -323,3 +323,14 @@ Backups declare `work-questions-v1` and include both tables. Older backups remai
 readable; unsupported feature versions fail closed. Restore validates question
 projections/correlation, retains decisions and discussion, and invalidates old
 execution applicability before releasing the transfer lock.
+
+### Work attempt history (#303, project migration 38)
+
+| Migration | Change |
+|---|---|
+| 38 | `queue_entries.enrolled_by_principal` and `enrolled_by_participant` record the assigner. Both are nullable; existing enrollments stay `NULL` and are treated as having no recorded assigner. |
+
+Migration 38 is additive and shared by DO SQLite, Node and Bun embedded stores.
+Transfer metadata and backups report the latest project migration instead of a
+hard-coded number. A backup made before migration 38 restores with `NULL`
+assigners, and its semantic digest is computed without the new columns.
