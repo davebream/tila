@@ -113,16 +113,15 @@ export function useOverview(): OverviewData {
   const schemaState = state<AppliedSchemaResponse>(DEFINITIONS, schema);
   const workState = state<WorkCatalogResponse>(WORK, work);
   const recordState = state<RecordTypesResponse>(RECORDS, records);
+  // Anything the caller cannot read is not evidence of an empty project.
   const unconfigured =
     schemaState !== "hidden" &&
     workState !== "hidden" &&
+    recordState !== "hidden" &&
     isUnconfigured({
       schema: schemaState,
       work: workState,
-      records:
-        recordState === "hidden"
-          ? { phase: "failed", kind: "forbidden", error: null }
-          : recordState,
+      records: recordState,
     });
 
   return {
@@ -136,9 +135,21 @@ export function useOverview(): OverviewData {
       0,
       ...[...sources, schema, work, records].map((q) => q.dataUpdatedAt),
     ),
+    // `refetch` ignores `enabled`, so only retry reads the caller may make.
     refetch: () => {
-      for (const query of [...sources, schema, work, records])
-        void query.refetch();
+      const reads: Array<[AccessTarget, { refetch: () => unknown }]> = [
+        ...SOURCES.map(
+          (source, i): [AccessTarget, { refetch: () => unknown }] => [
+            source,
+            sources[i],
+          ],
+        ),
+        [DEFINITIONS, schema],
+        [WORK, work],
+        [RECORDS, records],
+      ];
+      for (const [target, query] of reads)
+        if (enabled(target)) void query.refetch();
     },
   };
 }

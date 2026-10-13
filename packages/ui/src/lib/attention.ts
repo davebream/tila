@@ -164,7 +164,6 @@ export function isUnconfigured(input: {
     0,
   );
   if (workRows > 0) return false;
-  if (records.phase === "failed") return records.kind === "forbidden";
   if (records.phase !== "ready" || records.stale) return false;
   if (records.data.incomplete?.in_use_types) return false;
   const entries = records.data.entries;
