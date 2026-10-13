@@ -121,6 +121,14 @@ export {
   type RecordDefinition,
   SCHEMA_SECTION_MERGE_POLICY,
   type SchemaSectionMergePolicy,
+  DEFINITION_MAX_BYTES,
+  DEFINITION_REQUEST_MAX_BYTES,
+  DEFINITION_EXPORT_KEY,
+  DEFINITION_EXPORT_FORMAT,
+  DEFINITION_EXPORT_FORMAT_VERSION,
+  DefinitionExportMetadataSchema,
+  type DefinitionExportMetadata,
+  definitionByteLength,
 } from "./config";
 export {
   TilaInfraConfigSchema,

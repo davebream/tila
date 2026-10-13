@@ -4,15 +4,19 @@ import {
   SchemaParseException,
   type SchemaRecordChange,
   diffSchemas,
+  findForbiddenDefinitionContent,
+  parseDefinitionDocument,
   parseTilaSchemaToml,
 } from "@tila/core";
 import {
   type ArtifactPolicyImpact,
+  DEFINITION_MAX_BYTES,
   SchemaApplyRequestSchema,
   type SchemaHistory,
   type SchemaPreviewChange,
   type TilaSchemaToml,
   canonicalJson,
+  definitionByteLength,
 } from "@tila/schemas";
 import { type SQL, and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -61,6 +65,43 @@ export class SchemaPreconditionError extends Error {
     );
     this.name = "SchemaPreconditionError";
   }
+}
+
+/** A definition (or its reviewed copy) over `DEFINITION_MAX_BYTES`. */
+export class DefinitionTooLargeError extends Error {
+  constructor(
+    public readonly field: "definition" | "reviewed_definition",
+    public readonly bytes: number,
+  ) {
+    super(
+      `${field} is ${Math.ceil(bytes / 1024)} KiB; definitions are limited to ${DEFINITION_MAX_BYTES / 1024} KiB`,
+    );
+    this.name = "DefinitionTooLargeError";
+  }
+}
+
+/**
+ * Guard for every new definition write (preview and apply), never for reads
+ * of stored text: size first, then content no definition may carry
+ * (credentials, export metadata, a client connection file). Failures use the
+ * parse-error envelope so clients show them like any other path error.
+ */
+function assertWritableDefinition(definition: string, reviewed?: string): void {
+  const bytes = definitionByteLength(definition);
+  if (bytes > DEFINITION_MAX_BYTES)
+    throw new DefinitionTooLargeError("definition", bytes);
+  if (reviewed !== undefined) {
+    const reviewedBytes = definitionByteLength(reviewed);
+    if (reviewedBytes > DEFINITION_MAX_BYTES)
+      throw new DefinitionTooLargeError("reviewed_definition", reviewedBytes);
+  }
+  const doc = parseDefinitionDocument(definition);
+  if (!doc.ok) throw new SchemaParseException(doc.errors);
+  const forbidden = findForbiddenDefinitionContent(doc.doc);
+  if (forbidden.length > 0)
+    throw new SchemaParseException(
+      forbidden.map(({ message, path }) => ({ message, path })),
+    );
 }
 
 export interface SchemaApplyOptions {
@@ -161,6 +202,7 @@ export function applySchema(
   origin?: RequestOrigin,
   options: SchemaApplyOptions = {},
 ): ApplySchemaResult {
+  assertWritableDefinition(definition, options.reviewed_definition);
   SchemaApplyRequestSchema.parse({
     definition,
     strategy,
@@ -362,6 +404,7 @@ export function previewSchema(
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
   definition: string,
 ): PreviewSchemaResult {
+  assertWritableDefinition(definition);
   return db.transaction((tx) => previewSchemaInTransaction(tx, definition));
 }
 

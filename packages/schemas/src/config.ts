@@ -309,3 +309,58 @@ export const SCHEMA_SECTION_MERGE_POLICY = {
   schema_version: "singleton-scalar",
 } as const;
 export type SchemaSectionMergePolicy = typeof SCHEMA_SECTION_MERGE_POLICY;
+
+// --- Definition import/export ---
+
+/** Largest definition accepted for preview, apply and import, in UTF-8 bytes. */
+export const DEFINITION_MAX_BYTES = 256 * 1024;
+
+/**
+ * Request body limit for schema writes: the definition, its reviewed copy and
+ * the JSON envelope. The idempotency receipt keeps both texts in one DO row,
+ * so the definition cap must stay well under the 2 MB row limit.
+ */
+export const DEFINITION_REQUEST_MAX_BYTES =
+  4 * DEFINITION_MAX_BYTES + 64 * 1024;
+
+/** Reserved top-level table carrying export metadata; never part of a definition. */
+export const DEFINITION_EXPORT_KEY = "tila_export";
+export const DEFINITION_EXPORT_FORMAT = "tila-definitions";
+export const DEFINITION_EXPORT_FORMAT_VERSION = 1;
+
+/**
+ * Metadata written into `[tila_export]`. It records where the file came from;
+ * it is not an authority, and import checks only `format` and `format_version`.
+ */
+export const DefinitionExportMetadataSchema = z.object({
+  format: z.literal(DEFINITION_EXPORT_FORMAT),
+  format_version: z.number().int().positive(),
+  project_id: z.string().optional(),
+  revision: z.number().int().nonnegative().optional(),
+  exported_at: z.string().optional(),
+  applied_at: z.string().optional(),
+  exported_with: z.string().optional(),
+});
+export type DefinitionExportMetadata = z.infer<
+  typeof DefinitionExportMetadataSchema
+>;
+
+/** UTF-8 length of `text`, without depending on TextEncoder typings. */
+export function definitionByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      i + 1 < text.length &&
+      (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00
+    ) {
+      bytes += 4;
+      i++;
+    } else bytes += 3;
+  }
+  return bytes;
+}

@@ -33,7 +33,7 @@ import {
 // module init. Imported for local use in projectErrorResponses and re-exported
 // for back-compat (index.ts and downstream import it from here).
 import { SchemaCorruptError } from "./schema-errors";
-import { SchemaPreconditionError } from "./schema-ops";
+import { DefinitionTooLargeError, SchemaPreconditionError } from "./schema-ops";
 
 export { SchemaCorruptError } from "./schema-errors";
 
@@ -213,6 +213,8 @@ export function mapProjectError(err: Error): {
     };
   if (err instanceof SchemaWriteError)
     return { status: 422, code: "constraint-violation", retryable: false };
+  if (err instanceof DefinitionTooLargeError)
+    return { status: 413, code: "payload-too-large", retryable: false };
   if (err instanceof SchemaPreconditionError)
     return {
       status:

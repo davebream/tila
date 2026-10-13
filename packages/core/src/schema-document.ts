@@ -326,7 +326,11 @@ export function sameDefinitionValue(a: unknown, b: unknown): boolean {
   return canonical(a) === canonical(b);
 }
 
-function rebaseUnits(...docs: DefinitionDocument[]): RebaseUnit[] {
+/**
+ * Every unit that appears in any of `docs`, in first-seen order. An empty
+ * declaration section contributes no units; a non-table one contributes none.
+ */
+export function definitionUnits(...docs: DefinitionDocument[]): RebaseUnit[] {
   const units = new Map<string, RebaseUnit>();
   for (const doc of docs) {
     for (const key of Object.keys(doc)) {
@@ -357,7 +361,7 @@ export function rebaseDefinition(
 ): RebaseResult {
   let merged = cloneValue(latest);
   const conflicts: string[] = [];
-  for (const unit of rebaseUnits(base, mine, latest)) {
+  for (const unit of definitionUnits(base, mine, latest)) {
     const b = canonical(getIn(base, unit.keys));
     const m = canonical(getIn(mine, unit.keys));
     const l = canonical(getIn(latest, unit.keys));
@@ -381,4 +385,36 @@ export function rebaseDefinition(
     }
   }
   return { merged, conflicts };
+}
+
+export type DefinitionUnitComparison = {
+  /** Units only `after` has. */
+  added: string[];
+  /** Units both have, with different values. */
+  changed: string[];
+  unchanged: string[];
+  /** Units only `before` has. */
+  removed: string[];
+};
+
+/** Classify each unit of two documents by how it differs between them. */
+export function compareDefinitionUnits(
+  before: DefinitionDocument,
+  after: DefinitionDocument,
+): DefinitionUnitComparison {
+  const result: DefinitionUnitComparison = {
+    added: [],
+    changed: [],
+    unchanged: [],
+    removed: [],
+  };
+  for (const unit of definitionUnits(before, after)) {
+    const from = getIn(before, unit.keys);
+    const to = getIn(after, unit.keys);
+    if (from === undefined) result.added.push(unit.path);
+    else if (to === undefined) result.removed.push(unit.path);
+    else if (sameDefinitionValue(from, to)) result.unchanged.push(unit.path);
+    else result.changed.push(unit.path);
+  }
+  return result;
 }

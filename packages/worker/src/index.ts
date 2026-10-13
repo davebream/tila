@@ -53,7 +53,7 @@ import { records } from "./routes/records";
 import { repos } from "./routes/repos";
 import { runtimeRoutes } from "./routes/runtime";
 import { runtimeView } from "./routes/runtime-view";
-import { schemaRoutes } from "./routes/schema";
+import { schemaBodyLimit, schemaRoutes } from "./routes/schema";
 import { search } from "./routes/search";
 import { serviceAccountRoutes } from "./routes/service-accounts";
 import { signals } from "./routes/signals";
@@ -250,6 +250,9 @@ projectRoutes.use("/*", async (c, next) => {
   }
   return next();
 });
+// Definitions are size-limited before any middleware reads the body.
+projectRoutes.use("/schema", schemaBodyLimit);
+projectRoutes.use("/schema/*", schemaBodyLimit);
 // Settings writes on agents and rooms commit DO-side idempotency receipts
 // after current authorization (see the receipt paths in the middleware).
 const settingsIdempotency = createIdempotencyMiddleware();

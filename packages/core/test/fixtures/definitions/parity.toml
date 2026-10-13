@@ -1,0 +1,47 @@
+# Parity fixture: the same definition as parity.yaml.
+schema_version = 1
+team_note = "custom top-level key"
+
+[work_units.task]
+parents = []
+owner_hint = "custom on a type"
+fields = [
+  { name = "title", type = "string", required = true },
+  { name = "status", type = "enum", values = ["open", "done"], default = "open" },
+  { name = "estimate", type = "string", required = false },
+]
+
+[work_units.epic.fields.title]
+type = "string"
+required = true
+
+[hierarchy]
+levels = ["epic", "task"]
+max_depth = 3
+
+[artifacts.plan]
+mime_types = ["text/markdown"]
+retention_days = 30
+searchable = true
+
+[templates.bugfix]
+description = "Bug with a fix task"
+
+[templates.bugfix.entities.fix]
+id_suffix = "fix"
+type = "task"
+data = { title = "Fix it", status = "open" }
+
+[records.config]
+format = "json"
+history = "revision"
+key_description = "Config name"
+
+[[records.config.fields]]
+name = "url"
+type = "string"
+required = true
+
+[[records.config.fields]]
+name = "replicas"
+type = "number"

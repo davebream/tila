@@ -6,6 +6,18 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./definition-yaml": {
+      "types": "./dist/definition-yaml.d.ts",
+      "import": "./dist/definition-yaml.js",
+      "default": "./dist/definition-yaml.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -15,7 +27,8 @@
   },
   "dependencies": {
     "@tila/schemas": "workspace:*",
-    "smol-toml": "^1.8.0"
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
