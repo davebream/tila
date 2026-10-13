@@ -45,6 +45,9 @@ describe("matchNav", () => {
     ["/p/acme/settings", "settings", "settings"],
     ["/p/acme/settings/definitions", "settings", "definitions"],
     ["/p/acme/settings/agents", "settings", "agent-settings"],
+    ["/p/acme/settings/general", "settings", "general"],
+    ["/p/acme/settings/repositories", "settings", "repositories"],
+    ["/p/acme/settings/service-identities", "settings", "service-identities"],
     ["/p/acme/settings/rooms", "settings", "room-settings"],
     ["/p/acme/settings/signal-groups", "settings", "signal-group-settings"],
     ["/p/acme/overview", "overview", "overview"],
@@ -135,5 +138,55 @@ describe("navVisibility", () => {
       "work",
       "settings",
     ]);
+  });
+});
+
+describe("session flags", () => {
+  const owner: WhoamiResponse = {
+    ok: true,
+    project_id: "test-project",
+    token_name: "owner",
+    scopes: "admin",
+    role: "owner",
+  };
+  const session = (flags: Record<string, boolean>) =>
+    ({
+      memberships_manage: false,
+      credentials_manage: false,
+      membership_available: true,
+      step_up_max_age_seconds: 600,
+      ...flags,
+    }) as Parameters<typeof navVisibility>[2];
+
+  test("an owner editor appears only with its own session flag", () => {
+    const none = ids(navVisibility(owner, "test-project", session({})));
+    expect(none).not.toContain("repositories");
+    expect(none).not.toContain("service-identities");
+    expect(none).toContain("general");
+
+    const repos = ids(
+      navVisibility(
+        owner,
+        "test-project",
+        session({ repository_policy_manage: true }),
+      ),
+    );
+    expect(repos).toContain("repositories");
+    expect(repos).not.toContain("service-identities");
+
+    const bindings = ids(
+      navVisibility(
+        owner,
+        "test-project",
+        session({ workload_bindings_manage: true }),
+      ),
+    );
+    expect(bindings).toContain("service-identities");
+  });
+
+  test("unknown session flags keep flagged items visible rather than guessing", () => {
+    expect(ids(navVisibility(owner, "test-project", null))).toContain(
+      "repositories",
+    );
   });
 });

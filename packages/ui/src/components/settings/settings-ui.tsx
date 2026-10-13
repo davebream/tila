@@ -1,5 +1,7 @@
+import { StepUpBanner } from "@/components/admin/step-up-banner";
 import { Button } from "@/components/ui/button";
 import { FormNotice } from "@/components/ui/form-fields";
+import { useAuth } from "@/hooks/use-auth";
 import { splitLines } from "@/lib/definition-values";
 import {
   failureKind,
@@ -151,5 +153,23 @@ export function LandedNotice({
         </span>
       )}
     </FormNotice>
+  );
+}
+
+/**
+ * The step-up banner for owner-level editors: the change was refused because
+ * the session is older than the step-up window. Drafts stay where they were.
+ */
+export function OwnerStepUp({ onDismiss }: { onDismiss: () => void }) {
+  const { capabilities } = useAuth();
+  const minutes = Math.max(
+    1,
+    Math.round((capabilities?.step_up_max_age_seconds ?? 600) / 60),
+  );
+  return (
+    <StepUpBanner
+      onDismiss={onDismiss}
+      description={`Owner changes require a sign-in newer than ${minutes} minute${minutes === 1 ? "" : "s"}. Your change was not applied; sign in again, then repeat it.`}
+    />
   );
 }

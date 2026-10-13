@@ -356,7 +356,7 @@ function SectionNav({
 }
 
 export function Layout() {
-  const { projectId, logout } = useAuth();
+  const { projectId, logout, capabilities } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -364,8 +364,8 @@ export function Layout() {
 
   const prefix = projectId ? `/p/${projectId}` : "";
   const isVisible = useMemo(
-    () => navVisibility(identity.data, projectId),
-    [identity.data, projectId],
+    () => navVisibility(identity.data, projectId, capabilities),
+    [identity.data, projectId, capabilities],
   );
   const sections = useMemo(() => visibleSections(isVisible), [isVisible]);
   const current = matchNav(pathname);
