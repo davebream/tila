@@ -611,13 +611,17 @@ export function TaskExecution({
         </p>
       )}
 
-      {!entry && !active && !queue.isError && (
-        <EnrollmentForm
-          project={project}
-          task={taskId}
-          allowed={allowed.edit}
-        />
-      )}
+      {/* After a success, corrective work is a follow-up task, not a rerun. */}
+      {!entry &&
+        !active &&
+        !queue.isError &&
+        finished?.outcome?.status !== "success" && (
+          <EnrollmentForm
+            project={project}
+            task={taskId}
+            allowed={allowed.edit}
+          />
+        )}
 
       {rows.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-border">
