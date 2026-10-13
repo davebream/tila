@@ -265,6 +265,7 @@ describe("CommandPalette", () => {
 
     await user.type(await screen.findByRole("combobox"), "go to");
     for (const page of [
+      "Overview",
       "Tasks",
       "Queue",
       "Records",
@@ -276,7 +277,8 @@ describe("CommandPalette", () => {
       "Runtime",
       "Agents",
       "Presence",
-      "Settings",
+      "Access",
+      "Definitions",
     ])
       expect(await screen.findByText(`Go to ${page}`)).toBeInTheDocument();
   });
