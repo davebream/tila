@@ -50,8 +50,10 @@ packages/cli-*/bin/tila.exe
 /.playwright-mcp/
 /2026-*-command-*.txt
 /2026-*-caveat*.txt
-# Local AI tooling (not published)
-.claude/
+# Local AI tooling (not published), except shared repo skills and branch policy
+.claude/*
+!.claude/skills/
+!.claude/branch-policy
 
 # kombajn build-loop checkpoint (orchestration artifact, never committed)
 .build-checkpoint.json
