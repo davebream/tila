@@ -208,3 +208,7 @@ commit, tests packed artifacts on native runners, verifies attestations, then
 publishes the tested tarballs and binaries without rebuilding. Homebrew remains
 opt-in and disabled by default. See `docs/05-OPERATIONS.md` for commands and the
 manual live-infrastructure pre-tag gates.
+
+To cut a release, use the repo skill `tila-release` (Claude Code: `/tila-release`;
+Codex: `$tila-release`). Its canonical copy is `.agents/skills/tila-release/`, and
+`.claude/skills/tila-release` is a symlink to it. Edit the procedure there only.

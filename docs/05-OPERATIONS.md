@@ -1132,6 +1132,8 @@ teardown steps (a no-op for environments that never had a Pages project).
 
 These gates exercise live infrastructure. They are **not** part of CI (no live infrastructure in CI) and must be run manually before each release tag.
 
+This section defines what each gate must show. The step-by-step procedure, including disposable gate infrastructure that never touches the production D1 database or R2 bucket, is the `tila-release` skill in `.agents/skills/tila-release/` (`reference/live-gates.md`).
+
 ### Gate 1: DO-state survival after restart
 
 Verifies that Durable Object SQLite state survives an eviction+restart cycle. Catches any regression where state is held only in memory.
