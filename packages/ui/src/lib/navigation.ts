@@ -80,6 +80,14 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         keywords: ["execution", "attempts"],
       },
       {
+        id: "decisions",
+        label: "Decisions",
+        segment: "decisions",
+        requires: ["tasks:read"],
+        surface: "questions",
+        keywords: ["questions", "inbox", "answer", "escalation"],
+      },
+      {
         id: "records",
         label: "Records",
         segment: "records",

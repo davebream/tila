@@ -19,6 +19,7 @@ import {
 import { AgentsPage } from "@/pages/agents";
 import { ArtifactsPage } from "@/pages/artifacts";
 import { AuthResultPage } from "@/pages/auth-result";
+import { DecisionsPage } from "@/pages/decisions";
 import { DeliveriesPage } from "@/pages/deliveries";
 import { JournalPage } from "@/pages/journal";
 import { LoginPage } from "@/pages/login";
@@ -138,6 +139,8 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       </Route>
       <Route path="journal" element={<JournalPage />} />
       <Route path="queue" element={<QueuePage />} />
+      <Route path="decisions" element={<DecisionsPage />} />
+      <Route path="decisions/:questionId" element={<DecisionsPage />} />
       <Route path="presence" element={<PresencePage />} />
       <Route path="signals" element={<SignalsPage />} />
       <Route path="rooms" element={<RoomsPage />} />

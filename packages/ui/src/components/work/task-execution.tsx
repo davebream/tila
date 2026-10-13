@@ -576,8 +576,13 @@ export function TaskExecution({
           </h3>
           <ul className="space-y-1 text-sm">
             {openQuestions.map(({ question }) => (
-              <li key={question.id} className="line-clamp-2">
-                {question.text}
+              <li key={question.id}>
+                <Link
+                  className={`${linkClass} line-clamp-2`}
+                  to={`/p/${project}/decisions/${question.id}`}
+                >
+                  {question.text}
+                </Link>
               </li>
             ))}
           </ul>

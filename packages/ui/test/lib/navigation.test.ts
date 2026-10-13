@@ -32,6 +32,7 @@ describe("matchNav", () => {
     ["/p/acme/tasks/task-1", "work", "tasks"],
     ["/p/acme/entities/task-1", "work", "tasks"],
     ["/p/acme/queue", "work", "queue"],
+    ["/p/acme/decisions/0f0e", "work", "decisions"],
     ["/p/acme/records/config/a/b", "work", "records"],
     ["/p/acme/artifacts/task/t1/report.md", "work", "artifacts"],
     ["/p/acme/journal", "work", "journal"],
@@ -122,6 +123,7 @@ describe("navVisibility", () => {
       "overview",
       "tasks",
       "queue",
+      "decisions",
       "records",
       "settings",
     ]);

@@ -55,7 +55,14 @@ describe("Layout navigation", () => {
       within(work)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Tasks", "Queue", "Records", "Artifacts", "Journal"]);
+    ).toEqual([
+      "Tasks",
+      "Queue",
+      "Decisions",
+      "Records",
+      "Artifacts",
+      "Journal",
+    ]);
     expect(within(work).getByRole("link", { name: "Tasks" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -118,7 +125,7 @@ describe("Layout navigation", () => {
       within(work)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Tasks", "Queue", "Records"]);
+    ).toEqual(["Tasks", "Queue", "Decisions", "Records"]);
   });
 
   test("the skip link comes before the primary navigation", async () => {
