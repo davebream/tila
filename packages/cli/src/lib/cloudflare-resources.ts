@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { GITHUB_LOGIN_REGEX } from "@tila/schemas";
 import type { Cloudflare } from "./cloudflare-client";
@@ -214,8 +215,16 @@ export async function insertTokenAndProject(opts: {
 
   await opts.client.d1.database.query(opts.databaseId, {
     account_id: opts.accountId,
-    sql: "INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)",
-    params: [opts.tokenHash, opts.slug, "init", "full", createdAt, "tila-init"],
+    sql: "INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by, token_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    params: [
+      opts.tokenHash,
+      opts.slug,
+      "init",
+      "full",
+      createdAt,
+      "tila-init",
+      randomUUID(),
+    ],
   });
 }
 
@@ -426,41 +435,6 @@ export async function deleteWorkerSecret(
     }
     throw err;
   }
-}
-
-/**
- * Seed the first admin grant directly into D1 via a parameterized
- * INSERT OR IGNORE INTO _admin_grants. Mirrors insertTokenAndProject's
- * param style (Unix seconds, string params).
- *
- * granted_by_user_id is NULL — marks this as an owner/infra-seeded row.
- * INSERT OR IGNORE against the partial unique index idx_admin_grants_active
- * makes re-running idempotent (no duplicate active row).
- *
- * Rollback note: there is no compensating delete on failure. _projects and
- * _tokens are already inserted before this call. Re-running project create
- * (or using the C5 --token fallback) is the recovery path.
- */
-export async function seedFirstAdmin(opts: {
-  client: Cloudflare;
-  accountId: string;
-  databaseId: string;
-  slug: string;
-  githubUserId: number;
-  githubLoginSnapshot?: string;
-}): Promise<void> {
-  const grantedAt = String(Math.floor(Date.now() / 1000));
-
-  await opts.client.d1.database.query(opts.databaseId, {
-    account_id: opts.accountId,
-    sql: "INSERT OR IGNORE INTO _admin_grants (project_id, github_host, github_user_id, github_login_snapshot, granted_by_user_id, granted_at) VALUES (?, 'github.com', ?, ?, NULL, ?)",
-    params: [
-      opts.slug,
-      String(opts.githubUserId),
-      opts.githubLoginSnapshot ?? null,
-      grantedAt,
-    ] as string[],
-  });
 }
 
 /**

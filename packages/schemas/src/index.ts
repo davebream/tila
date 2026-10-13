@@ -243,6 +243,8 @@ export {
   TokenRevokeResponseSchema,
   type TokenRevokeResponse,
   TokenListItemSchema,
+  MembershipGrantResponseSchema,
+  type MembershipGrantResponse,
   type TokenListItem,
   TokenListResponseSchema,
   type TokenListResponse,

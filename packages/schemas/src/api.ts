@@ -19,7 +19,11 @@ import { ClaimModeSchema } from "./claim";
 import { LIFECYCLE_OUTCOMES, LifecycleOutcomeSchema } from "./config";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 import { JournalEventKindSchema } from "./journal";
-import { MembershipSourceSchema, ProjectRoleSchema } from "./membership";
+import {
+  MembershipSourceSchema,
+  ProjectMembershipSchema,
+  ProjectRoleSchema,
+} from "./membership";
 import { RecordKeySchema, RecordTagSchema, RecordTypeSchema } from "./record";
 import {
   EntityRelationshipSchema,
@@ -41,6 +45,17 @@ export const ErrorEnvelopeSchema = z.object({
 });
 
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
+
+// --- Project membership API ---
+
+export const MembershipGrantResponseSchema = z.object({
+  ok: z.literal(true),
+  membership: ProjectMembershipSchema,
+  created: z.boolean(),
+});
+export type MembershipGrantResponse = z.infer<
+  typeof MembershipGrantResponseSchema
+>;
 
 // --- Claim API ---
 
