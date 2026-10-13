@@ -90,6 +90,36 @@ export {
   type SchemaParseError,
 } from "./schema-parser";
 
+// Editable definition documents (raw TOML tables) for settings editors
+export {
+  DECLARATION_SECTIONS,
+  cloneDeclaration,
+  cloneValue,
+  copyName,
+  declarationNames,
+  definitionHasComments,
+  duplicateField,
+  getIn,
+  isTable,
+  parseDefinitionDocument,
+  putField,
+  readFields,
+  rebaseDefinition,
+  removeDeclaration,
+  removeField,
+  serializeDefinitionDocument,
+  setIn,
+  writeFields,
+  type DeclarationSection,
+  type DefinitionDocument,
+  type DefinitionTable,
+  type FieldCollection,
+  type FieldEntry,
+  type FieldShape,
+  type ParseDefinitionDocumentResult,
+  type RebaseResult,
+} from "./schema-document";
+
 // Artifact text normalization for full-text search indexing
 export {
   normalizeArtifactText,
