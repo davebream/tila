@@ -7,7 +7,7 @@ import {
   RepoOidcPolicySchema,
   type SessionPermission,
 } from "@tila/schemas";
-import { and, eq } from "drizzle-orm";
+import { type SQL, and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { projectRepos } from "./schema";
 
@@ -33,6 +33,8 @@ export interface RepoAllowlistRow {
   enabled: number;
   created_at: number;
   created_by: string;
+  access_policy_revision?: number;
+  oidc_policy_revision?: number;
 }
 
 export interface RegisterParams {
@@ -49,15 +51,32 @@ export interface RegisterParams {
   createdBy: string;
 }
 
+/** A stale `expected_revision`; `revision` is the current one. */
+type Conflict = { status: "conflict"; revision: number };
+
 export type RepoAccessPolicyResult =
-  | { status: "ok"; policy: RepoAccessPolicy; repo: RepoAllowlistRow }
+  | {
+      status: "ok";
+      policy: RepoAccessPolicy;
+      repo: RepoAllowlistRow;
+      revision: number;
+    }
   | { status: "not-found" }
-  | { status: "invalid-policy" };
+  | { status: "invalid-policy" }
+  | Conflict;
 
 export type RepoOidcPolicyResult =
-  | { status: "ok"; policy: RepoOidcPolicy; repo: RepoAllowlistRow }
+  | {
+      status: "ok";
+      policy: RepoOidcPolicy;
+      repo: RepoAllowlistRow;
+      revision: number;
+    }
   | { status: "not-found" }
-  | { status: "invalid-policy" };
+  | { status: "invalid-policy" }
+  | Conflict;
+
+export type RepoRemoveResult = { status: "removed" | "not-found" } | Conflict;
 
 function decodeAccessPolicy(row: RepoAllowlistRow): RepoAccessPolicyResult {
   const parsed = RepoAccessPolicySchema.safeParse({
@@ -68,7 +87,12 @@ function decodeAccessPolicy(row: RepoAllowlistRow): RepoAccessPolicyResult {
     membership_role_cap: row.membership_role_cap ?? "participant",
   });
   return parsed.success
-    ? { status: "ok", policy: parsed.data, repo: row }
+    ? {
+        status: "ok",
+        policy: parsed.data,
+        repo: row,
+        revision: row.access_policy_revision ?? 1,
+      }
     : { status: "invalid-policy" };
 }
 
@@ -84,7 +108,12 @@ function decodeOidcPolicy(row: RepoAllowlistRow): RepoOidcPolicyResult {
       allowed_workflows: JSON.parse(row.oidc_allowed_workflows),
     });
     return parsed.success
-      ? { status: "ok", policy: parsed.data, repo: row }
+      ? {
+          status: "ok",
+          policy: parsed.data,
+          repo: row,
+          revision: row.oidc_policy_revision ?? 1,
+        }
       : { status: "invalid-policy" };
   } catch {
     return { status: "invalid-policy" };
@@ -170,12 +199,91 @@ export class RepoAllowlistStore {
     return row ? decodeAccessPolicy(row) : { status: "not-found" };
   }
 
+  private link(projectId: string, githubHost: string, githubRepoId: number) {
+    return and(
+      eq(projectRepos.project_id, projectId),
+      eq(projectRepos.github_host, githubHost),
+      eq(projectRepos.github_repo_id, githubRepoId),
+      eq(projectRepos.enabled, 1),
+    );
+  }
+
+  /**
+   * Every enabled repository link with both policies and their revisions,
+   * optionally for one host (owner settings surface, #298).
+   */
+  async listLinks(projectId: string, githubHost?: string) {
+    const rows = (await this.listForProject(projectId)).filter(
+      (row) => githubHost === undefined || row.github_host === githubHost,
+    );
+    return rows.map((row) => {
+      const access = decodeAccessPolicy(row);
+      const oidc = decodeOidcPolicy(row);
+      return {
+        github_host: row.github_host,
+        github_owner: row.github_owner,
+        github_repo: row.github_repo,
+        github_repo_id: row.github_repo_id,
+        created_at: row.created_at,
+        created_by: row.created_by,
+        access_policy: access.status === "ok" ? access.policy : null,
+        access_policy_revision: row.access_policy_revision ?? 1,
+        oidc_policy: oidc.status === "ok" ? oidc.policy : null,
+        oidc_policy_revision: row.oidc_policy_revision ?? 1,
+      };
+    });
+  }
+
+  /**
+   * Replace a policy in one conditional UPDATE. With `expectedRevision`, the
+   * write applies only to that revision; otherwise it is unconditional
+   * (legacy). Zero changed rows distinguishes a stale revision from a missing
+   * link by reading the row again.
+   */
+  private async conditionalPolicyWrite(
+    projectId: string,
+    githubHost: string,
+    githubRepoId: number,
+    revisionColumn:
+      | typeof projectRepos.access_policy_revision
+      | typeof projectRepos.oidc_policy_revision,
+    values: Partial<typeof projectRepos.$inferInsert>,
+    expectedRevision: number | undefined,
+  ): Promise<RepoAllowlistRow | Conflict | null> {
+    const where: SQL[] = [
+      this.link(projectId, githubHost, githubRepoId) as SQL,
+    ];
+    if (expectedRevision !== undefined)
+      where.push(eq(revisionColumn, expectedRevision));
+    const updated = await this.drizzle
+      .update(projectRepos)
+      .set({ ...values, [revisionColumn.name]: sql`${revisionColumn} + 1` })
+      .where(and(...where))
+      .returning();
+    const row = updated[0] as RepoAllowlistRow | undefined;
+    if (row) return row;
+    const current = await this.isRegistered(
+      projectId,
+      githubHost,
+      githubRepoId,
+    );
+    if (!current) return null;
+    return {
+      status: "conflict",
+      revision:
+        (revisionColumn.name === "access_policy_revision"
+          ? current.access_policy_revision
+          : current.oidc_policy_revision) ?? 1,
+    };
+  }
+
   /** Atomically replace a repository's complete human access policy. */
   async setAccessPolicy(
     projectId: string,
     githubHost: string,
     githubRepoId: number,
     policy: RepoAccessPolicyRequest,
+    expectedRevision?: number,
   ): Promise<RepoAccessPolicyResult> {
     const current = await this.getAccessPolicy(
       projectId,
@@ -183,31 +291,29 @@ export class RepoAllowlistStore {
       githubRepoId,
     );
     if (current.status !== "ok") return current;
+    if (expectedRevision !== undefined && current.revision !== expectedRevision)
+      return { status: "conflict", revision: current.revision };
     const validated = RepoAccessPolicySchema.parse({
       ...current.policy,
       ...policy,
     });
-    const updated = await this.drizzle
-      .update(projectRepos)
-      .set({
+    const result = await this.conditionalPolicyWrite(
+      projectId,
+      githubHost,
+      githubRepoId,
+      projectRepos.access_policy_revision,
+      {
         min_read_permission: validated.min_read_permission,
         min_write_permission: validated.min_write_permission,
         max_permission: validated.max_permission,
         membership_enabled: validated.membership_enabled ? 1 : 0,
         membership_role_cap: validated.membership_role_cap,
-      })
-      .where(
-        and(
-          eq(projectRepos.project_id, projectId),
-          eq(projectRepos.github_host, githubHost),
-          eq(projectRepos.github_repo_id, githubRepoId),
-          eq(projectRepos.enabled, 1),
-        ),
-      )
-      .returning();
-
-    const row = updated[0] as RepoAllowlistRow | undefined;
-    return row ? decodeAccessPolicy(row) : { status: "not-found" };
+      },
+      // The merge above read `current`; never apply it over a newer revision.
+      current.revision,
+    );
+    if (!result) return { status: "not-found" };
+    return "status" in result ? result : decodeAccessPolicy(result);
   }
 
   /** Read and validate a repository's complete GitHub Actions OIDC policy. */
@@ -226,11 +332,15 @@ export class RepoAllowlistStore {
     githubHost: string,
     githubRepoId: number,
     policy: RepoOidcPolicy,
+    expectedRevision?: number,
   ): Promise<RepoOidcPolicyResult> {
     const validated = RepoOidcPolicySchema.parse(policy);
-    const updated = await this.drizzle
-      .update(projectRepos)
-      .set({
+    const result = await this.conditionalPolicyWrite(
+      projectId,
+      githubHost,
+      githubRepoId,
+      projectRepos.oidc_policy_revision,
+      {
         oidc_enabled: validated.enabled ? 1 : 0,
         oidc_max_permission: validated.max_permission,
         oidc_subject_pattern: validated.subject_pattern,
@@ -240,19 +350,11 @@ export class RepoAllowlistStore {
           validated.allowed_environments,
         ),
         oidc_allowed_workflows: JSON.stringify(validated.allowed_workflows),
-      })
-      .where(
-        and(
-          eq(projectRepos.project_id, projectId),
-          eq(projectRepos.github_host, githubHost),
-          eq(projectRepos.github_repo_id, githubRepoId),
-          eq(projectRepos.enabled, 1),
-        ),
-      )
-      .returning();
-
-    const row = updated[0] as RepoAllowlistRow | undefined;
-    return row ? decodeOidcPolicy(row) : { status: "not-found" };
+      },
+      expectedRevision,
+    );
+    if (!result) return { status: "not-found" };
+    return "status" in result ? result : decodeOidcPolicy(result);
   }
 
   /**
@@ -294,15 +396,30 @@ export class RepoAllowlistStore {
     projectId: string,
     githubHost: string,
     githubRepoId: number,
-  ): Promise<void> {
-    await this.drizzle
-      .delete(projectRepos)
-      .where(
-        and(
-          eq(projectRepos.project_id, projectId),
-          eq(projectRepos.github_host, githubHost),
-          eq(projectRepos.github_repo_id, githubRepoId),
-        ),
+    expectedAccessRevision?: number,
+  ): Promise<RepoRemoveResult> {
+    const where = [
+      eq(projectRepos.project_id, projectId),
+      eq(projectRepos.github_host, githubHost),
+      eq(projectRepos.github_repo_id, githubRepoId),
+    ];
+    if (expectedAccessRevision !== undefined)
+      where.push(
+        eq(projectRepos.access_policy_revision, expectedAccessRevision),
       );
+    const removed = await this.drizzle
+      .delete(projectRepos)
+      .where(and(...where))
+      .returning({ id: projectRepos.github_repo_id });
+    if (removed.length) return { status: "removed" };
+    if (expectedAccessRevision === undefined) return { status: "not-found" };
+    const current = await this.isRegistered(
+      projectId,
+      githubHost,
+      githubRepoId,
+    );
+    return current
+      ? { status: "conflict", revision: current.access_policy_revision ?? 1 }
+      : { status: "not-found" };
   }
 }

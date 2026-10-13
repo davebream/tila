@@ -24,7 +24,9 @@ const CREATE_PROJECT_REPOS = `
     oidc_allowed_events   TEXT    NOT NULL DEFAULT '[]',
     oidc_allowed_refs     TEXT    NOT NULL DEFAULT '[]',
     oidc_allowed_environments TEXT NOT NULL DEFAULT '[]',
-    oidc_allowed_workflows TEXT NOT NULL DEFAULT '[]'
+    oidc_allowed_workflows TEXT NOT NULL DEFAULT '[]',
+    access_policy_revision INTEGER NOT NULL DEFAULT 1,
+    oidc_policy_revision INTEGER NOT NULL DEFAULT 1
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_project_repos_lookup
     ON _project_repos (project_id, github_host, github_repo_id);

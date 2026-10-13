@@ -198,45 +198,37 @@ adminRoster.delete(
     const isD1Token =
       tokenResult.kind === "d1-token" && tokenResult.scopes === "full";
 
-    // ── Last-admin guard ────────────────────────────────────────────────────
-    // Guard: active roster count==1 AND sole row id==target AND bearer caller
-    // githubUserId==target → 409 last-admin (emit denied datapoint), grant untouched.
-    // Full-scope D1 tokens bypass the guard (bootstrap escape hatch).
-    if (
-      !isD1Token &&
-      activeAdmins.length === 1 &&
-      activeAdmins[0]?.subject_id === String(targetUserId) &&
-      callerUserId === targetUserId
-    ) {
-      emit(c, "revoke", "last-admin", 409);
-      return c.json(
-        {
-          ok: false,
-          error: {
-            code: "last-admin",
-            message:
-              "Cannot revoke the last admin; grant another admin first or use a D1 bootstrap token",
-            retryable: false,
-          },
-        },
-        409,
-      );
-    }
-
     // Revoke (soft-delete; double-revoke is a no-op → still 200 with revoked:false).
-    const revokedByUserId = callerUserId;
+    // The canonical store refuses to remove the last active owner at write
+    // time, for every caller kind; only the full bootstrap token may.
     const target = activeAdmins.find(
       (row) => row.subject_id === String(targetUserId),
     );
     if (target) {
-      await store.revoke({
+      const result = await store.revoke({
         projectId,
         membershipId: target.membership_id,
         actorPrincipalId:
           callerUserId === null
             ? "bootstrap:admin-roster"
             : `github:github.com:${callerUserId}`,
+        allowLastOwner: isD1Token,
       });
+      if (result && "status" in result) {
+        emit(c, "revoke", "last-admin", 409);
+        return c.json(
+          {
+            ok: false,
+            error: {
+              code: "last-admin",
+              message:
+                "Cannot revoke the last admin; grant another admin first or use a D1 bootstrap token",
+              retryable: false,
+            },
+          },
+          409,
+        );
+      }
     }
 
     emit(c, "revoke", "success", 200);

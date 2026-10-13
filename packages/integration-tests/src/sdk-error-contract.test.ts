@@ -36,6 +36,8 @@ function collectEmittedCodesFromContent(content: string): string[] {
     /code:\s*"([a-z][a-z0-9-]*)"/g,
     /zodValidationError\([^)]*?"([a-z][a-z0-9-]*)"/g,
     /jsonError\(\s*c\s*,\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
+    // Route-local `failure(c, status, "code", ...)` helpers (repos.ts).
+    /failure\(\s*c\s*,\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
     // multiline jsonError(c,\n  409,\n  "already-held", ...)
     /jsonError\(\s*\n\s*c\s*,\s*\n\s*\d+\s*,\s*\n\s*"([a-z][a-z0-9-]*)"/g,
   ];

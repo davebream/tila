@@ -57,7 +57,9 @@ it("enforces real D1 memberships, project scope, permission and revocation", asy
     membershipId: membership.membership_id,
     actorPrincipalId: "fixture",
   });
-  expect(revoked?.membership.revoked_at).not.toBeNull();
+  expect(
+    revoked && "membership" in revoked ? revoked.membership.revoked_at : null,
+  ).not.toBeNull();
   // Membership is re-resolved on every request, even for an otherwise valid JWT.
   expect([401, 403]).toContain((await request()).status);
 });

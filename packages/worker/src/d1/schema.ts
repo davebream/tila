@@ -26,6 +26,8 @@ export const projects = sqliteTable("_projects", {
   // WI-B2: nullable OIDC config (migration 0020). NULL = OIDC not configured for this project.
   oidc_issuer: text("oidc_issuer"),
   oidc_audience: text("oidc_audience"),
+  // #298: revision of the browser-editable display metadata (display_name).
+  settings_revision: integer("settings_revision").notNull().default(1),
 });
 
 // --- _tokens ---
@@ -93,6 +95,11 @@ export const projectRepos = sqliteTable(
     enabled: integer("enabled").notNull().default(1),
     created_at: integer("created_at").notNull(),
     created_by: text("created_by").notNull(),
+    // #298: one revision per independently edited policy.
+    access_policy_revision: integer("access_policy_revision")
+      .notNull()
+      .default(1),
+    oidc_policy_revision: integer("oidc_policy_revision").notNull().default(1),
   },
   (table) => [
     uniqueIndex("idx_project_repos_lookup").on(
@@ -388,6 +395,11 @@ export const runtimeInvitations = sqliteTable("_runtime_invitations", {
   policy_json: text("policy_json").notNull(),
   created_by: text("created_by").notNull(),
   expires_at: integer("expires_at").notNull(),
+  // #298 (migration 0034): public ID, creation time and explicit revocation.
+  invitation_id: text("invitation_id"),
+  created_at: integer("created_at"),
+  revoked_at: integer("revoked_at"),
+  revoked_by: text("revoked_by"),
 });
 export const runtimeRuns = sqliteTable("_runtime_runs", {
   agent_id: text("agent_id"),

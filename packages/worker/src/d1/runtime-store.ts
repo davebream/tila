@@ -13,13 +13,14 @@ import {
   RUN_TOKEN_TTL_SECONDS,
   RuntimeContextSchema,
   type RuntimeEnrollmentRequest,
+  type RuntimeInvitation,
   type RuntimeRunRequest,
   effectiveCredentialPolicy,
   intersectCredentialPolicies,
   permissionToRole,
   policyContains,
 } from "@tila/schemas";
-import { and, eq, gt, inArray, lte } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { D1DeploymentMetaStore } from "./deployment-meta";
 import {
@@ -337,6 +338,7 @@ export class RuntimeStore {
     hash: string,
   ) {
     const expires_at = this.clock() + INVITATION_TTL_SECONDS;
+    const invitation_id = crypto.randomUUID();
     await this.db.batch([
       this.db.insert(runtimeInvitations).values({
         invitation_hash: hash,
@@ -345,10 +347,78 @@ export class RuntimeStore {
         policy_json: JSON.stringify(policy),
         created_by: actor,
         expires_at,
+        invitation_id,
+        created_at: this.clock(),
       }),
-      this.event(project, actor, hash, "runtime-invitation-created"),
+      this.event(project, actor, invitation_id, "runtime-invitation-created"),
     ]);
-    return expires_at;
+    return { expires_at, invitation_id };
+  }
+  /** Owner listing; never returns the bearer hash. */
+  async listInvitations(project: string): Promise<RuntimeInvitation[]> {
+    const rows = await this.db
+      .select()
+      .from(runtimeInvitations)
+      .where(eq(runtimeInvitations.project_id, project));
+    const redeemed = await this.db
+      .select({
+        hash: runtimeEnrollments.invitation_hash,
+        n: count(),
+      })
+      .from(runtimeEnrollments)
+      .where(eq(runtimeEnrollments.project_id, project))
+      .groupBy(runtimeEnrollments.invitation_hash);
+    const uses = new Map(redeemed.map((row) => [row.hash, row.n]));
+    const now = this.clock();
+    return rows
+      .filter((row) => row.invitation_id !== null)
+      .map((row) => ({
+        invitation_id: row.invitation_id as string,
+        name: row.name,
+        policy: CredentialPolicyReadSchema.parse(JSON.parse(row.policy_json)),
+        created_by: row.created_by,
+        created_at: row.created_at,
+        expires_at: row.expires_at,
+        revoked_at: row.revoked_at,
+        revoked_by: row.revoked_by,
+        state:
+          row.revoked_at !== null
+            ? ("revoked" as const)
+            : row.expires_at <= now
+              ? ("expired" as const)
+              : ("pending" as const),
+        enrollments: uses.get(row.invitation_hash) ?? 0,
+      }))
+      .sort((a, b) => b.expires_at - a.expires_at);
+  }
+  /**
+   * Stop later redemption. Installations already enrolled through the
+   * invitation keep their own lifecycle and are revoked separately.
+   */
+  async revokeInvitation(
+    project: string,
+    invitationId: string,
+    actor: string,
+  ): Promise<"revoked" | "already-revoked" | "not-found"> {
+    const target = and(
+      eq(runtimeInvitations.project_id, project),
+      eq(runtimeInvitations.invitation_id, invitationId),
+    );
+    const existing = await this.db
+      .select({ revoked_at: runtimeInvitations.revoked_at })
+      .from(runtimeInvitations)
+      .where(target)
+      .get();
+    if (!existing) return "not-found";
+    if (existing.revoked_at !== null) return "already-revoked";
+    await this.db.batch([
+      this.db
+        .update(runtimeInvitations)
+        .set({ revoked_at: this.clock(), revoked_by: actor })
+        .where(and(target, isNull(runtimeInvitations.revoked_at))),
+      this.event(project, actor, invitationId, "runtime-invitation-revoked"),
+    ]);
+    return "revoked";
   }
   async invitation(hash: string) {
     return this.db
@@ -429,6 +499,7 @@ export class RuntimeStore {
         if (
           !invite ||
           invite.project_id !== project ||
+          invite.revoked_at !== null ||
           invite.expires_at <= this.clock() ||
           !policyContains(
             CredentialPolicyReadSchema.parse(JSON.parse(invite.policy_json)),

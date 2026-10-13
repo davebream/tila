@@ -1,12 +1,74 @@
+import type { ProjectSettings } from "@tila/schemas";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { projects } from "./schema";
+
+export type ProjectRenameResult =
+  | { status: "ok"; settings: ProjectSettings }
+  | { status: "conflict"; revision: number }
+  | { status: "not-found" };
 
 export class D1ProjectRegistry {
   private drizzle;
 
   constructor(private db: D1Database) {
     this.drizzle = drizzle(this.db);
+  }
+
+  /** Browser-editable metadata with its revision; IDs and provenance are read-only. */
+  async settings(projectId: string): Promise<ProjectSettings | null> {
+    const row = await this.drizzle
+      .select({
+        project_id: projects.project_id,
+        display_name: projects.display_name,
+        created_at: projects.created_at,
+        created_by: projects.created_by,
+        revision: projects.settings_revision,
+      })
+      .from(projects)
+      .where(and(eq(projects.project_id, projectId), eq(projects.archived, 0)))
+      .get();
+    return row ?? null;
+  }
+
+  /**
+   * Rename against the reviewed revision in one batch: the audit event is
+   * written only when the conditional update changed the row.
+   */
+  async rename(params: {
+    projectId: string;
+    expectedRevision: number;
+    displayName: string | null;
+    actorPrincipalId: string;
+  }): Promise<ProjectRenameResult> {
+    const previous = await this.settings(params.projectId);
+    if (!previous) return { status: "not-found" };
+    const [updated] = await this.db.batch([
+      this.db
+        .prepare(
+          "UPDATE _projects SET display_name = ?, settings_revision = settings_revision + 1 WHERE project_id = ? AND archived = 0 AND settings_revision = ?",
+        )
+        .bind(params.displayName, params.projectId, params.expectedRevision),
+      this.db
+        .prepare(
+          "INSERT INTO _membership_events (event_id, project_id, principal_id, actor_principal_id, action, source, role, github_repo_id, details_json, occurred_at) SELECT ?, ?, NULL, ?, 'project-rename', 'explicit', NULL, NULL, ?, ? WHERE changes() > 0",
+        )
+        .bind(
+          crypto.randomUUID(),
+          params.projectId,
+          params.actorPrincipalId,
+          JSON.stringify({
+            previous_display_name: previous.display_name,
+            display_name: params.displayName,
+          }),
+          Date.now(),
+        ),
+    ]);
+    const current = await this.settings(params.projectId);
+    if (!current) return { status: "not-found" };
+    return (updated?.meta.changes ?? 0) > 0
+      ? { status: "ok", settings: current }
+      : { status: "conflict", revision: current.revision };
   }
 
   async get(

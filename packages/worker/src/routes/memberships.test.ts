@@ -164,14 +164,23 @@ describe("memberships routes", () => {
     });
 
     it("rejects demoting or revoking the last owner with last-owner", async () => {
-      store.getById.mockResolvedValue({ ...MEMBERSHIP, role: "owner" });
-      store.countActiveOwners.mockResolvedValue(1);
+      // The store enforces the rule inside its write; the route maps it.
+      store.revoke.mockResolvedValueOnce({ status: "last-owner" });
+      store.updateRole.mockResolvedValueOnce({ status: "last-owner" });
       const call = appFor(ownerCookie());
       const res = await call("/memberships/m-1", { method: "DELETE" });
       expect(res.status).toBe(409);
       expect(
         ((await res.json()) as { error: { code: string } }).error.code,
       ).toBe("last-owner");
+      const demote = await call("/memberships/m-1", {
+        ...json({ role: "maintainer" }),
+        method: "PATCH",
+      });
+      expect(demote.status).toBe(409);
+      expect(store.revoke).toHaveBeenCalledWith(
+        expect.objectContaining({ allowLastOwner: false }),
+      );
     });
 
     it("reads and updates the membership policy mode", async () => {

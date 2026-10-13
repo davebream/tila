@@ -297,23 +297,44 @@ export class ProjectMembershipStore {
     return { membership, created: true };
   }
 
+  /**
+   * SQL condition that another active, enabled owner remains besides
+   * `membership_id = ?`. Evaluated inside the same write statement, so two
+   * concurrent removals of the last two owners cannot both succeed.
+   */
+  private static readonly OTHER_OWNER = `EXISTS (
+    SELECT 1 FROM _project_memberships AS o
+    LEFT JOIN _human_users AS u ON u.id = o.subject_id
+    WHERE o.project_id = _project_memberships.project_id
+      AND o.membership_id <> _project_memberships.membership_id
+      AND o.role = 'owner' AND o.revoked_at IS NULL
+      AND (o.provider <> 'user' OR u.disabled = 0)
+  )`;
+
+  /**
+   * Change a role. Demoting an owner fails with `last-owner` unless another
+   * active owner remains at write time (`allowLastOwner` is the full
+   * bootstrap-credential escape hatch). The audit event commits only with a
+   * changed row.
+   */
   async updateRole(params: {
     projectId: string;
     membershipId: string;
     role: ProjectRole;
     actorPrincipalId: string;
-  }): Promise<ProjectMembership | null> {
+    allowLastOwner?: boolean;
+  }): Promise<ProjectMembership | { status: "last-owner" } | null> {
     const current = await this.getById(params.projectId, params.membershipId);
     if (!current || current.revoked_at !== null) return null;
     if (current.role === params.role) return current;
+    const guarded =
+      current.role === "owner" &&
+      params.role !== "owner" &&
+      !params.allowLastOwner;
     const now = Date.now();
-    await this.db.batch([
-      this.db
-        .prepare(
-          "UPDATE _project_memberships SET role = ? WHERE project_id = ? AND membership_id = ? AND revoked_at IS NULL",
-        )
-        .bind(params.role, params.projectId, params.membershipId),
-      this.eventStatement({
+    // Same batch, same connection: changes() reports the UPDATE above.
+    const event = this.eventStatement(
+      {
         eventId: crypto.randomUUID(),
         projectId: params.projectId,
         principalId: current.principal_id,
@@ -323,26 +344,66 @@ export class ProjectMembershipStore {
         role: params.role,
         details: { previous_role: current.role },
         occurredAt: now,
-      }),
+      },
+      { sql: "changes() > 0", bindings: [] },
+    );
+    const [updated] = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE _project_memberships SET role = ? WHERE project_id = ? AND membership_id = ? AND revoked_at IS NULL AND role = ?${
+            guarded ? ` AND ${ProjectMembershipStore.OTHER_OWNER}` : ""
+          }`,
+        )
+        .bind(params.role, params.projectId, params.membershipId, current.role),
+      event,
     ]);
+    if ((updated?.meta.changes ?? 0) === 0) {
+      const latest = await this.getById(params.projectId, params.membershipId);
+      if (!latest || latest.revoked_at !== null) return null;
+      if (guarded && latest.role === "owner") return { status: "last-owner" };
+      return latest;
+    }
     return this.getById(params.projectId, params.membershipId);
   }
 
+  /**
+   * Revoke a membership. Revoking an owner fails with `last-owner` unless
+   * another active owner remains at write time (`allowLastOwner` bypasses for
+   * the full bootstrap credential). Subject revocation, session deletion and
+   * the audit event apply only when this call revoked the row.
+   */
   async revoke(params: {
     projectId: string;
     membershipId: string;
     actorPrincipalId: string;
-  }): Promise<{
-    membership: ProjectMembership;
-    revokedSessions: number;
-  } | null> {
+    allowLastOwner?: boolean;
+  }): Promise<
+    | {
+        membership: ProjectMembership;
+        revokedSessions: number;
+      }
+    | { status: "last-owner" }
+    | null
+  > {
     const current = await this.getById(params.projectId, params.membershipId);
     if (!current || current.revoked_at !== null) return null;
+    const guarded = current.role === "owner" && !params.allowLastOwner;
     const now = Date.now();
+    // True only after this batch's UPDATE revoked the row.
+    const revokedHere =
+      "EXISTS (SELECT 1 FROM _project_memberships WHERE project_id = ? AND membership_id = ? AND revoked_at = ? AND revoked_by = ?)";
+    const mine = [
+      params.projectId,
+      params.membershipId,
+      now,
+      params.actorPrincipalId,
+    ];
     const results = await this.db.batch([
       this.db
         .prepare(
-          "UPDATE _project_memberships SET revoked_at = ?, revoked_by = ? WHERE project_id = ? AND membership_id = ? AND revoked_at IS NULL",
+          `UPDATE _project_memberships SET revoked_at = ?, revoked_by = ? WHERE project_id = ? AND membership_id = ? AND revoked_at IS NULL${
+            guarded ? ` AND ${ProjectMembershipStore.OTHER_OWNER}` : ""
+          }`,
         )
         .bind(
           now,
@@ -352,25 +413,39 @@ export class ProjectMembershipStore {
         ),
       this.db
         .prepare(
-          "INSERT INTO _revoked_subjects (project_id, identity_host, subject_id, revoked_before) VALUES (?, ?, ?, ?) ON CONFLICT (project_id, identity_host, subject_id) DO UPDATE SET revoked_before = MAX(revoked_before, excluded.revoked_before)",
+          `INSERT INTO _revoked_subjects (project_id, identity_host, subject_id, revoked_before) SELECT ?, ?, ?, ? WHERE ${revokedHere} ON CONFLICT (project_id, identity_host, subject_id) DO UPDATE SET revoked_before = MAX(revoked_before, excluded.revoked_before)`,
         )
-        .bind(params.projectId, current.identity_host, current.subject_id, now),
+        .bind(
+          params.projectId,
+          current.identity_host,
+          current.subject_id,
+          now,
+          ...mine,
+        ),
       this.db
         .prepare(
-          "DELETE FROM _sessions WHERE project_id = ? AND principal_id = ?",
+          `DELETE FROM _sessions WHERE project_id = ? AND principal_id = ? AND ${revokedHere}`,
         )
-        .bind(params.projectId, current.principal_id),
-      this.eventStatement({
-        eventId: crypto.randomUUID(),
-        projectId: params.projectId,
-        principalId: current.principal_id,
-        actorPrincipalId: params.actorPrincipalId,
-        action: "revoke",
-        source: "explicit",
-        role: current.role,
-        occurredAt: now,
-      }),
+        .bind(params.projectId, current.principal_id, ...mine),
+      this.eventStatement(
+        {
+          eventId: crypto.randomUUID(),
+          projectId: params.projectId,
+          principalId: current.principal_id,
+          actorPrincipalId: params.actorPrincipalId,
+          action: "revoke",
+          source: "explicit",
+          role: current.role,
+          occurredAt: now,
+        },
+        { sql: revokedHere, bindings: mine },
+      ),
     ]);
+    if ((results[0]?.meta.changes ?? 0) === 0) {
+      const latest = await this.getById(params.projectId, params.membershipId);
+      if (!latest || latest.revoked_at !== null) return null;
+      return guarded ? { status: "last-owner" } : null;
+    }
     return {
       membership: {
         ...current,
@@ -449,21 +524,28 @@ export class ProjectMembershipStore {
     return (await statement.all<MembershipEventRow>()).results;
   }
 
-  private eventStatement(params: {
-    eventId: string;
-    projectId: string;
-    principalId: string | null;
-    actorPrincipalId: string;
-    action: string;
-    source: MembershipSource;
-    role?: ProjectRole;
-    githubRepoId?: number;
-    details?: Record<string, unknown>;
-    occurredAt: number;
-  }): D1PreparedStatement {
+  private eventStatement(
+    params: {
+      eventId: string;
+      projectId: string;
+      principalId: string | null;
+      actorPrincipalId: string;
+      action: string;
+      source: MembershipSource;
+      role?: ProjectRole;
+      githubRepoId?: number;
+      details?: Record<string, unknown>;
+      occurredAt: number;
+    },
+    when?: { sql: string; bindings: unknown[] },
+  ): D1PreparedStatement {
+    const columns =
+      "INSERT INTO _membership_events (event_id, project_id, principal_id, actor_principal_id, action, source, role, github_repo_id, details_json, occurred_at)";
     return this.db
       .prepare(
-        "INSERT INTO _membership_events (event_id, project_id, principal_id, actor_principal_id, action, source, role, github_repo_id, details_json, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        when
+          ? `${columns} SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${when.sql}`
+          : `${columns} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         params.eventId,
@@ -476,6 +558,7 @@ export class ProjectMembershipStore {
         params.githubRepoId ?? null,
         JSON.stringify(params.details ?? {}),
         params.occurredAt,
+        ...(when?.bindings ?? []),
       );
   }
 }

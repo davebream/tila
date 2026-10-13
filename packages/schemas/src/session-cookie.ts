@@ -21,8 +21,23 @@ export type SessionExchangeResponse = z.infer<
 export const SessionCapabilitiesSchema = z.object({
   /** Caller may grant, change and revoke project memberships. */
   memberships_manage: z.boolean(),
-  /** Caller may list and revoke scoped credentials. */
+  /**
+   * Caller may list and revoke scoped credentials. Kept for older clients;
+   * equals `credentials_revoke`.
+   */
   credentials_manage: z.boolean(),
+  // #298: one flag per owner-level editor, mirroring each route guard. They
+  // default to false so a client can read an older server's response.
+  credentials_read: z.boolean().default(false),
+  credentials_issue: z.boolean().default(false),
+  credentials_rotate: z.boolean().default(false),
+  credentials_revoke: z.boolean().default(false),
+  service_accounts_manage: z.boolean().default(false),
+  workload_bindings_manage: z.boolean().default(false),
+  repository_policy_manage: z.boolean().default(false),
+  project_configure: z.boolean().default(false),
+  /** Shared runtime invitations and enrollment revocation (owner). */
+  runtime_access_manage: z.boolean().default(false),
   /** False when the membership store could not be consulted (fail closed). */
   membership_available: z.boolean(),
   /** How an interactive cookie session authenticated; absent for bearer auth. */

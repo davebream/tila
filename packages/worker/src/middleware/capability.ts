@@ -188,6 +188,8 @@ export function routeCapability(
     ["GET", /^\/doctor\/(?:search-drift|schema|probe)$/, "project:inspect"],
     ["POST", /^\/admin\/restart$/, "project:restart"],
     ["POST", /^\/admin\/archive\/journal$/, "journal:archive"],
+    ["GET", /^\/project-settings$/, "summary:read"],
+    ["PATCH", /^\/project-settings$/, "project:configure"],
     ["GET", /^\/admin\/store-counts$/, "project:inspect"],
     ["POST", /^\/admin\/destroy$/, "project:destroy"],
     ["POST", /^\/admin\/sessions\/revoke$/, "project:sessions-revoke"],

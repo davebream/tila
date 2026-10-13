@@ -124,20 +124,17 @@ memberships.patch("/memberships/:membershipId", async (c) => {
       400,
     );
   }
-  const store = new ProjectMembershipStore(c.env.DB);
-  const current = await store.getById(
-    c.get("projectId"),
-    c.req.param("membershipId"),
-  );
   const credential = c.get("tokenResult");
-  const bootstrap =
-    credential.kind === "d1-token" && credential.scopes === "full";
-  if (
-    current?.role === "owner" &&
-    parsed.data.role !== "owner" &&
-    !bootstrap &&
-    (await store.countActiveOwners(c.get("projectId"))) <= 1
-  ) {
+  const membership = await new ProjectMembershipStore(c.env.DB).updateRole({
+    projectId: c.get("projectId"),
+    membershipId: c.req.param("membershipId"),
+    role: parsed.data.role,
+    actorPrincipalId: actor(c),
+    // The full bootstrap credential is the documented recovery escape hatch.
+    allowLastOwner:
+      credential.kind === "d1-token" && credential.scopes === "full",
+  });
+  if (membership && "status" in membership)
     return c.json(
       {
         ok: false,
@@ -149,38 +146,31 @@ memberships.patch("/memberships/:membershipId", async (c) => {
       },
       409,
     );
-  }
-  const membership = await store.updateRole({
-    projectId: c.get("projectId"),
-    membershipId: c.req.param("membershipId"),
-    role: parsed.data.role,
-    actorPrincipalId: actor(c),
-  });
   return membership
     ? c.json({ ok: true, membership })
     : c.json(
         {
           ok: false,
-          error: { code: "not-found", message: "Membership not found" },
+          error: {
+            code: "not-found",
+            message: "Membership not found",
+            retryable: false,
+          },
         },
         404,
       );
 });
 
 memberships.delete("/memberships/:membershipId", async (c) => {
-  const store = new ProjectMembershipStore(c.env.DB);
-  const current = await store.getById(
-    c.get("projectId"),
-    c.req.param("membershipId"),
-  );
   const credential = c.get("tokenResult");
-  const bootstrap =
-    credential.kind === "d1-token" && credential.scopes === "full";
-  if (
-    current?.role === "owner" &&
-    !bootstrap &&
-    (await store.countActiveOwners(c.get("projectId"))) <= 1
-  ) {
+  const result = await new ProjectMembershipStore(c.env.DB).revoke({
+    projectId: c.get("projectId"),
+    membershipId: c.req.param("membershipId"),
+    actorPrincipalId: actor(c),
+    allowLastOwner:
+      credential.kind === "d1-token" && credential.scopes === "full",
+  });
+  if (result && "status" in result)
     return c.json(
       {
         ok: false,
@@ -192,18 +182,16 @@ memberships.delete("/memberships/:membershipId", async (c) => {
       },
       409,
     );
-  }
-  const result = await store.revoke({
-    projectId: c.get("projectId"),
-    membershipId: c.req.param("membershipId"),
-    actorPrincipalId: actor(c),
-  });
   return result
     ? c.json({ ok: true, ...result })
     : c.json(
         {
           ok: false,
-          error: { code: "not-found", message: "Membership not found" },
+          error: {
+            code: "not-found",
+            message: "Membership not found",
+            retryable: false,
+          },
         },
         404,
       );

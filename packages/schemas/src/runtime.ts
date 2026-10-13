@@ -117,6 +117,30 @@ export const RuntimeInvitationResponseSchema = z.object({
   ok: z.literal(true),
   invitation: z.string(),
   expires_at: z.number(),
+  /** Public ID for listing and revocation (#298); never the bearer secret. */
+  invitation_id: z.string().optional(),
+});
+/**
+ * Owner view of a shared runtime invitation. The bearer value is shown only
+ * once at creation and is never listed. Revoking stops later redemption;
+ * enrollments already redeemed keep their own lifecycle.
+ */
+export const RuntimeInvitationSchema = z.object({
+  invitation_id: z.string(),
+  name: z.string(),
+  policy: CredentialPolicyReadSchema,
+  created_by: z.string(),
+  created_at: z.number().nullable(),
+  expires_at: z.number(),
+  revoked_at: z.number().nullable(),
+  revoked_by: z.string().nullable(),
+  state: z.enum(["pending", "expired", "revoked"]),
+  enrollments: z.number().int().nonnegative(),
+});
+export type RuntimeInvitation = z.infer<typeof RuntimeInvitationSchema>;
+export const RuntimeInvitationsResponseSchema = z.object({
+  ok: z.literal(true),
+  invitations: z.array(RuntimeInvitationSchema),
 });
 export type RuntimeContext = z.infer<typeof RuntimeContextSchema>;
 export type RuntimeEnrollment = z.infer<typeof RuntimeEnrollmentSchema>;
