@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parseTilaSchemaToml } from "@tila/core";
-import { TilaSchemaTomlSchema } from "@tila/schemas";
+import { type Entity, TilaSchemaTomlSchema } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { acquire } from "../src/coordination-ops";
@@ -231,6 +231,86 @@ describe("blockedTaskIds", () => {
       .map((entity) => entity.id)
       .sort();
   }
+
+  it("matches readiness on random graphs with cycles, missing and archived tasks", () => {
+    const definition = parseTilaSchemaToml(lifecycleDefinition);
+    let seed = 306;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const pick = <T>(values: readonly T[]) =>
+      values[Math.floor(random() * values.length)];
+    for (let round = 0; round < 200; round++) {
+      const size = 2 + Math.floor(random() * 14);
+      const ids = Array.from({ length: size }, (_, i) => `t${i}`);
+      const entities = new Map<string, Entity>();
+      for (const id of ids) {
+        // Some ids stay absent: edges to them model missing predecessors.
+        if (random() < 0.1) continue;
+        const lifecycle = random() < 0.5;
+        entities.set(id, {
+          id,
+          type: lifecycle ? "issue" : "task",
+          schema_version: 1,
+          data: lifecycle
+            ? { phase: pick(["todo", "working", "shipped", "aborted"]) }
+            : random() < 0.2
+              ? {}
+              : { status: pick(["open", "closed", "done"]) },
+          archived: random() < 0.15 ? 1 : 0,
+          created_at: 0,
+          updated_at: 0,
+          created_by: "test",
+          tags: [],
+        } as Entity);
+      }
+      const predecessors = new Map<string, string[]>();
+      const edges = Math.floor(random() * size * 1.5);
+      for (let e = 0; e < edges; e++) {
+        const from = pick(ids);
+        const to = pick(ids);
+        predecessors.set(to, [...(predecessors.get(to) ?? []), from]);
+      }
+      const snapshot: ReadinessSnapshot = {
+        definition,
+        entities,
+        predecessors,
+        gates: new Map(),
+      };
+      expect(sorted(blockedTaskIds(snapshot))).toEqual(
+        blockedByReadiness(snapshot),
+      );
+    }
+  });
+
+  it("handles a 5,000-task chain in one pass", () => {
+    const entities = new Map<string, Entity>();
+    const predecessors = new Map<string, string[]>();
+    for (let i = 0; i < 5_000; i++) {
+      entities.set(`c${i}`, {
+        id: `c${i}`,
+        type: "task",
+        schema_version: 1,
+        data: { status: "open" },
+        archived: 0,
+        created_at: 0,
+        updated_at: 0,
+        created_by: "test",
+        tags: [],
+      } as Entity);
+      if (i > 0) predecessors.set(`c${i}`, [`c${i - 1}`]);
+    }
+    const started = performance.now();
+    const blocked = blockedTaskIds({
+      definition: null,
+      entities,
+      predecessors,
+      gates: new Map(),
+    });
+    expect(blocked.size).toBe(4_999);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
 
   /** `issue` uses the `phase` lifecycle; `task` is legacy, keyed on `status`. */
   interface Seeded {

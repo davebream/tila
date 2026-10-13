@@ -270,6 +270,16 @@ describe("loadRuntimeView with the attention filter", () => {
     return RuntimeViewResponseSchema.parse(await response.json());
   }
 
+  it("rejects a malformed cursor before scanning", async () => {
+    const { server, fetch } = app(directory(120), store);
+    const response = await server.request(
+      "/?filter=attention&cursor=not-a-cursor",
+    );
+    // This harness skips the route, which maps the cursor error to a 400.
+    expect(response.ok).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("follows every DO page and keeps only rows that need attention", async () => {
     const { server, fetch } = app(
       directory(120, { 3: "expired", 49: "expired", 50: "epoch-mismatch" }),

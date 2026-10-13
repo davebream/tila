@@ -539,3 +539,39 @@ it("keeps accepting cursors issued before the blocked and outcome filters", () =
       ),
     ).toEqual(expected);
 });
+
+it("matches a lifecycle field whose name contains a dot by its exact key", () => {
+  const dotted = `schema_version = 1
+[work_units.job.fields."run.state"]
+type = "enum"
+values = ["queued", "done", "broken"]
+[work_units.job.lifecycle]
+field = "run.state"
+dispatchable = ["queued"]
+terminal = ["done", "broken"]
+dependency_satisfied = ["done"]
+[work_units.job.lifecycle.outcomes]
+failure = "broken"
+`;
+  expect(applySchema(testDb.db, dotted, "test").ok).toBe(true);
+  createEntity(testDb.db, {
+    id: "job-broken",
+    type: "job",
+    data: { "run.state": "broken" },
+  });
+  createEntity(testDb.db, {
+    id: "job-done",
+    type: "job",
+    data: { "run.state": "done" },
+  });
+  // A nested object must not match: the field is the literal key.
+  createEntity(testDb.db, {
+    id: "job-nested",
+    type: "job",
+    data: { "run.state": "queued", run: { state: "broken" } },
+  });
+  const page = list(testDb.db, { outcome: ["failure"] });
+  expect(page.entities.map((e) => e.id)).toEqual(["job-broken"]);
+  expect(page.total).toBe(1);
+  expect(page.outcome_types).toEqual(["job"]);
+});
