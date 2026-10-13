@@ -780,6 +780,7 @@ export class EmbeddedProject
       version: row?.version ?? null,
       revision: row?.version ?? 0,
       definition: row?.definition ?? null,
+      applied_at: row?.applied_at ?? null,
     };
   }
 

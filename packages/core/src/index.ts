@@ -43,6 +43,7 @@ export type {
   SchemaRecord,
   ApplySchemaInput,
   ApplySchemaOutput,
+  SchemaPreviewResult,
 } from "./interfaces/schema-backend";
 export type {
   SummaryBackend,

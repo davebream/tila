@@ -38,6 +38,10 @@ import {
   runFirstAdminSeed,
 } from "../../lib/seed-first-admin-flow";
 
+/** tila.schema.toml is a starting point; the project's definitions live on the server. */
+const DEFINITIONS_STEP =
+  "Apply starter definitions: tila schema import tila.schema.toml  (preview), then add --expected-revision 0";
+
 export default defineCommand({
   meta: {
     name: "create",
@@ -355,8 +359,8 @@ async function runCloudflareProvisioning(
     summaryLines += "\nAuth:     github-repo";
   }
   const nextSteps = githubEnabled
-    ? 'Next steps:\n  1. Commit .tila/config.toml to the repo\n  2. Teammates join with: tila init\n  3. Run: tila doctor  to verify the setup\n  4. Start working: tila task new --title "First task"'
-    : 'Next steps:\n  1. Commit .tila/config.toml to the repo\n  2. Teammates join with: tila init  (authenticates via GitHub)\n  3. Start working: tila task new --title "First task"';
+    ? `Next steps:\n  1. Commit .tila/config.toml to the repo\n  2. Teammates join with: tila init\n  3. Run: tila doctor  to verify the setup\n  4. ${DEFINITIONS_STEP}\n  5. Start working: tila task new --title "First task"`
+    : `Next steps:\n  1. Commit .tila/config.toml to the repo\n  2. Teammates join with: tila init  (authenticates via GitHub)\n  3. ${DEFINITIONS_STEP}\n  4. Start working: tila task new --title "First task"`;
   p.note(`${summaryLines}\n\n${nextSteps}`, "tila project created");
 
   // Step 12: Offer MCP setup
@@ -482,7 +486,7 @@ async function runLocalProvisioning(
     return;
   }
   p.note(
-    `Project:    ${projectId}\nOrg:        ${org}\nDatabase:   ${dbPath}\nArtifacts:  ${artifactsPath}\nBackend:    local (SQLite + filesystem)\n\nNext steps:\n  1. Start working: tila task new --title "First task"`,
+    `Project:    ${projectId}\nOrg:        ${org}\nDatabase:   ${dbPath}\nArtifacts:  ${artifactsPath}\nBackend:    local (SQLite + filesystem)\n\nNext steps:\n  1. ${DEFINITIONS_STEP}\n  2. Start working: tila task new --title "First task"`,
     "tila project provisioned (local mode)",
   );
   await runMcpInitPrompt(cwd);
