@@ -51,4 +51,22 @@ describe("App routing", () => {
 
     expect(screen.getByLabelText("Search artifacts")).toBeInTheDocument();
   });
+
+  test("/entities/:id opens that task, not the bare list", async () => {
+    renderWithProviders(<AuthGate />, { route: "/entities/entity-1" });
+
+    expect(
+      await screen.findByRole("dialog", { name: /Test Task Detail/ }),
+    ).toBeInTheDocument();
+  });
+
+  test("/p/:project/entities/:id opens that task", async () => {
+    renderWithProviders(<AuthGate />, {
+      route: "/p/test-project/entities/entity-1",
+    });
+
+    expect(
+      await screen.findByRole("dialog", { name: /Test Task Detail/ }),
+    ).toBeInTheDocument();
+  });
 });
