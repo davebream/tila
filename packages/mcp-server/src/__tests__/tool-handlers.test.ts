@@ -1,3 +1,4 @@
+import { TilaApiError } from "tila-sdk";
 /**
  * Behavioral (handler-invocation) coverage for the tool groups whose
  * surface-parity test only checks registration count/names: journal, schema,
@@ -39,6 +40,51 @@ describe("tool handler invocation — journal", () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  it("appends reports with an explicit key and preserves the authenticated receipt", async () => {
+    const input = {
+      event_name: "pipeline.tests_passed",
+      event_version: 1,
+      target: { kind: "project" },
+      data: { passed: 87 },
+    };
+    const receipt = {
+      ok: true,
+      event: {
+        seq: 1,
+        t: 100,
+        kind: "custom.reported",
+        resource: "project:test-project",
+        principal_id: "principal",
+        participant_id: "participant",
+        environment: {},
+        token_id: "credential",
+        fence: null,
+        data: input,
+      },
+      dedup_expires_at: 604800100,
+    };
+    facade.journal.append.mockResolvedValue(receipt);
+    const handler = findToolHandler(server, "tila_journal_append");
+    const result = await handler({ input, idempotency_key: "stable" });
+    expect(facade.journal.append).toHaveBeenCalledWith(input, {
+      idempotencyKey: "stable",
+    });
+    expect(result).toMatchObject({
+      content: [{ type: "text", text: JSON.stringify(receipt) }],
+    });
+    facade.journal.append.mockRejectedValue(
+      new TilaApiError(
+        422,
+        "idempotency-key-conflict",
+        "Different report",
+        false,
+      ),
+    );
+    expect(await handler({ input, idempotency_key: "stable" })).toMatchObject({
+      isError: true,
+    });
+  });
 
   it("tila_journal_list → journal.query with resource/kind/after_seq(stringified)/limit(stringified)", async () => {
     const payload = {

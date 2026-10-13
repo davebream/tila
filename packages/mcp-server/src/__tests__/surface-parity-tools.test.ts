@@ -202,14 +202,14 @@ describe("registerSignalTools", () => {
 });
 
 describe("registerJournalTools", () => {
-  it("registers 1 tool", () => {
+  it("registers append and list tools", () => {
     const server = createMockServer();
     registerJournalTools(
       asServer(server),
       asClient(createMockClient()),
       PROJECT_ID,
     );
-    expect(server.tool).toHaveBeenCalledTimes(1);
+    expect(server.tool).toHaveBeenCalledTimes(2);
   });
 
   it("registers tila_journal_list", () => {
@@ -219,7 +219,10 @@ describe("registerJournalTools", () => {
       asClient(createMockClient()),
       PROJECT_ID,
     );
-    expect(server.tool.mock.calls[0][0]).toBe("tila_journal_list");
+    expect(server.tool.mock.calls.map((call) => call[0])).toEqual([
+      "tila_journal_append",
+      "tila_journal_list",
+    ]);
   });
 });
 
@@ -316,7 +319,7 @@ describe("registerAllTools — group gating", () => {
     expect(server.tool).toHaveBeenCalledTimes(11);
   });
 
-  it("expands the 'core' alias to 32 coordination tools", () => {
+  it("expands the 'core' alias to 33 coordination tools", () => {
     process.env.TILA_MCP_COMPAT_ALIASES = "";
     const server = createMockServer();
     registerAllTools(
@@ -325,8 +328,8 @@ describe("registerAllTools — group gating", () => {
       PROJECT_ID,
       ["core"],
     );
-    // core = tasks(8) + claims(3) + gates(3) + signals(8) + summary(1) + presence(1) + journal(1)
-    expect(server.tool).toHaveBeenCalledTimes(32);
+    // core = tasks(8) + claims(3) + gates(3) + signals(8) + summary(1) + presence(1) + journal(2)
+    expect(server.tool).toHaveBeenCalledTimes(33);
   });
 
   it("throws an actionable error with valid group list on unknown group", () => {

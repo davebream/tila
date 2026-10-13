@@ -54,6 +54,16 @@ export async function runMigrationsWithPitrRollback(
 }
 
 const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
+  journal_report_receipts: [
+    "key",
+    "project_id",
+    "principal_id",
+    "participant_id",
+    "request_hash",
+    "response",
+    "expires_at",
+  ],
+  journal_report_rates: ["key", "window_start", "count"],
   _project_transfer_state: ["singleton", "queue_fences_json"],
   queue_policy: [
     "singleton",

@@ -241,6 +241,8 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
         resource,
         kind,
         client_name,
+        event_name: c.req.query("event_name"),
+        correlation_id: c.req.query("correlation_id"),
         after_seq,
         limit,
       },

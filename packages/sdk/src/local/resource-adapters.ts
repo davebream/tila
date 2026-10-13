@@ -920,6 +920,16 @@ function createLocalSignalMethods(project: EmbeddedProject) {
 /** Journal methods (mirrors `createJournalMethods` in `journal.ts`). */
 function createLocalJournalMethods(project: EmbeddedProject) {
   return {
+    append: async (
+      ..._args: Parameters<TilaFacade["journal"]["append"]>
+    ): ReturnType<TilaFacade["journal"]["append"]> => {
+      throw new TilaApiError(
+        400,
+        "unsupported-capability",
+        "Authenticated journal reports require the Cloudflare backend",
+        false,
+      );
+    },
     replay: (input: JournalReplayRequest) => project.replayJournal(input),
     getCursor: async () => ({
       ok: true as const,
@@ -932,12 +942,18 @@ function createLocalJournalMethods(project: EmbeddedProject) {
     async query(opts?: {
       resource?: string;
       kind?: string;
+      event_name?: string;
+      correlation_id?: string;
+      client_name?: string;
       after_seq?: string;
       limit?: string;
     }): Promise<JournalResponse> {
       const events = await project.listJournal({
         resource: opts?.resource,
         kind: opts?.kind,
+        event_name: opts?.event_name,
+        correlation_id: opts?.correlation_id,
+        client_name: opts?.client_name,
         after_seq: opts?.after_seq ? Number(opts.after_seq) : undefined,
         limit: opts?.limit ? Number(opts.limit) : undefined,
       });

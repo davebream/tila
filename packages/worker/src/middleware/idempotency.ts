@@ -52,6 +52,7 @@ export function createIdempotencyMiddleware(deps?: {
     const contentType = c.req.header("Content-Type");
 
     if (
+      /^\/projects\/[^/]+\/journal\/?$/.test(c.req.path) ||
       c.req.path.endsWith("/admin/backup/d1/restore") ||
       !ACTIVE_METHODS.has(c.req.method) ||
       !clientKey ||

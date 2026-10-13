@@ -9,6 +9,7 @@ export const JournalEventKindSchema = z.enum([
   "question.superseded",
   "question.invalidated",
   "question.discussion_linked",
+  "custom.reported",
   "queue.policy_changed",
   "queue.grant_denied",
   "queue.enrolled",

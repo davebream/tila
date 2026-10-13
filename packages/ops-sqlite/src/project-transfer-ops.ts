@@ -3,6 +3,7 @@ import {
   ArtifactReviewEventSchema,
 } from "@tila/schemas";
 import type { ProjectTransferMode, ProjectTransferState } from "@tila/schemas";
+import { validateJournalReportBackupRow } from "./custom-journal-ops";
 import { validateQueueBackupRow } from "./queue-backup-ops";
 
 export interface SqlRows<T = Record<string, unknown>> {
@@ -45,6 +46,8 @@ export const PROJECT_BACKUP_TABLES = [
   "signals",
   "signal_deliveries",
   "journal",
+  "journal_report_receipts",
+  "journal_report_rates",
   "journal_cursors",
   "handoffs",
   "handoff_references",
@@ -73,6 +76,8 @@ export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
   work_questions: ["id"],
   question_receipts: ["key"],
+  journal_report_receipts: ["key"],
+  journal_report_rates: ["key"],
   queue_policy: ["singleton"],
   queue_entries: ["id"],
   work_attempts: ["fence", "id"],
@@ -369,6 +374,7 @@ export function insertSnapshotRows(
   );
   for (const row of rows) {
     validateQueueBackupRow(table, row);
+    validateJournalReportBackupRow(table, row);
     if (table === "artifact_pointers") {
       for (const column of ["provenance", "revision_creation"]) {
         if (row[column] != null)

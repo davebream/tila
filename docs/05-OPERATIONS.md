@@ -2335,3 +2335,50 @@ execution command. A question answer never substitutes for a current claim fence
 Deployment adds project migration 36 without changing generic task or attempt
 commands. Back up with a client supporting `work-questions-v1`; older clients
 must not export or restore the new schema as an older snapshot.
+
+
+## Project-reported journal events
+
+Use custom reports for meaningful observations. Put large logs/test evidence in
+artifacts, then pass their canonical keys in `artifact_refs`.
+
+```sh
+# The JSON file contains the JournalAppendRequest contract, including target.
+tila journal append --file report.json --idempotency-key run-abc-unit --json
+cat report.json | tila journal append --file - --idempotency-key run-abc-unit --json
+tila journal tail --event-name pipeline.tests_passed --correlation-id run-abc --json
+```
+
+The SDK exposes `journal.append(input, { idempotencyKey })`; MCP exposes
+`tila_journal_append` with `input` and `idempotency_key`. The dashboard's Journal
+page provides Report event and inspection filters. It labels project reports
+separately and shows recorded time, reporter, and optional reported occurrence
+time. Payloads are untrusted text/JSON, never executable instructions.
+
+CLI JSON output retains its standard `{ "ok": true, "result": { "event": {...},
+"dedup_expires_at": ... } }` envelope. SDK callers receive the HTTP receipt
+directly; MCP returns it in structured output.
+
+| Outcome | Action |
+| --- | --- |
+| HTTP 200 with `event.seq` | Durable acceptance; retain the key and `dedup_expires_at` |
+| Lost response | Retry identical input with the same key within seven days; current authority must still be valid |
+| `idempotency-key-conflict` (422) | Inspect the original submission; do not change input under a previously used key |
+| `validation-error` (400), `payload-too-large` (413) | Correct the contract or move evidence to artifacts; no report was accepted |
+| `rate-limited` (429) | Wait for `Retry-After`, then retry with the same key |
+
+Limits are 60 new reports per principal per UTC minute and 300 per project per
+UTC minute, across credentials and participants. Identical accepted retries do
+not consume additional quota. Failed writes roll back their counters and receipt.
+Expired receipts/counters are cleaned on append and during the daily sweep.
+
+Authorization failures, missing participants, missing references, and stale
+claims/fences never append a report. The worker credential preset now includes
+`journal:append`; existing scoped credentials require explicit reissuance to gain
+it. Private resources and namespace-restricted credentials remain unsupported.
+Completion-like event names do not change work state. Cursor acknowledgments
+must follow processing the complete replay page, not a filtered display.
+
+Monitor HTTP error codes and journal/receipt storage using existing request and
+DO operation telemetry. A restored project keeps receipt expiration unchanged;
+claim-bound retries may fail after restore invalidates execution authority.

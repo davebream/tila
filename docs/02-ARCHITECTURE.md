@@ -3248,3 +3248,91 @@ existing journal replay and acknowledgment cursor. Journal events contain the
 question ID and revision; fetch the durable record for content. Process by
 question/revision and acknowledge only after processing. A retry may replay an
 event; this guarantees one persisted answer, not exactly-once external execution.
+
+
+## Authenticated project reports (#321)
+
+`POST /projects/:projectId/journal` appends the reserved `custom.reported`
+envelope. A report proves an authenticated principal/participant submitted an
+observation. It does not verify the observation or change tasks, claims, attempts,
+gates, assignments, or capacity. The server stamps `seq`, `t` (recorded Unix ms),
+identity, environment headers, credential attribution, and any validated fence.
+The producer's contract is stored in the envelope's `data` object:
+
+```json
+{
+  "event_name": "pipeline.tests_passed",
+  "event_version": 1,
+  "target": { "kind": "resource", "resource": "task:T-142" },
+  "correlation_id": "run-abc",
+  "occurred_at": "2026-10-12T12:00:00Z",
+  "data": { "suite": "unit", "passed": 87 }
+}
+```
+
+The request requires `event_name`, `event_version`, `target`, and object `data`.
+Names match `[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+`, maximum 128 characters.
+Versions are producer format labels (1–2,147,483,647), without registration.
+Unknown names and versions remain inspectable. JSON data is limited to 16 KiB
+serialized UTF-8 and 16 container levels, counting its root object as level 1.
+The HTTP body is limited to 64 KiB. Unknown contract fields are rejected.
+`correlation_id` and the required `Idempotency-Key` header each accept 1–128
+printable ASCII characters. `occurred_at` must be an RFC 3339 datetime with an
+explicit timezone. Producer timestamps never affect sequence ordering.
+
+| Target | Meaning and validation |
+| --- | --- |
+| `{ "kind": "project" }` | Project observation; server resource is `project:<projectId>` |
+| `{ "kind": "resource", "resource": "task:T-142" }` | Observation about an existing task or `record:<type>/<key>`; no ownership assertion |
+| `{ "kind": "claim", "resource": "task:T-142", "fence": 7 }` | Requires a live claim held by the authenticated principal and participant, matching the current fence |
+
+Task IDs are canonicalized to their stored `<type>:<id>` resource. Resource
+strings are bounded to 1,024 characters and must resolve in this project.
+Optional `artifact_refs` contains up to ten existing canonical artifact keys;
+expired/tombstoned artifacts and non-project-visible resources are rejected.
+Optional `corrects_seq` is a positive safe integer referencing an earlier custom
+report. Corrections validate live or archived history and current reference
+access, then append another event. Existing history is immutable.
+
+Append requires current project write authority, an explicit participant, and
+`journal:append`. Linked references additionally require their read capabilities;
+claim-bound reports require `claims:read`, and corrections require `journal:read`.
+Namespace-restricted credentials cannot append or read this project-wide journal.
+Conversation/private attachments are unsupported. Arbitrary JSON fields do not
+establish references, permissions, or ownership. Environment labels are reported
+metadata, not authenticated machine identity.
+
+Migration 37 adds `journal_report_receipts`, fixed-minute rate counters, and
+partial expression indexes for custom event name and correlation. The event,
+receipt, and counters commit in one project SQLite transaction. D1 response replay
+is bypassed. Keys are scoped to project, principal, and participant; credential
+rotation does not reset them. Canonical JSON hashing ignores object-key order.
+Current permissions, reference access, and claim authority are rechecked even on
+retry. An authorized identical retry returns the original event and attribution;
+a changed request with the same key fails with `idempotency-key-conflict` (422).
+
+The response is `{ "ok": true, "event": {...}, "dedup_expires_at": <Unix ms> }`.
+Acceptance and replay return 200; replay also sets `Idempotency-Replayed: true`.
+Receipts expire exactly seven days after acceptance, without extension. After
+expiration, key reuse is a new submission and can duplicate a historical report.
+This guarantee does not provide unbounded exactly-once delivery.
+
+Live inspection supports indexed `event_name`, `correlation_id`, and existing
+resource filters. Archived ranges retain the explicit archive-boundary response;
+use bounded replay for older history. Replay remains complete and unfiltered,
+including custom reports. Acknowledging a sequence means processing that journal
+position, never acknowledging an external command. Inspection does not advance a
+consumer cursor. Handoffs/reentry reuse the same replay stream.
+
+Complete project backups preserve reports, identity, sequence, and receipt
+expiration; compatible older backups restore new tables empty. Local/embedded
+backends can inspect imported reports, but append returns
+`unsupported-capability` because local identity is not service-authenticated.
+Built-in writes remain transactionally coupled to their domain operation.
+
+Public API read schemas tolerate unknown event kinds. Consumers validating the
+older closed `JournalEventKindSchema` must upgrade before consuming projects
+that contain `custom.reported`. Reports are never disguised or omitted for older
+clients. Upgrade readers before enabling producers; deploy the Worker and bundled
+UI together. There is no pipeline engine, trigger execution, or attempt-reference
+contract introduced by this feature.

@@ -42,7 +42,10 @@ import type {
   SignalRecord,
   SummaryBackend,
 } from "@tila/core";
-import { ArtifactRevisionSchema } from "@tila/schemas";
+import {
+  ArtifactRevisionSchema,
+  type JournalAppendRequest,
+} from "@tila/schemas";
 import type {
   ArtifactReviewRequest,
   ArtifactReviewResponse,
@@ -109,6 +112,7 @@ import {
 import { z } from "zod";
 import { createArtifactMethods } from "../artifacts";
 import { TilaApiError, type TilaClient } from "../client";
+import { createJournalMethods } from "../journal";
 
 // Internal schemas for artifact endpoints not exported from @tila/schemas.
 //
@@ -611,6 +615,15 @@ export class RemoteBackend
   }
 
   // --- JournalBackend ---
+  appendJournal(
+    input: JournalAppendRequest,
+    options: { idempotencyKey: string },
+  ) {
+    return createJournalMethods(this.client, this.projectId).append(
+      input,
+      options,
+    );
+  }
 
   async listJournal(query: JournalQuery): Promise<JournalEvent[]> {
     const result = await this.client.get(
@@ -622,6 +635,10 @@ export class RemoteBackend
           resource: query.resource,
           kind: query.kind,
           client_name: query.client_name,
+          event_name: query.event_name,
+          correlation_id: query.correlation_id,
+          after_seq:
+            query.after_seq !== undefined ? String(query.after_seq) : undefined,
           limit: query.limit !== undefined ? String(query.limit) : undefined,
         },
       },

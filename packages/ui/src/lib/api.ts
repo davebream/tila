@@ -53,6 +53,11 @@ import type {
   WorkCatalogResponse,
 } from "@tila/schemas";
 import { GitHubLoginConfigResponseSchema } from "@tila/schemas";
+import {
+  type JournalAppendRequest,
+  JournalAppendRequestSchema,
+  JournalAppendResponseSchema,
+} from "@tila/schemas";
 import { API_BASE_URL } from "./config";
 import { encodeArtifactKey } from "./utils";
 
@@ -132,8 +137,11 @@ export async function mutate<T>(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
+  options?: { idempotencyKey?: string },
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
+  if (options?.idempotencyKey)
+    headers["Idempotency-Key"] = options.idempotencyKey;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (/\/rooms(?:\/|$)/.test(path))
     headers["X-Tila-Conversation-Protocol"] = "1";
@@ -354,11 +362,16 @@ export async function listJournal(
     resource?: string | string[];
     kind?: string | string[];
     client_name?: string[];
+    event_name?: string;
+    correlation_id?: string;
     after_seq?: number;
     limit?: number;
   },
 ): Promise<JournalResponse> {
   const stringParams: Record<string, string | string[] | undefined> = {};
+  if (params?.event_name) stringParams.event_name = params.event_name;
+  if (params?.correlation_id)
+    stringParams.correlation_id = params.correlation_id;
   if (params?.resource) stringParams.resource = params.resource;
   if (params?.kind) {
     stringParams.kind = Array.isArray(params.kind)
@@ -374,6 +387,21 @@ export async function listJournal(
     stringParams.after_seq = String(params.after_seq);
   if (params?.limit !== undefined) stringParams.limit = String(params.limit);
   return request<JournalResponse>(projectId, "/journal", stringParams);
+}
+
+export async function appendJournalReport(
+  projectId: string,
+  input: JournalAppendRequest,
+  idempotencyKey: string,
+) {
+  return JournalAppendResponseSchema.parse(
+    await mutate(
+      "POST",
+      projectPath(projectId, "/journal"),
+      JournalAppendRequestSchema.parse(input),
+      { idempotencyKey },
+    ),
+  );
 }
 
 export async function listPresenceAll(

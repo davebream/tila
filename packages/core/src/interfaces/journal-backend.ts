@@ -1,9 +1,15 @@
-import type { EnvironmentMetadata } from "@tila/schemas";
+import type {
+  EnvironmentMetadata,
+  JournalAppendRequest,
+  JournalAppendResponse,
+} from "@tila/schemas";
 
 export interface JournalQuery {
   resource?: string;
   kind?: string;
   client_name?: string;
+  event_name?: string;
+  correlation_id?: string;
   after_seq?: number;
   limit?: number;
 }
@@ -22,5 +28,9 @@ export interface JournalEvent {
 }
 
 export interface JournalBackend {
+  appendJournal(
+    input: JournalAppendRequest,
+    options: { idempotencyKey: string },
+  ): Promise<JournalAppendResponse>;
   listJournal(query: JournalQuery): Promise<JournalEvent[]>;
 }

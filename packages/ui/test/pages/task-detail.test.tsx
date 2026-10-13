@@ -888,6 +888,55 @@ describe("TaskDetailPage schema-aware content", () => {
     ).toHaveAttribute("href", "/p/test-project/journal?resource=job-1");
   });
 
+  test("history renders custom reports with attribution and inert payload text", async () => {
+    server.use(
+      jobHandler("job", { headline: "Ship it" }),
+      http.get("*/projects/*/journal", () =>
+        HttpResponse.json({
+          ok: true,
+          events: [
+            {
+              seq: 42,
+              t: Date.now(),
+              kind: "custom.reported",
+              resource: "job:job-1",
+              principal_id: "reporter",
+              participant_id: "worker",
+              environment: {},
+              fence: null,
+              data: {
+                event_name: "external.unknown",
+                event_version: 42,
+                target: { kind: "resource", resource: "job:job-1" },
+                occurred_at: "2000-01-01T00:00:00Z",
+                data: { text: "<script>alert(1)</script>" },
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    renderDrawer(JOB);
+    const history = await screen.findByRole("region", { name: "History" });
+    expect(
+      await within(history).findByText("Project report"),
+    ).toBeInTheDocument();
+    expect(within(history).getByText("external.unknown")).toBeInTheDocument();
+    expect(
+      within(history).getByText("Reporter: reporter/worker"),
+    ).toBeInTheDocument();
+    expect(
+      within(history).getByText(/Occurred \(reported\): 2000/),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      within(history).getByRole("button", { name: /Show report data/ }),
+    );
+    expect(
+      within(history).getByText(/<script>alert\(1\)<\/script>/),
+    ).toBeInTheDocument();
+    expect(history.querySelector("script")).toBeNull();
+  });
+
   test("an artifact failure does not affect history", async () => {
     server.use(
       jobHandler("job", { headline: "Ship it" }),

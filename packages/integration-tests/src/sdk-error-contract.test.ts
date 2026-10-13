@@ -117,6 +117,7 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
     "cursor-expired",
     "delivery-expired",
     "body-too-large",
+    "payload-too-large",
     "stale-binding",
     "no-active-binding",
     "runtime-required",

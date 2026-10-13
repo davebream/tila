@@ -157,7 +157,7 @@ it("lists exactly nine default tools, validates real calls, and preserves the ex
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(67);
+  expect((await all.listTools()).tools).toHaveLength(68);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -535,7 +535,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(69);
+  expect(listed).toHaveLength(70);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -706,6 +706,23 @@ title = "Evidence"
   await primitive("tila_signal_history");
   await primitive("tila_summary");
   await primitive("tila_journal_list");
+  called.add("tila_journal_append");
+  const unsupportedReport = await client.callTool({
+    name: "tila_journal_append",
+    arguments: {
+      input: {
+        event_name: "pipeline.tests_passed",
+        event_version: 1,
+        target: { kind: "project" },
+        data: {},
+      },
+      idempotency_key: "report",
+    },
+  });
+  expect(unsupportedReport.isError).toBe(true);
+  expect(unsupportedReport.structuredContent).toMatchObject({
+    error: { code: "unsupported-capability" },
+  });
   const replay = await primitive("tila_journal_replay", { after_seq: 0 });
   await primitive("tila_journal_cursor_get");
   await primitive("tila_journal_acknowledge", { seq: replay.next_after_seq });
