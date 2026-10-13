@@ -3055,8 +3055,8 @@ needs a person. The count links to the list it was counted from.
 |---|---|---|---|
 | `execution.uncertain` | red | Queue entries whose execution outcome is uncertain | `queue?state=uncertain` |
 | `execution.lease-lapsed` | red | Executions starting or running past their lease | `queue?lease=expired` |
-| `work.failed` | red | Tasks in their type's failure or abandoned state | `tasks?outcome=failure,abandoned` |
 | `work.blocked` | amber | Open tasks waiting on prerequisites | `tasks?blocked=1` |
+| `work.failed` | amber | Unarchived tasks in their type's failure or abandoned state | `tasks?outcome=failure,abandoned` |
 | `execution.suspended` | amber | Queue entries whose execution is suspended | `queue?state=suspended` |
 | `delivery.wake-suppressed` | amber | Pending deliveries whose wakes stopped | `deliveries?state=pending&wake=suppressed` |
 | `delivery.expired-recent` | amber | Deliveries that expired unacknowledged in the last day | `deliveries?state=expired&expires_after=<cutoff>` |
@@ -3066,7 +3066,9 @@ Each count is the `total` of the list its link opens, read with `limit=1` and th
 same URL-derived filters the list page applies (`packages/ui/src/lib/list-queries.ts`).
 The expired-deliveries cutoff is fixed when the count is read, and the link
 carries that exact cutoff. `work.failed` is not applicable, rather than zero,
-when no type declares either outcome.
+when no type declares either outcome. Failure states are terminal, so a
+failed task keeps counting until it is archived; the rule says so and is amber
+rather than a standing red alarm.
 
 Workflow-attempt and decision rules wait for list pages that can show them.
 
