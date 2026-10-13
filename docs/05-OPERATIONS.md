@@ -962,6 +962,111 @@ After resolving the cause, rerunning skips existing tables, indexes, triggers an
 columns. For the interrupted `0027_scoped_credentials.sql` trigger failure,
 rerunning with the fixed CLI completes the migration and records it.
 
+### Project bootstrap repair (#360)
+
+Upgrade the CLI and Worker together. `tila deploy` applies
+`0033_project_bootstrap_repair.sql` before uploading the Worker. With a separate
+deployment pipeline, apply pending global D1 migrations first using the manual
+application commands below. The repair is data-only and can resume after an
+interrupted CLI migration run.
+
+The migration assigns an ID to every `_tokens` row whose `token_id` is NULL. It
+preserves existing IDs, token hashes, scopes and revocation state, so consumers
+keep their existing credentials. Do not rerun `project create` merely to repair
+an existing token: that command replaces the active `init` token.
+
+Active legacy `_admin_grants` with no granting user are bootstrap seeds. The
+repair imports them as GitHub project owners only for existing, unarchived
+projects and valid positive numeric GitHub IDs. It handles the old seed's empty
+`subject_id` and records grants and audit events with `bootstrap:repair-360`.
+Legacy timestamps are converted from seconds to milliseconds. The old roster
+remains unchanged.
+
+Canonical access decisions take priority: any matching membership (including
+revoked rows), membership event or subject-revocation record prevents import.
+A malformed canonical GitHub identity anywhere in that project also prevents
+import. Non-bootstrap grants, other GitHub hosts, conflicting legacy subjects
+and archived projects require explicit review rather than automatic recovery.
+
+Verify the repair in global D1:
+
+```sql
+SELECT COUNT(*) AS missing_token_ids FROM _tokens WHERE token_id IS NULL;
+
+SELECT m.project_id, m.principal_id, m.role, m.granted_at,
+       e.event_id, e.occurred_at
+FROM _project_memberships AS m
+LEFT JOIN _membership_events AS e ON e.event_id = m.membership_id
+WHERE m.granted_by = 'bootstrap:repair-360';
+```
+
+`missing_token_ids` should be zero; every recovered owner should have an audit
+event with the same millisecond timestamp. `tila whoami --json` with an existing
+bootstrap token should report its nonempty `token_id` and `token:<id>` principal.
+`tila admin list --json` reads the canonical owner roster.
+
+List legacy bootstrap seeds that still lack an active canonical owner:
+
+```sql
+SELECT a.project_id, a.github_host, a.github_user_id, a.subject_id,
+       p.archived,
+       EXISTS (SELECT 1 FROM _project_memberships AS m
+         WHERE m.project_id = a.project_id
+           AND m.principal_id = 'github:github.com:' || CAST(a.github_user_id AS TEXT)
+       ) AS has_membership_history,
+       EXISTS (SELECT 1 FROM _membership_events AS e
+         WHERE e.project_id = a.project_id
+           AND e.principal_id = 'github:github.com:' || CAST(a.github_user_id AS TEXT)
+       ) AS has_event_history,
+       EXISTS (SELECT 1 FROM _revoked_subjects AS r
+         WHERE r.project_id = a.project_id AND r.identity_host = 'github.com'
+           AND r.subject_id = CAST(a.github_user_id AS TEXT)
+       ) AS has_subject_revocation
+FROM _admin_grants AS a
+LEFT JOIN _projects AS p ON p.project_id = a.project_id
+WHERE a.revoked_at IS NULL AND a.granted_by_user_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM _project_memberships AS m
+    WHERE m.project_id = a.project_id
+      AND m.principal_id = 'github:github.com:' || CAST(a.github_user_id AS TEXT)
+      AND m.role = 'owner' AND m.revoked_at IS NULL);
+
+SELECT project_id, membership_id, identity_host, subject_id, principal_id
+FROM _project_memberships
+WHERE provider = 'github' AND (
+  identity_host = '' OR identity_host <> lower(trim(identity_host))
+  OR CAST(subject_id AS INTEGER) <= 0
+  OR subject_id <> CAST(CAST(subject_id AS INTEGER) AS TEXT)
+  OR principal_id <> 'github:' || identity_host || ':' || subject_id
+);
+```
+
+Review outstanding seeds against the current membership roster and audit history.
+An old active admin row alone does not authorize reversing a later revoke or
+demotion. After explicitly deciding to restore an owner, use the existing
+project configuration and bootstrap credential:
+
+```fish
+set -x TILA_TOKEN 'your-existing-bootstrap-token'
+tila admin grant 12345
+tila admin list --json
+set -e TILA_TOKEN
+```
+
+Use the intended numeric GitHub ID, rather than a login snapshot. If the target
+already has a lower role, update that membership explicitly with
+`PATCH /projects/{projectId}/memberships/{membershipId}` and `{"role":"owner"}`;
+granting again does not promote it. Revoke an incorrectly formed membership
+through `DELETE /projects/{projectId}/memberships/{membershipId}` before granting
+the reviewed numeric identity. These operations preserve canonical audit history.
+
+New `project create --admin-github-user` calls require a reachable Worker and the
+correct `TILA_HASH_PEPPER` for a peppered deployment. A failed seed exits nonzero
+and reports partial failure; bring the Worker up or correct the credential
+configuration, then rerun project creation. Existing owner seeds are idempotent;
+existing lower roles remain unchanged and cause a failure requiring an explicit
+role update. This workflow grants a GitHub **project owner**; native instance
+administrator setup and legacy browser-session recovery are separate workflows.
+
 ### Manual application
 
 ```bash

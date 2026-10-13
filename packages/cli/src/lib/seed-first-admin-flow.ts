@@ -1,5 +1,6 @@
-import type { Cloudflare } from "./cloudflare-client";
-import { resolveGithubUserId, seedFirstAdmin } from "./cloudflare-resources";
+import { MembershipGrantResponseSchema } from "@tila/schemas";
+import type { TilaClient } from "tila-sdk";
+import { resolveGithubUserId } from "./cloudflare-resources";
 
 /**
  * Result from runFirstAdminSeed.
@@ -25,21 +26,19 @@ export interface SeedOutcomeDecision {
 
 /**
  * Resolve login-or-id to a numeric GitHub user id, then seed the first admin
- * row in D1 via seedFirstAdmin.
+ * owner membership through the Worker, including its canonical audit event.
  *
  * Returns { seeded: true, githubUserId, login? } on success, or
- * { seeded: false, error } on any failure (resolution or D1 write).
+ * { seeded: false, error } on any failure (resolution, API or persisted role).
  *
  * This is the testable seam so that create.ts stays thin.
  */
 export async function runFirstAdminSeed(opts: {
   flag: string;
-  client: Cloudflare;
-  accountId: string;
-  databaseId: string;
+  client: Pick<TilaClient, "post">;
   slug: string;
 }): Promise<FirstAdminSeedResult> {
-  const { flag, client, accountId, databaseId, slug } = opts;
+  const { flag, client, slug } = opts;
 
   // Determine if flag looks like a login (non-numeric)
   const isLogin = !/^\d+$/.test(flag);
@@ -55,14 +54,39 @@ export async function runFirstAdminSeed(opts: {
   }
 
   try {
-    await seedFirstAdmin({
-      client,
-      accountId,
-      databaseId,
-      slug,
-      githubUserId,
-      githubLoginSnapshot: isLogin ? flag : undefined,
-    });
+    const result = await client.post(
+      `/projects/${encodeURIComponent(slug)}/memberships`,
+      {
+        principal: {
+          provider: "github",
+          host: "github.com",
+          user_id: githubUserId,
+          ...(isLogin ? { login: flag } : {}),
+        },
+        subject_kind: "human",
+        role: "owner",
+      },
+      { schema: MembershipGrantResponseSchema, validate: true },
+    );
+    const membership = result.membership;
+    if (
+      membership.project_id !== slug ||
+      membership.principal_id !== `github:github.com:${githubUserId}` ||
+      membership.provider !== "github" ||
+      membership.identity_host !== "github.com" ||
+      membership.subject_id !== String(githubUserId) ||
+      membership.subject_kind !== "human" ||
+      membership.revoked_at !== null
+    ) {
+      throw new Error(
+        "Worker returned a membership that does not match the requested first admin",
+      );
+    }
+    if (membership.role !== "owner") {
+      throw new Error(
+        `GitHub user ${githubUserId} already has role '${membership.role}'. Explicitly update that membership to owner before retrying; project creation leaves the current role unchanged.`,
+      );
+    }
   } catch (err) {
     return {
       seeded: false,
