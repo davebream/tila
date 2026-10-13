@@ -274,8 +274,13 @@ export function RuntimePage() {
     refetchInterval: 5000,
   });
   const now = useServerNow(query.data, query.dataUpdatedAt);
+  // A filtered view is only empty when every run record was readable, and a
+  // later page is never "empty": it keeps its notices and paging controls.
+  const runsReadable = (data: RuntimeView) =>
+    data.sources.runs === "ok" && data.sources.enrollments === "ok";
   const state = deriveSectionState(query, {
-    isEmpty: (data) => data.rows.length === 0,
+    isEmpty: (data) =>
+      data.rows.length === 0 && !cursor && (!filter || runsReadable(data)),
   });
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -316,13 +321,16 @@ export function RuntimePage() {
             <SourceNotices sources={data.sources} />
             {filter && data.total !== undefined && data.scan && (
               <p className="font-mono text-[11px] text-fg-faint">
-                {data.scan.complete ? "" : "at least "}
+                {data.scan.complete && runsReadable(data) ? "" : "at least "}
                 {data.total.toLocaleString("en-US")}{" "}
                 {data.total === 1 ? "agent needs" : "agents need"} attention ·
                 scanned{" "}
                 {data.scan.complete
                   ? `all ${data.scan.agents} agents`
                   : `the first ${data.scan.agents} agents`}
+                {runsReadable(data)
+                  ? ""
+                  : " · run records unavailable, so occupants could not be confirmed"}
               </p>
             )}
             <div className="overflow-x-auto rounded-lg border border-border">

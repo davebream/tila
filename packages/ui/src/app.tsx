@@ -53,7 +53,6 @@ const RecordDetailPage = lazy(() =>
 );
 import {
   BrowserRouter,
-  Navigate,
   Outlet,
   Route,
   Routes,

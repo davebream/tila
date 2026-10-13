@@ -215,8 +215,10 @@ export const ATTENTION_RULES: readonly AttentionRule[] = [
       "task that failed or was abandoned",
       "tasks that failed or were abandoned",
     ],
-    rule: "These ended without success. Retry, follow up or close each one.",
-    severity: "red",
+    // A failure state is terminal, so only archiving clears the count; the
+    // rule says so, and stays amber rather than an urgent standing alarm.
+    rule: "These ended without success. Follow up on each one, then archive it to clear it from this check.",
+    severity: "amber",
     link: fixed("tasks", FAILED),
     observe: (data) =>
       data.scope?.outcome_types?.length === 0
