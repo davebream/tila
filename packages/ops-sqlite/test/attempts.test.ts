@@ -57,7 +57,7 @@ it("does not requeue a cancelled unaccepted reservation when it expires", () => 
   const { db } = fixture;
   const now = Date.now();
   const attempt = seedAttempt(db, "task", now);
-  requestCancellation(db, attempt.id, authority(attempt), origin, now);
+  requestCancellation(db, attempt.id, authority(attempt), origin, false, now);
   attempts.expire(db, now + 60_001);
   expect(attempts.get(db, attempt.id).outcome?.status).toBe("cancelled");
   expect(db.select().from(schema.queueEntries).get()?.state).toBe("finished");
