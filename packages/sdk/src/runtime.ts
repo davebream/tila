@@ -6,6 +6,7 @@ import {
   type RuntimeEnrollmentRequest,
   RuntimeEnrollmentsResponseSchema,
   RuntimeInvitationResponseSchema,
+  RuntimeInvitationsResponseSchema,
   RuntimeRunCredentialResponseSchema,
   type RuntimeRunRequest,
   RuntimeRunsResponseSchema,
@@ -145,6 +146,19 @@ export class RuntimeClient {
     return this.client.get(`${this.root}/enrollments`, {
       schema: RuntimeEnrollmentsResponseSchema,
     });
+  }
+  /** Owner listing of shared invitations; bearer values are never returned. */
+  invitations() {
+    return this.client.get(`${this.root}/invitations`, {
+      schema: RuntimeInvitationsResponseSchema,
+    });
+  }
+  /** Stops later redemption; enrolled installations are revoked separately. */
+  revokeInvitation(id: string) {
+    return this.client.post<{ ok: true; revoked: boolean }>(
+      `${this.root}/invitations/${encodeURIComponent(id)}/revoke`,
+      {},
+    );
   }
   revokeEnrollment(id: string) {
     return this.client.post(

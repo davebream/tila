@@ -41,7 +41,7 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (89)
+## Tools (93)
 
 The default catalog contains **nine workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
@@ -261,6 +261,18 @@ Conversation protocol 1 is independent of runtime protocol 1. SDK requests send
 Room settings writes name the revision you read. A stale revision fails with
 `revision-conflict` and the current revision instead of overwriting another change;
 reuse an `idempotency_key` only to retry the same request.
+
+### Access inspection (`TILA_MCP_TOOLS=access`)
+
+Read-only views for project owners. Memberships, repository policy, service
+identities and credentials change only through the dashboard, CLI or SDK.
+
+| Tool | Purpose |
+|------|---------|
+| `tila_access_members` | List canonical memberships and roles |
+| `tila_access_repos` | List linked repositories with access and OIDC policies and revisions |
+| `tila_access_service_accounts` | List service identities |
+| `tila_access_credentials` | List credential metadata; never secret values |
 
 ### Agent management (`TILA_MCP_TOOLS=agents`)
 

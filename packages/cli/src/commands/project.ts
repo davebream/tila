@@ -12,5 +12,7 @@ export default defineCommand({
     export: () => import("./project/export").then((m) => m.default),
     import: () => import("./project/import").then((m) => m.default),
     list: () => import("./project/list").then((m) => m.default),
+    settings: () => import("./project/settings").then((m) => m.default),
+    rename: () => import("./project/rename").then((m) => m.default),
   },
 });

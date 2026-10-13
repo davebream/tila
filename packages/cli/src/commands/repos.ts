@@ -1,7 +1,13 @@
 import { RepoRegisterResponseSchema } from "@tila/schemas";
+import {
+  RepoAccessPolicyRequestSchema,
+  RepoOidcPolicySchema,
+} from "@tila/schemas";
 import { defineCommand } from "citty";
-import { TILA_ERRORS, TilaApiError } from "tila-sdk";
+import { TILA_ERRORS, TilaApiError, createRepoMethods } from "tila-sdk";
 import { requireClient, resolveContext } from "../context";
+import { integerFlag } from "../lib/expected-revision";
+import { globalFlagArgs } from "../lib/global-flags";
 import {
   diagnostic,
   exit,
@@ -10,6 +16,117 @@ import {
   printJson,
   printJsonError,
 } from "../lib/output";
+
+async function repoApi() {
+  return createRepoMethods(requireClient(await resolveContext()));
+}
+const repoArg = {
+  ...globalFlagArgs,
+  repo: {
+    type: "positional" as const,
+    required: true as const,
+    description: "Numeric GitHub repository ID (from repos list)",
+  },
+  host: {
+    type: "string" as const,
+    description: "GitHub host (default github.com)",
+  },
+};
+const revisionArg = {
+  "expected-revision": {
+    type: "string" as const,
+    description: "Policy revision you reviewed; stale values fail",
+  },
+};
+function repoId(value: string) {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id < 1)
+    throw new Error("Repository ID must be a positive integer");
+  return id;
+}
+
+/** Owner policy commands; all writes accept the reviewed revision. */
+function repoPolicyCommands() {
+  return {
+    list: defineCommand({
+      meta: { description: "List linked repositories with both policies" },
+      args: { ...globalFlagArgs, host: { type: "string" } },
+      async run({ args }) {
+        printJson(await (await repoApi()).list({ host: args.host }));
+      },
+    }),
+    policy: defineCommand({
+      meta: {
+        description:
+          "Show the human access policy, or replace it with --set '<json>'",
+      },
+      args: { ...repoArg, ...revisionArg, set: { type: "string" } },
+      async run({ args }) {
+        const api = await repoApi();
+        const id = repoId(args.repo);
+        printJson(
+          args.set
+            ? await api.setAccessPolicy(
+                id,
+                RepoAccessPolicyRequestSchema.parse(JSON.parse(args.set)),
+                {
+                  host: args.host,
+                  expectedRevision: integerFlag(
+                    "expected-revision",
+                    args["expected-revision"],
+                  ),
+                },
+              )
+            : await api.accessPolicy(id, { host: args.host }),
+        );
+      },
+    }),
+    oidc: defineCommand({
+      meta: {
+        description:
+          "Show the Actions OIDC policy, or replace it with --set '<json>'",
+      },
+      args: { ...repoArg, ...revisionArg, set: { type: "string" } },
+      async run({ args }) {
+        const api = await repoApi();
+        const id = repoId(args.repo);
+        printJson(
+          args.set
+            ? await api.setOidcPolicy(
+                id,
+                RepoOidcPolicySchema.parse(JSON.parse(args.set)),
+                {
+                  host: args.host,
+                  expectedRevision: integerFlag(
+                    "expected-revision",
+                    args["expected-revision"],
+                  ),
+                },
+              )
+            : await api.oidcPolicy(id, { host: args.host }),
+        );
+      },
+    }),
+    remove: defineCommand({
+      meta: {
+        description:
+          "Remove a repository link; explicit memberships are not removed",
+      },
+      args: { ...repoArg, ...revisionArg },
+      async run({ args }) {
+        printJson(
+          await (await repoApi()).remove(repoId(args.repo), {
+            host: args.host,
+            expectedRevision: integerFlag(
+              "expected-revision",
+              args["expected-revision"],
+            ),
+          }),
+        );
+      },
+    }),
+  };
+}
 
 export default defineCommand({
   meta: { name: "repos", description: "Manage the GitHub repo allowlist" },
@@ -181,5 +298,6 @@ export default defineCommand({
         }
       },
     }),
+    ...repoPolicyCommands(),
   },
 });

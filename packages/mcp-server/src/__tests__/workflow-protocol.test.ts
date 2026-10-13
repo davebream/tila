@@ -157,7 +157,7 @@ it("lists exactly nine default tools, validates real calls, and preserves the ex
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(83);
+  expect((await all.listTools()).tools).toHaveLength(87);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -535,7 +535,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(85);
+  expect(listed).toHaveLength(89);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -797,6 +797,20 @@ title = "Evidence"
     expect(response.isError).toBe(true);
     expect(response.structuredContent).toMatchObject({
       error: { code: "unsupported-capability", retry_safety: "after_recovery" },
+    });
+  }
+  // Access administration lives in the shared Cloudflare authority only.
+  for (const [name, args] of Object.entries({
+    tila_access_members: {},
+    tila_access_repos: {},
+    tila_access_service_accounts: {},
+    tila_access_credentials: {},
+  })) {
+    called.add(name);
+    const response = await client.callTool({ name, arguments: args });
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toMatchObject({
+      error: { code: "unsupported-backend" },
     });
   }
   expect([...called].sort()).toEqual(listed.map((t) => t.name).sort());

@@ -1293,6 +1293,41 @@ function createLocalServiceAccountMethods() {
   };
 }
 
+/** Access administration lives in the shared Cloudflare authority only. */
+function localAccessOnly(resource: string) {
+  return (method: string) => async (): Promise<never> => {
+    throw new LocalUnsupportedError(`${resource}.${method}`);
+  };
+}
+function createLocalAccessMethods() {
+  const memberships = localAccessOnly("memberships");
+  const repos = localAccessOnly("repos");
+  const project = localAccessOnly("project");
+  return {
+    memberships: {
+      list: memberships("list"),
+      grant: memberships("grant"),
+      updateRole: memberships("updateRole"),
+      revoke: memberships("revoke"),
+      policy: memberships("policy"),
+      setPolicy: memberships("setPolicy"),
+      events: memberships("events"),
+    },
+    repos: {
+      list: repos("list"),
+      accessPolicy: repos("accessPolicy"),
+      setAccessPolicy: repos("setAccessPolicy"),
+      oidcPolicy: repos("oidcPolicy"),
+      setOidcPolicy: repos("setOidcPolicy"),
+      remove: repos("remove"),
+    },
+    project: {
+      settings: project("settings"),
+      rename: project("rename"),
+    },
+  };
+}
+
 export function buildLocalResources(
   project: EmbeddedProject,
   artifacts: EmbeddedArtifactBackend,
@@ -1340,6 +1375,7 @@ export function buildLocalResources(
     templates: createLocalTemplateMethods(project),
     tokens: createLocalTokenMethods(),
     serviceAccounts: createLocalServiceAccountMethods(),
+    ...createLocalAccessMethods(),
     indexes: createLocalIndexMethods(),
   };
 }
@@ -1393,6 +1429,9 @@ const _assertLocalSurfaceMatchesFacade: _SurfaceMatch<
   templates: true,
   tokens: true,
   serviceAccounts: true,
+  memberships: true,
+  repos: true,
+  project: true,
   indexes: true,
 };
 void _assertLocalSurfaceMatchesFacade;

@@ -96,6 +96,40 @@ export default defineCommand({
         printJson({ ok: true, enrollment });
       },
     }),
+    invitations: defineCommand({
+      meta: {
+        description: "List shared invitations (owner); secrets are never shown",
+      },
+      args: { ...globalFlagArgs },
+      async run() {
+        printJson(
+          await (
+            await runtimeOperatorClient(await runtimeSelection())
+          ).invitations(),
+        );
+      },
+    }),
+    "revoke-invitation": defineCommand({
+      meta: {
+        description:
+          "Stop later redemption; installations already enrolled stay until revoked",
+      },
+      args: {
+        ...globalFlagArgs,
+        id: {
+          type: "positional",
+          required: true,
+          description: "Invitation ID (from machine invitations)",
+        },
+      },
+      async run({ args }) {
+        printJson(
+          await (
+            await runtimeOperatorClient(await runtimeSelection())
+          ).revokeInvitation(args.id),
+        );
+      },
+    }),
     revoke: defineCommand({
       args: { ...globalFlagArgs, ...idArg },
       async run({ args }) {

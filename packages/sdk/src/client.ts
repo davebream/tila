@@ -28,6 +28,11 @@ import {
   TokenProviderError,
 } from "./token-provider";
 export { TilaApiError, isTilaApiError } from "./errors";
+import {
+  createMembershipMethods,
+  createProjectMethods,
+  createRepoMethods,
+} from "./access";
 import { createAgentMethods } from "./agents";
 import {
   createConversationMethods,
@@ -519,6 +524,12 @@ export interface TilaFacade {
   templates: ReturnType<typeof createTemplateMethods>;
   tokens: ReturnType<typeof createTokenMethods>;
   serviceAccounts: ReturnType<typeof createServiceAccountMethods>;
+  /** Canonical memberships (owner). Cloudflare backend only. */
+  memberships: ReturnType<typeof createMembershipMethods>;
+  /** Repository links and their access/OIDC policies (owner). */
+  repos: ReturnType<typeof createRepoMethods>;
+  /** Project display metadata. */
+  project: ReturnType<typeof createProjectMethods>;
   /** Index artifact operations (create, addEntry, listEntries). */
   indexes: ReturnType<typeof createIndexMethods>;
   /**
@@ -554,6 +565,9 @@ function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
     templates: createTemplateMethods(client, projectId),
     tokens: createTokenMethods(client),
     serviceAccounts: createServiceAccountMethods(client, projectId),
+    memberships: createMembershipMethods(client, projectId),
+    repos: createRepoMethods(client),
+    project: createProjectMethods(client, projectId),
     indexes: createIndexMethods(client, projectId),
     close: () => {},
   };
