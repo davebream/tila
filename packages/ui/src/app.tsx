@@ -3,9 +3,12 @@ import {
   StepUpResume,
 } from "@/components/admin/step-up-resume";
 import { Layout } from "@/components/layout";
-import { EntityAlias, LegacyRedirect } from "@/components/legacy-redirect";
+import {
+  EntityAlias,
+  LegacyRedirect,
+  ProjectHome,
+} from "@/components/legacy-redirect";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
-import { defaultProjectPath } from "@/lib/navigation";
 import { AccountPage } from "@/pages/account";
 import {
   DevicePage,
@@ -98,10 +101,7 @@ function RecordsWithDrawer() {
 function ProjectRoutes({ projectId }: { projectId: string }) {
   return (
     <Route element={<Layout />}>
-      <Route
-        index
-        element={<Navigate to={defaultProjectPath(projectId)} replace />}
-      />
+      <Route index element={<ProjectHome projectId={projectId} />} />
       <Route path="tasks" element={<TasksWithDrawer />}>
         <Route path=":id" element={<TaskDetailPage />} />
       </Route>
@@ -134,10 +134,7 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />
       </Route>
-      <Route
-        path="*"
-        element={<Navigate to={defaultProjectPath(projectId)} replace />}
-      />
+      <Route path="*" element={<ProjectHome projectId={projectId} />} />
     </Route>
   );
 }

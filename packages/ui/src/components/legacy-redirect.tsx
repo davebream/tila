@@ -1,6 +1,6 @@
 import { DefaultRedirect } from "@/components/admin/step-up-resume";
-import { PROJECT_SEGMENTS } from "@/lib/navigation";
-import { Navigate, useLocation } from "react-router";
+import { PROJECT_SEGMENTS, defaultProjectPath } from "@/lib/navigation";
+import { Navigate, useLocation, useParams } from "react-router";
 
 /**
  * Flat URLs from before project-scoped routes (`/tasks/:id`, `/rooms/:id`,
@@ -24,11 +24,19 @@ export function LegacyRedirect({ projectId }: { projectId: string }) {
   );
 }
 
-/** `/p/:projectId/entities[/:id]` is the pre-rename name for tasks. */
+/**
+ * `/p/:projectId/entities[/:id]` is the pre-rename name for tasks. The project
+ * in the URL is kept, so a shared link never silently moves to another one.
+ */
 export function EntityAlias({ projectId }: { projectId: string }) {
   const { pathname, search, hash } = useLocation();
+  const project = useParams().projectId ?? projectId;
   const tail = pathname.replace(/^.*?\/entities(?=\/|$)/, "");
-  return (
-    <Navigate to={`/p/${projectId}/tasks${tail}${search}${hash}`} replace />
-  );
+  return <Navigate to={`/p/${project}/tasks${tail}${search}${hash}`} replace />;
+}
+
+/** The project's default page, for the project in the URL. */
+export function ProjectHome({ projectId }: { projectId: string }) {
+  const project = useParams().projectId ?? projectId;
+  return <Navigate to={defaultProjectPath(project)} replace />;
 }

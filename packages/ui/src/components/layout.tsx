@@ -375,7 +375,7 @@ export function Layout() {
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
@@ -425,7 +425,8 @@ export function Layout() {
                 to={`${prefix}/${section.items[0].segment}`}
                 aria-current={
                   active
-                    ? section.items.length === 1
+                    ? section.items.length === 1 &&
+                      current?.item.id === section.items[0].id
                       ? "page"
                       : "true"
                     : undefined
