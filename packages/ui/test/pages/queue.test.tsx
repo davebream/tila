@@ -62,6 +62,8 @@ function entries(count: number): QueueInspection["entries"] {
       available_at: 0,
       created_at: 0,
       updated_at: 0,
+      enrolled_by_principal: null,
+      enrolled_by_participant: null,
     },
     task: {
       id: `task-${index}`,

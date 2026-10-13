@@ -1,5 +1,6 @@
 import { queueBackupOps } from "@tila/ops-sqlite";
 import {
+  LATEST_PROJECT_MIGRATION,
   type ProjectBackupTable,
   agentBindingOps,
   projectTransferOps,
@@ -113,7 +114,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     return c.json({
       digest,
       journal,
-      migrationVersion: 36,
+      migrationVersion: LATEST_PROJECT_MIGRATION,
       tables: projectTransferOps.PROJECT_BACKUP_TABLES,
     });
   });

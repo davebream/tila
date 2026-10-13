@@ -34,6 +34,8 @@ import { getEntry, occupancy, policy } from "./queue-ops";
 import { evaluateReadiness, readReadinessSnapshot } from "./ready-ops";
 import * as schema from "./schema";
 
+type Authorize = (tx: ProjectTransaction, attempt: WorkAttempt) => void;
+/** `authorize` runs before receipt lookup, so a replay is rejected once authority is gone. */
 function execute(
   db: ProjectDatabase,
   id: string,
@@ -42,12 +44,12 @@ function execute(
   origin: RequestOrigin,
   run: (tx: ProjectTransaction, attempt: WorkAttempt) => void,
   now: number,
-  owner = false,
+  authorize: Authorize,
 ): AttemptView {
   attempts.expire(db, now);
   return db.transaction((tx) => {
     const attempt = attempts.get(tx, id);
-    if (owner) attempts.assertOwner(attempt, origin);
+    authorize(tx, attempt);
     command(
       tx,
       `${operation}:${id}`,
@@ -76,6 +78,39 @@ function requireState(
       `Operation is unavailable while ${attempt.state}`,
     );
 }
+/**
+ * Control requests come from the current execution owner, the principal that
+ * enrolled the work, or a maintainer. A former owner has none of these roles,
+ * so it cannot steer a replacement attempt.
+ */
+export function assertControl(
+  tx: ProjectTransaction,
+  attempt: WorkAttempt,
+  origin: RequestOrigin,
+  canManage: boolean,
+): void {
+  if (canManage) return;
+  if (
+    attempt.principal_id === origin.principalId &&
+    attempt.participant_id === origin.participantId
+  )
+    return;
+  const assigner = getEntry(tx, attempt.entry_id).enrolled_by_principal;
+  if (assigner !== null && assigner === origin.principalId) return;
+  throw new QueueError(
+    "queue-authority-lost",
+    "Only the attempt owner, the principal that enrolled the work, or a maintainer can request this",
+  );
+}
+const control =
+  (origin: RequestOrigin, canManage: boolean): Authorize =>
+  (tx, attempt) =>
+    assertControl(tx, attempt, origin, canManage);
+const ownerOnly =
+  (origin: RequestOrigin): Authorize =>
+  (_tx, attempt) =>
+    attempts.assertOwner(attempt, origin);
+const anyone: Authorize = () => {};
 function requireMaintainer(canManage: boolean): void {
   if (!canManage)
     throw new QueueError(
@@ -98,6 +133,7 @@ export function requestCancellation(
   id: string,
   raw: QueueRevisionCommand,
   origin: RequestOrigin,
+  canManage = false,
   now = Date.now(),
 ): AttemptView {
   const input = QueueRevisionCommandSchema.parse(raw);
@@ -127,6 +163,7 @@ export function requestCancellation(
       );
     },
     now,
+    control(origin, canManage),
   );
 }
 export function requestSuspension(
@@ -134,6 +171,7 @@ export function requestSuspension(
   id: string,
   raw: QueueRevisionCommand,
   origin: RequestOrigin,
+  canManage = false,
   now = Date.now(),
 ): AttemptView {
   const input = QueueRevisionCommandSchema.parse(raw);
@@ -156,6 +194,7 @@ export function requestSuspension(
       );
     },
     now,
+    control(origin, canManage),
   );
 }
 export function confirmSuspension(
@@ -210,7 +249,7 @@ export function confirmSuspension(
       );
     },
     now,
-    true,
+    ownerOnly(origin),
   );
 }
 export function requestResume(
@@ -218,6 +257,7 @@ export function requestResume(
   id: string,
   raw: QueueRevisionCommand,
   origin: RequestOrigin,
+  canManage = false,
   now = Date.now(),
 ): AttemptView {
   const input = QueueRevisionCommandSchema.parse(raw);
@@ -242,6 +282,7 @@ export function requestResume(
       );
     },
     now,
+    control(origin, canManage),
   );
 }
 export function claimResume(
@@ -342,7 +383,6 @@ export function reconcile(
   now = Date.now(),
 ): AttemptView {
   const input = AttemptReconcileCommandSchema.parse(raw);
-  if (!canManage) attempts.assertOwner(attempts.get(db, id), origin);
   return execute(
     db,
     id,
@@ -427,7 +467,7 @@ export function reconcile(
             "queue-conflict",
             "Reconnection must identify the same recorded execution",
           );
-        const rebound = attempts.refence(tx, attempt, owner, now);
+        const rebound = attempts.refence(tx, attempt, owner, now, origin);
         attempts.change(tx, rebound, { session: input.session }, now);
         event(
           tx,
@@ -454,8 +494,28 @@ export function reconcile(
           "queue-invalid-state",
           "Stopped reconciliation requires an explicit stopped outcome",
         );
-      const stopped = attempts.refence(tx, attempt, owner, now);
-      attempts.finishInTransaction(tx, stopped, input.outcome, owner, now);
+      // Same rule as finish: an unaccepted reservation never ran, so only a
+      // requested cancellation can be recorded for it.
+      if (
+        attempt.accepted_at === null &&
+        !(
+          attempt.cancellation_requested && input.outcome.status === "cancelled"
+        )
+      )
+        throw new QueueError(
+          "queue-invalid-state",
+          "Unaccepted execution cannot report a result",
+        );
+      const stopped = attempts.refence(tx, attempt, owner, now, origin);
+      attempts.finishInTransaction(
+        tx,
+        stopped,
+        input.outcome,
+        owner,
+        now,
+        true,
+        origin,
+      );
       event(
         tx,
         "attempt.rebound",
@@ -471,6 +531,7 @@ export function reconcile(
       );
     },
     now,
+    canManage ? anyone : ownerOnly(origin),
   );
 }
 export function rebind(
@@ -508,6 +569,7 @@ export function rebind(
           participantId: input.participant_id,
         },
         now,
+        origin,
       );
       event(
         tx,
@@ -527,6 +589,7 @@ export function rebind(
       );
     },
     now,
+    anyone,
   );
 }
 export function retry(
@@ -534,6 +597,7 @@ export function retry(
   id: string,
   raw: AttemptRetryCommand,
   origin: RequestOrigin,
+  canManage = false,
   now = Date.now(),
 ): AttemptView {
   const input = AttemptRetryCommandSchema.parse(raw);
@@ -598,6 +662,7 @@ export function retry(
       );
     },
     now,
+    control(origin, canManage),
   );
 }
 export function forceRecovery(
@@ -626,7 +691,7 @@ export function forceRecovery(
         "uncertain",
       ]);
       const owner = ownedOrigin(attempt, origin);
-      const abandoned = attempts.refence(tx, attempt, owner, now);
+      const abandoned = attempts.refence(tx, attempt, owner, now, origin);
       attempts.finishInTransaction(
         tx,
         abandoned,
@@ -640,6 +705,7 @@ export function forceRecovery(
         owner,
         now,
         false,
+        origin,
       );
       // Maintainer explicitly accepts the risk of unresolved external execution.
       // Keep WIP for the replacement and retain abandonment evidence permanently.
@@ -653,5 +719,6 @@ export function forceRecovery(
       );
     },
     now,
+    anyone,
   );
 }

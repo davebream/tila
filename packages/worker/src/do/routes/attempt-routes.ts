@@ -114,6 +114,7 @@ export function createAttemptRoutes(deps: RouterDeps) {
             id,
             QueueRevisionCommandSchema.parse(body),
             origin,
+            manage,
           );
         case "request-suspension":
           return attemptRecoveryOps.requestSuspension(
@@ -121,6 +122,7 @@ export function createAttemptRoutes(deps: RouterDeps) {
             id,
             QueueRevisionCommandSchema.parse(body),
             origin,
+            manage,
           );
         case "confirm-suspension":
           return attemptRecoveryOps.confirmSuspension(
@@ -135,6 +137,7 @@ export function createAttemptRoutes(deps: RouterDeps) {
             id,
             QueueRevisionCommandSchema.parse(body),
             origin,
+            manage,
           );
         case "claim-resume":
           return attemptRecoveryOps.claimResume(
@@ -165,6 +168,7 @@ export function createAttemptRoutes(deps: RouterDeps) {
             id,
             AttemptRetryCommandSchema.parse(body),
             origin,
+            manage,
           );
         case "force-recovery":
           return attemptRecoveryOps.forceRecovery(

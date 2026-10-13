@@ -478,3 +478,64 @@ it("filters entries whose starting or running attempt is past its lease", () => 
   ).toBe(0);
   expect(queue.inspect(db, {}, undefined, lapsed).total).toBe(ids.length);
 });
+
+it("records the assigner and keeps ambiguous enrollment retries to one logical assignment", () => {
+  const { db } = fixture;
+  task("assigned");
+  const orchestrator = { ...origin, principalId: "orchestrator" };
+  const command = { ...key(), task_id: "assigned", target_principal: "worker" };
+  const entry = queue.enroll(db, command, orchestrator);
+  expect(entry).toMatchObject({
+    enrolled_by_principal: "orchestrator",
+    enrolled_by_participant: origin.participantId,
+    target_principal: "worker",
+  });
+  // Exact replay returns the same assignment.
+  expect(queue.enroll(db, command, orchestrator)).toEqual(entry);
+  // A retry under a new key after an ambiguous failure names the existing entry.
+  expect(() =>
+    queue.enroll(db, { ...command, ...key() }, orchestrator),
+  ).toThrow(`Task already has unfinished enrollment ${entry.id}`);
+  expect(
+    db
+      .select()
+      .from(schema.queueEntries)
+      .where(eq(schema.queueEntries.task_id, "assigned"))
+      .all(),
+  ).toHaveLength(1);
+});
+
+it("lets only the assigner or a maintainer edit or withdraw recorded enrollments", () => {
+  const { db } = fixture;
+  task("owned");
+  const orchestrator = { ...origin, principalId: "orchestrator" };
+  const stranger = { ...origin, principalId: "stranger" };
+  let entry = queue.enroll(db, { ...key(), task_id: "owned" }, orchestrator);
+  const edit = () => ({
+    ...key(),
+    expected_revision: entry.revision,
+    priority: 7,
+  });
+  expect(() => queue.edit(db, entry.id, edit(), stranger)).toThrow(
+    "enrolled this work",
+  );
+  expect(() =>
+    queue.withdraw(
+      db,
+      entry.id,
+      { ...key(), expected_revision: entry.revision },
+      stranger,
+    ),
+  ).toThrow("enrolled this work");
+  entry = queue.edit(db, entry.id, edit(), orchestrator);
+  expect(entry.priority).toBe(7);
+  entry = queue.edit(db, entry.id, edit(), stranger, true);
+  expect(
+    queue.withdraw(
+      db,
+      entry.id,
+      { ...key(), expected_revision: entry.revision },
+      orchestrator,
+    ).state,
+  ).toBe("withdrawn");
+});

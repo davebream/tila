@@ -174,10 +174,12 @@ export function enroll(
             "queue-precondition",
             "Managed work requires explicit lifecycle metadata",
           );
-        if (unfinishedEntry(tx, task.id))
+        const existing = unfinishedEntry(tx, task.id);
+        if (existing)
           throw new QueueError(
             "queue-conflict",
-            "Task already has an unfinished enrollment",
+            `Task already has unfinished enrollment ${existing.id}`,
+            { entry_id: existing.id },
           );
         const claim = tx
           .select()
@@ -212,6 +214,8 @@ export function enroll(
             available_at: now,
             created_at: now,
             updated_at: now,
+            enrolled_by_principal: origin.principalId,
+            enrolled_by_participant: origin.participantId,
           })
           .run();
         event(tx, "queue.enrolled", `${task.type}:${task.id}`, origin, {
@@ -225,15 +229,37 @@ export function enroll(
     return getEntry(tx, result.entry_id);
   });
 }
+/**
+ * Enrollment changes belong to the assigner or a maintainer. Entries recorded
+ * before the assigner was captured keep their original task-writer behavior.
+ */
+export function assertEntryControl(
+  entry: QueueEntry,
+  origin: RequestOrigin,
+  canManage: boolean,
+): void {
+  if (
+    canManage ||
+    entry.enrolled_by_principal === null ||
+    entry.enrolled_by_principal === origin.principalId
+  )
+    return;
+  throw new QueueError(
+    "queue-authority-lost",
+    "Only the principal that enrolled this work or a maintainer can change it",
+  );
+}
 export function edit(
   db: ProjectDatabase,
   id: string,
   raw: QueueEditCommand,
   origin: RequestOrigin,
+  canManage = false,
   now = Date.now(),
 ): QueueEntry {
   const input = QueueEditCommandSchema.parse(raw);
   return db.transaction((tx) => {
+    assertEntryControl(getEntry(tx, id), origin, canManage);
     command(
       tx,
       `entry-edit:${id}`,
@@ -273,11 +299,13 @@ export function withdraw(
   id: string,
   raw: QueueRevisionCommand,
   origin: RequestOrigin,
+  canManage = false,
   now = Date.now(),
 ): QueueEntry {
   const input = QueueRevisionCommandSchema.parse(raw);
   attempts.expire(db, now);
   return db.transaction((tx) => {
+    assertEntryControl(getEntry(tx, id), origin, canManage);
     command(
       tx,
       `withdraw:${id}`,

@@ -1,5 +1,5 @@
 import { SELF } from "cloudflare:test";
-import { projectTransferOps } from "@tila/ops-sqlite";
+import { LATEST_PROJECT_MIGRATION, projectTransferOps } from "@tila/ops-sqlite";
 import {
   RUNTIME_RUN_CEILING,
   type RuntimeCredentialResponse,
@@ -129,7 +129,7 @@ it("restores real DO snapshots without resurrecting bindings or rewinding epochs
     journal: { nextSequence: number };
     tables: string[];
   }>();
-  expect(meta.migrationVersion).toBe(36);
+  expect(meta.migrationVersion).toBe(LATEST_PROJECT_MIGRATION);
   const snapshot = new Map<string, Record<string, unknown>[]>();
   for (const table of meta.tables) {
     const { rows } = await (

@@ -82,6 +82,8 @@ const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
     "enqueue_order",
     "revision",
     "retry_policy",
+    "enrolled_by_principal",
+    "enrolled_by_participant",
   ],
   work_attempts: [
     "id",

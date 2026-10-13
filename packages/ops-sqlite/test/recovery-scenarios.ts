@@ -30,9 +30,13 @@ const revision = (a: WorkAttempt) => ({
   idempotency_key: crypto.randomUUID(),
   expected_revision: a.revision,
 });
-function setup(db: ProjectDatabase, retrySafe = false) {
+function setup(
+  db: ProjectDatabase,
+  retrySafe = false,
+  assigner: string | null = null,
+) {
   const now = Date.now();
-  let attempt = seedAttempt(db, "task", now);
+  let attempt = seedAttempt(db, "task", now, assigner);
   queue.configure(
     db,
     {
@@ -73,6 +77,7 @@ function suspend(db: ProjectDatabase, attempt: WorkAttempt, now: number) {
     attempt.id,
     revision(attempt),
     origin,
+    false,
     now,
   ).attempt;
   return recovery.confirmSuspension(
@@ -100,6 +105,7 @@ export const recoveryScenarios: {
         attempt.id,
         revision(attempt),
         origin,
+        false,
         now,
       ).attempt;
       assert.deepEqual(queue.occupancy(db), { execution: 1, wip: 1 });
@@ -138,6 +144,7 @@ export const recoveryScenarios: {
         current.id,
         revision(current),
         origin,
+        false,
         now,
       ).attempt;
       queue.configure(
@@ -197,6 +204,7 @@ export const recoveryScenarios: {
         current.id,
         revision(current),
         origin,
+        false,
         now,
       ).attempt;
       const entry = queue.getEntry(db, attempt.entry_id);
@@ -209,6 +217,7 @@ export const recoveryScenarios: {
           required_capabilities: ["coding"],
         },
         origin,
+        false,
         now,
       );
       const denied = recovery.claimResume(
@@ -263,6 +272,7 @@ export const recoveryScenarios: {
         attempt.id,
         revision(attempt),
         { ...origin, principalId: "operator" },
+        true,
         now,
       ).attempt;
       assert.equal(cancelled.cancellation_requested, true);
@@ -299,6 +309,7 @@ export const recoveryScenarios: {
         current.id,
         revision(current),
         origin,
+        false,
         now,
       ).attempt;
       const result = attempts.finish(
@@ -349,6 +360,7 @@ export const recoveryScenarios: {
           current.id,
           { ...revision(current), reason: "retry-safe" },
           origin,
+          false,
           now + 60_001,
         ),
       );
@@ -523,6 +535,7 @@ export const recoveryScenarios: {
         result.id,
         { ...revision(result), reason: "verified safe manually" },
         origin,
+        false,
         now,
       );
       const replacement = queue.claimNext(
@@ -634,6 +647,7 @@ recoveryScenarios.push(
         current.id,
         revision(current),
         origin,
+        false,
         now,
       ).attempt;
       const firstCommand = revision(current);
@@ -657,6 +671,7 @@ recoveryScenarios.push(
         current.id,
         revision(current),
         origin,
+        false,
         now,
       ).attempt;
       const second = recovery.claimResume(
@@ -688,6 +703,7 @@ recoveryScenarios.push(
         reserved.id,
         revision(reserved),
         origin,
+        false,
         now,
       ).attempt;
       assert.throws(() =>
@@ -789,6 +805,263 @@ recoveryScenarios.push(
           origin,
         ),
       );
+    },
+  },
+  {
+    name: "control requests come from the owner, the assigner or a maintainer",
+    run(db) {
+      const { now, attempt } = setup(db, false, "orchestrator");
+      const stranger = {
+        ...origin,
+        principalId: "stranger",
+        participantId: "stranger-process",
+      };
+      const assigner = {
+        ...origin,
+        principalId: "orchestrator",
+        participantId: "orchestrator-process",
+      };
+      for (const request of [
+        recovery.requestCancellation,
+        recovery.requestSuspension,
+      ])
+        assert.throws(
+          () =>
+            request(db, attempt.id, revision(attempt), stranger, false, now),
+          /attempt owner/,
+        );
+      let current = recovery.requestSuspension(
+        db,
+        attempt.id,
+        revision(attempt),
+        assigner,
+        false,
+        now,
+      ).attempt;
+      assert.equal(current.suspension_requested, true);
+      // A maintainer replaces the execution participant; the former one loses control.
+      current = recovery.rebind(
+        db,
+        current.id,
+        {
+          ...revision(current),
+          reason: "worker replaced",
+          principal_id: origin.principalId,
+          participant_id: "replacement",
+          session,
+        },
+        origin,
+        true,
+        now,
+      ).attempt;
+      assert.throws(
+        () =>
+          recovery.requestCancellation(
+            db,
+            current.id,
+            revision(current),
+            origin,
+            false,
+            now,
+          ),
+        /attempt owner/,
+      );
+      const command = revision(current);
+      current = recovery.requestCancellation(
+        db,
+        current.id,
+        command,
+        assigner,
+        false,
+        now,
+      ).attempt;
+      assert.equal(current.cancellation_requested, true);
+      const requested = db
+        .select()
+        .from(schema.journal)
+        .where(eq(schema.journal.kind, "attempt.cancellation_requested"))
+        .all();
+      assert.deepEqual(
+        requested.map((row) => row.principal_id),
+        ["orchestrator"],
+      );
+      assert.equal(
+        attempts.view(db, current.id, assigner, now).assigner_principal_id,
+        "orchestrator",
+      );
+    },
+  },
+  {
+    name: "enrollments without a recorded assigner allow only owner or maintainer control",
+    run(db) {
+      const { now, attempt } = setup(db);
+      const stranger = { ...origin, principalId: "stranger" };
+      assert.throws(() =>
+        recovery.requestSuspension(
+          db,
+          attempt.id,
+          revision(attempt),
+          stranger,
+          false,
+          now,
+        ),
+      );
+      const owned = recovery.requestSuspension(
+        db,
+        attempt.id,
+        revision(attempt),
+        origin,
+        false,
+        now,
+      ).attempt;
+      const managed = recovery.requestCancellation(
+        db,
+        owned.id,
+        revision(owned),
+        stranger,
+        true,
+        now,
+      ).attempt;
+      assert.equal(managed.cancellation_requested, true);
+    },
+  },
+  {
+    name: "explicit retry and receipt replay require current control",
+    run(db) {
+      const { now, attempt } = setup(db, false, "orchestrator");
+      const finished = attempts.finish(
+        db,
+        attempt.id,
+        { ...authority(attempt), outcome },
+        origin,
+        now,
+      ).attempt;
+      const stranger = { ...origin, principalId: "stranger" };
+      const input = { ...revision(finished), reason: "transient failure" };
+      assert.throws(
+        () => recovery.retry(db, finished.id, input, stranger, false, now),
+        /attempt owner/,
+      );
+      const assigner = { ...origin, principalId: "orchestrator" };
+      recovery.retry(db, finished.id, input, assigner, false, now);
+      assert.equal(queue.getEntry(db, attempt.entry_id).state, "queued");
+      db.update(schema.queueEntries)
+        .set({ enrolled_by_principal: "someone-else" })
+        .run();
+      assert.throws(
+        () => recovery.retry(db, finished.id, input, assigner, false, now),
+        /attempt owner/,
+      );
+    },
+  },
+  {
+    name: "finishing suspended work requires the latest recorded fence",
+    run(db) {
+      const { now, attempt } = setup(db);
+      let current = suspend(db, attempt, now);
+      current = recovery.requestResume(
+        db,
+        current.id,
+        revision(current),
+        origin,
+        false,
+        now,
+      ).attempt;
+      current = recovery.claimResume(
+        db,
+        current.id,
+        revision(current),
+        origin,
+        now,
+      ).attempt;
+      current = attempts.started(
+        db,
+        current.id,
+        { ...authority(current), session },
+        origin,
+        now,
+      ).attempt;
+      current = suspend(db, current, now);
+      assert.ok(current.fence > attempt.fence);
+      assert.throws(
+        () =>
+          attempts.finish(
+            db,
+            current.id,
+            {
+              ...authority(current),
+              fence: attempt.fence,
+              outcome: { ...outcome, status: "success" },
+            },
+            origin,
+            now,
+          ),
+        /another execution authority/,
+      );
+      assert.deepEqual(attempts.get(db, current.id), current);
+      const result = attempts.finish(
+        db,
+        current.id,
+        { ...authority(current), outcome: { ...outcome, status: "success" } },
+        origin,
+        now,
+      );
+      assert.equal(result.attempt.outcome?.status, "success");
+    },
+  },
+  {
+    name: "stopped reconciliation never records a result for an unaccepted reservation",
+    run(db) {
+      const now = Date.now();
+      const reserved = seedAttempt(db, "task", now);
+      for (const status of ["success", "failure", "cancelled"] as const)
+        assert.throws(
+          () =>
+            recovery.reconcile(
+              db,
+              reserved.id,
+              {
+                ...revision(reserved),
+                observation: "stopped",
+                reason: "wrapper reports exit",
+                outcome: { ...outcome, status },
+              },
+              origin,
+              true,
+              now,
+            ),
+          /Unaccepted execution/,
+        );
+      assert.deepEqual(attempts.get(db, reserved.id), reserved);
+    },
+  },
+  {
+    name: "maintainer recovery records the maintainer and the owner in the journal",
+    run(db) {
+      const { now, attempt } = setup(db);
+      const maintainer = {
+        ...origin,
+        principalId: "maintainer",
+        participantId: "maintainer-console",
+      };
+      recovery.forceRecovery(
+        db,
+        attempt.id,
+        { ...revision(attempt), reason: "host lost" },
+        maintainer,
+        true,
+        now,
+      );
+      const finished = db
+        .select()
+        .from(schema.journal)
+        .where(eq(schema.journal.kind, "attempt.finished"))
+        .get();
+      assert.equal(finished?.principal_id, "maintainer");
+      assert.equal(finished?.participant_id, "maintainer-console");
+      const data = JSON.parse(finished?.data ?? "{}");
+      assert.equal(data.owner_principal_id, origin.principalId);
+      assert.equal(data.owner_participant_id, origin.participantId);
     },
   },
 );

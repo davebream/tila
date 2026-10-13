@@ -18,6 +18,7 @@ export function seedAttempt(
   db: ProjectDatabase,
   id = "task",
   now = Date.now(),
+  assigner: string | null = null,
 ) {
   if (!db.select().from(schema.schemaHistory).get())
     applySchema(db, lifecycleDefinition, "test");
@@ -38,6 +39,8 @@ export function seedAttempt(
       available_at: now,
       created_at: now,
       updated_at: now,
+      enrolled_by_principal: assigner,
+      enrolled_by_participant: assigner && `${assigner}-process`,
     })
     .run();
   const entry = db

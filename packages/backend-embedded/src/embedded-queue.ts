@@ -48,12 +48,12 @@ export class EmbeddedQueueBackend implements QueueBackend {
   }
   async edit(id: string, input: QueueEditCommand) {
     return this.withRetry(() =>
-      queueOps.edit(this.db, id, input, this.origin()),
+      queueOps.edit(this.db, id, input, this.origin(), true),
     );
   }
   async withdraw(id: string, input: QueueRevisionCommand) {
     return this.withRetry(() =>
-      queueOps.withdraw(this.db, id, input, this.origin()),
+      queueOps.withdraw(this.db, id, input, this.origin(), true),
     );
   }
   async claimNext(input: QueueClaimCommand) {
@@ -96,13 +96,25 @@ export class EmbeddedAttemptBackend implements AttemptBackend {
   }
   async requestCancellation(id: string, input: QueueRevisionCommand) {
     return this.withRetry(() =>
-      attemptRecoveryOps.requestCancellation(this.db, id, input, this.origin()),
+      attemptRecoveryOps.requestCancellation(
+        this.db,
+        id,
+        input,
+        this.origin(),
+        true,
+      ),
     );
   }
 
   async requestSuspension(id: string, input: QueueRevisionCommand) {
     return this.withRetry(() =>
-      attemptRecoveryOps.requestSuspension(this.db, id, input, this.origin()),
+      attemptRecoveryOps.requestSuspension(
+        this.db,
+        id,
+        input,
+        this.origin(),
+        true,
+      ),
     );
   }
 
@@ -114,7 +126,7 @@ export class EmbeddedAttemptBackend implements AttemptBackend {
 
   async requestResume(id: string, input: QueueRevisionCommand) {
     return this.withRetry(() =>
-      attemptRecoveryOps.requestResume(this.db, id, input, this.origin()),
+      attemptRecoveryOps.requestResume(this.db, id, input, this.origin(), true),
     );
   }
 
@@ -138,7 +150,7 @@ export class EmbeddedAttemptBackend implements AttemptBackend {
 
   async retry(id: string, input: AttemptRetryCommand) {
     return this.withRetry(() =>
-      attemptRecoveryOps.retry(this.db, id, input, this.origin()),
+      attemptRecoveryOps.retry(this.db, id, input, this.origin(), true),
     );
   }
 
