@@ -22,12 +22,14 @@ import { AuthResultPage } from "@/pages/auth-result";
 import { DeliveriesPage } from "@/pages/deliveries";
 import { JournalPage } from "@/pages/journal";
 import { LoginPage } from "@/pages/login";
+import { OverviewPage } from "@/pages/overview";
 import { PresencePage } from "@/pages/presence";
 import { QueuePage } from "@/pages/queue";
 import { RecordsPage } from "@/pages/records";
 import { RoomsPage } from "@/pages/rooms";
 import { RuntimePage } from "@/pages/runtime";
 import { SettingsPage } from "@/pages/settings";
+import { SettingsDefinitionsPage } from "@/pages/settings-definitions";
 import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
 import { WorkspacePage } from "@/pages/workspace";
@@ -102,6 +104,7 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
   return (
     <Route element={<Layout />}>
       <Route index element={<ProjectHome projectId={projectId} />} />
+      <Route path="overview" element={<OverviewPage />} />
       <Route path="tasks" element={<TasksWithDrawer />}>
         <Route path=":id" element={<TaskDetailPage />} />
       </Route>
@@ -131,6 +134,10 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
       <Route path="runtime" element={<RuntimePage />} />
       <Route path="runtime/:agentId" element={<RuntimePage />} />
       <Route path="settings" element={<SettingsPage />} />
+      <Route
+        path="settings/definitions"
+        element={<SettingsDefinitionsPage />}
+      />
       <Route path="artifacts" element={<ArtifactsWithDrawer />}>
         <Route path="*" element={<ArtifactDetailPage />} />
       </Route>

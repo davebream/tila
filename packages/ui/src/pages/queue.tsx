@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { QuerySection, SectionNotice } from "@/components/ui/query-section";
 import { useAuth } from "@/hooks/use-auth";
 import { inspectQueue, whoami } from "@/lib/api";
+import { queueQueryFromSearch } from "@/lib/list-queries";
 import { deriveSectionState } from "@/lib/query-state";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -22,21 +23,9 @@ export function QueuePage() {
   const { projectId } = useAuth();
   const [params, setParams] = useSearchParams();
   const project = projectId ?? "";
-  const offset = Math.max(0, Number(params.get("offset")) || 0);
-  const state = params.get("state") as QueueListQuery["state"];
-  const queryInput: QueueListQuery = {
-    limit: 100,
-    offset,
-    ...(state ? { state } : {}),
-    ...Object.fromEntries(
-      ["task_id", "type", "target_principal", "capability"]
-        .filter((key) => params.get(key))
-        .map((key) => [key, params.get(key)]),
-    ),
-    ...(params.has("priority") && params.get("priority") !== ""
-      ? { priority: Number(params.get("priority")) }
-      : {}),
-  };
+  const queryInput = queueQueryFromSearch(params);
+  const offset = queryInput.offset ?? 0;
+  const state = queryInput.state;
   const query = useQuery({
     queryKey: ["queue", project, queryInput],
     queryFn: () => inspectQueue(project, queryInput),

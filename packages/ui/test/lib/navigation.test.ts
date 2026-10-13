@@ -42,6 +42,8 @@ describe("matchNav", () => {
     ["/p/acme/agents/agent-1/deliveries/d-1", "runtime", "agents"],
     ["/p/acme/presence", "runtime", "presence"],
     ["/p/acme/settings", "settings", "settings"],
+    ["/p/acme/settings/definitions", "settings", "definitions"],
+    ["/p/acme/overview", "overview", "overview"],
     ["tasks/task-1", "work", "tasks"],
   ])("%s belongs to %s › %s", (pathname, section, item) => {
     const match = matchNav(pathname);
@@ -106,6 +108,7 @@ describe("navVisibility", () => {
     expect(visible).toContain("rooms");
     expect(visible).toContain("runtime");
     expect(visible).toContain("settings");
+    expect(visible).toContain("definitions");
   });
 
   test("a namespace-restricted credential sees only permitted surfaces", () => {
@@ -115,8 +118,15 @@ describe("navVisibility", () => {
       restrictions: { task_types: ["bug"] },
     });
     const isVisible = navVisibility(restricted, "test-project");
-    expect(ids(isVisible)).toEqual(["tasks", "queue", "records", "settings"]);
+    expect(ids(isVisible)).toEqual([
+      "overview",
+      "tasks",
+      "queue",
+      "records",
+      "settings",
+    ]);
     expect(visibleSections(isVisible).map((section) => section.id)).toEqual([
+      "overview",
       "work",
       "settings",
     ]);
