@@ -5,6 +5,7 @@ import {
   type CredentialPolicy,
   PROJECT_ROLE_RANK,
   type ProjectRole,
+  RESTRICTED_CREDENTIAL_SURFACES,
   capabilityRole,
   effectiveCredentialPolicy,
   hasNamespaceRestrictions,
@@ -50,6 +51,10 @@ export function scopedPolicy(c: Context<AppEnv>): CredentialPolicy | undefined {
 }
 
 /** Explicit route inventory: unknown routes never inherit a family-wide grant. */
+const RESTRICTED_SURFACE = new RegExp(
+  `^/(${RESTRICTED_CREDENTIAL_SURFACES.join("|")})(/|$)`,
+);
+
 export function routeCapability(
   method: string,
   rawPath: string,
@@ -401,12 +406,7 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
       }
       // The listed surfaces cannot safely project their cross-resource data.
       // Exact `/search` filters each kind inside the DO (#300).
-      if (
-        !/^\/(tasks|records|claims|templates|queue|attempts|questions)(\/|$)/.test(
-          path,
-        ) &&
-        path !== "/search"
-      )
+      if (!RESTRICTED_SURFACE.test(path) && path !== "/search")
         return denied(c);
       if (/^\/tasks\/ready(?:\/|$)/.test(path) || /artifact-refs/.test(path))
         return denied(c);

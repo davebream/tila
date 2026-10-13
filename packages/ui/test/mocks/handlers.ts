@@ -208,6 +208,19 @@ export const handlers = [
     });
   }),
 
+  // Identity for capability-aware navigation: an owner without a scoped
+  // policy, so every destination is visible.
+  http.get("*/api/whoami", () =>
+    HttpResponse.json({
+      ok: true,
+      project_id: "test-project",
+      token_name: "test-user",
+      scopes: "admin",
+      role: "owner",
+      legacy: true,
+    }),
+  ),
+
   // Session logout
   http.post("*/auth/logout", () => {
     return HttpResponse.json({ ok: true }, { status: 200 });

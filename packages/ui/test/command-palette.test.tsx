@@ -258,4 +258,51 @@ describe("CommandPalette", () => {
       expect(dialog.contains(document.activeElement)).toBe(true);
     }
   });
+
+  test("lists every section's pages, including ones missing before", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PaletteHarness />);
+
+    await user.type(await screen.findByRole("combobox"), "go to");
+    for (const page of [
+      "Tasks",
+      "Queue",
+      "Records",
+      "Artifacts",
+      "Journal",
+      "Rooms",
+      "Deliveries",
+      "Signals",
+      "Runtime",
+      "Agents",
+      "Presence",
+      "Settings",
+    ])
+      expect(await screen.findByText(`Go to ${page}`)).toBeInTheDocument();
+  });
+
+  test("finds pages by section and keyword", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PaletteHarness />);
+    const input = await screen.findByRole("combobox");
+
+    await user.type(input, "history");
+    expect(await screen.findByText("Go to Journal")).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, "conversations");
+    expect(await screen.findByText("Go to Deliveries")).toBeInTheDocument();
+    expect(screen.queryByText("Go to Tasks")).not.toBeInTheDocument();
+  });
+
+  test("choosing a page opens its project route", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PaletteHarness />);
+
+    await user.type(await screen.findByRole("combobox"), "go to signals");
+    await user.click(await screen.findByText("Go to Signals"));
+    await waitFor(() =>
+      expect(currentLocation.pathname).toBe("/p/test-project/signals"),
+    );
+  });
 });

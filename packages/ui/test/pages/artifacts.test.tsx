@@ -1,9 +1,16 @@
+import { ArtifactDetailPage } from "@/pages/artifact-detail";
 import { ArtifactsPage } from "@/pages/artifacts";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, delay } from "msw";
-import { Route, Routes } from "react-router";
+import {
+  type Location,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router";
 import { server } from "../mocks/server";
-import { renderWithProviders, screen, within } from "../test-utils";
+import { renderWithProviders, screen, waitFor, within } from "../test-utils";
 
 function renderSearch(query = "report") {
   return renderWithProviders(
@@ -111,5 +118,53 @@ describe("ArtifactsPage search", () => {
     );
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+});
+
+describe("ArtifactsPage drawer", () => {
+  let currentLocation: Location;
+  function LocationProbe() {
+    currentLocation = useLocation();
+    return null;
+  }
+
+  test("opening and closing the drawer keeps the list filters", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/p/:projectId/artifacts"
+          element={
+            <>
+              <ArtifactsPage />
+              <LocationProbe />
+              <Outlet />
+            </>
+          }
+        >
+          <Route path="*" element={<ArtifactDetailPage />} />
+        </Route>
+      </Routes>,
+      { route: "/p/test-project/artifacts?kind=output" },
+    );
+
+    const row = await screen.findByTitle("test/artifact-1/abc123.txt");
+    // The list writes its sort into the URL; the drawer must carry it all.
+    const listSearch = currentLocation.search;
+    expect(new URLSearchParams(listSearch).get("kind")).toBe("output");
+
+    await user.click(row);
+    await waitFor(() =>
+      expect(currentLocation.pathname).toBe(
+        "/p/test-project/artifacts/test/artifact-1/abc123.txt",
+      ),
+    );
+    expect(currentLocation.search).toBe(listSearch);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(currentLocation.pathname).toBe("/p/test-project/artifacts"),
+    );
+    expect(currentLocation.search).toBe(listSearch);
   });
 });

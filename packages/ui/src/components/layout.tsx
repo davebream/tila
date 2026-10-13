@@ -1,12 +1,27 @@
+import { useWhoami } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
 import {
   workspaceDeselect,
   workspaceProjects,
   workspaceSelect,
 } from "@/lib/api";
+import {
+  type NavSection,
+  defaultProjectPath,
+  matchNav,
+  navVisibility,
+  visibleSections,
+} from "@/lib/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { Search } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "./error-boundary";
 import { Button } from "./ui/button";
 import { CommandPalette } from "./ui/command-palette";
@@ -198,7 +213,7 @@ function ProjectSwitcher() {
       queryClient.clear();
       selectProject(targetProjectId);
       setOpen(false);
-      navigate(`/p/${targetProjectId}/tasks`);
+      navigate(defaultProjectPath(targetProjectId));
     } catch {
       setSwitching(null);
     }
@@ -219,10 +234,12 @@ function ProjectSwitcher() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-foreground transition-colors hover:bg-signal-blue/10 cursor-pointer"
+          className="flex min-w-0 items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-foreground transition-colors hover:bg-signal-blue/10 cursor-pointer"
           aria-label={`Switch project (current: ${projectId})`}
         >
-          <span className="font-mono text-xs">{projectId}</span>
+          <span className="min-w-0 truncate whitespace-nowrap font-mono text-xs">
+            {projectId}
+          </span>
           <svg
             width="12"
             height="12"
@@ -233,7 +250,7 @@ function ProjectSwitcher() {
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
-            className={`transition-transform ${open ? "rotate-180" : ""}`}
+            className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
           >
             <path d="M3 4.5l3 3 3-3" />
           </svg>
@@ -304,16 +321,61 @@ function ProjectSwitcher() {
   );
 }
 
+const NAV_LINK =
+  "shrink-0 text-[13px] rounded-sm px-2.5 py-1.5 transition-[background-color,color] duration-150 ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue";
+const NAV_LINK_ACTIVE = "text-signal-blue bg-tint-blue-15";
+const NAV_LINK_IDLE =
+  "text-muted-foreground hover:text-foreground hover:bg-[var(--color-row-hover-2)]";
+
+/** Pages inside the active section, shown when it has more than one. */
+function SectionNav({
+  section,
+  prefix,
+}: {
+  section: NavSection;
+  prefix: string;
+}) {
+  return (
+    <nav
+      aria-label={section.label}
+      className="flex items-center gap-1 overflow-x-auto border-b border-border bg-card px-3 py-1 md:px-6"
+    >
+      {section.items.map((item) => (
+        <NavLink
+          key={item.id}
+          to={`${prefix}/${item.segment}`}
+          className={({ isActive }) =>
+            `${NAV_LINK} ${isActive ? NAV_LINK_ACTIVE : NAV_LINK_IDLE}`
+          }
+        >
+          {item.label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
 export function Layout() {
   const { projectId, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const identity = useWhoami();
 
   const prefix = projectId ? `/p/${projectId}` : "";
+  const isVisible = useMemo(
+    () => navVisibility(identity.data, projectId),
+    [identity.data, projectId],
+  );
+  const sections = useMemo(() => visibleSections(isVisible), [isVisible]);
+  const current = matchNav(pathname);
+  const activeSection = sections.find(
+    (section) => section.id === current?.section.id,
+  );
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
@@ -340,49 +402,52 @@ export function Layout() {
       >
         Skip to content
       </a>
-      <header className="flex h-[52px] items-center justify-between border-b border-border bg-card px-3 md:px-6">
-        <div className="flex min-w-0 items-center gap-3 md:gap-8">
+      <header className="flex flex-wrap items-center border-b border-border bg-card px-3 md:h-[52px] md:flex-nowrap md:px-6">
+        <div className="flex h-[52px] min-w-0 flex-1 items-center gap-3 md:flex-none md:h-auto">
           <span className="shrink-0 flex items-center gap-1.5 text-signal-blue">
             <TilaMark size={18} />
-            <span className="font-logo text-[18px] font-bold tracking-[-0.03em]">
+            <span className="hidden font-logo text-[18px] font-bold tracking-[-0.03em] sm:inline">
               tila
             </span>
           </span>
           <ProjectSwitcher />
-          <nav className="flex items-center gap-1 overflow-x-auto">
-            {[
-              "Tasks",
-              "Queue",
-              "Records",
-              "Journal",
-              "Presence",
-              "Signals",
-              "Rooms",
-              "Agents",
-              "Deliveries",
-              "Runtime",
-              "Artifacts",
-              "Settings",
-            ].map((label) => (
-              <NavLink
-                key={label}
-                to={`${prefix}/${label.toLowerCase()}`}
-                className={({ isActive }) =>
-                  `shrink-0 text-[13px] rounded-sm px-2.5 py-1.5 transition-[background-color,color] duration-150 ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue ${isActive ? "text-signal-blue bg-tint-blue-15" : "text-muted-foreground hover:text-foreground hover:bg-[var(--color-row-hover-2)]"}`
-                }
-              >
-                {label}
-              </NavLink>
-            ))}
-          </nav>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        {/* Wraps to its own full-width row below 768px. */}
+        <nav
+          aria-label="Primary"
+          className="order-last flex w-full items-center gap-1 overflow-x-auto pb-2 md:order-none md:ml-8 md:w-auto md:flex-1 md:pb-0"
+        >
+          {sections.map((section) => {
+            const active = section.id === activeSection?.id;
+            return (
+              <Link
+                key={section.id}
+                to={`${prefix}/${section.items[0].segment}`}
+                aria-current={
+                  active
+                    ? section.items.length === 1 &&
+                      current?.item.id === section.items[0].id
+                      ? "page"
+                      : "true"
+                    : undefined
+                }
+                className={`${NAV_LINK} ${active ? NAV_LINK_ACTIVE : NAV_LINK_IDLE}`}
+              >
+                {section.label}
+              </Link>
+            );
+          })}
+        </nav>
+        <div className="flex h-[52px] shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={() => setPaletteOpen(true)}
-            className="hidden md:flex items-center gap-1 rounded-sm px-2 py-1 text-[13px] text-muted-foreground transition-[background-color,color] duration-150 hover:text-foreground hover:bg-[var(--color-row-hover-2)] cursor-pointer"
+            aria-label="Search and navigate"
+            aria-keyshortcuts="Meta+K Control+K"
+            className="flex items-center gap-1 rounded-sm px-2 py-1 text-[13px] text-muted-foreground transition-[background-color,color] duration-150 hover:text-foreground hover:bg-[var(--color-row-hover-2)] cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
           >
-            <kbd className="font-mono text-[11px] leading-none px-[5px] pt-[3px] pb-[2px] rounded-[4px] bg-background border border-border border-b-2 text-muted-foreground">
+            <Search className="size-3.5 md:hidden" aria-hidden="true" />
+            <kbd className="hidden md:inline font-mono text-[11px] leading-none px-[5px] pt-[3px] pb-[2px] rounded-[4px] bg-background border border-border border-b-2 text-muted-foreground">
               ⌘K
             </kbd>
           </button>
@@ -408,6 +473,9 @@ export function Layout() {
           </Button>
         </div>
       </header>
+      {activeSection && activeSection.items.length > 1 && (
+        <SectionNav section={activeSection} prefix={prefix} />
+      )}
       <main id="main-content" className="flex-1">
         <WelcomeBanner />
         <ErrorBoundary>
@@ -417,6 +485,7 @@ export function Layout() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
+        isVisible={isVisible}
       />
     </div>
   );

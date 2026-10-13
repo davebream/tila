@@ -27,7 +27,7 @@ import { relativeTime } from "@/lib/time";
 import { encodeArtifactKey, formatBytes, parseArtifactKey } from "@/lib/utils";
 import type { ArtifactReviewSummary } from "@tila/schemas";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 
 export function ArtifactsPage() {
   useTimeTick();
@@ -255,6 +255,8 @@ function ArtifactList({
   >;
   toggleSort: (key: "produced" | "size" | "kind") => void;
 }) {
+  // Drawer links carry the list's filters so closing returns to the same view.
+  const { search: listSearch } = useLocation();
   const sorted = useMemo(() => {
     if (!sort) return artifacts;
     const dir = sort.dir === "asc" ? 1 : -1;
@@ -275,7 +277,7 @@ function ArtifactList({
   const navigate = useNavigate();
   const { focusIdx, handleKeyDown } = useTableKeyNav(sorted.length, (idx) =>
     navigate(
-      `/p/${projectId}/artifacts/${encodeArtifactKey(sorted[idx].r2_key)}`,
+      `/p/${projectId}/artifacts/${encodeArtifactKey(sorted[idx].r2_key)}${listSearch}`,
     ),
   );
 
@@ -345,7 +347,7 @@ function ArtifactList({
                 <TableCell>
                   <span className="inline-flex items-center gap-1.5">
                     <Link
-                      to={`/p/${projectId}/artifacts/${encodeArtifactKey(a.r2_key)}`}
+                      to={`/p/${projectId}/artifacts/${encodeArtifactKey(a.r2_key)}${listSearch}`}
                       className="rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
                       title={a.r2_key}
                     >
@@ -443,6 +445,7 @@ function SearchResultsTable({
   data: SearchData;
   projectId: string | null;
 }) {
+  const { search: listSearch } = useLocation();
   return (
     <div className="overflow-hidden rounded-lg border border-border">
       <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
@@ -466,7 +469,7 @@ function SearchResultsTable({
             <TableRow key={r.r2_key}>
               <TableCell>
                 <Link
-                  to={`/p/${projectId}/artifacts/${encodeArtifactKey(r.r2_key)}`}
+                  to={`/p/${projectId}/artifacts/${encodeArtifactKey(r.r2_key)}${listSearch}`}
                   className="rounded-sm text-signal-blue underline decoration-signal-blue/40 underline-offset-2 hover:text-signal-blue-hover hover:decoration-signal-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
                 >
                   {r.r2_key}

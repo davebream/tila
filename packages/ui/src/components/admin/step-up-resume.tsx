@@ -1,5 +1,6 @@
 import { useAuth } from "@/hooks/use-auth";
 import { workspaceSelect } from "@/lib/api";
+import { defaultProjectPath } from "@/lib/navigation";
 import { peekStepUpResume, takeStepUpResume } from "@/lib/step-up";
 import { useEffect, useRef } from "react";
 import { Navigate } from "react-router";
@@ -49,5 +50,5 @@ export function DefaultRedirect({ projectId }: { projectId: string }) {
     return <Navigate to={stash.returnTo} replace />;
   }
   if (stash) takeStepUpResume();
-  return <Navigate to={`/p/${projectId}/tasks`} replace />;
+  return <Navigate to={defaultProjectPath(projectId)} replace />;
 }

@@ -8,6 +8,7 @@ import {
 } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useDebouncedValue } from "@/hooks/use-debounce";
+import { NAV_SECTIONS, type NavItem } from "@/lib/navigation";
 import { catalogIndex, taskTitle } from "@/lib/presentation";
 import { classifyApiError } from "@/lib/query-state";
 import { Dialog } from "radix-ui";
@@ -30,7 +31,13 @@ const SEARCH_LIMIT = 20;
 export function CommandPalette({
   open,
   onClose,
-}: { open: boolean; onClose: () => void }) {
+  isVisible,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Hides destinations the current identity cannot use. */
+  isVisible?: (item: NavItem) => boolean;
+}) {
   const { projectId } = useAuth();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -95,67 +102,21 @@ export function CommandPalette({
       });
     }
 
-    const pages: PaletteItem[] = [
-      {
-        id: "nav:rooms",
-        label: "Go to Rooms",
-        group: "navigation",
-        href: `${prefix}/rooms`,
-      },
-      {
-        id: "nav:agents",
-        label: "Go to Agents",
-        group: "navigation",
-        href: `${prefix}/agents`,
-      },
-      {
-        id: "nav:runtime",
-        label: "Go to Runtime",
-        group: "navigation",
-        href: `${prefix}/runtime`,
-      },
-      {
-        id: "nav:queue",
-        label: "Go to Queue",
-        group: "navigation",
-        href: `${prefix}/queue`,
-      },
-      {
-        id: "nav:tasks",
-        label: "Go to Tasks",
-        group: "navigation",
-        href: `${prefix}/tasks`,
-      },
-      {
-        id: "nav:records",
-        label: "Go to Records",
-        group: "navigation",
-        href: `${prefix}/records`,
-      },
-      {
-        id: "nav:journal",
-        label: "Go to Journal",
-        group: "navigation",
-        href: `${prefix}/journal`,
-      },
-      {
-        id: "nav:presence",
-        label: "Go to Presence",
-        group: "navigation",
-        href: `${prefix}/presence`,
-      },
-      {
-        id: "nav:artifacts",
-        label: "Go to Artifacts",
-        group: "navigation",
-        href: `${prefix}/artifacts`,
-      },
-    ];
-
-    for (const p of pages) {
-      if (q && !p.label.toLowerCase().includes(q)) continue;
-      result.push(p);
-    }
+    for (const section of NAV_SECTIONS)
+      for (const item of section.items) {
+        if (isVisible && !isVisible(item)) continue;
+        const label = `Go to ${item.label}`;
+        const terms = [label, section.label, ...(item.keywords ?? [])];
+        if (q && !terms.some((term) => term.toLowerCase().includes(q)))
+          continue;
+        result.push({
+          id: `nav:${item.id}`,
+          label,
+          meta: section.label === item.label ? undefined : section.label,
+          group: "navigation",
+          href: `${prefix}/${item.segment}`,
+        });
+      }
 
     const shortcuts: PaletteItem[] = [
       {
@@ -253,6 +214,7 @@ export function CommandPalette({
     wantsSearch,
     searchFailed,
     projectId,
+    isVisible,
     recentQuery.data,
     searchQuery.data,
     catalogQuery.data,

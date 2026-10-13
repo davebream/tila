@@ -1,6 +1,7 @@
 import { TilaMark } from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError, workspaceProjects, workspaceSelect } from "@/lib/api";
+import { defaultProjectPath } from "@/lib/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router";
@@ -32,7 +33,7 @@ export function WorkspacePage() {
     try {
       await workspaceSelect(projectId);
       selectProject(projectId);
-      navigate(`/p/${projectId}/tasks`);
+      navigate(defaultProjectPath(projectId));
     } catch (err) {
       setSelectError(errorMessage(err));
       setSelecting(null);
