@@ -148,20 +148,8 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
   });
 
   app.get("/template/list", async (c) => {
-    const { db } = deps;
-    const parsedSchema = constraintOps.resolveCurrentSchema(db);
-    if (!parsedSchema?.templates) {
-      return c.json({ ok: true, templates: [] });
-    }
-    const templates = Object.entries(parsedSchema.templates).map(
-      ([name, def]) => ({
-        name,
-        description: def.description ?? null,
-        entity_count: Object.keys(def.entities).length,
-        entity_types: [
-          ...new Set(Object.values(def.entities).map((e) => e.type)),
-        ],
-      }),
+    const templates = templateOps.listTemplates(
+      constraintOps.resolveCurrentSchema(deps.db),
     );
     return c.json({ ok: true, templates });
   });

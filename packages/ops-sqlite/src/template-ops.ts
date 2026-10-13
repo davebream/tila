@@ -1,5 +1,9 @@
 import { type CredentialPolicy, permitsTask } from "@tila/schemas";
-import type { TemplateDefinition, TilaSchemaToml } from "@tila/schemas";
+import type {
+  TemplateDefinition,
+  TemplateSummary,
+  TilaSchemaToml,
+} from "@tila/schemas";
 import { sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
@@ -120,13 +124,44 @@ export function validateTemplateInstantiation(
   return templateDef;
 }
 
+const VAR_PATTERN = /\{\{(\w+)\}\}/g;
+
+/**
+ * Variable names referenced by `{{var}}` placeholders in a template's data.
+ * Only top-level string values are scanned, matching {@link applyVarsToData}.
+ */
+export function templateVariables(def: TemplateDefinition): string[] {
+  const found = new Set<string>();
+  for (const entity of Object.values(def.entities))
+    for (const value of Object.values(entity.data as Record<string, unknown>))
+      if (typeof value === "string")
+        for (const match of value.matchAll(VAR_PATTERN)) found.add(match[1]);
+  return [...found].sort();
+}
+
+/** Summaries for every template declared by `parsedSchema` (empty when none). */
+export function listTemplates(
+  parsedSchema: TilaSchemaToml | null,
+): TemplateSummary[] {
+  return Object.entries(parsedSchema?.templates ?? {}).map(([name, def]) => ({
+    name,
+    type: Object.values(def.entities)[0]?.type ?? "",
+    description: def.description ?? null,
+    entity_count: Object.keys(def.entities).length,
+    entity_types: [...new Set(Object.values(def.entities).map((e) => e.type))],
+    variables: templateVariables(def),
+    entities: Object.entries(def.entities).map(([key, entity]) => ({
+      key,
+      type: entity.type,
+      id_suffix: entity.id_suffix,
+    })),
+  }));
+}
+
 /** Substitute `{{var}}` placeholders in a single value (strings only). */
 function applyVar(value: unknown, vars: Record<string, string>): unknown {
   if (typeof value !== "string") return value;
-  return value.replace(
-    /\{\{(\w+)\}\}/g,
-    (_, k: string) => vars[k] ?? `{{${k}}}`,
-  );
+  return value.replace(VAR_PATTERN, (_, k: string) => vars[k] ?? `{{${k}}}`);
 }
 
 /** Substitute `{{var}}` placeholders across every value of an entity's data. */

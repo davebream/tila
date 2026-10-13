@@ -1,6 +1,7 @@
 import type {
   InstantiateTemplateRequest,
   InstantiateTemplateResponse,
+  TemplateListResponse,
 } from "@tila/schemas";
 import type { TilaClient } from "./client";
 
@@ -19,24 +20,8 @@ export function createTemplateMethods(client: TilaClient, projectId: string) {
     },
 
     /** List available templates from the project schema. GET /projects/:id/templates */
-    async list(): Promise<{
-      ok: true;
-      templates: Array<{
-        name: string;
-        type: string;
-        description: string | null;
-        variables: string[];
-      }>;
-    }> {
-      return client.get<{
-        ok: true;
-        templates: Array<{
-          name: string;
-          type: string;
-          description: string | null;
-          variables: string[];
-        }>;
-      }>(base);
+    async list(): Promise<TemplateListResponse> {
+      return client.get<TemplateListResponse>(base);
     },
   };
 }

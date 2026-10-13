@@ -56,6 +56,8 @@ export const CatalogFieldSchema = z.object({
   type: z.string(),
   required: z.boolean(),
   values: z.array(z.string()).optional(),
+  /** Declared `default`; clients prefill new rows with it. Never applied to stored data. */
+  default: z.unknown().optional(),
 });
 export type CatalogField = z.infer<typeof CatalogFieldSchema>;
 

@@ -1,12 +1,13 @@
 import { TilaSchemaTomlSchema } from "@tila/schemas";
 import { beforeEach, describe, expect, it } from "vitest";
-import { SchemaWriteError } from "../src/constraint-ops";
+import { SchemaWriteError, resolveCurrentSchema } from "../src/constraint-ops";
 import { CredentialPolicyDenied } from "../src/credential-policy";
 import { EntityAlreadyExistsError } from "../src/entity-ops";
 import { applySchema } from "../src/schema-ops";
 import {
   TemplateInstantiateError,
   instantiateTemplate,
+  listTemplates,
   validateTemplateInstantiation,
 } from "../src/template-ops";
 import { type TestDb, createTestDb } from "./helpers";
@@ -433,5 +434,29 @@ status = "{{state}}"
       }),
     ).toThrow(SchemaWriteError);
     expect(countEntities(testDb)).toBe(0);
+  });
+});
+
+describe("templateOps.listTemplates", () => {
+  it("summarizes entities and the variables instantiation substitutes", () => {
+    applySchema(testDb.db, SCHEMA_WITH_TEMPLATE, "test-actor");
+    expect(listTemplates(resolveCurrentSchema(testDb.db))).toEqual([
+      {
+        name: "sprint",
+        type: "task",
+        description: "A task with one subtask",
+        entity_count: 2,
+        entity_types: ["task", "subtask"],
+        variables: ["name"],
+        entities: [
+          { key: "root", type: "task", id_suffix: "" },
+          { key: "child", type: "subtask", id_suffix: "-child" },
+        ],
+      },
+    ]);
+  });
+
+  it("returns no templates without a schema", () => {
+    expect(listTemplates(null)).toEqual([]);
   });
 });
