@@ -8,11 +8,78 @@ import { parseSchemaToml } from "@tila/core";
 import { artifactVersionOps, schema } from "@tila/ops-sqlite";
 import { artifactCommitKey } from "@tila/schemas";
 import { drizzle } from "drizzle-orm/durable-sqlite";
+import { TilaClient, createArtifactMethods } from "tila-sdk";
 import { expect, it } from "vitest";
 import { createProjectRouter } from "../../worker/src/do/project-do-router";
 import { hashToken } from "../../worker/src/lib/hash-token";
 import { identity, post } from "./helpers";
 import { bindings } from "./setup";
+
+it("round-trips SDK gzip Blob and File uploads through R2 and DO SQLite", async () => {
+  const projectId = "runtime-sdk-blob-upload";
+  const token = "runtime-sdk-blob-token";
+  await bindings.DB.prepare(
+    "INSERT INTO _projects (project_id, display_name, created_at, created_by, cloudflare_account_id) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(projectId, projectId, Date.now(), "fixture", "local")
+    .run();
+  await bindings.DB.prepare(
+    "INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(
+      await hashToken(token, bindings.HASH_PEPPER),
+      projectId,
+      "init",
+      "full",
+      Date.now(),
+      "fixture",
+    )
+    .run();
+  const methods = createArtifactMethods(
+    new TilaClient({
+      baseUrl: "https://worker",
+      token,
+      participantId: "runtime-worker",
+      fetch: async (input, init) => {
+        // Workerd does not support the SDK's redirect: "error" mode.
+        const response = await SELF.fetch(input, {
+          ...init,
+          redirect: "manual",
+        });
+        expect(response.status).toBeLessThan(300);
+        return response;
+      },
+    }),
+    projectId,
+  );
+  const bytes = await new Response(
+    new Blob([
+      JSON.stringify({ report: "gzip artifact content".repeat(20000) }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream("gzip")),
+  ).arrayBuffer();
+  const inputs = [
+    new Blob([bytes], { type: "application/gzip" }),
+    new File([bytes], "report.json.gz", { type: "application/gzip" }),
+  ];
+  for (const input of inputs) {
+    const uploaded = await methods.upload(input, { kind: "source" });
+    expect(uploaded.ok).toBe(true);
+    expect(uploaded.bytes).toBe(bytes.byteLength);
+    const downloaded = await methods.download(uploaded.key);
+    expect(downloaded.contentType).toBe("application/gzip");
+    expect(await new Response(downloaded.body).arrayBuffer()).toEqual(bytes);
+    const object = await bindings.ARTIFACTS.get(uploaded.key);
+    expect(object).not.toBeNull();
+    expect(object?.httpMetadata?.contentType).toBe("application/gzip");
+    expect(await object?.arrayBuffer()).toEqual(bytes);
+    const meta = await methods.meta(uploaded.key);
+    expect(meta).toMatchObject({
+      pointer: { mime_type: "application/gzip", bytes: bytes.byteLength },
+    });
+  }
+});
 
 it("normalizes upload aliases and returns permanent resource errors through real R2 and DO SQLite", async () => {
   const projectId = "runtime-artifact-aliases";
