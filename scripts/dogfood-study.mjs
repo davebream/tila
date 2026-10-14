@@ -1118,7 +1118,7 @@ function cmdEvaluate(opts) {
     overlap_id: "injected-helper",
     kind: "injected",
     resource: scenario.helper.file,
-    role: other ?? supported?.payload.role ?? "unknown",
+    role: supported?.payload.role ?? other ?? "unknown",
     response: duplicate
       ? "duplicate_started"
       : (supported?.payload.response ?? "unavailable"),
