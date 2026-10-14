@@ -1093,9 +1093,10 @@ function cmdEvaluate(opts) {
     : definingRoles.length > 1;
   // A real attempt-response/snapshot record may be supplied in either arm.
   // A denied claim alone still lacks proof that no duplicate edit preceded it.
+  // Observer identity does not establish eligibility; use the same retained-record
+  // verifier as derivation, including for generated evaluator summaries.
   const supported = events.find(
     (e) =>
-      e.actor.role !== "evaluator" &&
       e.payload.overlap_id === "injected-helper" &&
       hasPreventionEvidence(e, dir, context),
   );
