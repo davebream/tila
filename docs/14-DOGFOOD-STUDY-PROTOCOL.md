@@ -212,7 +212,14 @@ PreToolUse reserves slots and records metadata only. It cannot turn a grep, an
 attempted append or a failed write into explicit completion. PostToolUse confirms
 persisted RESUME candidates and binds time to the full note hash and invocation.
 Semantic review receives that same hash; a later correction cannot backdate the
-first correct decision. Unknown post-tool success formats remain unavailable.
+first correct decision. Structured exit status takes precedence; a Bash string
+response is parsed only from its runtime header before `Final output:`, never
+from command stdout. Unsupported or ambiguous success formats remain unavailable
+until installed-runtime smoke establishes the format.
+Result, ACK and recovery credit ends at the earliest trial closure, wall deadline
+or retirement of the emitting context. Late evidence remains in the raw log and
+invalidates scored state integrity; evaluator and coverage-audit events may still
+be recorded after stop.
 Native retries with distinct invocation IDs use separate slots; absent native retry
 relationships are null, not an observed zero.
 
@@ -339,7 +346,7 @@ denotes the clean frozen checkout. Commands run from its root.
 ```bash
 node scripts/generate-version.mjs cli
 node scripts/generate-version.mjs sdk
-node scripts/dogfood-study.mjs declare
+# Use the committed v3 declaration; declare refuses to overwrite it.
 node scripts/dogfood-study.mjs manifest-check
 node scripts/dogfood-study.mjs allocate
 
