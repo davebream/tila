@@ -254,7 +254,7 @@ export async function inspectSettingsDestination(
     )
   )
     needed.add("agents");
-  for (const section of needed)
+  for (const section of sections)
     if (!rights[section])
       throw Object.assign(
         new Error(`Cannot inspect and manage destination ${section}.`),

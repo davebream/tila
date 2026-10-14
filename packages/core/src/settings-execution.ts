@@ -278,13 +278,19 @@ export type SettingsServices = {
       idempotency_key: string;
     },
   ): Promise<SchemaApplyResponse>;
-  createAgent(input: AgentRegistration): Promise<Agent>;
+  createAgent(
+    input: AgentRegistration,
+    key: { idempotencyKey: string },
+  ): Promise<Agent>;
   updateAgent(
     id: string,
     input: UpdateAgent,
     key: { idempotencyKey: string },
   ): Promise<Agent>;
-  createRoom(input: CreateRoom): Promise<unknown>;
+  createRoom(
+    input: CreateRoom,
+    key: { idempotencyKey: string },
+  ): Promise<unknown>;
   updateRoom(
     id: string,
     input: UpdateRoom,
@@ -425,7 +431,7 @@ export function createSettingsExecutionPort(
         case "agent.create": {
           // Register has stable-ID/owner/settings reconciliation, not general
           // idempotency receipts. Never invent unsupported write options.
-          const result = await services.createAgent(action.payload);
+          const result = await services.createAgent(action.payload, key);
           const agent = result;
           if (
             agent.archived ||
@@ -448,7 +454,7 @@ export function createSettingsExecutionPort(
             )
           ).revision;
         case "room.create": {
-          await services.createRoom(action.payload);
+          await services.createRoom(action.payload, key);
           const result = await services.room(action.resource_id);
           const { room, members } = result;
           const config = {
