@@ -7,34 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.9.0] - 2026-10-14
+
+### Upgrade notes
+
+- Upgrade the deployment CLI to 0.9.0 before running `tila deploy`. It now verifies that the selected instance and saved infrastructure identify the same Cloudflare account, Worker, D1 database and R2 bucket before any migration or upload (#450, #451). To intentionally deploy a saved installation, use `tila deploy --infra <slug>`; use `--instance <key>` to select a registered instance. Missing, ambiguous or unverifiable targets stop deployment. Normal deployment preserves existing Worker secrets; secret setup and rotation remain separate operations.
+- Deploy the Worker and bundled UI together with the 0.9.0 CLI, before upgrading other clients. It applies additive D1 migrations `0035_access_settings_revision_watermarks.sql` and `0036_service_identity_revisions.sql` before Worker upload. With a separate pipeline, apply both first. There are no new DO/embedded migrations beyond level 42; project backup format and older archives remain compatible.
+- Service-account names and workload-binding policies gain optional `expected_revision` checks and expose `revision` in list/create/update responses. A stale edit returns `412 revision-conflict`; callers omitting the revision keep existing behavior. Restores assign access-setting revisions above the destination's retained history so an old editor cannot overwrite restored settings. No new capability or credential reissue is required for these settings changes.
+- Definition preview/apply now reject definitions over 256 KiB (`413 payload-too-large`) and definitions containing credentials, client connection fields or unprocessed export metadata (`400 schema-parse-error`). Existing stored definitions remain readable; remove rejected content before their next apply. Definition exports contain definitions only, not project data or credentials, and are not backups.
+- `tila schema status --json` now reports `up-to-date`, `differs` or `unknown`, with `applied_revision` and declaration differences. Scripts using the old `pending-apply` or `ahead` values need updating. Revisionless `tila schema apply` still works on non-managed projects but warns; prefer reviewed import or supply `--expected-revision`/`--review`.
+- Task-list requests with invalid HTTP limits, including zero, negative, fractional and non-finite values, now return `400 validation-error`; valid limits above 500 remain capped. Local SDK task lists now include archived rows by default to match HTTP. SDK `compact: true` or a variable boolean returns a compact/full projection union: narrow rows before reading `.data`. Omitted/false compact retains full-row typing.
+- Upgrade every serving Worker before enabling GitHub Enterprise Server (GHES) Actions issuer trust or exchanging GHES assertions. Workload JSON and signed session claims gain `issuer` and `repository_host`; old contexts without these fields remain GitHub.com only. Older Workers discard the new fields and cannot safely authorize GHES sessions. Private-network-only GHES still requires a separate network design.
+- Actions personal enrollments created without sponsor context are not retroactively repaired. Revoke known affected enrollments and their descendant runs, then re-enroll with a new operation ID and current assertion. Recovery cannot invent provenance. Existing contextless human/generic OIDC behavior and untagged GitHub mirrored context remain supported; repository-specific revocation cannot be inferred for contextless legacy installations.
+
+### Verified deployment targets (#451)
+
+- `tila deploy` uses saved infrastructure matching the repository-selected instance, verifies custom-domain aliases through Cloudflare metadata, and refuses conflicting account, Worker or storage bindings. Repository instance A can no longer silently deploy global infrastructure B. Explicit `--infra <slug>` selects infrastructure independently of ambient instance context; `--project` assertions and explicit instance assertions are still checked.
+- Before mutation, stderr shows the verified installation, account, Worker, database and bucket. Successful JSON results include a secret-free `target`. Offline `--dry-run` continues to inspect the deployment payload without contacting Cloudflare.
+
+### Definition import and export (#443, #444, #445, #456)
+
+- Import and export applied definitions as TOML or YAML through `tila schema import` / `export`, Settings › Definitions, and the opt-in MCP tools `tila_schema_import` / `tila_schema_export`. Merge replaces declarations named in the file and keeps omitted declarations; replace uses the whole file and lists removals for explicit confirmation.
+- CLI import previews by default. Applying requires the reviewed `--expected-revision`; replace requires `--confirm-removals`, and destructive changes require `--strategy relax`. The dashboard loads imports into its existing draft/review flow and retains drafts on a revision conflict. Export records the source project and applied revision; import strips that metadata before applying.
+- MCP import defaults to planning. Apply requires the unchanged `reviewed_plan` and caller-supplied `expected_revision`, plus a strategy for destructive changes. Retries keep the original definition, revision, strategy and idempotency key so a lost response can replay without silently rebasing onto newer edits.
+- TOML/YAML readers reject client connection files, credential content, unsupported export formats and oversized input. YAML also rejects multiple documents, custom tags, aliases, merge keys and nulls. Stored definitions containing credentials are refused on export with the field path rather than the value.
+
+### Enterprise Actions authorization (#474)
 
 - GitHub Enterprise Server Actions OIDC support through optional deployment JSON `GITHUB_ACTIONS_TRUSTED_ISSUERS` (`issuer`, `host`, `jwks_uri`). Verified issuer and repository host select the linked repository policy and remain part of credential, runtime run and signed-session authorization. Removing issuer trust or disabling repository policy denies subsequent protected requests for context-bearing Actions authority. GitHub.com remains trusted by default.
 - Actions-sponsored personal runtime enrollments persist verified sponsor provenance and revalidate it for existing descendant runs, recovery, renewal and heartbeat. Recovery cannot switch repository/context or exceed the caller's current ceiling; original capabilities and restrictions remain frozen.
 
-### Task attention filters (#399)
+### Task attention filters (#473)
 
 - SDK HTTP/local task lists, CLI `task list --blocked` / `--outcome`, and MCP `tila_task_list` expose blocked and lifecycle-outcome filters with exact totals, cursor continuation and `scope.outcome_types`. An undeclared outcome returns an empty page with total zero. Invalid and empty outcome lists are rejected. Paging rejects non-positive, fractional or non-finite limits and negative, fractional or non-finite offsets; valid limits above 500 remain capped. Compact SDK requests expose a projection union rather than promising full HTTP rows.
 - `EntityBackend.list` keeps its array result; optional `listPage` carries metadata for remote and Node/Bun embedded backends. Array-only third-party backends remain compatible and report unavailable metadata explicitly. Local SDK lists now honor cursors and match HTTP's default inclusion of archived rows; the local compact projection difference remains. No DDL or deployment configuration changes.
 
-### Definition revision warnings (#416)
+### Access settings (#459)
+
+- Service-account and workload-binding editors in the dashboard retain drafts after revision conflicts and offer an explicit reload or rebase. SDK and CLI updates can send the reviewed revision; revocation remains immediate and requires no revision. Metadata backups include these revisions, and import/rollback allocate fresh revisions above both archive and destination history, including deleted identities.
+
+### Definition revision warnings (#465)
 
 - Accepted definition applies without `expected_revision` return structured `warnings` with code `schema-revision-deprecated`, guidance, and observed/result revisions. The SDK shows them through an injectable `warningSink` (default `console.warn`); CLI diagnostics go to stderr, including `--json`; MCP `tila_schema_update` includes them in text and structured output. Embedded/local applies have the same behavior.
 - A revisionless state change records `schema.revisionless_applied` in the same project SQLite transaction as the definition, history and receipt. It contains identity/provenance, idempotency context and revision numbers, without definition contents. Exact retries retain the warning without another revision/event; no-change warns without a state-change event. Rejected writes do not record a successful apply.
 
-### Upgrade notes
+- Upgrade the Worker to record warnings and journal events, then upgrade clients to display them. Older clients may ignore the warning field; `tila journal list --kind schema.revisionless_applied` remains observable. Direct SDK/API applies and MCP `tila_schema_update` still accept omission on non-managed projects. Preview, retain the reviewed revision/definition, and use a stable idempotency key on retry.
+- Supplied revisions retain `412 schema-revision-conflict` behavior without a deprecation warning. Managed projects still require a revision, even for a cached legacy receipt. Requiring revisions everywhere is a future migration; no enforcement release or date is set.
 
-- Task-list compatibility (#399): invalid HTTP `limit` values, including zero, negative, fractional and non-finite values, now return `400 validation-error`; valid limits above 500 remain capped. The local SDK's default task list now includes archived rows to match HTTP. SDK `compact: true` (or a variable boolean) returns a compact/full projection union, so callers must narrow before reading `.data`; omitted/false compact retains full-row typing. These are observable behavior and typing changes, alongside the additive filters and page metadata.
+### Fixes
 
-- Upgrade the Worker to record warnings and journal events, then upgrade clients to display them. An older client may ignore the new response field; the project journal remains observable (`tila journal list --kind schema.revisionless_applied`). No database migration or product-version bump accompanies this change.
-- Current `tila schema apply` still permits revision omission; use `--expected-revision` from a reviewed diff or `--review`. CLI definition import, the dashboard definition editor/importer, and MCP `tila_schema_import` send reviewed revisions on apply. Direct SDK/API applies and MCP `tila_schema_update` still accept omission on non-managed projects and now warn. Preview, retain its `revision`/`reviewed_definition`, and submit them with a stable idempotency key; never substitute a newer revision on retry.
-- Supplied revisions retain HTTP 412 `schema-revision-conflict` behavior without a deprecation warning. Managed projects still require a revision, even for a cached legacy receipt. Requiring revisions everywhere is a future migration; no enforcement release or date is set.
-- Upgrade every Worker instance before enabling GHES issuer trust or exchanging GHES assertions. Workload JSON and signed session claims gain `issuer` and `repository_host`; old contexts without these fields remain GitHub.com only. Older Workers discard the new fields and cannot safely authorize GHES sessions. No additional D1 migration is required for #440. The existing generic OIDC configuration and hardened public HTTPS egress rules are unchanged; private-network-only GHES requires a separate network design.
-- Pre-fix Actions personal enrollments with null sponsor context remain membership-only; their existing credentials are not retroactively repaired. Known affected enrollments must be revoked and re-enrolled with a new operation ID/current assertion. Recovery cannot invent provenance. Existing contextless human/generic OIDC behavior and untagged GitHub mirrored context remain supported; repository-specific revocation cannot be inferred for contextless legacy installations.
-
-### Fixed
-
+- Restoring project names and repository policies assigns revisions above retained destination history, preventing stale editors from overwriting restored data (#442). Revision tracking begins with values present when migration 0035 runs; already-deleted history and whole-database infrastructure rollback are outside this guarantee.
+- Browser step-up authentication preserves the return location under React Strict Mode (#453). Blocked-task counts explain legacy readiness behavior instead of implying those tasks are ready to execute (#458).
 - OIDC verification refreshes expired JWKS before using cached keys, rejects removed keys, and fails closed if refresh fails. Stable-kid rotation retains one retry for a failed cached signature. Cache keys and fetch bookkeeping include both issuer and configured JWKS URI, so an old in-flight fetch cannot restore keys under a new endpoint configuration.
+- Native release smoke checks compare the actual embedded Worker's product version and full build commit with the release manifest, and reject deployment-payload overrides (#485).
 
 ## [0.8.0] - 2026-10-13
 
@@ -429,7 +454,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/davebream/tila/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/davebream/tila/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/davebream/tila/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/davebream/tila/compare/v0.5.0...v0.6.0
