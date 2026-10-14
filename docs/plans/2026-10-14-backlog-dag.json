@@ -4,7 +4,7 @@
   "snapshot_date": "2026-10-14",
   "source_sha": "f231ba532b55fe33de15bc49cdb2e5c35a6439de",
   "plan": "2026-10-14-backlog-execution.md",
-  "review_status": "approved-for-builder-dispatch; local-plan-push-held",
+  "review_status": "approved-for-builder-dispatch",
   "edge_semantics": "hard=completion/acceptance prerequisite; preferred=serialization only; preparation may begin earlier",
   "resource_policy": {
     "max_active_builders": 3,
@@ -447,7 +447,7 @@
           "kind": "review",
           "reviewer": "lead-backlog",
           "result": "approved",
-          "source": "lead user message on 2026-10-14",
+          "source": "lead orchestration review on 2026-10-14",
           "scope": "full written plan and independent graph/coverage checks; #400 #449 #439 released"
         }
       ]
@@ -470,7 +470,7 @@
         {
           "kind": "merge",
           "verified_by": "lead-backlog",
-          "source": "lead user message on 2026-10-14",
+          "source": "https://github.com/davebream/tila/pull/451",
           "pr": 451,
           "head_sha": "2cb07e2d89e4f759a4b4f495632dab159c089700",
           "merge_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
@@ -2204,13 +2204,13 @@
       "change": "Claude 2.1.299 supports xhigh; claude.ai firstParty subscription verified; no API override"
     },
     {
-      "source": "lead user message on 2026-10-14",
+      "source": "lead orchestration review on 2026-10-14",
       "change": "full plan approved; #400 #449 #439 released; push hold remains for final local artifacts"
     },
     {
       "kind": "merge",
       "verified_by": "lead-backlog",
-      "source": "lead user message on 2026-10-14",
+      "source": "https://github.com/davebream/tila/pull/451",
       "pr": 451,
       "head_sha": "2cb07e2d89e4f759a4b4f495632dab159c089700",
       "merge_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
@@ -2221,7 +2221,7 @@
       "issue_state": "CLOSED"
     },
     {
-      "source": "lead user message on 2026-10-14",
+      "source": "lead orchestration review on 2026-10-14",
       "issue": 439,
       "worker": "build-439-revisions",
       "worktree": "/home/dawid/code/tila-workers/issue-439",
@@ -2245,7 +2245,7 @@
           "kind": "review",
           "reviewer": "lead-backlog",
           "result": "approved",
-          "source": "lead user message on 2026-10-14",
+          "source": "lead orchestration review on 2026-10-14",
           "scope": "full written plan and independent graph/coverage checks; #400 #449 #439 released"
         }
       ],
@@ -2265,7 +2265,7 @@
         {
           "kind": "merge",
           "verified_by": "lead-backlog",
-          "source": "lead user message on 2026-10-14",
+          "source": "https://github.com/davebream/tila/pull/451",
           "pr": 451,
           "head_sha": "2cb07e2d89e4f759a4b4f495632dab159c089700",
           "merge_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
@@ -2293,7 +2293,7 @@
           "phase": "baseline",
           "result": "passed",
           "passed": 2,
-          "source": "lead user message on 2026-10-14",
+          "source": "lead orchestration review on 2026-10-14",
           "command": "focused step-up suite; exact invocation held by builder"
         }
       ],
@@ -2314,7 +2314,7 @@
           "phase": "baseline",
           "result": "passed",
           "passed": 37,
-          "source": "lead user message on 2026-10-14",
+          "source": "lead orchestration review on 2026-10-14",
           "command": "focused suite; exact invocation held by builder"
         }
       ],
@@ -2323,7 +2323,7 @@
           "kind": "package-size-baseline",
           "packed_bytes": 63786,
           "unpacked_bytes": 289180,
-          "source": "lead user message on 2026-10-14"
+          "source": "lead orchestration review on 2026-10-14"
         }
       ],
       "lead_review": "dispatch-approved",

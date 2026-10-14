@@ -1,6 +1,6 @@
 # Backlog execution plan — 14 October 2026
 
-**Status: lead reviewed the full plan and released #400, #449 and #439 to implementation. Final plan artifacts remain local and unpushed for the lead's correction check.** Completion of this document does not authorize production secrets or a release. Routine builder handoff follows the repository's existing commit/push/non-draft PR/Mergify policy.
+**Status: lead reviewed the full plan and released #400, #449 and #439 to implementation. This is the reviewed execution baseline; subsequent progress is recorded in the adjacent ledger.** Completion of this document does not authorize production secrets or a release. Routine builder handoff follows the repository's existing commit/push/non-draft PR/Mergify policy.
 
 This plan covers the entire open `davebream/tila` backlog at source **f231ba532b55fe33de15bc49cdb2e5c35a6439de**: 16 issues and three dependency PRs. The adjacent [DAG](2026-10-14-backlog-dag.json) contains inventory, provenance, task status, hard acceptance edges, preferred ordering, execution stages, and progress ledger. Run [the validator](validate-backlog-plan.py) after changing either file. All implementation and acceptance work below is **planned**, except work explicitly marked implementing or delivered in the execution ledger.
 
