@@ -43,6 +43,7 @@ import { SettingsRoomsPage } from "@/pages/settings-rooms";
 import { SettingsRuntimeAccessPage } from "@/pages/settings-runtime-access";
 import { SettingsServiceIdentitiesPage } from "@/pages/settings-service-identities";
 import { SettingsSignalGroupsPage } from "@/pages/settings-signal-groups";
+import { SettingsTransferPage } from "@/pages/settings-transfer";
 import { SignalsPage } from "@/pages/signals";
 import { TasksPage } from "@/pages/tasks";
 import { WorkspacePage } from "@/pages/workspace";
@@ -208,6 +209,7 @@ function ProjectRoutes({ projectId }: { projectId: string }) {
         element={<SettingsRuntimeAccessPage />}
       />
       <Route path="settings/agents" element={<SettingsAgentsPage />} />
+      <Route path="settings/transfer" element={<SettingsTransferPage />} />
       <Route path="settings/rooms" element={<SettingsRoomsPage />} />
       <Route
         path="settings/signal-groups"

@@ -511,6 +511,8 @@ export async function exchangeGitHubToken(
  * backend (HTTP-only — D1 global token store).
  */
 export interface TilaFacade {
+  /** Portable settings orchestration (HTTP only). */
+  settingsTransfer?: ReturnType<typeof createSettingsTransferMethods>;
   queue: QueueBackend;
   attempts: AttemptBackend;
   questions: QuestionBackend;
@@ -552,6 +554,7 @@ export interface TilaFacade {
 /** Build the HTTP-backed facade from a configured `TilaClient`. */
 function buildHttpFacade(client: TilaClient, projectId: string): TilaFacade {
   return {
+    settingsTransfer: createSettingsTransferMethods(client, projectId),
     queue: queueFacade(new RemoteQueueBackend(client, projectId)),
     attempts: attemptFacade(new RemoteAttemptBackend(client, projectId)),
     questions: questionFacade(new RemoteQuestionBackend(client, projectId)),
@@ -702,3 +705,4 @@ export async function createTila(
   });
   return buildHttpFacade(client, config.project_id);
 }
+import { createSettingsTransferMethods } from "./settings-transfer";

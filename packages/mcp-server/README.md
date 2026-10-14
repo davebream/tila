@@ -41,7 +41,7 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (95)
+## Tools (98)
 
 The default catalog contains **nine workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
@@ -187,8 +187,24 @@ Artifact results expose provenance and review state; a matching hash does not es
 | `tila_schema_preview` | Preview configuration changes and return the revision and reviewed definition for conditional apply |
 | `tila_schema_import` | Plan or conditionally apply a TOML/YAML definition file, merging named declarations by default |
 | `tila_schema_export` | Export the applied definition as TOML/YAML with provenance metadata |
+| `tila_settings_export` | Export allowlisted agents, rooms and signal groups with caller-scoped coverage |
+| `tila_settings_import` | Review explicit identity/profile/resource mappings and return a frozen non-secret receipt |
+| `tila_settings_resume` | Inspect or explicitly apply a retained receipt; confirm removals and retain partial outcomes |
 | `tila_template_list` | List available task templates |
 | `tila_template_instantiate` | Create tasks from a template |
+
+The settings tools are in the `settings` group, selected with
+`TILA_MCP_TOOLS=workflow,settings` or `all`. They require the Cloudflare backend.
+`tila_settings_import` never writes. Without `mappings`, it lists required
+identity/profile/resource choices. With mappings it returns `result.receipt`,
+including exact action payloads, destination revisions, warnings and removals.
+Retain that receipt before calling `tila_settings_resume({ receipt, apply: true })`.
+Inspecting with `apply: false` is the default. Confirm listed removals with
+`confirm_removals: true`; keep the returned receipt after every attempt, including
+`partial` or `blocked` outcomes. Resume skips committed actions and retains the
+original IDs and revisions. Changed permissions and revision conflicts block
+replay; they never silently refresh the plan. See [the settings transfer guide](../../docs/settings-transfer.md)
+for mapping shapes, pending profile selections and recovery.
 
 ### Presence & Summary
 

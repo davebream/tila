@@ -587,3 +587,9 @@ export { presentedTitle, presentedText } from "./presentation";
 
 export * from "./question";
 export * from "./custom-journal";
+export * from "./settings-transfer";
+
+export {
+  credentialValueLabel,
+  containsCredentialValue,
+} from "./credential-patterns";

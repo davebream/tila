@@ -88,6 +88,7 @@ const main = defineCommand({
     attempt: () => load(() => import("./commands/attempt")),
     question: () => load(() => import("./commands/question")),
     schema: () => load(() => import("./commands/schema")),
+    settings: () => load(() => import("./commands/settings")),
     journal: () => load(() => import("./commands/journal")),
     config: () => load(() => import("./commands/config")),
     deploy: () => load(() => import("./commands/deploy")),
