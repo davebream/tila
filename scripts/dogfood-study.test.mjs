@@ -1479,6 +1479,401 @@ const validateStudy = (bundle) => {
   return validateBundle({ bundle, rubric, rubricSha256, declaration });
 };
 
+const recoveryMetrics = [
+  "handoff_score",
+  "handoff_candidate_count",
+  "recovery_to_decision_ms",
+  "recovery_to_first_action_ms",
+  "recovery_wrong_decisions",
+];
+
+function replaceEvent(t, kind, change) {
+  change(t.events.find((e) => e.kind === kind));
+}
+
+const replacementMutations = {
+  "wrong-role lifecycle": (t, slot) => {
+    const wrong = {
+      ...slot,
+      replaced_role: slot.replaced_role === "w1" ? "w2" : "w1",
+    };
+    t.events = goodTrial(wrong).events;
+    t.evaluation = passingEvaluation(wrong);
+  },
+  "wrong handoff role": (t, slot) => {
+    replaceEvent(t, "handoff.saved", (e) => {
+      e.actor.role = e.payload.role = slot.replaced_role === "w1" ? "w2" : "w1";
+    });
+  },
+  "wrong evaluated handoff": (t, slot) => {
+    t.evaluation.handoff.role = slot.replaced_role === "w1" ? "w2" : "w1";
+  },
+  "wrong recovery role": (t, slot) => {
+    for (const e of t.events.filter((e) => e.kind.startsWith("recovery.")))
+      e.actor.role = e.payload.role =
+        slot.replaced_role === "w1" ? "w2r" : "w1r";
+  },
+  "wrong recovery actor": (t) => {
+    replaceEvent(t, "recovery.first_action", (e) => {
+      e.actor.role = "w2";
+    });
+  },
+  "wrong recovery participant": (t) => {
+    replaceEvent(t, "recovery.started", (e) => {
+      e.payload.participant = "stranger";
+    });
+  },
+  "wrong recovery session": (t) => {
+    replaceEvent(t, "recovery.decision_stated", (e) => {
+      e.payload.session_id = "s1";
+    });
+  },
+  "wrong original identity": (t) => {
+    replaceEvent(t, "worker.replaced", (e) => {
+      e.payload.from_participant = "stranger";
+    });
+  },
+  "wrong replacement identity": (t) => {
+    replaceEvent(t, "worker.replaced", (e) => {
+      e.payload.to_participant = "stranger";
+    });
+  },
+  "reused session": (t) => {
+    const original = t.events.find((e) => e.kind === "worker.started");
+    const replacement = t.events.find(
+      (e) => e.kind === "worker.started" && e.payload.context === "replacement",
+    );
+    replacement.payload.session_id = original.payload.session_id;
+  },
+  "missing retirement": (t) => {
+    t.events = t.events.filter((e) => e.kind !== "worker.stopped");
+  },
+  "missing recovery start": (t) => {
+    t.events = t.events.filter((e) => !e.kind.startsWith("recovery."));
+  },
+  "action before recovery": (t) => {
+    const e = t.events.find((e) => e.kind === "recovery.first_action");
+    t.events.splice(t.events.indexOf(e), 1);
+    const start = t.events.find((e) => e.kind === "recovery.started");
+    e.mono_ms = start.mono_ms;
+    t.events.splice(t.events.indexOf(start), 0, e);
+  },
+  "duplicate retirement": (t) => {
+    const e = t.events.find((e) => e.kind === "worker.stopped");
+    t.events.splice(t.events.indexOf(e), 0, structuredClone(e));
+  },
+  "duplicate replacement": (t) => {
+    const e = t.events.find((e) => e.kind === "worker.replaced");
+    t.events.splice(t.events.indexOf(e), 0, structuredClone(e));
+  },
+  "duplicate registration": (t) => {
+    const e = t.events.find(
+      (e) => e.kind === "worker.started" && e.payload.context === "replacement",
+    );
+    t.events.splice(t.events.indexOf(e), 0, structuredClone(e));
+  },
+  "duplicate recovery start": (t) => {
+    const e = t.events.find((e) => e.kind === "recovery.started");
+    t.events.splice(t.events.indexOf(e), 0, structuredClone(e));
+  },
+  "recovery before registration": (t) => {
+    const e = t.events.find((e) => e.kind === "recovery.started");
+    t.events.splice(t.events.indexOf(e), 1);
+    const registration = t.events.find(
+      (e) => e.kind === "worker.started" && e.payload.context === "replacement",
+    );
+    e.mono_ms = registration.mono_ms;
+    t.events.splice(t.events.indexOf(registration), 0, e);
+  },
+};
+
+test("declared replacement controls bind handoff and recovery across all four slots", () => {
+  const result = validateStudy(completeBundle());
+  assert.equal(result.ok, true, JSON.stringify(result.findings));
+  assert.equal(result.reading, "informative");
+  for (const slot of declaration.trials) {
+    const ledger = result.ledgers[slot.trial];
+    assert.equal(ledger.outcome, "success");
+    assert.equal(ledger.metrics.handoff_score.value, 4);
+    assert.equal(ledger.metrics.handoff_candidate_count.value, 6);
+    assert.equal(ledger.metrics.recovery_to_decision_ms.value, 19_700);
+    assert.equal(ledger.metrics.recovery_to_first_action_ms.value, 39_700);
+    assert.equal(ledger.metrics.recovery_wrong_decisions.value, 0);
+  }
+});
+
+test("wrong-role, identity and duplicate replacement evidence cannot score a complete bundle", () => {
+  for (const slot of declaration.trials) {
+    for (const [name, mutate] of Object.entries(replacementMutations)) {
+      const bundle = completeBundle();
+      const t = bundle.trials[slot.trial];
+      mutate(t, slot);
+      t.events.forEach((e, i) => {
+        e.seq = i + 1;
+      });
+      const raw = JSON.stringify(t.events);
+      const result = validateStudy(bundle);
+      const label = `${slot.trial}: ${name}`;
+      assert.equal(result.ok, false, label);
+      assert.equal(result.reading, "inconclusive", label);
+      assert.ok(
+        result.findings.some(
+          (f) => f.code === "replacement_invalid" && f.trial === slot.trial,
+        ),
+        label,
+      );
+      const ledger = result.ledgers[slot.trial];
+      assert.equal(ledger.outcome, "harness_invalid", label);
+      for (const metric of recoveryMetrics)
+        assert.equal(
+          ledger.metrics[metric].availability,
+          "unavailable",
+          `${label}: ${metric}`,
+        );
+      if (slot.condition === "B")
+        assert.equal(
+          ledger.gates.G2_lost_acknowledged_decision.undetermined,
+          true,
+          label,
+        );
+      assert.equal(JSON.stringify(t.events), raw, label);
+      assert.equal(result.outcomes.length, 4, label);
+    }
+  }
+});
+
+test("early aborts do not require scheduled replacement evidence", () => {
+  for (const reason of [
+    "abort_wrong_target",
+    "abort_privacy",
+    "harness_failure",
+  ]) {
+    const bundle = completeBundle();
+    const t = bundle.trials.t2;
+    const l = log();
+    l.add("trial.started", "harness", {}, 0);
+    l.add("trial.stopped", "harness", { reason }, 100);
+    if (reason === "harness_failure")
+      l.add(
+        "harness.note",
+        "harness",
+        { topic: "validity", rule_id: "V-schedule" },
+        101,
+      );
+    t.events = l.events;
+    t.evaluation = null;
+    t.review = null;
+    const result = validateStudy(bundle);
+    assert.equal(result.reading, "inconclusive");
+    assert.equal(
+      result.ledgers.t2.outcome,
+      reason === "harness_failure"
+        ? "harness_invalid"
+        : "aborted_wrong_target_or_privacy",
+    );
+    assert.ok(
+      !result.findings.some(
+        (f) =>
+          f.trial === "t2" &&
+          [
+            "replacement_missing",
+            "replacement_invalid",
+            "handoff_missing",
+            "schedule_event_missing",
+          ].includes(f.code),
+      ),
+      JSON.stringify(result.findings),
+    );
+  }
+});
+
+test("early aborts preserve partial lifecycle evidence without requiring future checkpoints", () => {
+  for (const slot of declaration.trials) {
+    for (const lastKind of [
+      "handoff.saved",
+      "worker.stopped",
+      "worker.replaced",
+      "worker.started",
+      "recovery.started",
+    ]) {
+      const bundle = completeBundle();
+      const t = bundle.trials[slot.trial];
+      const last =
+        lastKind === "worker.started"
+          ? t.events.find(
+              (e) => e.kind === lastKind && e.payload.context === "replacement",
+            )
+          : t.events.find((e) => e.kind === lastKind);
+      t.events = t.events.filter((e) => e.seq <= last.seq);
+      t.events.push({
+        ...last,
+        seq: last.seq + 1,
+        mono_ms: last.mono_ms + 1,
+        actor: { role: "harness" },
+        kind: "trial.stopped",
+        payload: { reason: "abort_privacy" },
+      });
+      t.evaluation = null;
+      t.review = null;
+      const result = validateStudy(bundle);
+      assert.notEqual(result.reading, "informative");
+      assert.equal(
+        result.ledgers[slot.trial].outcome,
+        "aborted_wrong_target_or_privacy",
+      );
+      assert.ok(
+        !result.findings.some((f) => f.code === "replacement_invalid"),
+        `${slot.trial}/${lastKind}: ${JSON.stringify(result.findings)}`,
+      );
+    }
+  }
+});
+
+test("replacement binding uses registered participant IDs rather than role-shaped IDs", () => {
+  const bundle = completeBundle();
+  for (const slot of declaration.trials) {
+    const t = bundle.trials[slot.trial];
+    const participants = Object.fromEntries(
+      ["w1", "w2", "w1r", "w2r"].map((r) => [
+        r,
+        `participant-${slot.trial}-${r}`,
+      ]),
+    );
+    for (const e of t.events) {
+      if (["worker.started", "recovery.started"].includes(e.kind))
+        e.payload.participant = participants[e.payload.role];
+      if (e.kind === "worker.replaced") {
+        e.payload.from_participant = participants[slot.replaced_role];
+        e.payload.to_participant = participants[`${slot.replaced_role}r`];
+      }
+      if (e.kind === "handoff.saved") {
+        e.payload.participant = participants[slot.replaced_role];
+        e.payload.session_id = slot.replaced_role === "w1" ? "s1" : "s2";
+      }
+      if (e.kind.startsWith("recovery.")) {
+        e.payload.participant = participants[`${slot.replaced_role}r`];
+        e.payload.session_id = "s3";
+      }
+    }
+    t.trialDir = scratch();
+    writeFileSync(
+      join(t.trialDir, "trial.json"),
+      JSON.stringify({
+        trial: slot.trial,
+        condition: slot.condition,
+        participants,
+        shared: t.trialDir,
+        run_dir: t.trialDir,
+        helper_resource: "src/x.mjs",
+      }),
+    );
+  }
+  const result = validateStudy(bundle);
+  assert.equal(result.ok, true, JSON.stringify(result.findings));
+  assert.equal(result.reading, "informative");
+  for (const slot of declaration.trials)
+    assert.equal(
+      result.ledgers[slot.trial].metrics.recovery_to_decision_ms.value,
+      19_700,
+    );
+});
+
+test("CLI derivation and validation bind declared replacement roles and registered identities", () => {
+  const run = scratch();
+  const cli = (...args) =>
+    spawnSync("node", [join(repo, "scripts/dogfood-study.mjs"), ...args], {
+      encoding: "utf8",
+    });
+  const writeBundle = (bundle) => {
+    writeFileSync(
+      join(run, "manifest.frozen.json"),
+      JSON.stringify({
+        ...declaration,
+        ...bundle.frozen,
+        rubric: declaration.rubric,
+      }),
+    );
+    mkdirSync(join(run, "preflight"), { recursive: true });
+    writeFileSync(
+      join(run, "preflight/drills.json"),
+      JSON.stringify(bundle.drills),
+    );
+    for (const slot of declaration.trials) {
+      const dir = join(run, "trials", slot.trial);
+      mkdirSync(dir, { recursive: true });
+      const t = bundle.trials[slot.trial];
+      writeFileSync(
+        join(dir, "events.jsonl"),
+        `${t.events.map((e) => JSON.stringify(e)).join("\n")}\n`,
+      );
+      writeFileSync(join(dir, "evaluation.json"), JSON.stringify(t.evaluation));
+      writeFileSync(join(dir, "review.json"), JSON.stringify(t.review));
+      writeFileSync(
+        join(dir, "trial.json"),
+        JSON.stringify({
+          trial: slot.trial,
+          condition: slot.condition,
+          helper_resource: "src/x.mjs",
+          shared: dir,
+          run_dir: run,
+          participants: { w1: "w1", w2: "w2", w1r: "w1r", w2r: "w2r" },
+        }),
+      );
+      const raw = readFileSync(join(dir, "events.jsonl"), "utf8");
+      const derived = cli("derive", "--run-dir", run, "--trial", slot.trial);
+      assert.equal(derived.status, 0, derived.stderr);
+      assert.equal(readFileSync(join(dir, "events.jsonl"), "utf8"), raw);
+    }
+  };
+  writeBundle(completeBundle());
+  const positive = cli("validate", "--bundle", run, "--json");
+  assert.equal(positive.status, 0, positive.stdout + positive.stderr);
+  assert.equal(JSON.parse(positive.stdout).reading, "informative");
+  for (const slot of declaration.trials) {
+    for (const name of [
+      "wrong-role lifecycle",
+      "duplicate replacement",
+      "wrong recovery participant",
+      "registered identity mismatch",
+    ]) {
+      const bundle = completeBundle();
+      if (name !== "registered identity mismatch")
+        replacementMutations[name](bundle.trials[slot.trial], slot);
+      bundle.trials[slot.trial].events.forEach((e, i) => {
+        e.seq = i + 1;
+      });
+      writeBundle(bundle);
+      if (name === "registered identity mismatch") {
+        const file = join(run, "trials", slot.trial, "trial.json");
+        const config = JSON.parse(readFileSync(file, "utf8"));
+        config.participants[`${slot.replaced_role}r`] = "registered-stranger";
+        writeFileSync(file, JSON.stringify(config));
+        assert.equal(
+          cli("derive", "--run-dir", run, "--trial", slot.trial).status,
+          0,
+        );
+      }
+      const rawFile = join(run, "trials", slot.trial, "events.jsonl");
+      const raw = readFileSync(rawFile, "utf8");
+      const checked = cli("validate", "--bundle", run, "--json");
+      assert.equal(checked.status, 1, `${slot.trial}: ${name}`);
+      const result = JSON.parse(checked.stdout);
+      assert.equal(result.reading, "inconclusive");
+      assert.ok(
+        result.findings.some(
+          (f) => f.code === "replacement_invalid" && f.trial === slot.trial,
+        ),
+      );
+      for (const metric of recoveryMetrics)
+        assert.equal(
+          result.ledgers[slot.trial].metrics[metric].availability,
+          "unavailable",
+        );
+      assert.equal(readFileSync(rawFile, "utf8"), raw);
+    }
+  }
+});
+
 test("informative requires all four valid trials and permits at most one assisted trial", () => {
   const bundle = completeBundle();
   const initial = validateStudy(bundle);
