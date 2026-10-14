@@ -1969,6 +1969,106 @@ Tighter binding policy is immediate; later expansion does not expand an old sess
 Monitor `authorization/denied` and `auth/lookup` analytics alongside ordinary request
 errors and latency. Telemetry excludes bearer credentials and hashes.
 
+### Enterprise Actions issuer trust
+
+GitHub.com Actions always has the built-in issuer
+`https://token.actions.githubusercontent.com` and fixed JWKS endpoint
+`https://token.actions.githubusercontent.com/.well-known/jwks`. A deployment
+operator can also configure `GITHUB_ACTIONS_TRUSTED_ISSUERS` as a JSON array:
+
+```json
+[
+  {
+    "issuer": "https://ghe.example.com/_services/token",
+    "host": "ghe.example.com",
+    "jwks_uri": "https://keys.example.com/actions-jwks"
+  }
+]
+```
+
+Use the exact issuer and JWKS endpoint supplied by your GHES installation; the
+URLs above are examples. The repository host is a lowercase DNS hostname,
+without a scheme, userinfo, port or path. Issuer and JWKS URLs must use HTTPS
+without credentials, queries or fragments. Duplicate issuer identities and
+overrides of the built-in GitHub.com mapping are rejected. The issuer is matched
+exactly against the verified token's `iss`; an unverified claim can only select
+one explicitly configured endpoint for verification. It never enables discovery
+or a fetch to an unconfigured URL. Invalid JSON or invalid entries fail closed
+for all Actions exchanges and later Actions authorization until corrected.
+Generic OIDC configuration is separate.
+
+Store the array in a local `actions-issuers.json`, then set it for the selected
+Worker using the operator's existing Wrangler configuration:
+
+```sh
+wrangler secret put GITHUB_ACTIONS_TRUSTED_ISSUERS --name <worker-name> < actions-issuers.json
+```
+
+The mapping contains no secrets. Storing it as a Worker secret preserves it
+across CLI-generated deployment configurations, which intentionally omit
+`[vars]`. Unset the setting or use `[]` to trust only GitHub.com. The existing
+`GITHUB_OIDC_AUDIENCE` must still match the workflow's audience exactly.
+
+Link the repository under its mapped host and enable its Actions OIDC policy in
+Settings › Repositories (or `tila repos oidc` with `--host`). Host plus numeric
+repository ID selects the policy; an identical ID on GitHub.com or another
+Enterprise host grants no access. For a service workload binding, choose GitHub
+Actions and enter the exact configured Enterprise issuer in Settings › Service
+identities, or pass it as `--issuer` to the workload CLI command. Creating a
+binding does not establish deployment issuer trust. Canonical project membership
+continues to use the existing roster; direct Actions principals include their
+actual issuer, and service bindings resolve to their existing service principal.
+
+The hardened OIDC fetch path still rejects private/loopback targets, redirects,
+oversized responses and timeouts. Do not disable those guards for a GHES server
+reachable only on a private network: that needs a separate reviewed network
+design. Keys, eviction and rotation retry bookkeeping are isolated by issuer
+and configured JWKS endpoint, including overlapping fetches during a config
+change. Successful cached keys expire after one hour: verification refreshes
+before using an expired namespace and fails closed if that refresh fails. A
+failed cached signature gets at most one rotation retry against its configured
+endpoint.
+
+Removing a trusted issuer, changing its host mapping, disabling a repository
+link or its OIDC policy, revoking a binding, or removing membership denies later
+protected requests from previously exchanged credentials, runtime runs and
+signed sessions that retain verified workload or tagged Actions sponsor context.
+Historical cookie sessions derived from credentials revalidate
+their source too. Policy tightening narrows issued authority; a later expansion
+does not expand its issuance ceiling. Requests already authorized and executing
+are outside this subsequent-request guarantee.
+
+Personal runtime enrollments sponsored by Actions also retain the complete
+server-derived workload context, tagged `provider: "github-actions"` in the
+existing `sponsor_context_json`. Every enrollment/run authentication, child run
+start, recovery, renewal and heartbeat rechecks current Actions membership,
+deployment trust, repository policy and the issuer's subject-revocation cutoff.
+Canonical issuer/subject must match the recorded sponsor. Current authority
+narrows the frozen enrollment capabilities and restrictions; it never rebuilds
+a broader policy from the sponsor's role. Recovery binds the operation ID to the
+original normalized context, including repository ID and workflow conditions,
+and refuses an existing effective policy above the current caller's ceiling.
+
+Contextless personal enrollments from older Workers, including pre-fix
+Actions-sponsored enrollments, cannot identify an Actions repository safely.
+Their existing credentials remain membership-only and are not retroactively
+repaired. That behavior remains for human and generic OIDC compatibility.
+Recovery using an Actions session cannot infer
+or add provenance to one: re-enroll with a new operation ID and current Actions
+assertion, then revoke the old installation and its descendants. Repository-specific
+revocation cannot be established for those contextless legacy installations.
+Known affected Actions enrollments must be revoked and re-enrolled during rollout.
+The historical untagged GitHub human mirrored context remains supported.
+
+Upgrade all serving Worker instances **before** configuring GHES trust. No new
+D1 columns or migration are needed: workload JSON and the signed session's
+`workload` claim add `issuer` and `repository_host`. A legacy context with both
+fields absent means GitHub.com only; supplying just one is invalid. Older Workers
+discard the new fields, so a mixed-version deployment cannot safely authorize
+GHES sessions. Do not roll back to such a Worker while GHES credentials or
+sessions remain usable; remove trust, revoke the affected credentials/runs and
+sessions, and let any upstream assertions expire first.
+
 ### Browser administration (#102)
 
 The dashboard's **Settings** page (`/p/<project>/settings`) lets a project owner

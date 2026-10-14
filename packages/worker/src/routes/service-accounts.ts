@@ -29,9 +29,10 @@ serviceAccountRoutes.use("*", requireProjectOwner, stepUpGuard);
 serviceAccountRoutes.get("/", async (c) =>
   c.json({
     ok: true,
-    service_accounts: await new CredentialStore(c.env.DB).listServices(
-      c.get("projectId"),
-    ),
+    service_accounts: await new CredentialStore(
+      c.env.DB,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).listServices(c.get("projectId")),
   }),
 );
 serviceAccountRoutes.post("/", async (c) => {
@@ -46,11 +47,13 @@ serviceAccountRoutes.post("/", async (c) => {
   )
     return denied(c);
   const token = c.get("tokenResult");
-  const account = await new CredentialStore(c.env.DB).createService(
-    c.get("projectId"),
-    parsed.data,
-    { principalId: principalIdFor(token), tokenId: token.tokenId },
-  );
+  const account = await new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).createService(c.get("projectId"), parsed.data, {
+    principalId: principalIdFor(token),
+    tokenId: token.tokenId,
+  });
   return c.json({ ok: true, service_account: account }, 201);
 });
 serviceAccountRoutes.patch("/:principalId", async (c) => {
@@ -59,7 +62,10 @@ serviceAccountRoutes.patch("/:principalId", async (c) => {
   );
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const token = c.get("tokenResult");
-  const account = await new CredentialStore(c.env.DB).updateService(
+  const account = await new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).updateService(
     c.get("projectId"),
     c.req.param("principalId"),
     parsed.data.display_name,
@@ -73,11 +79,13 @@ serviceAccountRoutes.patch("/:principalId", async (c) => {
 });
 serviceAccountRoutes.delete("/:principalId", async (c) => {
   const token = c.get("tokenResult");
-  await new CredentialStore(c.env.DB).revokeService(
-    c.get("projectId"),
-    c.req.param("principalId"),
-    { principalId: principalIdFor(token), tokenId: token.tokenId },
-  );
+  await new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).revokeService(c.get("projectId"), c.req.param("principalId"), {
+    principalId: principalIdFor(token),
+    tokenId: token.tokenId,
+  });
   await expireAgentBindings(c.env, c.get("projectId"), {
     principal_id: c.req.param("principalId"),
   });
@@ -86,10 +94,10 @@ serviceAccountRoutes.delete("/:principalId", async (c) => {
 serviceAccountRoutes.get("/:principalId/workload-bindings", async (c) =>
   c.json({
     ok: true,
-    bindings: await new CredentialStore(c.env.DB).listBindings(
-      c.get("projectId"),
-      c.req.param("principalId"),
-    ),
+    bindings: await new CredentialStore(
+      c.env.DB,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).listBindings(c.get("projectId"), c.req.param("principalId")),
   }),
 );
 serviceAccountRoutes.post("/:principalId/workload-bindings", async (c) => {
@@ -98,12 +106,13 @@ serviceAccountRoutes.post("/:principalId/workload-bindings", async (c) => {
   const policy = scopedPolicy(c);
   if (policy && !policyContains(policy, parsed.data.policy)) return denied(c);
   const token = c.get("tokenResult");
-  const binding = await new CredentialStore(c.env.DB).createBinding(
-    c.get("projectId"),
-    c.req.param("principalId"),
-    parsed.data,
-    { principalId: principalIdFor(token), tokenId: token.tokenId },
-  );
+  const binding = await new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).createBinding(c.get("projectId"), c.req.param("principalId"), parsed.data, {
+    principalId: principalIdFor(token),
+    tokenId: token.tokenId,
+  });
   return c.json({ ok: true, binding }, 201);
 });
 serviceAccountRoutes.patch(
@@ -116,7 +125,10 @@ serviceAccountRoutes.patch(
     const policy = scopedPolicy(c);
     if (policy && !policyContains(policy, parsed.data.policy)) return denied(c);
     const token = c.get("tokenResult");
-    const binding = await new CredentialStore(c.env.DB).updateBinding(
+    const binding = await new CredentialStore(
+      c.env.DB,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).updateBinding(
       c.get("projectId"),
       c.req.param("principalId"),
       c.req.param("bindingId"),
@@ -131,7 +143,10 @@ serviceAccountRoutes.delete(
   "/:principalId/workload-bindings/:bindingId",
   async (c) => {
     const token = c.get("tokenResult");
-    const revoked = await new CredentialStore(c.env.DB).revokeBinding(
+    const revoked = await new CredentialStore(
+      c.env.DB,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).revokeBinding(
       c.get("projectId"),
       c.req.param("principalId"),
       c.req.param("bindingId"),

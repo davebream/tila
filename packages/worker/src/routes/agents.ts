@@ -79,7 +79,12 @@ agents.all("*", async (c) => {
           },
           403,
         );
-      const store = new RuntimeStore(c.env.DB);
+      const store = new RuntimeStore(
+        c.env.DB,
+        undefined,
+        undefined,
+        c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+      );
       if (authority.runtime.run_role === "relay") {
         const acting = parsed.data.acting_run_id
           ? await store.run(parsed.data.acting_run_id)

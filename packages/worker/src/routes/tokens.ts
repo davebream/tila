@@ -59,7 +59,10 @@ tokens.post("/", async (c) => {
     if (parentPolicy && !policyContains(parentPolicy, policy)) return denied(c);
     const plaintext = await generateToken();
     const tokenHash = await hashToken(plaintext, c.env.HASH_PEPPER);
-    const issued = await new CredentialStore(c.env.DB).issue(
+    const issued = await new CredentialStore(
+      c.env.DB,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).issue(
       {
         projectId,
         principalId: principal_id,
@@ -146,7 +149,10 @@ tokens.delete("/:name", async (c) => {
   const projectId = tokenResult.projectId;
   const name = c.req.param("name");
 
-  const scopedStore = new CredentialStore(c.env.DB);
+  const scopedStore = new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  );
   const scoped = await scopedStore.find(projectId, name);
   if (scoped) {
     const parent = scopedPolicy(c);
@@ -211,7 +217,10 @@ tokens.get("/", async (c) => {
       ...rows
         .filter((row) => row.scopes !== "scoped-v1")
         .map((row) => ({ ...row, legacy: true })),
-      ...(await new CredentialStore(c.env.DB).list(projectId)),
+      ...(await new CredentialStore(
+        c.env.DB,
+        c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+      ).list(projectId)),
     ],
   });
 });
@@ -226,7 +235,10 @@ tokens.post("/:name/rotate", async (c) => {
   const parsed = TokenRotateRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const token = c.get("tokenResult");
-  const store = new CredentialStore(c.env.DB);
+  const store = new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  );
   const row = await store.find(token.projectId, c.req.param("name"));
   if (!row)
     return c.json(

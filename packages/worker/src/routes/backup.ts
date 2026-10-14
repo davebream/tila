@@ -520,9 +520,17 @@ export function createBackupRoutes(options: {
       }
     }
     statements.push(...revisions.assign);
-    await new RuntimeStore(c.env.DB).revokeProject(projectId, callerOwner(c));
+    await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).revokeProject(projectId, callerOwner(c));
     // Restoring membership/binding metadata must not resurrect old credentials.
-    await new CredentialStore(c.env.DB).revokeProjectCredentials(projectId, {
+    await new CredentialStore(
+      c.env.DB,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).revokeProjectCredentials(projectId, {
       principalId: callerOwner(c),
       tokenId: options.projectTokenAuth
         ? c.get("tokenResult").tokenId

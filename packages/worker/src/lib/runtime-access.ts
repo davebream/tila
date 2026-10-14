@@ -56,6 +56,7 @@ export async function runtimeOperator(c: RuntimeHttpContext, owner = false) {
     c.env.DB,
     token,
     token.projectId,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
   );
   if (!membership)
     throw new RuntimeDenied(
@@ -118,7 +119,12 @@ export async function runtimeDescendant(
   workloadSelf = false,
 ) {
   const authority = runtimeAuthority(c);
-  const row = await new RuntimeStore(c.env.DB).run(runId);
+  const row = await new RuntimeStore(
+    c.env.DB,
+    undefined,
+    undefined,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).run(runId);
   if (
     workloadSelf &&
     authority?.purpose === "run" &&
@@ -142,7 +148,12 @@ export async function runtimeDescendant(
 
 export async function runtimeVisibleEnrollments(c: RuntimeHttpContext) {
   const authority = runtimeAuthority(c);
-  const store = new RuntimeStore(c.env.DB);
+  const store = new RuntimeStore(
+    c.env.DB,
+    undefined,
+    undefined,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  );
   if (authority?.purpose === "enrollment")
     return (await store.listEnrollments(c.get("projectId"))).filter(
       (row) => row.enrollment_id === authority.enrollment_id,
@@ -152,6 +163,7 @@ export async function runtimeVisibleEnrollments(c: RuntimeHttpContext) {
     c.env.DB,
     token,
     c.get("projectId"),
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
   );
   if (!membership)
     throw new RuntimeDenied(

@@ -31,6 +31,8 @@ import { createCredentialFixture } from "./d1/helpers/credential-fixture";
 
 vi.mock("../src/lib/oidc-verify", () => ({
   verifyOidcToken: async () => ({
+    iss: "https://token.actions.githubusercontent.com",
+    repository_host: "github.com",
     repository_id: 42,
     actor: "owner",
     actor_id: 7,

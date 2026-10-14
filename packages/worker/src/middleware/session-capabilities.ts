@@ -60,7 +60,12 @@ export async function computeSessionCapabilities(
 
   let membership: Awaited<ReturnType<typeof resolveTokenMembership>>;
   try {
-    membership = await resolveTokenMembership(c.env.DB, token, token.projectId);
+    membership = await resolveTokenMembership(
+      c.env.DB,
+      token,
+      token.projectId,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    );
   } catch {
     return { ...base, membership_available: false };
   }

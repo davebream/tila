@@ -4,6 +4,7 @@ import {
   CredentialPolicyReadSchema,
   CredentialPolicySchema,
   GitHubActionsContextSchema,
+  GitHubActionsEnrollmentSponsorSchema,
   INVITATION_TTL_SECONDS,
   PROJECT_ROLE_RANK,
   RUNTIME_PROTOCOL,
@@ -13,9 +14,12 @@ import {
   RUN_TOKEN_TTL_SECONDS,
   RuntimeContextSchema,
   type RuntimeEnrollmentRequest,
+  type RuntimeEnrollmentSponsor,
+  RuntimeEnrollmentSponsorSchema,
   type RuntimeInvitation,
   type RuntimeRunRequest,
   effectiveCredentialPolicy,
+  githubActionsIdentity,
   intersectCredentialPolicies,
   permissionToRole,
   policyContains,
@@ -26,8 +30,10 @@ import { D1DeploymentMetaStore } from "./deployment-meta";
 import {
   type MirroredMembershipCandidate,
   ProjectMembershipStore,
+  canonicalMembershipPrincipal,
 } from "./project-memberships";
 import { RepoAllowlistStore } from "./repo-allowlist";
+import { D1RevokedSubjectsStore } from "./revoked-subjects-store";
 import {
   credentialEvents,
   projectMemberships,
@@ -42,7 +48,10 @@ import {
   tokens,
   workloadBindings,
 } from "./schema";
-import { resolveActionsPolicy } from "./workload-policy";
+import {
+  resolveActionsMembership,
+  resolveActionsPolicy,
+} from "./workload-policy";
 
 export const RUNTIME_TOKEN_MARKER = "runtime-v1";
 export class RuntimeDenied extends Error {
@@ -56,6 +65,7 @@ export class RuntimeDenied extends Error {
 }
 type EnrollmentRow = typeof runtimeEnrollments.$inferSelect;
 type RunRow = typeof runtimeRuns.$inferSelect;
+type SponsorContext = RuntimeEnrollmentSponsor;
 export interface RuntimeSecret {
   hash: string;
   id: string;
@@ -72,6 +82,7 @@ export class RuntimeStore {
       principal: string,
       agent: string,
     ) => Promise<void>,
+    private trustedActionsIssuers?: string,
   ) {
     this.db = drizzle(binding);
   }
@@ -125,6 +136,14 @@ export class RuntimeStore {
       .where(eq(runtimeRuns.run_id, id))
       .get();
   }
+  private sponsorContext(raw: string | null): SponsorContext | null {
+    if (raw === null) return null;
+    try {
+      return RuntimeEnrollmentSponsorSchema.parse(JSON.parse(raw));
+    } catch {
+      this.deny("enrollment-revoked", "Invalid sponsor context");
+    }
+  }
   private async enrollmentPolicy(
     row: EnrollmentRow,
   ): Promise<CredentialPolicy> {
@@ -150,51 +169,89 @@ export class RuntimeStore {
     );
     if (row.sponsor_id) {
       let mirrored: MirroredMembershipCandidate | null = null;
-      if (row.sponsor_context_json) {
-        const original = JSON.parse(
-          row.sponsor_context_json,
-        ) as MirroredMembershipCandidate;
-        const current = await new RepoAllowlistStore(
-          this.binding,
-        ).getAccessPolicy(row.project_id, "github.com", original.githubRepoId);
-        const revoked = await this.db
-          .select()
-          .from(revokedSubjects)
-          .where(
-            and(
-              eq(revokedSubjects.project_id, row.project_id),
-              eq(revokedSubjects.identity_host, "github.com"),
-              eq(
-                revokedSubjects.subject_id,
-                row.sponsor_id.replace("github:github.com:", ""),
-              ),
-            ),
+      let actions: Awaited<ReturnType<typeof resolveActionsMembership>> | null =
+        null;
+      const original = this.sponsorContext(row.sponsor_context_json);
+      if (original) {
+        if ("provider" in original) {
+          const parsed =
+            GitHubActionsEnrollmentSponsorSchema.safeParse(original);
+          if (
+            !parsed.success ||
+            canonicalMembershipPrincipal({
+              provider: "oidc",
+              issuer: githubActionsIdentity(parsed.data.workload).issuer,
+              subject: parsed.data.workload.sub,
+            }).principalId !== row.sponsor_id
           )
-          .get();
-        if (revoked && revoked.revoked_before >= row.created_at * 1000)
-          this.deny(
-            "enrollment-revoked",
-            "Personal sponsor authority was revoked",
+            this.deny("enrollment-revoked", "Invalid Actions sponsor identity");
+          actions = await resolveActionsMembership(
+            this.binding,
+            row.project_id,
+            parsed.data.workload,
+            undefined,
+            this.trustedActionsIssuers,
           );
-        if (
-          current.status === "ok" &&
-          current.policy.membership_enabled &&
-          current.repo.enabled
-        ) {
-          const roles = [
-            original.role,
-            current.policy.membership_role_cap,
-            permissionToRole(current.policy.max_permission),
-          ];
-          roles.sort((a, b) => PROJECT_ROLE_RANK[a] - PROJECT_ROLE_RANK[b]);
-          mirrored = { githubRepoId: original.githubRepoId, role: roles[0] };
+          const revoked = await new D1RevokedSubjectsStore(
+            this.binding,
+          ).getRevokedBefore(
+            row.project_id,
+            githubActionsIdentity(parsed.data.workload).issuer,
+            parsed.data.workload.sub,
+          );
+          if (
+            !actions ||
+            (revoked !== null && revoked >= row.created_at * 1000)
+          )
+            this.deny(
+              "enrollment-revoked",
+              "Actions sponsor authorization is inactive",
+            );
+        } else {
+          const current = await new RepoAllowlistStore(
+            this.binding,
+          ).getAccessPolicy(
+            row.project_id,
+            "github.com",
+            original.githubRepoId,
+          );
+          const revoked = await this.db
+            .select()
+            .from(revokedSubjects)
+            .where(
+              and(
+                eq(revokedSubjects.project_id, row.project_id),
+                eq(revokedSubjects.identity_host, "github.com"),
+                eq(
+                  revokedSubjects.subject_id,
+                  row.sponsor_id.replace("github:github.com:", ""),
+                ),
+              ),
+            )
+            .get();
+          if (revoked && revoked.revoked_before >= row.created_at * 1000)
+            this.deny(
+              "enrollment-revoked",
+              "Personal sponsor authority was revoked",
+            );
+          if (
+            current.status === "ok" &&
+            current.policy.membership_enabled &&
+            current.repo.enabled
+          ) {
+            const roles = [
+              original.role,
+              current.policy.membership_role_cap,
+              permissionToRole(current.policy.max_permission),
+            ];
+            roles.sort((a, b) => PROJECT_ROLE_RANK[a] - PROJECT_ROLE_RANK[b]);
+            mirrored = { githubRepoId: original.githubRepoId, role: roles[0] };
+          }
         }
       }
-      const sponsor = await memberships.resolve(
-        row.project_id,
-        row.sponsor_id,
-        mirrored,
-      );
+      const sponsor =
+        actions ??
+        (await memberships.resolve(row.project_id, row.sponsor_id, mirrored));
       if (!sponsor)
         this.deny(
           "enrollment-revoked",
@@ -255,13 +312,20 @@ export class RuntimeStore {
         ),
       );
       if (binding.provider === "github-actions") {
-        const context = GitHubActionsContextSchema.parse(
+        const parsed = GitHubActionsContextSchema.safeParse(
           JSON.parse(row.workload_context_json ?? "null"),
         );
+        if (
+          !parsed.success ||
+          binding.issuer !== githubActionsIdentity(parsed.data).issuer ||
+          binding.subject !== parsed.data.sub
+        )
+          this.deny("enrollment-revoked", "Invalid workload identity");
         const current = await resolveActionsPolicy(
           this.binding,
           row.project_id,
-          context,
+          parsed.data,
+          this.trustedActionsIssuers,
         );
         if (!current)
           this.deny(
@@ -434,8 +498,11 @@ export class RuntimeStore {
     ceiling: CredentialPolicy,
     secret: RuntimeSecret,
     invitationHash?: string,
-    sponsorContext?: MirroredMembershipCandidate | null,
+    sponsorContext?: SponsorContext | null,
   ) {
+    const normalizedSponsor = sponsorContext
+      ? RuntimeEnrollmentSponsorSchema.parse(sponsorContext)
+      : null;
     const existing = await this.enrollment(input.operation_id);
     const policy =
       input.policy ??
@@ -467,7 +534,29 @@ export class RuntimeStore {
           "runtime-binding-mismatch",
           "Enrollment operation is already bound to another identity",
         );
-      await this.enrollmentPolicy(existing);
+      // An Actions operation cannot recover via a different verified repository
+      // or context, or silently upgrade a contextless legacy enrollment.
+      const originalSponsor = this.sponsorContext(
+        existing.sponsor_context_json,
+      );
+      if (
+        (normalizedSponsor && "provider" in normalizedSponsor) ||
+        (originalSponsor && "provider" in originalSponsor)
+      ) {
+        if (
+          JSON.stringify(originalSponsor) !== JSON.stringify(normalizedSponsor)
+        )
+          this.deny(
+            "runtime-binding-mismatch",
+            "Enrollment is bound to another sponsor context",
+          );
+      }
+      const currentPolicy = await this.enrollmentPolicy(existing);
+      if (!policyContains(ceiling, currentPolicy))
+        this.deny(
+          "runtime-policy-denied",
+          "Recovered enrollment exceeds the caller ceiling",
+        );
       // A proven holder can recover an interrupted enrollment. Retire previous
       // authenticators atomically; the service identity never changes.
       await this.db.batch([
@@ -539,8 +628,8 @@ export class RuntimeStore {
           kind: sponsor ? "personal" : "shared",
           principal_id: principal,
           sponsor_id: sponsor,
-          sponsor_context_json: sponsorContext
-            ? JSON.stringify(sponsorContext)
+          sponsor_context_json: normalizedSponsor
+            ? JSON.stringify(normalizedSponsor)
             : null,
           invitation_hash: invitationHash,
           jkt: input.jkt,

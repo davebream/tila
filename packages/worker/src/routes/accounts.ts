@@ -252,9 +252,12 @@ accounts.get("/tokens", async (c) => {
   const projectId = c.req.query("projectId");
   if (!projectId) return c.json(fail("Project required"), 400);
   const principalId = `user:${authenticated(c).user.id}`;
-  const tokens = (await new CredentialStore(c.env.DB).list(projectId)).filter(
-    (token) => token.principal_id === principalId,
-  );
+  const tokens = (
+    await new CredentialStore(
+      c.env.DB,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).list(projectId)
+  ).filter((token) => token.principal_id === principalId);
   return c.json({ tokens });
 });
 accounts.use("/tokens*", async (c, next) => {
@@ -275,7 +278,10 @@ accounts.post("/tokens", async (c) => {
     return c.json(fail("Token expiry must be within one year"), 400);
   const principalId = `user:${authenticated(c).user.id}`;
   const plaintext = await generateToken();
-  const issued = await new CredentialStore(c.env.DB).issue(
+  const issued = await new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).issue(
     {
       projectId: input.projectId,
       principalId,
@@ -292,7 +298,10 @@ accounts.on(["DELETE", "POST"], "/tokens/:name", async (c) => {
   const projectId = c.req.query("projectId");
   if (!projectId) return c.json(fail("Project required"), 400);
   const principalId = `user:${authenticated(c).user.id}`;
-  const store = new CredentialStore(c.env.DB);
+  const store = new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  );
   const credential = await store.find(projectId, c.req.param("name"));
   if (!credential || credential.principal_id !== principalId)
     return c.json(fail("Token not found"), 404);

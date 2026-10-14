@@ -41,7 +41,10 @@ import {
 import { deriveSectionState } from "@/lib/query-state";
 import { useSettingsDraft } from "@/lib/settings-draft";
 import { useMutation } from "@tanstack/react-query";
-import { GITHUB_ACTIONS_ISSUER } from "@tila/schemas";
+import {
+  GITHUB_ACTIONS_ISSUER,
+  GitHubActionsEndpointSchema,
+} from "@tila/schemas";
 import { type FormEvent, useState } from "react";
 import { z } from "zod";
 
@@ -368,8 +371,8 @@ export function WorkloadBindingsDrawer({
         <p className="text-sm text-muted-foreground">
           A workload whose token matches the issuer and subject acts as{" "}
           <span className="font-mono">{account.name}</span> under the binding's
-          policy, capped by the account's membership. Policy changes apply to
-          the next token exchange.
+          policy, capped by the account's membership. The server checks the
+          current binding and repository policy on every protected request.
         </p>
         {notice && <FormNotice tone="info">{notice}</FormNotice>}
         <QuerySection
@@ -554,7 +557,7 @@ function BindingForm({
       void invalidate.services();
       onDone(
         binding
-          ? `Saved the policy of ${binding.name}; it applies to the next token exchange.`
+          ? `Saved the policy of ${binding.name}; it applies to subsequent protected requests.`
           : `Added ${value.name.trim()}.`,
       );
     },
@@ -568,7 +571,11 @@ function BindingForm({
     ? {}
     : {
         name: NAME.test(value.name.trim()) ? undefined : NAME_RULE,
-        issuer: /^https?:\/\/\S+$/.test(value.issuer.trim())
+        issuer: (
+          value.provider === "github-actions"
+            ? GitHubActionsEndpointSchema.safeParse(value.issuer.trim()).success
+            : /^https?:\/\/\S+$/.test(value.issuer.trim())
+        )
           ? undefined
           : "Enter the issuer URL.",
         subject:
@@ -643,6 +650,11 @@ function BindingForm({
             value={value.issuer}
             disabled={save.isPending}
             error={shown.issuer}
+            hint={
+              value.provider === "github-actions"
+                ? "Use the exact GitHub.com or Enterprise Actions issuer configured by your deployment operator. A binding does not add issuer trust."
+                : undefined
+            }
             onChange={(e) => setValue({ ...value, issuer: e.target.value })}
           />
           <TextField

@@ -488,9 +488,9 @@ export function OidcPolicyDrawer({
             "The stored policy is invalid, so a disabled policy is shown; saving writes a complete one. "}
           GitHub Actions runs in this repository can exchange their OIDC token
           for a project session when every condition matches. The policy is read
-          on every exchange.
+          on every exchange and subsequent protected request.
           {link.github_host !== "github.com" &&
-            " Exchange is currently accepted only for github.com repositories."}
+            " Your deployment operator must configure a trusted Enterprise Actions issuer for this repository host."}
         </>
       }
       link={link}
