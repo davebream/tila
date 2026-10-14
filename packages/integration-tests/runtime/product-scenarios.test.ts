@@ -111,18 +111,21 @@ it("S1 serializes three revisionful client-shaped edits and rejects a stale orig
       })
     ).status,
   ).toBe(200);
+  const clients = ["ui", "cli", "mcp"];
+  // Comments normalize to semantic no-ops. Each contender must change state.
+  const command = (client: string) => ({
+    definition: `${original}\n[work_units.bug.fields.field_${client}]\ntype = "string"\n`,
+    applied_by: client,
+    expected_revision: 1,
+    idempotency_key: `edit-${client}`,
+  });
   const responses = await Promise.all(
-    ["ui", "cli", "mcp"].map((client) =>
-      post(stub, "/schema/apply", {
-        definition: `${original}\n# ${client}`,
-        applied_by: client,
-        expected_revision: 1,
-        idempotency_key: `edit-${client}`,
-      }),
-    ),
+    clients.map((client) => post(stub, "/schema/apply", command(client))),
   );
   expect(responses.map((r) => r.status).sort()).toEqual([200, 412, 412]);
+  const winner = clients[responses.findIndex((r) => r.status === 200)];
   await evictDurableObject(stub);
+  expect((await post(stub, "/schema/apply", command(winner))).status).toBe(200);
   expect(
     (
       await post(stub, "/schema/apply", {
@@ -136,6 +139,13 @@ it("S1 serializes three revisionful client-shaped edits and rejects a stale orig
     await stub.fetch("https://project/schema/history")
   ).json<{ entries: unknown[] }>();
   expect(history.entries).toHaveLength(2);
+  const current = await (
+    await stub.fetch("https://project/schema/current")
+  ).json<{ revision: number; schema: { definition: string } }>();
+  expect(current.revision).toBe(2);
+  expect(current.schema.definition).toContain(`field_${winner}`);
+  for (const loser of clients.filter((client) => client !== winner))
+    expect(current.schema.definition).not.toContain(`field_${loser}`);
 });
 
 it("S2 retains two distinct answers and one logical replay effect across outage and replacement", async () => {
