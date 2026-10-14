@@ -11,10 +11,10 @@
  *    Selects an exact deployment-trusted issuer before any fetch, delegates
  *    verification, then attaches the configured repository host.
  *
- * JWKS cache and rotation/eviction bookkeeping are isolated by exact issuer
- * AND configured JWKS URI. Length-prefixed namespace keys prevent crafted kid
- * collisions. In-flight fetches from an older configuration own only their
- * original namespace, including eviction and rotation-retry timestamps.
+ * JWKS cache and rotation bookkeeping are isolated by exact issuer AND
+ * configured JWKS URI. Each source owns a nested kid map, atomically replaced
+ * after import. Refreshes coalesce per source; old configuration fetches cannot
+ * populate another source or leave orphan keys after concurrent eviction.
  */
 
 import { base64UrlDecode } from "./base64url";
@@ -87,22 +87,17 @@ export interface VerifiedOidcResult {
 }
 
 // ---------------------------------------------------------------------------
-// JWKS cache — three maps for issuer/URI isolation and eviction
+// JWKS cache — independent, atomically published issuer/URI snapshots
 // ---------------------------------------------------------------------------
 
-/** Length-prefix the exact issuer/URI namespace so arbitrary kid values cannot collide. */
-function cacheKey(namespace: string, kid: string): string {
-  return `${namespace.length}:${namespace}:${kid}`;
-}
-
-/** `kid → CryptoKey` — keyed by the length-prefixed issuer/URI namespace. */
-const jwksCache = new Map<string, CryptoKey>();
-
-/** Per-issuer/URI timestamp of the last successful JWKS fetch. */
-const lastFetchedAt = new Map<string, number>();
-
-/** Per-issuer/URI set of (raw) kid values currently loaded into `jwksCache`. */
-const namespaceKids = new Map<string, Set<string>>();
+const jwksCache = new Map<
+  string,
+  {
+    keys: Map<string, CryptoKey>;
+    fetchedAt: number;
+  }
+>();
+const jwksRefreshes = new Map<string, Promise<void>>();
 
 const JWKS_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -112,31 +107,42 @@ const JWKS_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 /**
  * Clear the JWKS cache (for testing only).
- * Clears all three maps so cache state never leaks across tests.
+ * Clears snapshots and fetch ownership so pending test fetches cannot republish.
  *
  * @internal
  */
 export function clearCacheForTesting(): void {
   jwksCache.clear();
-  lastFetchedAt.clear();
-  namespaceKids.clear();
+  jwksRefreshes.clear();
 }
 
 // ---------------------------------------------------------------------------
 // JWKS fetch + import
 // ---------------------------------------------------------------------------
 
-/**
- * Fetch the JWKS at `jwksUri` and import keys into `jwksCache` under the
- * given `issuer` namespace.  Stamps `lastFetchedAt` on success.
- *
- * Evict and replace only this issuer/URI namespace; other configured sources
- * retain their independent key sets and rotation timestamps.
- */
-async function fetchJwks(issuer: string, jwksUri: string): Promise<void> {
-  // Every fetch owns only its exact issuer + configured endpoint namespace.
-  // A slower fetch from an old configuration cannot overwrite new-source keys.
+/** Refresh once per exact source; import privately, then publish one complete snapshot. */
+function fetchJwks(issuer: string, jwksUri: string): Promise<void> {
   const namespace = JSON.stringify([issuer, jwksUri]);
+  const active = jwksRefreshes.get(namespace);
+  if (active) return active;
+  const refresh: Promise<void> = importJwks(issuer, jwksUri)
+    .then((keys) => {
+      if (jwksRefreshes.get(namespace) === refresh) {
+        jwksCache.set(namespace, { keys, fetchedAt: Date.now() });
+      }
+    })
+    .finally(() => {
+      if (jwksRefreshes.get(namespace) === refresh)
+        jwksRefreshes.delete(namespace);
+    });
+  jwksRefreshes.set(namespace, refresh);
+  return refresh;
+}
+
+async function importJwks(
+  issuer: string,
+  jwksUri: string,
+): Promise<Map<string, CryptoKey>> {
   let res: Response;
   try {
     res = await oidcFetch(jwksUri);
@@ -161,16 +167,7 @@ async function fetchJwks(issuer: string, jwksUri: string): Promise<void> {
     keys: (JsonWebKey & { kid?: string })[];
   };
 
-  // Evict only this exact issuer/URI source before loading its new key set.
-  const currentKids = namespaceKids.get(namespace);
-  if (currentKids) {
-    for (const kid of currentKids) {
-      jwksCache.delete(cacheKey(namespace, kid));
-    }
-    namespaceKids.delete(namespace);
-  }
-
-  const newKids = new Set<string>();
+  const keys = new Map<string, CryptoKey>();
 
   for (const jwk of jwks.keys) {
     if (!jwk.kid) continue;
@@ -184,9 +181,7 @@ async function fetchJwks(issuer: string, jwksUri: string): Promise<void> {
         ["verify"],
       );
 
-      jwksCache.set(cacheKey(namespace, jwk.kid), key);
-      // Only add to the kid index after successful importKey.
-      newKids.add(jwk.kid);
+      keys.set(jwk.kid, key);
     } catch (err) {
       console.warn(
         `Failed to import JWKS key ${jwk.kid} for issuer ${issuer}:`,
@@ -195,8 +190,7 @@ async function fetchJwks(issuer: string, jwksUri: string): Promise<void> {
     }
   }
 
-  namespaceKids.set(namespace, newKids);
-  lastFetchedAt.set(namespace, Date.now());
+  return keys;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,8 +296,7 @@ export async function verifyOidcJwt(
 
   // 8. Key lookup — fetch if not cached for this issuer.
   const namespace = JSON.stringify([issuer, jwksUri]);
-  const ck = cacheKey(namespace, kid);
-  const fetchedAt = lastFetchedAt.get(namespace);
+  const fetchedAt = jwksCache.get(namespace)?.fetchedAt;
   // Cached successful signatures do not extend trust in a removed key. Expiry
   // requires a successful refresh before any key from this source can be used.
   let fetched = false;
@@ -311,11 +304,11 @@ export async function verifyOidcJwt(
     await fetchJwks(issuer, jwksUri);
     fetched = true;
   }
-  let key = jwksCache.get(ck);
+  let key = jwksCache.get(namespace)?.keys.get(kid);
   if (!key && !fetched) {
     await fetchJwks(issuer, jwksUri);
     fetched = true;
-    key = jwksCache.get(ck);
+    key = jwksCache.get(namespace)?.keys.get(kid);
   }
 
   if (!key) {
@@ -346,11 +339,11 @@ export async function verifyOidcJwt(
   if (
     !valid &&
     !fetched &&
-    Date.now() - (lastFetchedAt.get(namespace) ?? 0) < JWKS_TTL_MS
+    Date.now() - (jwksCache.get(namespace)?.fetchedAt ?? 0) < JWKS_TTL_MS
   ) {
     // Force unconditional re-fetch (don't short-circuit on current freshness).
     await fetchJwks(issuer, jwksUri);
-    const retryKey = jwksCache.get(ck) ?? null;
+    const retryKey = jwksCache.get(namespace)?.keys.get(kid) ?? null;
 
     if (retryKey) {
       try {
