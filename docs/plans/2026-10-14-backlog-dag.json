@@ -494,7 +494,7 @@
       "issue": 400,
       "pr": 453,
       "kind": "builder",
-      "state": "queued",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-400",
       "contract": "2026-10-14-backlog-execution.md#400--step-up-return-navigation-i400",
@@ -503,7 +503,19 @@
         "packages/ui/src/lib/step-up.ts"
       ],
       "validation": ["ui", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 453,
+          "head_sha": "f7330d6c8d57fc401ba93105d91ffc35c6780462",
+          "merge_sha": "8397f3da26a01afeb692a73a9d510e3991653866",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/453"
+        }
+      ],
       "task_name": "build-400-stepup",
       "branch": "fix/400-step-up-resume",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -514,9 +526,9 @@
       "owner": "C",
       "stage": 0,
       "issue": 449,
-      "pr": null,
+      "pr": 456,
       "kind": "builder",
-      "state": "implementing",
+      "state": "queued",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-449",
       "contract": "2026-10-14-backlog-execution.md#449--mcp-definition-transfer-i449",
@@ -565,9 +577,9 @@
       "owner": "B",
       "stage": 1,
       "issue": 398,
-      "pr": null,
+      "pr": 458,
       "kind": "builder",
-      "state": "implementing",
+      "state": "in-review",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-398",
       "contract": "2026-10-14-backlog-execution.md#398--honest-legacy-blocked-counts-i398",
@@ -590,7 +602,7 @@
       "issue": 416,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-416",
       "contract": "2026-10-14-backlog-execution.md#416--visible-revisionless-deprecation-i416",
@@ -636,7 +648,7 @@
       "issue": 362,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-362",
       "contract": "2026-10-14-backlog-execution.md#362--cleanup-without-broadening-worker-authority-i362",
@@ -2294,7 +2306,7 @@
     },
     {
       "node": "i400",
-      "state": "queued",
+      "state": "merged",
       "worker": "build-400-stepup",
       "base_sha": "f231ba532b55fe33de15bc49cdb2e5c35a6439de",
       "head_sha": "f7330d6c8d57fc401ba93105d91ffc35c6780462",
@@ -2315,18 +2327,31 @@
           "source": "build-400-stepup handoff; lead final diff review"
         }
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "kind": "merge",
+          "pr": 453,
+          "head_sha": "f7330d6c8d57fc401ba93105d91ffc35c6780462",
+          "merge_sha": "8397f3da26a01afeb692a73a9d510e3991653866",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/453"
+        }
+      ],
       "lead_review": "approved",
-      "queue_state": "entered-queue-preparing-checks",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-400-closed",
+      "merge_sha": "8397f3da26a01afeb692a73a9d510e3991653866"
     },
     {
       "node": "i449",
-      "state": "implementing",
+      "state": "queued",
       "worker": "build-449-mcp-transfer",
       "base_sha": null,
-      "head_sha": null,
-      "pr": null,
+      "head_sha": "29173ee1dcce2109261f8a6fd874ba2843f715f3",
+      "pr": 456,
       "tests": [
         {
           "phase": "baseline",
@@ -2334,6 +2359,12 @@
           "passed": 37,
           "source": "lead orchestration review on 2026-10-14",
           "command": "focused suite; exact invocation held by builder"
+        },
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "205 MCP, 330 core, 286 schemas, 17 CLI transfer, 125 runtime; affected typechecks/build, packed stdio roundtrip, lint",
+          "source": "/tmp/tila-449-baseline.OxenEu/final-evidence.json"
         }
       ],
       "evidence": [
@@ -2344,8 +2375,8 @@
           "source": "lead orchestration review on 2026-10-14"
         }
       ],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "entered-queue-waiting-for-batch",
       "closure": "not-closed"
     },
     {
@@ -2353,22 +2384,29 @@
       "state": "implementing",
       "worker": "build-439-revisions",
       "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
-      "head_sha": null,
+      "head_sha": "0ddc0f94eb25b06de7e2658a4cfe795951e89dbb",
       "pr": null,
       "tests": [],
       "evidence": [],
-      "lead_review": "dispatch-approved",
+      "lead_review": "approved",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
     {
       "node": "i398",
-      "state": "implementing",
+      "state": "in-review",
       "worker": "build-398-readiness",
       "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
-      "head_sha": null,
-      "pr": null,
-      "tests": [],
+      "head_sha": "1ed1917d84822710cdb2447a41b0b50d85652d6b",
+      "pr": 458,
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "667 UI; 18 dev-seed; 541 ops with pre-existing1todo; 10 attention filters; 125 runtime; UI typecheck, lint/version",
+          "source": "build-398-readiness final handoff, lead diff review 2026-10-14"
+        }
+      ],
       "evidence": [
         {
           "kind": "dispatch",
@@ -2379,20 +2417,29 @@
           "push_hold": true
         }
       ],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "awaiting-ci",
       "closure": "not-closed"
     },
     {
       "node": "i416",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-416-revision-warning",
-      "base_sha": null,
+      "base_sha": "29173ee1dcce2109261f8a6fd874ba2843f715f3",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr orchestration 2026-10-14",
+          "pane": "tila/w3:p2",
+          "model": "GPT-6.1-Sol xhigh",
+          "push_hold": true,
+          "base_note": "unpublished issue branch based on reviewed PR456; transplant only issue416 commits onto verified origin/main after parent merge before PR"
+        }
+      ],
+      "lead_review": "dispatch-approved",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
@@ -2411,14 +2458,22 @@
     },
     {
       "node": "i362",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-362-cleanup-guide",
-      "base_sha": null,
+      "base_sha": "8397f3da26a01afeb692a73a9d510e3991653866",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr orchestration 2026-10-14",
+          "pane": "tila/w3:p1",
+          "model": "Sonnet xhigh",
+          "push_hold": true
+        }
+      ],
+      "lead_review": "dispatch-approved",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
@@ -2860,7 +2915,7 @@
       "source"
     ],
     "release_election_allowed_with_evidence": true,
-    "current_active_builders": ["i398", "i449", "i439"],
+    "current_active_builders": ["i362", "i439", "i416"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient"
   }
 }
