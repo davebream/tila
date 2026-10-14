@@ -35,7 +35,7 @@ const cf = {
 const analytics = {
   name: "ANALYTICS",
   type: "analytics_engine",
-  dataset: "leadcue_reply_tila",
+  dataset: "example-analytics-dataset",
 } as const;
 const worker = { bindings: [analytics] };
 const options = { cf, accountId: "account", scriptName: "tila", worker };
@@ -109,7 +109,7 @@ describe("deployment settings preservation", () => {
       expect(config.workers_dev).toBe(false);
       expect(config.preview_urls).toBe(false);
       expect(config.analytics_engine_datasets).toEqual([
-        { binding: "ANALYTICS", dataset: "leadcue_reply_tila" },
+        { binding: "ANALYTICS", dataset: "example-analytics-dataset" },
         { binding: "EXTRA", dataset: "another_dataset" },
       ]);
       expect(config).not.toHaveProperty("route");
