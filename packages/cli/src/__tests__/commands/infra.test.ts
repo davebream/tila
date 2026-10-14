@@ -1,3 +1,12 @@
+const mockDetectWrangler = vi.fn();
+vi.mock("../../lib/wrangler-cli", () => ({
+  detectWrangler: (...args: unknown[]) => mockDetectWrangler(...args),
+}));
+const mockResolveProvisionDeployment = vi.fn();
+vi.mock("../../lib/deploy-target", () => ({
+  resolveProvisionDeployment: (...args: unknown[]) =>
+    mockResolveProvisionDeployment(...args),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Module-level mocks (must come before any imports of the SUT) ---
@@ -63,6 +72,9 @@ vi.mock("../../lib/github-app-setup", () => ({
 }));
 
 const mockLoadInfraConfig = vi.fn();
+vi.mock("../../lib/infra-fallback", () => ({
+  resolveInfraConfig: (...args: unknown[]) => mockLoadInfraConfig(...args),
+}));
 const mockWriteInfraConfig = vi.fn();
 const mockGetInfraSlug = vi.fn((_config: unknown) => "tila");
 vi.mock("../../lib/infra-config", () => ({
@@ -175,6 +187,7 @@ const mockCfClient = {
 async function invokeProvision(
   forceGithubApp = false,
   rotateAdminToken = false,
+  forceRedeploy = false,
 ): Promise<void> {
   const mod = await import("../../commands/infra/provision");
   const cmd = mod.default;
@@ -183,6 +196,7 @@ async function invokeProvision(
     args: {
       "force-github-app": forceGithubApp,
       "rotate-admin-token": rotateAdminToken,
+      "force-redeploy": forceRedeploy,
     },
   });
 }
@@ -204,6 +218,109 @@ async function invokeStatus(): Promise<void> {
 // --- Test suites ---
 
 describe("tila infra provision", () => {
+  const preservedSettings = {
+    workersDev: false,
+    previewUrls: false,
+    analyticsEngineDatasets: [{ binding: "ANALYTICS", dataset: "dedicated" }],
+  };
+  function existingDeployment() {
+    mockLoadInfraConfig.mockReturnValue({
+      account_id: "acct-123",
+      account_name: "Test Account",
+      d1_database_id: "custom-db",
+      r2_bucket_name: "custom-bucket",
+      infra_slug: "tila",
+      hmac_key: "existing-key",
+    });
+    mockGetInfraSlug.mockReturnValue("tila");
+    mockResolveProvisionDeployment.mockResolvedValue({
+      settings: preservedSettings,
+      workerUrl: "https://tila.example.com",
+      target: { d1DatabaseId: "custom-db", r2BucketName: "custom-bucket" },
+    });
+  }
+
+  it.each([false, true])(
+    "preserves an existing installation (forceRedeploy=%s)",
+    async (forceRedeploy) => {
+      existingDeployment();
+      await invokeProvision(false, false, forceRedeploy);
+      expect(mockResolveProvisionDeployment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: "acct-123",
+          scriptName: "tila",
+          allowCreate: !forceRedeploy,
+        }),
+      );
+      expect(mockDeployWorkerWithAssets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: preservedSettings,
+          workerUrl: "https://tila.example.com",
+          d1DatabaseId: "custom-db",
+          r2BucketName: "custom-bucket",
+        }),
+      );
+      expect(mockEnsureD1Database).not.toHaveBeenCalled();
+      expect(mockEnsureR2Bucket).not.toHaveBeenCalled();
+      if (!forceRedeploy) {
+        expect(mockApplyD1Migrations).toHaveBeenCalledWith(
+          mockCfClient,
+          "acct-123",
+          "custom-db",
+          "/mock/migrations/global",
+        );
+        expect(mockApplyR2Lifecycle).toHaveBeenCalledWith(
+          mockCfClient,
+          "acct-123",
+          "custom-bucket",
+        );
+        expect(mockWriteInfraConfig).toHaveBeenCalledWith(
+          expect.objectContaining({
+            d1_database_id: "custom-db",
+            r2_bucket_name: "custom-bucket",
+          }),
+          "/mock/.tila",
+        );
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "stops all remote writes on failed preflight (forceRedeploy=%s)",
+    async (forceRedeploy) => {
+      existingDeployment();
+      mockResolveProvisionDeployment.mockImplementationOnce(async () => {
+        expect(mockEnsureD1Database).not.toHaveBeenCalled();
+        expect(mockApplyD1Migrations).not.toHaveBeenCalled();
+        expect(mockSetWorkerSecrets).not.toHaveBeenCalled();
+        throw new Error("Could not verify exposure settings");
+      });
+      await expect(
+        invokeProvision(false, false, forceRedeploy),
+      ).rejects.toThrow("Could not verify");
+      for (const mutation of [
+        mockEnsureD1Database,
+        mockApplyD1Migrations,
+        mockQueryD1,
+        mockEnsureR2Bucket,
+        mockApplyR2Lifecycle,
+        mockDeployWorkerWithAssets,
+        mockDeleteWorkerSecret,
+        mockSetWorkerSecrets,
+        mockWriteInfraConfig,
+      ])
+        expect(mutation).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects an incompatible Wrangler before provisioning", async () => {
+    mockDetectWrangler.mockRejectedValueOnce(new Error("Wrangler too old"));
+    await expect(invokeProvision()).rejects.toThrow("process.exit(1)");
+    expect(mockVerifyCloudflareAuth).not.toHaveBeenCalled();
+    expect(mockEnsureD1Database).not.toHaveBeenCalled();
+    expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+  });
+
   // biome-ignore lint/suspicious/noExplicitAny: vitest spy types
   let exitSpy: any;
 
@@ -220,6 +337,18 @@ describe("tila infra provision", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    mockDetectWrangler.mockResolvedValue(undefined);
+    mockResolveProvisionDeployment.mockResolvedValue({
+      settings: {
+        workersDev: true,
+        previewUrls: true,
+        analyticsEngineDatasets: [
+          { binding: "ANALYTICS", dataset: "tila-analytics" },
+        ],
+      },
+      workerUrl: "https://tila.test-sub.workers.dev",
+      target: null,
+    });
 
     exitSpy = vi
       .spyOn(process, "exit")
@@ -679,6 +808,18 @@ describe("tila infra teardown", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    mockDetectWrangler.mockResolvedValue(undefined);
+    mockResolveProvisionDeployment.mockResolvedValue({
+      settings: {
+        workersDev: true,
+        previewUrls: true,
+        analyticsEngineDatasets: [
+          { binding: "ANALYTICS", dataset: "tila-analytics" },
+        ],
+      },
+      workerUrl: "https://tila.test-sub.workers.dev",
+      target: null,
+    });
 
     exitSpy = vi
       .spyOn(process, "exit")
@@ -869,6 +1010,18 @@ describe("tila infra status", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    mockDetectWrangler.mockResolvedValue(undefined);
+    mockResolveProvisionDeployment.mockResolvedValue({
+      settings: {
+        workersDev: true,
+        previewUrls: true,
+        analyticsEngineDatasets: [
+          { binding: "ANALYTICS", dataset: "tila-analytics" },
+        ],
+      },
+      workerUrl: "https://tila.test-sub.workers.dev",
+      target: null,
+    });
 
     exitSpy = vi
       .spyOn(process, "exit")
