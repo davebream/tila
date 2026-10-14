@@ -538,3 +538,95 @@ it("re-exchanges a signed workload assertion under the new pepper without weaken
     ).status,
   ).toBe(403);
 });
+
+it("keeps revoked invitations unusable across pepper rollback and reapplication while pending ones revive", async () => {
+  const d = await deployment();
+  const installation = await key();
+  type Listed = { invitation_id: string; state: string; enrollments: number };
+  const listing = async () =>
+    (
+      await json<{ invitations: Listed[] }>(
+        await d.http(`${d.root}/runtime/invitations`),
+      )
+    ).invitations;
+  const entry = async (id: string) => {
+    const found = (await listing()).find((row) => row.invitation_id === id);
+    if (!found) throw new Error("Invitation missing from the owner listing");
+    return found;
+  };
+  const invite = async () =>
+    json<{ invitation: string; invitation_id: string }>(
+      await d.http(`${d.root}/runtime/invitations`, { name: "Host" }),
+    );
+  const revoke = async (id: string) =>
+    d.http(`${d.root}/runtime/invitations/${id}/revoke`, {});
+  const redeem = async (invitation: string) =>
+    d.http(
+      `${d.root}/runtime/redeem`,
+      {
+        invitation,
+        name: "Host",
+        operation_id: crypto.randomUUID(),
+        installation_id: crypto.randomUUID(),
+        jkt: installation.jkt,
+      },
+      {
+        ...bearer(invitation),
+        DPoP: await proof(
+          installation,
+          invitation,
+          `${d.root}/runtime/redeem`,
+          "POST",
+        ),
+      },
+    );
+
+  // Issued before the cutover, under the previously absent pepper.
+  const revokedBefore = await invite();
+  const leftOpenBefore = await invite();
+  d.env.HASH_PEPPER = pepper;
+  // Issued during the transition, hashed under the new pepper.
+  const revokedDuring = await invite();
+  const leftOpenDuring = await invite();
+  for (const issued of [
+    revokedBefore,
+    leftOpenBefore,
+    revokedDuring,
+    leftOpenDuring,
+  ])
+    expect((await entry(issued.invitation_id)).state).toBe("pending");
+
+  // A redemption rejected under the current pepper is not a revocation.
+  expect((await redeem(leftOpenBefore.invitation)).status).toBe(403);
+  expect((await entry(leftOpenBefore.invitation_id)).state).toBe("pending");
+
+  expect(
+    await json<{ revoked: boolean }>(await revoke(revokedBefore.invitation_id)),
+  ).toMatchObject({ revoked: true });
+  expect(
+    await json<{ revoked: boolean }>(await revoke(revokedBefore.invitation_id)),
+  ).toMatchObject({ revoked: false });
+  expect((await revoke(crypto.randomUUID())).status).toBe(404);
+  expect((await entry(revokedBefore.invitation_id)).state).toBe("revoked");
+  await json(await revoke(revokedDuring.invitation_id));
+  expect((await entry(revokedDuring.invitation_id)).state).toBe("revoked");
+
+  // Rollback: only the invitation left pending is usable under the old pepper.
+  d.env.HASH_PEPPER = undefined;
+  expect((await redeem(revokedBefore.invitation)).status).toBe(403);
+  const resurrected = await redeem(leftOpenBefore.invitation);
+  expect(resurrected.status).toBe(200);
+  await resurrected.arrayBuffer();
+  expect((await entry(leftOpenBefore.invitation_id)).enrollments).toBe(1);
+  // Transition-issued invitations are inert here, but still pending.
+  expect((await redeem(leftOpenDuring.invitation)).status).toBe(403);
+  expect((await entry(leftOpenDuring.invitation_id)).state).toBe("pending");
+
+  // Re-applying the new pepper revives only what was not revoked.
+  d.env.HASH_PEPPER = pepper;
+  expect((await redeem(revokedDuring.invitation)).status).toBe(403);
+  const revived = await redeem(leftOpenDuring.invitation);
+  expect(revived.status).toBe(200);
+  await revived.arrayBuffer();
+  expect((await entry(leftOpenDuring.invitation_id)).enrollments).toBe(1);
+});
