@@ -593,3 +593,59 @@ it.each(
     ).rejects.toThrow();
   },
 );
+it("validates mapped agents with read access without requiring unrelated agent management", async () => {
+  const { inspectSettingsDestination } = await import(
+    "../src/settings-transfer"
+  );
+  const p: SettingsReadPort = {
+    identity: async () => ({
+      ok: true,
+      project_id: "destination",
+      scopes: "scoped",
+      token_name: "fixture",
+      principal_id: "destination-person",
+      role: "maintainer",
+      policy: {
+        role: "maintainer",
+        capabilities: [
+          "conversations:read",
+          "conversations:manage",
+          "agents:read",
+        ],
+      },
+    }),
+    principals: vi.fn(),
+    agents: async () => [
+      {
+        id: "worker",
+        name: "Worker",
+        archived: false,
+        revision: 2,
+        owner_principal_id: "owner",
+        bind_policy: [],
+        profile_selection: null,
+        binding_epoch: 0,
+        created_at: 1,
+        updated_at: 1,
+      },
+    ],
+    rooms: async () => [],
+    room: vi.fn(),
+    groups: vi.fn(),
+    definitions: vi.fn(),
+  };
+  const choices = SettingsMappingsSchema.parse({
+    identities: { "agent:sourceagent": { target: "worker" } },
+    resources: { rooms: { sourceroom: { id: "team", mode: "create" } } },
+  });
+  const snapshot = await inspectSettingsDestination(
+    p,
+    "destination",
+    ["rooms"],
+    choices,
+  );
+  expect(snapshot.rights.agents).toBe(false);
+  expect(snapshot.agents.worker.id).toBe("worker");
+  expect(p.principals).not.toHaveBeenCalled();
+  expect(p.groups).not.toHaveBeenCalled();
+});
