@@ -1,9 +1,9 @@
 import { useAuth } from "@/hooks/use-auth";
 import { workspaceSelect } from "@/lib/api";
 import { defaultProjectPath } from "@/lib/navigation";
-import { peekStepUpResume, takeStepUpResume } from "@/lib/step-up";
-import { useEffect, useRef } from "react";
-import { Navigate } from "react-router";
+import { readStepUpResume, takeStepUpResume } from "@/lib/step-up";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 
 /**
  * Step-up resume, part 1 (#102). GitHub sign-in lands on `/` with a
@@ -18,8 +18,12 @@ export function StepUpResume() {
 
   useEffect(() => {
     if (isLoading || !isAuthenticated || projectId || running.current) return;
-    const stash = peekStepUpResume();
-    if (!stash) return;
+    const snapshot = readStepUpResume();
+    const stash = snapshot.state;
+    if (!stash) {
+      takeStepUpResume(snapshot);
+      return;
+    }
     running.current = true;
     (async () => {
       try {
@@ -28,7 +32,7 @@ export function StepUpResume() {
       } catch {
         // Selection failed (membership revoked, project gone): drop the
         // stash and leave the user on the workspace page.
-        takeStepUpResume();
+        takeStepUpResume(snapshot);
       } finally {
         running.current = false;
       }
@@ -44,11 +48,19 @@ export function StepUpResume() {
  * was; otherwise go to the default page.
  */
 export function DefaultRedirect({ projectId }: { projectId: string }) {
-  const stash = peekStepUpResume();
-  if (stash && stash.projectId === projectId) {
-    takeStepUpResume();
-    return <Navigate to={stash.returnTo} replace />;
-  }
-  if (stash) takeStepUpResume();
-  return <Navigate to={defaultProjectPath(projectId)} replace />;
+  // StrictMode may repeat initializers and effects. Keep the read pure and
+  // retain the destination after consumption, including on effect replay.
+  const [snapshot] = useState(readStepUpResume);
+  const navigate = useNavigate();
+  const to =
+    snapshot.state?.projectId === projectId
+      ? snapshot.state.returnTo
+      : defaultProjectPath(projectId);
+
+  useEffect(() => {
+    navigate(to, { replace: true });
+    takeStepUpResume(snapshot);
+  }, [navigate, to, snapshot]);
+
+  return null;
 }
