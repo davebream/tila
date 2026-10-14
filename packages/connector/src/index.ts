@@ -6,3 +6,4 @@ export * from "./claude";
 export * from "./codex";
 export * from "./launch";
 export * from "./herdr";
+export * from "./composite-discovery";

@@ -1,0 +1,5 @@
+Retained diagnostic excerpt from failed local format/lint check:
+scripts/issue-308-scenarios.mjs: noControlCharactersInRegex for ANSI stripping.
+packages/integration-tests/runtime/product-scenarios.test.ts: noNonNullAssertion for previous_session.
+Checked 5 files. Fixed 5 files. Found 2 errors. Exit 1.
+Resolution: document the ANSI sanitizer exception; explicitly guard missing session.

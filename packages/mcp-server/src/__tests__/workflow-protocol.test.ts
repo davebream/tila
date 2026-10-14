@@ -6,7 +6,13 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { JsonSchemaValidatorResult } from "@modelcontextprotocol/sdk/validation";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import type { TilaProjectConfig } from "@tila/schemas";
+import { createSettingsReceipt } from "@tila/core";
+import { renderSettingsFile } from "@tila/core/definition-yaml";
+import {
+  type SettingsDocument,
+  SettingsPlanSchema,
+  type TilaProjectConfig,
+} from "@tila/schemas";
 import { TilaApiError, type TilaFacade, createTila } from "tila-sdk";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerAllTools } from "../tools/index";
@@ -157,7 +163,7 @@ it("lists exactly nine default tools, validates real calls, and preserves the ex
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(89);
+  expect((await all.listTools()).tools).toHaveLength(92);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -535,7 +541,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(91);
+  expect(listed).toHaveLength(94);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -580,6 +586,102 @@ title = "Evidence"
   });
   await primitive("tila_schema_import", { text: "schema_version = 1" });
   await primitive("tila_schema_export", { format: "yaml" });
+  // Settings transfer is an explicitly optional remote surface. Exercise its
+  // real tools on the local facade instead of dropping them from the catalog.
+  expect(a.settingsTransfer).toBeUndefined();
+  const coverage = {
+    status: "omitted" as const,
+    scope: "visible" as const,
+    unavailable_fields: [],
+  };
+  const settings: SettingsDocument = {
+    tila_export: {
+      format: "tila-project-settings",
+      format_version: 1,
+      project_id: "source",
+      exported_at: "2026-10-14T00:00:00Z",
+    },
+    coverage: {
+      definitions: coverage,
+      agents: coverage,
+      rooms: coverage,
+      signal_groups: { ...coverage, status: "read" },
+    },
+    settings: {
+      signal_groups: {
+        sourcegroup: {
+          name: "Reviewers",
+          source_revision: 1,
+          principal_ids: ["source-person"],
+        },
+      },
+    },
+  };
+  const settingsMappings = {
+    identities: { "principal:source-person": { target: "destination-person" } },
+    profiles: {},
+    resources: {
+      agents: {},
+      rooms: {},
+      signal_groups: { sourcegroup: { id: "reviewers", mode: "create" } },
+    },
+  };
+  const unchangedDefinitions = await a.schema.get();
+  const setGroup = vi.spyOn(a.signals.groups, "set");
+  const applyDefinition = vi.spyOn(a.schema, "apply");
+  for (const [name, args] of [
+    ["tila_settings_export", {}],
+    [
+      "tila_settings_import",
+      {
+        text: renderSettingsFile(settings, "toml"),
+        mappings: settingsMappings,
+      },
+    ],
+  ] as const) {
+    called.add(name);
+    const response = await client.callTool({ name, arguments: args });
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toMatchObject({
+      error: { code: "unsupported-backend" },
+    });
+  }
+  const settingsOperation = crypto.randomUUID();
+  const settingsReceipt = await createSettingsReceipt(
+    SettingsPlanSchema.parse({
+      format: "tila-settings-plan",
+      version: 1,
+      operation_id: settingsOperation,
+      project_id: "workflow",
+      creator_member: "principal:destination-person",
+      mappings: settingsMappings,
+      references: ["principal:source-person"],
+      coverage: settings.coverage,
+      removals: [],
+      warnings: [],
+      actions: [
+        {
+          id: `${settingsOperation}:0`,
+          kind: "group.set",
+          resource_id: "reviewers",
+          expected_revision: 0,
+          payload: { name: "Reviewers", principal_ids: ["destination-person"] },
+        },
+      ],
+    }),
+  );
+  const settingsResume = await primitive("tila_settings_resume", {
+    receipt: settingsReceipt,
+    apply: true,
+  });
+  expect(settingsResume).toMatchObject({
+    status: "blocked",
+    error_code: "unsupported-backend",
+    receipt: settingsReceipt,
+  });
+  expect(setGroup).not.toHaveBeenCalled();
+  expect(applyDefinition).not.toHaveBeenCalled();
+  expect(await a.schema.get()).toEqual(unchangedDefinitions);
   await primitive("tila_template_list");
   await primitive("tila_template_instantiate", {
     template: "simple",

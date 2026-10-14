@@ -1,0 +1,352 @@
+{
+  "numTotalTestSuites": 9,
+  "numPassedTestSuites": 9,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 24,
+  "numPassedTests": 24,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1791996719744,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "initializes, edits, conflicts, rebases and restores definitions from a browser session",
+          "status": "passed",
+          "title": "initializes, edits, conflicts, rebases and restores definitions from a browser session",
+          "duration": 2420,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996732677,
+      "endTime": 1791996735097,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/definition-editor.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "bootstraps, edits, exports and imports to a fresh project with equivalent definitions",
+          "status": "passed",
+          "title": "bootstraps, edits, exports and imports to a fresh project with equivalent definitions",
+          "duration": 707,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "reimporting the original file shows what it reverts and still conflicts on a stale revision",
+          "status": "passed",
+          "title": "reimporting the original file shows what it reverts and still conflicts on a stale revision",
+          "duration": 481,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "importing one section keeps every other section, task and record",
+          "status": "passed",
+          "title": "importing one section keeps every other section, task and record",
+          "duration": 548,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects oversize, credential and metadata-bearing definitions without writing",
+          "status": "passed",
+          "title": "rejects oversize, credential and metadata-bearing definitions without writing",
+          "duration": 318,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996733456,
+      "endTime": 1791996735510,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/definition-transfer.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "S1 walks all 301 custom tasks and search hits through eviction without truncation",
+          "status": "passed",
+          "title": "S1 walks all 301 custom tasks and search hits through eviction without truncation",
+          "duration": 2560,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S1 serializes three revisionful client-shaped edits and rejects a stale original file",
+          "status": "passed",
+          "title": "S1 serializes three revisionful client-shaped edits and rejects a stale original file",
+          "duration": 258,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S2 retains two distinct answers and one logical replay effect across outage and replacement",
+          "status": "passed",
+          "title": "S2 retains two distinct answers and one logical replay effect across outage and replacement",
+          "duration": 259,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S2 two local participant principals sharing a participant label cannot exchange grants",
+          "status": "passed",
+          "title": "S2 two local participant principals sharing a participant label cannot exchange grants",
+          "duration": 882,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S3 retains acknowledged decisions through cancellation and explicit result (answer first)",
+          "status": "passed",
+          "title": "S3 retains acknowledged decisions through cancellation and explicit result (answer first)",
+          "duration": 233,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S3 retains acknowledged decisions through cancellation and explicit result (answer last)",
+          "status": "passed",
+          "title": "S3 retains acknowledged decisions through cancellation and explicit result (answer last)",
+          "duration": 256,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996733068,
+      "endTime": 1791996737516,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/product-scenarios.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "repairs bootstrap credentials and seeds canonical owners through the real Worker membership API",
+          "status": "passed",
+          "title": "repairs bootstrap credentials and seeds canonical owners through the real Worker membership API",
+          "duration": 381,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996739453,
+      "endTime": 1791996739834,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/project-bootstrap.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes configuration races and retains transactional receipts across DO eviction",
+          "status": "passed",
+          "title": "serializes configuration races and retains transactional receipts across DO eviction",
+          "duration": 385,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "checks the reviewed definition and current revision before a destructive apply",
+          "status": "passed",
+          "title": "checks the reviewed definition and current revision before a destructive apply",
+          "duration": 295,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "persists revisionless warnings and one minimal event across receipt replay and DO eviction",
+          "status": "passed",
+          "title": "persists revisionless warnings and one minimal event across receipt replay and DO eviction",
+          "duration": 298,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "requires revisions in managed projects even for cached revisionless writes and no-change receipts",
+          "status": "passed",
+          "title": "requires revisions in managed projects even for cached revisionless writes and no-change receipts",
+          "duration": 270,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "exposes real HTTP warnings to SDK sinks and the authenticated journal without stdout diagnostics",
+          "status": "passed",
+          "title": "exposes real HTTP warnings to SDK sinks and the authenticated journal without stdout diagnostics",
+          "duration": 393,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996733072,
+      "endTime": 1791996734713,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/schema-revision.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "conditionally edits service identities in real D1 and preserves authority boundaries",
+          "status": "passed",
+          "title": "conditionally edits service identities in real D1 and preserves authority boundaries",
+          "duration": 596,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996739259,
+      "endTime": 1791996739855,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/service-identity-revisions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "renames, revision-checks repository policy and keeps one owner",
+          "status": "passed",
+          "title": "renames, revision-checks repository policy and keeps one owner",
+          "duration": 1367,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rotates and revokes credentials and invitations without reviving authority",
+          "status": "passed",
+          "title": "rotates and revokes credentials and invitations without reviving authority",
+          "duration": 1182,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996732674,
+      "endTime": 1791996735223,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/settings-access.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "edits, conflicts, replays and archives agents, rooms and groups from a browser session",
+          "status": "passed",
+          "title": "edits, conflicts, replays and archives agents, rooms and groups from a browser session",
+          "duration": 2534,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "archiving an agent ends its active binding atomically on the real DO",
+          "status": "passed",
+          "title": "archiving an agent ends its active binding atomically on the real DO",
+          "duration": 271,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996732676,
+      "endTime": 1791996735481,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/settings-identities.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects stale settings after project backup import",
+          "status": "passed",
+          "title": "rejects stale settings after project backup import",
+          "duration": 1430,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects stale settings after project backup rollback",
+          "status": "passed",
+          "title": "rejects stale settings after project backup rollback",
+          "duration": 1271,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996732677,
+      "endTime": 1791996735379,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/settings-restore.test.ts"
+    }
+  ]
+}

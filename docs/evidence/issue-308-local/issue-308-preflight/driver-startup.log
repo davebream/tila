@@ -1,0 +1,6 @@
+Retained diagnostic excerpt from failed local scenario-driver startup:
+Error: EISDIR: illegal operation on a directory, read
+    at metadata (scripts/issue-308-scenarios.mjs:264)
+A tracked directory symlink was read as a regular file before checks started.
+Resolution: fingerprint symlink contents without traversal; add regression test.
+No scenario checks executed by this failed startup.

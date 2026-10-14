@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { profileEnvironment } from "@tila/client-lifecycle";
 import {
+  CompositeDiscovery,
   ConnectorControl,
   ConnectorStore,
   HostConnector,
-  StandaloneDiscovery,
   controlRequest,
 } from "@tila/connector";
 import { defineCommand } from "citty";
@@ -15,13 +15,15 @@ import { globalFlagArgs } from "../lib/global-flags";
 import { cliInvocation } from "../lib/lifecycle-runtime";
 import { printJson } from "../lib/output";
 
+export function createHostConnector(
+  store = new ConnectorStore(),
+): HostConnector {
+  return new HostConnector(store, new CompositeDiscovery(), relayFactory);
+}
+
 async function serve(): Promise<void> {
   const store = new ConnectorStore();
-  const connector = new HostConnector(
-    store,
-    new StandaloneDiscovery(),
-    relayFactory,
-  );
+  const connector = createHostConnector(store);
   const control = new ConnectorControl(store);
   const stop = () => {
     void connector.request({ action: "stop" });

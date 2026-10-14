@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { processIdentity } from "@tila/client-lifecycle";
+import { HerdrProcessInfoSchema, HerdrSnapshotSchema } from "@tila/schemas";
 import { expect, it } from "vitest";
 import type { DiscoveredSession } from "../src/discovery";
 import {
@@ -151,4 +152,118 @@ it("uses protected read-only fixture sockets and refuses to enable unproven inte
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it("normalizes protocol22 absence in unrelated shell panes without trusting missing target evidence", async () => {
+  const f = fixture();
+  const original = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    const result = await original(method, params);
+    if (method === "session.snapshot") {
+      const value = result as { snapshot: { panes: unknown[] } };
+      value.snapshot.panes.push({
+        pane_id: "shell",
+        terminal_id: "shell-terminal",
+        agent: null,
+        agent_session: null,
+        agent_status: "idle",
+        revision: 0,
+      });
+      expect(
+        HerdrSnapshotSchema.parse(value.snapshot).panes[1].agent,
+      ).toBeUndefined();
+    }
+    return result;
+  };
+  await f.adapter.observe(f.session, "w1:p1");
+  await expect(f.adapter.observe(f.session, "shell")).rejects.toThrow(
+    "native session",
+  );
+  expect(
+    HerdrProcessInfoSchema.parse({ pane_id: "shell", shell_pid: null })
+      .foreground_processes,
+  ).toEqual([]);
+  f.client.request = async (method, params) =>
+    method === "pane.process_info"
+      ? { process_info: { pane_id: "w1:p1", shell_pid: null } }
+      : original(method, params);
+  await expect(f.adapter.observe(f.session, "w1:p1")).rejects.toThrow(
+    "foreground occupant",
+  );
+});
+
+it.each([
+  "version",
+  "protocol",
+  "agent",
+  "session-kind",
+  "native-id",
+  "terminal",
+])("rejects changed %s on the final snapshot", async (field) => {
+  const f = fixture();
+  const original = f.client.request.bind(f.client);
+  let snapshots = 0;
+  f.client.request = async (method, params) => {
+    const result = await original(method, params);
+    if (method === "session.snapshot" && ++snapshots === 2) {
+      const value = result as {
+        snapshot: {
+          version: string;
+          protocol: number;
+          panes: (typeof f.pane)[];
+        };
+      };
+      if (field === "version") value.snapshot.version = "0.9.4";
+      if (field === "protocol") value.snapshot.protocol = 21;
+      if (field === "agent") value.snapshot.panes[0].agent = "codex";
+      if (field === "session-kind")
+        value.snapshot.panes[0].agent_session.kind = "path";
+      if (field === "native-id")
+        value.snapshot.panes[0].agent_session.value = "replacement";
+      if (field === "terminal")
+        value.snapshot.panes[0].terminal_id = "replacement";
+    }
+    return result;
+  };
+  await expect(f.adapter.observe(f.session, "w1:p1")).rejects.toThrow();
+});
+
+it.each([1, 2, 3, 4])(
+  "invalidates a disconnect at observation await %s and requires fresh reconnect evidence",
+  async (boundary) => {
+    const f = fixture();
+    const original = f.client.request.bind(f.client);
+    let requests = 0;
+    f.client.request = async (method, params) => {
+      const result = await original(method, params);
+      if (++requests === boundary) f.adapter.invalidate();
+      return result;
+    };
+    await expect(f.adapter.observe(f.session, "w1:p1")).rejects.toThrow(
+      "changed during reconciliation",
+    );
+    f.client.request = original;
+    const proof = await f.adapter.observe(f.session, "w1:p1");
+    f.adapter.invalidate();
+    expect(() => f.adapter.assertCurrent(proof)).toThrow("invalidated");
+    expect(await f.adapter.observe(f.session, "w1:p1", proof)).toEqual(proof);
+  },
+);
+
+it("rejects a surviving background PID and reused PID start identity near the effect", async () => {
+  const f = fixture();
+  const original = f.client.request.bind(f.client);
+  let processes = 0;
+  f.client.request = async (method, params) => {
+    if (method === "pane.process_info" && ++processes === 2) f.replaceProcess();
+    return original(method, params);
+  };
+  await expect(f.adapter.observe(f.session, "w1:p1")).rejects.toThrow(
+    "foreground occupant",
+  );
+  const reused = fixture();
+  reused.session.state.owner.started = "another-process-incarnation";
+  await expect(reused.adapter.observe(reused.session, "w1:p1")).rejects.toThrow(
+    "changed during reconciliation",
+  );
 });

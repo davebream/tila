@@ -5,6 +5,7 @@ import {
   DEFINITION_MAX_BYTES,
   type DefinitionExportMetadata,
   DefinitionExportMetadataSchema,
+  credentialValueLabel,
   definitionByteLength,
 } from "@tila/schemas";
 import {
@@ -76,12 +77,13 @@ function kib(bytes: number): string {
 export function definitionSizeError(
   text: string,
   what = "The definition",
+  maxBytes = DEFINITION_MAX_BYTES,
 ): DefinitionTransferError | null {
   const bytes = definitionByteLength(text);
-  if (bytes <= DEFINITION_MAX_BYTES) return null;
+  if (bytes <= maxBytes) return null;
   return fail(
     "too-large",
-    `${what} is ${kib(bytes)}; definitions are limited to ${kib(DEFINITION_MAX_BYTES)}.`,
+    `${what} is ${kib(bytes)}; definitions are limited to ${kib(maxBytes)}.`,
   );
 }
 
@@ -101,27 +103,6 @@ export function looksLikeClientConfig(doc: DefinitionDocument): boolean {
   );
 }
 
-const SECRET_VALUE_PATTERNS: { label: string; pattern: RegExp }[] = [
-  { label: "a tila API token", pattern: /tila_d1_[0-9a-f]{72}/ },
-  { label: "a tila session token", pattern: /tila_u_[A-Za-z0-9._~-]{16,}/ },
-  {
-    label: "a GitHub token",
-    pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})/,
-  },
-  {
-    label: "a private key",
-    pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/,
-  },
-  { label: "an AWS access key", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
-  { label: "a Slack token", pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}/ },
-  { label: "an API key", pattern: /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}/ },
-  {
-    label: "a JSON Web Token",
-    pattern:
-      /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
-  },
-];
-
 /**
  * Key names that hold credentials. Modeled definition keys never match; a
  * field declared as `name = "api_token"` is a value, and a keyed field table
@@ -138,12 +119,12 @@ function secretErrors(
   if (typeof value === "string") {
     const key = path[path.length - 1] ?? "";
     const at = path.join(".");
-    const shaped = SECRET_VALUE_PATTERNS.find((p) => p.pattern.test(value));
+    const shaped = credentialValueLabel(value);
     if (shaped) {
       out.push(
         fail(
           "forbidden-secret",
-          `${at} looks like ${shaped.label}. Definitions are shared, exported and kept in history, so they must not contain credentials; store a reference (an environment variable or secret name) instead.`,
+          `${at} looks like ${shaped}. Definitions are shared, exported and kept in history, so they must not contain credentials; store a reference (an environment variable or secret name) instead.`,
           { path: at },
         ),
       );

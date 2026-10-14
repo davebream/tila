@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: source fingerprint hashes directory symlinks without traversing them and excludes evidence
+ok 1 - source fingerprint hashes directory symlinks without traversing them and excludes evidence
+  ---
+  duration_ms: 2.546306
+  type: 'test'
+  ...
+# Subtest: redacts private paths and credentials while retaining product failure diagnostics
+ok 2 - redacts private paths and credentials while retaining product failure diagnostics
+  ---
+  duration_ms: 0.511795
+  type: 'test'
+  ...
+# Subtest: redacts slashless source-map paths in runtime JSON and checksums sanitized copies
+ok 3 - redacts slashless source-map paths in runtime JSON and checksums sanitized copies
+  ---
+  duration_ms: 6.119385
+  type: 'test'
+  ...
+# Subtest: retains failed commands, continues, links reruns and detects artifact tampering
+ok 4 - retains failed commands, continues, links reruns and detects artifact tampering
+  ---
+  duration_ms: 9.969721
+  type: 'test'
+  ...
+# Subtest: missing executable is a failed observation with metadata and a retained log
+ok 5 - missing executable is a failed observation with metadata and a retained log
+  ---
+  duration_ms: 1.671379
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 84.760574

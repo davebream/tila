@@ -1,0 +1,40 @@
+packages/cli-darwin-arm64                |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["darwin"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-darwin-x64                  |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["darwin"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-arm64                 |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["linux"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-arm64-musl            |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["linux"],"libc":["musl"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-x64-musl              |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["linux"],"libc":["musl"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-windows-arm64               |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["win32"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-windows-x64                 |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["win32"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+
+ RUN  v4.1.11 <checkout>/packages/integration-tests
+
+ ✓ runtime/attempts.test.ts (2 tests) 678ms
+   ✓ persists execution receipts and capacity through a real DO cold start and lease expiry  380ms
+exception = workerd/api/unsafe.c++:228: failed: jsg.Error: Application called deleteAllDurableObjects().
+stack: <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@36c25b7 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2238860 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d4eda <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d45a0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d5fd0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d64f0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@3567f40 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@356819e <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d440 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d7dd <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89858 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89d5b
+exception = workerd/api/unsafe.c++:228: failed: jsg.Error: Application called deleteAllDurableObjects().
+stack: <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@36c25b7 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2238860 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d4eda <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d45a0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d5fd0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d64f0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@3567f40 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@356819e <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d440 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d7dd <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89858 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89d5b
+ ✓ runtime/question-api.test.ts (1 test) 796ms
+   ✓ checks current D1 responder membership before answering and before replay  795ms
+ ✓ runtime/attempt-authority.test.ts (1 test) 1004ms
+   ✓ rejects control requests from a former owner while the assigner keeps control across a cold start  1003ms
+ ✓ runtime/attempt-continuity.test.ts (2 tests) 1601ms
+   ✓ replaces a restarted native session on the same attempt and recovers owned work after a cold start  940ms
+   ✓ keeps finishing available while paused, rejects results the current definition forbids and rejects revoked authority  660ms
+ ✓ runtime/artifacts.test.ts (4 tests) 1809ms
+   ✓ round-trips SDK gzip Blob and File uploads through R2 and DO SQLite  606ms
+   ✓ normalizes upload aliases and returns permanent resource errors through real R2 and DO SQLite  530ms
+   ✓ returns a readable 410 envelope for deleted revision content through the Worker  398ms
+ ✓ runtime/agent-bindings.test.ts (2 tests) 2273ms
+   ✓ restores real DO snapshots without resurrecting bindings or rewinding epochs  1103ms
+   ✓ authorizes agent selection and binding against current credentials before any replay  1169ms
+ ✓ runtime/questions.test.ts (16 tests) 4068ms
+   ✓ serializes concurrent answer and request-cancellation requests (answer sent first)  406ms
+   ✓ serializes concurrent answer and request-cancellation requests (answer sent last)  370ms
+
+ Test Files  7 passed (7)
+      Tests  28 passed (28)
+   Start at  16:52:21
+   Duration  16.95s (transform 29.89s, setup 75.15s, import 2.11s, tests 12.23s, environment 0ms)
+
+JSON report written to <checkout>/.ci-reports/runtime.json

@@ -100,7 +100,12 @@ export {
 } from "./d1";
 
 // --- Config schemas ---
-export { DeployTargetSchema, type DeployTarget } from "./deploy-target";
+export {
+  DeployTargetSchema,
+  type DeployTarget,
+  DeploymentSettingsSchema,
+  type DeploymentSettings,
+} from "./deploy-target";
 export {
   TilaProjectConfigSchema,
   type TilaProjectConfig,
@@ -587,3 +592,9 @@ export { presentedTitle, presentedText } from "./presentation";
 
 export * from "./question";
 export * from "./custom-journal";
+export * from "./settings-transfer";
+
+export {
+  credentialValueLabel,
+  containsCredentialValue,
+} from "./credential-patterns";

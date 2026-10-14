@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./settings-execution": {
+      "types": "./dist/settings-execution.d.ts",
+      "import": "./dist/settings-execution.js",
+      "default": "./dist/settings-execution.js"
+    },
     "./definition-yaml": {
       "types": "./dist/definition-yaml.d.ts",
       "import": "./dist/definition-yaml.js",

@@ -146,3 +146,53 @@ it("preserves ambiguous native outcomes and refuses a mismatched Codex session",
     ),
   ).rejects.toThrow("session mismatch");
 });
+
+it("rechecks native busy state after asynchronous identity verification before starting a turn", async () => {
+  let state = "idle";
+  const request = vi.fn(async (method: string) =>
+    method === "thread/read"
+      ? { thread: { id: "thread-1", status: { type: state } } }
+      : {},
+  );
+  const outcome = await wakeCodex(
+    { request, close() {} },
+    { start: true, steer: false, queue: false },
+    "thread-1",
+    randomUUID(),
+    {
+      allowIdleStart: true,
+      urgent: false,
+      beforeEffect: async () => {
+        state = "active";
+      },
+    },
+  );
+  expect(outcome).toBe("deferred");
+  expect(request.mock.calls.map(([method]) => method)).toEqual([
+    "thread/read",
+    "thread/read",
+  ]);
+});
+
+it("rejects replaced identity after the final native read with zero native writes", async () => {
+  let reads = 0;
+  const request = vi.fn(async () => {
+    reads++;
+    return { thread: { id: "thread-1", status: { type: "idle" } } };
+  });
+  const outcome = await wakeCodex(
+    { request, close() {} },
+    { start: true, steer: false, queue: false },
+    "thread-1",
+    randomUUID(),
+    {
+      allowIdleStart: true,
+      urgent: false,
+      preEffectCheck: () => {
+        if (reads === 2) throw new Error("Fixture occupant replaced");
+      },
+    },
+  );
+  expect(outcome).toBe("unknown");
+  expect(request).toHaveBeenCalledTimes(2);
+});

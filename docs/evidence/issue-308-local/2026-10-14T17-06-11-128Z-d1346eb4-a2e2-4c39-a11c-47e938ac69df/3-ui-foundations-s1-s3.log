@@ -1,0 +1,460 @@
+packages/cli-darwin-arm64                |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["darwin"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-darwin-x64                  |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["darwin"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-arm64                 |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["linux"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-arm64-musl            |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["linux"],"libc":["musl"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-x64-musl              |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["linux"],"libc":["musl"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-windows-arm64               |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["win32"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-windows-x64                 |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["win32"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+
+> @tila/ui@0.1.0 test <checkout>/packages/ui
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - `__dirname` (vitest.config.ts:21:25). Use `import.meta.dirname` instead
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 <checkout>/packages/ui
+
+stderr | test/pages/settings-definitions-forms.test.tsx > definition forms > duplicate field names block saving and invalid lifecycles are explained
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+stderr | test/pages/settings-definitions-forms.test.tsx > definition forms > duplicate field names block saving and invalid lifecycles are explained
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `title`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+ ✓ test/pages/settings-agents.test.tsx (13 tests) 3874ms
+     ✓ a viewer without agents:manage reads agents but gets no controls or writes  425ms
+     ✓ a conflicting save keeps the edits, shows what changed, and the next save uses a new key  743ms
+     ✓ the key changes after a conflict and Load latest discards the edits  542ms
+     ✓ an unconfirmed save retries the same request with the same key  382ms
+     ✓ registers with grants naming the new agent, and explains a taken ID  582ms
+ ✓ test/pages/settings-definitions-forms.test.tsx (7 tests) 4025ms
+     ✓ an empty work type is added with the keyboard only  1151ms
+     ✓ editing a field keeps custom keys and the array shape  599ms
+     ✓ a keyed field table stays keyed when a field is added  422ms
+     ✓ duplicate field names block saving and invalid lifecycles are explained  862ms
+     ✓ a record type is declared with its storage and writer policy  641ms
+ ✓ test/pages/task-detail.test.tsx (38 tests) 4392ms
+     ✓ displays the claim for a canonical task:<id> resource (AC-1)  540ms
+     ✓ expanded drawer, open data panel and focus survive a failed task refresh and recovery  379ms
+ ✓ test/pages/settings-service-identities.test.tsx (11 tests) 5666ms
+   ✓ workload_bindings_manage alone offers bindings but not account changes  412ms
+   ✓ creating an account sends its name, display name and role  641ms
+   ✓ a binding policy is replaced from a preset  427ms
+   ✓ a new GitHub Actions binding defaults the issuer  820ms
+   ✓ a rename conflict keeps the opened revision and draft until explicit rebase  308ms
+   ✓ binding conflict keeps policy edits and Load latest explicitly replaces them  362ms
+   ✓ an Actions binding accepts an explicit Enterprise issuer without adding deployment trust  1889ms
+ ✓ test/components/task-edit.test.tsx (8 tests) 7735ms
+   ✓ edits under a claim and sends only changed fields with its fence  1128ms
+   ✓ a change made elsewhere while editing is a conflict that keeps the draft  5343ms
+   ✓ a lost save that was applied is not sent again after the claim changed  328ms
+stderr | test/components/task-execution.test.tsx > a follow-up task links back to the attempt and survives an interrupted link
+Unhandled GET http://localhost:3000/projects/test-project/templates
+
+stderr | test/components/task-execution.test.tsx > a follow-up task links back to the attempt and survives an interrupted link
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/templates
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/components/task-execution.test.tsx > a refused correction unlocks the reason and finishes on retry without a second task
+Unhandled GET http://localhost:3000/projects/test-project/templates
+
+stderr | test/components/task-execution.test.tsx > a refused correction unlocks the reason and finishes on retry without a second task
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/templates
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ ✓ test/components/task-execution.test.tsx (6 tests) 2869ms
+   ✓ task state, attempt state and result are shown separately  498ms
+   ✓ a failed result shows its evidence, history and a reasoned retry  502ms
+   ✓ a follow-up task links back to the attempt and survives an interrupted link  620ms
+   ✓ a refused correction unlocks the reason and finishes on retry without a second task  681ms
+ ✓ test/pages/records.test.tsx (21 tests) 3056ms
+     ✓ Next and Previous walk cursor pages with the cursor in the URL  817ms
+     ✓ the key filter is sent to the server and drops the cursor  660ms
+     ✓ an invalid cursor resets to the first page with a notice  324ms
+ ✓ test/command-palette.test.tsx (13 tests) 3778ms
+     ✓ an empty query lists recently updated tasks from the full list  396ms
+     ✓ searches the server after a debounce and offers a full search  458ms
+     ✓ Enter opens a matching task that is not on the first list page  399ms
+     ✓ works for a namespace-restricted credential without compact listing  387ms
+     ✓ a failed search offers Retry  442ms
+     ✓ a forbidden search omits task results silently  406ms
+     ✓ finds pages by section and keyword  359ms
+ ✓ test/pages/tasks.test.tsx (34 tests) 9860ms
+     ✓ renders table rows from API data  342ms
+     ✓ requests non-archived tasks by default and can include archived  319ms
+     ✓ searching drops the filters search cannot apply  386ms
+     ✓ Next walks keyset pages and browser Back returns to the previous page  2525ms
+     ✓ changing the type filter drops the page cursor  1201ms
+     ✓ a deep link to a later page renders it with First page  705ms
+     ✓ closing the drawer keeps the list's query string  991ms
+     ✓ searches the server with the type filter and shows ranked matches  421ms
+     ✓ a one-character query keeps the list and asks for more  346ms
+stderr | test/pages/decisions.test.tsx > answers with the question's correlation and a matching idempotency key
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > answers with the question's correlation and a matching idempotency key
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > answers with the question's correlation and a matching idempotency key
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > answers with the question's correlation and a matching idempotency key
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ ✓ test/pages/settings-definitions-policies.test.tsx (4 tests) 3318ms
+     ✓ shortening retention explains the effect and keeps custom keys  934ms
+     ✓ a template is duplicated and edited; invalid data blocks saving  825ms
+     ✓ reference slots and the hierarchy are edited without a file  1300ms
+stderr | test/pages/decisions.test.tsx > an interrupted answer is retried with the same operation
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > an interrupted answer is retried with the same operation
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > an interrupted answer is retried with the same operation
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > an interrupted answer is retried with the same operation
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > a superseded question keeps the unsent answer visible
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > a superseded question keeps the unsent answer visible
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > a superseded question keeps the unsent answer visible
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > a superseded question keeps the unsent answer visible
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > a draft survives closing and reopening the drawer
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > a draft survives closing and reopening the drawer
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > a draft survives closing and reopening the drawer
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > a draft survives closing and reopening the drawer
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > a draft survives closing and reopening the drawer
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > a draft survives closing and reopening the drawer
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > losing access while the drawer is open keeps the draft and removes the form
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > losing access while the drawer is open keeps the draft and removes the form
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ ✓ test/pages/queue.test.tsx (18 tests) 12509ms
+   ✓ paginates beyond 250 entries and opens task-filtered work beyond the first page  1907ms
+   ✓ preserves edited limits on a revision conflict and retries only after revision review  1295ms
+   ✓ keeps the queue visible when permissions or attempt details are unavailable  604ms
+   ✓ requests cancellation without claiming the running process stopped  723ms
+   ✓ makes viewer actions unavailable and disables writes on stale queue data  533ms
+   ✓ sends request-suspension as durable intent through the attempt API  644ms
+   ✓ sends request-resume as durable intent through the attempt API  658ms
+   ✓ sends force-recovery as durable intent through the attempt API  972ms
+   ✓ requires a recovery reason and keeps session identity when rebinding ownership  1288ms
+   ✓ request controls for a participant who enrolled the work  444ms
+   ✓ request controls for a participant with no control authority  515ms
+   ✓ shows the server's refusal when authority cannot be checked locally  766ms
+   ✓ links corrective work to a finished attempt with a retry-safe key  1094ms
+stderr | test/pages/decisions.test.tsx > losing access while the drawer is open keeps the draft and removes the form
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > losing access while the drawer is open keeps the draft and removes the form
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > only the designated responder answers; others may escalate to an owner
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > only the designated responder answers; others may escalate to an owner
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > only the designated responder answers; others may escalate to an owner
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > only the designated responder answers; others may escalate to an owner
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > an escalated question waits for an owner
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > an escalated question waits for an owner
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > an escalated question waits for an owner
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > an escalated question waits for an owner
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > the answer form works from the keyboard alone
+Unhandled GET http://localhost:3000/projects//questions/00000000-0000-4000-8000-000000000001
+
+stderr | test/pages/decisions.test.tsx > the answer form works from the keyboard alone
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects//questions/00000000-0000-4000-8000-000000000001
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | test/pages/decisions.test.tsx > the answer form works from the keyboard alone
+Unhandled GET http://localhost:3000/projects/test-project/memberships
+
+stderr | test/pages/decisions.test.tsx > the answer form works from the keyboard alone
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/memberships
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ ✓ test/pages/decisions.test.tsx (10 tests) 3317ms
+   ✓ the inbox lists open questions waiting on the signed-in principal  454ms
+   ✓ answers with the question's correlation and a matching idempotency key  579ms
+   ✓ a superseded question keeps the unsent answer visible  317ms
+   ✓ a draft survives closing and reopening the drawer  414ms
+   ✓ losing access while the drawer is open keeps the draft and removes the form  333ms
+   ✓ only the designated responder answers; others may escalate to an owner  365ms
+ ✓ test/pages/settings-rooms.test.tsx (13 tests) 3614ms
+     ✓ a conflicting save keeps the edits and the next save names the new revision  620ms
+     ✓ widening history to every project reader asks first, inline  310ms
+     ✓ keeping members only cancels the widening without a request  342ms
+     ✓ each change sends the room revision, and the next one uses the revision the last returned  619ms
+   ✓ creating a room sends its settings with an idempotency key  574ms
+ ✓ test/pages/rooms.test.tsx (10 tests) 3338ms
+   ✓ polls the tail separately, deduplicates overlapping sequences and bounds rendered messages  2715ms
+ ✓ test/pages/overview.test.tsx (30 tests) 3400ms
+     ✓ S1 keeps large custom and empty catalogs usable when a secondary source fails  464ms
+ ✓ test/pages/settings-repositories.test.tsx (9 tests) 3141ms
+   ✓ a conflicting access-policy save keeps the edits and keeps the other change  618ms
+   ✓ an enabled OIDC policy needs an event and sends lists and the revision  859ms
+   ✓ step-up closes the drawer, shows the banner and keeps the draft for later  351ms
+   ✓ linking reports a repository GitHub cannot find  380ms
+ ✓ test/pages/settings-credentials.test.tsx (9 tests) 3770ms
+   ✓ read-only access lists credentials with no issue, rotate or revoke control  399ms
+   ✓ revoking requires typing the name and calls DELETE /api/tokens/:name  547ms
+   ✓ issuing shows the secret once and never stores it  1021ms
+   ✓ an unconfirmed issue is not retried and says to check the list  634ms
+   ✓ rotation sends the listed version and shows the new secret once  320ms
+   ✓ step-up on issue closes the drawer and shows the banner  448ms
+ ✓ test/pages/settings-definitions-transfer.test.tsx (12 tests) 2727ms
+     ✓ bootstraps a project from a pasted file  980ms
+     ✓ an uploaded YAML file applies the same definition as TOML  373ms
+     ✓ replace lists removals and blocks apply until they are confirmed  330ms
+ ✓ test/pages/settings.test.tsx (22 tests) 3000ms
+     ✓ explicit mode: lists members, offers the grant form, explains mirroring is off  506ms
+     ✓ a failed members refresh keeps the table, the grant draft and an open revoke dialog  374ms
+ ✓ test/pages/journal.test.tsx (10 tests) 2166ms
+     ✓ toggles data display when data button clicked  308ms
+       ✓ trim-notice: shows trim notice when events.length >= MAX_ROWS - PRUNE_COUNT (400)  812ms
+ ✓ test/pages/settings-signal-groups.test.tsx (7 tests) 2356ms
+     ✓ a viewer without signals:manage reads groups but gets no controls  372ms
+   ✓ creating is create-only: an existing ID is reported, not overwritten  1100ms
+   ✓ an edit replaces the group at the revision it opened on and reports a conflict  448ms
+ ✓ test/pages/settings-definitions-editor.test.tsx (8 tests) 2550ms
+     ✓ a first project is started, reviewed and applied as revision 1  803ms
+     ✓ a concurrent apply keeps the draft and rebases it onto the latest revision  364ms
+     ✓ a destructive preview shows its impact and cancel sends nothing  445ms
+ ✓ test/components/task-create.test.tsx (7 tests) 2798ms
+   ✓ creates a declared task with declared defaults and an idempotency key  770ms
+   ✓ a lost response is retried with the same request and recognised as created  422ms
+   ✓ a different task holding the ID keeps the input and asks for another ID  303ms
+   ✓ instantiates a template with its declared variables  520ms
+   ✓ a first template send that finds the root taken is not reported as created  316ms
+ ✓ test/layout.test.tsx (11 tests) 2060ms
+     ✓ groups pages into primary sections with the active one marked  400ms
+     ✓ the palette hides destinations the credential cannot use  314ms
+ ✓ test/pages/record-detail.test.tsx (11 tests) 1955ms
+     ✓ a failed history request is an error with retry, not 'No history available'  480ms
+ ✓ test/components/record-editor.test.tsx (4 tests) 1713ms
+   ✓ creates a declared record with defaults prefilled  716ms
+   ✓ edits at the loaded fence and keeps undeclared keys  378ms
+   ✓ a stale fence keeps the draft and requires review before saving again  480ms
+stderr | test/app.test.tsx > App routing > an unknown project path opens the overview
+Unhandled GET http://localhost:3000/projects/test-project/deliveries?state=pending&wake=suppressed&limit=1
+Unhandled GET http://localhost:3000/projects/test-project/deliveries?state=expired&expires_after=1791911220000&limit=1
+Unhandled GET http://localhost:3000/projects/test-project/runtime-view?filter=attention&limit=1
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/deliveries?state=pending&wake=suppressed&limit=1
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/deliveries?state=expired&expires_after=1791911220000&limit=1
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+[MSW] Error: intercepted a request without a matching request handler:
+
+  • GET /projects/test-project/runtime-view?filter=attention&limit=1
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ ✓ test/pages/journal-report.test.tsx (4 tests) 1577ms
+     ✓ retains the retry key after a lost response and emits the accepted sequence  590ms
+     ✓ sends custom-name and correlation filters to the service  847ms
+ ✓ test/pages/login.test.tsx (7 tests) 1300ms
+     ✓ offers email/password without token entry or email delivery  508ms
+     ✓ shows a sign-in failure without exposing password or tokens  332ms
+ ✓ test/app.test.tsx (9 tests) 1694ms
+     ✓ / opens the project overview  380ms
+     ✓ /entities/:id opens that task, not the bare list  545ms
+ ✓ test/artifact-review-details.test.tsx (8 tests) 1647ms
+     ✓ shows all fields in server order and identifies the viewed revision  316ms
+     ✓ paginates, opens an older revision, resets its cursor, and supports Back and close  628ms
+ ✓ test/pages/runtime.test.tsx (15 tests) 1725ms
+     ✓ links the mailbox to run, host, session and declared account evidence  310ms
+ ✓ test/pages/settings-runtime-access.test.tsx (5 tests) 1224ms
+   ✓ a sponsor sees their installations, can revoke them, and never sees invitations  314ms
+   ✓ revoking an installation needs its name typed and explains the effect  392ms
+   ✓ a new invitation's secret is shown once and never stored  312ms
+ ✓ test/pages/deliveries.test.tsx (9 tests) 1205ms
+   ✓ keeps wake, fetch, acknowledgement and work result separate per delivery  405ms
+ ✓ test/pages/signals.test.tsx (4 tests) 954ms
+     ✓ transitions from loading tables to independent empty states  671ms
+ ✓ test/pages/settings-definitions.test.tsx (4 tests) 979ms
+     ✓ a project without definitions offers to start them in the browser  426ms
+     ✓ shows the applied revision, types and paged history  445ms
+ ✓ test/hooks/step-up-resume.test.tsx (33 tests) 1114ms
+ ✓ test/pages/agents.test.tsx (9 tests) 904ms
+ ✓ test/pages/artifacts.test.tsx (6 tests) 778ms
+ ✓ test/pages/settings-general.test.tsx (4 tests) 991ms
+   ✓ an owner renames against the revision on screen; clearing sends null  449ms
+ ✓ test/reply-composer.test.tsx (3 tests) 962ms
+   ✓ retries the same publication after a lost response without clearing newer edits  407ms
+   ✓ a response from an unmounted composer preserves the reopened draft  354ms
+ ✓ test/components/confirm-action.test.tsx (2 tests) 459ms
+     ✓ enables the destructive button only once the typed name matches  405ms
+ ✓ test/tables.test.tsx (2 tests) 569ms
+     ✓ data table has aria-rowcount equal to the number of entities  450ms
+ ✓ test/pages/account-access.test.tsx (3 tests) 490ms
+   ✓ requires confirmation of the target account before consuming a browser link  345ms
+ ✓ test/components/legacy-redirect.test.tsx (17 tests) 390ms
+ ✓ test/components/query-section.test.tsx (15 tests) 401ms
+ ✓ test/copy-button.test.tsx (2 tests) 246ms
+ ✓ test/pages/presence.test.tsx (1 test) 352ms
+     ✓ labels heartbeat freshness and never infers idle or completed  344ms
+ ✓ test/components/step-up-banner.test.tsx (5 tests) 518ms
+ ✓ test/lib/api.test.ts (24 tests) 92ms
+ ✓ test/use-api.test.tsx (4 tests) 253ms
+ ✓ test/lib/attention.test.ts (50 tests) 30ms
+ ✓ test/lib/readiness-context.test.ts (16 tests) 10ms
+ ✓ test/lib/query-state.test.ts (29 tests) 43ms
+ ✓ test/lib/field-values.test.ts (5 tests) 10ms
+ ✓ test/lib/lease.test.ts (10 tests) 13ms
+ ✓ test/lib/navigation.test.ts (38 tests) 15ms
+ ✓ test/lib/list-queries.test.ts (4 tests) 11ms
+ ✓ test/contrast.test.ts (4 tests) 7ms
+ ✓ test/lib/operation-draft.test.ts (3 tests) 8ms
+ ✓ test/lib/execution.test.ts (3 tests) 7ms
+ ✓ test/lib/config.test.ts (2 tests) 7ms
+ ✓ test/lib/definition-draft.test.ts (2 tests) 7ms
+
+ Test Files  62 passed (62)
+      Tests  707 passed (707)
+   Start at  17:06:49
+   Duration  36.67s (transform 7.07s, setup 19.30s, import 43.34s, tests 123.98s, environment 54.05s)
+

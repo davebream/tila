@@ -1,0 +1,96 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 1,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 6,
+  "numPassedTests": 2,
+  "numFailedTests": 0,
+  "numPendingTests": 4,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1791996607383,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "S1 walks all 301 custom tasks and search hits through eviction without truncation",
+          "status": "passed",
+          "title": "S1 walks all 301 custom tasks and search hits through eviction without truncation",
+          "duration": 1846,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S1 serializes three revisionful client-shaped edits and rejects a stale original file",
+          "status": "passed",
+          "title": "S1 serializes three revisionful client-shaped edits and rejects a stale original file",
+          "duration": 223,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S2 retains two distinct answers and one logical replay effect across outage and replacement",
+          "status": "skipped",
+          "title": "S2 retains two distinct answers and one logical replay effect across outage and replacement",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S2 two local participant principals sharing a participant label cannot exchange grants",
+          "status": "skipped",
+          "title": "S2 two local participant principals sharing a participant label cannot exchange grants",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S3 retains acknowledged decisions through cancellation and explicit result (answer first)",
+          "status": "skipped",
+          "title": "S3 retains acknowledged decisions through cancellation and explicit result (answer first)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S3 retains acknowledged decisions through cancellation and explicit result (answer last)",
+          "status": "skipped",
+          "title": "S3 retains acknowledged decisions through cancellation and explicit result (answer last)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996620979,
+      "endTime": 1791996623048,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/product-scenarios.test.ts"
+    }
+  ]
+}

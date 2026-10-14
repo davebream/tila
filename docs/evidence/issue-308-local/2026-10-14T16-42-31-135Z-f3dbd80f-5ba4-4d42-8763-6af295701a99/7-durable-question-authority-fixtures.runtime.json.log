@@ -1,0 +1,374 @@
+{
+  "numTotalTestSuites": 7,
+  "numPassedTestSuites": 7,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 28,
+  "numPassedTests": 28,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1791996323129,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "restores real DO snapshots without resurrecting bindings or rewinding epochs",
+          "status": "passed",
+          "title": "restores real DO snapshots without resurrecting bindings or rewinding epochs",
+          "duration": 1579,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "authorizes agent selection and binding against current credentials before any replay",
+          "status": "passed",
+          "title": "authorizes agent selection and binding against current credentials before any replay",
+          "duration": 1541,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996338305,
+      "endTime": 1791996341425,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/agent-bindings.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "round-trips SDK gzip Blob and File uploads through R2 and DO SQLite",
+          "status": "passed",
+          "title": "round-trips SDK gzip Blob and File uploads through R2 and DO SQLite",
+          "duration": 715,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "normalizes upload aliases and returns permanent resource errors through real R2 and DO SQLite",
+          "status": "passed",
+          "title": "normalizes upload aliases and returns permanent resource errors through real R2 and DO SQLite",
+          "duration": 660,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "returns a readable 410 envelope for deleted revision content through the Worker",
+          "status": "passed",
+          "title": "returns a readable 410 envelope for deleted revision content through the Worker",
+          "duration": 573,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "recovers interrupted R2 publication after eviction without duplicate logical records",
+          "status": "passed",
+          "title": "recovers interrupted R2 publication after eviction without duplicate logical records",
+          "duration": 363,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996339024,
+      "endTime": 1791996341335,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/artifacts.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects control requests from a former owner while the assigner keeps control across a cold start",
+          "status": "passed",
+          "title": "rejects control requests from a former owner while the assigner keeps control across a cold start",
+          "duration": 1259,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996339018,
+      "endTime": 1791996340277,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempt-authority.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "replaces a restarted native session on the same attempt and recovers owned work after a cold start",
+          "status": "passed",
+          "title": "replaces a restarted native session on the same attempt and recovers owned work after a cold start",
+          "duration": 1172,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps finishing available while paused, rejects results the current definition forbids and rejects revoked authority",
+          "status": "passed",
+          "title": "keeps finishing available while paused, rejects results the current definition forbids and rejects revoked authority",
+          "duration": 906,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996339017,
+      "endTime": 1791996341095,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempt-continuity.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "persists execution receipts and capacity through a real DO cold start and lease expiry",
+          "status": "passed",
+          "title": "persists execution receipts and capacity through a real DO cold start and lease expiry",
+          "duration": 532,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rolls back an admission failure including claim, fence and journal on DO SQLite",
+          "status": "passed",
+          "title": "rolls back an admission failure including claim, fence and journal on DO SQLite",
+          "duration": 324,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996338347,
+      "endTime": 1791996339203,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempts.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "checks current D1 responder membership before answering and before replay",
+          "status": "passed",
+          "title": "checks current D1 responder membership before answering and before replay",
+          "duration": 1007,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996339030,
+      "endTime": 1791996340037,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/question-api.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and request-cancellation requests (answer sent first)",
+          "status": "passed",
+          "title": "serializes concurrent answer and request-cancellation requests (answer sent first)",
+          "duration": 467,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and request-cancellation requests (answer sent last)",
+          "status": "passed",
+          "title": "serializes concurrent answer and request-cancellation requests (answer sent last)",
+          "duration": 495,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and rebind requests (answer sent first)",
+          "status": "passed",
+          "title": "serializes concurrent answer and rebind requests (answer sent first)",
+          "duration": 395,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and rebind requests (answer sent last)",
+          "status": "passed",
+          "title": "serializes concurrent answer and rebind requests (answer sent last)",
+          "duration": 415,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: keeps simultaneous questions distinct and replays only identical authorized answers",
+          "status": "passed",
+          "title": "DO: keeps simultaneous questions distinct and replays only identical authorized answers",
+          "duration": 264,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: rejects wrong actors and exact attempt correlation mismatches",
+          "status": "passed",
+          "title": "DO: rejects wrong actors and exact attempt correlation mismatches",
+          "duration": 398,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: heartbeats and initial session attachment preserve answer context",
+          "status": "passed",
+          "title": "DO: heartbeats and initial session attachment preserve answer context",
+          "duration": 282,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: retains offline answers as evidence and requires a new question after recovery",
+          "status": "passed",
+          "title": "DO: retains offline answers as evidence and requires a new question after recovery",
+          "duration": 300,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: cancellation first supersedes pending answers in the same transaction",
+          "status": "passed",
+          "title": "DO: cancellation first supersedes pending answers in the same transaction",
+          "duration": 210,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: answer first retains evidence after cancellation or terminal completion",
+          "status": "passed",
+          "title": "DO: answer first retains evidence after cancellation or terminal completion",
+          "duration": 220,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: escalation transfers answer ownership and requires current owner authority",
+          "status": "passed",
+          "title": "DO: escalation transfers answer ownership and requires current owner authority",
+          "duration": 284,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: rolls back answer state receipt and journal together",
+          "status": "passed",
+          "title": "DO: rolls back answer state receipt and journal together",
+          "duration": 269,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: filters pending questions and paginates without leaking forbidden tasks",
+          "status": "passed",
+          "title": "DO: filters pending questions and paginates without leaking forbidden tasks",
+          "duration": 256,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: reports a total equal to the rows reached by walking every page",
+          "status": "passed",
+          "title": "DO: reports a total equal to the rows reached by walking every page",
+          "duration": 281,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "destroys a project that has an open question and report receipts",
+          "status": "passed",
+          "title": "destroys a project that has an open question and report receipts",
+          "duration": 232,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "recovers an offline answer after DO eviction and acknowledges its journal position",
+          "status": "passed",
+          "title": "recovers an offline answer after DO eviction and acknowledges its journal position",
+          "duration": 236,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996338384,
+      "endTime": 1791996343388,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/questions.test.ts"
+    }
+  ]
+}

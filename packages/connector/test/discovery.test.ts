@@ -166,3 +166,36 @@ it("rejects reused PIDs before attaching and detects replacement during external
   );
   f.discovery.close();
 });
+
+it.each(["run", "namespace", "enrollment", "participant", "role"])(
+  "rejects mismatched %s authority before native account I/O",
+  async (field) => {
+    const f = setup();
+    if (field === "run") f.context.run_id = randomUUID();
+    if (field === "namespace")
+      f.sessions.write({
+        ...f.state,
+        namespace: '["https://other.test","project"]',
+      });
+    if (field === "enrollment") f.context.enrollment_id = "";
+    if (field === "participant") f.context.participant_id = "replacement";
+    if (field === "role") f.context.run_role = "relay";
+    await expect(f.discovery.discover(f.state.key)).rejects.toThrow(
+      "does not match",
+    );
+    expect(f.verify).not.toHaveBeenCalled();
+    expect(mocked.proxies).toBe(0);
+  },
+);
+
+it("rejects lifecycle replacement while broker authentication awaits", async () => {
+  const f = setup();
+  mocked.connect.mockImplementationOnce(async () => {
+    f.sessions.write({ ...f.state, participantId: "replacement" });
+    return { deployment: "https://tila.test", context: f.context };
+  });
+  await expect(f.discovery.discover(f.state.key)).rejects.toThrow(
+    "changed during discovery",
+  );
+  expect(f.verify).not.toHaveBeenCalled();
+});

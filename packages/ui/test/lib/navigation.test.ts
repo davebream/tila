@@ -44,6 +44,7 @@ describe("matchNav", () => {
     ["/p/acme/presence", "runtime", "presence"],
     ["/p/acme/settings", "settings", "settings"],
     ["/p/acme/settings/definitions", "settings", "definitions"],
+    ["/p/acme/settings/transfer", "settings", "settings-transfer"],
     ["/p/acme/settings/agents", "settings", "agent-settings"],
     ["/p/acme/settings/general", "settings", "general"],
     ["/p/acme/settings/repositories", "settings", "repositories"],
@@ -76,7 +77,8 @@ describe("navigation config", () => {
   test("every required capability exists", () => {
     for (const section of NAV_SECTIONS)
       for (const item of section.items)
-        for (const cap of item.requires) expect(CAPABILITIES).toContain(cap);
+        for (const cap of [...item.requires, ...(item.requiresAny ?? [])])
+          expect(CAPABILITIES).toContain(cap);
   });
 
   test("project segments include the entities alias", () => {
@@ -120,6 +122,32 @@ describe("navVisibility", () => {
     expect(visible).toContain("definitions");
   });
 
+  test.each(["agents:read", "conversations:read", "signals:read"] as const)(
+    "keeps settings transfer visible with only %s",
+    (capability) => {
+      const policy = identity({ role: "viewer", capabilities: [capability] });
+      expect(ids(navVisibility(policy, "test-project"))).toContain(
+        "settings-transfer",
+      );
+    },
+  );
+
+  test("hides settings transfer when a known policy has no readable settings section", () => {
+    const policy = identity({
+      role: "viewer",
+      capabilities: ["tasks:read", "schema:read"],
+    });
+    expect(ids(navVisibility(policy, "test-project"))).not.toContain(
+      "settings-transfer",
+    );
+    expect(ids(navVisibility(undefined, "test-project"))).toContain(
+      "settings-transfer",
+    );
+    expect(ids(navVisibility(policy, "other-project"))).toContain(
+      "settings-transfer",
+    );
+  });
+
   test("a namespace-restricted credential sees only permitted surfaces", () => {
     const restricted = identity({
       role: "participant",
@@ -127,6 +155,18 @@ describe("navVisibility", () => {
       restrictions: { task_types: ["bug"] },
     });
     const isVisible = navVisibility(restricted, "test-project");
+    const transfer = NAV_SECTIONS.flatMap((section) => section.items).find(
+      (item) => item.id === "settings-transfer",
+    );
+    if (!transfer) throw new Error("Missing settings transfer navigation");
+    expect(transfer.surface).toBe("agents");
+    expect(isVisible(transfer)).toBe(false);
+    expect(
+      navVisibility(
+        identity({ role: "maintainer", capabilities: [...CAPABILITIES] }),
+        "test-project",
+      )(transfer),
+    ).toBe(true);
     expect(ids(isVisible)).toEqual([
       "overview",
       "tasks",

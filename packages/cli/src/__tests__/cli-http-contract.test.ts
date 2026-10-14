@@ -63,9 +63,11 @@ async function invoke(args: string[]) {
     {
       cwd: home,
       env: {
-        ...process.env,
+        PATH: process.env.PATH,
         HOME: home,
         TILA_HOME: home,
+        XDG_CONFIG_HOME: join(home, "config"),
+        XDG_CACHE_HOME: join(home, "cache"),
         CI: "1",
         CODEX_THREAD_ID: "",
         TILA_LIFECYCLE_KEY: "",
@@ -90,6 +92,60 @@ async function invoke(args: string[]) {
     stderr: Buffer.concat(stderr).toString(),
   };
 }
+it("preserves the successful remote task claim contract", async () => {
+  respond = (_req, res) =>
+    json(res, {
+      ok: true,
+      fence: 42,
+      expires_at: 1700000300000,
+      participant_id: "explicit-session",
+    });
+  const result = await invoke(["task", "claim", "T-claim", "--json"]);
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(JSON.parse(result.stdout.toString())).toEqual({
+    ok: true,
+    result: {
+      acquired: true,
+      fence: 42,
+      expires_at: new Date(1700000300000).toISOString(),
+      participant_id: "explicit-session",
+    },
+  });
+  expect(requests).toEqual([
+    { url: "/projects/test/claims/acquire", participant: "explicit-session" },
+  ]);
+});
+it.each([true, false])(
+  "preserves remote task claim conflict output (json=%s)",
+  async (jsonOutput) => {
+    const message = "Resource task:T-claim already held";
+    respond = (_req, res) =>
+      json(
+        res,
+        {
+          ok: false,
+          error: { code: "already-held", message, retryable: false },
+        },
+        409,
+      );
+    const result = await invoke([
+      "task",
+      "claim",
+      "T-claim",
+      ...(jsonOutput ? ["--json"] : []),
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stdout.length).toBe(0);
+    if (jsonOutput) {
+      expect(JSON.parse(result.stderr)).toEqual({
+        ok: false,
+        error: { kind: "already-held", message, retryable: false },
+      });
+    } else expect(result.stderr.trim()).toBe(message);
+    expect(requests).toHaveLength(1);
+  },
+);
 it("forwards task pagination and participant override, normalizes empty results", async () => {
   respond = (_req, res) =>
     json(res, {

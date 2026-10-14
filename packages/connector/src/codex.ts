@@ -52,7 +52,11 @@ export function codexCapabilities(
   }
 }
 export interface CodexRpc {
-  request(method: string, params: unknown): Promise<unknown>;
+  request(
+    method: string,
+    params: unknown,
+    preSend?: () => void,
+  ): Promise<unknown>;
   close(): void;
 }
 /** Only attaches to the profile's existing daemon; never starts one implicitly. */
@@ -120,7 +124,11 @@ export class CodexProxy implements CodexRpc {
       });
     });
   }
-  async request(method: string, params: unknown): Promise<unknown> {
+  async request(
+    method: string,
+    params: unknown,
+    preSend?: () => void,
+  ): Promise<unknown> {
     if (
       !["thread/read", "account/read", "turn/start", "turn/steer"].includes(
         method,
@@ -128,6 +136,7 @@ export class CodexProxy implements CodexRpc {
     )
       throw new Error("Unsupported Codex request");
     await this.connect();
+    preSend?.();
     return this.send(method, params);
   }
   close(): void {
@@ -169,13 +178,29 @@ export async function wakeCodex(
   capabilities: CodexCapabilities,
   threadId: string,
   nonce: string,
-  policy: { allowIdleStart: boolean; urgent: boolean; expectedTurnId?: string },
+  policy: {
+    allowIdleStart: boolean;
+    urgent: boolean;
+    expectedTurnId?: string;
+    beforeEffect?: () => Promise<void>;
+    preEffectCheck?: () => void;
+  },
 ): Promise<WakeOutcome> {
   const status = await codexThread(rpc, threadId);
+  policy.preEffectCheck?.();
   const input = [{ type: "text", text: wakeNotice(nonce) }];
   if (status.state === "idle" && policy.allowIdleStart && capabilities.start) {
     try {
-      await rpc.request("turn/start", { threadId, input });
+      await policy.beforeEffect?.();
+      policy.preEffectCheck?.();
+      const current = await codexThread(rpc, threadId);
+      policy.preEffectCheck?.();
+      if (current.state !== "idle") return "deferred";
+      await rpc.request(
+        "turn/start",
+        { threadId, input },
+        policy.preEffectCheck,
+      );
       return "accepted";
     } catch {
       return "unknown";
@@ -188,11 +213,24 @@ export async function wakeCodex(
     policy.expectedTurnId
   ) {
     try {
-      await rpc.request("turn/steer", {
-        threadId,
-        input,
-        expectedTurnId: policy.expectedTurnId,
-      });
+      await policy.beforeEffect?.();
+      policy.preEffectCheck?.();
+      const current = await codexThread(rpc, threadId);
+      policy.preEffectCheck?.();
+      if (
+        current.state !== "active" ||
+        (current.turnId && current.turnId !== policy.expectedTurnId)
+      )
+        return "deferred";
+      await rpc.request(
+        "turn/steer",
+        {
+          threadId,
+          input,
+          expectedTurnId: policy.expectedTurnId,
+        },
+        policy.preEffectCheck,
+      );
       return "accepted";
     } catch {
       return "unknown";

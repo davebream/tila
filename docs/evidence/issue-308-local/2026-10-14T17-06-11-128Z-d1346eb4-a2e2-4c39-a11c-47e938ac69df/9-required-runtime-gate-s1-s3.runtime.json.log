@@ -1,0 +1,2131 @@
+{
+  "numTotalTestSuites": 42,
+  "numPassedTestSuites": 42,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 170,
+  "numPassedTests": 170,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1791997750919,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "restores real DO snapshots without resurrecting bindings or rewinding epochs",
+          "status": "passed",
+          "title": "restores real DO snapshots without resurrecting bindings or rewinding epochs",
+          "duration": 1102,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "authorizes agent selection and binding against current credentials before any replay",
+          "status": "passed",
+          "title": "authorizes agent selection and binding against current credentials before any replay",
+          "duration": 1342,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997792608,
+      "endTime": 1791997795052,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/agent-bindings.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "round-trips SDK gzip Blob and File uploads through R2 and DO SQLite",
+          "status": "passed",
+          "title": "round-trips SDK gzip Blob and File uploads through R2 and DO SQLite",
+          "duration": 492,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "normalizes upload aliases and returns permanent resource errors through real R2 and DO SQLite",
+          "status": "passed",
+          "title": "normalizes upload aliases and returns permanent resource errors through real R2 and DO SQLite",
+          "duration": 629,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "returns a readable 410 envelope for deleted revision content through the Worker",
+          "status": "passed",
+          "title": "returns a readable 410 envelope for deleted revision content through the Worker",
+          "duration": 442,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "recovers interrupted R2 publication after eviction without duplicate logical records",
+          "status": "passed",
+          "title": "recovers interrupted R2 publication after eviction without duplicate logical records",
+          "duration": 344,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997793281,
+      "endTime": 1791997795188,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/artifacts.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects control requests from a former owner while the assigner keeps control across a cold start",
+          "status": "passed",
+          "title": "rejects control requests from a former owner while the assigner keeps control across a cold start",
+          "duration": 908,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997797962,
+      "endTime": 1791997798870,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempt-authority.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "replaces a restarted native session on the same attempt and recovers owned work after a cold start",
+          "status": "passed",
+          "title": "replaces a restarted native session on the same attempt and recovers owned work after a cold start",
+          "duration": 805,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps finishing available while paused, rejects results the current definition forbids and rejects revoked authority",
+          "status": "passed",
+          "title": "keeps finishing available while paused, rejects results the current definition forbids and rejects revoked authority",
+          "duration": 636,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997796194,
+      "endTime": 1791997797635,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempt-continuity.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "links a hotfix to an accepted result over HTTP and the DO refuses to rewrite that result",
+          "status": "passed",
+          "title": "links a hotfix to an accepted result over HTTP and the DO refuses to rewrite that result",
+          "duration": 688,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997806617,
+      "endTime": 1791997807305,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempt-corrections.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "persists execution receipts and capacity through a real DO cold start and lease expiry",
+          "status": "passed",
+          "title": "persists execution receipts and capacity through a real DO cold start and lease expiry",
+          "duration": 329,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rolls back an admission failure including claim, fence and journal on DO SQLite",
+          "status": "passed",
+          "title": "rolls back an admission failure including claim, fence and journal on DO SQLite",
+          "duration": 206,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997805521,
+      "endTime": 1791997806057,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempts.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "enforces real D1 memberships, project scope, permission and revocation",
+          "status": "passed",
+          "title": "enforces real D1 memberships, project scope, permission and revocation",
+          "duration": 461,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997806623,
+      "endTime": 1791997807084,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/authorization.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "serves conversations without HASH_PEPPER once CONVERSATION_CURSOR_KEY is set",
+          "status": "passed",
+          "title": "serves conversations without HASH_PEPPER once CONVERSATION_CURSOR_KEY is set",
+          "duration": 329,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "fails closed without a signing secret and shows detail only to managers",
+          "status": "passed",
+          "title": "fails closed without a signing secret and shows detail only to managers",
+          "duration": 210,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects a short dedicated key without falling back to HASH_PEPPER",
+          "status": "passed",
+          "title": "rejects a short dedicated key without falling back to HASH_PEPPER",
+          "duration": 159,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "invalidates cursors when the key source changes and ignores a client-supplied key",
+          "status": "passed",
+          "title": "invalidates cursors when the key source changes and ignores a client-supplied key",
+          "duration": 313,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997797443,
+      "endTime": 1791997798455,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/conversation-cursor-key.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "exchanges durable peer messages between authenticated SDK runs and rejects replay after revocation",
+          "status": "passed",
+          "title": "exchanges durable peer messages between authenticated SDK runs and rejects replay after revocation",
+          "duration": 3068,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997779300,
+      "endTime": 1791997782368,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/conversations.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes exclusive claims, advances fences and rejects stale destructive writes",
+          "status": "passed",
+          "title": "serializes exclusive claims, advances fences and rejects stale destructive writes",
+          "duration": 421,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "upgrades a seeded old DO schema with real migrations and rolls back failed transactions",
+          "status": "passed",
+          "title": "upgrades a seeded old DO schema with real migrations and rolls back failed transactions",
+          "duration": 257,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997801787,
+      "endTime": 1791997802466,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/coordination.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "returns an explicit retry delay for append throttling while replaying accepted receipts",
+          "status": "passed",
+          "title": "returns an explicit retry delay for append throttling while replaying accepted receipts",
+          "duration": 1809,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "persists authenticated reports across concurrent HTTP retries, cold restart and archive replay",
+          "status": "passed",
+          "title": "persists authenticated reports across concurrent HTTP retries, cold restart and archive replay",
+          "duration": 571,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects forged identities, missing authentication, cross-project resources and oversized data",
+          "status": "passed",
+          "title": "rejects forged identities, missing authentication, cross-project resources and oversized data",
+          "duration": 363,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rechecks scoped authority before retries and denies restricted readers across live and archived paths",
+          "status": "passed",
+          "title": "rechecks scoped authority before retries and denies restricted readers across live and archived paths",
+          "duration": 553,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "checks claim owner and fence through HTTP without changing task or claim state",
+          "status": "passed",
+          "title": "checks claim owner and fence through HTTP without changing task or claim state",
+          "duration": 438,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997773103,
+      "endTime": 1791997776837,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/custom-journal.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "initializes, edits, conflicts, rebases and restores definitions from a browser session",
+          "status": "passed",
+          "title": "initializes, edits, conflicts, rebases and restores definitions from a browser session",
+          "duration": 2214,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997784008,
+      "endTime": 1791997786222,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/definition-editor.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "bootstraps, edits, exports and imports to a fresh project with equivalent definitions",
+          "status": "passed",
+          "title": "bootstraps, edits, exports and imports to a fresh project with equivalent definitions",
+          "duration": 566,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "reimporting the original file shows what it reverts and still conflicts on a stale revision",
+          "status": "passed",
+          "title": "reimporting the original file shows what it reverts and still conflicts on a stale revision",
+          "duration": 439,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "importing one section keeps every other section, task and record",
+          "status": "passed",
+          "title": "importing one section keeps every other section, task and record",
+          "duration": 442,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects oversize, credential and metadata-bearing definitions without writing",
+          "status": "passed",
+          "title": "rejects oversize, credential and metadata-bearing definitions without writing",
+          "duration": 330,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997787454,
+      "endTime": 1791997789231,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/definition-transfer.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "cuts over existing credentials, recovers the owner and a lost rotation response without widening access",
+          "status": "passed",
+          "title": "cuts over existing credentials, recovers the owner and a lost rotation response without widening access",
+          "duration": 2187,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rehearses rollback before and after replacement without undoing revocations",
+          "status": "passed",
+          "title": "rehearses rollback before and after replacement without undoing revocations",
+          "duration": 860,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "replaces shared installations and runs and rejects pre-cutover invitations",
+          "status": "passed",
+          "title": "replaces shared installations and runs and rejects pre-cutover invitations",
+          "duration": 958,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "re-exchanges a signed workload assertion under the new pepper without weakening verification or replay protection",
+          "status": "passed",
+          "title": "re-exchanges a signed workload assertion under the new pepper without weakening verification or replay protection",
+          "duration": 849,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps revoked invitations unusable across pepper rollback and reapplication while pending ones revive",
+          "status": "passed",
+          "title": "keeps revoked invitations unusable across pepper rollback and reapplication while pending ones revive",
+          "duration": 1056,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997762984,
+      "endTime": 1791997768894,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/hash-pepper-cutover.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "creates an invited password account without email and preserves canonical ownership",
+          "status": "passed",
+          "title": "creates an invited password account without email and preserves canonical ownership",
+          "duration": 687,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "approves a CLI and transfers once without refreshing authentication; revocation invalidates descendants",
+          "status": "passed",
+          "title": "approves a CLI and transfers once without refreshing authentication; revocation invalidates descendants",
+          "duration": 575,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects token conversion, anonymous signup and cross-origin handoffs",
+          "status": "passed",
+          "title": "rejects token conversion, anonymous signup and cross-origin handoffs",
+          "duration": 177,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps a user's read-only API token scoped and revokes it on demand",
+          "status": "passed",
+          "title": "keeps a user's read-only API token scoped and revokes it on demand",
+          "duration": 604,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "consumes account recovery once and signs out old sessions",
+          "status": "passed",
+          "title": "consumes account recovery once and signs out old sessions",
+          "duration": 575,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects a stale browser approving another CLI and resolves account suspension live",
+          "status": "passed",
+          "title": "rejects a stale browser approving another CLI and resolves account suspension live",
+          "duration": 717,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "does not count suspended accounts when protecting the remaining project owner",
+          "status": "passed",
+          "title": "does not count suspended accounts when protecting the remaining project owner",
+          "duration": 583,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "recovers an old bootstrap cookie through an explicit account invitation without inheriting token authority",
+          "status": "passed",
+          "title": "recovers an old bootstrap cookie through an explicit account invitation without inheriting token authority",
+          "duration": 621,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997762978,
+      "endTime": 1791997767517,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/human-accounts.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "S1 walks all 301 custom tasks and search hits through eviction without truncation",
+          "status": "passed",
+          "title": "S1 walks all 301 custom tasks and search hits through eviction without truncation",
+          "duration": 2150,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S1 serializes three revisionful client-shaped edits and rejects a stale original file",
+          "status": "passed",
+          "title": "S1 serializes three revisionful client-shaped edits and rejects a stale original file",
+          "duration": 266,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S2 retains two distinct answers and one logical replay effect across outage and replacement",
+          "status": "passed",
+          "title": "S2 retains two distinct answers and one logical replay effect across outage and replacement",
+          "duration": 321,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S2 two local participant principals sharing a participant label cannot exchange grants",
+          "status": "passed",
+          "title": "S2 two local participant principals sharing a participant label cannot exchange grants",
+          "duration": 843,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S3 retains acknowledged decisions through cancellation and explicit result (answer first)",
+          "status": "passed",
+          "title": "S3 retains acknowledged decisions through cancellation and explicit result (answer first)",
+          "duration": 240,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "S3 retains acknowledged decisions through cancellation and explicit result (answer last)",
+          "status": "passed",
+          "title": "S3 retains acknowledged decisions through cancellation and explicit result (answer last)",
+          "duration": 250,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997763321,
+      "endTime": 1791997767391,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/product-scenarios.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "repairs bootstrap credentials and seeds canonical owners through the real Worker membership API",
+          "status": "passed",
+          "title": "repairs bootstrap credentials and seeds canonical owners through the real Worker membership API",
+          "duration": 355,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997809046,
+      "endTime": 1791997809401,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/project-bootstrap.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "checks current D1 responder membership before answering and before replay",
+          "status": "passed",
+          "title": "checks current D1 responder membership before answering and before replay",
+          "duration": 970,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997801083,
+      "endTime": 1791997802053,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/question-api.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and request-cancellation requests (answer sent first)",
+          "status": "passed",
+          "title": "serializes concurrent answer and request-cancellation requests (answer sent first)",
+          "duration": 353,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and request-cancellation requests (answer sent last)",
+          "status": "passed",
+          "title": "serializes concurrent answer and request-cancellation requests (answer sent last)",
+          "duration": 261,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and rebind requests (answer sent first)",
+          "status": "passed",
+          "title": "serializes concurrent answer and rebind requests (answer sent first)",
+          "duration": 257,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes concurrent answer and rebind requests (answer sent last)",
+          "status": "passed",
+          "title": "serializes concurrent answer and rebind requests (answer sent last)",
+          "duration": 241,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: keeps simultaneous questions distinct and replays only identical authorized answers",
+          "status": "passed",
+          "title": "DO: keeps simultaneous questions distinct and replays only identical authorized answers",
+          "duration": 218,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: rejects wrong actors and exact attempt correlation mismatches",
+          "status": "passed",
+          "title": "DO: rejects wrong actors and exact attempt correlation mismatches",
+          "duration": 229,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: heartbeats and initial session attachment preserve answer context",
+          "status": "passed",
+          "title": "DO: heartbeats and initial session attachment preserve answer context",
+          "duration": 238,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: retains offline answers as evidence and requires a new question after recovery",
+          "status": "passed",
+          "title": "DO: retains offline answers as evidence and requires a new question after recovery",
+          "duration": 254,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: cancellation first supersedes pending answers in the same transaction",
+          "status": "passed",
+          "title": "DO: cancellation first supersedes pending answers in the same transaction",
+          "duration": 245,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: answer first retains evidence after cancellation or terminal completion",
+          "status": "passed",
+          "title": "DO: answer first retains evidence after cancellation or terminal completion",
+          "duration": 261,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: escalation transfers answer ownership and requires current owner authority",
+          "status": "passed",
+          "title": "DO: escalation transfers answer ownership and requires current owner authority",
+          "duration": 278,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: rolls back answer state receipt and journal together",
+          "status": "passed",
+          "title": "DO: rolls back answer state receipt and journal together",
+          "duration": 268,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: filters pending questions and paginates without leaking forbidden tasks",
+          "status": "passed",
+          "title": "DO: filters pending questions and paginates without leaking forbidden tasks",
+          "duration": 241,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "DO: reports a total equal to the rows reached by walking every page",
+          "status": "passed",
+          "title": "DO: reports a total equal to the rows reached by walking every page",
+          "duration": 278,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "destroys a project that has an open question and report receipts",
+          "status": "passed",
+          "title": "destroys a project that has an open question and report receipts",
+          "duration": 255,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "recovers an offline answer after DO eviction and acknowledges its journal position",
+          "status": "passed",
+          "title": "recovers an offline answer after DO eviction and acknowledges its journal position",
+          "duration": 288,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997772929,
+      "endTime": 1791997777094,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/questions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "allows participant-less inspection without granting execution authority",
+          "status": "passed",
+          "title": "allows participant-less inspection without granting execution authority",
+          "duration": 556,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "executes the complete queue lifecycle through authenticated HTTP and the SDK, with safe replay",
+          "status": "passed",
+          "title": "executes the complete queue lifecycle through authenticated HTTP and the SDK, with safe replay",
+          "duration": 853,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "does not let cached claim responses bypass managed work or revoked credentials",
+          "status": "passed",
+          "title": "does not let cached claim responses bypass managed work or revoked credentials",
+          "duration": 423,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "revalidates human membership before permanent receipts and restricts configuration to maintainers",
+          "status": "passed",
+          "title": "revalidates human membership before permanent receipts and restricts configuration to maintainers",
+          "duration": 431,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "admits exactly twenty of one hundred authenticated consumers",
+          "status": "passed",
+          "title": "admits exactly twenty of one hundred authenticated consumers",
+          "duration": 5789,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "filters scoped work before pagination and never confuses scheduling capabilities with authorization",
+          "status": "passed",
+          "title": "filters scoped work before pagination and never confuses scheduling capabilities with authorization",
+          "duration": 862,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997763333,
+      "endTime": 1791997772247,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/queue-api.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "authenticated Worker queue conformance"
+          ],
+          "fullName": "authenticated Worker queue conformance skips incompatible high priority work and deduplicates permanent grants",
+          "status": "passed",
+          "title": "skips incompatible high priority work and deduplicates permanent grants",
+          "duration": 760,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "authenticated Worker queue conformance"
+          ],
+          "fullName": "authenticated Worker queue conformance separates execution from WIP, honors pause on resume and invalidates old receipts",
+          "status": "passed",
+          "title": "separates execution from WIP, honors pause on resume and invalidates old receipts",
+          "duration": 985,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "authenticated Worker queue conformance"
+          ],
+          "fullName": "authenticated Worker queue conformance replaces a stopped native session on the same attempt and finds owned work",
+          "status": "passed",
+          "title": "replaces a stopped native session on the same attempt and finds owned work",
+          "duration": 500,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "authenticated Worker queue conformance"
+          ],
+          "fullName": "authenticated Worker queue conformance holds unknown execution and requires explicit force recovery before replacement",
+          "status": "passed",
+          "title": "holds unknown execution and requires explicit force recovery before replacement",
+          "duration": 639,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997783358,
+      "endTime": 1791997786242,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/queue-conformance.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "restores queue state through the real DO transfer protocol with destination fence watermarks",
+          "status": "passed",
+          "title": "restores queue state through the real DO transfer protocol with destination fence watermarks",
+          "duration": 1100,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "restores a prequeue snapshot with dispatch disabled and ordinary work preserved",
+          "status": "passed",
+          "title": "restores a prequeue snapshot with dispatch disabled and ordinary work preserved",
+          "duration": 718,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997792622,
+      "endTime": 1791997794440,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/queue-restore.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "atomically caps 100 concurrent DO consumers and retains grants across cold starts",
+          "status": "passed",
+          "title": "atomically caps 100 concurrent DO consumers and retains grants across cold starts",
+          "duration": 2339,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "does not commit a new grant after a racing pause has committed",
+          "status": "passed",
+          "title": "does not commit a new grant after a racing pause has committed",
+          "duration": 740,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997774672,
+      "endTime": 1791997777751,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/queue.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "uses custom lifecycle success and cycle rules through real DO requests and cold starts",
+          "status": "passed",
+          "title": "uses custom lifecycle success and cycle rules through real DO requests and cold starts",
+          "duration": 343,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997808724,
+      "endTime": 1791997809067,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/readiness.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "creates, sets, puts and patches snapshot records with retrievable canonical artifacts",
+          "status": "passed",
+          "title": "creates, sets, puts and patches snapshot records with retrievable canonical artifacts",
+          "duration": 712,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects invalid writes and rolls back a full write when its snapshot pointer fails",
+          "status": "passed",
+          "title": "rejects invalid writes and rolls back a full write when its snapshot pointer fails",
+          "duration": 586,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "accepts source preuploads only for valid snapshot resources without task fences",
+          "status": "passed",
+          "title": "accepts source preuploads only for valid snapshot resources without task fences",
+          "duration": 716,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "enforces restricted record namespaces before writing snapshots to R2",
+          "status": "passed",
+          "title": "enforces restricted record namespaces before writing snapshots to R2",
+          "duration": 529,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997784180,
+      "endTime": 1791997786723,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/records.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "suspension retains WIP, resume checks policy and creates fresh authority",
+          "status": "passed",
+          "title": "suspension retains WIP, resume checks policy and creates fresh authority",
+          "duration": 343,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "resume respects current capabilities, gates and occupied capacity",
+          "status": "passed",
+          "title": "resume respects current capabilities, gates and occupied capacity",
+          "duration": 279,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "durable cancellation retains capacity and terminal result wins once",
+          "status": "passed",
+          "title": "durable cancellation retains capacity and terminal result wins once",
+          "duration": 262,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "suspended cancellation can finish without an execution heartbeat",
+          "status": "passed",
+          "title": "suspended cancellation can finish without an execution heartbeat",
+          "duration": 252,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "unknown execution cannot retry and reconnect must match recorded session",
+          "status": "passed",
+          "title": "unknown execution cannot retry and reconnect must match recorded session",
+          "duration": 268,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "ownership rebind requires maintainer and invalidates previous participant",
+          "status": "passed",
+          "title": "ownership rebind requires maintainer and invalidates previous participant",
+          "duration": 264,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "automatic retry retains WIP, uses backoff and stops at three attempts",
+          "status": "passed",
+          "title": "automatic retry retains WIP, uses backoff and stops at three attempts",
+          "duration": 296,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "retry defaults off, explicit retry links same-millisecond history and keeps WIP after preaccept expiry",
+          "status": "passed",
+          "title": "retry defaults off, explicit retry links same-millisecond history and keeps WIP after preaccept expiry",
+          "duration": 238,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "force recovery records unresolved execution and rejects previous authority",
+          "status": "passed",
+          "title": "force recovery records unresolved execution and rejects previous authority",
+          "duration": 256,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "stopped reconciliation and automatic retry roll back together on schema conflict",
+          "status": "passed",
+          "title": "stopped reconciliation and automatic retry roll back together on schema conflict",
+          "duration": 259,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "an earlier resume receipt never authorizes a later resume",
+          "status": "passed",
+          "title": "an earlier resume receipt never authorizes a later resume",
+          "duration": 270,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "cancellation before acceptance never authorizes spawning",
+          "status": "passed",
+          "title": "cancellation before acceptance never authorizes spawning",
+          "duration": 233,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "confirmed stopped reconciliation schedules safe retry but unknown never does",
+          "status": "passed",
+          "title": "confirmed stopped reconciliation schedules safe retry but unknown never does",
+          "duration": 262,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "configured abandonment mapping permits replacement while preserving unresolved history",
+          "status": "passed",
+          "title": "configured abandonment mapping permits replacement while preserving unresolved history",
+          "duration": 246,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "control requests come from the owner, the assigner or a maintainer",
+          "status": "passed",
+          "title": "control requests come from the owner, the assigner or a maintainer",
+          "duration": 239,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "enrollments without a recorded assigner allow only owner or maintainer control",
+          "status": "passed",
+          "title": "enrollments without a recorded assigner allow only owner or maintainer control",
+          "duration": 221,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "explicit retry and receipt replay require current control",
+          "status": "passed",
+          "title": "explicit retry and receipt replay require current control",
+          "duration": 242,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "finishing suspended work requires the latest recorded fence",
+          "status": "passed",
+          "title": "finishing suspended work requires the latest recorded fence",
+          "duration": 237,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "stopped reconciliation never records a result for an unaccepted reservation",
+          "status": "passed",
+          "title": "stopped reconciliation never records a result for an unaccepted reservation",
+          "duration": 252,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "maintainer recovery records the maintainer and the owner in the journal",
+          "status": "passed",
+          "title": "maintainer recovery records the maintainer and the owner in the journal",
+          "duration": 230,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "a replacement native session keeps the attempt and retires the old session's authority",
+          "status": "passed",
+          "title": "a replacement native session keeps the attempt and retires the old session's authority",
+          "duration": 220,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "session replacement requires the owner, the recorded session and no pending cancellation",
+          "status": "passed",
+          "title": "session replacement requires the owner, the recorded session and no pending cancellation",
+          "duration": 231,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "a native restart after lease expiry reattaches without completing the attempt",
+          "status": "passed",
+          "title": "a native restart after lease expiry reattaches without completing the attempt",
+          "duration": 223,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "attempts record the definition and policy revisions in force at each transition",
+          "status": "passed",
+          "title": "attempts record the definition and policy revisions in force at each transition",
+          "duration": 222,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "a definition change that rejects a result names both versions and changes nothing",
+          "status": "passed",
+          "title": "a definition change that rejects a result names both versions and changes nothing",
+          "duration": 214,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "owner filters find one wrapper's unfinished work and keep every attempt's history",
+          "status": "passed",
+          "title": "owner filters find one wrapper's unfinished work and keep every attempt's history",
+          "duration": 236,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997763030,
+      "endTime": 1791997769525,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/recovery.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "enrolls, runs workflows, renews and revokes through real Worker, D1, DO SQLite and R2",
+          "status": "passed",
+          "title": "enrolls, runs workflows, renews and revokes through real Worker, D1, DO SQLite and R2",
+          "duration": 2065,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997788340,
+      "endTime": 1791997790405,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/run-authentication.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) refuses worker-preset archive, delete and destroy and changes nothing",
+          "status": "passed",
+          "title": "refuses worker-preset archive, delete and destroy and changes nothing",
+          "duration": 906,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) archives only records within the cleaner's prefix, with the current fence",
+          "status": "passed",
+          "title": "archives only records within the cleaner's prefix, with the current fence",
+          "duration": 1304,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) silently loses delete authority when either the membership or the key role is only viewer",
+          "status": "passed",
+          "title": "silently loses delete authority when either the membership or the key role is only viewer",
+          "duration": 860,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) deletes artifact revisions only with a live claim fence, and drains bytes asynchronously",
+          "status": "passed",
+          "title": "deletes artifact revisions only with a live claim fence, and drains bytes asynchronously",
+          "duration": 1289,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) states the limit: an artifact-capable cleaner is not bound to a run or prefix",
+          "status": "passed",
+          "title": "states the limit: an artifact-capable cleaner is not bound to a run or prefix",
+          "duration": 810,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) states the limit: a live lineage fence authorises any holder of artifacts:delete",
+          "status": "passed",
+          "title": "states the limit: a live lineage fence authorises any holder of artifacts:delete",
+          "duration": 713,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) states the limit: identical legacy bytes share one key that deletes without a fence",
+          "status": "passed",
+          "title": "states the limit: identical legacy bytes share one key that deletes without a fence",
+          "duration": 470,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure removes exactly the receipt's resources, retires its lineage, retries idempotently and verifies",
+          "status": "passed",
+          "title": "removes exactly the receipt's resources, retires its lineage, retries idempotently and verifies",
+          "duration": 2104,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure keeps artifacts when the receipt is archive-only",
+          "status": "passed",
+          "title": "keeps artifacts when the receipt is archive-only",
+          "duration": 1417,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure refuses before sending any request that changes state",
+          "status": "passed",
+          "title": "refuses before sending any request that changes state",
+          "duration": 1329,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure rejects a receipt that repeats a record, lineage or revision key before any request",
+          "status": "passed",
+          "title": "rejects a receipt that repeats a record, lineage or revision key before any request",
+          "duration": 1251,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure compares actual key sets, not counts, when retiring a lineage",
+          "status": "passed",
+          "title": "compares actual key sets, not counts, when retiring a lineage",
+          "duration": 127,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure refuses, under the claims, a receipt that no longer matches live artifacts",
+          "status": "passed",
+          "title": "refuses, under the claims, a receipt that no longer matches live artifacts",
+          "duration": 1779,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure refuses to retire a lineage a writer extended before the cleaner took the claim",
+          "status": "passed",
+          "title": "refuses to retire a lineage a writer extended before the cleaner took the claim",
+          "duration": 1468,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure removes only receipt revisions when per-revision mode meets a newer append",
+          "status": "passed",
+          "title": "removes only receipt revisions when per-revision mode meets a newer append",
+          "duration": 1666,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "run cleanup without widening the worker preset (#362)",
+            "receipt-driven procedure"
+          ],
+          "fullName": "run cleanup without widening the worker preset (#362) receipt-driven procedure excludes writers between verification and the destructive call",
+          "status": "passed",
+          "title": "excludes writers between verification and the destructive call",
+          "duration": 1433,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997763335,
+      "endTime": 1791997782261,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/run-cleanup.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "links agents to runs, hosts and sessions and keeps replaced occupants distinct",
+          "status": "passed",
+          "title": "links agents to runs, hosts and sessions and keeps replaced occupants distinct",
+          "duration": 818,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "uses D1 run authority over the DO lease snapshot",
+          "status": "passed",
+          "title": "uses D1 run authority over the DO lease snapshot",
+          "duration": 501,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "redacts binding, run, host and session evidence for a viewer",
+          "status": "passed",
+          "title": "redacts binding, run, host and session evidence for a viewer",
+          "duration": 434,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "bounds pages, rejects bad cursors and keeps internal routes private",
+          "status": "passed",
+          "title": "bounds pages, rejects bad cursors and keeps internal routes private",
+          "duration": 504,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "looks up runs and enrollments in parameter-bounded chunks",
+          "status": "passed",
+          "title": "looks up runs and enrollments in parameter-bounded chunks",
+          "duration": 177,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997788407,
+      "endTime": 1791997790841,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/runtime-view.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "serializes configuration races and retains transactional receipts across DO eviction",
+          "status": "passed",
+          "title": "serializes configuration races and retains transactional receipts across DO eviction",
+          "duration": 340,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "checks the reviewed definition and current revision before a destructive apply",
+          "status": "passed",
+          "title": "checks the reviewed definition and current revision before a destructive apply",
+          "duration": 276,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "persists revisionless warnings and one minimal event across receipt replay and DO eviction",
+          "status": "passed",
+          "title": "persists revisionless warnings and one minimal event across receipt replay and DO eviction",
+          "duration": 304,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "requires revisions in managed projects even for cached revisionless writes and no-change receipts",
+          "status": "passed",
+          "title": "requires revisions in managed projects even for cached revisionless writes and no-change receipts",
+          "duration": 270,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "exposes real HTTP warnings to SDK sinks and the authenticated journal without stdout diagnostics",
+          "status": "passed",
+          "title": "exposes real HTTP warnings to SDK sinks and the authenticated journal without stdout diagnostics",
+          "duration": 374,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997792182,
+      "endTime": 1791997793746,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/schema-revision.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "conditionally edits service identities in real D1 and preserves authority boundaries",
+          "status": "passed",
+          "title": "conditionally edits service identities in real D1 and preserves authority boundaries",
+          "duration": 843,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997802770,
+      "endTime": 1791997803613,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/service-identity-revisions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "renames, revision-checks repository policy and keeps one owner",
+          "status": "passed",
+          "title": "renames, revision-checks repository policy and keeps one owner",
+          "duration": 1184,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rotates and revokes credentials and invitations without reviving authority",
+          "status": "passed",
+          "title": "rotates and revokes credentials and invitations without reviving authority",
+          "duration": 1071,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997783469,
+      "endTime": 1791997785725,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/settings-access.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "edits, conflicts, replays and archives agents, rooms and groups from a browser session",
+          "status": "passed",
+          "title": "edits, conflicts, replays and archives agents, rooms and groups from a browser session",
+          "duration": 2162,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "archiving an agent ends its active binding atomically on the real DO",
+          "status": "passed",
+          "title": "archiving an agent ends its active binding atomically on the real DO",
+          "duration": 291,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997778102,
+      "endTime": 1791997780555,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/settings-identities.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects stale settings after project backup import",
+          "status": "passed",
+          "title": "rejects stale settings after project backup import",
+          "duration": 1286,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects stale settings after project backup rollback",
+          "status": "passed",
+          "title": "rejects stale settings after project backup rollback",
+          "duration": 1213,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997775411,
+      "endTime": 1791997777910,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/settings-restore.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "preserves populated artifact storage and guards on upgrade, and rolls back migration failures",
+          "status": "passed",
+          "title": "preserves populated artifact storage and guards on upgrade, and rolls back migration failures",
+          "duration": 271,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997810989,
+      "endTime": 1791997811260,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/snapshot-migration.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "reports the runtime database size and growth after writes",
+          "status": "passed",
+          "title": "reports the runtime database size and growth after writes",
+          "duration": 760,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997802444,
+      "endTime": 1791997803204,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/store-counts.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "retains exact task filter pages, cursor bindings and scope after a DO restart",
+          "status": "passed",
+          "title": "retains exact task filter pages, cursor bindings and scope after a DO restart",
+          "duration": 392,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997808514,
+      "endTime": 1791997808906,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/task-filter-pages.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "lists template variables and reports a retried instantiation as already existing",
+          "status": "passed",
+          "title": "lists template variables and reports a retried instantiation as already existing",
+          "duration": 298,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997809235,
+      "endTime": 1791997809533,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/templates.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "rechecks Actions membership and repository policy in the real Worker",
+          "status": "passed",
+          "title": "rechecks Actions membership and repository policy in the real Worker",
+          "duration": 633,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "persists workload context and narrows scoped credentials using real D1",
+          "status": "passed",
+          "title": "persists workload context and narrows scoped credentials using real D1",
+          "duration": 250,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "requires reauthentication for pre-cutover GitHub JWTs in the real Worker",
+          "status": "passed",
+          "title": "requires reauthentication for pre-cutover GitHub JWTs in the real Worker",
+          "duration": 167,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "exchanges a signed GHES assertion and isolates same-ID host policy, canonical membership and replay",
+          "status": "passed",
+          "title": "exchanges a signed GHES assertion and isolates same-ID host policy, canonical membership and replay",
+          "duration": 556,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "does not replay sessions across issuers with identical assertion IDs",
+          "status": "passed",
+          "title": "does not replay sessions across issuers with identical assertion IDs",
+          "duration": 297,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "denies unknown issuer and malformed deployment trust before any JWKS network call",
+          "status": "passed",
+          "title": "denies unknown issuer and malformed deployment trust before any JWKS network call",
+          "duration": 202,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "revalidates issued GHES credentials and historical cookie sessions after trust removal and policy disabling",
+          "status": "passed",
+          "title": "revalidates issued GHES credentials and historical cookie sessions after trust removal and policy disabling",
+          "duration": 652,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "revalidates GHES runtime runs and denies credential/assertion replay after trust removal or disabled policy",
+          "status": "passed",
+          "title": "revalidates GHES runtime runs and denies credential/assertion replay after trust removal or disabled policy",
+          "duration": 665,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "checks the actual GHES issuer in the signed session subject-revocation identity",
+          "status": "passed",
+          "title": "checks the actual GHES issuer in the signed session subject-revocation identity",
+          "duration": 388,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "rejects issuer/host mismatches and never treats legacy GHES contexts as Enterprise authority",
+          "status": "passed",
+          "title": "rejects issuer/host mismatches and never treats legacy GHES contexts as Enterprise authority",
+          "duration": 355,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps legacy GitHub.com runtime contexts usable without Enterprise deployment configuration",
+          "status": "passed",
+          "title": "keeps legacy GitHub.com runtime contexts usable without Enterprise deployment configuration",
+          "duration": 284,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "revalidates Actions-sponsored installations and existing child runs after issuer-removal",
+          "status": "passed",
+          "title": "revalidates Actions-sponsored installations and existing child runs after issuer-removal",
+          "duration": 683,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "revalidates Actions-sponsored installations and existing child runs after disabled-policy",
+          "status": "passed",
+          "title": "revalidates Actions-sponsored installations and existing child runs after disabled-policy",
+          "duration": 657,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "revalidates Actions-sponsored installations and existing child runs after issuer-revocation",
+          "status": "passed",
+          "title": "revalidates Actions-sponsored installations and existing child runs after issuer-revocation",
+          "duration": 743,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "preserves frozen capabilities/restrictions when Actions sponsor policy tightens and refuses recovery above caller ceiling",
+          "status": "passed",
+          "title": "preserves frozen capabilities/restrictions when Actions sponsor policy tightens and refuses recovery above caller ceiling",
+          "duration": 698,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "binds Actions enrollment recovery to the original repository/context even with identical issuer and sub",
+          "status": "passed",
+          "title": "binds Actions enrollment recovery to the original repository/context even with identical issuer and sub",
+          "duration": 453,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "denies malformed-tag Actions enrollment sponsor provenance instead of membership-only fallback",
+          "status": "passed",
+          "title": "denies malformed-tag Actions enrollment sponsor provenance instead of membership-only fallback",
+          "duration": 412,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "denies wrong-principal Actions enrollment sponsor provenance instead of membership-only fallback",
+          "status": "passed",
+          "title": "denies wrong-principal Actions enrollment sponsor provenance instead of membership-only fallback",
+          "duration": 436,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "refuses to infer Actions provenance during recovery of a contextless enrollment and preserves generic OIDC enrollment",
+          "status": "passed",
+          "title": "refuses to infer Actions provenance during recovery of a contextless enrollment and preserves generic OIDC enrollment",
+          "duration": 408,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps GitHub.com Actions legacy contexts and historical human mirrored sponsor provenance compatible",
+          "status": "passed",
+          "title": "keeps GitHub.com Actions legacy contexts and historical human mirrored sponsor provenance compatible",
+          "duration": 373,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791997762988,
+      "endTime": 1791997772300,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/workload-authorization.test.ts"
+    }
+  ]
+}

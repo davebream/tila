@@ -1,0 +1,51 @@
+packages/cli-darwin-arm64                |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["darwin"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-darwin-x64                  |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["darwin"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-arm64                 |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["linux"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-arm64-musl            |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["linux"],"libc":["musl"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-linux-x64-musl              |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["linux"],"libc":["musl"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-windows-arm64               |  WARN  Unsupported platform: wanted: {"cpu":["arm64"],"os":["win32"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+packages/cli-windows-x64                 |  WARN  Unsupported platform: wanted: {"cpu":["x64"],"os":["win32"],"libc":["any"]} (current: {"os":"linux","cpu":"x64","libc":"glibc"})
+
+ RUN  v4.1.11 <checkout>/packages/integration-tests
+
+ ✓ runtime/readiness.test.ts (1 test) 543ms
+   ✓ uses custom lifecycle success and cycle rules through real DO requests and cold starts  542ms
+ ✓ runtime/task-filter-pages.test.ts (1 test) 612ms
+   ✓ retains exact task filter pages, cursor bindings and scope after a DO restart  611ms
+ ✓ runtime/attempt-corrections.test.ts (1 test) 824ms
+   ✓ links a hotfix to an accepted result over HTTP and the DO refuses to rewrite that result  823ms
+exception = workerd/api/unsafe.c++:228: failed: jsg.Error: Application called deleteAllDurableObjects().
+stack: <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@36c25b7 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2238860 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d4eda <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d45a0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d5fd0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d64f0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@3567f40 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@356819e <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d440 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d7dd <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89858 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89d5b
+exception = workerd/api/unsafe.c++:228: failed: jsg.Error: Application called deleteAllDurableObjects().
+stack: <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@36c25b7 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2238860 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d4eda <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d45a0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d5fd0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d64f0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@3567f40 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@356819e <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d440 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d7dd <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89858 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89d5b
+exception = workerd/api/unsafe.c++:228: failed: jsg.Error: Application called deleteAllDurableObjects().
+stack: <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@36c25b7 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2238860 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d4eda <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@57d45a0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d5fd0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@33d64f0 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@3567f40 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@356819e <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d440 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@322d7dd <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@5aa0368 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89858 <checkout>/node_modules/.pnpm/@cloudflare+workerd-linux-64@1.20261006.1/node_modules/@cloudflare/workerd-linux-64/bin/workerd@2f89d5b
+ ✓ runtime/runtime-view.test.ts (5 tests) 3891ms
+   ✓ links agents to runs, hosts and sessions and keeps replaced occupants distinct  1040ms
+   ✓ uses D1 run authority over the DO lease snapshot  807ms
+   ✓ redacts binding, run, host and session evidence for a viewer  1102ms
+   ✓ bounds pages, rejects bad cursors and keeps internal routes private  679ms
+ ✓ runtime/recovery.test.ts (26 tests) 9392ms
+   ✓ suspension retains WIP, resume checks policy and creates fresh authority  401ms
+   ✓ suspended cancellation can finish without an execution heartbeat  376ms
+   ✓ unknown execution cannot retry and reconnect must match recorded session  320ms
+   ✓ automatic retry retains WIP, uses backoff and stops at three attempts  721ms
+   ✓ retry defaults off, explicit retry links same-millisecond history and keeps WIP after preaccept expiry  456ms
+   ✓ force recovery records unresolved execution and rejects previous authority  374ms
+   ✓ stopped reconciliation and automatic retry roll back together on schema conflict  334ms
+   ✓ an earlier resume receipt never authorizes a later resume  590ms
+   ✓ cancellation before acceptance never authorizes spawning  435ms
+   ✓ confirmed stopped reconciliation schedules safe retry but unknown never does  524ms
+   ✓ configured abandonment mapping permits replacement while preserving unresolved history  454ms
+   ✓ control requests come from the owner, the assigner or a maintainer  519ms
+   ✓ enrollments without a recorded assigner allow only owner or maintainer control  334ms
+   ✓ explicit retry and receipt replay require current control  332ms
+   ✓ finishing suspended work requires the latest recorded fence  366ms
+   ✓ a replacement native session keeps the attempt and retires the old session's authority  322ms
+
+ Test Files  5 passed (5)
+      Tests  34 passed (34)
+   Start at  16:45:44
+   Duration  31.98s (transform 28.08s, setup 102.45s, import 797ms, tests 15.26s, environment 1ms)
+
+JSON report written to <checkout>/.ci-reports/runtime.json

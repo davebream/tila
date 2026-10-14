@@ -2653,7 +2653,10 @@ See [the conversation contract](distributed-agent-conversations.md) and
 [operations](05-OPERATIONS.md#durable-conversation-operations) for the API and
 recovery boundaries. Connector, gated Herdr observations and conversation UI
 slices are merged (#287–#289); fixture coverage does not satisfy #283 distributed
-live acceptance or implement unsupported Herdr registration/open commands.
+live acceptance. The bounded [Herdr adapter wiring](evidence/issue-283-adapter-v1.md)
+adds authenticated read-only reconciliation and a private V2 runtime association
+ledger. Public Herdr registration and cold open remain unsupported pending live
+evidence; attended standalone restoration remains available.
 
 ### Conversation dashboard (#283)
 
@@ -2998,9 +3001,12 @@ deployment, host profile, deleted blob or independently committed setting.
 
 ### 14.6 Import/export and acceptance traceability
 
-Import and export cover applied definitions only (#299). Agents, rooms, signal
-groups, access settings and credentials are not in the file; exporting them, with
-explicit identity remapping, is follow-up work. Server state stays authoritative:
+Definition import and export cover applied definitions only (#299). Agents,
+rooms and signal groups use the separate `tila-project-settings` v1 envelope
+and explicit identity/profile/resource mapping (#448), exposed by `tila settings`,
+Settings → Settings transfer and the MCP `settings` group. See the
+[settings transfer guide](settings-transfer.md) for coverage, review and exact
+receipt recovery. Access settings and credentials remain excluded. Server state stays authoritative:
 starting a client, deploying, provisioning or `init` never reads a definitions
 file, and Git-managed or automatically synchronized files remain deferred.
 
