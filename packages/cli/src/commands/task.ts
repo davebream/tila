@@ -812,6 +812,14 @@ export default defineCommand({
           "exclusive",
           ttlMs,
         );
+        if (!result.acquired) {
+          throw new TilaApiError(
+            409,
+            TILA_ERRORS.ALREADY_HELD,
+            `Task ${args.id} is already held. Wait for the claim to expire or its holder to release it before claiming.`,
+            false,
+          );
+        }
         if (args.json) {
           printJson({
             ok: true,
