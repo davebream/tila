@@ -15,6 +15,7 @@ import {
 import { server } from "../mocks/server";
 import {
   catalogHandler,
+  configuredEntry,
   cursorFor,
   declaredEntry,
   makeTask,
@@ -612,5 +613,139 @@ describe("TasksPage search", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("entity-1")).toBeInTheDocument();
     expect(searches).toHaveLength(0);
+  });
+});
+
+// #398: a blocked list is the same server readiness the Overview counted, so
+// it explains the same legacy fallback, from the catalog and never from rows.
+describe("TasksPage lifecycle coverage", () => {
+  const coverage = () =>
+    screen.findByRole("region", { name: "Lifecycle coverage" });
+  const none = () =>
+    expect(
+      screen.queryByRole("region", { name: "Lifecycle coverage" }),
+    ).not.toBeInTheDocument();
+
+  test("a blocked list names legacy types and links to Definitions", async () => {
+    server.use(
+      catalogHandler([configuredEntry("job", 2), declaredEntry("note", 1)]),
+    );
+    captureListRequests();
+    renderTasks("/p/test-project/tasks?blocked=1");
+
+    const note = await coverage();
+    expect(note).toHaveTextContent("No lifecycle is declared for note.");
+    expect(within(note).queryByText("job")).not.toBeInTheDocument();
+    expect(
+      within(note).getByRole("link", {
+        name: "Review lifecycles in Definitions",
+      }),
+    ).toHaveAttribute("href", "/p/test-project/settings/definitions");
+  });
+
+  test("is shown for an empty blocked list too", async () => {
+    server.use(catalogHandler([declaredEntry("note", 1)]));
+    captureListRequests([]);
+    renderTasks("/p/test-project/tasks?blocked=1");
+
+    expect(
+      await screen.findByText("No open tasks are waiting on prerequisites."),
+    ).toBeInTheDocument();
+    expect(await coverage()).toHaveTextContent(
+      "No lifecycle is declared for note.",
+    );
+  });
+
+  test("an unfiltered list does not carry the blocked explanation", async () => {
+    server.use(catalogHandler([declaredEntry("note", 1)]));
+    captureListRequests();
+    renderTasks("/p/test-project/tasks");
+
+    await screen.findByText("3 tasks · excluding archived");
+    none();
+  });
+
+  test("removing the blocked filter removes the explanation", async () => {
+    const user = userEvent.setup();
+    server.use(catalogHandler([declaredEntry("note", 1)]));
+    captureListRequests();
+    renderTasks("/p/test-project/tasks?blocked=1");
+    await coverage();
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove blocked filter" }),
+    );
+    await waitFor(none);
+  });
+
+  test("a failed catalog is unknown coverage and the list still renders", async () => {
+    server.use(
+      http.get("*/projects/*/tasks/~/types", () =>
+        HttpResponse.json(
+          { ok: false, error: { code: "internal", message: "down" } },
+          { status: 500 },
+        ),
+      ),
+    );
+    captureListRequests();
+    renderTasks("/p/test-project/tasks?blocked=1");
+
+    const note = await coverage();
+    expect(note).toHaveTextContent("Lifecycle coverage is unknown");
+    expect(note).not.toHaveTextContent("No lifecycle is declared");
+    expect(await screen.findByText("task-001")).toBeInTheDocument();
+  });
+
+  test("names come from the catalog, not from the page's rows", async () => {
+    // The only row is a configured type; the legacy type has no row on this page.
+    server.use(
+      catalogHandler([configuredEntry("job", 1), declaredEntry("note", 40)]),
+      pagedTasksHandler([makeTask("job-1", { type: "job" })]),
+    );
+    renderTasks("/p/test-project/tasks?blocked=1");
+
+    expect(await coverage()).toHaveTextContent(
+      "No lifecycle is declared for note.",
+    );
+  });
+
+  test("a records-only restriction masks the schema but hides no task type", async () => {
+    server.use(
+      http.get("*/api/whoami", () =>
+        HttpResponse.json({
+          ok: true,
+          project_id: "test-project",
+          token_name: "limited",
+          scopes: "read",
+          role: "participant",
+          policy: {
+            role: "participant",
+            capabilities: ["tasks:read"],
+            restrictions: { records: [{ type: "note" }] },
+          },
+        }),
+      ),
+      catalogHandler([declaredEntry("note", 1)]),
+    );
+    captureListRequests();
+    renderTasks("/p/test-project/tasks?blocked=1");
+
+    const note = await coverage();
+    expect(note).toHaveTextContent(
+      "This credential sees no lifecycle for note.",
+    );
+    expect(note).not.toHaveTextContent("only some task types");
+  });
+
+  test("a restricted catalog is not presented as complete", async () => {
+    server.use(
+      catalogHandler([configuredEntry("job", 2)], { restricted: true }),
+    );
+    captureListRequests();
+    renderTasks("/p/test-project/tasks?blocked=1");
+
+    expect(await coverage()).toHaveTextContent(
+      "This credential sees only some task types.",
+    );
   });
 });

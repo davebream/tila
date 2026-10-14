@@ -6,11 +6,30 @@ schema_version = 1
 [project]
 id = "dev-project"
 
+# `task` declares its lifecycle. A type without one is judged by the legacy
+# readiness rule, where only status "closed" counts as finished, so `done`
+# tasks would still be reported as waiting on prerequisites. `epic` and
+# `milestone` are containers with no dependency edges and no known finished
+# state, so they declare none.
 [work_units.epic]
 
 [work_units.milestone]
 
 [work_units.task]
+
+[work_units.task.fields]
+title = { type = "string", required = true }
+status = { type = "enum", required = true, values = ["queued", "in-progress", "done"] }
+
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["queued"]
+terminal = ["done"]
+dependency_satisfied = ["done"]
+on_start = "in-progress"
+
+[work_units.task.lifecycle.outcomes]
+success = "done"
 
 [records.deploy_config]
 format = "json"

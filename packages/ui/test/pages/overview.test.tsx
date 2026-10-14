@@ -1,5 +1,7 @@
 import { OverviewPage } from "@/pages/overview";
-import { CAPABILITIES } from "@tila/schemas";
+import { TasksPage } from "@/pages/tasks";
+import userEvent from "@testing-library/user-event";
+import { CAPABILITIES, type NamespaceRestrictions } from "@tila/schemas";
 import { http, HttpResponse, delay } from "msw";
 import { Route, Routes } from "react-router";
 import {
@@ -12,7 +14,7 @@ import {
 } from "../fixtures/overview-scenarios";
 import { recordTypesHandler } from "../mocks/records";
 import { server } from "../mocks/server";
-import { catalogHandler } from "../mocks/tasks";
+import { catalogHandler, configuredEntry, declaredEntry } from "../mocks/tasks";
 import { renderWithProviders, screen, waitFor, within } from "../test-utils";
 
 function renderOverview() {
@@ -57,7 +59,12 @@ const scenario = (name: string) => {
   return found;
 };
 
-function identity(capabilities: readonly string[], restricted = false) {
+function identity(
+  capabilities: readonly string[],
+  restrictions: boolean | NamespaceRestrictions = false,
+) {
+  const narrowed =
+    restrictions === true ? { task_types: ["bug"] } : restrictions || undefined;
   server.use(
     http.get("*/api/whoami", () =>
       HttpResponse.json({
@@ -70,7 +77,7 @@ function identity(capabilities: readonly string[], restricted = false) {
         policy: {
           role: "participant",
           capabilities,
-          ...(restricted ? { restrictions: { task_types: ["bug"] } } : {}),
+          ...(narrowed ? { restrictions: narrowed } : {}),
         },
       }),
     ),
@@ -406,5 +413,284 @@ describe("OverviewPage", () => {
     expect(
       within(facts).getByText(/4 tasks in 1 type · excluding archived/),
     ).toBeInTheDocument();
+  });
+});
+
+// #398: the blocked count follows the shared readiness rules, under which a
+// type without a lifecycle treats only `closed` as finished. The Overview says
+// which visible types that applies to and never changes the count itself.
+describe("OverviewPage lifecycle coverage", () => {
+  const coverage = () =>
+    screen.findByRole("region", { name: "Lifecycle coverage" });
+  const noCoverage = () =>
+    expect(
+      screen.queryByRole("region", { name: "Lifecycle coverage" }),
+    ).not.toBeInTheDocument();
+  const outage = http.get("*/projects/*/tasks/~/types", () =>
+    HttpResponse.json(
+      { ok: false, error: { code: "internal", message: "down" } },
+      { status: 500 },
+    ),
+  );
+
+  test("names a legacy type beside the count and links to Definitions", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [declaredEntry("bug", 6)],
+    });
+    renderOverview();
+
+    const note = await coverage();
+    expect(within(note).getByText("bug")).toBeInTheDocument();
+    expect(note).toHaveTextContent(
+      /No lifecycle is declared for bug\. Without one only status “closed” counts as finished/,
+    );
+    expect(
+      within(note).getByRole("link", {
+        name: "Review lifecycles in Definitions",
+      }),
+    ).toHaveAttribute("href", "/p/test-project/settings/definitions");
+    // The note sits in the blocked row, beside the count it explains, and
+    // the count still opens exactly the list it was taken from.
+    const row = note.closest("tr");
+    expect(
+      within(row as HTMLElement).getByRole("link", {
+        name: "3 open tasks waiting on prerequisites",
+      }),
+    ).toHaveAttribute("href", "/p/test-project/tasks?blocked=1");
+  });
+
+  test("explains a legacy type even when the count is zero", async () => {
+    useScenario({
+      ...scenario("S1 configured"),
+      work: [declaredEntry("task", 0)],
+    });
+    renderOverview();
+
+    const note = await coverage();
+    expect(note).toHaveTextContent("No lifecycle is declared for task.");
+    expect(
+      screen.getByText("No open tasks waiting on prerequisites"),
+    ).toBeInTheDocument();
+  });
+
+  test("a mixed project names only the types without a lifecycle", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [
+        configuredEntry("bug", 4),
+        declaredEntry("note", 1),
+        {
+          type: "legacy",
+          declaration: "undeclared",
+          count: 1,
+          archived_count: 0,
+        },
+      ],
+    });
+    renderOverview();
+
+    const note = await coverage();
+    expect(note).toHaveTextContent(
+      "No lifecycle is declared for legacy, note.",
+    );
+    expect(within(note).queryByText("bug")).not.toBeInTheDocument();
+  });
+
+  test("a project where every type declares one has nothing to explain", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [configuredEntry("bug", 6), configuredEntry("job", 0)],
+    });
+    renderOverview();
+
+    await screen.findByRole("link", {
+      name: "3 open tasks waiting on prerequisites",
+    });
+    noCoverage();
+  });
+
+  test("the count's link opens a list that carries the same explanation and filter", async () => {
+    const user = userEvent.setup();
+    const seen = useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [configuredEntry("bug", 2), declaredEntry("note", 4)],
+    });
+    renderWithProviders(
+      <Routes>
+        <Route path="/p/:projectId/overview" element={<OverviewPage />} />
+        <Route path="/p/:projectId/tasks" element={<TasksPage />} />
+      </Routes>,
+      { route: "/p/test-project/overview" },
+    );
+    const overviewNote = (await coverage()).textContent;
+
+    await user.click(
+      screen.getByRole("link", {
+        name: "3 open tasks waiting on prerequisites",
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Tasks" }),
+    ).toBeInTheDocument();
+    const listNote = (await coverage()).textContent;
+
+    expect(listNote).toBe(overviewNote);
+    expect(listNote).toContain("No lifecycle is declared for note.");
+    // The count and the list ask the server the same question; only paging
+    // differs, and neither filters rows in the client.
+    const filter = (params: URLSearchParams) =>
+      ["blocked", "archived", "type", "outcome"].map((k) => params.get(k));
+    const taskCalls = seen.filter(({ path }) => path.endsWith("/tasks"));
+    const blockedCall = (limit: string) =>
+      taskCalls.find(
+        ({ params }) =>
+          params.get("blocked") === "1" && params.get("limit") === limit,
+      );
+    const count = blockedCall("1");
+    const list = blockedCall("100");
+    expect(count && list).toBeTruthy();
+    expect(filter(list?.params as URLSearchParams)).toEqual(
+      filter(count?.params as URLSearchParams),
+    );
+    expect(list?.params.get("blocked")).toBe("1");
+  });
+
+  test("a failed type catalog is unknown coverage, not an all-clear", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [configuredEntry("bug", 6)],
+    });
+    server.use(outage);
+    renderOverview();
+
+    const note = await coverage();
+    expect(note).toHaveTextContent("Lifecycle coverage is unknown");
+    expect(note).not.toHaveTextContent("No lifecycle is declared");
+    // The count is read from a different list; the outage does not alter it.
+    expect(
+      screen.getByRole("link", {
+        name: "3 open tasks waiting on prerequisites",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("an unreadable schema says declarations are unknown, not undeclared", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [
+        { type: "bug", declaration: "unknown", count: 6, archived_count: 0 },
+      ],
+    });
+    server.use(
+      http.get("*/projects/*/tasks/~/types", () =>
+        HttpResponse.json({
+          ok: true,
+          types: [
+            {
+              type: "bug",
+              declaration: "unknown",
+              count: 6,
+              archived_count: 0,
+            },
+          ],
+          scope: { restricted: false },
+          incomplete: { declared_types: "unavailable" },
+        }),
+      ),
+    );
+    renderOverview();
+
+    const note = await coverage();
+    expect(note).toHaveTextContent(
+      "Definitions could not be read, so it is unknown which task types declare a lifecycle.",
+    );
+    expect(note).not.toHaveTextContent("No lifecycle is declared");
+  });
+
+  test("without Definitions access the note explains but does not link", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [declaredEntry("bug", 6)],
+    });
+    identity(CAPABILITIES.filter((cap) => cap !== "schema:read"));
+    renderOverview();
+
+    const note = await coverage();
+    expect(note).toHaveTextContent("No lifecycle is declared for bug.");
+    expect(within(note).queryByRole("link")).not.toBeInTheDocument();
+    expect(note).toHaveTextContent("Your access does not include Definitions.");
+  });
+
+  test("a restricted credential gets a caveat and only the types it can see", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [declaredEntry("bug", 6)],
+    });
+    // Another type exists on the server; the restricted catalog omits it.
+    server.use(catalogHandler([declaredEntry("bug", 6)], { restricted: true }));
+    identity([...CAPABILITIES], true);
+    renderOverview();
+
+    const note = await coverage();
+    expect(note).toHaveTextContent(
+      "This credential sees no lifecycle for bug.",
+    );
+    expect(note).toHaveTextContent(
+      "Prerequisites of types it cannot see are counted but not named",
+    );
+    // Restricted credentials may not read definitions at all.
+    expect(note).not.toHaveTextContent("No lifecycle is declared");
+  });
+
+  test("a records-only restriction does not claim task types are hidden", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [declaredEntry("task", 6)],
+    });
+    identity([...CAPABILITIES], { records: [{ type: "note" }] });
+    renderOverview();
+
+    const note = await coverage();
+    // The schema's read state is hidden from any restricted credential, so
+    // the type is stated as unconfirmed, not as declared-absent...
+    expect(note).toHaveTextContent(
+      "This credential sees no lifecycle for task.",
+    );
+    // ...but every task type is visible, so nothing is said about hidden ones.
+    expect(note).not.toHaveTextContent("only some task types");
+    expect(note).not.toHaveTextContent("cannot see are counted but not named");
+  });
+
+  test("a records-only restriction with every type declared has nothing to explain", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [configuredEntry("bug", 6)],
+    });
+    identity([...CAPABILITIES], { records: [{ type: "note" }] });
+    renderOverview();
+
+    await screen.findByRole("link", {
+      name: "3 open tasks waiting on prerequisites",
+    });
+    noCoverage();
+  });
+
+  test("a restricted credential seeing only declared types is still not told coverage is complete", async () => {
+    useScenario({
+      ...scenario("S3 failed hotfix"),
+      work: [configuredEntry("bug", 6)],
+    });
+    server.use(
+      catalogHandler([configuredEntry("bug", 6)], { restricted: true }),
+    );
+    identity([...CAPABILITIES], true);
+    renderOverview();
+
+    const note = await coverage();
+    expect(note).toHaveTextContent(
+      "This credential sees only some task types.",
+    );
+    expect(note).not.toHaveTextContent("Review lifecycles in Definitions");
   });
 });

@@ -7,7 +7,7 @@ import type {
 import { http, HttpResponse } from "msw";
 import { emptyQueue } from "../mocks/handlers";
 import { recordEntry } from "../mocks/records";
-import { declaredEntry } from "../mocks/tasks";
+import { configuredEntry, declaredEntry } from "../mocks/tasks";
 
 // Scenario fixtures for the Overview's attention rules (#306). Each describes
 // the server state a scenario user meets and what the Overview must conclude.
@@ -113,7 +113,7 @@ export const SCENARIOS: OverviewScenario[] = [
     // S1 later: definitions applied, an empty declared type, nothing to do.
     name: "S1 configured project with nothing to do",
     schema: applied,
-    work: [declaredEntry("bug", 0)],
+    work: [configuredEntry("bug", 0)],
     records: [recordEntry("config", 0)],
     sources: QUIET,
     expected: "idle",
@@ -122,7 +122,7 @@ export const SCENARIOS: OverviewScenario[] = [
     // S1 again, but nobody configured conversations: quiet is not all-clear.
     name: "S1 quiet project with conversations not configured",
     schema: applied,
-    work: [declaredEntry("bug", 2)],
+    work: [configuredEntry("bug", 2)],
     records: [],
     sources: { ...QUIET, ...NO_CONVERSATIONS },
     expected: "partial",
@@ -132,7 +132,7 @@ export const SCENARIOS: OverviewScenario[] = [
     // and the outcome of an earlier attempt is unknown.
     name: "S2 worker lost its session mid-run",
     schema: applied,
-    work: [declaredEntry("bug", 4)],
+    work: [configuredEntry("bug", 4)],
     records: [],
     sources: {
       ...QUIET,
@@ -150,7 +150,7 @@ export const SCENARIOS: OverviewScenario[] = [
     // store is unreachable.
     name: "S3 failed hotfix during a queue outage",
     schema: applied,
-    work: [declaredEntry("bug", 6)],
+    work: [configuredEntry("bug", 6)],
     records: [],
     sources: {
       ...QUIET,
@@ -167,7 +167,7 @@ export const SCENARIOS: OverviewScenario[] = [
     // S3: everything is unreachable.
     name: "S3 total outage",
     schema: applied,
-    work: [declaredEntry("bug", 6)],
+    work: [configuredEntry("bug", 6)],
     records: [],
     sources: DOWN,
     expected: "unknown",
@@ -191,7 +191,7 @@ export const SCENARIOS: OverviewScenario[] = [
     // question was routed to the person looking at the Overview.
     name: "S4 worker waiting on an answer",
     schema: applied,
-    work: [declaredEntry("bug", 3)],
+    work: [configuredEntry("bug", 3)],
     records: [],
     sources: {
       ...QUIET,
@@ -208,7 +208,7 @@ export const SCENARIOS: OverviewScenario[] = [
     // waiting. That is not "nothing waiting".
     name: "S4 decisions request failed",
     schema: applied,
-    work: [declaredEntry("bug", 3)],
+    work: [configuredEntry("bug", 3)],
     records: [],
     sources: { ...QUIET, questions: "outage" },
     expected: "partial",
