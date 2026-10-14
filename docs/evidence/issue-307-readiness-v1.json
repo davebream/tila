@@ -39,7 +39,7 @@
         "scope": "names the verified Worker in the cursor-key activation command"
       }
     ],
-    "evidence_file_commit": "The commit that adds this file changes no source or test; it is not self-referenced.",
+    "evidence_file_commit": "Commits that add or revise this file change no source or test and are not self-referenced. All test results below are for tested_revision; later commits are documentation or evidence only.",
     "generated_identity_at_test": {
       "PRODUCT_VERSION": "0.8.0",
       "BUILD_COMMIT": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
@@ -117,7 +117,7 @@
       "scripts/release-verify.mjs": "rejects an artifact whose manifest revision differs from the expected revision"
     },
     "observations": [
-      "No automated release gate asserts that the Worker bundle embedded in the compiled CLI carries BUILD_COMMIT equal to manifest.revision; this audit checked v0.8.0 by inspection. Candidate follow-up, not changed here.",
+      "Audit observation, not a confirmed blocker: no step among the release scripts this audit read (release-validate, release-pack, release-verify, release-smoke) asserts that the Worker bundle embedded in the compiled CLI carries BUILD_COMMIT equal to manifest.revision. This audit checked v0.8.0 by inspection. The release worker is to corroborate it independently before it is treated as a gap.",
       "generate-version.mjs records git HEAD even when the working tree is dirty; the release path is protected by release-validate.mjs requiring a clean checkout, a local development build is not.",
       "GET /api/runtime/info advertises io.tila/durable-conversations unconditionally. It is protocol support, not configured readiness; readiness is the conversation route response."
     ],
@@ -378,8 +378,8 @@
   },
   "risks": [
     "The invitation revival is real product behavior with no server guard; safety depends on the operator following the runbook prerequisite.",
-    "A deployment older than 0.8.0 has no invitation listing or revoke endpoint and lacks migration 0034; deploy and migrate before relying on the revocation prerequisite.",
-    "The release pipeline does not assert embedded Worker commit equals manifest revision."
+    "The revocation prerequisite needs a deployment that has the owner invitation listing and revoke routes and D1 migration 0034 (the invitation_id backfill). The CHANGELOG lists the routes under 0.8.0 and the commit that added migration 0034 is contained in no earlier tag (git tag --contains); the routes were not separately bisected. A deployment without them cannot satisfy the prerequisite and must be upgraded and migrated first.",
+    "Unconfirmed audit observation: the embedded-Worker BUILD_COMMIT assertion gap described under release_identity_audit.observations awaits independent corroboration by the release worker."
   ],
   "redaction": "No credential, token, cookie, password, recovery link, secret value or private host address is recorded. Fixture values in the tests are synthetic and are not reproduced here."
 }
