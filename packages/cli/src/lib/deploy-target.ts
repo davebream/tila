@@ -10,6 +10,11 @@ import type { AuthStore } from "../auth-store";
 import { canonicalizeWorkerUrl } from "../auth-store";
 import { findConfig } from "../config";
 import type { Cloudflare } from "./cloudflare-client";
+import {
+  DeploymentSettingsError,
+  readWorkerSettings,
+  resolveDeploymentSettings,
+} from "./deployment-settings";
 import { getInfraSlug, loadInfraConfig } from "./infra-config";
 import {
   type InstanceSelection,
@@ -86,7 +91,11 @@ export async function resolveDeployTarget(opts: {
   try {
     return await verifyTarget(opts);
   } catch (error) {
-    if (error instanceof DeployTargetError) throw error;
+    if (
+      error instanceof DeployTargetError ||
+      error instanceof DeploymentSettingsError
+    )
+      throw error;
     if (error instanceof InstanceSelectionError)
       throw new DeployTargetError("DEPLOY_TARGET_NOT_FOUND", error.message);
     // SDK/TOML errors can contain request bodies or secret-bearing source lines.
@@ -221,10 +230,16 @@ async function verifyTarget(
       );
   }
 
-  const settings = await opts.cf.workers.scripts.scriptAndVersionSettings.get(
+  const settings = await readWorkerSettings(
+    opts.cf,
+    meta.account_id,
     scriptName,
-    { account_id: meta.account_id },
   );
+  if (!settings)
+    throw new DeployTargetError(
+      "DEPLOY_TARGET_UNVERIFIED",
+      "Worker settings are missing; no deployment was started.",
+    );
   const databases = settings.bindings?.filter((b) => b.name === "DB") ?? [];
   const buckets =
     settings.bindings?.filter((b) => b.name === "ARTIFACTS") ?? [];
@@ -245,16 +260,55 @@ async function verifyTarget(
       `Worker ${scriptName} in account ${meta.account_id} does not have the configured DB (${meta.d1_database_id}) and ARTIFACTS (${r2BucketName}) bindings. Refusing to migrate or change resources.`,
     );
 
-  const workerUrl = selection?.workerUrl ?? meta.worker_url;
+  const deployment = await resolveDeploymentSettings({
+    cf: opts.cf,
+    accountId: meta.account_id,
+    scriptName,
+    worker: settings,
+    preferredUrl: selection?.workerUrl ?? meta.worker_url,
+  });
   return DeployTargetSchema.parse({
     source: opts.infra !== undefined ? "infra-flag" : selection?.source,
     infraSlug: candidate.slug,
     instanceKey: selection?.instanceKey ?? null,
-    workerUrl: workerUrl ? canonicalizeWorkerUrl(workerUrl) : null,
+    workerUrl: deployment.workerUrl,
     accountId: meta.account_id,
     accountName: meta.account_name,
     scriptName,
     d1DatabaseId: meta.d1_database_id,
     r2BucketName,
+    settings: deployment.settings,
   });
+}
+
+/** Provisioning must inspect before creating or migrating any remote resources. */
+export async function resolveProvisionDeployment(opts: {
+  cf: Cloudflare;
+  store: MetadataStore;
+  home: string;
+  accountId: string;
+  scriptName: string;
+  allowCreate: boolean;
+}) {
+  const worker = await readWorkerSettings(
+    opts.cf,
+    opts.accountId,
+    opts.scriptName,
+    opts.allowCreate,
+  );
+  if (worker === null) {
+    const deployment = await resolveDeploymentSettings({ ...opts, worker });
+    return { ...deployment, target: null };
+  }
+  const target = await resolveDeployTarget({ ...opts, infra: opts.scriptName });
+  if (
+    target.accountId !== opts.accountId ||
+    target.scriptName !== opts.scriptName
+  ) {
+    throw new DeployTargetError(
+      "DEPLOY_TARGET_MISMATCH",
+      "Saved infrastructure does not match the provisioning account and Worker; no resources were changed.",
+    );
+  }
+  return { settings: target.settings, workerUrl: target.workerUrl, target };
 }

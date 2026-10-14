@@ -1,3 +1,7 @@
+const mockDetectWrangler = vi.fn();
+vi.mock("../../lib/wrangler-cli", () => ({
+  detectWrangler: (...args: unknown[]) => mockDetectWrangler(...args),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetGlobalFlags, setGlobalFlags } from "../../lib/global-flags";
 
@@ -115,8 +119,61 @@ async function invokeDeploy(
 }
 
 describe("deploy command", () => {
+  it.each([false, true])(
+    "blocks migrations and upload when settings cannot be verified (skipUi=%s)",
+    async (skipUi) => {
+      const { DeploymentSettingsError } = await import(
+        "../../lib/deployment-settings"
+      );
+      mockResolveDeployTarget.mockRejectedValueOnce(
+        new DeploymentSettingsError("Could not verify Worker settings"),
+      );
+      await expect(invokeDeploy(skipUi, { json: true })).rejects.toThrow();
+      expect(mockApplyD1Migrations).not.toHaveBeenCalled();
+      expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+      expect(mockSetWorkerSecrets).not.toHaveBeenCalled();
+      expect(mockPrintJsonError).toHaveBeenCalledWith(
+        expect.stringContaining("settings"),
+        "DEPLOY_SETTINGS_UNVERIFIED",
+      );
+    },
+  );
+
+  it("checks Wrangler compatibility before migrations", async () => {
+    mockDetectWrangler.mockRejectedValueOnce(new Error("Wrangler too old"));
+    await expect(invokeDeploy()).rejects.toThrow();
+    expect(mockResolveDeployTarget).not.toHaveBeenCalled();
+    expect(mockApplyD1Migrations).not.toHaveBeenCalled();
+    expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "forwards verified custom-domain settings (skipUi=%s)",
+    async (skipUi) => {
+      const target = await mockResolveDeployTarget();
+      target.settings = {
+        workersDev: false,
+        previewUrls: false,
+        analyticsEngineDatasets: [
+          { binding: "ANALYTICS", dataset: "dedicated" },
+        ],
+      };
+      target.workerUrl = "https://tila.example.com";
+      mockResolveDeployTarget.mockResolvedValue(target);
+      await invokeDeploy(skipUi);
+      expect(mockDeployWorkerWithAssets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: target.settings,
+          workerUrl: target.workerUrl,
+          skipUi,
+        }),
+      );
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDetectWrangler.mockResolvedValue(undefined);
     resetGlobalFlags();
 
     exitSpy = vi
@@ -133,6 +190,13 @@ describe("deploy command", () => {
       r2_bucket_name: "tila-artifacts",
     });
     mockResolveDeployTarget.mockResolvedValue({
+      settings: {
+        workersDev: true,
+        previewUrls: true,
+        analyticsEngineDatasets: [
+          { binding: "ANALYTICS", dataset: "tila-analytics" },
+        ],
+      },
       source: "repo-pointer",
       infraSlug: "tila",
       instanceKey: "tila-id",

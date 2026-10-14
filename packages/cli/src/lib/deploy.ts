@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import type { TilaProjectConfig } from "@tila/schemas";
+import type { DeploymentSettings, TilaProjectConfig } from "@tila/schemas";
 import { VERSION } from "../version";
 import type { Cloudflare } from "./cloudflare-client";
 import { embeddedPayloadRoot } from "./deploy-payload";
@@ -20,7 +20,6 @@ import {
 } from "./provisioning";
 import {
   detectWrangler,
-  parseDeployedUrl,
   runWrangler,
   validateTokenScopes,
 } from "./wrangler-cli";
@@ -70,6 +69,8 @@ export interface DeployOptions {
   r2BucketName: string;
   apiToken: string;
   skipUi: boolean;
+  settings: DeploymentSettings;
+  workerUrl: string;
 }
 
 /**
@@ -215,17 +216,17 @@ export async function deployWorkerWithAssets(
       accountId: opts.accountId,
       databaseId: opts.d1DatabaseId,
       r2BucketName: opts.r2BucketName,
+      settings: opts.settings,
       skipAssets: true,
     });
 
-    const { stdout } = await runWrangler(["deploy", "-c", configPath], {
+    await runWrangler(["deploy", "-c", configPath], {
       token: opts.apiToken,
       accountId: opts.accountId,
       cwd: dirname(configPath),
     });
 
-    const deployedUrl =
-      parseDeployedUrl(stdout) ?? `https://${opts.scriptName}.workers.dev`;
+    const deployedUrl = opts.workerUrl;
 
     return { workerUrl: deployedUrl, ui: { kind: "skipped", reason: "flag" } };
   }
@@ -261,18 +262,18 @@ export async function deployWorkerWithAssets(
     accountId: opts.accountId,
     databaseId: opts.d1DatabaseId,
     r2BucketName: opts.r2BucketName,
+    settings: opts.settings,
   });
 
   // Step 6: Run wrangler deploy
-  const { stdout } = await runWrangler(["deploy", "-c", configPath], {
+  await runWrangler(["deploy", "-c", configPath], {
     token: opts.apiToken,
     accountId: opts.accountId,
     cwd: dirname(configPath),
   });
 
-  // Step 7: Parse deployed URL from wrangler output
-  const deployedUrl =
-    parseDeployedUrl(stdout) ?? `https://${opts.scriptName}.workers.dev`;
+  // Use the endpoint verified before mutation, including custom domains.
+  const deployedUrl = opts.workerUrl;
 
   // Step 8: Smoke check — hard gate; throws if either / or /api/health returns ≥500
   await smokeCheck(deployedUrl);

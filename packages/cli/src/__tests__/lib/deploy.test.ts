@@ -82,6 +82,14 @@ function makeOpts(
     r2BucketName: "tila-artifacts",
     apiToken: "tok-xyz",
     skipUi: false,
+    settings: {
+      workersDev: true,
+      previewUrls: true,
+      analyticsEngineDatasets: [
+        { binding: "ANALYTICS", dataset: "tila-analytics" },
+      ],
+    },
+    workerUrl: "https://tila-dev.workers.dev",
     ...overrides,
   };
 }
@@ -141,6 +149,34 @@ describe("resolveDeployConfig", () => {
 // ---------------------------------------------------------------------------
 
 describe("deployWorkerWithAssets", () => {
+  it.each([false, true])(
+    "uses the verified custom-domain endpoint despite Wrangler stdout (skipUi=%s)",
+    async (skipUi) => {
+      const workerUrl = "https://tila.example.com";
+      const settings = {
+        workersDev: false,
+        previewUrls: false,
+        analyticsEngineDatasets: [
+          { binding: "ANALYTICS", dataset: "dedicated" },
+        ],
+      };
+      const result = await deployWorkerWithAssets(
+        makeOpts({ workerUrl, settings, skipUi }),
+      );
+      expect(result.workerUrl).toBe(workerUrl);
+      expect(generateWranglerConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ settings }),
+      );
+      if (!skipUi) {
+        expect(mockFetch).toHaveBeenCalledWith(
+          `${workerUrl}/api/health`,
+          expect.anything(),
+        );
+        expect(result.ui).toEqual({ kind: "deployed", url: workerUrl });
+      }
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
 

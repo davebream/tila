@@ -2,13 +2,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InstanceKey, PerSlugInfraMeta } from "@tila/schemas";
+import CloudflareSDK from "cloudflare";
 import { stringify } from "smol-toml";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthStore, TilaPaths } from "../../auth-store";
 import { writeRegistry } from "../../auth-store/registry-file";
 import { writeConfigFile } from "../../config";
 import type { Cloudflare } from "../../lib/cloudflare-client";
-import { resolveDeployTarget } from "../../lib/deploy-target";
+import {
+  resolveDeployTarget,
+  resolveProvisionDeployment,
+} from "../../lib/deploy-target";
 
 let root: string;
 let home: string;
@@ -20,11 +24,15 @@ const secretGet = vi.fn(() => {
 const settings = vi.fn();
 const domains = vi.fn();
 const subdomains = vi.fn();
+const scriptSubdomain = vi.fn();
 const cf = {
   workers: {
     subdomains: { get: subdomains },
     domains: { list: domains },
-    scripts: { scriptAndVersionSettings: { get: settings } },
+    scripts: {
+      scriptAndVersionSettings: { get: settings },
+      subdomain: { get: scriptSubdomain },
+    },
   },
 } as unknown as Cloudflare;
 const urlA = "https://a.acct.workers.dev";
@@ -114,10 +122,16 @@ beforeEach(async () => {
     secrets: { get: secretGet, set: vi.fn(), delete: vi.fn() },
     env: { isCI: true, isTTY: false },
   });
+  scriptSubdomain.mockResolvedValue({ enabled: true, previews_enabled: true });
   subdomains.mockResolvedValue({ subdomain: "acct" });
   domains.mockReturnValue([]);
   settings.mockImplementation(async (script: string) => ({
     bindings: [
+      {
+        name: "ANALYTICS",
+        type: "analytics_engine",
+        dataset: "tila-analytics",
+      },
       { name: "DB", type: "d1", database_id: `db-${script}` },
       { name: "ARTIFACTS", type: "r2_bucket", bucket_name: `bucket-${script}` },
     ],
@@ -394,6 +408,11 @@ describe("selection failure boundaries", () => {
     );
     settings.mockResolvedValue({
       bindings: [
+        {
+          name: "ANALYTICS",
+          type: "analytics_engine",
+          dataset: "tila-analytics",
+        },
         { name: "DB", type: "d1", database_id: "db-tila" },
         { name: "ARTIFACTS", type: "r2_bucket", bucket_name: "tila-artifacts" },
       ],
@@ -475,6 +494,11 @@ describe("Cloudflare identity and binding verification", () => {
     save("a");
     settings.mockResolvedValue({
       bindings: [
+        {
+          name: "ANALYTICS",
+          type: "analytics_engine",
+          dataset: "tila-analytics",
+        },
         { name: "DB", type: "d1", id: "db-a" },
         { name: "ARTIFACTS", type: "r2_bucket", bucket_name: "bucket-a" },
       ],
@@ -512,7 +536,85 @@ describe("Cloudflare identity and binding verification", () => {
     save("a");
     settings.mockRejectedValue(new Error("404"));
     await expect(resolve({ infra: "a" })).rejects.toMatchObject({
-      code: "DEPLOY_TARGET_UNVERIFIED",
+      code: "DEPLOY_SETTINGS_UNVERIFIED",
+    });
+  });
+});
+
+describe("provisioning target preflight", () => {
+  function provision(allowCreate = true) {
+    return resolveProvisionDeployment({
+      cf,
+      store,
+      home,
+      accountId: "account",
+      scriptName: "a",
+      allowCreate,
+    });
+  }
+
+  it.each([false, true])(
+    "requires saved metadata for an existing Worker (allowCreate=%s)",
+    async (allowCreate) => {
+      await expect(provision(allowCreate)).rejects.toMatchObject({
+        code: "DEPLOY_TARGET_NOT_FOUND",
+      });
+    },
+  );
+
+  it("uses the saved installation's verified resources and settings", async () => {
+    save("a");
+    scriptSubdomain.mockResolvedValue({
+      enabled: false,
+      previews_enabled: false,
+    });
+    domains.mockReturnValue([
+      { hostname: "tila.example.com", service: "a", environment: "production" },
+    ]);
+    const result = await provision();
+    expect(result).toMatchObject({
+      workerUrl: "https://tila.example.com",
+      settings: { workersDev: false, previewUrls: false },
+      target: { d1DatabaseId: "db-a", r2BucketName: "bucket-a" },
+    });
+  });
+
+  it("refuses saved metadata for a different account", async () => {
+    save("a", metadata("a", { account_id: "other-account" }));
+    await expect(provision()).rejects.toMatchObject({
+      code: "DEPLOY_TARGET_MISMATCH",
+    });
+  });
+
+  it.each([false, true])(
+    "refuses wrong live storage bindings (allowCreate=%s)",
+    async (allowCreate) => {
+      save("a");
+      settings.mockResolvedValue({
+        bindings: [{ name: "DB", type: "d1", database_id: "another-db" }],
+      });
+      await expect(provision(allowCreate)).rejects.toMatchObject({
+        code: "DEPLOY_TARGET_MISMATCH",
+      });
+    },
+  );
+
+  it("permits fresh provisioning only on confirmed script absence", async () => {
+    settings.mockRejectedValue(
+      new CloudflareSDK.NotFoundError(
+        404,
+        { errors: [{ code: 10007 }] },
+        "Worker not found",
+        new Headers(),
+      ),
+    );
+    expect(await provision()).toMatchObject({
+      target: null,
+      workerUrl: urlA,
+      settings: { workersDev: true },
+    });
+    await expect(provision(false)).rejects.toMatchObject({
+      code: "DEPLOY_SETTINGS_UNVERIFIED",
     });
   });
 });

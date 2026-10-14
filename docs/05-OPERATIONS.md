@@ -1266,6 +1266,33 @@ any migration or upload. A repository pointing at instance A cannot silently
 deploy global infrastructure B. Custom domains are matched to their Worker through
 Cloudflare's domain API; matching URL strings alone is insufficient.
 
+Deployment also reads the Worker's live `workers.dev` and preview URL switches
+and all Analytics Engine bindings. It carries those values into the generated
+Wrangler configuration, so an upgrade cannot enable a disabled endpoint or
+replace a dedicated `ANALYTICS` dataset with `tila-analytics`. Route configuration
+is omitted: existing routes and custom domains remain managed in Cloudflare.
+The verified active endpoint, including a custom domain, is used in deployment
+results and the UI smoke check.
+
+Wrangler **3.91.0 or newer** is required for explicit preview URL configuration;
+the version check runs before remote mutations. The Cloudflare token must allow
+reading Worker settings and subdomain state, plus custom domains when needed
+to verify the endpoint. `Workers Scripts: Edit` includes the required settings
+access; custom-domain lookup also needs the applicable account domain read access.
+Denied or failed reads, malformed settings, a missing or invalid `ANALYTICS`
+binding, and unresolved endpoints stop deployment before migrations or upload.
+Review the selected installation, Cloudflare bindings, routing, and token
+permissions before retrying. These failures never fall back to default settings.
+
+The same preservation applies to `--skip-ui`, `tila infra provision
+--force-redeploy`, and full provisioning over an existing Worker. Provisioning
+inspects the Worker before creating resources or applying migrations. An existing
+Worker requires matching saved infrastructure and retains its verified D1 and
+R2 bindings. Only a confirmed missing Worker permits fresh-install defaults:
+workers.dev enabled, `ANALYTICS` bound to `tila-analytics`, and preview configuration
+left to Wrangler's initial default. Saved infrastructure does not gain new fields.
+Other template-controlled settings retain their existing deployment behavior.
+
 ```bash
 tila deploy                         # Infrastructure matching this repository
 tila deploy --instance <key>         # Explicit registered instance
