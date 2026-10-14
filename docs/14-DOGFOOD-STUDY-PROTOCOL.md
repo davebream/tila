@@ -109,8 +109,10 @@ Condition B uses:
 - a **thin logged wrapper over the public local SDK facade**
   (`buildLocalResources`) for claims, handoffs and reentry. It adds no behaviour: no
   retry, reassignment or recovery logic. It exists because handoffs and reentry
-  have no local CLI surface, and because the CLI's `task claim` mis-reports a lost
-  claim (see [coverage limits](#13-coverage-limits-and-known-limitations)).
+  have no local CLI surface, and because at declaration time the CLI's `task
+  claim` mis-reported a lost claim. The source CLI now rejects a lost claim after
+  a separately delivered fix; the declared SDK selection is retained (see
+  [coverage limits](#13-coverage-limits-and-known-limitations)).
 
 Both conditions get the same `NOTES.md` baseline durable notes, the same packets
 apart from the condition appendix, the same communication channel, and no

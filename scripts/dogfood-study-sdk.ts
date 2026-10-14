@@ -2,8 +2,10 @@
  * Thin, logged-by-the-caller wrapper over the public local SDK facade, for the #194 pilot.
  *
  * It adds no behaviour: no retry, reassignment or recovery logic. It exists because handoffs
- * and reentry have no local CLI surface, and because the CLI's `task claim` mis-reports a lost
- * claim; the facade throws 409 already-held, which is surfaced here unchanged.
+ * and reentry have no local CLI surface, and because at declaration time the CLI's
+ * `task claim` mis-reported a lost claim. The source CLI now rejects a lost claim after
+ * a separately delivered fix; the declared SDK selection is retained. The facade throws
+ * 409 already-held, which is surfaced here unchanged.
  *
  * Usage (run through tsx so the workspace source is resolved):
  *   tsx --tsconfig tsconfig.json scripts/dogfood-study-sdk.ts <store.json> <participant> <verb> [args]
