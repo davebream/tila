@@ -76,7 +76,8 @@ legitimate #194 deliverable on its own terms; the live gates keep their owners.
 | Freshness | fresh clone, worktrees, tila store and agent contexts per trial; no memory carried over |
 
 The pilot limits (two pairs, 12 minutes, 40 hook-covered operations, Sol `high`) are scheduling
-and capacity choices made before observation. They are not measured values and are
+and capacity choices declared for prospective v3 execution in commit
+`5b8aaf9601ebb331f98397535498ff456dbd09f3`. They are not measured values and are
 not tuned afterwards. Bounds are never extended after an outcome is seen.
 
 ### Learning and order effects
@@ -451,7 +452,7 @@ node scripts/dogfood-study.mjs derive --run-dir "$RUN" --trial t1
 node scripts/dogfood-study.mjs validate --bundle "$RUN" --json
 ```
 
-## 15. Remaining inputs before the first measured run
+## 15. Remaining inputs before the first measured run under prospective v3
 
 1. Exact installed-runtime smoke and coverage/failure evidence for the shared
    Codex surface; no source check proves runtime enforcement.
@@ -469,8 +470,13 @@ fixtures. Runtime access and subject sessions are supplied by the run operator.
 
 ## Change control
 
-V1 and v2 remain unchanged, superseded and unused. V3 changes model/runtime and
-explicitly names the hook-covered-operation unit before observation. Each rubric
+V1 and v2 remain unchanged and retained, superseded for prospective v3 execution.
+Earlier v2 activity remains under its own version; its completion, authenticity,
+validity and scoring are not established by the dated erratum's inventory. That
+bounded inventory found no retained v3 scored bundle. V3's model/runtime and
+hook-covered-operation unit choices were declared in commit
+`5b8aaf9601ebb331f98397535498ff456dbd09f3`; this does not claim declaration before
+all earlier observation. Each rubric
 is immutable at its first commit; later methodological changes require a new
 version and file. The declaration binds the warm-up and scored fixture hashes.
 Frozen manifests bind source, rubric, declaration, hook, library, configuration,
