@@ -1,0 +1,558 @@
+{
+  "schema": "tila.dogfood.rubric/1",
+  "rubric_id": "issue-194-pilot-rubric",
+  "rubric_version": 2,
+  "issue": 194,
+  "declared_on": "2026-10-14",
+  "status": "predeclared; supersedes version 1 before any measured run; no run has been executed under this rubric",
+  "immutability": "This file is frozen at its first commit. Any later change is a new rubric_version in a new file, with this file retained; a run is scored only under the rubric whose sha256 its frozen manifest records. Pilot limits below are design choices made before observation, not measured values.",
+  "protocol_document": "docs/14-DOGFOOD-STUDY-PROTOCOL.md",
+  "claims_boundary": {
+    "design_kind": "paired, counterbalanced, descriptive pilot on one Linux host with separate git worktrees and the local (embedded SQLite) tila backend",
+    "sample": {
+      "pairs": 2,
+      "trials": 4,
+      "worker_roles_per_trial": 2,
+      "orchestrator_is_subject": false
+    },
+    "max_claim_level": "descriptive",
+    "never_claimed_from_this_pilot": [
+      "statistical significance or any efficacy, productivity or adoption claim",
+      "deployed (Cloudflare) latency, throughput or tail behaviour",
+      "multi-host, Mac-to-Linux, native-session or compaction recovery",
+      "authenticated live shared-project behaviour, memberships or key-only auth",
+      "MCP workflow call counts or token cost unless the actual MCP path was exercised and native usage records exist",
+      "generality beyond the two task types, one model family and one operator"
+    ],
+    "does_not_satisfy": [
+      "#283 live native acceptance",
+      "#308 scenarios S1-S3 live evidence",
+      "#292 acceptance"
+    ],
+    "separate_from": {
+      "deterministic_harness_feasibility": "unit tests and preflight mechanism drills against scratch stores; provenance harness_fixture; never used as an agent outcome",
+      "multi_host_authenticated_case_study": "requires supplied isolated deployment, scoped principals, a second host and native sessions; out of scope here; link evidence from #283/#308 by reference"
+    }
+  },
+  "design": {
+    "conditions": {
+      "A": {
+        "label": "baseline",
+        "description": "git worktrees, normal terminal and editor tools, the same communication channel, and a shared directory outside all worktrees holding BOARD.md, DECISIONS.md, HANDOFFS/ and a locks/ directory. Ownership of the shared helper uses an ordinary atomic filesystem lock (mkdir of locks/shared-helper) with a named owner file; after the scheduled end of the owner's context, its replacement takes over by a recorded transfer line on BOARD.md. No tila access.",
+        "system_of_record": "markdown files and the lock directory in the trial shared directory"
+      },
+      "B": {
+        "label": "with-tila",
+        "description": "Everything in A, plus the existing tila local backend against one run-owned database and artifact root outside all worktrees. Claims, handoffs and reentry go through a thin logged wrapper over the public local SDK facade, which reports a lost claim as a 409; fenced task updates, task reads, artifacts and journal reads use the source CLI. The CLI 'task claim' command is not used for acquisition (see known_limitations). No new supervisor, scheduler or automatic reassignment.",
+        "system_of_record": "tila project state; Markdown files remain available for free-form notes"
+      }
+    },
+    "equal_conditions": [
+      "same model family, reasoning effort, runtime and tool permissions for every worker",
+      "same task packet text apart from the condition appendix",
+      "same baseline durable notes file (NOTES.md) in every worktree",
+      "same wall budget, tool-call budget and checkpoint schedule",
+      "equal-length training appendix and an unscored warm-up exercise on a throwaway fixture"
+    ],
+    "model": {
+      "family": "Claude Sonnet",
+      "effort": "xhigh",
+      "same_for_both_conditions": true,
+      "exact_model_id": null,
+      "exact_model_id_reason": "recorded in the frozen manifest at freeze time from the runtime; not known at declaration"
+    },
+    "pairs": [
+      {
+        "pair": "p1",
+        "template": "report",
+        "summary": "two report functions that both need one new shared amount formatter; a rendering decision is amended mid-trial",
+        "variants": ["x", "y"]
+      },
+      {
+        "pair": "p2",
+        "template": "commands",
+        "summary": "two CLI subcommands that both need one new shared flag parser; an error-handling decision is amended mid-trial",
+        "variants": ["x", "y"]
+      }
+    ],
+    "matching_rules": [
+      "variants of a pair share file layout, function arity, number of acceptance cases and reference-solution size within the tolerances in validity_rules",
+      "variants use different identifiers, data, output wording and file names so a solution to one gives no reusable answer to the other",
+      "frozen acceptance tests, fact sheets and reference solutions are written and hashed before any trial and are never shown to workers",
+      "no unfinished production backlog work is used as a scored task"
+    ],
+    "trial_order": [
+      {
+        "trial": "t1",
+        "pair": "p1",
+        "condition": "A",
+        "replaced_role": "w2"
+      },
+      {
+        "trial": "t2",
+        "pair": "p1",
+        "condition": "B",
+        "replaced_role": "w1"
+      },
+      {
+        "trial": "t3",
+        "pair": "p2",
+        "condition": "B",
+        "replaced_role": "w2"
+      },
+      {
+        "trial": "t4",
+        "pair": "p2",
+        "condition": "A",
+        "replaced_role": "w1"
+      }
+    ],
+    "counterbalancing": "pair p1 runs A then B, pair p2 runs B then A; the variant (x or y) given to condition A in each pair is derived from the declared seed; work items swap between roles w1 and w2 between pairs; each condition has exactly one trial where w1 is replaced and one where w2 is replaced",
+    "allocation": {
+      "seed": "tila-194-pilot-v1",
+      "rule": "for each pair p: h = sha256(seed + '|' + p); if (h[0] & 1) == 0 then variant x runs under A and y under B, else y under A and x under B",
+      "recomputed_by": "scripts/dogfood-study-lib.mjs allocateVariants; the validator re-derives it and rejects a manifest that disagrees"
+    },
+    "role_item_mapping": [
+      {
+        "pair": "p1",
+        "w1": "item1",
+        "w2": "item2"
+      },
+      {
+        "pair": "p2",
+        "w1": "item2",
+        "w2": "item1"
+      }
+    ],
+    "fresh_state": "every trial starts from a fresh repository clone, fresh worktrees, a fresh tila store (condition B) and fresh agent contexts with no memory carried across trials; if cross-trial memory cannot be disabled this is recorded as a validity finding",
+    "learning_effect_controls": [
+      "counterbalanced condition order across pairs (A/B then B/A)",
+      "fresh contexts and fresh state per trial; no solution or transcript reuse between variants",
+      "equal training and an unscored warm-up for both conditions",
+      "report results by trial position as well as by condition; with two pairs, order and pair are confounded and no adjustment is attempted",
+      "operator setup effort is recorded per condition so operator familiarity effects stay visible"
+    ]
+  },
+  "budgets": {
+    "predeclared_before_observation": true,
+    "wall_ms_per_trial": 720000,
+    "tool_calls_per_role_per_trial": 40,
+    "role_budget_includes_replacement": true,
+    "tool_call_definition": "one native tool invocation by a worker session that the run-owned PreToolUse hook admitted; shell, file read, edit, search, git, tila wrapper and subagent tool calls all count; shell subcommands inside one invocation do not; retries are separate invocations",
+    "provider_usage_budget": "not capped by the pilot; logged separately when native usage records exist",
+    "no_selective_extension": "bounds are never extended after an outcome is seen; a trial that reaches a bound is stopped and recorded as such",
+    "claim_ttl_ms": 120000,
+    "admitted_per_role_per_trial": 40,
+    "attempts_and_denials": "every submitted invocation is logged as attempted; denied ones are logged separately with the reason and never counted as admitted or dropped",
+    "count_hook": {
+      "kind": "claude_pretooluse_command_hook",
+      "settings_delivery": "one run-owned settings file per role passed with --settings; no global or project settings are edited",
+      "exact_hook_frozen": "the sha256 of the hook script and its library are recorded in the frozen manifest",
+      "counter": "one atomic, locked event log per trial; replacement sessions map to the same base role with no counter reset",
+      "records": "tool_use_id, session_id, tool name, category, admitted or denied, reason and time; never tool input",
+      "deny_after": "the 40th admitted invocation of a role or the wall deadline, whichever is first",
+      "must_be_smoke_tested": "against the installed interactive CLI in an unscored session before freeze",
+      "failure_rule": "a hook failure, an unattested hook or any other count source makes the trial harness_invalid for budget compliance and is never reported as enforced"
+    },
+    "schedule_lateness_tolerance_ms": 15000,
+    "wall_includes": "replacement startup and claim-expiry waits are inside the same 12-minute wall budget",
+    "no_pause_or_extension": "the clock is never paused, moved or extended to help a slow arm",
+    "deadline_state": "at the deadline the harness blocks new calls, stops only run-owned activity and captures the state; work completing after the deadline does not enter the scored artifact"
+  },
+  "timeline_ms_from_t0": {
+    "t0": "the packet barrier: trial.started is recorded once both packets are delivered; all offsets use this one monotonic trial clock",
+    "overlap_opportunity": "exists from t0 by construction: both items need the same new shared helper",
+    "decision_change_issued": 240000,
+    "handoff_checkpoint_requested": 330000,
+    "context_replacement": 360000,
+    "hard_stop": 720000,
+    "lateness_tolerance_ms": 15000,
+    "scheduled_events": {
+      "decision.issued": 240000,
+      "checkpoint.reached:handoff_requested": 330000,
+      "checkpoint.reached:replacement_started": 360000
+    }
+  },
+  "checkpoints": {
+    "decision_change": "orchestrator sends the amended decision (D1) over the shared channel; each worker must acknowledge it in the condition's system of record",
+    "handoff_checkpoint": "the role to be replaced is asked to save a normal handoff in the condition's system of record",
+    "context_replacement": "the replaced role's context is ended without a release step and a fresh context with a distinct participant id starts with only the entry packet and the condition's durable resources",
+    "recovery_scope": "same-host context replacement only; local database reopen is a separate harness_fixture drill; neither is native compaction recovery or machine change",
+    "early_completion": "A result declared before D1 is provisional. Both roles stay available: D1 is issued on schedule and the handoff request and replacement happen on schedule whether or not the role believes it is done. A role counts as completed only by a result.declared after D1, which may be a reaffirmation of an already correct result without needless edits. Time to initial result and time to final result are recorded separately.",
+    "reaffirmation": "an explicit result.declared after D1 flagged reaffirmed, naming the unchanged result commit (board line REAFFIRM or tila field reaffirmed), preceded by a test run or other verification call",
+    "first_valid_action": "the replacement's first admitted edit, git, tila, test-run or reaffirmation call after it has written its RESUME note; reading durable resources first is expected and counts toward the budget",
+    "replacement_always_scheduled": "the replacement starts at the scheduled time even when the original role already declared a result",
+    "late_schedule": "a scheduled message later than the lateness tolerance makes the schedule harness_invalid (V-schedule); nothing is paused or extended"
+  },
+  "provenance_classes": {
+    "harness_fixture": "deterministic checks against scratch stores or generated fixtures; no agent; reported only under preflight and never added to any agent-trial count, rate or time",
+    "local_agent_trial": "real agent sessions in separate worktrees on one host against the local backend; the only class that may supply agent-comparison metrics",
+    "linked_external": "evidence produced elsewhere (#283, #308 S1-S3, #192 recovery, #193 benchmarks); linked by reference with candidate_sha and source_ref, never re-labelled or re-measured here",
+    "authenticated_live": "reserved; not produced by this pilot"
+  },
+  "availability_values": {
+    "observed": "measured from an event or artifact in the bundle; value non-null; evidence refs required",
+    "estimated": "derived from a stated basis; value non-null; basis and date required; never presented as observed",
+    "unavailable": "could have existed but the source was absent; value null; reason required",
+    "not_applicable": "the mechanism does not exist in this condition; value null; reason required"
+  },
+  "event_kinds": [
+    "trial.prepared",
+    "trial.started",
+    "packet.delivered",
+    "worker.started",
+    "worker.stopped",
+    "worker.replaced",
+    "checkpoint.reached",
+    "decision.issued",
+    "decision.acked",
+    "handoff.saved",
+    "tool_call",
+    "tila_call",
+    "usage.record",
+    "intervention",
+    "result.declared",
+    "overlap.observed",
+    "overlap.resolved",
+    "fenced_write",
+    "recovery.started",
+    "recovery.decision_stated",
+    "recovery.first_action",
+    "gate.violation",
+    "evaluation.completed",
+    "trial.stopped",
+    "harness.note"
+  ],
+  "actor_roles": ["orch", "w1", "w2", "w2r", "w1r", "harness", "evaluator"],
+  "tool_call_categories": [
+    "read",
+    "edit",
+    "search",
+    "shell_test",
+    "git",
+    "tila_cli",
+    "tila_sdk",
+    "board_edit",
+    "other"
+  ],
+  "tila_call_outcomes": ["ok", "conflict", "stale_fence", "not_found", "error"],
+  "metrics": {
+    "trial_success": {
+      "unit": "0|1 plus outcome class",
+      "per": "trial",
+      "definition": "every frozen acceptance case passes on the harness integration of both worker branches, integration has no textual conflict, no forbidden authored path or acceptance-test tampering was found, each role declared or reaffirmed a result after D1, and no role exceeded the admitted-call bound",
+      "applies_to": ["A", "B"]
+    },
+    "role_task_success": {
+      "unit": "0|1",
+      "per": "role",
+      "definition": "the role's tagged acceptance subset passes on the integrated tree",
+      "applies_to": ["A", "B"]
+    },
+    "decision_honored": {
+      "unit": "0|1",
+      "per": "trial",
+      "definition": "the amended decision D1 is reflected in the integrated tree, as judged by the decision-tagged frozen assertions only",
+      "applies_to": ["A", "B"]
+    },
+    "conflict_opportunities": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "overlapping-work opportunities: the injected shared helper (always 1) plus naturally observed overlaps, each logged with intended resource, worker and response",
+      "applies_to": ["A", "B"]
+    },
+    "conflict_prevented": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "opportunities where evidence shows an overlapping attempt was stopped or redirected before duplicate edits were made; repeated retries are not extra",
+      "applies_to": ["A", "B"]
+    },
+    "duplicate_helper_definitions": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "implementations of the shared helper in the combined branches beyond the first; automated candidates are confirmed against the diff",
+      "applies_to": ["A", "B"]
+    },
+    "reconciliation_ms": {
+      "unit": "ms",
+      "per": "trial",
+      "definition": "from overlap.observed to overlap.resolved; null when no overlap occurred",
+      "applies_to": ["A", "B"]
+    },
+    "stale_fence_attempts": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "stale fenced writes made by agents during the trial that presented a fence older than the resource current fence: backend-reported rejections plus journal-audited accepted writes. Preflight drills and any scripted probe are reported only under preflight and never added to this count.",
+      "applies_to": ["B"],
+      "not_applicable_in_A": "condition A has no fence API"
+    },
+    "stale_fence_rejected": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "stale fenced writes made by agents during the trial that the backend rejected, with the journal showing no matching accepted write",
+      "applies_to": ["B"]
+    },
+    "stale_authority_accepted": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "stale fenced writes that were accepted; any nonzero value fails hard gate G1",
+      "applies_to": ["B"]
+    },
+    "obsolete_work_accepted": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "obsolete work (made against a superseded decision or superseded base) that a reviewer or the integration accepted; measured in both conditions and distinct from fence rejection",
+      "applies_to": ["A", "B"]
+    },
+    "holder_mismatch_current_fence_accepted": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "accepted writes by a participant that is not the current claim holder but presented the current fence number; fences are bearer numbers, so this is reported as an observation, not a stale write",
+      "applies_to": ["B"]
+    },
+    "handoff_score": {
+      "unit": "0-6",
+      "per": "trial",
+      "definition": "one point per fact a separate reviewer verifies as correct against captured evidence: goal and acceptance, current status, artifact or commit references that exist on the role branch, verification results that match the recorded test outcome, active decision or blocker stated with the full D1 rule, and a next owner and action that is coherent with the repository state. Lexical matches are only candidates and never award points.",
+      "applies_to": ["A", "B"],
+      "availability_rule": "unavailable when no semantic review was recorded; the candidate count is reported separately"
+    },
+    "recovery_to_decision_ms": {
+      "unit": "ms",
+      "per": "trial",
+      "definition": "from the replacement context start to the RESUME note whose decision statement the reviewer confirms states the full active rule; candidate time is recorded at write time; an unconfirmed or contradictory statement is censored; censored at the remaining budget",
+      "applies_to": ["A", "B"]
+    },
+    "recovery_to_first_action_ms": {
+      "unit": "ms",
+      "per": "trial",
+      "definition": "from the replacement context start to its first valid action as defined in checkpoints.first_valid_action; censored at the remaining budget",
+      "applies_to": ["A", "B"]
+    },
+    "recovery_wrong_decisions": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "actions by the replacement that contradict the active decision or redo accepted work; includes repeated work units and operator assists as separate counted fields",
+      "applies_to": ["A", "B"]
+    },
+    "tool_calls": {
+      "unit": "count",
+      "per": "role",
+      "definition": "attempted, admitted and denied native tool invocations by category and retries, from the frozen run-owned hook; the bound applies to admitted invocations",
+      "applies_to": ["A", "B"]
+    },
+    "tokens": {
+      "unit": "tokens",
+      "per": "role",
+      "definition": "provider input, output, cache-read and cache-write tokens from native usage records only",
+      "applies_to": ["A", "B"],
+      "availability_rule": "observed only when usage.record events with source native_usage_record cover every context of the role; otherwise unavailable with reason; subscription usage is never converted into a per-run price"
+    },
+    "mcp_calls": {
+      "unit": "count",
+      "per": "trial",
+      "definition": "MCP tool calls; SDK and CLI calls are not MCP calls",
+      "applies_to": ["B"],
+      "availability_rule": "unavailable unless the actual MCP path is selected and supported; the local backend rejects MCP configuration, so this pilot records unavailable",
+      "not_applicable_in_A": "condition A has no tila tools"
+    },
+    "operator_effort": {
+      "unit": "active minutes and intervention counts",
+      "per": "trial",
+      "definition": "active operator minutes and intervention counts by level for setup, diagnosis, correction, recovery and cleanup, with reasons; unattended waiting is recorded separately",
+      "applies_to": ["A", "B"]
+    },
+    "setup_effort": {
+      "unit": "minutes and steps",
+      "per": "condition",
+      "definition": "time and steps for the equal training and environment preparation; retained, not scored",
+      "applies_to": ["A", "B"]
+    },
+    "wall_ms": {
+      "unit": "ms",
+      "per": "role",
+      "definition": "role start to role stop or hard stop; recorded with the stop reason",
+      "applies_to": ["A", "B"]
+    },
+    "time_to_initial_result_ms": {
+      "unit": "ms",
+      "per": "role",
+      "definition": "trial start to the first result.declared of the role, which is provisional before D1",
+      "applies_to": ["A", "B"]
+    },
+    "time_to_final_result_ms": {
+      "unit": "ms",
+      "per": "role",
+      "definition": "trial start to the first result.declared or reaffirmation of the role after D1",
+      "applies_to": ["A", "B"]
+    }
+  },
+  "hard_gates": {
+    "scope": "In condition B the four counters are correctness gates for tila-managed state: any nonzero value is a gate failure that stays failed until a corrective slice is retested. In condition A the same counters are reported as baseline observations, not gates.",
+    "G1_stale_authority_write": {
+      "counter": "stale_authority_accepted",
+      "threshold": 0,
+      "rule": "no fenced write is accepted when its presented fence is lower than the resource's current fence at the time of the attempt; audited from journal order, not from client responses"
+    },
+    "G2_lost_acknowledged_decision": {
+      "counter": "acknowledged_decision_lost",
+      "threshold": 0,
+      "rule": "a decision that a worker acknowledged must appear in the integrated result and in that role's handoff or resume evidence; lost means acknowledged but contradicted or absent"
+    },
+    "G3_silent_overwrite": {
+      "counter": "silent_overwrites",
+      "threshold": 0,
+      "rule": "a change committed by one worker, or a fenced state change acknowledged by the backend, is not removed or replaced in the integrated result without a recorded supersession (board, decision or journal entry)"
+    },
+    "G4_inferred_completion": {
+      "counter": "completions_inferred",
+      "threshold": 0,
+      "rule": "a role or trial is counted complete only from an explicit result.declared event that references a result artifact, commit or status write; process exit, idleness, delivery or message receipt never count"
+    }
+  },
+  "outcome_taxonomy": {
+    "trial": [
+      "success",
+      "partial",
+      "failed",
+      "timeout_wall",
+      "timeout_calls",
+      "integration_conflict",
+      "aborted_wrong_target_or_privacy",
+      "harness_invalid"
+    ],
+    "rules": {
+      "success": "meets trial_success",
+      "partial": "at least one role_task_success and not trial_success",
+      "failed": "no role_task_success, or a forbidden path or acceptance-test tampering was detected",
+      "timeout_wall": "hard stop reached before explicit result.declared from both roles",
+      "timeout_calls": "a role exhausted the tool-call bound before declaring a result",
+      "integration_conflict": "harness integration produced a textual conflict that the harness does not resolve",
+      "aborted_wrong_target_or_privacy": "stopped on a wrong path, wrong target or privacy leak; redacted evidence retained",
+      "harness_invalid": "only by a rule in validity_rules; the trial and its evidence are retained and reported"
+    },
+    "failures_are_outcomes": "a product or agent failure is never an exclusion; it stays in the denominator"
+  },
+  "intervention_levels": {
+    "I0": "none",
+    "I1": "clarification or unblocking message that restates the packet without adding task information",
+    "I2": "corrective action on worker state: restarting a session, re-sending a lost message, releasing a claim by hand, repairing an environment fault",
+    "I3": "operator performs task work, edits worker files, or resolves a merge conflict",
+    "classification": {
+      "unassisted": "I0 only",
+      "assisted": "any I1 or I2",
+      "invalid_as_agent_outcome": "any I3; the trial is retained but cannot count as an agent success"
+    },
+    "report_both": "unassisted and all-trial counts are both reported"
+  },
+  "validity_rules": [
+    {
+      "id": "V-manifest",
+      "rule": "the frozen manifest records the rubric sha256, declaration sha256, source sha, runtime and model identifiers, and every fixture hash; a missing field fails validation"
+    },
+    {
+      "id": "V-start-skew",
+      "rule": "both workers receive their packets within 30000 ms of each other, else the trial may be declared harness_invalid with the skew recorded"
+    },
+    {
+      "id": "V-matching",
+      "rule": "variants of a pair must have equal file lists, equal acceptance-case counts, equal decision-sensitive case counts and reference-solution line counts within 15 percent; each item must also fail a constant-sample mutant; checked by the fixture validator before freeze"
+    },
+    {
+      "id": "V-instrument",
+      "rule": "a harness or instrumentation failure may invalidate a comparison only when it prevented recording a required event; the trial is retained and a replacement trial is reported separately with replacement_of set"
+    },
+    {
+      "id": "V-memory",
+      "rule": "cross-trial agent memory that cannot be disabled is recorded; the study is then labelled memory-contaminated and no comparative statement is made"
+    },
+    {
+      "id": "V-stop",
+      "rule": "stop immediately on a wrong path, wrong target or privacy leak; retain redacted evidence"
+    },
+    {
+      "id": "V-hook",
+      "rule": "the budget count source must be the frozen run-owned hook, smoke-tested against the installed CLI before freeze, with no recorded hook failure; otherwise the trial is harness_invalid for budget compliance and is never reported as enforced"
+    },
+    {
+      "id": "V-schedule",
+      "rule": "D1, the handoff request and the replacement start must each occur no more than 15000 ms after their scheduled offset; a later one makes the trial harness_invalid with the lateness recorded; nothing is paused or extended"
+    },
+    {
+      "id": "V-review",
+      "rule": "handoff and recovery-decision correctness require a separate reviewer verdict against captured facts; absent a verdict those metrics are unavailable and lexical candidates are not scores"
+    }
+  ],
+  "known_limitations": [
+    {
+      "id": "KL-cli-claim-report",
+      "statement": "At the declaration commit, the local source CLI command 'task claim' prints acquired:true for a losing exclusive claim (with the holder's fence number and an epoch-zero expiry) because it does not read the acquire result's acquired flag; the SDK local facade throws 409 already-held. Claim state itself is correct.",
+      "handling": "condition B acquires claims only through the SDK-facade wrapper and never counts a CLI 'task claim' report as an acquired claim; the preflight drill records the CLI behaviour as an observation without hiding it; a corrected CLI is not assumed",
+      "tracking": "owned and fixed outside this study by the lead"
+    },
+    {
+      "id": "KL-bearer-fence",
+      "statement": "Fences are capability numbers in the existing model: a write presenting the current fence number is accepted regardless of which participant presents it.",
+      "handling": "not redesigned here; such writes are reported as holder_mismatch_current_fence_accepted and are not stale writes",
+      "tracking": "existing model, docs/01-DECISIONS.md section 2"
+    },
+    {
+      "id": "KL-no-local-cli-handoff",
+      "statement": "Handoffs and reentry have no local CLI surface and the MCP server rejects local SQLite configuration.",
+      "handling": "handoff and reentry use the public SDK facade through the wrapper; MCP call counts are recorded as unavailable",
+      "tracking": "docs/14-DOGFOOD-STUDY-PROTOCOL.md coverage limits"
+    },
+    {
+      "id": "KL-blinding",
+      "statement": "The integrating lead knows each trial condition and the packets and wrapper commands differ by condition, so full blinding is not achieved.",
+      "handling": "integration and tests are deterministic; handoff and recovery verdicts are given by a separate reviewer on neutral trial identifiers with the mapping withheld until verdicts are recorded; whether blinding held is recorded per verdict",
+      "tracking": "docs/14-DOGFOOD-STUDY-PROTOCOL.md"
+    },
+    {
+      "id": "KL-renamed-variants",
+      "statement": "Variants x and y are structurally near-identical with renamed data and wording; renamed identifiers do not make solutions inherently non-transferable.",
+      "handling": "fresh contexts and fresh state per trial are the learning control; no cross-trial memory or transcript reuse",
+      "tracking": "docs/14-DOGFOOD-STUDY-PROTOCOL.md"
+    }
+  ],
+  "study_level_thresholds": {
+    "informative": "all four trials valid and at most one assisted trial",
+    "inconclusive": "two or more trials harness_invalid or assisted, or any trial missing; report feasibility and limitations only and make no comparative statement",
+    "gate_failure": "any hard gate violated in condition B; report the failure, open a bounded corrective issue and do not run further trials until retested",
+    "minimum_denominators_reported": "every rate is shown with its raw numerator and denominator"
+  },
+  "analysis": {
+    "plan": [
+      "retain every trial, event and intervention",
+      "report each rubric row separately, never an opaque aggregate",
+      "show pairwise A-versus-B deltas with raw denominators",
+      "summarise with medians and ranges descriptively",
+      "no significance test, confidence interval, efficacy, adoption or latency claim",
+      "report results by trial position as well as by condition"
+    ],
+    "reviewer_blinding": "a separate reviewer receives neutral trial identifiers, the task and D1 contract, code and sanitised handoff evidence with condition-specific labels removed where practical; the mapping stays private until verdicts are recorded; the integrating lead may know the condition and this is recorded"
+  },
+  "evidence": {
+    "event_schema": "tila.dogfood.event/1",
+    "ledger_schema": "tila.dogfood.ledger/1",
+    "manifest_schema": "tila.dogfood.manifest/1",
+    "clock_fields": ["ts_utc", "mono_ms"],
+    "bundle_layout": [
+      "manifest.frozen.json",
+      "preflight/drills.json",
+      "trials/<trial>/events.jsonl",
+      "trials/<trial>/evaluation.json",
+      "trials/<trial>/review.json",
+      "trials/<trial>/ledger.json",
+      "review-packets/<neutral-id>.json"
+    ],
+    "sanitisation": "synthetic participant labels only; no environment dumps, credentials, account identifiers, host addresses, private transcripts or absolute home paths; run directories appear as $RUN",
+    "retained_private_files": "only when needed for redaction review; never published",
+    "hook_hashes": "the frozen manifest records the sha256 of the hook script and library"
+  },
+  "supersedes": {
+    "path": "docs/evidence/issue-194-rubric-v1.json",
+    "reason": "Independent pre-trial review found defects in recovery-path allowances, the baseline claim protocol, handoff and decision scoring, command acceptance, drill/agent metric separation, and undefined budget, early-completion and checkpoint-lateness rules. Version 1 is retained unchanged; no trial ran under it."
+  }
+}
