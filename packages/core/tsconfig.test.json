@@ -5,5 +5,9 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src", "test/record-backend.test.ts"]
+  "include": [
+    "src",
+    "test/record-backend.test.ts",
+    "test/settings-transfer.test.ts"
+  ]
 }
