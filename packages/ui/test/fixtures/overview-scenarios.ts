@@ -100,6 +100,27 @@ const NO_CONVERSATIONS: Partial<ScenarioSources> = {
 
 export const SCENARIOS: OverviewScenario[] = [
   {
+    name: "S1 large custom project with a failed secondary fetch",
+    schema: applied,
+    work: [
+      configuredEntry("bug", 301),
+      configuredEntry("empty", 0),
+      { ...declaredEntry("legacy", 1), declaration: "undeclared" },
+    ],
+    records: [recordEntry("config", 1)],
+    sources: { ...QUIET, runtime: "outage" },
+    expected: "partial",
+  },
+  {
+    name: "S3 stopped runtime with unresolved execution",
+    schema: applied,
+    work: [configuredEntry("bug", 2)],
+    records: [],
+    sources: { ...QUIET, queue: { uncertain: 1 }, runtime: { total: 0 } },
+    expected: "attention",
+    next: "/p/test-project/queue?state=uncertain",
+  },
+  {
     // S1: a solo developer opens a project created without a schema file, on
     // a deployment where conversations are not configured yet.
     name: "S1 new project without definitions or data",
