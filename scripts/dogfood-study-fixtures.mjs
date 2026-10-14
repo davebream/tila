@@ -1294,6 +1294,18 @@ const TRAINING = [
   "You have at most 40 admitted tool calls and 12 minutes of wall time for your role, including a replacement. Spend them on the task; there is no credit for coordination for its own sake.",
 ].join("\n");
 
+/** Ordinary shell coordination recipes used in packets and exercised by preflight tests. */
+export function baselineHelperCommands({ shared, role }) {
+  const quote = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
+  const lock = quote(`${shared}/locks/shared-helper`);
+  const owner = quote(`${shared}/locks/shared-helper/owner`);
+  const board = quote(`${shared}/BOARD.md`);
+  const base = role.replace(/r$/, "");
+  const acquire = `if mkdir ${lock}; then echo "${role} $(date +%T)" > ${owner} && echo "shared-helper: owner=${role} since=$(date +%T)" >> ${board}; elif [ "$(cut -d' ' -f1 ${owner})" = "${role}" ]; then echo 'already owned'; else cat ${owner}; exit 1; fi`;
+  const transfer = `if [ ! -d ${lock} ]; then ${acquire}; elif [ "$(cut -d' ' -f1 ${owner})" = "${base}" ]; then echo "${role} $(date +%T) transfer from ${base}" > ${owner} && echo "TRANSFER shared-helper ${base} -> ${role} $(date +%T)" >> ${board}; elif [ "$(cut -d' ' -f1 ${owner})" = "${role}" ]; then echo 'already owned'; else cat ${owner}; exit 1; fi`;
+  return { acquire, transfer };
+}
+
 function conditionAppendix(ctx) {
   const { condition, role, scenario, itemKey, shared } = ctx;
   const base = role.replace(/r$/, "");
@@ -1301,15 +1313,16 @@ function conditionAppendix(ctx) {
   const itemFile = scenario.items[itemKey].file;
   if (condition === "A") {
     const lock = `${shared}/locks/shared-helper`;
+    const commands = baselineHelperCommands(ctx);
     return [
       "## Coordination tools (condition A)",
       "",
       `Shared directory (outside your worktree): \`${shared}\`. It holds BOARD.md, DECISIONS.md, HANDOFFS/ and locks/. Use ordinary shell commands.`,
       "",
-      `1. Own the helper: \`mkdir ${lock} && echo "${role} $(date +%T)" > ${lock}/owner && echo "shared-helper: owner=${role} since=$(date +%T)" >> ${shared}/BOARD.md\`. \`mkdir\` is atomic: if it fails, read \`${lock}/owner\`. If another role owns it, do not implement a second \`${helper}\`; obtain the owner's work from its branch.`,
+      `1. Own the helper: \`${commands.acquire}\`. \`mkdir\` is atomic; repeat acquisition recognizes your existing ownership. If another role owns it, do not implement a second \`${helper}\`; obtain the owner's work from its branch.`,
       ...(role.endsWith("r")
         ? [
-            `2. Takeover (replacements only, for the role you replace, after your entry packet says the previous context ended): \`echo "${role} $(date +%T) transfer from ${base}" > ${lock}/owner && echo "TRANSFER shared-helper ${base} -> ${role} $(date +%T)" >> ${shared}/BOARD.md\`.`,
+            `2. Takeover (replacements only, after your entry packet says the previous context ended): \`${commands.transfer}\`. This transfers only from ${base}, keeps another role's ownership, and uses normal atomic acquisition if no lock exists. Read \`${lock}/owner\` before editing.`,
           ]
         : ["2. Takeover: not applicable to you."]),
       `3. Acknowledge: when the orchestrator posts a decision change, append \`ACK <decision id> ${role}\` to DECISIONS.md.`,

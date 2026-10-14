@@ -620,6 +620,7 @@ function cmdPrepare(opts) {
   writeFileSync(join(repo, ".git/info/exclude"), ".tila/\nRESUME.txt\n");
 
   // shared coordination files exist in both conditions
+  mkdirSync(join(shared, "locks"), { recursive: true });
   mkdirSync(join(shared, "HANDOFFS"), { recursive: true });
   writeFileSync(join(shared, "BOARD.md"), "# Board\n\n");
   writeFileSync(
@@ -831,31 +832,54 @@ function cmdEvaluate(opts) {
   mkdirSync(scratch, { recursive: true });
   const rubric = readJson(join(repoRoot, config.rubric_path));
 
-  // 1. what each branch authored, and path audit. Commits reachable from the other branch are
-  // imports (the packet allows merging it), not authored edits.
+  // 1. Attribute commits using the run-owned branch reflogs. Reachability alone cannot
+  // distinguish an imported commit from its original author's work after a merge.
   const base = git(repo, "rev-parse", "main");
+  const commitOrigins = {};
+  const commits = git(repo, "rev-list", "--reverse", "w1", "w2", "^main")
+    .split("\n")
+    .filter(Boolean);
+  for (const role of ["w1", "w2"]) {
+    const reflog = git(repo, "reflog", "show", "--format=%H%x09%gs", role);
+    for (const line of reflog.split("\n")) {
+      const [commit, subject] = line.split("\t");
+      if (!commits.includes(commit)) continue;
+      if (
+        /^commit(?: \([^)]*\))?:/.test(subject) ||
+        /^merge .*: Merge made by/.test(subject)
+      ) {
+        if (commitOrigins[commit] && commitOrigins[commit] !== role)
+          fail(`ambiguous origin for ${commit}; retain the run for audit`);
+        commitOrigins[commit] = role;
+      }
+    }
+  }
+  for (const commit of commits) {
+    if (!commitOrigins[commit])
+      fail(`missing branch provenance for ${commit}; retain the run for audit`);
+  }
   const branches = {};
   const forbidden = [];
   const tampering = [];
+  // Audit every unique commit for immutable paths, including changes imported by both
+  // branches and merge commits. This is independent of role-specific permissions.
+  for (const commit of commits) {
+    for (const change of commitChanges(repo, commit, "first-parent")) {
+      if (scenario.frozenPaths.includes(change.path))
+        tampering.push({ role: commitOrigins[commit], commit, ...change });
+    }
+  }
   for (const role of ["w1", "w2"]) {
-    const otherRole = role === "w1" ? "w2" : "w1";
     const head = git(repo, "rev-parse", role);
-    const authored = git(
-      repo,
-      "log",
-      "--no-merges",
-      "--name-status",
-      "--format=",
-      role,
-      "^main",
-      `^${otherRole}`,
-    )
+    const reachable = git(repo, "rev-list", role, "^main")
       .split("\n")
-      .filter(Boolean)
-      .map((l) => {
-        const [status, ...p] = l.split("\t");
-        return { status, path: p.join("\t") };
-      });
+      .filter(Boolean);
+    const authoredCommits = commits.filter((c) => commitOrigins[c] === role);
+    const importedCommits = reachable.filter((c) => commitOrigins[c] !== role);
+    // Combined merge diffs contain resolution edits, rather than unchanged imports.
+    const authored = authoredCommits.flatMap((commit) =>
+      commitChanges(repo, commit, "combined").map((c) => ({ commit, ...c })),
+    );
     const allowed = allowedPaths(scenario, role, slot.role_items[role]);
     const permitted = (c) =>
       allowed.exact.includes(c.path) ||
@@ -869,8 +893,6 @@ function cmdEvaluate(opts) {
           status: c.status,
           where: "committed",
         });
-      if (scenario.frozenPaths.includes(c.path))
-        tampering.push({ role, path: c.path });
     }
     // uncommitted edits are audited too (they are not integrated)
     const dirty = git(config.worktrees[role], "status", "--porcelain")
@@ -889,7 +911,13 @@ function cmdEvaluate(opts) {
       if (scenario.frozenPaths.includes(c.path))
         tampering.push({ role, path: c.path });
     }
-    branches[role] = { head, authored, uncommitted: dirty.map((d) => d.path) };
+    branches[role] = {
+      head,
+      authored_commits: authoredCommits,
+      imported_commits: importedCommits,
+      authored,
+      uncommitted: dirty.map((d) => d.path),
+    };
   }
   const uncommitted = Object.fromEntries(
     Object.entries(branches)
@@ -998,7 +1026,7 @@ function cmdEvaluate(opts) {
   }
   const other = owner === "w1" ? "w2" : owner === "w2" ? "w1" : null;
   const otherDefines = other
-    ? branchDefinesHelper(repo, other, scenario)
+    ? authoredDefinesHelper(repo, branches[other].authored_commits, scenario)
     : null;
   const overlap = {
     overlap_id: "injected-helper",
@@ -1210,6 +1238,7 @@ function cmdEvaluate(opts) {
     scenario_sha256: scenario.sha256,
     base,
     branches,
+    commit_origins: commitOrigins,
     uncommitted,
     integration,
     cases: results,
@@ -1283,18 +1312,44 @@ function later(events, e, field) {
   );
 }
 
-function branchDefinesHelper(repo, role, scenario) {
-  const diff = spawnSync(
-    "git",
-    [
-      "diff",
-      `main..${role}`,
-      "--",
-      scenario.helper.file,
-      ...Object.values(scenario.items).map((i) => i.file),
-    ],
-    { cwd: repo, encoding: "utf8" },
-  ).stdout;
+function commitChanges(repo, commit, mergeMode) {
+  const fields = git(
+    repo,
+    "show",
+    "--format=",
+    `--diff-merges=${mergeMode}`,
+    "--no-renames",
+    "--name-status",
+    "-z",
+    commit,
+  ).split("\0");
+  const changes = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const status = fields[i];
+    changes.push({
+      status: /^A+$/.test(status) ? "A" : status,
+      path: fields[i + 1],
+    });
+  }
+  return changes;
+}
+
+function authoredDefinesHelper(repo, commits, scenario) {
+  const diff = commits
+    .map((commit) =>
+      git(
+        repo,
+        "show",
+        "--format=",
+        "--diff-merges=combined",
+        "--no-renames",
+        commit,
+        "--",
+        scenario.helper.file,
+        ...Object.values(scenario.items).map((i) => i.file),
+      ),
+    )
+    .join("\n");
   return new RegExp(
     `^\\+.*(function\\s+${scenario.helper.name}\\b|const\\s+${scenario.helper.name}\\s*=)`,
     "m",
