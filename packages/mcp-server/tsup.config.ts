@@ -7,10 +7,15 @@ export default defineConfig({
   clean: true,
   treeshake: true,
   sourcemap: false,
-  // Bundle the internal @tila/schemas package so the server ships self-contained
-  // and @tila/schemas never needs to be published.
-  // The shebang comes from src/index.ts (esbuild preserves it) — no banner.
-  noExternal: ["@tila/schemas", "@tila/client-lifecycle"],
+  // Private workspace packages and the YAML adapter ship inside the bundle.
+  // They must never become unresolved published runtime dependencies.
+  // The shebang comes from src/index.ts (esbuild preserves it).
+  // yaml's Node entry is CommonJS and requires built-ins such as process.
+  // Give bundled CommonJS modules a Node require inside the ESM executable.
+  banner: {
+    js: 'import { createRequire as createBundledRequire } from "node:module"; const require = createBundledRequire(import.meta.url);',
+  },
+  noExternal: ["@tila/schemas", "@tila/client-lifecycle", "@tila/core", "yaml"],
   // SDK HTTP transport stays external; MCP does not load SDK local storage.
   external: [
     "@modelcontextprotocol/sdk",
