@@ -564,7 +564,7 @@
       "issue": 439,
       "pr": 459,
       "kind": "builder",
-      "state": "queued",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-439",
       "contract": "2026-10-14-backlog-execution.md#439--service-and-binding-revision-safety-i439",
@@ -574,7 +574,20 @@
         "packages/ui/src/pages/settings-service-identities.tsx"
       ],
       "validation": ["worker", "ui", "sdk", "cli", "runtime", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 459,
+          "head_sha": "0ddc0f94eb25b06de7e2658a4cfe795951e89dbb",
+          "merge_sha": "e9c904580eabf91abd917dbc066386ead7d8e479",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/459",
+          "issue_state": "CLOSED"
+        }
+      ],
       "task_name": "build-439-revisions",
       "branch": "feat/439-service-revisions",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot",
@@ -2420,7 +2433,7 @@
     },
     {
       "node": "i439",
-      "state": "queued",
+      "state": "merged",
       "worker": "build-439-revisions",
       "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
       "head_sha": "0ddc0f94eb25b06de7e2658a4cfe795951e89dbb",
@@ -2433,10 +2446,24 @@
           "source": "build-439-revisions final handoff; lead reviewed diff and logs"
         }
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "kind": "merge",
+          "pr": 459,
+          "head_sha": "0ddc0f94eb25b06de7e2658a4cfe795951e89dbb",
+          "merge_sha": "e9c904580eabf91abd917dbc066386ead7d8e479",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/459",
+          "issue_state": "CLOSED"
+        }
+      ],
       "lead_review": "approved",
-      "queue_state": "entered-queue-checks-running-batch-461",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-439-closed",
+      "merge_sha": "e9c904580eabf91abd917dbc066386ead7d8e479"
     },
     {
       "node": "i398",

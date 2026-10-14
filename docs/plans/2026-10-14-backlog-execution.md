@@ -1,6 +1,6 @@
 # Backlog execution plan — 14 October 2026
 
-**Status: plan merged in PR #452; #450, #400, #449 and #398 merged with GitHub and main ancestry verified. #439 is queued as PR #459 in Mergify batch #461. #362 / #416 / #440 are implementing. The adjacent ledger records verification evidence and current dispatch.** Completion of this document does not authorize production secrets or a release. Routine builder handoff follows the repository's existing commit/push/non-draft PR/Mergify policy.
+**Status: plan merged in PR #452; #450, #400, #449, #398 and #439 merged with GitHub and main ancestry verified. #362 / #416 / #440 are implementing. The adjacent ledger records verification evidence and current dispatch.** Completion of this document does not authorize production secrets or a release. Routine builder handoff follows the repository's existing commit/push/non-draft PR/Mergify policy.
 
 This plan covers the entire open `davebream/tila` backlog at source **f231ba532b55fe33de15bc49cdb2e5c35a6439de**: 16 issues and three dependency PRs. The adjacent [DAG](2026-10-14-backlog-dag.json) contains inventory, provenance, task status, hard acceptance edges, preferred ordering, execution stages, and progress ledger. Run [the validator](validate-backlog-plan.py) after changing either file. All implementation and acceptance work below is **planned**, except work explicitly marked implementing or delivered in the execution ledger.
 
@@ -22,7 +22,7 @@ This plan covers the entire open `davebream/tila` backlog at source **f231ba532b
 | B, current: build-362-cleanup-guide | `/home/dawid/code/tila-workers/issue-362` | `docs/362-worker-cleanup`; Sonnet XHIGH implementing from `8397f3da` |
 | Canceled duplicate, retired | `/home/dawid/code/tila-workers/issue-450` | `fix/450-deploy-target`; inspection only; worktree/branch now removed |
 | C, current: build-416-revision-warning | `/home/dawid/code/tila-workers/issue-416` | `feat/416-schema-apply-warning`; Sol XHIGH implementing on reviewed PR #456 head; lead will transplant only #416 commits onto merged main before handoff |
-| A: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; PR #459 merge-ready after lead review, head `0ddc0f94` |
+| A: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; PR #459 merged as `e9c90458`, GitHub and main ancestry verified |
 | A, current: build-440-ghes-oidc | `/home/dawid/code/tila-workers/issue-440` | `feat/440-ghes-actions-oidc`; Sol XHIGH on reviewed PR #459; transplant only440 commits onto merged main before handoff |
 | Planner | `/home/dawid/code/tila-workers/backlog-plan` | Plan PR #452 merged as `69c463b1`; lead maintains progress on `docs/backlog-execution-progress` |
 
@@ -238,7 +238,7 @@ Predeclare repository/task set, participants and runtime versions, same-budget w
 
 The JSON's `hard_edges` mean **required for completion/acceptance**, with provenance (`native`, `contract`, or `safety`). They do not forbid preparing tests or reviewing source early. `preferred_edges` mean conflict/risk serialization only and can be rescheduled by the lead without waiving acceptance. Native closed dependencies are recorded as satisfied evidence, not reintroduced as build tasks. The validator checks both the hard DAG and the combined proposed ordering for cycles.
 
-The practical three-lane schedule is below. Stages 0–1 are historical: #450, #400, #449 and #398 are merged; #439 is queued, and lanes A/B/C implement #440/#362/#416. These are work stages, not time estimates or mandatory barriers: a free lane may take an eligible unowned task once its hard prerequisites and conflict locks permit. If live resources are unavailable, release that coding slot for other work and retain the gate as blocked. A queued PR stops occupying a coding slot only when the lead confirms its implementation/review handoff complete; later corrections reacquire a slot, never create a fourth.
+The practical three-lane schedule is below. Stages 0–1 are historical: #450, #400, #449 and #398 are merged; #439 is merged, and lanes A/B/C implement #440/#362/#416. These are work stages, not time estimates or mandatory barriers: a free lane may take an eligible unowned task once its hard prerequisites and conflict locks permit. If live resources are unavailable, release that coding slot for other work and retain the gate as blocked. A queued PR stops occupying a coding slot only when the lead confirms its implementation/review handoff complete; later corrections reacquire a slot, never create a fourth.
 
 | Stage | Lane A | Lane B | Lane C |
 |---|---|---|---|
@@ -289,12 +289,12 @@ Machine ledger is authoritative for task state; update it with UTC, worker, work
 |---|---|
 | Snapshot/reconciliation | 16 open issues, three dependency PRs; full open relations/comments read; relevant closed foundations checked against source |
 | C, current: build-416-revision-warning | `/home/dawid/code/tila-workers/issue-416` | `feat/416-schema-apply-warning`; Sol XHIGH implementing on reviewed PR #456 head; lead will transplant only #416 commits onto merged main before handoff |
-| A: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; PR #459 merge-ready after lead review, head `0ddc0f94` |
+| A: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; PR #459 merged as `e9c90458`, GitHub and main ancestry verified |
 | A, current: build-440-ghes-oidc | `/home/dawid/code/tila-workers/issue-440` | `feat/440-ghes-actions-oidc`; Sol XHIGH on reviewed PR #459; transplant only440 commits onto merged main before handoff |
 | Planner | Plan and DAG persisted; validator result and local docs commit reported separately; no application code changed |
 | #450 | Completed externally; PR #451 head `2cb07e2d89e4f759a4b4f495632dab159c089700`, merge `ba26881e5ac36032e33670eb324ed58c63117a58`; lead verified GitHub MERGED and fetched main ancestry; issue CLOSED |
 | #400 / #449 / #398 | Merged and issues closed; GitHub state and main ancestry independently verified in the machine ledger |
-| #439 | PR #459 queued in Mergify batch #461; original CI green; integration checks running |
+| #439 | PR #459 merged as `e9c90458`; GitHub state and fetched main ancestry verified; issue closed |
 | #307 | #434 runbook/rehearsal delivered; audit and explicit production gate remain; no production secret touched |
 | #283 / #308 / #194 | Live execution/measurements not passed by this planning work |
 | #311 / #314 / #312 | Snapshot green / green / failing respectively; all originally unlabelled; validation/repair/handoff still planned |
