@@ -9,7 +9,7 @@ Coordination primitives that prevent races.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.9.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Upgrade the deployment CLI to 0.9.0 before deploying: it verifies the selected instance and infrastructure before any mutation. Deploy the Worker and UI together, applying D1 migrations 0035 and 0036 before the Worker, then upgrade other clients. Read the [upgrade notes](CHANGELOG.md#090---2026-10-14) before deploying.
+> **Status:** v0.10.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Upgrade the deployment CLI to 0.10.0 before deploying; it verifies and preserves live Worker exposure and analytics settings and requires Wrangler 3.91.0 or newer. Read the [upgrade notes](CHANGELOG.md#0100---2026-10-14) before deploying.
 
 </div>
 
