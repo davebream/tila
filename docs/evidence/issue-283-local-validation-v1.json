@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "issue": 283,
+  "evidence_revision": 1,
+  "recorded_at": "2026-10-14",
+  "classification": "deterministic-fixtures-and-local-runtime",
+  "product_version_marker": "0.8.0",
+  "contracts": {
+    "herdr": "0.9.3 / protocol 22 / schema version 1",
+    "codex_schema": "0.162.1",
+    "tila_runtime_protocol": 1,
+    "connector_adapter_version": "1",
+    "protocol_record": "issue-283-protocol-contract-v1.json"
+  },
+  "validation": [
+    {
+      "command": "pnpm build",
+      "result": "passed",
+      "counts": {
+        "tasks_passed": 14
+      }
+    },
+    {
+      "command": "pnpm run typecheck",
+      "result": "passed",
+      "counts": {
+        "tasks_passed": 27
+      }
+    },
+    {
+      "command": "pnpm --filter @tila/connector test",
+      "result": "passed",
+      "counts": {
+        "files_passed": 10,
+        "tests_passed": 68
+      }
+    },
+    {
+      "command": "node scripts/turbo.mjs test --concurrency=1",
+      "result": "passed",
+      "scope": "Every normal workspace package test target and its build prerequisites; only task scheduling is serialized.",
+      "counts": {
+        "tasks_passed": 27,
+        "vitest_tests_passed": 6931,
+        "vitest_tests_skipped": 51,
+        "vitest_tests_todo": 249,
+        "bun_tests_passed": 203
+      },
+      "affected_suites": {
+        "connector": {
+          "tests_passed": 68,
+          "files_passed": 10
+        },
+        "client_lifecycle": {
+          "tests_passed": 27,
+          "files_passed": 4
+        },
+        "cli": {
+          "vitest_tests_passed": 1450,
+          "vitest_tests_todo": 1,
+          "vitest_files_passed": 119,
+          "bun_tests_passed": 97,
+          "bun_files": 14
+        }
+      }
+    },
+    {
+      "command": "pnpm test:runtime",
+      "result": "passed",
+      "counts": {
+        "files_passed": 38,
+        "tests_passed": 146,
+        "tests_skipped": 0,
+        "tests_todo": 0
+      },
+      "scope": "Required local Cloudflare DO SQLite, D1 and R2 runtime suite, including conversations, agent bindings and run authentication. No deployed service or credentials required."
+    },
+    {
+      "command": "env -u CODEX_THREAD_ID -u TILA_LIFECYCLE_KEY -u TILA_RUN_SOCKET -u TILA_RUN_CAPABILITY pnpm run test:scripts",
+      "result": "passed",
+      "counts": {
+        "tests_passed": 109,
+        "tests_skipped": 7,
+        "tests_failed": 0,
+        "tests_todo": 0
+      },
+      "scope": "All root script tests, including the compiled connector native request-shape fixture. Parent native-session context is absent in fixture subprocesses."
+    },
+    {
+      "command": "pnpm lint",
+      "result": "passed",
+      "scope": "Biome, public version lockstep and test-quality policy."
+    }
+  ],
+  "coverage": [
+    "Authenticated strict control and effect-free explicit/persisted-association reconciliation",
+    "Protocol22 documented null/absence normalization; exact version/protocol on both snapshots",
+    "Lifecycle/broker/profile and socket/terminal/foreground/PID-start replacement rejection",
+    "V1 standalone ledger migration preserves pending outcomes and committed binding/relay evidence; old reader rejects V2",
+    "Durable registration-before-effects, exact target/policy repeats, scoped relay cleanup and lost-response recovery",
+    "One connector owns standalone and Herdr dispatch; public activation and cold restoration remain unsupported",
+    "Claude idle/busy/idle transitions preserve endpoint identity, relay and binding epoch; busy sends no notice; socket/token replacement rejects"
+  ],
+  "interpretation": "The serialized package command and isolated root script command cover the full normal pnpm test scope. Existing optional workspace/root skips and TODOs are reported; the separate required Cloudflare runtime gate passed every case. These are deterministic Linux fixtures and local runtime results, not live native acceptance.",
+  "live_acceptance": {
+    "result": "blocked/unproven",
+    "record": "issue-283-acceptance-v4.json",
+    "macos_native_fixtures": "not established for this candidate",
+    "required_inputs": [
+      "Authenticated disposable deployment/project with scoped memberships/enrollments",
+      "Isolated profiles for two independent Claude accounts and plain Codex",
+      "macOS and Linux execution resources with pinned clients/lifecycle hooks",
+      "Authenticated draft-preservation and original-transcript restoration evidence"
+    ]
+  },
+  "migration_impact": "Host-local ledger V1 to V2 only. No server DDL/API migration, dependency update, public version bump or support activation.",
+  "redaction": "No credentials, native transcript bodies, real account identifiers or local runtime endpoints are included.",
+  "tested_source_sha": "547bd344cfbe790581bb863ca90f1d9d28fa6e5e"
+}

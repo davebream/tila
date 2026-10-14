@@ -103,20 +103,40 @@ terminal identity, and socket incarnation. Pane labels do not grant authority.
 Events invalidate observations; they never transfer mailbox ownership.
 
 The manifest in `herdr-plugin/herdr-plugin.toml` exposes status/register/open and
-runs authenticated connector status reconciliation after server startup. Status
-works with the existing connector. Register/open return `unsupported-capability`;
-this package does not yet activate Herdr attachment or native restoration through
-those actions. There is no terminal-injection fallback, including dedicated panes.
+runs authenticated read-only reconciliation after server startup. Reconciliation
+without selectors inspects only persisted Herdr associations. Inspect one explicit
+candidate with:
 
-The [versioned evidence](../../docs/evidence/issue-283-herdr-0-9-3-v2.json) separates
-isolated runtime/plugin probes from unproven native behavior. In the Mac probe,
-headless restart launched a resume command but reached login/welcome, so no original
-conversation restoration was established. The amended acceptance scope uses two
-independent Claude accounts and plain Codex. The selected account contexts now pass
-native account verification on both hosts. Linux access and the compiled Codex daemon
-account probe now pass; live session delivery/restoration gates remain open.
-See the [updated acceptance record](../../docs/evidence/issue-283-acceptance-v3.json).
-Do not flip the support gate based on fixtures or process launch alone.
+```sh
+tila connector herdr reconcile --key <lifecycle-key> \
+  --socket <protected-local-socket> --pane <exact-pane-id>
+```
+
+The production connector uses composite standalone/Herdr discovery for inspection,
+registration, tick and pre-wake checks. Existing-session registration plumbing is
+implemented behind the live evidence gate. Public register remains unsupported
+before discovery/relay/binding/wake effects, and cold open remains unsupported.
+Fixtures inject the internal policy dependency; there is no public activation
+flag or environment bypass. Reconciliation does not attach, wake, launch, enroll
+profiles or adopt an epoch. There is no terminal-injection fallback.
+
+New local ledger writes use version 2 with an explicit runtime association. V1
+standalone migration preserves pending outcomes and binding/relay IDs; older
+connectors reject V2 instead of stripping Herdr identity. Do not downgrade a V2
+ledger. Standalone/Herdr conversion requires explicit unregister/register; exact
+repeats retain the same target and registration policy. Claude readiness changes
+retain the socket/token identity and defer busy wakes without changing the binding.
+
+The [implementation decisions](../../docs/evidence/issue-283-adapter-v1.md) and
+[local validation](../../docs/evidence/issue-283-local-validation-v1.json) describe
+this bounded source/fixture slice. Earlier
+[versioned runtime evidence](../../docs/evidence/issue-283-herdr-0-9-3-v2.json)
+records a macOS cold launch reaching login/welcome, which did not establish original
+conversation restoration. Account readiness and transport observations in that
+record are historical. No fresh authenticated live readiness is claimed here.
+The amended scope uses two independent Claude accounts and plain Codex. The
+[acceptance matrix](../../docs/evidence/issue-283-acceptance-v4.json) remains
+not-run or unproven. Do not flip the support gate based on fixtures or process launch.
 
 Codex profile enrollment reads account metadata through a short-lived stdio
 app-server and verifies its reported home before reading the account. It neither

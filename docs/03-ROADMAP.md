@@ -236,15 +236,19 @@ or deploy the future auth, host, orchestration or persistence migrations.
 | Identity / profiles | schemas, D1, SQLite bindings, SDK/CLI | [PR #285 merged](https://github.com/davebream/tila/pull/285); current authority checks remain required |
 | Durable conversations | SQLite/DO, Worker, SDK/CLI/MCP | [PR #286 merged](https://github.com/davebream/tila/pull/286); durable rooms/mailboxes |
 | Standalone connector | connector, client lifecycle, CLI | [PR #287 merged](https://github.com/davebream/tila/pull/287); native request fixtures pass on macOS/Linux |
-| Herdr 0.9.3 | connector observation adapter and plugin | [PR #288 merged](https://github.com/davebream/tila/pull/288); status available, registration/open deliberately unsupported |
+| Herdr 0.9.3 | connector observation adapter and plugin | [PR #288 merged](https://github.com/davebream/tila/pull/288); status and authenticated observation/reconciliation available; registration wired behind the evidence gate, public register/cold open unsupported |
 | Dashboard / acceptance | UI plus shared history API; repository maintainer owns live acceptance | [PR #289 merged](https://github.com/davebream/tila/pull/289); live multi-account gates remain open |
 
 The required two Claude accounts and plain Codex coordinator, both cross-host
 directions, Mac outage, busy drafts, occupant replacement/reconnect and unattended
-native transcript restoration have **not** passed. The selected macOS profiles
-now verify against native account metadata, including distinct Claude accounts.
-Linux SSH access, account readiness and read-only native transport probes now pass.
-Full cross-host routing and native session acceptance remain outstanding. Herdr
-activation and #283 closure remain blocked on those gates; no process-supervisor
-work is implied. Versioned evidence distinguishes fixtures, isolated runtime probes
+native transcript restoration have **not** passed. Historical 2026-10-09 evidence
+records native account metadata verification, Linux access and isolated transport
+probes. Those observations do not establish authenticated live acceptance.
+Acceptance requires a disposable authenticated deployment, isolated native
+profiles and macOS/Linux execution resources. Bounded composite discovery,
+read-only reconciliation and V2 local-ledger registration
+wiring are documented in [the adapter decisions](evidence/issue-283-adapter-v1.md).
+Public Herdr registration and cold open remain unsupported. Full cross-host routing
+and native session acceptance remain outstanding. Herdr activation and #283
+closure remain blocked on those gates; no process-supervisor work is implied. Versioned evidence distinguishes fixtures, isolated runtime probes
 and actual live results. Do not add `Closes #283` until every live gate passes.

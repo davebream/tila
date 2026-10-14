@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "issue": 283,
+  "evidence_revision": 4,
+  "recorded_at": "2026-10-14",
+  "supersedes": "issue-283-acceptance-v3.json",
+  "result": "incomplete",
+  "live_matrix": [
+    {
+      "scenario": "two independent Claude accounts plus plain Codex coordinator",
+      "result": "not-run"
+    },
+    {
+      "scenario": "Mac to Linux and Linux to Mac delivery",
+      "result": "not-run"
+    },
+    {
+      "scenario": "Mac offline and delayed recovery",
+      "result": "not-run"
+    },
+    {
+      "scenario": "busy native draft preservation",
+      "result": "not-run"
+    },
+    {
+      "scenario": "Herdr occupant replacement and reconnect without crossover",
+      "result": "not-run"
+    },
+    {
+      "scenario": "unattended native restoration with transcript correlation",
+      "result": "not-proven",
+      "observation": "Authenticated unattended transcript restoration remains unproven."
+    }
+  ],
+  "historical_evidence": [
+    "issue-283-acceptance-v1.json",
+    "issue-283-acceptance-v2.json",
+    "issue-283-acceptance-v3.json",
+    "issue-283-herdr-0-9-3-v1.json",
+    "issue-283-herdr-0-9-3-v2.json"
+  ],
+  "retained_failed_observations": [
+    "Historical cold-launch evidence did not establish authenticated restoration of the original native transcript."
+  ],
+  "new_local_evidence": [
+    "issue-283-adapter-v1.md",
+    "issue-283-protocol-contract-v1.json",
+    "issue-283-local-validation-v1.json"
+  ],
+  "activation": {
+    "registration": "unsupported; existing-session wiring is covered by deterministic fixtures, with no public activation bypass",
+    "cold_open": "unsupported; authenticated profile-preserving transcript restoration unproven",
+    "attended_standalone": "delivered existing path retained"
+  },
+  "additional_live_gates": [
+    "Same-directory sessions remain distinct",
+    "Duplicate/lost response with stored message, wake, fetch and acknowledgement separately correlated",
+    "Account mismatch/revocation fails closed",
+    "Standalone and Herdr share one connector without duplicate dispatch"
+  ],
+  "limits": "No live row advanced. Historical account/native observations are not fresh availability evidence. Fixture and local runtime success do not establish live support or close #283.",
+  "acceptance_scope": {
+    "claude_accounts": 2,
+    "codex_coordinators": 1,
+    "hosts": ["macos", "linux"],
+    "codex": "plain native CLI"
+  },
+  "required_acceptance_inputs": [
+    "Authenticated disposable project and scoped memberships/enrollments",
+    "Isolated native account profiles and macOS/Linux execution resources",
+    "Registration activation evidence and original-transcript restoration proof"
+  ]
+}
