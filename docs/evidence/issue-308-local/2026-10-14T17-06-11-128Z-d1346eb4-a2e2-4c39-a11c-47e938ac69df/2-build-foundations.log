@@ -1,0 +1,213 @@
+
+> tila@0.9.0 build <checkout>
+> node scripts/turbo.mjs build
+
+
+   • turbo 2.11.7
+   • Packages in scope: @tila/backend-embedded, @tila/bench, @tila/client-lifecycle, @tila/connector, @tila/core, @tila/integration-tests, @tila/ops-sqlite, @tila/schemas, @tila/ui, @tila/worker, tila-cli, tila-cli-darwin-arm64, tila-cli-darwin-x64, tila-cli-linux-arm64, tila-cli-linux-arm64-musl, tila-cli-linux-x64, tila-cli-linux-x64-musl, tila-cli-windows-arm64, tila-cli-windows-x64, tila-mcp-server, tila-sdk
+   • Running build in 21 packages
+   • Remote caching disabled, using shared worktree cache
+
+tila-cli:gen:version: cache miss, executing 723d7fbe9cabb378
+@tila/worker:gen:version: cache miss, executing a8faf25adecc7339
+tila-sdk:gen:version: cache miss, executing 13a8d357a8fe4d4e
+@tila/schemas:build: cache miss, executing 91852613d472f95e
+tila-cli:gen:version: 
+tila-cli:gen:version: > tila-cli@0.9.0 gen:version <checkout>/packages/cli
+tila-cli:gen:version: > node ../../scripts/generate-version.mjs cli
+tila-cli:gen:version: 
+@tila/schemas:build: 
+@tila/schemas:build: > @tila/schemas@0.1.0 build <checkout>/packages/schemas
+@tila/schemas:build: > tsc
+@tila/schemas:build: 
+@tila/worker:gen:version: 
+@tila/worker:gen:version: > @tila/worker@0.1.0 gen:version <checkout>/packages/worker
+@tila/worker:gen:version: > node ../../scripts/generate-version.mjs worker
+@tila/worker:gen:version: 
+tila-sdk:gen:version: 
+tila-sdk:gen:version: > tila-sdk@0.9.0 gen:version <checkout>/packages/sdk
+tila-sdk:gen:version: > node ../../scripts/generate-version.mjs sdk
+tila-sdk:gen:version: 
+@tila/core:build: cache miss, executing 39a6b97d34f81712
+@tila/core:build: 
+@tila/core:build: > @tila/core@0.1.0 build <checkout>/packages/core
+@tila/core:build: > tsc
+@tila/core:build: 
+@tila/ui:build: cache miss, executing 89d39b69938ab32f
+@tila/ops-sqlite:build: cache miss, executing 93dc6fcc025bafff
+@tila/ops-sqlite:build: 
+@tila/ops-sqlite:build: > @tila/ops-sqlite@0.1.0 build <checkout>/packages/ops-sqlite
+@tila/ops-sqlite:build: > tsc
+@tila/ops-sqlite:build: 
+@tila/ui:build: 
+@tila/ui:build: > @tila/ui@0.1.0 build <checkout>/packages/ui
+@tila/ui:build: > vite build
+@tila/ui:build: 
+@tila/ui:build: (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+@tila/ui:build:   - `__dirname` (vite.config.ts:23:25). Use `import.meta.dirname` instead
+@tila/ui:build: Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+@tila/ui:build: vite v8.3.4 building client environment for production...
+@tila/ui:build: transforming...
+@tila/ui:build: ✓ 2540 modules transformed.
+@tila/ui:build: rendering chunks...
+@tila/ui:build: computing gzip size...
+@tila/ui:build: dist/index.html                             1.34 kB │ gzip:   0.61 kB
+@tila/ui:build: dist/assets/index-DdJAtTVV.css             59.87 kB │ gzip:  11.12 kB
+@tila/ui:build: dist/assets/minimize-2-BovVHsjA.js          0.48 kB │ gzip:   0.26 kB
+@tila/ui:build: dist/assets/rolldown-runtime-hePW80VL.js    0.71 kB │ gzip:   0.42 kB
+@tila/ui:build: dist/assets/schema-form-BTxL1jLN.js         2.89 kB │ gzip:   1.24 kB
+@tila/ui:build: dist/assets/table-BIYOEtOv.js               3.32 kB │ gzip:   1.26 kB
+@tila/ui:build: dist/assets/record-editor-hRhWPcr9.js       6.69 kB │ gzip:   2.77 kB
+@tila/ui:build: dist/assets/task-create-DTKwiI4I.js         9.37 kB │ gzip:   3.87 kB
+@tila/ui:build: dist/assets/record-detail-DurRbj1X.js      11.61 kB │ gzip:   3.79 kB
+@tila/ui:build: dist/assets/tooltip-Cgo6sirZ.js            12.49 kB │ gzip:   4.57 kB
+@tila/ui:build: dist/assets/copy-button-CJtnxt8P.js        34.45 kB │ gzip:  13.12 kB
+@tila/ui:build: dist/assets/task-detail-Kd7JOpV0.js        34.75 kB │ gzip:  10.68 kB
+@tila/ui:build: dist/assets/api-DCO3xaqv.js                47.08 kB │ gzip:  14.19 kB
+@tila/ui:build: dist/assets/definition-yaml-CEjjX02k.js    98.81 kB │ gzip:  30.86 kB
+@tila/ui:build: dist/assets/artifact-detail-YRbLK93u.js   120.12 kB │ gzip:  38.27 kB
+@tila/ui:build: dist/assets/drawer-U-QRj0Eg.js            127.33 kB │ gzip:  42.58 kB
+@tila/ui:build: dist/assets/src-OifEHzGU.js               176.67 kB │ gzip:  46.95 kB
+@tila/ui:build: dist/assets/index-7av8xoiF.js             763.51 kB │ gzip: 220.67 kB
+@tila/ui:build: 
+@tila/ui:build: [plugin builtin:vite-reporter] 
+@tila/ui:build: (!) Some chunks are larger than 500 kB after minification. Consider:
+@tila/ui:build: - Using dynamic import() to code-split the application
+@tila/ui:build: - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+@tila/ui:build: - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+@tila/ui:build: ✓ built in 854ms
+@tila/backend-embedded:build: cache miss, executing aca192054ec7450c
+@tila/worker:build: cache miss, executing a7b929f6bb830b31
+@tila/backend-embedded:build: 
+@tila/backend-embedded:build: > @tila/backend-embedded@0.1.0 build <checkout>/packages/backend-embedded
+@tila/backend-embedded:build: > tsc
+@tila/backend-embedded:build: 
+@tila/worker:build: 
+@tila/worker:build: > @tila/worker@0.1.0 prebuild <checkout>/packages/worker
+@tila/worker:build: > node ../../scripts/generate-version.mjs worker
+@tila/worker:build: 
+@tila/worker:build: 
+@tila/worker:build: > @tila/worker@0.1.0 build <checkout>/packages/worker
+@tila/worker:build: > wrangler deploy --dry-run --outdir dist
+@tila/worker:build: 
+@tila/worker:build: 
+@tila/worker:build:  ⛅️ wrangler 4.149.0 (update available 4.151.0)
+@tila/worker:build: ───────────────────────────────────────────────
+tila-sdk:build: cache miss, executing 25a6c2d7a7699880
+tila-sdk:build: 
+tila-sdk:build: > tila-sdk@0.9.0 build <checkout>/packages/sdk
+tila-sdk:build: > pnpm run gen:version && tsup
+tila-sdk:build: 
+@tila/worker:build: ✨ Read 19 files from the assets directory <checkout>/packages/ui/dist
+tila-sdk:build: 
+tila-sdk:build: > tila-sdk@0.9.0 gen:version <checkout>/packages/sdk
+tila-sdk:build: > node ../../scripts/generate-version.mjs sdk
+tila-sdk:build: 
+@tila/worker:build: Total Upload: 4890.32 KiB / gzip: 832.26 KiB
+@tila/worker:build: Your Worker has access to the following bindings:
+@tila/worker:build: Binding                                        Resource                      
+@tila/worker:build: env.PROJECT (ProjectDO)                        Durable Object                
+@tila/worker:build: env.DB (tila-global)                           D1 Database                   
+@tila/worker:build: env.ARTIFACTS (tila-artifacts)                 R2 Bucket                     
+@tila/worker:build: env.ANALYTICS (tila-analytics)                 Analytics Engine Dataset      
+@tila/worker:build: env.CORS_ALLOWED_ORIGINS ("")                  Environment Variable          
+@tila/worker:build: 
+@tila/worker:build: --dry-run: exiting now.
+tila-sdk:build: CLI Building entry: {"local":"src/local/index.ts"}
+tila-sdk:build: CLI Using tsconfig: tsconfig.json
+tila-sdk:build: CLI Building entry: {"backup":"src/backup/index.ts"}
+tila-sdk:build: CLI Using tsconfig: tsconfig.json
+tila-sdk:build: CLI tsup v8.5.1
+tila-sdk:build: CLI Using tsup config: <checkout>/packages/sdk/tsup.config.ts
+tila-sdk:build: CLI tsup v8.5.1
+tila-sdk:build: CLI Using tsup config: <checkout>/packages/sdk/tsup.config.ts
+tila-sdk:build: CLI Building entry: src/index.ts
+tila-sdk:build: CLI Using tsconfig: tsconfig.json
+tila-sdk:build: CLI tsup v8.5.1
+tila-sdk:build: CLI Using tsup config: <checkout>/packages/sdk/tsup.config.ts
+tila-sdk:build: CLI Target: es2022
+tila-sdk:build: ESM Build start
+tila-sdk:build: CJS Build start
+tila-sdk:build: CLI Target: es2022
+tila-sdk:build: CLI Target: es2022
+tila-sdk:build: ESM Build start
+tila-sdk:build: CJS Build start
+tila-sdk:build: CLI Cleaning output folder
+tila-sdk:build: ESM Build start
+tila-sdk:build: CJS Build start
+tila-sdk:build: DTS Build start
+tila-sdk:build: DTS Build start
+tila-sdk:build: DTS Build start
+tila-sdk:build: "getTableColumns", "inArray", "or", "isNotNull", "isNull", "lte", "notExists", "lt", "count", "max", "gte" and "like" are imported from external module "drizzle-orm" but never used in "dist/backup.js".
+tila-sdk:build: "alias" is imported from external module "drizzle-orm/sqlite-core" but never used in "dist/backup.js".
+tila-sdk:build: "getTableColumns", "inArray", "or", "isNotNull", "isNull", "lte", "notExists", "lt", "count", "max", "gte" and "like" are imported from external module "drizzle-orm" but never used in "dist/backup.cjs".
+tila-sdk:build: "alias" is imported from external module "drizzle-orm/sqlite-core" but never used in "dist/backup.cjs".
+tila-sdk:build: CJS dist/index.cjs 320.82 KB
+tila-sdk:build: CJS ⚡️ Build success in 3255ms
+tila-sdk:build: ESM dist/index.js 306.83 KB
+tila-sdk:build: ESM ⚡️ Build success in 3259ms
+tila-sdk:build: CJS dist/backup.cjs 371.34 KB
+tila-sdk:build: CJS ⚡️ Build success in 3262ms
+tila-sdk:build: ESM dist/backup.js 351.49 KB
+tila-sdk:build: ESM ⚡️ Build success in 3262ms
+tila-sdk:build: ESM dist/local.js 708.31 KB
+tila-sdk:build: ESM ⚡️ Build success in 3269ms
+tila-sdk:build: CJS dist/local.cjs 808.79 KB
+tila-sdk:build: CJS ⚡️ Build success in 3269ms
+tila-sdk:build: DTS ⚡️ Build success in 4990ms
+tila-sdk:build: DTS dist/backup.d.ts  3.84 KB
+tila-sdk:build: DTS dist/backup.d.cts 3.84 KB
+tila-sdk:build: DTS ⚡️ Build success in 9544ms
+tila-sdk:build: DTS dist/index.d.ts  516.20 KB
+tila-sdk:build: DTS dist/index.d.cts 516.20 KB
+tila-sdk:build: DTS ⚡️ Build success in 13996ms
+tila-sdk:build: DTS dist/local.d.ts  840.76 KB
+tila-sdk:build: DTS dist/local.d.cts 840.76 KB
+@tila/client-lifecycle:build: cache miss, executing d9e033eb1e90e55f
+@tila/client-lifecycle:build: 
+@tila/client-lifecycle:build: > @tila/client-lifecycle@0.1.0 build <checkout>/packages/client-lifecycle
+@tila/client-lifecycle:build: > tsc
+@tila/client-lifecycle:build: 
+tila-mcp-server:build: cache miss, executing 7d2f9ff27cdf9515
+@tila/connector:build: cache miss, executing a47e15f9b350dfd4
+tila-mcp-server:build: 
+tila-mcp-server:build: > tila-mcp-server@0.9.0 build <checkout>/packages/mcp-server
+tila-mcp-server:build: > tsup
+tila-mcp-server:build: 
+@tila/connector:build: 
+@tila/connector:build: > @tila/connector@0.1.0 build <checkout>/packages/connector
+@tila/connector:build: > tsc
+@tila/connector:build: 
+tila-mcp-server:build: CLI Building entry: src/index.ts
+tila-mcp-server:build: CLI Using tsconfig: tsconfig.json
+tila-mcp-server:build: CLI tsup v8.5.1
+tila-mcp-server:build: CLI Using tsup config: <checkout>/packages/mcp-server/tsup.config.ts
+tila-mcp-server:build: CLI Target: es2022
+tila-mcp-server:build: CLI Cleaning output folder
+tila-mcp-server:build: ESM Build start
+tila-mcp-server:build: "RuntimeClient" is imported from external module "tila-sdk" but never used in "dist/index.js".
+tila-mcp-server:build: "spawn" is imported from external module "child_process" but never used in "dist/index.js".
+tila-mcp-server:build: "createHmac", "randomBytes" and "timingSafeEqual" are imported from external module "crypto" but never used in "dist/index.js".
+tila-mcp-server:build: "tmpdir" is imported from external module "os" but never used in "dist/index.js".
+tila-mcp-server:build: "constants", "accessSync", "closeSync", "fstatSync", "fsyncSync", "lstatSync", "openSync", "realpathSync" and "unlinkSync" are imported from external module "fs" but never used in "dist/index.js".
+tila-mcp-server:build: "createInterface" is imported from external module "readline" but never used in "dist/index.js".
+tila-mcp-server:build: "Duplex" is imported from external module "stream" but never used in "dist/index.js".
+tila-mcp-server:build: "default" is imported from external module "ws-node" but never used in "dist/index.js".
+tila-mcp-server:build: "chmod", "mkdtemp" and "rm" are imported from external module "fs/promises" but never used in "dist/index.js".
+tila-mcp-server:build: "createServer" is imported from external module "http" but never used in "dist/index.js".
+tila-mcp-server:build: ESM dist/index.js 565.05 KB
+tila-mcp-server:build: ESM ⚡️ Build success in 762ms
+tila-cli:build: cache miss, executing ccd6b0fa570a98b5
+tila-cli:build: 
+tila-cli:build: > tila-cli@0.9.0 build <checkout>/packages/cli
+tila-cli:build: > pnpm run gen:version && tsc
+tila-cli:build: 
+tila-cli:build: 
+tila-cli:build: > tila-cli@0.9.0 gen:version <checkout>/packages/cli
+tila-cli:build: > node ../../scripts/generate-version.mjs cli
+tila-cli:build: 
+
+ Tasks:    14 successful, 14 total
+Cached:    0 cached, 14 total
+  Time:    36s 
+

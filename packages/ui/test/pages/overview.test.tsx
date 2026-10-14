@@ -90,6 +90,33 @@ const hrefs = (table: HTMLElement) =>
     .map((link) => link.getAttribute("href"));
 
 describe("OverviewPage", () => {
+  test("S1 keeps large custom and empty catalogs usable when a secondary source fails", async () => {
+    useScenario(scenario("S1 large custom"));
+    renderOverview();
+    expect(
+      await screen.findByText(/Could not load runtime/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Nothing needs attention."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/302 tasks in 2 types/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open tasks" }),
+    ).toBeInTheDocument();
+  });
+
+  test("S3 a quiet runtime does not erase an unresolved execution", async () => {
+    useScenario(scenario("S3 stopped runtime"));
+    renderOverview();
+    const next = await screen.findByRole("region", { name: "Next action" });
+    expect(
+      within(next).getByRole("link", { name: /uncertain outcome/ }),
+    ).toHaveAttribute("href", "/p/test-project/queue?state=uncertain");
+    expect(
+      screen.queryByText("Nothing needs attention."),
+    ).not.toBeInTheDocument();
+  });
+
   test("a new project guides the user into settings", async () => {
     useScenario(scenario("S1 new project"));
     renderOverview();

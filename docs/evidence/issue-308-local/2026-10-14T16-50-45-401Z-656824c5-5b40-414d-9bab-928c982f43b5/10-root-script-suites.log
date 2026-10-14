@@ -1,0 +1,758 @@
+
+> tila@0.9.0 test:scripts <checkout>
+> node --test "scripts/*.test.mjs"
+
+TAP version 13
+# Subtest: assembles the layout and a deterministic manifest
+ok 1 - assembles the layout and a deterministic manifest
+  ---
+  duration_ms: 14.69476
+  type: 'test'
+  ...
+# Subtest: rejects a UI built against a local API
+ok 2 - rejects a UI built against a local API
+  ---
+  duration_ms: 2.303713
+  type: 'test'
+  ...
+# Subtest: requires index.html, index.js and at least one migration
+ok 3 - requires index.html, index.js and at least one migration
+  ---
+  duration_ms: 2.026339
+  type: 'test'
+  ...
+# Subtest: fails on unexpected files in the Worker bundle
+ok 4 - fails on unexpected files in the Worker bundle
+  ---
+  duration_ms: 1.474373
+  type: 'test'
+  ...
+# Subtest: CHANGELOG.md has a heading for every git-tagged release
+ok 5 - CHANGELOG.md has a heading for every git-tagged release
+  ---
+  duration_ms: 14.470035
+  type: 'test'
+  ...
+# Subtest: CHANGELOG.md trailing compare links point to current product version
+ok 6 - CHANGELOG.md trailing compare links point to current product version
+  ---
+  duration_ms: 3.433011
+  type: 'test'
+  ...
+# Subtest: Turbo hashes shared configuration, revision, toolchain and transitive package inputs
+ok 7 - Turbo hashes shared configuration, revision, toolchain and transitive package inputs
+  ---
+  duration_ms: 3594.790451
+  type: 'test'
+  ...
+# Subtest: CI gate accepts all required successes
+ok 8 - CI gate accepts all required successes
+  ---
+  duration_ms: 11.613796
+  type: 'test'
+  ...
+# Subtest: CI gate rejects missing, failed, cancelled and skipped dependencies
+ok 9 - CI gate rejects missing, failed, cancelled and skipped dependencies
+  ---
+  duration_ms: 54.02073
+  type: 'test'
+  ...
+# Subtest: scope uploads must succeed when required, but can be skipped on unprivileged events
+ok 10 - scope uploads must succeed when required, but can be skipped on unprivileged events
+  ---
+  duration_ms: 56.599243
+  type: 'test'
+  ...
+# Subtest: diagnostics retain output and preserve a failed command's exit status
+ok 11 - diagnostics retain output and preserve a failed command's exit status
+  ---
+  duration_ms: 105.359402
+  type: 'test'
+  ...
+# Subtest: scopes follow tila's real transitive package graph, including migrations
+ok 12 - scopes follow tila's real transitive package graph, including migrations
+  ---
+  duration_ms: 725.851776
+  type: 'test'
+  ...
+# Subtest: renames cover old and new packages, and deleted files keep their package scope
+ok 13 - renames cover old and new packages, and deleted files keep their package scope
+  ---
+  duration_ms: 419.48407
+  type: 'test'
+  ...
+# Subtest: shared files and unknown or changed package boundaries are barriers
+ok 14 - shared files and unknown or changed package boundaries are barriers
+  ---
+  duration_ms: 477.109398
+  type: 'test'
+  ...
+# Subtest: uncertain selection never becomes an empty or incomplete narrow scope
+ok 15 - uncertain selection never becomes an empty or incomplete narrow scope
+  ---
+  duration_ms: 219.542713
+  type: 'test'
+  ...
+# Subtest: compiled host connector authenticates sockets and preserves native wake request shapes
+ok 16 - compiled host connector authenticates sockets and preserves native wake request shapes
+  ---
+  duration_ms: 697.95117
+  type: 'test'
+  ...
+# Subtest: a compiled CLI deploys from its embedded payload and fails closed without one
+ok 17 - a compiled CLI deploys from its embedded payload and fails closed without one
+  ---
+  duration_ms: 2142.414713
+  type: 'test'
+  ...
+# Subtest: dev seed writes the complete dataset with request identity and acquired fences
+ok 18 - dev seed writes the complete dataset with request identity and acquired fences
+  ---
+  duration_ms: 2106.076657
+  type: 'test'
+  ...
+# Subtest: dev seed declares the task lifecycle, so finished tasks do not count as blocked
+ok 19 - dev seed declares the task lifecycle, so finished tasks do not count as blocked
+  ---
+  duration_ms: 2034.576388
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed schema write
+ok 20 - dev seed stops immediately on a failed schema write
+  ---
+  duration_ms: 45.158967
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed task write
+ok 21 - dev seed stops immediately on a failed task write
+  ---
+  duration_ms: 68.873517
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed relationship write
+ok 22 - dev seed stops immediately on a failed relationship write
+  ---
+  duration_ms: 381.753244
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed record write
+ok 23 - dev seed stops immediately on a failed record write
+  ---
+  duration_ms: 793.552823
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed claim write
+ok 24 - dev seed stops immediately on a failed claim write
+  ---
+  duration_ms: 904.194279
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed presence write
+ok 25 - dev seed stops immediately on a failed presence write
+  ---
+  duration_ms: 975.049738
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed inline artifact write
+ok 26 - dev seed stops immediately on a failed inline artifact write
+  ---
+  duration_ms: 1078.398766
+  type: 'test'
+  ...
+# Subtest: dev seed stops immediately on a failed file artifact write
+ok 27 - dev seed stops immediately on a failed file artifact write
+  ---
+  duration_ms: 1094.900678
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: not json
+ok 28 - dev seed rejects invalid exclusive-claim response: not json
+  ---
+  duration_ms: 956.239949
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: {"ok":true}
+ok 29 - dev seed rejects invalid exclusive-claim response: {"ok":true}
+  ---
+  duration_ms: 895.73546
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":null}
+ok 30 - dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":null}
+  ---
+  duration_ms: 944.003884
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":0}
+ok 31 - dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":0}
+  ---
+  duration_ms: 904.993706
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":-1}
+ok 32 - dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":-1}
+  ---
+  duration_ms: 936.332481
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":1.5}
+ok 33 - dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":1.5}
+  ---
+  duration_ms: 948.439175
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":"17"}
+ok 34 - dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":"17"}
+  ---
+  duration_ms: 958.528141
+  type: 'test'
+  ...
+# Subtest: dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":true}
+ok 35 - dev seed rejects invalid exclusive-claim response: {"ok":true,"fence":true}
+  ---
+  duration_ms: 908.74203
+  type: 'test'
+  ...
+# Subtest: CLI README: no 'not published to npm yet' claim
+ok 36 - CLI README: no 'not published to npm yet' claim
+  ---
+  duration_ms: 6.868915
+  type: 'test'
+  ...
+# Subtest: CLI README: no phantom 'destroy' top-level command
+ok 37 - CLI README: no phantom 'destroy' top-level command
+  ---
+  duration_ms: 1.239611
+  type: 'test'
+  ...
+# Subtest: CLI README: no phantom 'migrate' top-level command
+ok 38 - CLI README: no phantom 'migrate' top-level command
+  ---
+  duration_ms: 2.080269
+  type: 'test'
+  ...
+# Subtest: CLI README: work-unit and entity marked deprecated for task
+ok 39 - CLI README: work-unit and entity marked deprecated for task
+  ---
+  duration_ms: 1.053014
+  type: 'test'
+  ...
+# Subtest: SURFACE-PARITY: no 'tila entity show' guidance
+ok 40 - SURFACE-PARITY: no 'tila entity show' guidance
+  ---
+  duration_ms: 1.008908
+  type: 'test'
+  ...
+# Subtest: SURFACE-PARITY: entity/work-unit not presented as canonical resource type
+ok 41 - SURFACE-PARITY: entity/work-unit not presented as canonical resource type
+  ---
+  duration_ms: 0.915008
+  type: 'test'
+  ...
+# Subtest: SDK README: Quick Start leads with createTila().tasks.* not createEntityMethods
+ok 42 - SDK README: Quick Start leads with createTila().tasks.* not createEntityMethods
+  ---
+  duration_ms: 2.164885
+  type: 'test'
+  ...
+# Subtest: CLI index.ts: entity deprecation comment points to task (not work-unit)
+ok 43 - CLI index.ts: entity deprecation comment points to task (not work-unit)
+  ---
+  duration_ms: 1.008247
+  type: 'test'
+  ...
+# Subtest: ARCHITECTURE: CLI dependency graph note is accurate (not misstating CLI as standalone)
+ok 44 - ARCHITECTURE: CLI dependency graph note is accurate (not misstating CLI as standalone)
+  ---
+  duration_ms: 2.121399
+  type: 'test'
+  ...
+# Subtest: ROADMAP: no 'auto-applied with default backfill' wording for required-field-with-default
+ok 45 - ROADMAP: no 'auto-applied with default backfill' wording for required-field-with-default
+  ---
+  duration_ms: 1.893369
+  type: 'test'
+  ...
+# Subtest: ROADMAP: schema default wording references lazy read-time materialization
+ok 46 - ROADMAP: schema default wording references lazy read-time materialization
+  ---
+  duration_ms: 1.127365
+  type: 'test'
+  ...
+# Subtest: version generation uses explicit revision and package versions independent of caller cwd
+ok 47 - version generation uses explicit revision and package versions independent of caller cwd
+  ---
+  duration_ms: 181.54017
+  type: 'test'
+  ...
+# Subtest: PowerShell installer: compressed
+ok 48 - PowerShell installer: compressed # SKIP
+  ---
+  duration_ms: 0.718443
+  type: 'test'
+  ...
+# Subtest: PowerShell installer: legacy
+ok 49 - PowerShell installer: legacy # SKIP
+  ---
+  duration_ms: 0.094021
+  type: 'test'
+  ...
+# Subtest: PowerShell installer: checksum
+ok 50 - PowerShell installer: checksum # SKIP
+  ---
+  duration_ms: 0.066148
+  type: 'test'
+  ...
+# Subtest: PowerShell installer: corrupt
+ok 51 - PowerShell installer: corrupt # SKIP
+  ---
+  duration_ms: 0.075893
+  type: 'test'
+  ...
+# Subtest: PowerShell installer: server-error
+ok 52 - PowerShell installer: server-error # SKIP
+  ---
+  duration_ms: 0.103746
+  type: 'test'
+  ...
+# Subtest: PowerShell installer: missing-assets
+ok 53 - PowerShell installer: missing-assets # SKIP
+  ---
+  duration_ms: 0.063065
+  type: 'test'
+  ...
+# Subtest: PowerShell installer: missing-checksum
+ok 54 - PowerShell installer: missing-checksum # SKIP
+  ---
+  duration_ms: 0.123104
+  type: 'test'
+  ...
+# Subtest: POSIX installer: compressed
+ok 55 - POSIX installer: compressed
+  ---
+  duration_ms: 131.059198
+  type: 'test'
+  ...
+# Subtest: POSIX installer: musl
+ok 56 - POSIX installer: musl
+  ---
+  duration_ms: 112.324561
+  type: 'test'
+  ...
+# Subtest: POSIX installer: legacy
+ok 57 - POSIX installer: legacy
+  ---
+  duration_ms: 141.506171
+  type: 'test'
+  ...
+# Subtest: POSIX installer: checksum
+ok 58 - POSIX installer: checksum
+  ---
+  duration_ms: 117.3222
+  type: 'test'
+  ...
+# Subtest: POSIX installer: corrupt
+ok 59 - POSIX installer: corrupt
+  ---
+  duration_ms: 88.876469
+  type: 'test'
+  ...
+# Subtest: POSIX installer: server-error
+ok 60 - POSIX installer: server-error
+  ---
+  duration_ms: 62.911257
+  type: 'test'
+  ...
+# Subtest: POSIX installer: missing-assets
+ok 61 - POSIX installer: missing-assets
+  ---
+  duration_ms: 82.514583
+  type: 'test'
+  ...
+# Subtest: POSIX installer: missing-checksum
+ok 62 - POSIX installer: missing-checksum
+  ---
+  duration_ms: 79.595821
+  type: 'test'
+  ...
+# Subtest: npm shim hands arguments to the retained raw platform binary
+ok 63 - npm shim hands arguments to the retained raw platform binary
+  ---
+  duration_ms: 86.836632
+  type: 'test'
+  ...
+# Subtest: source fingerprint hashes directory symlinks without traversing them and excludes evidence
+ok 64 - source fingerprint hashes directory symlinks without traversing them and excludes evidence
+  ---
+  duration_ms: 3.965828
+  type: 'test'
+  ...
+# Subtest: redacts private paths and credentials while retaining product failure diagnostics
+ok 65 - redacts private paths and credentials while retaining product failure diagnostics
+  ---
+  duration_ms: 0.507769
+  type: 'test'
+  ...
+# Subtest: retains failed commands, continues, links reruns and detects artifact tampering
+ok 66 - retains failed commands, continues, links reruns and detects artifact tampering
+  ---
+  duration_ms: 19.088407
+  type: 'test'
+  ...
+# Subtest: missing executable is a failed observation with metadata and a retained log
+ok 67 - missing executable is a failed observation with metadata and a retained log
+  ---
+  duration_ms: 2.44267
+  type: 'test'
+  ...
+# Subtest: every publishable package tarball includes LICENSE
+ok 68 - every publishable package tarball includes LICENSE
+  ---
+  duration_ms: 6070.718501
+  type: 'test'
+  ...
+# Subtest: all eight assets round-trip, have exact checksums and bundle-derived SBOMs
+ok 69 - all eight assets round-trip, have exact checksums and bundle-derived SBOMs
+  ---
+  duration_ms: 123.446542
+  type: 'test'
+  ...
+# Subtest: pnpm installs native addons for every release target
+ok 70 - pnpm installs native addons for every release target
+  ---
+  duration_ms: 0.68299
+  type: 'test'
+  ...
+# Subtest: release verification rejects altered artifacts, missing targets and integrity mismatches
+ok 71 - release verification rejects altered artifacts, missing targets and integrity mismatches
+  ---
+  duration_ms: 12.326872
+  type: 'test'
+  ...
+# Subtest: publication rejects broken manifests and mismatched existing npm versions
+ok 72 - publication rejects broken manifests and mismatched existing npm versions
+  ---
+  duration_ms: 63.810371
+  type: 'test'
+  ...
+# Subtest: tag validation requires matching version and a commit reachable from main
+ok 73 - tag validation requires matching version and a commit reachable from main
+  ---
+  duration_ms: 254.406543
+  type: 'test'
+  ...
+# Subtest: parses Wrangler identity structurally, including multiple declarations and JS escapes
+ok 74 - parses Wrangler identity structurally, including multiple declarations and JS escapes
+  ---
+  duration_ms: 13.538152
+  type: 'test'
+  ...
+# Subtest: rejects missing, malformed, duplicate, mutated and ambiguous Worker identity
+ok 75 - rejects missing, malformed, duplicate, mutated and ambiguous Worker identity
+  ---
+  duration_ms: 17.811999
+  type: 'test'
+  ...
+# Subtest: compares the actual Worker file with the outer manifest despite valid payload hashes
+ok 76 - compares the actual Worker file with the outer manifest despite valid payload hashes
+  ---
+  duration_ms: 27.632133
+  type: 'test'
+  ...
+# Subtest: smoke clears all payload overrides without changing other environment values
+ok 77 - smoke clears all payload overrides without changing other environment values
+  ---
+  duration_ms: 0.249882
+  type: 'test'
+  ...
+# Subtest: OSS-RELEASE-RUNBOOK.md is tracked by git (not gitignored or missing)
+ok 78 - OSS-RELEASE-RUNBOOK.md is tracked by git (not gitignored or missing)
+  ---
+  duration_ms: 6.83248
+  type: 'test'
+  ...
+# Subtest: SWEEP_SECRET is documented in packages/worker/wrangler.toml
+ok 79 - SWEEP_SECRET is documented in packages/worker/wrangler.toml
+  ---
+  duration_ms: 17.485992
+  type: 'test'
+  ...
+# Subtest: SWEEP_SECRET is documented in docs/05-OPERATIONS.md
+ok 80 - SWEEP_SECRET is documented in docs/05-OPERATIONS.md
+  ---
+  duration_ms: 2.93683
+  type: 'test'
+  ...
+# Subtest: packages/cli: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 81 - packages/cli: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 1393.146292
+  type: 'test'
+  ...
+# Subtest: packages/sdk: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 82 - packages/sdk: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 1447.025843
+  type: 'test'
+  ...
+# Subtest: packages/mcp-server: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 83 - packages/mcp-server: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 979.214992
+  type: 'test'
+  ...
+# Subtest: packages/cli-darwin-arm64: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 84 - packages/cli-darwin-arm64: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 261.654375
+  type: 'test'
+  ...
+# Subtest: packages/cli-darwin-x64: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 85 - packages/cli-darwin-x64: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 271.397676
+  type: 'test'
+  ...
+# Subtest: packages/cli-linux-arm64: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 86 - packages/cli-linux-arm64: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 281.690048
+  type: 'test'
+  ...
+# Subtest: packages/cli-linux-arm64-musl: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 87 - packages/cli-linux-arm64-musl: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 254.262819
+  type: 'test'
+  ...
+# Subtest: packages/cli-linux-x64: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 88 - packages/cli-linux-x64: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 275.476402
+  type: 'test'
+  ...
+# Subtest: packages/cli-linux-x64-musl: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 89 - packages/cli-linux-x64-musl: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 273.926025
+  type: 'test'
+  ...
+# Subtest: packages/cli-windows-arm64: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 90 - packages/cli-windows-arm64: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 268.179247
+  type: 'test'
+  ...
+# Subtest: packages/cli-windows-x64: CLAUDE.md and AGENTS.md are absent from npm tarball
+ok 91 - packages/cli-windows-x64: CLAUDE.md and AGENTS.md are absent from npm tarball
+  ---
+  duration_ms: 258.064571
+  type: 'test'
+  ...
+# Subtest: native executable updates itself, then executes the new version (gzip and raw)
+ok 92 - native executable updates itself, then executes the new version (gzip and raw)
+  ---
+  duration_ms: 6796.878746
+  type: 'test'
+  ...
+# Subtest: npm launcher releases the old executable before delegating and keeps JSON clean
+ok 93 - npm launcher releases the old executable before delegating and keeps JSON clean
+  ---
+  duration_ms: 1282.01448
+  type: 'test'
+  ...
+# Subtest: stable comparison rejects prereleases, invalid versions and unsafe numbers
+ok 94 - stable comparison rejects prereleases, invalid versions and unsafe numbers
+  ---
+  duration_ms: 1.3592
+  type: 'test'
+  ...
+# Subtest: unique valid checksums are mandatory
+ok 95 - unique valid checksums are mandatory
+  ---
+  duration_ms: 1.120586
+  type: 'test'
+  ...
+# Subtest: gzip and raw releases verify both digests and checksum entries
+ok 96 - gzip and raw releases verify both digests and checksum entries
+  ---
+  duration_ms: 21.220823
+  type: 'test'
+  ...
+# Subtest: missing assets, duplicate assets and invalid release metadata fail closed
+ok 97 - missing assets, duplicate assets and invalid release metadata fail closed
+  ---
+  duration_ms: 0.746356
+  type: 'test'
+  ...
+# Subtest: downloads enforce HTTPS, redirect hosts, size bounds and limited retries
+ok 98 - downloads enforce HTTPS, redirect hosts, size bounds and limited retries
+  ---
+  duration_ms: 757.999269
+  type: 'test'
+  ...
+# Subtest: installation detection rejects source, arbitrary paths, and recognizes official symlinks
+ok 99 - installation detection rejects source, arbitrary paths, and recognizes official symlinks
+  ---
+  duration_ms: 5.526688
+  type: 'test'
+  ...
+# Subtest: Homebrew requires both an official receipt and matching manager prefix
+ok 100 - Homebrew requires both an official receipt and matching manager prefix
+  ---
+  duration_ms: 4.114148
+  type: 'test'
+  ...
+# Subtest: npm and pnpm use matching global roots, never availability alone
+ok 101 - npm and pnpm use matching global roots, never availability alone
+  ---
+  duration_ms: 11.367498
+  type: 'test'
+  ...
+# Subtest: Bun ownership requires its global launcher to resolve to this package
+ok 102 - Bun ownership requires its global launcher to resolve to this package
+  ---
+  duration_ms: 5.318127
+  type: 'test'
+  ...
+# Subtest: Homebrew discovery reports channel lag and pins
+ok 103 - Homebrew discovery reports channel lag and pins
+  ---
+  duration_ms: 1.297939
+  type: 'test'
+  ...
+# Subtest: check and already-newer cases never download or replace binaries
+ok 104 - check and already-newer cases never download or replace binaries
+  ---
+  duration_ms: 8.368606
+  type: 'test'
+  ...
+# Subtest: concurrent updates cannot acquire the same installation lock
+ok 105 - concurrent updates cannot acquire the same installation lock
+  ---
+  duration_ms: 2.70348
+  type: 'test'
+  ...
+# Subtest: candidate validation, failed rename and post-install verification retain the old binary
+ok 106 - candidate validation, failed rename and post-install verification retain the old binary
+  ---
+  duration_ms: 18.209582
+  type: 'test'
+  ...
+# Subtest: manager execution preserves npm prefix and verifies the installed binary
+ok 107 - manager execution preserves npm prefix and verifies the installed binary
+  ---
+  duration_ms: 6.093686
+  type: 'test'
+  ...
+# Subtest: manager updates refuse to downgrade after a concurrent external upgrade
+ok 108 - manager updates refuse to downgrade after a concurrent external upgrade
+  ---
+  duration_ms: 2.766584
+  type: 'test'
+  ...
+# Subtest: a symlink from the official install path into another store is not standalone
+ok 109 - a symlink from the official install path into another store is not standalone
+  ---
+  duration_ms: 1.959067
+  type: 'test'
+  ...
+# Subtest: subprocess failures and timeouts never report success
+ok 110 - subprocess failures and timeouts never report success
+  ---
+  duration_ms: 57.739978
+  type: 'test'
+  ...
+# Subtest: placeholder and runtime skip guards reject false greens
+ok 111 - placeholder and runtime skip guards reject false greens
+  ---
+  duration_ms: 8.715043
+  type: 'test'
+  ...
+# Subtest: README.md install/usage version strings match product version
+ok 112 - README.md install/usage version strings match product version
+  ---
+  duration_ms: 7.76202
+  type: 'test'
+  ...
+# Subtest: docs/tutorial-getting-started.md install/usage version strings match product version
+ok 113 - docs/tutorial-getting-started.md install/usage version strings match product version
+  ---
+  duration_ms: 2.432544
+  type: 'test'
+  ...
+# Subtest: SECURITY.md Supported Versions includes 0.2.x (not just 0.1.x)
+ok 114 - SECURITY.md Supported Versions includes 0.2.x (not just 0.1.x)
+  ---
+  duration_ms: 2.29458
+  type: 'test'
+  ...
+# Subtest: check-public-versions reports mismatched public release metadata
+ok 115 - check-public-versions reports mismatched public release metadata
+  ---
+  duration_ms: 74.514958
+  type: 'test'
+  ...
+# Subtest: check-public-versions accepts aligned public metadata and ignores private packages
+ok 116 - check-public-versions accepts aligned public metadata and ignores private packages
+  ---
+  duration_ms: 91.132782
+  type: 'test'
+  ...
+# Subtest: bump-version updates public release metadata and the root product marker (homebrew formula lockstep covered separately below)
+ok 117 - bump-version updates public release metadata and the root product marker (homebrew formula lockstep covered separately below)
+  ---
+  duration_ms: 70.04664
+  type: 'test'
+  ...
+# Subtest: bump-version rewrites homebrew formula version and URL tags, leaving sha256 values unchanged
+ok 118 - bump-version rewrites homebrew formula version and URL tags, leaving sha256 values unchanged
+  ---
+  duration_ms: 66.397176
+  type: 'test'
+  ...
+# Subtest: bump-version rejects invalid semver
+ok 119 - bump-version rejects invalid semver
+  ---
+  duration_ms: 52.369633
+  type: 'test'
+  ...
+# Subtest: homebrew formula has no PLACEHOLDER tokens and version matches product version
+ok 120 - homebrew formula has no PLACEHOLDER tokens and version matches product version
+  ---
+  duration_ms: 3.227533
+  type: 'test'
+  ...
+# Subtest: implementation/workspace packages all set "private": true to prevent accidental publishing
+ok 121 - implementation/workspace packages all set "private": true to prevent accidental publishing
+  ---
+  duration_ms: 15.093786
+  type: 'test'
+  ...
+# Subtest: root package.json has test:scripts script containing node --test
+ok 122 - root package.json has test:scripts script containing node --test
+  ---
+  duration_ms: 12.209417
+  type: 'test'
+  ...
+# Subtest: root package.json test:scripts glob resolves at least one .test.mjs file
+ok 123 - root package.json test:scripts glob resolves at least one .test.mjs file
+  ---
+  duration_ms: 0.257985
+  type: 'test'
+  ...
+# Subtest: root package.json "test" script includes "test:scripts"
+ok 124 - root package.json "test" script includes "test:scripts"
+  ---
+  duration_ms: 1.626991
+  type: 'test'
+  ...
+1..124
+# tests 124
+# suites 0
+# pass 117
+# fail 0
+# cancelled 0
+# skipped 7
+# todo 0
+# duration_ms 17096.00471
