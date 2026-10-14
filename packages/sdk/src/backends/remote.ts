@@ -15,6 +15,7 @@ import type {
   CreateRecordInput,
   EntityBackend,
   EntityListFilter,
+  EntityListPage,
   EntityTree,
   GateBackend,
   GateFilter,
@@ -46,6 +47,7 @@ import type {
 import {
   ArtifactRevisionSchema,
   type JournalAppendRequest,
+  LifecycleOutcomeSchema,
   SchemaApplyWarningSchema,
   SchemaPreviewResponseSchema,
 } from "@tila/schemas";
@@ -290,6 +292,17 @@ export class RemoteBackend
   }
 
   async list(filter?: EntityListFilter): Promise<Entity[]> {
+    return (await this.fetchEntityList(filter)).entities;
+  }
+
+  async listPage(filter?: EntityListFilter): Promise<EntityListPage> {
+    const { ok, ...page } = await this.fetchEntityList(filter);
+    if (page.next_cursor === undefined || page.scope === undefined)
+      throw new Error("The server does not support task list page metadata");
+    return { ...page, next_cursor: page.next_cursor, scope: page.scope };
+  }
+
+  private async fetchEntityList(filter?: EntityListFilter) {
     const query: Record<string, string | undefined> = {};
     if (filter?.type) query.type = filter.type;
     if (filter?.archived !== undefined)
@@ -322,17 +335,24 @@ export class RemoteBackend
     // EmbeddedProject (which applies tagFilter via entityOps.list).
     if (filter?.tagFilter?.length)
       query.tag_filter = filter.tagFilter.join(",");
+    if (filter?.blocked) query.blocked = "1";
+    if (filter?.outcome !== undefined)
+      query.outcome = LifecycleOutcomeSchema.array()
+        .min(1)
+        .parse(filter.outcome)
+        .join(",");
     // Pagination and sorting params
     if (filter?.sort) query.sort = filter.sort;
     if (filter?.order) query.order = filter.order;
     if (filter?.limit !== undefined) query.limit = String(filter.limit);
     if (filter?.offset !== undefined) query.offset = String(filter.offset);
+    if (filter?.cursor !== undefined) query.cursor = filter.cursor;
     const result = await this.client.get(`/projects/${this.projectId}/tasks`, {
       schema: PaginatedEntityListResponseSchema,
       validate: true,
       query,
     });
-    return result.entities;
+    return result;
   }
 
   async update(id: string, data: Partial<Entity["data"]>): Promise<Entity> {

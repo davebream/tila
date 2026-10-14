@@ -151,6 +151,40 @@ describe("namespacedTaskMethods", () => {
     expect(result.entities[0].type).toBe("task");
   });
 
+  it("forwards attention filters and preserves pagination with logical outcome types", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: true,
+        entities: [],
+        total: 12,
+        limit: 2,
+        offset: 0,
+        has_more: true,
+        next_cursor: "next",
+        scope: { restricted: true, outcome_types: ["test_task", "test_story"] },
+      }),
+    );
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const tasks = createNamespace(client, "proj-1", "test").tasks;
+    const result = await tasks.list({
+      type: "task,story",
+      blocked: true,
+      outcome: ["failure"],
+      limit: "2",
+      cursor: "previous",
+    });
+    const query = new URL(mockFetch.mock.calls[0][0]).searchParams;
+    expect(query.get("type")).toBe("test_task,test_story");
+    expect(query.get("blocked")).toBe("1");
+    expect(query.get("outcome")).toBe("failure");
+    expect(result.total).toBe(12);
+    expect(result.next_cursor).toBe("next");
+    expect(result.scope).toEqual({
+      restricted: true,
+      outcome_types: ["task", "story"],
+    });
+  });
+
   it("list without type arg does not send type query param", async () => {
     const responseBody = {
       ok: true,
