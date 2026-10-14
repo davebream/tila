@@ -1690,6 +1690,52 @@ test("replacement and warm-up evidence is scanned for study-wide memory contamin
   }
 });
 
+test("gate arrays and objects return field-specific direct and bundle rejections", () => {
+  for (const gate of [
+    ["G1_stale_authority_write"],
+    [],
+    {},
+    { gate: "G1_stale_authority_write" },
+  ]) {
+    const bundle = completeBundle();
+    assert.equal(validateStudy(bundle).ok, true);
+    const events = bundle.trials.t1.events;
+    const malformed = {
+      ...events.at(-1),
+      seq: events.length + 1,
+      kind: "gate.violation",
+      payload: { gate, detail: "parseable wrong gate type" },
+    };
+    assert.ok(
+      validateEvent(malformed, rubric).some((p) =>
+        /payload\.gate.*string/.test(p),
+      ),
+    );
+    events.push(malformed);
+    const raw = `${JSON.stringify(malformed)}\n`;
+    assert.deepEqual(parseEvents(raw).events, [malformed]);
+    const result = validateBundle({
+      bundle,
+      rubric,
+      rubricSha256,
+      declaration,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reading, "inconclusive");
+    assert.ok(
+      result.findings.some(
+        (f) =>
+          f.code === "event_schema" && /payload\.gate.*string/.test(f.message),
+      ),
+    );
+    assert.equal(JSON.stringify(events.at(-1)), raw.trim());
+    assert.throws(
+      () => derive({ events }, {}, slotA),
+      /invalid event.*payload\.gate.*string/,
+    );
+  }
+});
+
 test("malformed parsed envelopes return bundle findings and cannot derive prevention", () => {
   for (const malformed of [
     null,
@@ -2721,8 +2767,45 @@ test("malformed CLI event logs reject cleanly and retain bytes; warm-ups retain 
   );
 });
 
-test("the evaluator accepts an actual competing attempt denied before edits in either condition", () => {
-  for (const trialId of ["t1", "t2"]) {
+test("gate arrays and objects reject through CLI reports while retaining raw logs", () => {
+  const { run, cli } = preparedTrialA();
+  const file = join(run, "trials/t1/events.jsonl");
+  for (const gate of [["G1_stale_authority_write"], {}]) {
+    const event = {
+      ...goodTrial(slotA).events.at(-1),
+      seq: 1,
+      kind: "gate.violation",
+      payload: { gate, detail: "parseable wrong gate type" },
+    };
+    const raw = `${JSON.stringify(event)}\n`;
+    writeFileSync(file, raw);
+    for (const command of ["evaluate", "derive"]) {
+      const result = cli(command, "--run-dir", run, "--trial", "t1");
+      assert.equal(result.status, 1, command);
+      assert.match(result.stderr, /invalid event.*payload\.gate.*string/);
+      assert.doesNotMatch(result.stderr, /TypeError|at cmd/);
+      assert.equal(readFileSync(file, "utf8"), raw);
+    }
+    const result = cli("validate", "--bundle", run, "--json");
+    assert.equal(result.status, 1);
+    assert.doesNotMatch(result.stderr, /TypeError|at cmd/);
+    const validation = JSON.parse(result.stdout);
+    assert.equal(validation.ok, false);
+    assert.equal(validation.reading, "inconclusive");
+    assert.ok(
+      validation.findings.some(
+        (f) =>
+          f.code === "event_schema" && /payload\.gate.*string/.test(f.message),
+      ),
+    );
+    assert.equal(readFileSync(file, "utf8"), raw);
+  }
+});
+
+test("the evaluator accepts an actual competing attempt denied before edits for either observer and condition", () => {
+  for (const { trialId, observer } of ["t1", "t2"].flatMap((trialId) =>
+    ["harness", "evaluator"].map((observer) => ({ trialId, observer })),
+  )) {
     const { run, trial, slot, scenario, cli } = preparedTrialA(trialId);
     const competingRole = slot.condition === "B" ? "w2r" : "w2";
     const eventFile = join(run, `trials/${trialId}/events.jsonl`);
@@ -2846,7 +2929,7 @@ test("the evaluator accepts an actual competing attempt denied before edits in e
     appendEvent(
       join(run, `trials/${trialId}/events.jsonl`),
       {
-        actor: { role: "harness" },
+        actor: { role: observer },
         kind: "overlap.observed",
         payload,
       },
@@ -2860,6 +2943,32 @@ test("the evaluator accepts an actual competing attempt denied before edits in e
     assert.equal(evaluation.overlap.response, "stopped");
     assert.equal(evaluation.overlap.role, competingRole);
     assert.deepEqual(evaluation.overlap.prevention_evidence, evidence);
+    // A second evaluation must preserve the generated summary and its references.
+    const reevaluated = cli("evaluate", "--run-dir", run, "--trial", trialId);
+    assert.equal(
+      reevaluated.status,
+      0,
+      reevaluated.stdout + reevaluated.stderr,
+    );
+    const repeated = JSON.parse(
+      readFileSync(join(run, `trials/${trialId}/evaluation.json`), "utf8"),
+    );
+    assert.deepEqual(repeated.overlap, evaluation.overlap);
+    const summaries = parseEvents(
+      readFileSync(eventFile, "utf8"),
+    ).events.filter(
+      (e) => e.kind === "overlap.observed" && e.payload.evidence_ref,
+    );
+    assert.equal(summaries.length, 2);
+    for (const summary of summaries) {
+      assert.equal(summary.actor.role, "evaluator");
+      assert.equal(summary.payload.response, "stopped");
+      assert.deepEqual(summary.payload.prevention_evidence, evidence);
+      assert.equal(
+        summary.payload.evidence_ref,
+        evaluation.overlap.evidence_ref,
+      );
+    }
     assert.equal(cli("derive", "--run-dir", run, "--trial", trialId).status, 0);
     const ledgerPath = join(run, `trials/${trialId}/ledger.json`);
     assert.equal(
