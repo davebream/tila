@@ -2996,9 +2996,12 @@ deployment, host profile, deleted blob or independently committed setting.
 
 ### 14.6 Import/export and acceptance traceability
 
-Import and export cover applied definitions only (#299). Agents, rooms, signal
-groups, access settings and credentials are not in the file; exporting them, with
-explicit identity remapping, is follow-up work. Server state stays authoritative:
+Definition import and export cover applied definitions only (#299). Agents,
+rooms and signal groups use the separate `tila-project-settings` v1 envelope
+and explicit identity/profile/resource mapping (#448), exposed by `tila settings`,
+Settings → Settings transfer and the MCP `settings` group. See the
+[settings transfer guide](settings-transfer.md) for coverage, review and exact
+receipt recovery. Access settings and credentials remain excluded. Server state stays authoritative:
 starting a client, deploying, provisioning or `init` never reads a definitions
 file, and Git-managed or automatically synchronized files remain deferred.
 
