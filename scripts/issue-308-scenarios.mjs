@@ -126,8 +126,10 @@ export function sanitize(log, workspace = root) {
       // biome-ignore lint/suspicious/noControlCharactersInRegex: remove ANSI terminal color escapes from captured test logs.
       .replace(/\x1b\[[0-9;]*m/g, "")
       .replaceAll(workspace, "<checkout>")
+      // Source maps and runtime stack traces may drop the leading slash.
+      .replaceAll(workspace.replace(/^\/+/, ""), "<checkout>")
       .replace(
-        /(?:\/home\/|\/Users\/|[A-Z]:\\Users\\)[^\s"'<>]+/g,
+        /(?:\/?home\/|\/?Users\/|[A-Z]:\\Users\\)[^\s"'<>]+/g,
         "<local-path>",
       )
       .replace(/\bBearer\s+[^\s"']+/gi, "Bearer <redacted>")
@@ -506,8 +508,8 @@ export async function runChecks({
     [
       "S1",
       "full-settings-transfer",
-      "#448 / #308",
-      "Integrated mapped settings transfer is not merged; full S1 remains blocked",
+      "#308 / integrated S1 validation",
+      "#448 merged upstream in #492; the integrated mapped UI/CLI/MCP settings-transfer journey remains unexecuted in #308 evidence. This pinned v0.9 source predates that merge; full S1 remains blocked",
     ],
     [
       "S2",

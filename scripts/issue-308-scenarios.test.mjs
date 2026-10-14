@@ -80,6 +80,60 @@ test("redacts private paths and credentials while retaining product failure diag
   assert.ok(output.includes("<checkout>/src.ts"));
 });
 
+test("redacts slashless source-map paths in runtime JSON and checksums sanitized copies", async () => {
+  const base = mkdtempSync(resolve(tmpdir(), "tila-slashless-"));
+  try {
+    const source = {
+      stack:
+        "at home/example/code/project/node_modules/pkg/index.js:4\nfile://home/example/code/project/src.ts\nUsers/example/private/log",
+      name: "/home/example/code/project/packages/ui/test/pages/overview.test.tsx",
+    };
+    const sanitized = JSON.parse(
+      JSON.stringify(source, (_key, value) =>
+        typeof value === "string"
+          ? sanitize(value, "/home/example/code/project")
+          : value,
+      ),
+    );
+    assert.ok(!JSON.stringify(sanitized).includes("home/example"));
+    assert.ok(!JSON.stringify(sanitized).includes("Users/example"));
+    assert.ok(
+      sanitized.stack.includes("<checkout>/node_modules/pkg/index.js:4"),
+    );
+    assert.ok(
+      sanitized.name.includes("packages/ui/test/pages/overview.test.tsx"),
+    );
+    mkdirSync(resolve(base, ".ci-reports"));
+    const result = await runChecks({
+      base,
+      output: "evidence",
+      context,
+      selected: [{ ...checks[0], provenance: "local Cloudflare runtime" }],
+      run: async () => {
+        writeFileSync(
+          resolve(base, ".ci-reports/runtime.json"),
+          JSON.stringify({
+            startTime: Date.now(),
+            success: true,
+            testResults: [source],
+          }),
+        );
+        return { code: 0, log: source.stack };
+      },
+    });
+    verifyArtifacts(result.report, base);
+    const ref = result.report.observations[0].artifact_refs.find((r) =>
+      r.path.endsWith(".runtime.json"),
+    );
+    assert.ok(ref, "Runtime JSON must be retained separately");
+    const retained = JSON.parse(readFileSync(resolve(base, ref.path), "utf8"));
+    assert.ok(!JSON.stringify(retained).includes("home/example"));
+    assert.ok(!JSON.stringify(retained).includes("Users/example"));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("retains failed commands, continues, links reruns and detects artifact tampering", async () => {
   const base = mkdtempSync(resolve(tmpdir(), "tila-scenarios-"));
   try {
