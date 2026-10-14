@@ -689,6 +689,36 @@ const notApplicable = (reason) => ({
 });
 
 /**
+ * Evidence-shape check, not a semantic verdict. The auditor must open all three
+ * hash-bound records: competing intent/attempt, its stopped/redirected response,
+ * and the before-edit snapshot/audit. Ownership and final-tree silence supply
+ * none of these. Optional event evidence restores the existing rubric definition;
+ * it does not change the declared task, method or budget.
+ */
+export function hasPreventionEvidence(event) {
+  const p = event.payload;
+  const evidence = p.prevention_evidence;
+  const retained = (record) =>
+    typeof record?.ref === "string" &&
+    record.ref.trim().length > 0 &&
+    /^[a-f0-9]{64}$/.test(record.sha256 ?? "");
+  return (
+    event.kind === "overlap.observed" &&
+    event.provenance === "local_agent_trial" &&
+    ["stopped", "redirected"].includes(p.response) &&
+    p.edits_before_redirect === 0 &&
+    evidence?.schema === "tila.dogfood.overlap-evidence/1" &&
+    retained(evidence.attempt) &&
+    retained(evidence.response) &&
+    retained(evidence.before_edit) &&
+    Number.isFinite(evidence.attempt.mono_ms) &&
+    Number.isFinite(evidence.response.mono_ms) &&
+    evidence.attempt.mono_ms <= evidence.response.mono_ms &&
+    evidence.response.mono_ms <= event.mono_ms
+  );
+}
+
+/**
  * Derive the per-trial ledger from raw events plus the evaluator's report.
  * Only events and the evaluation are consulted; nothing is inferred from silence.
  */
@@ -1008,17 +1038,18 @@ export function deriveLedger({
   // --- overlap ---
   const overlaps = events.filter((e) => e.kind === "overlap.observed");
   const overlapIds = [...new Set(overlaps.map((o) => o.payload.overlap_id))];
-  const prevented = overlaps.filter(
-    (o) =>
-      ["redirected", "stopped"].includes(o.payload.response) &&
-      o.payload.evidence_ref &&
-      Number(o.payload.edits_before_redirect ?? 0) === 0,
-  );
-  const preventedIds = new Set(prevented.map((o) => o.payload.overlap_id));
   const duplicateEdits = overlaps.filter(
     (o) =>
       o.payload.response === "duplicate_started" ||
       Number(o.payload.edits_before_redirect ?? 0) > 0,
+  );
+  const duplicateIds = new Set(duplicateEdits.map((o) => o.payload.overlap_id));
+  const prevented = overlaps.filter(
+    (o) => hasPreventionEvidence(o) && !duplicateIds.has(o.payload.overlap_id),
+  );
+  const preventedIds = new Set(prevented.map((o) => o.payload.overlap_id));
+  const preventionComplete = overlapIds.every(
+    (id) => preventedIds.has(id) || duplicateIds.has(id),
   );
   const recon = overlapIds
     .map((id) => {
@@ -1115,12 +1146,15 @@ export function deriveLedger({
       : unavailable(
           "no overlap.observed event: the injected opportunity was not logged",
         ),
-    conflict_prevented: overlapIds.length
-      ? observed(
-          preventedIds.size,
-          prevented.map((o) => o.seq),
-        )
-      : unavailable("no overlap.observed event"),
+    conflict_prevented:
+      overlapIds.length && preventionComplete
+        ? observed(
+            preventedIds.size,
+            [...prevented, ...duplicateEdits].map((o) => o.seq),
+          )
+        : unavailable(
+            "prevention requires retained competing attempt, stopped/redirected response and before-edit evidence for every opportunity",
+          ),
     duplicate_helper_definitions: fromEval((e) =>
       e.helper_definitions
         ? observed(Math.max(0, e.helper_definitions.count - 1))
@@ -1500,6 +1534,12 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
     const slot = declaration.trials.find((t) => t.trial === id);
     const t = bundle.trials[id];
     const events = t.events ?? [];
+    if (events.some((e) => e.payload?.rule_id === "V-memory"))
+      add(
+        "memory_contaminated",
+        "cross-trial memory contamination precludes comparative statements",
+        id,
+      );
     for (const p of t.parseProblems ?? []) add("event_parse", p, id);
 
     // event integrity
@@ -1798,11 +1838,19 @@ function summarize(findings, ledgers, readings = [], declaration = null) {
   const gateFailures = findings.filter((f) => f.code === "gate_violation");
   let reading = "inconclusive";
   if (declaration && readings.length === declaration.trials.length) {
-    const invalid = readings.filter(
+    const allValid = readings.every(
       (r) =>
-        r.outcome === "harness_invalid" || r.classification !== "unassisted",
+        !["harness_invalid", "aborted_wrong_target_or_privacy"].includes(
+          r.outcome,
+        ) && ["unassisted", "assisted"].includes(r.classification),
+    );
+    const assisted = readings.filter(
+      (r) => r.classification === "assisted",
     ).length;
-    reading = invalid <= 1 && !errors.length ? "informative" : "inconclusive";
+    reading =
+      allValid && assisted <= 1 && !errors.length
+        ? "informative"
+        : "inconclusive";
   }
   if (gateFailures.length) reading = "gate_failure";
   return {

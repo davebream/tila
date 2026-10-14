@@ -46,6 +46,7 @@ import {
   checkDeclaration,
   checkMatching,
   deriveLedger,
+  hasPreventionEvidence,
   parseEvents,
   sha256Text,
   studyCliEnv,
@@ -1067,14 +1068,13 @@ function cmdEvaluate(opts) {
     if (failing.length) obsolete.push(role);
   }
 
-  // 4. injected overlap: who owned the helper, and did the other role build a second one
+  // 4. Ownership identifies the opportunity, never a prevented competing attempt.
   const events = parseEvents(
     existsSync(join(dir, "events.jsonl"))
       ? readFileSync(join(dir, "events.jsonl"), "utf8")
       : "",
   ).events;
   let owner = null;
-  let evidenceSeq = null;
   if (config.condition === "B") {
     const claim = events.find(
       (e) =>
@@ -1084,46 +1084,49 @@ function cmdEvaluate(opts) {
         e.payload.outcome === "ok",
     );
     owner = claim ? baseOf(claim.payload.role) : null;
-    const lost = events.find(
-      (e) =>
-        e.kind === "tila_call" &&
-        e.payload.verb === "sdk claim" &&
-        e.payload.resource === `task:${config.task_ids.helper}` &&
-        e.payload.outcome === "conflict",
-    );
-    evidenceSeq = lost?.seq ?? null;
   } else {
     const board = readFileSync(join(config.shared, "BOARD.md"), "utf8");
     const m = /shared-helper:\s*owner=(w[12])/.exec(board);
     owner = m ? m[1] : null;
-    evidenceSeq = m ? `BOARD.md:${m.index}` : null;
     const lock = join(config.shared, "locks/shared-helper/owner");
     if (!owner && existsSync(lock)) {
       const named = /^(w[12])/.exec(readFileSync(lock, "utf8"));
       owner = named ? named[1] : null;
-      evidenceSeq = named ? "locks/shared-helper/owner" : null;
     }
   }
   const other = owner === "w1" ? "w2" : owner === "w2" ? "w1" : null;
-  const otherDefines = other
-    ? authoredDefinesHelper(repo, branches[other].authored_commits, scenario)
-    : null;
+  const definingRoles = ["w1", "w2"].filter((role) =>
+    authoredDefinesHelper(repo, branches[role].authored_commits, scenario),
+  );
+  const duplicate = other
+    ? definingRoles.includes(other)
+    : definingRoles.length > 1;
+  // A real attempt-response/snapshot record may be supplied in either arm.
+  // A denied claim alone still lacks proof that no duplicate edit preceded it.
+  const supported = events.find(
+    (e) =>
+      e.actor.role !== "evaluator" &&
+      e.payload.overlap_id === "injected-helper" &&
+      e.payload.resource === scenario.helper.file &&
+      typeof e.payload.role === "string" &&
+      (other
+        ? baseOf(e.payload.role) === other
+        : ["w1", "w2"].includes(e.payload.role)) &&
+      hasPreventionEvidence(e),
+  );
   const overlap = {
     overlap_id: "injected-helper",
     kind: "injected",
     resource: scenario.helper.file,
-    role: other ?? "unknown",
-    response:
-      other === null
-        ? "ignored"
-        : otherDefines
-          ? "duplicate_started"
-          : evidenceSeq
-            ? "redirected"
-            : "ignored",
-    evidence_ref:
-      otherDefines || !evidenceSeq ? undefined : String(evidenceSeq),
-    edits_before_redirect: otherDefines ? 1 : 0,
+    role: other ?? supported?.payload.role ?? "unknown",
+    response: duplicate
+      ? "duplicate_started"
+      : (supported?.payload.response ?? "unavailable"),
+    evidence_ref: !duplicate && supported ? String(supported.seq) : undefined,
+    prevention_evidence: !duplicate
+      ? supported?.payload.prevention_evidence
+      : undefined,
+    edits_before_redirect: duplicate ? 1 : supported ? 0 : null,
     owner,
   };
 
