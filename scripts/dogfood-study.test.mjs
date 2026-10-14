@@ -12,6 +12,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -127,21 +128,72 @@ const frozenHook = {
   codex_binary_sha256: "a".repeat(64),
 };
 
-// Synthetic retained-record references, never installed-runtime evidence.
-const preventionEvidence = () => ({
-  schema: "tila.dogfood.overlap-evidence/1",
-  attempt: {
-    ref: "native/attempt.json",
-    sha256: "c".repeat(64),
-    mono_ms: 1_000_200,
-  },
-  response: {
-    ref: "native/response.json",
-    sha256: "d".repeat(64),
-    mono_ms: 1_000_210,
-  },
-  before_edit: { ref: "snapshots/before-edit.json", sha256: "e".repeat(64) },
-});
+// Actual files and hashes, with explicitly synthetic contents for unit tests.
+function retainPrevention(event, trialDir = scratch(), overrides = {}) {
+  const p = event.payload;
+  const common = {
+    schema: "tila.dogfood.overlap-record/1",
+    provenance: "harness_fixture",
+    trial_id: event.trial_id,
+    overlap_id: p.overlap_id,
+    role: p.role,
+    resource: p.resource,
+    attempt_id: "attempt-1",
+  };
+  const records = {
+    attempt: {
+      ...common,
+      kind: "attempt",
+      intent: "implement_shared_helper",
+      command: ["sdk", "claim", "task:H"],
+      mono_ms: 1_000_200,
+      ...overrides.attempt,
+    },
+    response: {
+      ...common,
+      kind: "response",
+      disposition: p.response,
+      exit_code: p.response === "stopped" ? 1 : 0,
+      stdout:
+        p.response === "stopped"
+          ? "already held"
+          : "redirected to src/other.mjs",
+      stderr: "",
+      redirected_to: "src/other.mjs",
+      mono_ms: 1_000_210,
+      ...overrides.response,
+    },
+    before_edit: {
+      ...common,
+      kind: "before_edit",
+      coverage: "attempt_through_response",
+      from_mono_ms: 1_000_200,
+      through_mono_ms: 1_000_210,
+      mono_ms: 1_000_211,
+      observed_edits: [],
+      baseline: "1".repeat(40),
+      head: "1".repeat(40),
+      status: "",
+      diff: "",
+      ...overrides.before_edit,
+    },
+  };
+  p.prevention_evidence = { schema: "tila.dogfood.overlap-evidence/1" };
+  const rewrite = (kind) => {
+    const ref = `evidence/${kind}.json`;
+    const path = join(trialDir, ref);
+    mkdirSync(dirname(path), { recursive: true });
+    const text = JSON.stringify(records[kind]);
+    writeFileSync(path, text);
+    p.prevention_evidence[kind] = {
+      ref,
+      sha256: sha256Text(text),
+      ...(kind === "before_edit" ? {} : { mono_ms: records[kind].mono_ms }),
+    };
+  };
+  for (const kind of Object.keys(records)) rewrite(kind);
+  return { trialDir, records, rewrite };
+}
 
 /** A complete, well-behaved condition-B trial log; callers perturb it. */
 function goodTrial(slot = slotB) {
@@ -274,7 +326,6 @@ function goodTrial(slot = slotB) {
       response: "redirected",
       evidence_ref: "7",
       edits_before_redirect: 0,
-      prevention_evidence: preventionEvidence(),
     },
     650_000,
   );
@@ -547,7 +598,7 @@ test("a good condition-B trial derives observed metrics and passes the gates", (
   assert.equal(ledger.enforcement.enforced, true);
   assert.equal(ledger.metrics.handoff_score.value, 4);
   assert.equal(ledger.metrics.handoff_candidate_count.value, 6);
-  assert.equal(ledger.metrics.conflict_prevented.value, 1);
+  assert.equal(ledger.metrics.conflict_prevented.availability, "unavailable");
   assert.equal(ledger.metrics.recovery_to_decision_ms.censored, false);
   assert.ok(Object.values(ledger.gates).every((g) => !g.violated));
 });
@@ -576,13 +627,14 @@ test("both conditions count retained attempt-response-before-edit evidence once 
       const l = goodTrial(slot);
       const overlap = l.events.find((e) => e.kind === "overlap.observed");
       overlap.payload.response = response;
+      const { trialDir } = retainPrevention(overlap);
       l.add(
         "overlap.observed",
         "evaluator",
         structuredClone(overlap.payload),
         712_000,
       );
-      const ledger = derive(l, {}, slot);
+      const ledger = derive(l, { trialDir }, slot);
       assert.equal(ledger.metrics.conflict_prevented.availability, "observed");
       assert.equal(ledger.metrics.conflict_prevented.value, 1);
       assert.equal(ledger.metrics.conflict_opportunities.value, 1);
@@ -620,14 +672,18 @@ test("partial or unordered prevention evidence stays unavailable and duplicates 
   for (const slot of [slotA, slotB]) {
     for (const change of changes) {
       const l = goodTrial(slot);
+      const { trialDir } = retainPrevention(
+        l.events.find((e) => e.kind === "overlap.observed"),
+      );
       change(l.events.find((e) => e.kind === "overlap.observed").payload);
       assert.equal(
-        derive(l, {}, slot).metrics.conflict_prevented.availability,
+        derive(l, { trialDir }, slot).metrics.conflict_prevented.availability,
         "unavailable",
       );
     }
     const l = goodTrial(slot);
     const overlap = l.events.find((e) => e.kind === "overlap.observed");
+    const { trialDir } = retainPrevention(overlap);
     l.add(
       "overlap.observed",
       "evaluator",
@@ -635,10 +691,11 @@ test("partial or unordered prevention evidence stays unavailable and duplicates 
         ...overlap.payload,
         response: "duplicate_started",
         edits_before_redirect: 1,
+        prevention_evidence: undefined,
       },
       712_000,
     );
-    const ledger = derive(l, {}, slot);
+    const ledger = derive(l, { trialDir }, slot);
     assert.equal(ledger.metrics.conflict_prevented.value, 0);
     assert.equal(ledger.metrics.duplicate_edit_events.value, 1);
     l.add(
@@ -656,6 +713,200 @@ test("partial or unordered prevention evidence stays unavailable and duplicates 
       "unavailable",
     );
   }
+});
+
+test("bundle validation reopens every prevention record and rejects absent or tampered bytes", () => {
+  for (const kind of ["attempt", "response", "before_edit"]) {
+    for (const failure of ["absent", "tampered", "invalid-json"]) {
+      const bundle = completeBundle();
+      const t = bundle.trials.t1;
+      const overlap = t.events.find((e) => e.kind === "overlap.observed");
+      overlap.payload.response = "stopped";
+      const { trialDir } = retainPrevention(overlap);
+      t.trialDir = trialDir;
+      const valid = validateStudy(bundle);
+      assert.equal(valid.ok, true, JSON.stringify(valid.findings));
+      assert.equal(valid.ledgers.t1.metrics.conflict_prevented.value, 1);
+      const record = overlap.payload.prevention_evidence[kind];
+      const path = join(trialDir, record.ref);
+      if (failure === "absent") rmSync(path);
+      else {
+        writeFileSync(path, failure === "tampered" ? "{}" : "invalid JSON");
+        if (failure === "invalid-json")
+          record.sha256 = sha256Text("invalid JSON");
+      }
+      // Keep the previously derived observed ledger to catch stale/cached credit.
+      const result = validateBundle({
+        bundle,
+        rubric,
+        rubricSha256,
+        declaration,
+      });
+      assert.equal(result.ok, false, `${kind}/${failure}`);
+      assert.ok(
+        result.findings.some((f) => f.code === "prevention_evidence_invalid"),
+      );
+      assert.ok(result.findings.some((f) => f.code === "ledger_mismatch"));
+      assert.equal(
+        result.ledgers.t1.metrics.conflict_prevented.availability,
+        "unavailable",
+      );
+      assert.equal(result.ledgers.t1.metrics.conflict_opportunities.value, 1);
+    }
+  }
+});
+
+test("prevention references reject traversal, absolute paths and file/directory symlinks", () => {
+  for (const kind of ["attempt", "response", "before_edit"]) {
+    for (const pathCase of [
+      "parent",
+      "absolute",
+      "windows",
+      "file-link",
+      "directory-link",
+    ]) {
+      const l = goodTrial();
+      const overlap = l.events.find((e) => e.kind === "overlap.observed");
+      const { trialDir } = retainPrevention(overlap);
+      const record = overlap.payload.prevention_evidence[kind];
+      const outside = join(scratch(), `${kind}.json`);
+      writeFileSync(outside, readFileSync(join(trialDir, record.ref)));
+      if (pathCase === "parent")
+        record.ref = `../${trialDir.split("/").at(-1)}/evidence/${kind}.json`;
+      if (pathCase === "absolute") record.ref = outside;
+      if (pathCase === "windows") record.ref = "C:\\outside\\record.json";
+      if (pathCase === "file-link") {
+        symlinkSync(outside, join(trialDir, "linked.json"));
+        record.ref = "linked.json";
+      }
+      if (pathCase === "directory-link") {
+        symlinkSync(dirname(outside), join(trialDir, "linked-dir"));
+        record.ref = `linked-dir/${kind}.json`;
+      }
+      const ledger = derive(l, { trialDir });
+      assert.equal(
+        ledger.metrics.conflict_prevented.availability,
+        "unavailable",
+        `${kind}/${pathCase}`,
+      );
+      assert.ok(ledger.flags.some((f) => /reference|symlink/.test(f)));
+    }
+  }
+});
+
+test("matching hashes cannot turn ownership, an unrelated failure or edits into a prevented attempt", () => {
+  const changes = [
+    [
+      "attempt",
+      (r) => {
+        r.intent = "owns_helper";
+      },
+    ],
+    [
+      "attempt",
+      (r) => {
+        r.command = [];
+      },
+    ],
+    [
+      "attempt",
+      (r) => {
+        r.command = ["echo", "already held"];
+      },
+    ],
+    [
+      "attempt",
+      (r) => {
+        r.resource = "another-helper.mjs";
+      },
+    ],
+    [
+      "response",
+      (r) => {
+        r.exit_code = 0;
+      },
+    ],
+    [
+      "response",
+      (r) => {
+        r.stdout = "syntax error";
+      },
+    ],
+    [
+      "response",
+      (r) => {
+        r.attempt_id = "other-attempt";
+      },
+    ],
+    [
+      "response",
+      (r) => {
+        r.role = "w1";
+      },
+    ],
+    [
+      "before_edit",
+      (r) => {
+        r.status = " M src/helper.mjs";
+      },
+    ],
+    [
+      "before_edit",
+      (r) => {
+        r.diff = "+function helper() {}";
+      },
+    ],
+    [
+      "before_edit",
+      (r) => {
+        r.observed_edits = ["src/helper.mjs"];
+      },
+    ],
+    [
+      "before_edit",
+      (r) => {
+        r.head = "2".repeat(40);
+      },
+    ],
+    [
+      "before_edit",
+      (r) => {
+        r.through_mono_ms -= 1;
+      },
+    ],
+    [
+      "before_edit",
+      (r) => {
+        r.trial_id = "other-trial";
+      },
+    ],
+  ];
+  for (const [kind, change] of changes) {
+    const bundle = completeBundle();
+    const t = bundle.trials.t1;
+    const overlap = t.events.find((e) => e.kind === "overlap.observed");
+    overlap.payload.response = "stopped";
+    const retained = retainPrevention(overlap);
+    t.trialDir = retained.trialDir;
+    assert.equal(validateStudy(bundle).ok, true);
+    change(retained.records[kind]);
+    retained.rewrite(kind);
+    const result = validateStudy(bundle);
+    assert.equal(result.ok, false, `${kind}: ${change}`);
+    assert.equal(
+      result.ledgers.t1.metrics.conflict_prevented.availability,
+      "unavailable",
+    );
+  }
+  const l = goodTrial();
+  const overlap = l.events.find((e) => e.kind === "overlap.observed");
+  retainPrevention(overlap);
+  overlap.payload.verified = true;
+  assert.equal(
+    derive(l).metrics.conflict_prevented.availability,
+    "unavailable",
+    "no directory means no verified records",
+  );
 });
 
 test("missing sources become unavailable or not applicable, never zero", () => {
@@ -2031,47 +2282,47 @@ test("the evaluator accepts an actual competing attempt denied before edits in e
     const respondedAt = Number(process.hrtime.bigint() / 1_000_000n);
     assert.equal(denied.status, 1, denied.stdout + denied.stderr);
     const beforeEdit = {
+      baseline: git(trial.worktrees.w2, "rev-parse", "main").stdout.trim(),
       head: git(trial.worktrees.w2, "rev-parse", "HEAD").stdout.trim(),
       status: git(trial.worktrees.w2, "status", "--porcelain").stdout,
       diff: git(trial.worktrees.w2, "diff", "main").stdout,
     };
     assert.equal(beforeEdit.status, "");
     assert.equal(beforeEdit.diff, "");
-    const retain = (name, value) => {
-      const ref = `evidence/${name}.json`;
-      const text = JSON.stringify({ provenance: "harness_fixture", ...value });
-      const path = join(run, `trials/${trialId}`, ref);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, text);
-      return { ref, sha256: sha256Text(text) };
+    const payload = {
+      overlap_id: "injected-helper",
+      kind: "injected",
+      resource: scenario.helper.file,
+      role: "w2",
+      response: "stopped",
+      edits_before_redirect: 0,
     };
-    const evidence = {
-      schema: "tila.dogfood.overlap-evidence/1",
-      attempt: { ...retain("attempt", attempt), mono_ms: attemptedAt },
-      response: {
-        ...retain("response", {
-          status: denied.status,
+    retainPrevention(
+      { trial_id: trialId, payload },
+      join(run, `trials/${trialId}`),
+      {
+        attempt: { ...attempt, mono_ms: attemptedAt },
+        response: {
+          exit_code: denied.status,
           stdout: denied.stdout,
           stderr: denied.stderr,
-        }),
-        mono_ms: respondedAt,
+          mono_ms: respondedAt,
+        },
+        before_edit: {
+          ...beforeEdit,
+          from_mono_ms: attemptedAt,
+          through_mono_ms: respondedAt,
+          mono_ms: Number(process.hrtime.bigint() / 1_000_000n),
+        },
       },
-      before_edit: retain("before-edit", beforeEdit),
-    };
+    );
+    const evidence = payload.prevention_evidence;
     appendEvent(
       join(run, `trials/${trialId}/events.jsonl`),
       {
         actor: { role: "harness" },
         kind: "overlap.observed",
-        payload: {
-          overlap_id: "injected-helper",
-          kind: "injected",
-          resource: scenario.helper.file,
-          role: "w2",
-          response: "stopped",
-          edits_before_redirect: 0,
-          prevention_evidence: evidence,
-        },
+        payload,
       },
       rubric,
     );
@@ -2082,6 +2333,36 @@ test("the evaluator accepts an actual competing attempt denied before edits in e
     );
     assert.equal(evaluation.overlap.response, "stopped");
     assert.deepEqual(evaluation.overlap.prevention_evidence, evidence);
+    assert.equal(cli("derive", "--run-dir", run, "--trial", trialId).status, 0);
+    const ledgerPath = join(run, `trials/${trialId}/ledger.json`);
+    assert.equal(
+      JSON.parse(readFileSync(ledgerPath, "utf8")).metrics.conflict_prevented
+        .value,
+      1,
+    );
+    let validation = JSON.parse(
+      cli("validate", "--bundle", run, "--json").stdout,
+    );
+    assert.equal(
+      validation.ledgers[trialId].metrics.conflict_prevented.value,
+      1,
+    );
+    const recordPath = join(run, `trials/${trialId}`, evidence.response.ref);
+    writeFileSync(recordPath, "{}");
+    validation = JSON.parse(cli("validate", "--bundle", run, "--json").stdout);
+    assert.ok(
+      validation.findings.some((f) => f.code === "prevention_evidence_invalid"),
+    );
+    assert.equal(
+      validation.ledgers[trialId].metrics.conflict_prevented.availability,
+      "unavailable",
+    );
+    assert.equal(cli("derive", "--run-dir", run, "--trial", trialId).status, 0);
+    assert.equal(
+      JSON.parse(readFileSync(ledgerPath, "utf8")).metrics.conflict_prevented
+        .availability,
+      "unavailable",
+    );
   }
 });
 
