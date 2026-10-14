@@ -44,7 +44,13 @@ export function namespacedTaskMethods(
       ? {
           ...query,
           type:
-            query.type !== undefined ? applyPrefix(ns, query.type) : undefined,
+            query.type !== undefined
+              ? query.type
+                  .split(",")
+                  .filter(Boolean)
+                  .map((type) => applyPrefix(ns, type))
+                  .join(",")
+              : undefined,
         }
       : undefined;
     const result = await inner.list(prefixedQuery);
