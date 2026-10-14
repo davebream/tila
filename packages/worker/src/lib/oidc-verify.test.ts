@@ -937,3 +937,282 @@ describe("verifyOidcToken (backward-compat coercion)", () => {
     expect(claims.run_attempt).toBe(1);
   });
 });
+
+describe("deployment-trusted Enterprise Actions verification", () => {
+  const entry = {
+    issuer: "https://ghe.example/_services/token",
+    host: "ghe.example",
+    jwks_uri: "https://keys.example/actions",
+  };
+  const config = JSON.stringify([entry]);
+  const audience = VALID_GITHUB_CLAIMS.aud;
+  const claims = { ...VALID_GITHUB_CLAIMS, iss: entry.issuer };
+
+  it("uses only configured JWKS and attaches configured host after verification", async () => {
+    const factory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    mockOidcFetch.mockImplementation(async () => factory());
+    const result = await verifyOidcToken(
+      await signTestJwt({
+        ...claims,
+        repository_host: "attacker.example",
+        jku: "https://attacker.example/keys",
+      }),
+      audience,
+      config,
+    );
+    expect(result).toMatchObject({
+      iss: entry.issuer,
+      repository_host: entry.host,
+    });
+    expect(mockOidcFetch).toHaveBeenCalledExactlyOnceWith(
+      entry.jwks_uri,
+      undefined,
+    );
+  });
+
+  it.each([
+    "https://unknown.example/token",
+    `${entry.issuer}/`,
+    "https://127.0.0.1/token",
+  ])(
+    "rejects unknown/exact-mismatch issuer %s without network",
+    async (iss) => {
+      await expect(
+        verifyOidcToken(
+          await signTestJwt({ ...claims, iss }),
+          audience,
+          config,
+        ),
+      ).rejects.toMatchObject({ code: "oidc-invalid-issuer" });
+      expect(mockOidcFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "",
+    "null",
+    "{}",
+    "not-json",
+    JSON.stringify([entry, entry]),
+    JSON.stringify([{ ...entry, jwks_uri: "http://keys.example/keys" }]),
+    JSON.stringify([{ ...entry, jwks_uri: "https://10.0.0.1/keys" }]),
+    JSON.stringify([{ ...entry, issuer: "https://host.internal/token" }]),
+    JSON.stringify([{ ...entry, host: "localhost" }]),
+  ])(
+    "fails closed on malformed/blocked config without network: %s",
+    async (raw) => {
+      await expect(
+        verifyOidcToken(await signTestJwt(claims), audience, raw),
+      ).rejects.toMatchObject({ code: "oidc-invalid-configuration" });
+      expect(mockOidcFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [{ aud: "wrong-audience" }, "oidc-invalid-audience"],
+    [{ exp: NOW - 1 }, "oidc-token-expired"],
+    [{ nbf: NOW + 1000 }, "oidc-token-expired"],
+    [{ iat: NOW + 1000 }, "oidc-token-expired"],
+  ])("rejects Enterprise audience/time errors %j", async (overrides, code) => {
+    const factory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    mockOidcFetch.mockImplementation(async () => factory());
+    await expect(
+      verifyOidcToken(
+        await signTestJwt({ ...claims, ...overrides }),
+        audience,
+        config,
+      ),
+    ).rejects.toMatchObject({ code });
+  });
+
+  it("isolates identical kid values between GitHub.com and Enterprise issuers", async () => {
+    const github = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    const enterprise = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: altPublicKey },
+    ]);
+    mockOidcFetch.mockImplementation(async (url) =>
+      url === entry.jwks_uri ? enterprise() : github(),
+    );
+    await verifyOidcToken(
+      await signTestJwt(VALID_GITHUB_CLAIMS),
+      audience,
+      config,
+    );
+    await verifyOidcToken(
+      await signTestJwt(claims, {}, altPrivateKey),
+      audience,
+      config,
+    );
+    await expect(
+      verifyOidcToken(await signTestJwt(claims), audience, config),
+    ).rejects.toMatchObject({ code: "oidc-signature-invalid" });
+    await expect(
+      verifyOidcToken(
+        await signTestJwt(VALID_GITHUB_CLAIMS, {}, altPrivateKey),
+        audience,
+        config,
+      ),
+    ).rejects.toMatchObject({ code: "oidc-signature-invalid" });
+  });
+
+  it("isolates in-flight old-source fetch, eviction and rotation retries from a new JWKS configuration", async () => {
+    const oldFactory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    const newFactory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: altPublicKey },
+    ]);
+    const newEntry = { ...entry, jwks_uri: "https://new-keys.example/actions" };
+    let releaseOld!: () => void;
+    let startedOld!: () => void;
+    const oldStarted = new Promise<void>((resolve) => {
+      startedOld = resolve;
+    });
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    mockOidcFetch.mockImplementation(async (url) => {
+      if (url === entry.jwks_uri) {
+        startedOld();
+        await oldGate;
+        return oldFactory();
+      }
+      return newFactory();
+    });
+    const oldToken = await signTestJwt(claims);
+    const newToken = await signTestJwt(claims, {}, altPrivateKey);
+    const oldVerification = verifyOidcToken(oldToken, audience, config);
+    await oldStarted;
+    await verifyOidcToken(newToken, audience, JSON.stringify([newEntry]));
+    releaseOld();
+    await oldVerification;
+    // A late old-source fetch must neither replace nor evict new-source keys.
+    mockOidcFetch.mockClear();
+    await verifyOidcToken(newToken, audience, JSON.stringify([newEntry]));
+    expect(mockOidcFetch).not.toHaveBeenCalled();
+    await expect(
+      verifyOidcToken(oldToken, audience, JSON.stringify([newEntry])),
+    ).rejects.toMatchObject({ code: "oidc-signature-invalid" });
+    expect(mockOidcFetch).toHaveBeenCalledExactlyOnceWith(
+      newEntry.jwks_uri,
+      undefined,
+    );
+    // New-source retry must leave the old source's independently configured keys intact.
+    mockOidcFetch.mockClear();
+    await verifyOidcToken(oldToken, audience, config);
+    expect(mockOidcFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a removed issuer even when its signing key is cached", async () => {
+    const factory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    mockOidcFetch.mockImplementation(async () => factory());
+    const token = await signTestJwt(claims);
+    await verifyOidcToken(token, audience, config);
+    mockOidcFetch.mockClear();
+    await expect(verifyOidcToken(token, audience)).rejects.toMatchObject({
+      code: "oidc-invalid-issuer",
+    });
+    expect(mockOidcFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("JWKS source expiry", () => {
+  const issuer = "https://expiry.example/token";
+  const params = {
+    issuer,
+    audience: VALID_GITHUB_CLAIMS.aud,
+    jwksUri: "https://expiry.example/keys",
+  };
+  const claims = { ...VALID_GITHUB_CLAIMS, iss: issuer, exp: NOW + 8000 };
+
+  it("refreshes expired cached successful keys and denies a removed key", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(NOW * 1000);
+    try {
+      const factory = await makeJwksResponseFactory([
+        { kid: testKid, publicKey: testPublicKey },
+      ]);
+      mockOidcFetch
+        .mockImplementationOnce(async () => factory())
+        .mockImplementation(async () => Response.json({ keys: [] }));
+      const token = await signTestJwt(claims);
+      await verifyOidcJwt(token, params);
+      now.mockReturnValue((NOW + 3599) * 1000);
+      await verifyOidcJwt(token, params);
+      expect(mockOidcFetch).toHaveBeenCalledTimes(1);
+      now.mockReturnValue((NOW + 3600) * 1000);
+      await expect(verifyOidcJwt(token, params)).rejects.toMatchObject({
+        code: "oidc-jwks-unavailable",
+      });
+      expect(mockOidcFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("refreshes expired same-kid rotations before signature verification", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(NOW * 1000);
+    try {
+      const oldFactory = await makeJwksResponseFactory([
+        { kid: testKid, publicKey: testPublicKey },
+      ]);
+      const newFactory = await makeJwksResponseFactory([
+        { kid: testKid, publicKey: altPublicKey },
+      ]);
+      mockOidcFetch
+        .mockImplementationOnce(async () => oldFactory())
+        .mockImplementation(async () => newFactory());
+      await verifyOidcJwt(await signTestJwt(claims), params);
+      now.mockReturnValue((NOW + 3601) * 1000);
+      await verifyOidcJwt(await signTestJwt(claims, {}, altPrivateKey), params);
+      expect(mockOidcFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("fails closed on expired refresh failure without reusing old keys or extending TTL", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(NOW * 1000);
+    try {
+      const factory = await makeJwksResponseFactory([
+        { kid: testKid, publicKey: testPublicKey },
+      ]);
+      const { OidcFetchError } = await import("./oidc-fetch");
+      mockOidcFetch
+        .mockImplementationOnce(async () => factory())
+        .mockRejectedValue(
+          new OidcFetchError("oidc-fetch-blocked", "local refresh failure"),
+        );
+      const token = await signTestJwt(claims);
+      await verifyOidcJwt(token, params);
+      now.mockReturnValue((NOW + 3600) * 1000);
+      await expect(verifyOidcJwt(token, params)).rejects.toMatchObject({
+        code: "oidc-jwks-unavailable",
+      });
+      await expect(verifyOidcJwt(token, params)).rejects.toMatchObject({
+        code: "oidc-jwks-unavailable",
+      });
+      expect(mockOidcFetch).toHaveBeenCalledTimes(3);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("limits a failed signature on a freshly fetched source to one fetch", async () => {
+    const factory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    mockOidcFetch.mockImplementation(async () => factory());
+    await expect(
+      verifyOidcJwt(await signTestJwt(claims, {}, altPrivateKey), params),
+    ).rejects.toMatchObject({ code: "oidc-signature-invalid" });
+    expect(mockOidcFetch).toHaveBeenCalledTimes(1);
+  });
+});

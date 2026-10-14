@@ -431,3 +431,30 @@ test("linking reports a repository GitHub cannot find", async () => {
     github_host: "github.com",
   });
 });
+
+test("Enterprise OIDC policy explains deployment trust and keeps host in the policy write", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ repository_policy_manage: true }));
+  const api = reposApi();
+  api.state.repos = [link({ github_host: "github--enterprise.example" })];
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: /Actions OIDC policy for/ }),
+  );
+  const drawer = await screen.findByRole("dialog", { name: /Actions OIDC/ });
+  expect(drawer).toHaveTextContent(
+    "Your deployment operator must configure a trusted Enterprise Actions issuer for this repository host.",
+  );
+  expect(drawer).toHaveTextContent(
+    "on every exchange and subsequent protected request",
+  );
+  await user.selectOptions(
+    within(drawer).getByRole("combobox", { name: "Highest tila permission" }),
+    "write",
+  );
+  await user.click(within(drawer).getByRole("button", { name: "Save policy" }));
+  await waitFor(() => expect(api.sent).toHaveLength(1));
+  expect(api.sent[0].path).toBe(
+    "/api/repos/12345/oidc-policy?host=github--enterprise.example",
+  );
+});
