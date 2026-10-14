@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- Task-list compatibility (#399): invalid HTTP `limit` values, including zero, negative, fractional and non-finite values, now return `400 validation-error`; valid limits above 500 remain capped. The local SDK's default task list now includes archived rows to match HTTP. SDK `compact: true` (or a variable boolean) returns a compact/full projection union, so callers must narrow before reading `.data`; omitted/false compact retains full-row typing. These are observable behavior and typing changes, alongside the additive filters and page metadata.
+
 - Upgrade the Worker to record warnings and journal events, then upgrade clients to display them. An older client may ignore the new response field; the project journal remains observable (`tila journal list --kind schema.revisionless_applied`). No database migration or product-version bump accompanies this change.
 - Current `tila schema apply` still permits revision omission; use `--expected-revision` from a reviewed diff or `--review`. CLI definition import, the dashboard definition editor/importer, and MCP `tila_schema_import` send reviewed revisions on apply. Direct SDK/API applies and MCP `tila_schema_update` still accept omission on non-managed projects and now warn. Preview, retain its `revision`/`reviewed_definition`, and submit them with a stable idempotency key; never substitute a newer revision on retry.
 - Supplied revisions retain HTTP 412 `schema-revision-conflict` behavior without a deprecation warning. Managed projects still require a revision, even for a cached legacy receipt. Requiring revisions everywhere is a future migration; no enforcement release or date is set.
