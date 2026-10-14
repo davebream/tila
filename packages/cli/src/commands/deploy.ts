@@ -11,6 +11,10 @@ import {
   describeUiOutcome,
 } from "../lib/deploy";
 import { DeployTargetError, resolveDeployTarget } from "../lib/deploy-target";
+import {
+  DeploymentSettingsError,
+  describeDeploymentSettings,
+} from "../lib/deployment-settings";
 import { getGlobalFlags, globalFlagArgs } from "../lib/global-flags";
 import { buildAuthStore } from "../lib/instance-context";
 import {
@@ -20,6 +24,7 @@ import {
   printJson,
   printJsonError,
 } from "../lib/output";
+import { detectWrangler } from "../lib/wrangler-cli";
 
 import * as p from "../lib/prompts";
 import {
@@ -106,6 +111,7 @@ export default defineCommand({
     const cf = createCloudflareClient(cfToken);
     let target: DeployTarget;
     try {
+      await detectWrangler();
       target = await resolveDeployTarget({
         cf,
         store: buildAuthStore(),
@@ -118,7 +124,8 @@ export default defineCommand({
     } catch (error) {
       fatal(
         error instanceof Error ? error.message : "Target verification failed.",
-        error instanceof DeployTargetError
+        error instanceof DeployTargetError ||
+          error instanceof DeploymentSettingsError
           ? error.code
           : "DEPLOY_TARGET_UNVERIFIED",
       );
@@ -127,7 +134,7 @@ export default defineCommand({
       `Deployment target (${target.source}): ${target.infraSlug}\n` +
         `Account: ${target.accountName} (${target.accountId})\n` +
         `Worker: ${target.scriptName}${target.workerUrl ? ` (${target.workerUrl})` : ""}\n` +
-        `D1: ${target.d1DatabaseId}\nR2: ${target.r2BucketName}`,
+        `D1: ${target.d1DatabaseId}\nR2: ${target.r2BucketName}\n${describeDeploymentSettings(target.settings)}`,
     );
 
     const s = json ? null : p.spinner();
@@ -152,6 +159,8 @@ export default defineCommand({
         r2BucketName: target.r2BucketName,
         apiToken: cfToken,
         skipUi: args["skip-ui"],
+        settings: target.settings,
+        workerUrl: target.workerUrl,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

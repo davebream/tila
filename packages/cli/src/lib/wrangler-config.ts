@@ -1,6 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { RUN_WORKER_FIRST } from "@tila/schemas";
+import {
+  type DeploymentSettings,
+  DeploymentSettingsSchema,
+  RUN_WORKER_FIRST,
+} from "@tila/schemas";
 import { stringify } from "smol-toml";
 import {
   isMonorepoLayout,
@@ -26,6 +30,7 @@ const COMPATIBILITY_DATE = "2025-05-01";
 
 export interface GenerateWranglerConfigArgs {
   slug: string;
+  settings: DeploymentSettings;
   /** Intentionally not serialized into the TOML — account scoping happens via the CLOUDFLARE_ACCOUNT_ID env at `wrangler deploy` time. */
   accountId: string;
   databaseId: string;
@@ -58,6 +63,7 @@ export function generateWranglerConfig(
   args: GenerateWranglerConfigArgs,
 ): string {
   const { slug, databaseId, skipAssets = false } = args;
+  const settings = DeploymentSettingsSchema.parse(args.settings);
   const r2BucketName = args.r2BucketName ?? R2_BUCKET_NAME;
   const d1DatabaseName = args.d1DatabaseName ?? D1_DATABASE_NAME;
 
@@ -98,7 +104,10 @@ export function generateWranglerConfig(
     main: mainRelative,
     compatibility_date: COMPATIBILITY_DATE,
     compatibility_flags: ["nodejs_compat"],
-    workers_dev: true,
+    workers_dev: settings.workersDev,
+    ...(settings.previewUrls === undefined
+      ? {}
+      : { preview_urls: settings.previewUrls }),
 
     placement: {
       mode: "smart",
@@ -139,12 +148,7 @@ export function generateWranglerConfig(
       },
     ],
 
-    analytics_engine_datasets: [
-      {
-        binding: "ANALYTICS",
-        dataset: "tila-analytics",
-      },
-    ],
+    analytics_engine_datasets: settings.analyticsEngineDatasets,
 
     triggers: {
       crons: ["0 3 * * *"],

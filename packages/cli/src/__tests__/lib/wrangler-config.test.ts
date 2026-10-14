@@ -79,6 +79,13 @@ function makeTempLayout(variant: "monorepo" | "sidecar"): {
 // ---------------------------------------------------------------------------
 const BASE_ARGS = {
   slug: "my-project",
+  settings: {
+    workersDev: true,
+    previewUrls: true,
+    analyticsEngineDatasets: [
+      { binding: "ANALYTICS", dataset: "tila-analytics" },
+    ],
+  },
   accountId: "account-123",
   databaseId: "db-456",
   d1DatabaseName: "tila-global",

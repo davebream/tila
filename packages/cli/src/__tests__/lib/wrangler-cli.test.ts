@@ -74,7 +74,7 @@ describe("detectWrangler()", () => {
   });
 
   it("throws WranglerVersionError when wrangler version is below the minimum floor", async () => {
-    // Version 3.0.0 is below the floor (3.78.0)
+    // Version 3.0.0 is below the floor (3.91.0)
     mockExecFile(null, "3.0.0", "");
 
     await expect(detectWrangler()).rejects.toThrow(WranglerVersionError);
@@ -97,11 +97,19 @@ describe("detectWrangler()", () => {
   });
 
   it("resolves successfully when wrangler version meets the minimum floor", async () => {
-    // 3.78.0 is the minimum floor
-    mockExecFile(null, " 3.78.0 ", "");
+    // 3.91.0 is the minimum floor
+    mockExecFile(null, " 3.91.0 ", "");
 
     await expect(detectWrangler()).resolves.toBeUndefined();
   });
+
+  it.each(["3.78.0", "3.90.9"])(
+    "rejects %s before preview_urls support",
+    async (version) => {
+      mockExecFile(null, version, "");
+      await expect(detectWrangler()).rejects.toThrow(WranglerVersionError);
+    },
+  );
 
   it("resolves successfully for a newer wrangler version", async () => {
     mockExecFile(null, "4.93.0", "");

@@ -18,6 +18,8 @@ import {
   describeDeployPayload,
   describeUiOutcome,
 } from "../../lib/deploy";
+import { resolveProvisionDeployment } from "../../lib/deploy-target";
+import { describeDeploymentSettings } from "../../lib/deployment-settings";
 import { ensureInfraAdminToken } from "../../lib/ensure-infra-admin-token";
 import {
   discoverInstallation,
@@ -33,6 +35,7 @@ import {
 import { resolveInfraConfig } from "../../lib/infra-fallback";
 import { buildAuthStore } from "../../lib/instance-context";
 import { diagnostic, exit, printJsonError, warning } from "../../lib/output";
+import { detectWrangler } from "../../lib/wrangler-cli";
 
 import * as p from "../../lib/prompts";
 import {
@@ -137,17 +140,32 @@ async function runForceRedeploy(
   const cf = createCloudflareClient(cfToken);
   const s = p.spinner();
 
-  const r2BucketName = infraConfig.r2_bucket_name ?? R2_BUCKET_NAME;
+  const deployment = await resolveProvisionDeployment({
+    cf,
+    accountId: infraConfig.account_id,
+    scriptName,
+    store: buildAuthStore(),
+    home: tilaDir,
+    allowCreate: false,
+  });
+  diagnostic(describeDeploymentSettings(deployment.settings));
+  if (!deployment.target)
+    throw new Error(
+      "Force-redeploy requires verified existing infrastructure.",
+    );
+  const r2BucketName = deployment.target.r2BucketName;
 
   s.start("Deploying Worker and UI...");
   const result = await deployWorkerWithAssets({
     cf,
     accountId: infraConfig.account_id,
     scriptName,
-    d1DatabaseId: infraConfig.d1_database_id,
+    d1DatabaseId: deployment.target.d1DatabaseId,
     r2BucketName,
     apiToken: cfToken,
     skipUi: false,
+    settings: deployment.settings,
+    workerUrl: deployment.workerUrl,
   });
   const uiDesc = describeUiOutcome(result.ui);
   s.stop(uiDesc.spinnerMessage);
@@ -280,6 +298,7 @@ export default defineCommand({
     // Fail before touching Cloudflare when this CLI cannot deploy the Worker.
     try {
       describeDeployPayload();
+      await detectWrangler();
     } catch (err) {
       const msg = `Deploy payload check failed: ${err instanceof Error ? err.message : String(err)}`;
       if (args.headless) printJsonError(msg, "DEPLOY_PAYLOAD_INVALID");
@@ -367,9 +386,22 @@ export default defineCommand({
       infraSlug = slugResult as string;
     }
 
+    const deployment = await resolveProvisionDeployment({
+      cf,
+      accountId: whoami.account_id,
+      scriptName: infraSlug,
+      store: buildAuthStore(),
+      home: tilaDir,
+      allowCreate: true,
+    });
+    diagnostic(describeDeploymentSettings(deployment.settings));
+    const r2BucketName = deployment.target?.r2BucketName ?? R2_BUCKET_NAME;
+
     // Step 4: Create D1 database
     s.start("Setting up D1 database...");
-    const d1Id = await ensureD1Database(cf, whoami.account_id, cfToken);
+    const d1Id =
+      deployment.target?.d1DatabaseId ??
+      (await ensureD1Database(cf, whoami.account_id, cfToken));
     s.stop(`D1 database ID: ${d1Id}`);
 
     // Step 5: Apply D1 migrations
@@ -391,8 +423,9 @@ export default defineCommand({
 
     // Step 6: R2 artifact bucket
     s.start("Setting up R2 artifact bucket...");
-    await ensureR2Bucket(cf, whoami.account_id, R2_BUCKET_NAME);
-    await applyR2Lifecycle(cf, whoami.account_id, R2_BUCKET_NAME);
+    if (!deployment.target)
+      await ensureR2Bucket(cf, whoami.account_id, r2BucketName);
+    await applyR2Lifecycle(cf, whoami.account_id, r2BucketName);
     s.stop("R2 artifact bucket ready.");
 
     // Step 7: Deploy Worker + UI (Option A: same-origin, wrangler deploy)
@@ -402,9 +435,11 @@ export default defineCommand({
       accountId: whoami.account_id,
       scriptName: infraSlug,
       d1DatabaseId: d1Id,
-      r2BucketName: R2_BUCKET_NAME,
+      r2BucketName,
       apiToken: cfToken,
       skipUi: false,
+      settings: deployment.settings,
+      workerUrl: deployment.workerUrl,
     });
     const workerUrl = deployResult.workerUrl;
     const deployUiDesc = describeUiOutcome(deployResult.ui);
@@ -528,7 +563,7 @@ export default defineCommand({
         account_name: whoami.account_name,
         d1_database_id: d1Id,
         worker_url: workerUrl,
-        r2_bucket_name: R2_BUCKET_NAME,
+        r2_bucket_name: r2BucketName,
         hmac_key: hmacKey,
         infra_admin_token: infraAdminToken,
         infra_slug: infraSlug,
@@ -545,7 +580,7 @@ export default defineCommand({
       `Account:  ${whoami.account_name} (${whoami.account_id})`,
       `D1:       ${d1Id}`,
       `Worker:   ${workerUrl}`,
-      `R2:       ${R2_BUCKET_NAME}`,
+      `R2:       ${r2BucketName}`,
       ...(githubApp
         ? [
             `GitHub:   app_id=${githubApp.app_id}, installation_id=${githubApp.installation_id}`,
