@@ -2,25 +2,43 @@
 
 # tila
 
-**Durable state and artifact storage for multi-machine agentic work.**
+**Self-hosted development management for humans and coding agents.**
 
-Content-addressed artifacts outside your git repo. Schema-validated records.<br>
-Coordination primitives that prevent races.
+Durable project state, assignments, questions, decisions, results, and handoffs.<br>
+Content-addressed artifacts and coordination protected by fencing tokens.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.10.0 — see the [latest published release](https://github.com/davebream/tila/releases/latest). APIs may change before v1.0. Upgrade the deployment CLI to 0.10.0 before deploying; it verifies and preserves live Worker exposure and analytics settings and requires Wrangler 3.91.0 or newer. Read the [upgrade notes](CHANGELOG.md#0100---2026-10-14) before deploying.
+> **Status:** v0.10.0 — see the [published release](https://github.com/davebream/tila/releases/tag/v0.10.0). APIs may change before v1.0. Upgrade the deployment CLI to 0.10.0 before deploying; it verifies and preserves live Worker exposure and analytics settings and requires Wrangler 3.91.0 or newer. Deploy the Worker and bundled UI together before upgrading other clients. Read the [v0.10.0 upgrade notes](CHANGELOG.md#0100---2026-10-14) before deploying.
 
 </div>
 
-**Direction:** tila is evolving into one development-management product around this
-coordination core: an orchestrator with workers across Mac/Linux hosts, then native
-Mac/iPhone clients. Cloudflare will be the shared backend and project keys the
-supported auth path. These are planned changes; the current release still includes
-local persistence and GitHub auth. See [the roadmap](docs/03-ROADMAP.md) for the
-first milestone and runtime evaluation.
+tila is one development-management product with a reusable state-and-coordination
+core. The Cloudflare deployment holds shared project state; CLI, MCP, SDK, and web
+clients use its service contracts.
 
-**For:** framework authors, AI autopilot builders, and small teams (3 to 6 engineers) whose agents need shared state across multiple machines.
+**Delivered in v0.10.0:** schema-defined tasks and records, claims/fences, artifacts,
+journal cursors and handoffs, conversations, and a managed work queue with durable
+assignments, attempts, questions/decisions, and explicit results. An attempt is one
+execution of a task; its result is recorded separately from task and terminal state.
+
+**Direction and remaining acceptance:** the first live workflow is one orchestrator
+coordinating workers across Mac/Linux hosts. Host runtimes own processes, terminals,
+and model retries; tila owns durable assignments, decisions, work retry policy, and
+supported host-adapter contracts. The standalone connector and adapter contracts
+exist, but live cross-host recovery remains unverified. Herdr is under evaluation;
+registration and cold opening remain unsupported. Native Mac/iPhone clients, other
+topologies, and sandbox scheduling remain roadmap direction. See
+[Decisions §0](docs/01-DECISIONS.md#0-name-and-scope--amended-2026-09-20) and
+[the active roadmap](docs/03-ROADMAP.md).
+
+**Compatibility:** standalone local persistence and GitHub auth remain implemented.
+Local mode covers a subset of the product; MCP requires a remote project run.
+Key-only onboarding and retirement of GitHub auth or local persistence require
+separate migrations and have not shipped.
+
+**For:** developers and teams coordinating coding agents across worktrees or
+machines, and framework authors reusing the same durable coordination core.
 
 ---
 
@@ -43,9 +61,18 @@ first milestone and runtime evaluation.
 
 Agent-produced artifacts (plans, designs, analysis reports, build outputs) pile up fast. Commit them to your repo and they rot in context: coding agents waste tokens parsing stale intermediate files, and your git history fills with noise no human reviews. Gitignore them and they vanish on clone, can't be shared across machines, and agents lose access on context switch. A separate repo just moves the problem.
 
-Once you solve "where do artifacts go," the next question is shared state. Agents reading and writing pipeline configs, service catalogs, or feature flags need that state to be typed, validated, and protected from concurrent writes, not scattered across ad-hoc JSON files.
+Development work also needs durable answers to who owns a task, which attempt is
+running, what question blocks it, which decision authorizes the next step, and what
+result or handoff the next participant should read. Terminal activity alone cannot
+answer those questions after a process restart or a change of machine.
 
-tila handles both. Artifact storage is content-addressed with deduplication, lifecycle, and full-text search. Every record write is schema-validated and revision-tracked. Coordination uses first-writer-wins fencing; stale writes get a 409, not silent overwrites. Not a SaaS. You deploy to your own Cloudflare account or run locally.
+tila keeps that work in durable project state alongside typed records and artifacts.
+Artifact storage is content-addressed with deduplication, lifecycle, and full-text
+search for configured text kinds. Record writes are schema-validated and
+revision-tracked. Coordination uses first-writer-wins fencing; stale fenced writes
+to tila-managed state are rejected. Consumers must honor claims when editing files
+or calling external systems. You deploy to your own Cloudflare account or use the
+supported local subset.
 
 ---
 
@@ -70,7 +97,11 @@ $ tila artifact search "auth migration"
 # => 3 results across 2 resources
 ```
 
-Artifacts are keyed by sha256. Upload the same content twice and it's stored once. Full-text search across indexed content. Worker and doctor paths handle cross-store reconciliation; retention behavior is still evolving during v0.1.
+Artifacts are keyed by sha256. Upload the same content twice and it's stored once.
+Full-text search covers indexed content. Worker and doctor paths handle cross-store
+reconciliation. Immutable revisions, provenance, and version-aware retention are
+delivered; see [artifact lifecycle](docs/02-ARCHITECTURE.md#version-aware-retention-and-deletion)
+for live-head protection, deletion, and recovery limits.
 
 ### Typed records: structured state, not ad-hoc JSON
 
@@ -110,6 +141,9 @@ First-writer-wins with monotonic fences. Stale writes to tila-managed state get 
 
 ### Core concepts
 
+- **Tasks and attempts** — schema-defined work with durable assignments, execution history, and explicit results on the managed queue
+- **Questions and decisions** — attempt-correlated requests, answers, and owner escalation, with authority and revision checks
+- **Handoffs and cursors** — durable checkpoints and summaries for resuming project work
 - **Journal** — append-only audit log of every state transition (who changed what, when, with which fence)
 - **Signals** — lightweight inter-agent notifications distinct from journal events
 - **Presence** — TTL'd machine activity tracking across connected agents
@@ -132,6 +166,7 @@ tila deploys to your own Cloudflare account (Worker + DO + D1 + R2). There is no
 
 ## 🧩 When you need tila
 
+- You need assignments, worker questions, decisions, results, and handoffs to survive a session or machine change
 - Your agents produce artifacts (plans, reports, build outputs) that don't belong in git but need to be durable, searchable, and accessible across machines
 - Your agents share typed state (pipeline configs, service catalogs, agent policies, feature flags) and you want schema validation, revision history, and an audit log
 - Multiple agents on multiple machines need coordination for shared resources before write time
@@ -142,16 +177,21 @@ tila deploys to your own Cloudflare account (Worker + DO + D1 + R2). There is no
 
 ## 🤝 Related projects
 
-These projects solve adjacent problems and work well alongside tila:
+These projects cover overlapping parts of coding-agent work. tila combines durable
+development management with a reusable coordination core; choosing another task,
+memory, or messaging tool depends on the workflow you need. Execution frameworks
+and host runtimes can integrate through tila's service and adapter contracts. Host
+runtimes retain process/terminal supervision and model retries; tila retains work
+ownership, decisions, and recorded outcomes.
 
 | Project | What it does well | Relationship to tila |
 |---------|-------------------|---------------------|
-| [beads](https://github.com/gastownhall/beads) | Dolt-powered distributed issue tracker with agent memory, dependency graphs, context compaction, and cross-machine sync | Different layers. Beads tracks what agents should work on and remember; tila stores shared typed state and artifacts |
-| [claude-task-master](https://github.com/eyaltoledano/claude-task-master) | PRD-to-task decomposition with dependency graphs and complexity analysis | Good pairing. Task-master plans the work; tila is the state plane underneath |
+| [beads](https://github.com/gastownhall/beads) | Dolt-powered distributed issue tracker with agent memory, dependency graphs, context compaction, and cross-machine sync | Overlapping task management; tila also keeps fenced assignments, attempt results, decisions, typed records, and artifacts |
+| [claude-task-master](https://github.com/eyaltoledano/claude-task-master) | PRD-to-task decomposition with dependency graphs and complexity analysis | Planning can feed tila's durable tasks, assignments, and results |
 | [ccpm](https://github.com/automazeio/ccpm) | GitHub Issues as coordination hub with automatic worktree isolation | Great choice when GitHub is already your team's project hub |
-| [claude-mem](https://github.com/thedotmack/claude-mem) | Semantic memory with vector search across agent sessions | Different concerns. Memory and coordination don't overlap much |
-| [mcp_agent_mail](https://github.com/Dicklesworthstone/mcp_agent_mail) | Async agent-to-agent messaging with searchable, threaded conversations | Different layers. Messaging between agents; tila is shared state for agents |
-| [aweb](https://github.com/awebai/aweb) | Agent messaging, task management, and file reservations in one surface | Some overlap. aweb bundles several concerns; tila focuses on typed state and fence-checked writes |
+| [claude-mem](https://github.com/thedotmack/claude-mem) | Semantic memory with vector search across agent sessions | Session memory can complement tila's durable project state and handoffs |
+| [mcp_agent_mail](https://github.com/Dicklesworthstone/mcp_agent_mail) | Async agent-to-agent messaging with searchable, threaded conversations | Overlapping messaging; tila also correlates questions and decisions to work attempts |
+| [aweb](https://github.com/awebai/aweb) | Agent messaging, task management, and file reservations in one surface | Overlapping coordination and task management; compare the assignment, result, and recovery contracts your workflow needs |
 
 **If you have one developer, one machine, and one agent at a time,** you probably don't need tila yet. Any of the tools above might be a better starting point. tila earns its keep when multiple agents might write to the same resource.
 
@@ -169,7 +209,7 @@ tila mcp init
 **2. Explicit managed launch** (after enrollment)
 ```sh
 tila --instance https://tila.example.com --project my-project machine enroll
-tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.4.0
+tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.10.0
 ```
 
 MCP uses a single project run through a local credential helper. It rejects owner/personal credentials and local SQLite configuration. Generated editor settings contain only non-secret references. CLI administration and SDK local mode remain available.
@@ -257,11 +297,12 @@ See [What it looks like](#-what-it-looks-like) for detailed usage examples with 
 - [TypeScript SDK](packages/sdk/README.md): client API, claims, artifacts, error handling
 - [Getting Started Tutorial](docs/tutorial-getting-started.md): from `tila init` to the UI dashboard
 - [Architecture](docs/02-ARCHITECTURE.md): full technical spec
-- [Roadmap](docs/03-ROADMAP.md): what v0.1 ships and what is deferred
+- [Decisions](docs/01-DECISIONS.md): product scope, service/host boundary, and correctness guarantees
+- [Roadmap](docs/03-ROADMAP.md): active product direction, delivered foundations, and remaining acceptance work
 - [Persistence Schema](docs/04-PERSISTENCE-SCHEMA.md): DO SQLite, D1, and R2 layouts
 - [Operations](docs/05-OPERATIONS.md): deployment, monitoring, maintenance
 - [Search](docs/06-SEARCH.md): searchable artifact kinds and FTS5 usage
-- [GitHub-scoped Auth](docs/07-GITHUB-SCOPED-AUTH.md): GitHub auth (default) and repo allowlist
+- [GitHub-scoped Auth](docs/07-GITHUB-SCOPED-AUTH.md): implemented GitHub compatibility and repository access policy
 - [Records](docs/08-RECORDS.md): typed mutable JSON state primitive
 - [Shared-Project Coexistence](docs/09-SHARED-PROJECT-COEXISTENCE.md): sharing one project across a framework and direct use
 
@@ -332,7 +373,7 @@ Project IDs cannot be renamed during restore. Existing-project restore creates a
 
 ## CLI automation and JSON migration
 
-The next release changes CLI JSON output. Success emits
+The current CLI uses a common JSON output envelope. Success emits
 `{"ok":true,"result":...,"meta":...}` on stdout; failure emits
 `{"ok":false,"error":{"kind":"...","message":"...","retryable":false}}` on stderr.
 Errors may include `hint` and `details`; partial writes include recovery information
@@ -419,13 +460,22 @@ Yes. `tila project create --local` — see [Self-hosted](#-self-hosted) for deta
 <details>
 <summary><b>How does this compare to LangGraph or CrewAI?</b></summary>
 
-Those are agent orchestration frameworks. They run agents and route messages between them. tila is the state and coordination layer underneath such a framework. You can use LangGraph or CrewAI for orchestration and tila for typed state, artifact storage, claims, and gates.
+tila provides durable development-management contracts: tasks, assignments,
+attempts, questions/decisions, results, handoffs, and artifacts. An execution
+framework can consume those contracts alongside claims and gates. Host runtimes
+own process/terminal supervision and model retries. The first live
+orchestrator/worker workflow still has acceptance work; see
+[the roadmap](docs/03-ROADMAP.md).
 </details>
 
 <details>
 <summary><b>How does this compare to beads?</b></summary>
 
-Beads is a Dolt-powered distributed issue tracker with agent memory, dependency graphs, context compaction, and cross-machine sync via Dolt remotes. Great for giving coding agents structured task awareness. tila is a state and artifact engine with typed records, content-addressed storage, schema validation, and fence-protected writes. They sit at different layers: Beads tracks what agents should work on and remember, tila stores shared typed state and artifacts.
+Both cover task management for coding agents. tila combines that workflow with
+typed records, content-addressed artifacts, fence-protected writes, durable
+attempts and results, and attempt-correlated questions/decisions. Its coordination
+core is reusable by other tools. See [Related projects](#-related-projects) for
+overlapping capabilities and [the roadmap](docs/03-ROADMAP.md) for remaining work.
 </details>
 
 <details>

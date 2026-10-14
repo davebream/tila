@@ -2,22 +2,46 @@
 
 > The technical specification. Detailed enough that an autopilot can implement against it without inventing things. Reads top to bottom; subsections reference each other but each section is meaningful on its own.
 
-## Direction and implementation status — 2026-09-20
+## Direction and implementation status — v0.10.0 (2026-10-14)
 
-The existing sections describe the implemented coordination engine and historical
-plans. [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20) and
+tila is one self-hosted development-management product with a reusable
+state-and-coordination core. The existing sections include implemented contracts
+and historical design rationale. [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20) and
 [the active roadmap](03-ROADMAP.md) and the [settings/lifecycle contract](#section-14-editable-settings-and-entity-lifecycle-contract-293) take precedence for new work.
 
-The target adds a management service in the same repo, with tasks distinct from
-attempts and replaceable provider sessions. One orchestrator coordinates workers
-first. Cloudflare owns shared state; a Mac/Linux host integration owns execution.
-Evaluate Herdr's runtime before writing a new supervisor. Native clients are later
-API consumers, not a requirement for workers to stay alive.
+The current release includes schema-defined tasks and records, artifacts,
+claims/fences, journal cursors and handoffs, conversations, and a managed work queue.
+The queue records durable assignments, attempts, questions/decisions, and explicit
+results. Tasks, work attempts, authenticated runs, and replaceable provider sessions
+are distinct. See the [release and upgrade notes](../CHANGELOG.md#0100---2026-10-14)
+and the assignment/attempt/question contracts later in this document.
 
-Keys bound to native principals and explicit memberships will replace GitHub auth.
-The membership foundation from #184 / #218 is implemented; key-only onboarding,
-auth retirement and standalone local-mode retirement are not. Preserve current
-compatibility until migration/export and access tests cover each removal.
+The first live workflow targets one orchestrator coordinating workers across
+Mac/Linux hosts. Cloudflare is the shared project-state authority. Host runtimes
+own processes, terminals, and model retries; tila owns durable assignment and
+decision semantics, work retry policy, and supported host-adapter contracts.
+The standalone connector and SDK execution-adapter contracts are implemented;
+live cross-host recovery remains unverified. Herdr is under evaluation, with
+registration and cold opening still unsupported. A new supervisor, generic
+sandbox scheduler, later orchestration topologies, and native Mac/iPhone clients
+are not delivered features. Runtime evaluation and remaining acceptance are tracked
+in [#283](https://github.com/davebream/tila/issues/283) and
+[#308](https://github.com/davebream/tila/issues/308); measured product dogfooding
+remains [#194](https://github.com/davebream/tila/issues/194).
+
+Keys bound to native principals and explicit memberships are the target auth path.
+The membership foundation from #184 / #218 is implemented. GitHub App/session auth
+and standalone local persistence remain implemented compatibility; key-only
+onboarding and auth/local-mode retirement have not shipped. Local mode supports a
+subset of the service; MCP uses remote project runs. Preserve current compatibility
+until migration/export and access tests cover each removal.
+
+Earlier v0.1/v0.2 sketches are historical design context, not release promises.
+Shipped behavior below is reconciled with v0.10.0; alternatives without an
+implementation remain unscheduled ideas. The active roadmap and Decisions §0
+govern future scope rather than the old version-number sequence. Neither local
+fixtures nor the existence of an API establishes live multi-host acceptance or
+the comparative study results required by #194.
 
 For development, Wrangler, Bun and tsx use the root source path mappings; Vite reads
 schemas from source. Production package exports, declaration builds and packaging
@@ -54,14 +78,13 @@ The languages, frameworks, and libraries this is built with. Decisions are made;
 ### 0.1 Core stack
 
 - **Language:** TypeScript throughout. CLI, Worker, shared schemas, UI bundle. One language eliminates client-server type drift and maximizes Claude Code's effectiveness during AI-assisted implementation.
-- **CLI runtime:** Bun (>=1.2). Source is TypeScript; distribution is a static binary per platform via `bun build --compile`. Cold start ~20-30ms vs Node's 200-500ms. Bun's test runner is acceptable for v0.1; Vitest is the fallback for tests that need `@cloudflare/vitest-pool-workers` (the Worker tests specifically).
+- **CLI runtime:** Bun (>=1.2). Source is TypeScript; distribution is a static binary per platform via `bun build --compile`. The CLI test script runs Vitest and Bun's local-backend suite. Required Cloudflare runtime tests use `@cloudflare/vitest-plugin` separately.
 - **Worker runtime:** Cloudflare Workers (workerd). Same TypeScript source as the CLI; bundled via Wrangler.
-- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.0`). Bun runs the source CLI and compiles its release binary (`bun build --compile`); pnpm owns workspace management.
+- **Package manager:** pnpm for the monorepo (`pnpm install`, workspaces via `pnpm-workspace.yaml`; `packageManager: pnpm@9.15.9`). Bun runs the source CLI and compiles its release binary (`bun build --compile`); pnpm owns workspace management.
 - **Monorepo tooling:** Turborepo for task orchestration across packages (matching the maintainer's existing setup).
-- **ORM / DB access:** Drizzle for SQL access. In the Worker, `drizzle-orm/durable-sqlite` for the per-project DO (the primary persistence layer) and `drizzle-orm/d1` for the global D1 instance (auth tokens, idempotency). The EntityBackend interface preserves the option for v0.2+ alternatives (GitHub Issues, Linear, Upstash, self-hosted Postgres).
+- **ORM / DB access:** Drizzle for SQL access. In the Worker, `drizzle-orm/durable-sqlite` for the per-project DO (the primary persistence layer) and `drizzle-orm/d1` for the global D1 instance (auth tokens, idempotency). Backend interfaces preserve reuse of the core; the earlier GitHub Issues, Linear, Upstash, and Postgres alternatives are not shipped backends or scheduled milestones. Cloudflare remains the target shared authority under [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20).
 - **HTTP framework in the Worker:** Hono. Route handlers, middleware, error handling.
-- **CLI framework:** Citty. Bun-native, declarative, lightweight. Commander.js is the fallback if Citty surfaces gaps in v0.1.
-- **Terminal UI library:** Ink (React in the terminal) is bundled-supportable for any interactive CLI components needed. The same library Claude Code uses, well-supported under Bun. v0.1 tila is mostly non-interactive; Ink is available but not heavily used.
+- **CLI framework:** Citty. The earlier Commander.js fallback and Ink terminal-UI suggestion were design alternatives, not delivered dependencies. Process and terminal supervision belong to host runtimes.
 - **R2 / S3 client:** `aws4fetch` in the Worker for minimal bundle size. The CLI does not talk to R2 directly; all artifact ops go through the Worker.
 - **Validation:** Zod schemas for every API boundary (Worker endpoints, CLI inputs, schema.toml parsing). Zod is the source of truth; types are derived via `z.infer`. Shared schemas live in a dedicated `packages/schemas` workspace consumed by both the Worker and the CLI.
 - **Build:** `bun build --compile` for CLI binaries; Wrangler for the Worker. tsdown is the fallback if Bun's compile gains friction for any specific output target.
@@ -78,15 +101,20 @@ The languages, frameworks, and libraries this is built with. Decisions are made;
 The CLI ships as multiple artifacts to match how engineers actually install developer tools in 2026. This follows the pattern Claude Code itself uses (which is no accident — it's now the dominant pattern for AI-coding-adjacent CLIs):
 
 - **Pre-built binaries per platform:** GitHub Releases publishes `tila-darwin-arm64`, `tila-darwin-x64`, `tila-linux-x64`, `tila-linux-arm64`, `tila-linux-x64-musl`, `tila-linux-arm64-musl`, `tila-windows-x64.exe`, `tila-windows-arm64.exe`. The musl variants matter for Alpine and other musl-libc distros used in containers.
-- **curl-bash install script** (recommended primary path): `curl -fsSL https://tila.dev/install.sh | bash` detects platform, downloads the right binary, places it in `~/.tila/bin/`, updates PATH instructions in the shell rc file. Mirrors Claude Code's `claude.ai/install.sh` approach.
-- **PowerShell install script** for Windows: `irm https://tila.dev/install.ps1 | iex`. Same approach as Claude Code's Windows installation.
-- **Homebrew tap:** `brew install tila/tap/tila`. Updates manually via `brew upgrade`; opt-in auto-update via `TILA_PACKAGE_MANAGER_AUTO_UPDATE=1` env var.
+- **Shell install script:** `curl -fsSL https://github.com/davebream/tila/releases/latest/download/install.sh | sh` detects the platform, verifies SHA-256 checksums, and installs the binary in `~/.tila/bin/` with PATH instructions.
+- **PowerShell install script** for Windows: `irm https://github.com/davebream/tila/releases/latest/download/install.ps1 | iex`.
+- **Homebrew tap:** `brew install davebream/tap/tila`. Tap updates are published separately.
 - **npm with platform-specific optional dependencies:** `npm install -g tila-cli` or `bun add -g tila-cli`. The npm package uses optional per-platform deps (`tila-cli-darwin-arm64`, `tila-cli-linux-x64`, etc.) that resolve to the actual native binary. The installed binary does not invoke Node; this is the same architecture Claude Code uses. Useful for CI environments where adding curl-bash is friction.
-- **Linux package managers** (v0.2): `apt`, `dnf`, `apk` repositories with signed packages.
+- **Linux package repositories:** the earlier `apt`, `dnf`, and `apk` proposal is not delivered or tied to a release milestone. Use the binary or npm channels above.
 
-The binary is ~50-60MB (Bun runtime is included). Acceptable for a developer tool installed once.
+The binary includes the Bun runtime; exact sizes and checksums are available in
+the [published release assets](https://github.com/davebream/tila/releases/tag/v0.10.0).
 
-**Code signing.** Binaries should be signed on platforms that support it: macOS (via Apple Developer certificate, with notarization), Windows (via code-signing certificate). Linux binaries are not individually signed; the manifest is signed and verifiable via the install script. Worth deferring to v0.2 if v0.1 ships without — note in install instructions that v0.1 binaries are unsigned and Gatekeeper / SmartScreen may flag them.
+**Code signing.** Installers verify release-asset SHA-256 checksums; that is distinct
+from OS code signing. The earlier macOS notarization and Windows code-signing
+proposal is not delivered. macOS binaries remain unsigned and may trigger
+Gatekeeper. See [distribution verification](12-INSTALL-DISTRIBUTION.md#compressed-assets-sboms-and-attestations-178)
+for current platform limits; no v0.2 signing milestone is implied.
 
 ### 0.3 Why Bun + TypeScript
 
@@ -180,7 +208,7 @@ This stack uses a Turborepo monorepo, Drizzle ORM, a Hono backend, and Promptfoo
               └──────────┘
 ```
 
-**Why the layering looks like this:** the Worker is a thin facade that routes to the right backend. Per-project state (entities, journal, claims) lives in one DO per project; this is the 2026-native consolidation that replaces the 2024 D1+DO split. Auth tokens and idempotency keys live in global D1 because they need cross-project scope and lightweight access patterns. Artifacts live in R2 because they're large blobs that benefit from content-addressing and per-prefix lifecycle. The DO can only be reached through a Worker; the Worker is the only writer to R2 (no signed-URL writes in v0.1).
+**Why the layering looks like this:** the Worker is a thin facade that routes to the right backend. Per-project state (entities, journal, claims) lives in one DO per project; this is the 2026-native consolidation that replaces the 2024 D1+DO split. Auth tokens and idempotency keys live in global D1 because they need cross-project scope and lightweight access patterns. Artifacts live in R2 because they're large blobs that benefit from content-addressing and per-prefix lifecycle. The DO can only be reached through a Worker; the Worker is the only writer to R2 (no signed-URL writes in v0.10.0).
 
 **Local path (single machine -- `tila project create --local`):**
 
@@ -735,7 +763,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
 | GET | `/journal` | query: `since_seq`, `resource` (repeatable, up to 10), `kind`, `client_name`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — `archived: true` signals a cold-stored range |
-| GET | `/journal/stream` | query: `since_seq` | SSE event stream (v0.2; v0.1 uses polling) |
+| GET | `/journal/stream` | query: `since_seq` | Historical SSE proposal; not implemented in v0.10.0. Use journal reads and durable cursors; no scheduled SSE milestone. |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
 | GET | `/` (and static paths) | — | UI HTML/JS bundle |
@@ -868,7 +896,7 @@ Every cloud-mode tila project records which Cloudflare account owns it. From `.t
 project_id = "auth-refactor"
 worker_url = "https://tila-auth-refactor.acme.workers.dev"
 created_at = "2026-05-15T10:00:00Z"
-tila_version = "0.1.0"
+tila_version = "0.10.0"
 schema_version = 1
 
 [cloudflare]
@@ -1047,17 +1075,20 @@ interface EntityBackendCapabilities {
 }
 ```
 
-v0.1 implementations:
-- `do-sqlite` — full capabilities, sub-millisecond reads inside the DO (measured by the `inproc` benchmark tier, see [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), co-located with coordination state in the same DO
-- `local-sqlite` -- full capabilities (same as do-sqlite), <1ms reads (bun:sqlite, process-local), same SQLite storage as coordination state in the same DB file. Requires single-machine deployment; not suitable for multi-machine teams.
+Current implementations:
+
+- `do-sqlite` — entity state co-located with coordination state in the same project DO
+- `local-sqlite` — entity and coordination state in the same local SQLite DB, shared through `@tila/ops-sqlite`. Standalone local persistence is single-machine compatibility, not shared multi-host authority.
 
 Test fixtures (not shipped as backends):
 - An in-memory fake EntityBackend lives in `packages/core/test/fixtures/` for unit-testing tila-core logic without spinning up the DO.
 
-Stubs for v0.2+:
-- `github-issues` — limited capabilities (no typed dependencies, custom types via labels, ~400ms reads)
-- `linear` — limited capabilities (custom types via labels, ~200ms reads, requires paid plan past 250 issues)
-- `d1` — if a future use case wants entity storage decoupled from a per-project DO (e.g., shared-tenancy hosted offering)
+Historical alternatives (not implemented or scheduled):
+
+- `github-issues`, `linear`, and a separate `d1` entity backend were early design
+  options. They are not shipped stubs. New backend scope must follow
+  [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20) and
+  [the active roadmap](03-ROADMAP.md).
 
 ### 5.2 CoordinationBackend
 
@@ -1085,14 +1116,23 @@ type AcquireResult =
   | { acquired: false; fence: number; expires_at: number; participant_id: string };
 ```
 
-v0.1 implementations:
-- `do-sqlite` — strong consistency via DO single-thread serialization, sub-millisecond p50 for acquire/renew/release inside the DO (`inproc` tier in [docs/benchmarks/BASELINE.md](benchmarks/BASELINE.md)), same SQLite storage as entities (one transaction can claim and update an entity atomically)
-- `local-sqlite` -- strong consistency via SQLite `BEGIN IMMEDIATE` serialization, <1ms p50 (bun:sqlite, process-local), same SQLite storage as entities (one transaction can claim and update an entity atomically)
+Current implementations:
+
+- `do-sqlite` — strong consistency via DO single-thread serialization, with entity and claim writes in one SQLite transaction
+- `local-sqlite` — SQLite transaction serialization, with entity and claim writes in the same DB
+
+Performance evidence is dated and workload-specific. See the
+[benchmark baseline](benchmarks/BASELINE.md); it is not v0.10.0 validation or the
+comparative product study required by [#194](https://github.com/davebream/tila/issues/194).
 
 Test fixtures: a Map-backed in-memory fake CoordinationBackend in `packages/core/test/fixtures/` for unit testing.
 
-Stubs for v0.2+:
-- `upstash-redis` — for users who want a separate coordination backend (split EntityBackend and CoordinationBackend implementations are explicitly supported even though v0.1 unifies them)
+Historical alternative (not implemented or scheduled):
+
+- `upstash-redis` was considered for a separate coordination backend. The interfaces
+  remain reusable, while current SQLite implementations co-locate entities and
+  claims for transactional writes. This is not a v0.2 delivery commitment; see
+  [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20).
 
 ### 5.3 ArtifactBackend
 
@@ -1133,9 +1173,10 @@ interface ArtifactPutInput {
 }
 ```
 
-v0.1 implementations:
-- `r2` — content-addressed, conditional writes via S3 API path, native lifecycle
-- `local-filesystem` -- content-addressed blobs on local filesystem at `~/.tila/artifacts/<org>/<project>/<sha256>.<ext>`, pointer rows in same SQLite DB, <1ms reads (filesystem), no lifecycle rules API in v0.1 (returns empty array)
+Current implementations:
+
+- `r2` — content-addressed blobs with Worker-driven cleanup; see [version-aware retention and deletion](#version-aware-retention-and-deletion) for immutable revision lifecycle. An R2 lifecycle backstop must exclude the `versioned/` prefix.
+- `local-filesystem` — content-addressed local blobs with pointers in the same SQLite DB. Standalone local persistence remains compatibility; its lifecycle-rules inspection returns an empty array. It is not a new parity target under [Decisions §0](01-DECISIONS.md#0-name-and-scope--amended-2026-09-20).
 
 Test fixtures: a Map-backed in-memory fake ArtifactBackend in `packages/core/test/fixtures/` for unit testing.
 
@@ -1205,7 +1246,7 @@ max_depth = 3                          # rejected: creating a child of a task (a
 
 # ---------------------------------------------------------------------------
 # ARTIFACTS — content-addressed blobs produced or uploaded into the project
-# v0.1 searchability defaults: memory-like text kinds opt into FTS5 indexing
+# Searchability defaults: memory-like text kinds opt into FTS5 indexing
 # (searchable=true, search_mode="full_text"). Binary or ephemeral kinds
 # opt out (searchable=false). When searchable is omitted, it defaults to false.
 # ---------------------------------------------------------------------------
@@ -1267,7 +1308,7 @@ mime_types = ["text/x-patch", "application/x-patch"]
 retention_days = 7
 searchable = false                     # binary-adjacent — not indexed
 
-> **Searchability configuration:** Artifact kinds can opt in to lexical full-text search (FTS5) by setting `searchable = true` and `search_mode = "full_text"` in `tila.schema.toml`. See [docs/06-SEARCH.md](06-SEARCH.md) for the full guide: configuration, CLI usage, and v0.1 limitations.
+> **Searchability configuration:** Artifact kinds can opt in to lexical full-text search (FTS5) by setting `searchable = true` and `search_mode = "full_text"` in `tila.schema.toml`. See [docs/06-SEARCH.md](06-SEARCH.md) for configuration, CLI usage, and search limitations.
 
 # ---------------------------------------------------------------------------
 # ARTIFACT RELATIONSHIPS — the typed edges artifacts can have to each other
@@ -2213,18 +2254,34 @@ The artifact upload sequence guarantees that if R2 succeeds and the DO write fai
 Smart Placement is enabled by default in the bundled `wrangler.toml`. If a user disables it or runs on a Cloudflare region where it's unavailable, latency degrades but correctness is unaffected. Worker → DO RTT can rise from ~5ms to ~50ms cross-region (Cloudflare's figures; tila does not measure the hop in isolation). `tila doctor` reports the placement mode and Worker→DO latency from a `/api/health` probe; the benchmark harness records the serving colo and `cf-placement` header with every deployed run.
 
 ### 10.47 D1 token validation cache hit/miss
-The Worker caches token validation results in a per-isolate Map for 60 seconds after first validation. Cache miss = D1 lookup; cache hit = ~1ms. When `DELETE /api/tokens/:name` is called, D1 is updated immediately and the calling Worker isolate's in-memory cache entry is invalidated synchronously via `invalidate(tokenHash)`. Other isolates that have the token positively cached will continue accepting it until their cache entry expires (max 60 seconds TTL). The `tila token revoke` CLI output notes this propagation delay. Cross-isolate immediate invalidation (via a revocation marker or broadcast mechanism) is deferred to v0.2.
+The earlier 60-second positive-cache revocation window is superseded. Current
+requests revalidate D1 credential/session/binding and membership state against the
+primary database; positive authentication caches cannot establish continuing
+validity. Lookup failures fail closed. Revocation applies to requests authenticated
+after its commit, not mutations already authorized and executing. See
+[credential rotation and revocation](05-OPERATIONS.md#expiry-rotation-and-revocation)
+and [Decisions](01-DECISIONS.md) for the current authorization boundary.
 
 ### 10.48 Journal table growth over time
-The `journal` table grows with every operation. The earlier estimate was ~1-5MB/day for a busy autopilot project; the benchmark harness's soak mode (`--soak`, see `docs/benchmarks/README.md`) measures journal rows and database bytes per minute for a given workload, and sweep behaviour, so size this from a soak run rather than the estimate. DO SQLite's 10GB limit means roughly 5-10 years of journal at typical rates before pressure. Long before that becomes a concern, v0.2+ adds journal archival: events older than N days are cold-stored to R2 under `journal/<year>/<month>.jsonl.gz` and pruned from DO SQLite. v0.1 does not implement this; the assumption is that a project's actual lifetime is shorter than the practical limit. `tila doctor` reports journal size and projected fill date as part of `tila status`.
+Journal archival is implemented, superseding the earlier v0.2 proposal. The
+Worker sweep archives eligible events to project-scoped R2 objects and confirms
+the archive before pruning DO rows. Project backups include confirmed journal
+archives. See [backup and recovery](05-OPERATIONS.md#backup-and-recovery) and
+[cron sweep health](05-OPERATIONS.md#cron-sweep-health).
+The old growth/lifetime estimates are not capacity evidence; use the benchmark
+harness's soak mode to measure rows and database bytes for the actual workload
+([benchmark guide](benchmarks/README.md)).
 
 ### 10.49 Observability: tail Workers and metrics
-v0.1 provides three observability surfaces:
-1. **`wrangler tail`** streams Worker logs in real time. Documented in the operational guide.
-2. **`tila journal tail`** streams journal events from the DO as they're written. The user-facing real-time view of what's happening.
-3. **Workers Analytics Engine** writes telemetry datapoints on every Worker request (latency, route, status code, project) and on every DO transaction (table, op, rows affected). Free up to 25M datapoints/day. Aggregations available via Cloudflare's GraphQL Analytics API or the dashboard.
+Current observability surfaces include:
 
-A `/metrics` endpoint returning Prometheus-format counters is v0.2.
+1. **`wrangler tail`** streams Worker logs in real time. Documented in the operational guide.
+2. **`tila journal tail`** reads recent journal events; it is not an SSE subscription. Durable cursors support incremental recovery.
+3. **Workers Analytics Engine** records request telemetry and sweep summaries when configured. Telemetry is advisory; missing analytics must not break project operations. See [Operations](05-OPERATIONS.md) for queries and deployment settings.
+
+A Prometheus `/metrics` endpoint was an earlier proposal; it is not implemented
+or assigned a release milestone. See [Operations](05-OPERATIONS.md) for available
+telemetry and [the active roadmap](03-ROADMAP.md) for future scope.
 
 ### 10.50 Operational guide: routine maintenance
 `tila doctor` is the maintenance command. Run it weekly (or pipe to cron). It checks:
@@ -2559,8 +2616,8 @@ may cover `versioned/`; multipart-upload abortion remains bucket-wide.
 - **Semantic versioning** for tila packages and the `tila` CLI.
 - **Schema version is independent of tila version.** A given tila version supports a range of schema versions; mismatches refuse to operate (see edge case 10.6).
 - **Wrangler-managed Worker versions** allow rollback via `wrangler rollback`. Schema migrations are NOT auto-rolled back; the Worker version you roll back to must be compatible with the current D1 schema, or `tila doctor` will flag the mismatch.
-- **DO class migrations** declared in `wrangler.toml`; never destructive to live data in the v1 architecture (DO data is ephemeral).
-- **All tila workspace packages version together.** A given tila release tag (e.g. `v0.1.0`) corresponds to consistent versions of `@tila/schemas`, `@tila/core`, `tila-cli`, etc. Independent versioning would create matrix-testing burden for negligible benefit.
+- **DO class migrations** are declared in `wrangler.toml`. Project DO SQLite data is durable; class/storage migrations must preserve it. Rollback does not undo applied database migrations.
+- **One product version for public release artifacts.** v0.10.0 aligns the root release marker, `tila-cli`, all `tila-cli-*` platform packages, `tila-sdk`, `tila-mcp-server`, and the MCP server manifest. Private implementation packages (`@tila/schemas`, `@tila/core`, `@tila/ops-sqlite`, `@tila/backend-embedded`, Worker, UI, and other private modules) do not require product-version bumps. `pnpm version:check` verifies public lockstep; private package versions are not deployed release identity.
 
 ---
 
