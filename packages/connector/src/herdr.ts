@@ -12,6 +12,7 @@ import type { DiscoveredSession } from "./discovery";
 
 export const HERDR_CONTRACT = {
   version: "0.9.3",
+  protocol: 22,
   commit: "7b116c05bfda646af39d2524c54e70c751f57ee8",
 } as const;
 export const HERDR_SUPPORT = {
@@ -25,6 +26,14 @@ export function requireHerdrSupport(): void {
     throw Object.assign(new Error(HERDR_SUPPORT.reason), {
       code: "unsupported-capability",
     });
+}
+export function requireHerdrRestoration(): never {
+  throw Object.assign(
+    new Error(
+      "Herdr authenticated profile-preserving transcript restoration is unproven; cold open is unsupported",
+    ),
+    { code: "unsupported-capability" },
+  );
 }
 /** The socket inode identifies one server incarnation, not a reusable pane label. */
 export function herdrServerInstance(socket: string): string {
@@ -119,6 +128,15 @@ export class HerdrSocketClient implements HerdrReadClient {
 }
 export class HerdrRuntimeAdapter {
   private invalidation = 0;
+  private proofs = new WeakMap<HerdrObservation, number>();
+  assertCurrent(observation: HerdrObservation): void {
+    if (
+      this.proofs.get(observation) !== this.invalidation ||
+      observation.server_instance !== this.client.instance() ||
+      !processAlive(observation.owner)
+    )
+      throw new Error("Herdr observation invalidated");
+  }
   constructor(
     readonly serverRef: string,
     readonly client: HerdrReadClient,
@@ -131,16 +149,31 @@ export class HerdrRuntimeAdapter {
     session: DiscoveredSession,
     paneId: string,
     expected?: HerdrObservation,
+    recheck: () => void = () => {},
   ): Promise<HerdrObservation> {
     const invalidation = this.invalidation;
     const instance = this.client.instance();
+    const check = () => {
+      recheck();
+      if (
+        invalidation !== this.invalidation ||
+        instance !== this.client.instance() ||
+        !processAlive(session.state.owner)
+      )
+        throw new Error("Herdr observation changed during reconciliation");
+    };
     const raw = (await this.client.request("session.snapshot", {})) as {
       snapshot?: unknown;
     };
+    check();
     const snapshot = HerdrSnapshotSchema.parse(raw.snapshot);
-    if (snapshot.version !== HERDR_CONTRACT.version)
+    if (
+      snapshot.version !== HERDR_CONTRACT.version ||
+      snapshot.protocol !== HERDR_CONTRACT.protocol
+    )
       throw new Error("Herdr version is outside the evaluated contract");
-    const pane = snapshot.panes.find((row) => row.pane_id === paneId);
+    const matches = snapshot.panes.filter((row) => row.pane_id === paneId);
+    const pane = matches.length === 1 ? matches[0] : undefined;
     const harness =
       session.state.client === "claude-code" ? "claude" : session.state.client;
     if (
@@ -156,6 +189,7 @@ export class HerdrRuntimeAdapter {
     const processes = (await this.client.request("pane.process_info", {
       pane_id: paneId,
     })) as { process_info?: unknown };
+    check();
     const current = HerdrProcessInfoSchema.parse(processes.process_info);
     if (
       current.pane_id !== paneId ||
@@ -180,19 +214,43 @@ export class HerdrRuntimeAdapter {
     const after = (await this.client.request("session.snapshot", {})) as {
       snapshot?: unknown;
     };
-    const final = HerdrSnapshotSchema.parse(after.snapshot).panes.find(
+    check();
+    const finalSnapshot = HerdrSnapshotSchema.parse(after.snapshot);
+    if (
+      finalSnapshot.version !== HERDR_CONTRACT.version ||
+      finalSnapshot.protocol !== HERDR_CONTRACT.protocol
+    )
+      throw new Error("Herdr version is outside the evaluated contract");
+    const finalMatches = finalSnapshot.panes.filter(
       (row) => row.pane_id === paneId,
     );
+    const final = finalMatches.length === 1 ? finalMatches[0] : undefined;
     if (
       invalidation !== this.invalidation ||
       instance !== this.client.instance() ||
       !final ||
+      final.agent !== harness ||
       final.terminal_id !== pane.terminal_id ||
       JSON.stringify(final.agent_session) !==
         JSON.stringify(pane.agent_session) ||
       !processAlive(session.state.owner)
     )
       throw new Error("Herdr observation changed during reconciliation");
+    const near = (await this.client.request("pane.process_info", {
+      pane_id: paneId,
+    })) as { process_info?: unknown };
+    check();
+    const foreground = HerdrProcessInfoSchema.parse(near.process_info);
+    if (
+      foreground.pane_id !== paneId ||
+      !foreground.foreground_processes.some(
+        (p) => p.pid === session.state.owner.pid,
+      )
+    )
+      throw new Error(
+        "Herdr foreground occupant does not match the verified process",
+      );
+    this.proofs.set(observation, invalidation);
     return observation;
   }
 }

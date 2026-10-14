@@ -28,6 +28,11 @@ function fixture() {
       namespace: '["https://tila.test","project"]',
       client: "codex",
       sessionId: "native-1",
+      runtime: {
+        socket: "/fixture-broker",
+        capability: "fixture-only",
+        runId: acting,
+      },
     },
     context: {
       run_id: acting,
@@ -36,6 +41,8 @@ function fixture() {
       enrollment_id: enrollment,
       project_id: "project",
       instance_id: "instance",
+      participant_id: "participant",
+      principal_id: "principal",
     },
     capabilities: { protocol: 1, adapter_version: "1", capabilities: {} },
     evidence: {

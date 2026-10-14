@@ -2653,7 +2653,10 @@ See [the conversation contract](distributed-agent-conversations.md) and
 [operations](05-OPERATIONS.md#durable-conversation-operations) for the API and
 recovery boundaries. Connector, gated Herdr observations and conversation UI
 slices are merged (#287–#289); fixture coverage does not satisfy #283 distributed
-live acceptance or implement unsupported Herdr registration/open commands.
+live acceptance. The bounded [Herdr adapter wiring](evidence/issue-283-adapter-v1.md)
+adds authenticated read-only reconciliation and a private V2 runtime association
+ledger. Public Herdr registration and cold open remain unsupported pending live
+evidence; attended standalone restoration remains available.
 
 ### Conversation dashboard (#283)
 

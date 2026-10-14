@@ -1,0 +1,480 @@
+{
+  "schema_version": 1,
+  "issue": 283,
+  "evidence_revision": 1,
+  "kind": "versioned-protocol-contract",
+  "recorded_at": "2026-10-14",
+  "commands": [
+    "codex app-server generate-json-schema --experimental --out <schema-output-directory>",
+    "herdr api schema --json"
+  ],
+  "codex": {
+    "version": "0.162.1",
+    "schema_files": 447,
+    "bundle_manifest_sha256": "d1c81e651ea3d0b025936fe2f70ab9917bb975903d9f287417442948aea45cdc",
+    "contract_shapes": {
+      "ClientRequest.json": {
+        "sha256": "f1425525dae2903cb5b658ee412530ff7a8fcaf78887f182c169b299e7f6b09b",
+        "required": [],
+        "properties": []
+      },
+      "v2/TurnStartParams.json": {
+        "sha256": "062373a7dfc290b506e591bc5c2a35005211df27b3c60358cee3efed12859062",
+        "required": ["input", "threadId"],
+        "properties": [
+          "additionalContext",
+          "approvalPolicy",
+          "approvalsReviewer",
+          "clientUserMessageId",
+          "collaborationMode",
+          "cwd",
+          "cyberAccessProgram",
+          "disabledPluginIds",
+          "effort",
+          "environments",
+          "input",
+          "model",
+          "multiAgentMode",
+          "outputSchema",
+          "parentTurnId",
+          "permissions",
+          "personality",
+          "responsesapiClientMetadata",
+          "rootTurnId",
+          "runtimeWorkspaceRoots",
+          "sandboxPolicy",
+          "serviceTier",
+          "serviceTierForTurn",
+          "summary",
+          "threadId",
+          "toolOutput",
+          "turnTrigger"
+        ]
+      },
+      "v2/TurnSteerParams.json": {
+        "sha256": "99f7fdff8b090065b68f36420b70870b5eafed048c024b308230aaa02f15d891",
+        "required": ["expectedTurnId", "input", "threadId"],
+        "properties": [
+          "additionalContext",
+          "clientUserMessageId",
+          "expectedTurnId",
+          "input",
+          "responsesapiClientMetadata",
+          "threadId"
+        ]
+      },
+      "v2/ThreadReadParams.json": {
+        "sha256": "dfe040c6ac71d30795b8be3f3ff232e66f362a37f883b491e5d1ea367f470db4",
+        "required": ["threadId"],
+        "properties": ["includeTurns", "threadId"]
+      },
+      "v2/GetAccountParams.json": {
+        "sha256": "30b545275f60975b55bd6fbaafd70f15505801d14168ee82d3931b6e93c78aab",
+        "required": [],
+        "properties": ["refreshToken"]
+      }
+    },
+    "schema_generation": "Experimental schema includes request metadata for contract inspection; the connector negotiates installed nonexperimental methods."
+  },
+  "herdr": {
+    "version": "0.9.3",
+    "commit": "7b116c05bfda646af39d2524c54e70c751f57ee8",
+    "protocol": 22,
+    "schema_version": 1,
+    "raw_schema_sha256": "9e2af207e9aa8183d4aeca5fde9cc48e7909bb40cdbd7cf21608a6d3ea78075b",
+    "selected_schema_definitions": {
+      "event/AgentSessionInfo": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/schemas/event/$defs/AgentSessionRefKind"
+          },
+          "source": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": ["source", "agent", "kind", "value"],
+        "type": "object"
+      },
+      "event/PaneInfo": {
+        "properties": {
+          "agent": {
+            "type": ["string", "null"]
+          },
+          "agent_session": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/event/$defs/AgentSessionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent_status": {
+            "$ref": "#/schemas/event/$defs/AgentStatus"
+          },
+          "cwd": {
+            "type": ["string", "null"]
+          },
+          "display_agent": {
+            "type": ["string", "null"]
+          },
+          "focused": {
+            "type": "boolean"
+          },
+          "foreground_cwd": {
+            "type": ["string", "null"]
+          },
+          "label": {
+            "type": ["string", "null"]
+          },
+          "pane_id": {
+            "type": "string"
+          },
+          "restore_error": {
+            "type": ["string", "null"]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scroll": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/event/$defs/PaneScrollInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "tab_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          },
+          "terminal_title": {
+            "type": ["string", "null"]
+          },
+          "terminal_title_stripped": {
+            "type": ["string", "null"]
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "tokens": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 32,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9_-]{1,32}$"
+            },
+            "type": "object"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pane_id",
+          "terminal_id",
+          "workspace_id",
+          "tab_id",
+          "focused",
+          "agent_status",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "request/AgentStartParams": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pane_id": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "description": "Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          }
+        },
+        "required": ["name", "kind", "pane_id"],
+        "type": "object"
+      },
+      "request/PluginPaneOpenParams": {
+        "properties": {
+          "cwd": {
+            "type": ["string", "null"]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/request/$defs/SplitDirection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entrypoint": {
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "focus": {
+            "default": false,
+            "type": "boolean"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/request/$defs/PopupSize"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "placement": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/request/$defs/PluginPanePlacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "target_pane_id": {
+            "type": ["string", "null"]
+          },
+          "width": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/request/$defs/PopupSize"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "workspace_id": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["plugin_id", "entrypoint"],
+        "type": "object"
+      },
+      "success_response/AgentSessionInfo": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/schemas/success_response/$defs/AgentSessionRefKind"
+          },
+          "source": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": ["source", "agent", "kind", "value"],
+        "type": "object"
+      },
+      "success_response/PaneInfo": {
+        "properties": {
+          "agent": {
+            "type": ["string", "null"]
+          },
+          "agent_session": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/success_response/$defs/AgentSessionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent_status": {
+            "$ref": "#/schemas/success_response/$defs/AgentStatus"
+          },
+          "cwd": {
+            "type": ["string", "null"]
+          },
+          "display_agent": {
+            "type": ["string", "null"]
+          },
+          "focused": {
+            "type": "boolean"
+          },
+          "foreground_cwd": {
+            "type": ["string", "null"]
+          },
+          "label": {
+            "type": ["string", "null"]
+          },
+          "pane_id": {
+            "type": "string"
+          },
+          "restore_error": {
+            "type": ["string", "null"]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scroll": {
+            "anyOf": [
+              {
+                "$ref": "#/schemas/success_response/$defs/PaneScrollInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "tab_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          },
+          "terminal_title": {
+            "type": ["string", "null"]
+          },
+          "terminal_title_stripped": {
+            "type": ["string", "null"]
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "tokens": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 32,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9_-]{1,32}$"
+            },
+            "type": "object"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pane_id",
+          "terminal_id",
+          "workspace_id",
+          "tab_id",
+          "focused",
+          "agent_status",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "success_response/PaneProcessInfo": {
+        "properties": {
+          "foreground_process_group_id": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "foreground_processes": {
+            "items": {
+              "$ref": "#/schemas/success_response/$defs/PaneProcessInfoProcess"
+            },
+            "type": "array"
+          },
+          "pane_id": {
+            "type": "string"
+          },
+          "shell_pid": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "tty": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["pane_id"],
+        "type": "object"
+      },
+      "success_response/PaneProcessInfoProcess": {
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "type": ["array", "null"]
+          },
+          "argv0": {
+            "type": ["string", "null"]
+          },
+          "cmdline": {
+            "type": ["string", "null"]
+          },
+          "cwd": {
+            "type": ["string", "null"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "pid": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": ["pid", "name"],
+        "type": "object"
+      }
+    }
+  },
+  "limits": "Protocol schemas establish request shapes and documented absence. They do not prove native authentication, account/profile fidelity, draft preservation or transcript restoration."
+}

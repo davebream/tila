@@ -75,8 +75,8 @@ try {
   const requests = [];
   const rpc = { async request(method, params) { requests.push([method, params]); return method === "thread/read" ? { thread: { id: "fixture", status: { type: "active" } } } : {}; }, close() {} };
   assert.equal(await wakeCodex(rpc, { start: true, steer: true, queue: false }, "fixture", randomUUID(), { allowIdleStart: false, urgent: true, expectedTurnId: "turn-1" }), "accepted");
-  assert.deepEqual(Object.keys(requests[1][1]).sort(), ["expectedTurnId", "input", "threadId"]);
-  assert.equal(requests[1][1].expectedTurnId, "turn-1");
+  assert.deepEqual(Object.keys(requests.at(-1)[1]).sort(), ["expectedTurnId", "input", "threadId"]);
+  assert.equal(requests.at(-1)[1].expectedTurnId, "turn-1");
   let received = ""; let delivered;
   const delivery = new Promise(resolve => { delivered = resolve; });
   const peer = createServer(socket => { socket.on("data", data => { received += data; }); socket.on("end", delivered); });
