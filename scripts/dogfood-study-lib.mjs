@@ -1401,7 +1401,7 @@ export function deriveLedger({
       cond === "A"
         ? notApplicable("condition A has no tila tools")
         : unavailable(
-            "the local backend rejects MCP configuration; the actual MCP path was not exercised",
+            "this pilot selects CLI/SDK and disables MCP; the actual MCP path was not exercised",
           ),
     operator_effort: attested
       ? observed({
