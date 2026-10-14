@@ -1,0 +1,385 @@
+{
+  "schema_version": 1,
+  "issue": 307,
+  "evidence_revision": 1,
+  "supersedes": null,
+  "recorded_at": "2026-10-14",
+  "result": "local-evidence-complete-production-activation-not-performed",
+  "summary": "Delivered release identity (#337), cursor-key independence (#340), permission-aware readiness (#344) and the pepper runbook/rehearsal (#434) were audited and re-run on a clean candidate. All local Cloudflare runtime evidence passes. Production activation was NOT PERFORMED; no production secret was set or rotated, and no production resource was contacted.",
+  "classification": {
+    "fixture": "local Cloudflare runtime",
+    "runtime": "workerd through @cloudflare/vitest-plugin 1.4.0 with local D1, Durable Object SQLite and R2 bindings",
+    "credentials": "synthetic fixture credentials only; every command ran with a minimal environment (HOME, PATH, LANG, TERM) so no agent-session identity or Cloudflare credential variable was inherited",
+    "not_deployed": true,
+    "not_live": true,
+    "faked_transport": "external OIDC discovery/JWKS fetches only; authentication, authorization, minting and lookup run production code",
+    "limits": "Does not prove production secret propagation, provider availability, consumer rollout, live installation rebinding, or the deployed production release."
+  },
+  "source": {
+    "branch": "docs/307-readiness-evidence",
+    "base_revision": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
+    "base_note": "A merged-main commit. Main has advanced since; the branch was intentionally not rebased.",
+    "tested_revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+    "tested_tree_clean": true,
+    "commits_after_base": [
+      {
+        "sha": "d7bf6b6b766688c1a319bf0d588e4006996e8627",
+        "type": "test",
+        "scope": "adds the fifth hash-pepper-cutover runtime case"
+      },
+      {
+        "sha": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+        "type": "docs",
+        "scope": "invitation closure prerequisite and conversation/pepper separation in the runbook"
+      }
+    ],
+    "docs_only_after_tested_revision": [
+      {
+        "sha": "dc51347e487bb4a47bd7d74ab32045575f4dfa13",
+        "scope": "names the verified Worker in the cursor-key activation command"
+      }
+    ],
+    "evidence_file_commit": "Commits that add or revise this file change no source or test and are not self-referenced. All test results below are for tested_revision; later commits are documentation or evidence only.",
+    "generated_identity_at_test": {
+      "PRODUCT_VERSION": "0.8.0",
+      "BUILD_COMMIT": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "note": "packages/worker/src/version.ts is generated and gitignored; it was generated from HEAD of the clean tree."
+    },
+    "delivered_work_not_rebuilt": {
+      "#337": "release identity in GET /api/health",
+      "#340": "independent CONVERSATION_CURSOR_KEY",
+      "#344": "permission-aware conversation readiness in the dashboard",
+      "#434": {
+        "merge_commit": "e1ccb89b9c691d8f4f1956cbcfe320ac9485c848",
+        "historical_result": "pnpm test:runtime: 114 passed, none skipped (reported at that revision; not a new run here)"
+      }
+    },
+    "audited_blob_ids_at_tested_revision": {
+      "packages/worker/src/lib/conversation-cursor-key.ts": "2bb1a25f42404c88be0d30287bf835379c7bd017",
+      "packages/worker/src/routes/conversations.ts": "44767311f5f290b993048178158e820801b97383",
+      "packages/worker/src/routes/health.ts": "6c52e54153a6317c69833b6235c8ba5e380a6fdd",
+      "packages/worker/src/routes/runtime.ts": "d12dbe2bb56129afa1d3b597912e4781d83ecf8b",
+      "packages/worker/src/d1/runtime-store.ts": "cb73b43d1d196d674bde1b06edca016858b10a35",
+      "scripts/generate-version.mjs": "8aa91fb523792885a2db70da53a6b41070dd5d51",
+      "scripts/release-validate.mjs": "3d710e0a6788a0cd928383bbbb09a7cb06c344d0",
+      "packages/integration-tests/runtime/hash-pepper-cutover.test.ts": "8e33d68e7e5c5e453ea4cd59b45d3cf349439858",
+      "packages/integration-tests/runtime/conversation-cursor-key.test.ts": "ab63bed9d2d603d84c80e5cc9f3c0e2881fcfa65",
+      "packages/worker/migrations/global/0034_access_settings_revisions.sql": "26e03a5ba6ffcd6f79b3865e0b714429594a3157"
+    }
+  },
+  "environment": {
+    "os": "Linux 6.8.0-146-generic (x86_64, glibc)",
+    "node": "22.22.3",
+    "pnpm": "9.15.0",
+    "vitest": "4.1.11",
+    "wrangler_dry_run": "4.149.0"
+  },
+  "release_identity_audit": {
+    "source_chain": "scripts/generate-version.mjs writes PRODUCT_VERSION from the root package.json and BUILD_COMMIT from TILA_BUILD_REVISION or git HEAD; packages/worker/src/routes/health.ts serves them separately from API_VERSION and MIN_CLI_VERSION.",
+    "built_candidate_bundle": {
+      "method": "wrangler deploy --dry-run into an isolated directory in a clean environment; no upload, no Cloudflare API access",
+      "index_js_sha256": "217bafb49aef870f820a91e8f70e111ea387f95f8e73154c722f5cd9a2a8e61d",
+      "BUILD_COMMIT": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "PRODUCT_VERSION": "0.8.0",
+      "API_VERSION": 1,
+      "MIN_CLI_VERSION": "0.1.0",
+      "matches_tested_revision": true,
+      "limit": "A local dry-run bundle, not a release artifact; its hash is not claimed to be reproducible."
+    },
+    "published_release": {
+      "tag": "v0.8.0",
+      "tag_commit": "31103a49c5e7bef738d97e42090781f848d43025",
+      "ancestor_of_tested_revision": true,
+      "commits_between_tag_and_base": 16,
+      "artifact": "npm tila-cli-linux-x64@0.8.0",
+      "artifact_sha256": "8ce15976ca871f1bbbcb6056c1d8185d32d0252b62cc2647af8e10f53064f752",
+      "artifact_npm_integrity": "sha512-CBJxQuLSCMDqOnAJFBexWJHucZBjUUh6IPsW8xso8NgA6cnnRsSXaDk3cKxH9ex1351QMjP+VgXtnIQVFhARsw==",
+      "embedded_worker_BUILD_COMMIT": "31103a49c5e7bef738d97e42090781f848d43025",
+      "embedded_PRODUCT_VERSION": "0.8.0",
+      "embedded_API_VERSION": 1,
+      "embedded_MIN_CLI_VERSION": "0.1.0",
+      "embeds_conversation_cursor_key_support": true,
+      "matches_tag_commit": true,
+      "readiness_sources_identical_to_tested_revision": [
+        "packages/worker/src/lib/conversation-cursor-key.ts",
+        "packages/worker/src/routes/conversations.ts",
+        "packages/worker/src/routes/health.ts",
+        "packages/worker/src/routes/runtime.ts",
+        "packages/worker/src/d1/runtime-store.ts",
+        "packages/schemas/src/runtime.ts",
+        "scripts/generate-version.mjs"
+      ],
+      "inspection": "Tarball downloaded to an isolated directory and searched as data; nothing from it was executed."
+    },
+    "release_guards_read": {
+      "scripts/release-validate.mjs": "requires a clean checkout, a tag equal to v<product version>, tag commit equal to HEAD and ancestry from origin/main",
+      "scripts/release-pack.mjs": "records git HEAD as manifest.revision",
+      "scripts/release-verify.mjs": "rejects an artifact whose manifest revision differs from the expected revision"
+    },
+    "observations": [
+      "Audit observation, not a confirmed blocker: no step among the release scripts this audit read (release-validate, release-pack, release-verify, release-smoke) asserts that the Worker bundle embedded in the compiled CLI carries BUILD_COMMIT equal to manifest.revision. This audit checked v0.8.0 by inspection. The release worker is to corroborate it independently before it is treated as a gap.",
+      "generate-version.mjs records git HEAD even when the working tree is dirty; the release path is protected by release-validate.mjs requiring a clean checkout, a local development build is not.",
+      "GET /api/runtime/info advertises io.tila/durable-conversations unconditionally. It is protocol support, not configured readiness; readiness is the conversation route response."
+    ],
+    "production_deployment": "Not observed. The issue's last status says production reports 0.1.0 until next deployed; no production request was made."
+  },
+  "criteria": [
+    {
+      "id": "AC1",
+      "text": "A built release's health/build metadata matches the immutable deployed artifact and independently reports protocol compatibility.",
+      "status": "satisfied-locally-and-for-published-0.8.0",
+      "source_revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "evidence": [
+        {
+          "command": "pnpm --filter @tila/worker exec vitest run src/routes/health.test.ts",
+          "result": "3 passed",
+          "proves": "version equals the root package.json, commit is the generated 40-hex BUILD_COMMIT, apiVersion is the independent API_VERSION, and no Authorization is needed"
+        },
+        {
+          "command": "node --test scripts/generate-version.test.mjs scripts/version-policy.test.mjs",
+          "result": "8 passed, 0 failed (two files)",
+          "proves": "explicit revision and root product marker drive the generated identity independent of cwd; public versions stay in lockstep"
+        },
+        {
+          "command": "pnpm version:check",
+          "result": "Public release versions aligned at 0.8.0",
+          "proves": "lockstep"
+        },
+        {
+          "command": "wrangler deploy --dry-run (isolated outdir, clean env)",
+          "result": "bundle embeds BUILD_COMMIT equal to the tested revision",
+          "proves": "built-artifact identity for the candidate"
+        }
+      ],
+      "provenance": "see release_identity_audit",
+      "still_open_gate": "Deployed production health version/commit/apiVersion after an explicitly authorized deployment (g307-activation). Production is not observed."
+    },
+    {
+      "id": "AC2",
+      "text": "Missing prerequisites produce actionable, permission-appropriate readiness in UI/API; unrelated work/settings remain available.",
+      "status": "satisfied-locally",
+      "source_revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "evidence": [
+        {
+          "command": "pnpm --filter @tila/integration-tests test:runtime conversation-cursor-key conversations",
+          "result": "2 files, 5 passed",
+          "proves": "dedicated key serves send/read and a cursor round-trip without HASH_PEPPER; with neither secret the routes return 503 config-unavailable with details.reason only for a manager and the bare code for a viewer; a short dedicated key returns cursor-key-too-short and does not fall back to the pepper present in the bindings; changing the key source invalidates cursors only; a client-supplied key header is ignored"
+        },
+        {
+          "command": "pnpm --filter @tila/worker exec vitest run src/lib/conversation-cursor-key.test.ts",
+          "result": "6 passed",
+          "proves": "pepper derivation byte-identical, dedicated precedence, short key fails closed, empty key is unset, per-project keys, missing reported"
+        },
+        {
+          "command": "pnpm --filter @tila/ui exec vitest run test/pages/rooms.test.tsx test/pages/settings-rooms.test.tsx",
+          "result": "2 files, 23 passed",
+          "proves": "managers see the fix, other users are told to ask a maintainer without operator detail, an empty room list and a network failure keep distinct messages"
+        }
+      ],
+      "no_unrelated_secret_fallback": "The resolver reads only CONVERSATION_CURSOR_KEY and HASH_PEPPER. The runtime fixture also binds AUTH_SECRET, INFRA_ADMIN_TOKEN and GITHUB_SESSION_HMAC_KEY, and routes still fail closed when both cursor sources are absent.",
+      "still_open_gate": "Live authenticated room send/read and existing-principal access on the target deployment after activation."
+    },
+    {
+      "id": "AC3",
+      "text": "The migration is rehearsed on an isolated existing-credential fixture and proves access before/after cutover plus recovery from interruption.",
+      "status": "satisfied-locally",
+      "source_revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "evidence": [
+        {
+          "command": "pnpm --filter @tila/integration-tests test:runtime hash-pepper-cutover",
+          "result": "5 passed (the four #434 cases unchanged, plus one added here)",
+          "cases": [
+            "cuts over existing credentials, recovers the owner and a lost rotation response without widening access",
+            "rehearses rollback before and after replacement without undoing revocations",
+            "replaces shared installations and runs and rejects pre-cutover invitations",
+            "re-exchanges a signed workload assertion under the new pepper without weakening verification or replay protection",
+            "keeps revoked invitations unusable across pepper rollback and reapplication while pending ones revive"
+          ]
+        },
+        {
+          "command": "pnpm test:runtime",
+          "result": "37 files, 146 passed, 0 failed, 0 skipped, 0 todo; scripts/check-test-quality.mjs and scripts/check-runtime-report.mjs passed",
+          "baseline_at_base_revision": "145 passed (same command, same clean environment); 146 = baseline plus the added case",
+          "historical_at_434": "114 passed"
+        }
+      ],
+      "behavior_observed": [
+        "Existing scoped (including DPoP-bound) tokens and legacy cookie sessions are rejected after the pepper changes, while human account sessions are unaffected; an interrupted owner session is recovered through the independent infrastructure token.",
+        "A lost rotation response is recoverable from a fresh inventory; the superseded token id returns 409.",
+        "Rollback restores unrevoked old credentials but never a revoked one.",
+        "Pre-cutover invitations are rejected under the new pepper yet remain pending; a restored pepper makes them redeemable again, as do transition-issued invitations when the new pepper is re-applied. Invitations revoked through the owner endpoint stay unusable. The Worker has no automatic guard, so revoked/expired state is an operator prerequisite in the runbook.",
+        "Conversation send/read and an outstanding cursor keep working across the cutover with the dedicated key held constant."
+      ],
+      "still_open_gate": "An authorized production maintenance execution, which is not requested here. This rehearsal does not make the pepper migration a prerequisite of enabling conversations."
+    },
+    {
+      "id": "AC4",
+      "text": "The issue records whether production activation is performed or remains an explicit outstanding gate; no silent token invalidation.",
+      "status": "recorded-as-outstanding-gate",
+      "source_revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "evidence": [
+        {
+          "command": "n/a (decision record)",
+          "result": "production activation NOT PERFORMED; zero production changes",
+          "proves": "see production"
+        }
+      ],
+      "still_open_gate": "Maintainer decision and resources for g307-activation. The reconciling issue update is reviewed by the lead and posted by the lead; this evidence file does not post to GitHub."
+    }
+  ],
+  "commands": [
+    {
+      "id": "baseline-cutover-first-attempt",
+      "command": "pnpm --filter @tila/integration-tests test:runtime hash-pepper-cutover",
+      "revision": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
+      "result": "failed before executing: Cannot find module '../version' imported from packages/worker/src/routes/health.ts",
+      "classification": "setup",
+      "cause": "The generated, gitignored packages/worker/src/version.ts does not exist in a fresh worktree; the root pnpm test:runtime generates it first.",
+      "remedy": "node scripts/generate-version.mjs worker (and sdk) before the targeted command. No product change; the runbook command was corrected."
+    },
+    {
+      "id": "baseline-cutover",
+      "command": "pnpm --filter @tila/integration-tests test:runtime hash-pepper-cutover",
+      "revision": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
+      "result": "4 passed",
+      "classification": "local Cloudflare runtime"
+    },
+    {
+      "id": "baseline-full-runtime",
+      "command": "pnpm test:runtime",
+      "revision": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
+      "result": "37 files, 145 passed, 0 skipped, 0 todo",
+      "classification": "local Cloudflare runtime"
+    },
+    {
+      "id": "candidate-cutover",
+      "command": "pnpm --filter @tila/integration-tests test:runtime hash-pepper-cutover",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "1 file, 5 passed",
+      "classification": "local Cloudflare runtime"
+    },
+    {
+      "id": "candidate-cursor-runtime",
+      "command": "pnpm --filter @tila/integration-tests test:runtime conversation-cursor-key conversations",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "2 files, 5 passed",
+      "classification": "local Cloudflare runtime"
+    },
+    {
+      "id": "candidate-full-runtime",
+      "command": "pnpm test:runtime",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "37 files, 146 passed, 0 failed, 0 skipped, 0 todo",
+      "classification": "local Cloudflare runtime"
+    },
+    {
+      "id": "candidate-worker-unit-first-attempt",
+      "command": "pnpm --filter @tila/worker exec vitest run src/lib/conversation-cursor-key.test.ts src/routes/health.test.ts src/routes/hash-pepper-consistency.test.ts",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "1 file passed (6 tests); 2 files failed to load: Failed to resolve entry for package \"@tila/schemas\"",
+      "classification": "setup",
+      "cause": "Workspace dependencies were not built in the fresh worktree, so package entry points did not exist.",
+      "remedy": "pnpm --filter '@tila/worker^...' build; no product or test change."
+    },
+    {
+      "id": "candidate-ui-readiness-first-attempt",
+      "command": "pnpm --filter @tila/ui exec vitest run test/pages/rooms.test.tsx test/pages/settings-rooms.test.tsx",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "2 files failed to load: Failed to resolve import \"@tila/schemas\"",
+      "classification": "setup",
+      "cause": "Same unbuilt workspace dependency.",
+      "remedy": "pnpm --filter '@tila/ui^...' build; no product or test change."
+    },
+    {
+      "id": "candidate-typecheck-first-attempt",
+      "command": "pnpm --filter @tila/integration-tests typecheck",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "exit 2: TS2307 cannot find @tila/schemas, tila-sdk, @tila/backend-embedded and @tila/ops-sqlite declarations",
+      "classification": "setup",
+      "cause": "Same unbuilt workspace dependencies.",
+      "remedy": "pnpm --filter '@tila/integration-tests^...' build; no product or test change."
+    },
+    {
+      "id": "candidate-worker-unit",
+      "command": "pnpm --filter @tila/worker exec vitest run src/lib/conversation-cursor-key.test.ts src/routes/health.test.ts src/routes/hash-pepper-consistency.test.ts",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "3 files, 17 passed (after building worker dependencies)",
+      "classification": "worker unit"
+    },
+    {
+      "id": "candidate-ui-readiness",
+      "command": "pnpm --filter @tila/ui exec vitest run test/pages/rooms.test.tsx test/pages/settings-rooms.test.tsx",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "2 files, 23 passed (after building UI dependencies)",
+      "classification": "ui component"
+    },
+    {
+      "id": "candidate-typecheck",
+      "command": "pnpm --filter @tila/integration-tests typecheck",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "passed (after building integration-test dependencies)",
+      "classification": "typecheck"
+    },
+    {
+      "id": "candidate-version-scripts",
+      "command": "node --test scripts/generate-version.test.mjs scripts/version-policy.test.mjs",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "8 passed, 0 failed",
+      "classification": "root script"
+    },
+    {
+      "id": "candidate-lint",
+      "command": "pnpm lint",
+      "revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
+      "result": "passed: Biome (1583 files), version lockstep, test-quality gate",
+      "classification": "lint"
+    }
+  ],
+  "not_run": [
+    {
+      "what": "pnpm test and pnpm build (whole product units and compiled CLI)",
+      "reason": "The code change is one added runtime test case in a test file plus documentation. No product source changed. The compiled-CLI suite needs a clean environment regardless; none was needed."
+    }
+  ],
+  "runbook_corrections": [
+    "docs/05-OPERATIONS.md: replaced the false statement that no public invitation-revocation endpoint exists. Owners list invitations (GET /projects/:projectId/runtime/invitations) and revoke them (POST /projects/:projectId/runtime/invitations/:invitationId/revoke); the SDK, CLI (tila machine invitations, tila machine revoke-invitation) and dashboard use them.",
+    "docs/05-OPERATIONS.md: rollback and re-application require every invitation issued before or during the cutover to be read back as revoked or expired. A rejected redemption, a listing entry, or an absent local value is not proof.",
+    "docs/05-OPERATIONS.md: the invitation inventory comes from the owner listing, not retained setup values; invitations last 10 minutes.",
+    "docs/05-OPERATIONS.md: conversation enabling (CONVERSATION_CURSOR_KEY) is separated from credential migration (HASH_PEPPER) and the fallback coupling is stated: with neither secret, setting HASH_PEPPER also turns the routes on.",
+    "docs/05-OPERATIONS.md: the targeted rehearsal command needs the generated version file on a fresh checkout.",
+    "docs/05-OPERATIONS.md: the cursor-key command names the verified Worker; health and runtime info are not readiness evidence.",
+    "docs/13-MULTI-INSTANCE-AUTH.md: pending invitations revive with a restored pepper."
+  ],
+  "production": {
+    "activation": "NOT PERFORMED",
+    "production_changes": 0,
+    "secrets_set_or_rotated": false,
+    "credentials_invalidated": false,
+    "production_requests_made": 0,
+    "other_network_use": "read-only GitHub issue/PR/release queries and npm registry metadata/tarball download",
+    "authorization": "none granted for production activation or secret rotation",
+    "preferred_activation": "Set the dedicated CONVERSATION_CURSOR_KEY. Do not set or rotate HASH_PEPPER to enable conversations.",
+    "pepper_migration": "Not requested. A separately authorized maintenance action following docs/05-OPERATIONS.md#rotate-hash_pepper, including its invitation prerequisite.",
+    "requested_inputs_not_yet_supplied": [
+      "Explicit maintainer authorization naming the action and the Worker",
+      "Cloudflare account ID and Worker name for the target installation, verified by tila deploy target output",
+      "Worker origin and the full inventory of project IDs on that deployment",
+      "Deployed release, commit and protocol read from GET /api/health before and after",
+      "An existing principal per project that can read tasks, and a principal with conversations:manage plus one without it",
+      "Verified independent owner recovery (human owner login and the infrastructure token holder)",
+      "Operator and resources able to set a Worker secret on that Worker"
+    ],
+    "post_activation_checks": [
+      "Existing principals still authenticate and read tasks",
+      "Before activation a manager sees configuration detail and a non-manager only the code; after it neither receives 503 config-unavailable",
+      "Authenticated room send and read succeed; a cursor round-trips",
+      "GET /api/health reports the expected version/commit/apiVersion, as identity only"
+    ]
+  },
+  "risks": [
+    "The invitation revival is real product behavior with no server guard; safety depends on the operator following the runbook prerequisite.",
+    "The revocation prerequisite needs a deployment that has the owner invitation listing and revoke routes and D1 migration 0034 (the invitation_id backfill). The CHANGELOG lists the routes under 0.8.0 and the commit that added migration 0034 is contained in no earlier tag (git tag --contains); the routes were not separately bisected. A deployment without them cannot satisfy the prerequisite and must be upgraded and migrated first.",
+    "Unconfirmed audit observation: the embedded-Worker BUILD_COMMIT assertion gap described under release_identity_audit.observations awaits independent corroboration by the release worker."
+  ],
+  "redaction": "No credential, token, cookie, password, recovery link, secret value or private host address is recorded. Fixture values in the tests are synthetic and are not reproduced here."
+}
