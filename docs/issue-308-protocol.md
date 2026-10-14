@@ -48,8 +48,9 @@ Never publish account identifiers, credential locations or transcript bodies.
 | S3.3 | Explicit completion and corrective work; read-only reviewer, revoke while drawer is open | Corrections link to original immutable terminal result; permission loss stops mutation and privileged reads. UI work/decisions/runtime suites, HTTP question membership and corrections suites. |
 | S3.4 | Reconstruct journal after restart; fail readiness prerequisites | Retain original result and accepted decisions in audit; readiness failure stays failed/unavailable. Runtime readiness and replay suites. |
 
-Local fixtures assert four hard gates: zero silent revisionful settings
-overwrites, zero lost acknowledged decisions, zero accepted stale-authority
+Local fixtures assert four hard gates: zero silent settings overwrites (revisionful
+conflicts are rejected; legacy changes require explicit warning/journal evidence),
+zero lost acknowledged decisions, zero accepted stale-authority
 writes, and zero completions inferred from delivery/runtime. A passing suite
 means its assertions passed on its stated dataset, not that an unexecuted
 journey passed. A failed gate needs a bounded corrective issue/slice and remains
@@ -125,6 +126,8 @@ node scripts/issue-308-scenarios.mjs --list
 node scripts/issue-308-scenarios.mjs --run --output .ci-reports/issue-308
 # Repeat without deleting the failure; link the previous report explicitly:
 node scripts/issue-308-scenarios.mjs --run --output .ci-reports/issue-308 --previous .ci-reports/issue-308/<run>/report.json
+# Target S1 after a fixture correction, before repeating the full driver:
+env -i HOME="$HOME" PATH="$PATH" pnpm --filter @tila/integration-tests exec vitest run --config vitest.runtime.config.ts runtime/product-scenarios.test.ts -t S1
 ```
 
 `--list` prints the exact fixed local commands: `pnpm build`, UI test/typecheck,
