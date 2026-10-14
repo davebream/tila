@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { expect, it } from "vitest";
 
 it("loads the packed MCP executable and exposes settings plus unchanged definition tools", async () => {
@@ -67,10 +68,10 @@ it("loads the packed MCP executable and exposes settings plus unchanged definiti
         "tila_schema_import",
       ]),
     );
-    const definitions = await client.callTool({
+    const definitions = (await client.callTool({
       name: "tila_schema_export",
       arguments: { format: "yaml" },
-    });
+    })) as CallToolResult;
     expect(definitions.isError).not.toBe(true);
     expect(definitions.structuredContent?.result).toMatchObject({
       status: "empty",
