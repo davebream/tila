@@ -1058,7 +1058,7 @@
       "issue": null,
       "pr": 312,
       "kind": "builder",
-      "state": "ready",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/pr-312",
       "contract": "2026-10-14-backlog-execution.md#dependency-prs-and-261-pr311-pr312-pr314-i261",
@@ -1075,7 +1075,19 @@
         "runtime",
         "full"
       ],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 312,
+          "head_sha": "8651fb262870f59844d6299c417f8e2368d5bfc9",
+          "merge_sha": "c4d83773fb4f1d8087d278f468db53fc8b551fb3",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/312"
+        }
+      ],
       "branch": "renovate/runtime-dependencies",
       "task_name": "build-312-runtime-deps",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -2543,6 +2555,17 @@
       "kind": "release-validation-audit",
       "source": "release-prepare-sol offline counterexample2026-10-14",
       "detail": "Embedded Worker commit can differ from release manifest revision while self-consistent hash/version checks pass. No published artifact defect asserted. Dedicated release worker preparing precise gap report; formalrelease blocked unchanged."
+    },
+    {
+      "kind": "dependency-merge",
+      "pr": 312,
+      "head_sha": "8651fb262870f59844d6299c417f8e2368d5bfc9",
+      "merge_sha": "c4d83773fb4f1d8087d278f468db53fc8b551fb3",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/312"
     }
   ],
   "progress_ledger": [
@@ -2886,10 +2909,15 @@
           "kind": "handoff",
           "source": "https://github.com/davebream/tila/pull/474",
           "detail": "Validated clean merge6c2626ad pushed, merge-ready reapplied; actualcheck waitingci, conflict condition satisfied."
+        },
+        {
+          "kind": "queue-observation",
+          "source": "https://github.com/davebream/tila/pull/474",
+          "detail": "Required ci success; Mergify Merge Queue IN_PROGRESS at 14:19 UTC. Not yet merged."
         }
       ],
       "lead_review": "approved",
-      "queue_state": "resubmitted-waiting-ci",
+      "queue_state": "queued-in-progress",
       "closure": "not-closed"
     },
     {
@@ -3022,10 +3050,15 @@
           "kind": "handoff",
           "source": "https://github.com/davebream/tila/issues/307",
           "detail": "Issue body reconciled with merged434 and submitted479. Runtime invitation revival documented and tested; production activation NOTPERFORMED, issue remains open. Failed setup attempts retained."
+        },
+        {
+          "kind": "queue-observation",
+          "source": "https://github.com/davebream/tila/pull/479",
+          "detail": "Required ci success; Mergify Merge Queue IN_PROGRESS at 14:19 UTC. Not yet merged."
         }
       ],
       "lead_review": "approved",
-      "queue_state": "submitted-waiting-ci",
+      "queue_state": "queued-in-progress",
       "closure": "not-closed"
     },
     {
@@ -3281,7 +3314,7 @@
     },
     {
       "node": "pr312",
-      "state": "ready",
+      "state": "merged",
       "worker": "build-312-runtime-deps",
       "base_sha": "f231ba532b55fe33de15bc49cdb2e5c35a6439de",
       "head_sha": "8651fb262870f59844d6299c417f8e2368d5bfc9",
@@ -3313,11 +3346,23 @@
           "kind": "handoff",
           "source": "https://github.com/davebream/tila/pull/312",
           "detail": "Existing branch pushed without force, non-draft, auto-off, merge-ready; native OS-store operations unavailable KeyRevoked explicitly disclosed."
+        },
+        {
+          "kind": "merge",
+          "pr": 312,
+          "head_sha": "8651fb262870f59844d6299c417f8e2368d5bfc9",
+          "merge_sha": "c4d83773fb4f1d8087d278f468db53fc8b551fb3",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/312"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "waiting-ci-and-scopes",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "pr-merged",
+      "merge_sha": "c4d83773fb4f1d8087d278f468db53fc8b551fb3"
     },
     {
       "node": "g-production-authorization",
