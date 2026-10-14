@@ -1,6 +1,6 @@
 import { SignalsPage } from "@/pages/signals";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse, delay } from "msw";
+import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
 import { renderWithProviders, screen, waitFor } from "../test-utils";
 
@@ -9,13 +9,21 @@ const groupsUrl = "*/projects/*/signals/groups";
 
 describe("SignalsPage", () => {
   test("transitions from loading tables to independent empty states", async () => {
+    let releaseHistory: () => void = () => {};
+    let releaseGroups: () => void = () => {};
+    const historyResponse = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const groupsResponse = new Promise<void>((resolve) => {
+      releaseGroups = resolve;
+    });
     server.use(
       http.get(historyUrl, async () => {
-        await delay(300);
+        await historyResponse;
         return HttpResponse.json({ ok: true, signals: [], next_cursor: null });
       }),
       http.get(groupsUrl, async () => {
-        await delay(300);
+        await groupsResponse;
         return HttpResponse.json({ ok: true, groups: [] });
       }),
     );
@@ -25,11 +33,19 @@ describe("SignalsPage", () => {
       await screen.findByRole("table", { name: "Signal history" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("table", { name: "Signal groups" }),
+      await screen.findByRole("table", { name: "Signal groups" }),
     ).toBeInTheDocument();
+
+    releaseHistory();
     expect(
       await screen.findByText("No unexpired signals."),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", { name: "Signal groups" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No signal groups configured.")).toBeNull();
+
+    releaseGroups();
     expect(
       await screen.findByText("No signal groups configured."),
     ).toBeInTheDocument();
