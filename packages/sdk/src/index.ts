@@ -47,6 +47,9 @@ export { createJournalMethods } from "./journal";
 export { createPresenceMethods } from "./presence";
 export { createRecordMethods } from "./records";
 export { createSchemaMethods } from "./schema";
+export { defaultSchemaWarningSink } from "./schema-warnings";
+export type { SchemaWarningSink } from "./schema-warnings";
+export type { SchemaApplyResponse, SchemaApplyWarning } from "@tila/schemas";
 export { createSignalMethods } from "./signals";
 export {
   createAgentMethods,

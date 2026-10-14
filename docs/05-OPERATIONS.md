@@ -1289,6 +1289,44 @@ After resolving the cause, rerunning skips existing tables, indexes, triggers an
 columns. For the interrupted `0027_scoped_credentials.sql` trigger failure,
 rerunning with the fixed CLI completes the migration and records it.
 
+### Definition revision warnings (#416)
+
+This is an additive response/journal change with no DDL migration. Upgrade the
+Worker to record it and clients to display it. Non-managed projects continue to
+accept definition applies without `expected_revision`, with a structured
+`schema-revision-deprecated` warning. These writes can overwrite newer edits.
+Managed projects keep rejecting revision omission with `schema-revision-required`,
+including retries of legacy receipts. No date or release is set for requiring
+revisions on every project.
+
+`tila schema apply` still accepts omission; use `--expected-revision` from a
+reviewed diff or `--review`. CLI `schema import`, the dashboard definition
+editor/importer and MCP `tila_schema_import` apply conditionally. SDK/API callers
+and MCP `tila_schema_update` should preview, retain `revision` and
+`reviewed_definition`, and submit both with a stable idempotency key. A stale
+revision still returns 412; read and review again rather than automatically
+retrying against the newer revision. A lost response must retry the original
+payload, revision and key.
+
+SDK warnings use `console.warn` by default; supply `warningSink` to route them to
+your application's diagnostics. CLI warnings use stderr even with `--json`,
+whose stdout result also retains structured warnings. MCP includes them in
+text and structured results. An unmodified old binary may ignore the new field.
+Inspect the durable evidence with:
+
+```bash
+tila journal list --kind schema.revisionless_applied --json
+```
+
+Each successful revisionless state change records one event atomically with
+history and its receipt. The event carries principal, participant, environment,
+actor, idempotency context and observed/result revisions, without definitions.
+An exact retry returns its original warning without another event or revision.
+A no-change request warns but records no state-change event. Invalid or rejected
+requests never claim an apply occurred. Receipts from before this change get a
+warning on replay with the recorded result revision; an unknown prior revision
+is omitted, and no historical warning event is fabricated.
+
 ### Access settings revisions (#298)
 
 `tila deploy` applies `0034_access_settings_revisions.sql` before uploading the

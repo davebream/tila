@@ -87,6 +87,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
           changes: [],
           noChange: true,
           revision: result.revision,
+          warnings: result.warnings ?? [],
         });
       }
       if (!result.ok && result.reason === "destructive") {
@@ -99,6 +100,7 @@ export function createSchemaRoutes(deps: RouterDeps): ProjectSubRouter {
         version: result.version,
         changes: result.changes,
         revision: result.revision,
+        warnings: result.warnings ?? [],
       });
     } catch (e) {
       if (e instanceof schemaOps.SchemaParseException) {

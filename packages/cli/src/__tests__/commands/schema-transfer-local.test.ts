@@ -21,7 +21,10 @@ import { canonicalJson } from "@tila/schemas";
 import Database from "better-sqlite3";
 import type { CommandDef, SubCommandsDef } from "citty";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { RemoteBackend } from "tila-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCliClient } from "../../lib/client-factory";
+import { withOutput } from "../../lib/output";
 
 const mockLoadComposedSchema = vi.fn();
 vi.mock("../../lib/schema-loader", () => ({
@@ -193,6 +196,7 @@ describe("schema import / export / status (local EmbeddedProject)", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -203,6 +207,118 @@ describe("schema import / export / status (local EmbeddedProject)", () => {
     });
     expect(await revision()).toBe(1);
   }
+
+  it.each([false, true])(
+    "shows one revisionless apply diagnostic on stderr (json=%s) with real local storage",
+    async (jsonMode) => {
+      mockLoadComposedSchema.mockReturnValue({
+        ok: true,
+        definition: BOOTSTRAP,
+        warnings: [],
+      });
+      await withOutput(
+        { json: jsonMode, nonInteractive: true, mutating: true },
+        () =>
+          run("apply", { json: jsonMode, "idempotency-key": "legacy-apply" }),
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("schema-revision-deprecated");
+      expect(warnings[0]).toContain("expected_revision");
+      if (jsonMode) {
+        expect(JSON.parse(warnings[0])).toMatchObject({
+          type: "diagnostic",
+          level: "warning",
+        });
+        const value = JSON.parse(stdout.join(""));
+        expect(value.result).toMatchObject({
+          revision: 1,
+          warnings: [
+            {
+              code: "schema-revision-deprecated",
+              observed_revision: 0,
+              result_revision: 1,
+            },
+          ],
+        });
+      } else {
+        expect(logs.join("\n")).toContain("Applied schema version 1");
+      }
+      expect(await revision()).toBe(1);
+      warnings.length = 0;
+      await run("apply", { "idempotency-key": "legacy-apply" });
+      expect(warnings).toHaveLength(1);
+      expect(await revision()).toBe(1);
+      expect(
+        await project.listJournal({ kind: "schema.revisionless_applied" }),
+      ).toHaveLength(1);
+      warnings.length = 0;
+      await run("apply", {});
+      expect(warnings).toHaveLength(1);
+      expect(
+        await project.listJournal({ kind: "schema.revisionless_applied" }),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("does not emit a deprecation warning on conditional success, stale revision or rejected apply", async () => {
+    mockLoadComposedSchema.mockReturnValue({
+      ok: true,
+      definition: BOOTSTRAP,
+      warnings: [],
+    });
+    await run("apply", { "expected-revision": "0" });
+    expect(warnings).toHaveLength(0);
+    await expect(
+      run("apply", { "expected-revision": "0" }),
+    ).rejects.toMatchObject({ code: "schema-revision-conflict" });
+    expect(warnings).toHaveLength(0);
+    mockLoadComposedSchema.mockReturnValue({
+      ok: true,
+      definition: "schema_version = [",
+      warnings: [],
+    });
+    await expect(run("apply", {})).rejects.toBeDefined();
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("renders one JSON stderr warning when the CLI uses the actual SDK remote backend", async () => {
+    mockLoadComposedSchema.mockReturnValue({
+      ok: true,
+      definition: BOOTSTRAP,
+      warnings: [],
+    });
+    // Exercise CLI -> SDK HTTP serialization -> real local apply -> HTTP result.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        const result = await project.applySchema(JSON.parse(init.body));
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    mockResolveContext.mockReturnValue({
+      config: { project_id: "test-proj" },
+      schema: new RemoteBackend(
+        createCliClient("https://worker", "token"),
+        "test-proj",
+      ),
+    });
+    await withOutput({ json: true, nonInteractive: true, mutating: true }, () =>
+      run("apply", { json: true }),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(JSON.parse(warnings[0])).toMatchObject({
+      type: "diagnostic",
+      level: "warning",
+      message: expect.stringContaining("schema-revision-deprecated"),
+    });
+    expect(JSON.parse(stdout.join("")).result.warnings).toHaveLength(1);
+    expect(
+      await project.listJournal({ kind: "schema.revisionless_applied" }),
+    ).toHaveLength(1);
+  });
 
   describe("import", () => {
     it("previews by default and applies nothing", async () => {

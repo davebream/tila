@@ -62,6 +62,7 @@ export const JournalEventKindSchema = z.enum([
   "artifact.reconciled",
   "artifact.search.rebuilt",
   "schema.applied",
+  "schema.revisionless_applied",
   "artifact.relationship.added",
   "entity.artifact.referenced",
   "gate.created",

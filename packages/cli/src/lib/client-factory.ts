@@ -24,6 +24,9 @@ export function createCliClient(
   return new TilaClient({
     baseUrl,
     token,
+    // Commands render returned schema warnings through the CLI diagnostic
+    // channel, including JSON mode. Suppress the SDK's duplicate diagnostic.
+    warningSink: () => {},
     extraHeaders: CLI_SOURCE_HEADERS,
     participantId: identity?.participantId,
     environment: {

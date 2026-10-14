@@ -74,7 +74,7 @@ export function registerSchemaTools(
   registerPrimitiveTool(
     server,
     "tila_schema_update",
-    "Apply a new schema definition to the project. Pass the full TOML schema string. Returns the new version and a list of changes applied.",
+    "Apply a full TOML schema definition. Preview first and supply expected_revision to reject stale writes. Revisionless applies are deprecated and return warnings; managed projects require a revision. Returns the version, changes and compatibility warnings.",
     {
       expected_revision: z.number().int().nonnegative().optional(),
       reviewed_definition: z.string().optional(),

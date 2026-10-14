@@ -1613,6 +1613,17 @@ export const SchemaGetResponseSchema = z.object({
 
 export type SchemaGetResponse = z.infer<typeof SchemaGetResponseSchema>;
 
+/** Accepted legacy writes remain compatible, but must be visible to callers. */
+export const SchemaApplyWarningSchema = z.object({
+  code: z.literal("schema-revision-deprecated"),
+  message: z.string(),
+  /** Absent on receipts created before warnings were recorded. */
+  observed_revision: z.number().int().nonnegative().optional(),
+  result_revision: z.number().int().nonnegative(),
+});
+
+export type SchemaApplyWarning = z.infer<typeof SchemaApplyWarningSchema>;
+
 export const SchemaApplyResponseSchema = z.object({
   ok: z.literal(true),
   version: z.number().int().nullable(),
@@ -1620,6 +1631,8 @@ export const SchemaApplyResponseSchema = z.object({
   changes: z.array(z.string()).optional(),
   noChange: z.boolean().optional(),
   diff: z.unknown().optional(),
+  // Optional for compatibility with servers predating revision warnings.
+  warnings: z.array(SchemaApplyWarningSchema).optional(),
 });
 
 export type SchemaApplyResponse = z.infer<typeof SchemaApplyResponseSchema>;
