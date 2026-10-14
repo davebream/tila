@@ -131,13 +131,22 @@ upgrade or a rerun of the official installer. Later releases can use this comman
 
 ## Participant identity
 
-Every CLI process has one participant ID. Resolution order is `--participant-id`, then `TILA_PARTICIPANT_ID`, then a generated UUID. `tila task claim` prints the participant ID it used. Standalone renew/release require the same ID explicitly so a new process cannot silently act as another participant:
+Every CLI process has one participant ID. Resolution order is `--participant-id`, then `TILA_PARTICIPANT_ID`, then a generated UUID. A successful `tila task claim` prints the participant ID it used. Standalone renew/release require the same ID explicitly so a new process cannot silently act as another participant:
 
 ```bash
 tila --participant-id session-7 task claim T-abc123
 tila --participant-id session-7 task renew T-abc123 --fence 1
 tila shell --instance work # injects one TILA_PARTICIPANT_ID for the subshell
 ```
+
+`tila task claim` exits 0 only after acquiring the claim. If another participant
+holds the exclusive claim, both local and remote modes exit 1 with no success
+output on stdout. With `--json`, stderr contains
+`{"ok":false,"error":{"kind":"already-held","message":"...","retryable":false}}`;
+text mode reports the conflict on stderr. Failed acquisitions do not print a
+fence, expiry, or participant as acquired authority. Wait for expiry or have the
+holder release the claim before acquiring it. Successful JSON output retains
+`result.acquired: true`, `fence`, ISO 8601 `expires_at`, and `participant_id`.
 
 Hostname and Git repository/worktree/branch/commit details are collected best-effort as environment metadata only; they never establish ownership.
 
