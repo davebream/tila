@@ -18,6 +18,12 @@ import type { HerdrReadClient } from "../src/herdr";
 import type { Registration } from "../src/store";
 import { ConnectorStore } from "../src/store";
 
+vi.mock("@tila/client-lifecycle", async (original) => {
+  const actual = await original<typeof import("@tila/client-lifecycle")>();
+  const { workerProcessAlive } = await import("./fixtures/worker-process");
+  return { ...actual, processAlive: workerProcessAlive(actual) };
+});
+
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -231,7 +237,6 @@ it("routes authenticated inspection and gated registration through the productio
   expect(f.effect).not.toHaveBeenCalled();
 });
 
-// Sequential control round trips and process-identity checks need headroom under CI load.
 it("persists verified association before relay creation, uses stable refs and accepts only exact repeats", async () => {
   const f = fixture();
   await f.control.listen((request) => f.connector.request(request));
@@ -268,7 +273,7 @@ it("persists verified association before relay creation, uses stable refs and ac
   expect(JSON.stringify(f.connector.status())).not.toMatch(
     /fixture-only|account_ref|fixture\.sock/,
   );
-}, 15_000);
+});
 
 it.each([
   "socket",

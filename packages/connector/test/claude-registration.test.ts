@@ -19,10 +19,15 @@ import { StandaloneDiscovery } from "../src/discovery";
 import { ConnectorStore } from "../src/store";
 
 const mocked = vi.hoisted(() => ({ connect: vi.fn(), directory: "" }));
-vi.mock("@tila/client-lifecycle", async (original) => ({
-  ...(await original<typeof import("@tila/client-lifecycle")>()),
-  connectRuntimeBroker: mocked.connect,
-}));
+vi.mock("@tila/client-lifecycle", async (original) => {
+  const actual = await original<typeof import("@tila/client-lifecycle")>();
+  const { workerProcessAlive } = await import("./fixtures/worker-process");
+  return {
+    ...actual,
+    processAlive: workerProcessAlive(actual),
+    connectRuntimeBroker: mocked.connect,
+  };
+});
 // Only redirect the existing protected-socket guard to this run-owned fixture directory.
 vi.mock("../src/claude", async (original) => {
   const actual = await original<typeof import("../src/claude")>();
