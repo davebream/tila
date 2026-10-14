@@ -1982,10 +1982,33 @@ endpoint.
 Removing a trusted issuer, changing its host mapping, disabling a repository
 link or its OIDC policy, revoking a binding, or removing membership denies later
 protected requests from previously exchanged credentials, runtime runs and
-signed sessions. Historical cookie sessions derived from credentials revalidate
+signed sessions that retain verified workload or tagged Actions sponsor context.
+Historical cookie sessions derived from credentials revalidate
 their source too. Policy tightening narrows issued authority; a later expansion
 does not expand its issuance ceiling. Requests already authorized and executing
 are outside this subsequent-request guarantee.
+
+Personal runtime enrollments sponsored by Actions also retain the complete
+server-derived workload context, tagged `provider: "github-actions"` in the
+existing `sponsor_context_json`. Every enrollment/run authentication, child run
+start, recovery, renewal and heartbeat rechecks current Actions membership,
+deployment trust, repository policy and the issuer's subject-revocation cutoff.
+Canonical issuer/subject must match the recorded sponsor. Current authority
+narrows the frozen enrollment capabilities and restrictions; it never rebuilds
+a broader policy from the sponsor's role. Recovery binds the operation ID to the
+original normalized context, including repository ID and workflow conditions,
+and refuses an existing effective policy above the current caller's ceiling.
+
+Contextless personal enrollments from older Workers, including pre-fix
+Actions-sponsored enrollments, cannot identify an Actions repository safely.
+Their existing credentials remain membership-only and are not retroactively
+repaired. That behavior remains for human and generic OIDC compatibility.
+Recovery using an Actions session cannot infer
+or add provenance to one: re-enroll with a new operation ID and current Actions
+assertion, then revoke the old installation and its descendants. Repository-specific
+revocation cannot be established for those contextless legacy installations.
+Known affected Actions enrollments must be revoked and re-enrolled during rollout.
+The historical untagged GitHub human mirrored context remains supported.
 
 Upgrade all serving Worker instances **before** configuring GHES trust. No new
 D1 columns or migration are needed: workload JSON and the signed session's
