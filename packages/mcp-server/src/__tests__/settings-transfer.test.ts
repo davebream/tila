@@ -370,18 +370,20 @@ describe("MCP settings transfer over the real SDK and MCP protocol", () => {
     const ctx = await context();
     const receipt = preview(await ctx.plan());
     ctx.fetch.mockClear();
-    for (const changed of [
-      { ...receipt, digest: "a".repeat(64) },
-      { ...receipt, plan: { ...receipt.plan, project_id: "other" } },
-    ])
-      expect(
-        (
-          await ctx.call("tila_settings_resume", {
-            receipt: changed,
-            apply: true,
-          })
-        ).isError,
-      ).toBe(true);
+    for (const [changed, code] of [
+      [{ ...receipt, plan_sha256: "a".repeat(64) }, "plan-mismatch"],
+      [
+        { ...receipt, plan: { ...receipt.plan, project_id: "other" } },
+        "project-mismatch",
+      ],
+    ] as const) {
+      const response = await ctx.call("tila_settings_resume", {
+        receipt: changed,
+        apply: true,
+      });
+      expect(response.isError).toBe(true);
+      expect(response.structuredContent).toMatchObject({ error: { code } });
+    }
     expect(ctx.fetch).not.toHaveBeenCalled();
     expect(ctx.writes).toHaveLength(0);
   });
