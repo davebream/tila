@@ -67,6 +67,7 @@ export async function resolveTokenMembership(
   db: D1Database,
   token: UnifiedTokenResult,
   projectId: string,
+  trustedActionsIssuers?: string,
 ): Promise<{
   role: ProjectRole;
   explicitRole?: ProjectRole;
@@ -79,7 +80,13 @@ export async function resolveTokenMembership(
     return { role: token.runtime.policy.role, sources: ["explicit"] };
   }
   if (token.kind === "github-actions-session")
-    return resolveActionsMembership(db, projectId, token.workload, token.role);
+    return resolveActionsMembership(
+      db,
+      projectId,
+      token.workload,
+      token.role,
+      trustedActionsIssuers,
+    );
   if (
     (token.kind === "d1-token" || token.kind === "cookie-session") &&
     token.policy &&
@@ -114,7 +121,12 @@ export function projectMembershipMiddleware(): MiddlewareHandler<{
     const projectId = c.get("projectId");
     try {
       const membership = await measurePhase(c, "membership", () =>
-        resolveTokenMembership(c.env.DB, c.get("tokenResult"), projectId),
+        resolveTokenMembership(
+          c.env.DB,
+          c.get("tokenResult"),
+          projectId,
+          c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+        ),
       );
       if (!membership) {
         return c.json(

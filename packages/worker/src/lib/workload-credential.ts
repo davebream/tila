@@ -3,6 +3,7 @@ import {
   type GitHubActionsContext,
   delegablePolicy,
   effectiveCredentialPolicy,
+  githubActionsIdentity,
 } from "@tila/schemas";
 import { CredentialPolicyReadSchema, roleToPermission } from "@tila/schemas";
 import type { Context } from "hono";
@@ -36,7 +37,10 @@ async function exchangeScopedWorkloadUnchecked(
     workloadContext?: GitHubActionsContext;
   },
 ): Promise<Response | null> {
-  const store = new CredentialStore(c.env.DB);
+  const store = new CredentialStore(
+    c.env.DB,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  );
   const binding = await store.findBinding(
     input.projectId,
     input.provider,
@@ -86,10 +90,16 @@ async function exchangeScopedWorkloadUnchecked(
   if (input.provider === "github-actions") {
     if (!input.workloadContext)
       throw new CredentialDenied("Missing workload context");
+    if (
+      githubActionsIdentity(input.workloadContext).issuer !== input.issuer ||
+      input.workloadContext.sub !== input.subject
+    )
+      throw new CredentialDenied("Workload identity mismatch");
     const current = await resolveActionsPolicy(
       c.env.DB,
       input.projectId,
       input.workloadContext,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
     );
     if (!current) throw new CredentialDenied("Workload policy denied");
     issuedPolicy = effectiveCredentialPolicy(issuedPolicy, current.role);
@@ -109,6 +119,7 @@ async function exchangeScopedWorkloadUnchecked(
       c.env.DB,
       undefined,
       agentRunAuthorizer(c.env),
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
     );
     await runtime.consumeAssertion(
       digest,

@@ -68,6 +68,7 @@ whoami.get("/whoami", async (c) => {
         c.env.DB,
         token,
         token.projectId,
+        c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
       );
       if (membership) {
         response.role = membership.role;

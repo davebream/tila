@@ -55,7 +55,12 @@ runtimeRoutes.post("/projects/:projectId/runtime/redeem", async (c) => {
   const parsed = RuntimeRedeemRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return zodValidationError(c, parsed.error);
   const { invitation, ...input } = parsed.data;
-  const store = new RuntimeStore(c.env.DB);
+  const store = new RuntimeStore(
+    c.env.DB,
+    undefined,
+    undefined,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  );
   const hash = await hashToken(invitation, c.env.HASH_PEPPER);
   const invite = await store.invitation(hash);
   if (!invite || invite.project_id !== c.req.param("projectId"))
@@ -116,7 +121,12 @@ runtimeRoutes.post("/projects/:projectId/runtime/enrollments", async (c) => {
     "X-Tila-Enrollment-Proof",
   );
   const { token, secret } = await runtimeSecret(c);
-  const context = await new RuntimeStore(c.env.DB).enroll(
+  const context = await new RuntimeStore(
+    c.env.DB,
+    undefined,
+    undefined,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).enroll(
     c.get("projectId"),
     parsed.data,
     principalIdFor(c.get("tokenResult")),
@@ -141,7 +151,12 @@ runtimeRoutes.post("/projects/:projectId/runtime/invitations", async (c) => {
       "Invitation exceeds caller authority",
     );
   const { token, secret } = await runtimeSecret(c);
-  const { expires_at, invitation_id } = await new RuntimeStore(c.env.DB).invite(
+  const { expires_at, invitation_id } = await new RuntimeStore(
+    c.env.DB,
+    undefined,
+    undefined,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ).invite(
     c.get("projectId"),
     principalIdFor(c.get("tokenResult")),
     parsed.data.name,
@@ -161,9 +176,12 @@ runtimeRoutes.get("/projects/:projectId/runtime/invitations", async (c) => {
   if (denied) return denied;
   return c.json({
     ok: true,
-    invitations: await new RuntimeStore(c.env.DB).listInvitations(
-      c.get("projectId"),
-    ),
+    invitations: await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).listInvitations(c.get("projectId")),
   });
 });
 // Stops later redemption; enrollments already redeemed are revoked separately.
@@ -172,7 +190,12 @@ runtimeRoutes.post(
   async (c) => {
     const denied = await runtimeOperator(c, true);
     if (denied) return denied;
-    const result = await new RuntimeStore(c.env.DB).revokeInvitation(
+    const result = await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).revokeInvitation(
       c.get("projectId"),
       c.req.param("invitationId"),
       principalIdFor(c.get("tokenResult")),
@@ -216,10 +239,12 @@ runtimeRoutes.post(
       row.sponsor_id !== principalIdFor(c.get("tokenResult")),
     );
     if (denied) return denied;
-    await new RuntimeStore(c.env.DB).revokeEnrollment(
-      row.enrollment_id,
-      principalIdFor(c.get("tokenResult")),
-    );
+    await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).revokeEnrollment(row.enrollment_id, principalIdFor(c.get("tokenResult")));
     await expireAgentBindings(c.env, c.get("projectId"), {
       enrollment_id: row.enrollment_id,
     });
@@ -240,6 +265,7 @@ runtimeRoutes.post("/projects/:projectId/runtime/runs", async (c) => {
     c.env.DB,
     undefined,
     agentRunAuthorizer(c.env),
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
   ).start(authority.enrollment_id, parsed.data, secret);
   return c.json({ ok: true, token, context });
 });
@@ -252,7 +278,12 @@ runtimeRoutes.get("/projects/:projectId/runtime/runs", async (c) => {
       c.get("effectiveRole") === "owner");
   return c.json({
     ok: true,
-    runs: await new RuntimeStore(c.env.DB).listRuns(
+    runs: await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).listRuns(
       c.get("projectId"),
       owner ? undefined : enrollments.map((row) => row.enrollment_id),
     ),
@@ -265,11 +296,12 @@ runtimeRoutes.post(
     const parsed = RuntimeRenewRequestSchema.safeParse(await c.req.json());
     if (!parsed.success) return zodValidationError(c, parsed.error);
     const { token, secret } = await runtimeSecret(c);
-    const context = await new RuntimeStore(c.env.DB).renew(
-      c.req.param("runId"),
-      parsed.data.expected_token_id,
-      secret,
-    );
+    const context = await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).renew(c.req.param("runId"), parsed.data.expected_token_id, secret);
     return c.json({ ok: true, token, context });
   },
 );
@@ -279,9 +311,12 @@ runtimeRoutes.post(
     await runtimeDescendant(c, c.req.param("runId"), true);
     return c.json({
       ok: true,
-      lease_expires_at: await new RuntimeStore(c.env.DB).heartbeat(
-        c.req.param("runId"),
-      ),
+      lease_expires_at: await new RuntimeStore(
+        c.env.DB,
+        undefined,
+        undefined,
+        c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+      ).heartbeat(c.req.param("runId")),
     });
   },
 );
@@ -289,7 +324,12 @@ runtimeRoutes.post(
   "/projects/:projectId/runtime/runs/:runId/close",
   async (c) => {
     await runtimeDescendant(c, c.req.param("runId"), true);
-    await new RuntimeStore(c.env.DB).finish(
+    await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).finish(
       c.req.param("runId"),
       principalIdFor(c.get("tokenResult")),
       "closed",
@@ -305,7 +345,12 @@ runtimeRoutes.post(
   async (c) => {
     const denied = await runtimeOperator(c, true);
     if (denied) return denied;
-    const store = new RuntimeStore(c.env.DB);
+    const store = new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    );
     const run = await store.run(c.req.param("runId"));
     if (!run || run.project_id !== c.get("projectId"))
       throw new RuntimeDenied("runtime-binding-mismatch", "Unknown run");
@@ -333,7 +378,12 @@ runtimeRoutes.onError(async (error, c) => {
       doubles: [1],
     });
     if (authority)
-      await new RuntimeStore(c.env.DB).recordDenial(
+      await new RuntimeStore(
+        c.env.DB,
+        undefined,
+        undefined,
+        c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+      ).recordDenial(
         authority.project_id,
         authority.principal_id,
         authority.run_id ?? authority.enrollment_id ?? authority.principal_id,

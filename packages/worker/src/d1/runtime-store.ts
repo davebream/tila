@@ -16,6 +16,7 @@ import {
   type RuntimeInvitation,
   type RuntimeRunRequest,
   effectiveCredentialPolicy,
+  githubActionsIdentity,
   intersectCredentialPolicies,
   permissionToRole,
   policyContains,
@@ -72,6 +73,7 @@ export class RuntimeStore {
       principal: string,
       agent: string,
     ) => Promise<void>,
+    private trustedActionsIssuers?: string,
   ) {
     this.db = drizzle(binding);
   }
@@ -255,13 +257,20 @@ export class RuntimeStore {
         ),
       );
       if (binding.provider === "github-actions") {
-        const context = GitHubActionsContextSchema.parse(
+        const parsed = GitHubActionsContextSchema.safeParse(
           JSON.parse(row.workload_context_json ?? "null"),
         );
+        if (
+          !parsed.success ||
+          binding.issuer !== githubActionsIdentity(parsed.data).issuer ||
+          binding.subject !== parsed.data.sub
+        )
+          this.deny("enrollment-revoked", "Invalid workload identity");
         const current = await resolveActionsPolicy(
           this.binding,
           row.project_id,
-          context,
+          parsed.data,
+          this.trustedActionsIssuers,
         );
         if (!current)
           this.deny(

@@ -119,7 +119,12 @@ conversations.all("*", async (c) => {
     );
     if (!current.ok) return current;
     const { run_id } = (await current.json()) as { run_id: string | null };
-    const store = new RuntimeStore(c.env.DB);
+    const store = new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    );
     const holder = run_id ? await store.run(run_id) : undefined;
     if (
       !holder ||
@@ -199,7 +204,12 @@ conversations.all("*", async (c) => {
   );
   // A long poll must not return mailbox metadata after run revocation.
   if (path.endsWith("/watch") && token.kind === "d1-token" && runtime)
-    await new RuntimeStore(c.env.DB).context(token.tokenId);
+    await new RuntimeStore(
+      c.env.DB,
+      undefined,
+      undefined,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    ).context(token.tokenId);
   const result = new Response(response.body, response);
   result.headers.set("Cache-Control", "private, no-store");
   return result;
