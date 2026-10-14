@@ -22,6 +22,7 @@ import {
   allScenarios,
   buildScenario,
   materializeFiles,
+  warmupScenario,
 } from "./dogfood-study-fixtures.mjs";
 import {
   allocateVariants,
@@ -43,11 +44,13 @@ const rubricText = readFileSync(
 const rubric = JSON.parse(rubricText);
 const rubricSha256 = sha256Text(rubricText);
 const scenarios = allScenarios();
+const warmup = warmupScenario();
 const declaration = buildDeclaration({
   rubric,
   rubricSha256,
   rubricPath: "docs/evidence/issue-194-rubric-v2.json",
   scenarios,
+  warmup,
 });
 
 const temp = [];
@@ -304,6 +307,7 @@ test("a declaration that was edited or built on changed fixtures does not verify
     rubricSha256,
     rubricPath: "docs/evidence/issue-194-rubric-v2.json",
     scenarios,
+    warmup,
   };
   assert.deepEqual(checkDeclaration(declaration, ctx), []);
   const swapped = structuredClone(declaration);
@@ -320,6 +324,18 @@ test("a declaration that was edited or built on changed fixtures does not verify
     rubricSha256: "0".repeat(64),
   });
   assert.ok(wrongRubric.some((f) => f.code === "rubric_hash"));
+  const changedWarmup = checkDeclaration(declaration, {
+    ...ctx,
+    warmup: { ...warmup, sha256: "0".repeat(64) },
+  });
+  assert.ok(changedWarmup.some((f) => f.code === "warmup"));
+  const editedWarmup = structuredClone(declaration);
+  editedWarmup.warmup.sha256 = "0".repeat(64);
+  assert.ok(
+    checkDeclaration(editedWarmup, ctx).some(
+      (f) => f.code === "declaration_hash",
+    ),
+  );
 });
 
 test("pair matching rejects variants with different case counts", () => {
@@ -543,7 +559,10 @@ test("preflight drill results cannot change agent counts and fixture provenance 
     results: [{ id: "D2_stale_fence", pass: true }],
   };
   const withDrills = validateBundle({
-    bundle: bundleOf({ t2: { events: l.events } }, drillsFile),
+    bundle: bundleOf(
+      { t2: { events: l.events, evaluation: passingEvaluation(), review } },
+      drillsFile,
+    ),
     rubric,
     rubricSha256,
     declaration,
