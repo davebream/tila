@@ -13,6 +13,10 @@ import { dirname, join, resolve } from "node:path";
 import { binaryName, digest, run, targets } from "./release-common.mjs";
 import { mcpSmoke } from "./release-mcp-smoke.mjs";
 import { verifyRelease } from "./release-verify.mjs";
+import {
+  assertDeployPayload,
+  withoutPayloadOverrides,
+} from "./release-worker-identity.mjs";
 
 const directory = resolve(process.argv[2] || ".release");
 const mode = process.argv[3] || "consumer";
@@ -28,7 +32,7 @@ assert.match(
 );
 const manifest = verifyRelease(directory, process.env.RELEASE_SHA);
 const temporary = mkdtempSync(join(tmpdir(), "tila-release-smoke-"));
-const cleanEnv = {
+const cleanEnv = withoutPayloadOverrides({
   ...process.env,
   TILA_HOME: join(temporary, "home"),
   TILA_API_TOKEN: "",
@@ -37,7 +41,7 @@ const cleanEnv = {
   TILA_LIFECYCLE_KEY: "",
   TILA_PARTICIPANT_ID: "release-smoke",
   TILA_MCP_TOOLS: "all",
-};
+});
 
 function localConfig(cwd) {
   mkdirSync(join(cwd, ".tila"), { recursive: true });
@@ -45,14 +49,6 @@ function localConfig(cwd) {
     join(cwd, ".tila/config.toml"),
     `project_id="release-smoke"\nbackend="local"\nschema_version=1\ntila_version=${JSON.stringify(manifest.version)}\ncreated_at="2026-01-01T00:00:00Z"\n[local]\ndb_path=${JSON.stringify(join(cwd, "project.db"))}\nartifacts_path=${JSON.stringify(join(cwd, "artifacts"))}\norg="release-smoke"\n`,
   );
-}
-// Every installed CLI must carry a deploy payload matching its own version.
-function assertDeployPayload(output) {
-  const { result } = JSON.parse(output);
-  assert.equal(result.version, manifest.version, "Deploy payload version");
-  assert.equal(result.source, "embedded", "Deploy payload source");
-  assert.ok(result.migrations.count > 0, "Deploy payload has D1 migrations");
-  assert.ok(result.ui.indexHtml, "Deploy payload has the UI build");
 }
 function cliSmoke(command, prefix = []) {
   const cwd = join(temporary, `cli-${prefix.length ? "npm" : "binary"}`);
@@ -64,7 +60,7 @@ function cliSmoke(command, prefix = []) {
   // Loads the native keyring addon; a binary built without its target's
   // addon fails here even though --version and --help succeed.
   assert.match(call("auth", "setup", "--help"), /administrator/i);
-  assertDeployPayload(call("deploy", "--dry-run", "--json"));
+  assertDeployPayload(call("deploy", "--dry-run", "--json"), manifest);
   assert.match(
     call(
       "task",
@@ -144,6 +140,7 @@ async function installerSmoke(binary) {
       env: cleanEnv,
       timeout: 60_000,
     }),
+    manifest,
   );
 }
 

@@ -1,4 +1,4 @@
-import { GITHUB_ACTIONS_ISSUER } from "@tila/schemas";
+import { githubActionsIdentity } from "@tila/schemas";
 import {
   type EnvironmentMetadata,
   EnvironmentMetadataSchema,
@@ -34,7 +34,7 @@ export function principalIdFor(token: UnifiedTokenResult): string {
     case "github-actions-session":
       return canonicalMembershipPrincipal({
         provider: "oidc",
-        issuer: GITHUB_ACTIONS_ISSUER,
+        issuer: githubActionsIdentity(token.workload).issuer,
         subject: token.workload.sub,
       }).principalId;
     case "oidc-session":

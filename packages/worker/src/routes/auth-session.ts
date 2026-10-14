@@ -106,14 +106,13 @@ authSessionProtected.post("/logout", csrfGuard, async (c) => {
     case "d1-token": {
       if (tokenResult.policy && tokenResult.principalId) {
         try {
-          await new CredentialStore(c.env.DB).revoke(
-            tokenResult.projectId,
-            tokenResult.name,
-            {
-              principalId: tokenResult.principalId,
-              tokenId: tokenResult.tokenId,
-            },
-          );
+          await new CredentialStore(
+            c.env.DB,
+            c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+          ).revoke(tokenResult.projectId, tokenResult.name, {
+            principalId: tokenResult.principalId,
+            tokenId: tokenResult.tokenId,
+          });
         } catch {
           return c.json(
             {

@@ -211,7 +211,12 @@ async function loadAttention(
 export async function loadRuntimeView(
   c: RuntimeViewContext,
   query: RuntimeViewQuery,
-  store: RuntimeStoreReader = new RuntimeStore(c.env.DB),
+  store: RuntimeStoreReader = new RuntimeStore(
+    c.env.DB,
+    undefined,
+    undefined,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+  ),
 ): Promise<Response> {
   if (query.filter === "attention") return loadAttention(c, query, store);
   const params = new URLSearchParams({ limit: String(query.limit) });

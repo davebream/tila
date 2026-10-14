@@ -1,6 +1,6 @@
 {
   "name": "tila-mcp-server",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "description": "MCP server for tila — enables Claude Code, Cursor, and VS Code Copilot integration",
   "keywords": [
@@ -41,7 +41,7 @@
     "proper-lockfile": "^4.1.2",
     "smol-toml": "^1.8.0",
     "tila-sdk": "workspace:*",
-    "ws-node": "npm:ws@8.21.1",
+    "ws-node": "npm:ws@8.22.0",
     "zod": "^4.6.6"
   },
   "devDependencies": {
