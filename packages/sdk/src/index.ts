@@ -88,11 +88,16 @@ export {
 } from "./backends/remote";
 
 // Re-export key types consumers need
+export type { TaskListOptions, TaskListResponse } from "./entities";
 export type {
   // Entity types
   EntityResponse,
   EntityDetailResponse,
   EntityListResponse,
+  PaginatedEntityListResponse,
+  PaginatedCompactEntityListResponse,
+  LifecycleOutcome,
+  TaskListScope,
   // Claim types
   AcquireSuccessResponse,
   RenewSuccessResponse,

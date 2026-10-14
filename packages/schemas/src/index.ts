@@ -378,6 +378,8 @@ export {
   TASK_LIST_SORTS,
   TaskListQuerySchema,
   type TaskListQuery,
+  TaskListPageOptionsSchema,
+  type TaskListPageOptions,
   ArtifactGrepLineSchema,
   ArtifactGrepResultSchema,
   ArtifactGrepResponseSchema,

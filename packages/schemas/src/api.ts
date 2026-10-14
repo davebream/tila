@@ -251,6 +251,26 @@ export const TASK_LIST_SORTS = [
   "id",
 ] as const;
 
+/** Numeric paging contract shared by HTTP and embedded task lists. */
+export const TaskListPageOptionsSchema = z
+  .object({
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .transform((value) => Math.min(value, 500))
+      .optional(),
+    offset: z.number().int().nonnegative().optional(),
+    cursor: ListCursorSchema.optional(),
+    sort: z.enum(TASK_LIST_SORTS).optional(),
+    order: z.enum(["asc", "desc"]).optional(),
+  })
+  .refine((q) => !(q.cursor && q.offset), {
+    message: "cursor and offset cannot be combined",
+    path: ["cursor"],
+  });
+export type TaskListPageOptions = z.infer<typeof TaskListPageOptionsSchema>;
+
 /**
  * Query validation for `GET /tasks`. Only the paging contract is strict;
  * filter params stay lenient strings so existing callers keep working.
@@ -258,9 +278,21 @@ export const TASK_LIST_SORTS = [
 export const TaskListQuerySchema = z
   .object({
     cursor: ListCursorSchema.optional(),
+    limit: z
+      .string()
+      .regex(/^\d+$/, "limit must be a positive integer")
+      .refine(
+        (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0,
+        "limit must be a positive safe integer",
+      )
+      .optional(),
     offset: z
       .string()
       .regex(/^\d+$/, "offset must be a non-negative integer")
+      .refine(
+        (value) => Number.isSafeInteger(Number(value)),
+        "offset must be a non-negative safe integer",
+      )
       .optional(),
     sort: z.enum(TASK_LIST_SORTS).optional(),
     order: z.enum(["asc", "desc"]).optional(),
