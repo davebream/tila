@@ -1112,7 +1112,7 @@ function cmdEvaluate(opts) {
       (other
         ? baseOf(e.payload.role) === other
         : ["w1", "w2"].includes(e.payload.role)) &&
-      hasPreventionEvidence(e),
+      hasPreventionEvidence(e, dir),
   );
   const overlap = {
     overlap_id: "injected-helper",
@@ -1457,6 +1457,7 @@ function loadBundle(dir, manifest) {
       ? parseEvents(readFileSync(evFile, "utf8"))
       : { events: [], problems: ["events.jsonl missing"] };
     trials[id] = {
+      trialDir: t,
       events: parsed.events,
       parseProblems: parsed.problems,
       evaluation: existsSync(join(t, "evaluation.json"))
@@ -1501,6 +1502,7 @@ function cmdDerive(opts) {
     review,
     frozen: manifest.frozen,
     rubric,
+    trialDir: dir,
   });
   writeJson(join(dir, "ledger.json"), ledger);
   console.log(

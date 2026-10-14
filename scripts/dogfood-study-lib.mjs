@@ -1,7 +1,7 @@
 /**
  * Recorder and validator for the #194 dogfood pilot.
  *
- * Pure functions (plus a small locked JSONL appender). The driver
+ * Pure derivation plus a locked JSONL appender and trial-local evidence reader. The driver
  * `dogfood-study.mjs` adds the filesystem, git and process work around them.
  *
  * Design rule: absence is never zero. A metric is `observed` only from an event
@@ -12,11 +12,22 @@ import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
 } from "node:fs";
-import { basename, dirname } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from "node:path";
 
 /** Stable JSON: object keys sorted recursively so hashes do not depend on insertion order. */
 export function canonicalJson(value) {
@@ -689,38 +700,171 @@ const notApplicable = (reason) => ({
 });
 
 /**
- * Evidence-shape check, not a semantic verdict. The auditor must open all three
- * hash-bound records: competing intent/attempt, its stopped/redirected response,
- * and the before-edit snapshot/audit. Ownership and final-tree silence supply
- * none of these. Optional event evidence restores the existing rubric definition;
- * it does not change the declared task, method or budget.
+ * Resolve only regular files below the supplied trial directory. Reject lexical
+ * traversal and symlinks before reading, including links that point back inside.
  */
-export function hasPreventionEvidence(event) {
-  const p = event.payload;
-  const evidence = p.prevention_evidence;
-  const retained = (record) =>
-    typeof record?.ref === "string" &&
-    record.ref.trim().length > 0 &&
-    /^[a-f0-9]{64}$/.test(record.sha256 ?? "");
-  return (
-    event.kind === "overlap.observed" &&
-    event.provenance === "local_agent_trial" &&
-    ["stopped", "redirected"].includes(p.response) &&
-    p.edits_before_redirect === 0 &&
-    evidence?.schema === "tila.dogfood.overlap-evidence/1" &&
-    retained(evidence.attempt) &&
-    retained(evidence.response) &&
-    retained(evidence.before_edit) &&
-    Number.isFinite(evidence.attempt.mono_ms) &&
-    Number.isFinite(evidence.response.mono_ms) &&
-    evidence.attempt.mono_ms <= evidence.response.mono_ms &&
-    evidence.response.mono_ms <= event.mono_ms
-  );
+function readOverlapRecord(trialDir, record) {
+  if (!trialDir) throw new Error("trial directory unavailable");
+  const ref = record?.ref;
+  if (
+    typeof ref !== "string" ||
+    !ref.trim() ||
+    isAbsolute(ref) ||
+    win32.isAbsolute(ref) ||
+    /[\\:\0]/.test(ref) ||
+    ref.split("/").some((part) => !part || part === "." || part === "..")
+  )
+    throw new Error("reference must be a relative path without traversal");
+  if (!/^[a-f0-9]{64}$/.test(record.sha256 ?? ""))
+    throw new Error("record SHA-256 missing or malformed");
+  if (lstatSync(trialDir).isSymbolicLink())
+    throw new Error("trial directory is a symlink");
+  const root = realpathSync(trialDir);
+  const path = resolve(root, ref);
+  const rel = relative(root, path);
+  if (!rel || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+    throw new Error("reference escapes trial directory");
+  let current = root;
+  for (const part of ref.split("/")) {
+    current = join(current, part);
+    if (lstatSync(current).isSymbolicLink())
+      throw new Error("reference contains a symlink");
+  }
+  if (!lstatSync(path).isFile())
+    throw new Error("reference is not a regular file");
+  const bytes = readFileSync(path);
+  if (sha256Text(bytes) !== record.sha256)
+    throw new Error("record SHA-256 mismatch");
+  return JSON.parse(bytes.toString("utf8"));
 }
 
 /**
+ * Verify retained bytes and their explicit attempt/response/edit-audit contents.
+ * Unsupported native formats remain unavailable. This checks corroborating
+ * records, not their capture authenticity; native coverage still needs audit.
+ * No caller-supplied `verified` boolean or cached result earns credit.
+ */
+export function verifyPreventionEvidence(event, trialDir) {
+  const p = event.payload;
+  const evidence = p.prevention_evidence;
+  const fail = (reason) => ({ verified: false, reason });
+  if (
+    !(
+      event.kind === "overlap.observed" &&
+      event.provenance === "local_agent_trial" &&
+      ["stopped", "redirected"].includes(p.response) &&
+      p.edits_before_redirect === 0 &&
+      evidence?.schema === "tila.dogfood.overlap-evidence/1" &&
+      Number.isFinite(evidence.attempt?.mono_ms) &&
+      Number.isFinite(evidence.response?.mono_ms) &&
+      evidence.attempt.mono_ms <= evidence.response.mono_ms &&
+      evidence.response.mono_ms <= event.mono_ms
+    )
+  )
+    return fail("incomplete or unordered prevention claim");
+  let attempt;
+  let response;
+  let before;
+  try {
+    attempt = readOverlapRecord(trialDir, evidence.attempt);
+    response = readOverlapRecord(trialDir, evidence.response);
+    before = readOverlapRecord(trialDir, evidence.before_edit);
+  } catch (error) {
+    return fail(
+      error instanceof SyntaxError
+        ? "retained record is not valid JSON"
+        : error.code
+          ? `retained record unavailable (${error.code})`
+          : error.message,
+    );
+  }
+  const sameClaim = (record, kind) =>
+    record?.schema === "tila.dogfood.overlap-record/1" &&
+    record.kind === kind &&
+    record.trial_id === event.trial_id &&
+    record.overlap_id === p.overlap_id &&
+    record.role === p.role &&
+    record.resource === p.resource &&
+    typeof record.attempt_id === "string" &&
+    record.attempt_id.trim().length > 0 &&
+    record.attempt_id === attempt?.attempt_id;
+  if (
+    !sameClaim(attempt, "attempt") ||
+    !sameClaim(response, "response") ||
+    !sameClaim(before, "before_edit")
+  )
+    return fail("retained record identities do not match the claimed attempt");
+  if (
+    attempt.intent !== "implement_shared_helper" ||
+    !Array.isArray(attempt.command) ||
+    !attempt.command.length ||
+    !attempt.command.every((arg) => typeof arg === "string" && arg.trim()) ||
+    attempt.mono_ms !== evidence.attempt.mono_ms
+  )
+    return fail("record does not establish a competing helper attempt");
+  const claimCommand =
+    attempt.command.includes("claim") &&
+    attempt.command.some((arg) => /^task:\S+$/.test(arg));
+  const lockCommand =
+    ["bash", "sh"].includes(basename(attempt.command[0])) &&
+    attempt.command.some(
+      (arg) => /\bmkdir\s/.test(arg) && arg.includes("locks/shared-helper"),
+    );
+  if (!claimCommand && !lockCommand)
+    return fail(
+      "unsupported command: no competing helper claim or lock attempt",
+    );
+  if (
+    response.mono_ms !== evidence.response.mono_ms ||
+    response.disposition !== p.response ||
+    typeof response.stdout !== "string" ||
+    typeof response.stderr !== "string"
+  )
+    return fail("record does not establish the claimed response");
+  const stopped =
+    response.disposition === "stopped" &&
+    response.exit_code === 1 &&
+    /already[_ -]held|already[_ -]owned|file exists/i.test(
+      response.stdout + response.stderr,
+    );
+  const redirected =
+    response.disposition === "redirected" &&
+    response.exit_code === 0 &&
+    typeof response.redirected_to === "string" &&
+    response.redirected_to.trim().length > 0 &&
+    response.redirected_to !== p.resource &&
+    response.stdout.includes(response.redirected_to);
+  if (!stopped && !redirected)
+    return fail(
+      "response does not corroborate stopping or redirecting the attempt",
+    );
+  if (
+    before.from_mono_ms !== attempt.mono_ms ||
+    before.through_mono_ms !== response.mono_ms ||
+    !Number.isFinite(before.mono_ms) ||
+    before.mono_ms < response.mono_ms ||
+    before.mono_ms > event.mono_ms ||
+    before.coverage !== "attempt_through_response" ||
+    !Array.isArray(before.observed_edits) ||
+    before.observed_edits.length !== 0 ||
+    !/^[a-f0-9]{40}$/.test(before.baseline ?? "") ||
+    before.head !== before.baseline ||
+    before.status !== "" ||
+    before.diff !== ""
+  )
+    return fail(
+      "before-edit record does not establish zero edits through the response",
+    );
+  return { verified: true };
+}
+
+export const hasPreventionEvidence = (event, trialDir) =>
+  verifyPreventionEvidence(event, trialDir).verified;
+
+/**
  * Derive the per-trial ledger from raw events plus the evaluator's report.
- * Only events and the evaluation are consulted; nothing is inferred from silence.
+ * Events, evaluation and verified retained records supply observations. Missing
+ * trialDir/records never become prevention credit; nothing is inferred from silence.
  */
 export function deriveLedger({
   trial,
@@ -729,6 +873,7 @@ export function deriveLedger({
   review = null,
   frozen,
   rubric,
+  trialDir = null,
 }) {
   const cond = trial.condition;
   const roles = ["w1", "w2"];
@@ -1044,8 +1189,15 @@ export function deriveLedger({
       Number(o.payload.edits_before_redirect ?? 0) > 0,
   );
   const duplicateIds = new Set(duplicateEdits.map((o) => o.payload.overlap_id));
+  const verified = new Set();
+  for (const event of overlaps.filter((o) => o.payload.prevention_evidence)) {
+    const result = verifyPreventionEvidence(event, trialDir);
+    if (result.verified) verified.add(event);
+    else
+      flags.push(`prevention_evidence_invalid:${event.seq}:${result.reason}`);
+  }
   const prevented = overlaps.filter(
-    (o) => hasPreventionEvidence(o) && !duplicateIds.has(o.payload.overlap_id),
+    (o) => verified.has(o) && !duplicateIds.has(o.payload.overlap_id),
   );
   const preventedIds = new Set(prevented.map((o) => o.payload.overlap_id));
   const preventionComplete = overlapIds.every(
@@ -1697,8 +1849,13 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
       review: t.review ?? null,
       frozen: frozen.frozen ?? { count_source: "none", usage_source: "none" },
       rubric,
+      trialDir: t.trialDir,
     });
     ledgers[id] = trialLedger;
+    for (const flag of trialLedger.flags.filter((f) =>
+      f.startsWith("prevention_evidence_invalid:"),
+    ))
+      add("prevention_evidence_invalid", flag, id);
     for (const flag of trialLedger.flags.filter((f) =>
       f.startsWith("late_state_evidence:"),
     ))
