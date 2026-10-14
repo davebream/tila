@@ -15,7 +15,6 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
-  statSync,
 } from "node:fs";
 import { basename, dirname } from "node:path";
 
@@ -137,6 +136,14 @@ export function buildDeclaration({
       "count_hook_sha256",
       "usage_source",
       "host_label",
+      ...(rubric.rubric_version >= 3
+        ? [
+            "count_hook_lib_sha256",
+            "hook_config_template_sha256",
+            "hook_smoke_sha256",
+            "codex_binary_sha256",
+          ]
+        : []),
     ],
   };
   return { ...body, declaration_sha256: sha256Text(canonicalJson(body)) };
@@ -354,6 +361,14 @@ export function validateEvent(event, rubric) {
       rubric.tool_call_categories.includes(payload.category),
       `unknown tool category ${payload.category}`,
     );
+    if (rubric.rubric_version >= 3 && !payload.denied) {
+      for (const key of ["session_id", "turn_id", "tool_use_id", "tool"])
+        need(
+          typeof payload[key] === "string" && payload[key].trim().length > 0,
+          `tool_call: ${key} missing`,
+        );
+      need(payload.source === "hook", "tool_call: source must be frozen hook");
+    }
   }
   if (event.kind === "tila_call" && payload.outcome !== undefined) {
     need(
@@ -382,7 +397,7 @@ export function validateEvent(event, rubric) {
   return problems;
 }
 
-function withLock(lockDir, fn, { timeoutMs = 5000, staleMs = 10000 } = {}) {
+function withLock(lockDir, fn, { timeoutMs = 5000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
@@ -390,12 +405,6 @@ function withLock(lockDir, fn, { timeoutMs = 5000, staleMs = 10000 } = {}) {
       break;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - statSync(lockDir).mtimeMs > staleMs)
-          rmSync(lockDir, { recursive: true, force: true });
-      } catch {
-        // lock vanished between checks
-      }
       if (Date.now() > deadline) throw new Error(`could not lock ${lockDir}`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
@@ -425,7 +434,20 @@ export function appendEventsWith(
   mkdirSync(dirname(file), { recursive: true });
   return withLock(`${file}.lock`, () => {
     const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-    const existing = parseEvents(text).events;
+    const parsed = parseEvents(text);
+    if (parsed.problems.length || (text && !text.endsWith("\n")))
+      throw new Error(
+        "event log is incomplete or malformed; retain it for audit",
+      );
+    const existing = parsed.events;
+    for (const [i, event] of existing.entries()) {
+      if (
+        validateEvent(event, rubric).length ||
+        event.seq !== i + 1 ||
+        (i > 0 && event.mono_ms < existing[i - 1].mono_ms)
+      )
+        throw new Error("event log is inconsistent; retain it for audit");
+    }
     const decided = decide(existing);
     const list =
       decided === null ? [] : Array.isArray(decided) ? decided : [decided];
@@ -580,28 +602,59 @@ export function auditJournal(items) {
 }
 
 /**
- * Run-owned settings for one role, passed with `claude --settings <file>`. No global or
- * project settings are edited. `onFailure: block` makes a crashing hook deny the call.
+ * Invocation-local Codex config. The lead must smoke-test its coverage/failure behavior;
+ * supported deny output alone does not establish that a timeout blocks the tool.
  */
 export function buildHookSettings({ hookScript, runDir, trial, role }) {
   const quote = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
   return {
-    hooks: {
-      PreToolUse: [
-        {
-          matcher: "*",
-          hooks: [
-            {
-              type: "command",
-              command: `node ${quote(hookScript)} budget-hook --run-dir ${quote(runDir)} --trial ${trial} --role ${role}`,
-              timeout: 15,
-              onFailure: "block",
-            },
-          ],
-        },
-      ],
-    },
+    argv: [
+      "--no-daemon",
+      "--strict-config",
+      "-m",
+      "gpt-6.1-sol",
+      "-c",
+      'model_reasoning_effort="high"',
+      "-c",
+      "features.hooks=true",
+      "-c",
+      "agents.enabled=false",
+      "-c",
+      'web_search="disabled"',
+      "-c",
+      "features.apps=false",
+      "-c",
+      "features.plugins=false",
+      "-c",
+      "features.remote_plugin=false",
+      "-c",
+      "mcp_servers={}",
+      ...["PreToolUse", "PostToolUse"].flatMap((event) => [
+        "-c",
+        `hooks.${event}=[{matcher=".*",hooks=[{type="command",command=${JSON.stringify(`node ${quote(hookScript)} budget-hook --run-dir ${quote(runDir)} --trial ${trial} --role ${role}`)},async=false,timeout=15}]}]`,
+      ]),
+    ],
+    allowed_tools: ["Bash", "apply_patch"],
+    trust:
+      "lead reviews these run-owned hooks; invocation-local hook-trust bypass may be added after review, without changing normal approvals/sandbox permissions",
   };
+}
+
+/** Prevent source CLI calls from attaching to the builder's/subject's managed session. */
+export function studyCliEnv(participant, machine) {
+  const env = {
+    ...process.env,
+    TILA_PARTICIPANT_ID: participant,
+    TILA_MACHINE: machine,
+  };
+  for (const key of [
+    "CODEX_THREAD_ID",
+    "TILA_LIFECYCLE_KEY",
+    "TILA_RUN_SOCKET",
+    "TILA_RUN_CAPABILITY",
+  ])
+    delete env[key];
+  return env;
 }
 
 // ---------------------------------------------------------------------------
@@ -712,7 +765,12 @@ export function deriveLedger({
               attempted: all.length,
               total: calls.length,
               denied: all.length - calls.length,
-              retried,
+              retried: calls.every((c) => Object.hasOwn(c.payload, "retry_of"))
+                ? retried
+                : null,
+              retry_linkage_reason:
+                "unavailable unless native runtime supplies retry relationships",
+              unit: rubric.budgets.unit ?? "native tool invocations",
               by_category: byCategory,
             },
             calls.map((c) => c.seq),
@@ -768,6 +826,12 @@ export function deriveLedger({
       );
     perRole[role] = {
       tool_calls: toolCalls,
+      terminal_transport_calls: unavailable(
+        "no complete native runtime-call record adapter; transport is outside the admitted-operation unit",
+      ),
+      full_runtime_calls: unavailable(
+        "no complete native runtime-call records supplied",
+      ),
       tokens,
       wall_ms:
         startedAt && stoppedAt
@@ -832,7 +896,13 @@ export function deriveLedger({
   const resumed = events.some((e) => e.kind === "recovery.started");
   if (ackedReplaced && resumed) {
     if (!stated) lostDecisions += 1;
-    else if (!review) decisionUndetermined = true;
+    else if (
+      !review ||
+      (rubric.rubric_version >= 3 &&
+        (!stated.payload.text_sha256 ||
+          review.resume?.text_sha256 !== evaluation?.resume?.text_sha256))
+    )
+      decisionUndetermined = true;
     else if (review.resume?.decision_correct !== true) lostDecisions += 1;
   }
 
@@ -903,7 +973,12 @@ export function deriveLedger({
   const recStart = events.find((e) => e.kind === "recovery.started");
   const recDecision = events.find(
     (e) =>
-      e.kind === "recovery.decision_stated" && e.payload.candidate === true,
+      e.kind === "recovery.decision_stated" &&
+      e.payload.candidate === true &&
+      (rubric.rubric_version < 3 ||
+        (e.payload.text_sha256 &&
+          e.payload.text_sha256 === review?.resume?.text_sha256 &&
+          e.payload.text_sha256 === evaluation?.resume?.text_sha256)),
   );
   const recAction = events.find(
     (e) => e.kind === "recovery.first_action" && e.payload.valid === true,
@@ -914,12 +989,12 @@ export function deriveLedger({
       .length;
   const recovery = recStart
     ? {
-        to_decision: !recDecision
-          ? timeOrCensor(null, recStart, censoredAt)
-          : !review
-            ? unavailable(
-                "semantic review not recorded; the candidate time is in the event log",
-              )
+        to_decision: !review
+          ? unavailable(
+              "semantic review not recorded; the candidate time is in the event log",
+            )
+          : !recDecision
+            ? timeOrCensor(null, recStart, censoredAt)
             : review.resume?.decision_correct === true
               ? timeOrCensor(recDecision, recStart, censoredAt)
               : timeOrCensor(null, recStart, censoredAt),
@@ -1099,10 +1174,52 @@ export function deriveLedger({
     )
   )
     enforcementReasons.push("the hook reported a failure during the trial");
+  if (rubric.rubric_version >= 3) {
+    for (const key of [
+      "count_hook_lib_sha256",
+      "hook_config_template_sha256",
+      "hook_smoke_sha256",
+      "codex_binary_sha256",
+    ])
+      if (!/^[0-9a-f]{64}$/.test(frozen[key] ?? ""))
+        enforcementReasons.push(`missing frozen ${key}`);
+    const seen = new Set();
+    for (const e of events.filter(
+      (e) => e.kind === "tool_call" && !e.payload.denied,
+    )) {
+      const p = e.payload;
+      const registration = events.find(
+        (r) =>
+          r.kind === "worker.started" &&
+          r.seq < e.seq &&
+          r.payload.session_id === p.session_id &&
+          r.payload.role === e.actor.role,
+      );
+      const key = `${p.session_id}|${p.tool_use_id}`;
+      if (
+        validateEvent(e, rubric).length ||
+        p.role !== e.actor.role ||
+        !registration ||
+        seen.has(key) ||
+        !["Bash", "apply_patch"].includes(p.tool) ||
+        events.some(
+          (r) =>
+            r.seq < e.seq &&
+            (r.kind === "trial.stopped" ||
+              (r.kind === "worker.stopped" && r.payload.role === e.actor.role)),
+        ) ||
+        !started ||
+        e.mono_ms - started.mono_ms >= rubric.budgets.wall_ms_per_trial
+      )
+        enforcementReasons.push(`invalid admitted invocation at seq ${e.seq}`);
+      seen.add(key);
+    }
+  }
   const enforcement = {
     enforced: enforcementReasons.length === 0,
     source: frozen.count_source ?? "none",
     reasons: enforcementReasons,
+    scope: rubric.budgets.unit ?? "native tool invocations",
   };
   if (!enforcement.enforced) flags.push("budget_not_enforced");
 
@@ -1238,6 +1355,11 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
   }
   if (frozen.frozen?.source_tree_clean === false)
     add("dirty_source", "the source tree was dirty at freeze");
+  if (frozen.frozen?.provenance === "harness_fixture")
+    add(
+      "harness_freeze",
+      "synthetic/source-root fixture freezes cannot supply scored evidence",
+    );
   if (frozen.frozen && !frozen.frozen.model_id)
     add("model_unrecorded", "exact model id not recorded");
   const alloc = allocateVariants(

@@ -124,8 +124,9 @@ try {
     }
     case "reentry": {
       const handoffId = flag(rest, "handoff-id");
+      const resource = flag(rest, "resource");
       const result = await api.reentry(
-        handoffId ? { handoff_id: handoffId } : {},
+        handoffId ? { handoff_id: handoffId } : resource ? { resource } : {},
       );
       console.log(
         JSON.stringify({

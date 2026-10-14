@@ -47,13 +47,14 @@ import {
   deriveLedger,
   parseEvents,
   sha256Text,
+  studyCliEnv,
   validateBundle,
 } from "./dogfood-study-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
-const RUBRIC_REL = "docs/evidence/issue-194-rubric-v2.json";
-const DECL_REL = "docs/evidence/issue-194-manifest-v2.json";
+const RUBRIC_REL = "docs/evidence/issue-194-rubric-v3.json";
+const DECL_REL = "docs/evidence/issue-194-manifest-v3.json";
 const TSX = join(repoRoot, "node_modules/.bin/tsx");
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -280,11 +281,7 @@ function cliCall(cwd, participant, args, config) {
     {
       encoding: "utf8",
       cwd,
-      env: {
-        ...process.env,
-        TILA_PARTICIPANT_ID: participant,
-        TILA_MACHINE: config?.machine_label ?? "study-host",
-      },
+      env: studyCliEnv(participant, config?.machine_label ?? "study-host"),
     },
   );
   const text =
@@ -531,23 +528,96 @@ function cmdFreeze(opts) {
   const drills = readJson(drillsPath);
   if (!drills.pass || drills.provenance !== "harness_fixture")
     fail("preflight drills did not pass");
+  const smokePath = opts["hook-smoke"] && resolve(opts["hook-smoke"]);
+  const smoke = smokePath ? readJson(smokePath) : null;
+  const configHash = sha256Text(
+    canonicalJson(
+      buildHookSettings({
+        hookScript: "$SOURCE/scripts/dogfood-study-tila.mjs",
+        runDir: "$RUN",
+        trial: "$TRIAL",
+        role: "$ROLE",
+      }),
+    ),
+  );
+  const codexVersion = execFileSync("codex", ["--version"], {
+    encoding: "utf8",
+  }).trim();
+  if (declaration.rubric.version >= 3) {
+    if (
+      !smoke ||
+      smoke.provenance !== "harness_fixture" ||
+      smoke.source_sha !== git(sourceRoot, "rev-parse", "HEAD") ||
+      smoke.codex_version !== codexVersion ||
+      smoke.config_template_sha256 !== configHash ||
+      !/^[0-9a-f]{64}$/.test(smoke.binary_sha256 ?? "") ||
+      !Array.isArray(smoke.checks) ||
+      [
+        "coverage",
+        "identifiers",
+        "parallel_39_40_41",
+        "zero_effect_denial",
+        "replacement_retirement",
+        "deadline_closure",
+        "malformed_failure",
+        "terminal_cleanup",
+      ].some(
+        (name) =>
+          !smoke.checks.some(
+            (c) =>
+              c.name === name &&
+              c.pass === true &&
+              typeof c.evidence_ref === "string" &&
+              c.evidence_ref.length,
+          ),
+      )
+    )
+      fail(
+        "v3 freeze requires linked installed-runtime hook smoke evidence; a boolean is insufficient",
+      );
+    if (
+      !smoke.binary_path ||
+      sha256Text(readFileSync(smoke.binary_path)) !== smoke.binary_sha256
+    )
+      fail("installed binary differs from the hook smoke binary hash");
+    for (const check of smoke.checks) {
+      const evidencePath = resolve(dirname(smokePath), check.evidence_ref);
+      if (
+        !evidencePath.startsWith(`${dirname(smokePath)}/`) ||
+        !/^[0-9a-f]{64}$/.test(check.evidence_sha256 ?? "") ||
+        sha256Text(readFileSync(evidencePath)) !== check.evidence_sha256
+      )
+        fail(
+          "hook smoke requires retained run-owned evidence matching each check hash",
+        );
+    }
+    if (opts["model-id"] !== "gpt-6.1-sol" || opts["count-source"] !== "hook")
+      fail("v3 requires gpt-6.1-sol high and the run-owned hook count source");
+  }
   if (!["hook", "transcript", "none"].includes(opts["count-source"]))
     fail("--count-source must be hook, transcript or none");
   if (!["native_usage_record", "none"].includes(opts["usage-source"]))
     fail("--usage-source must be native_usage_record or none");
   const frozen = {
+    provenance:
+      sourceRoot === repoRoot ? "local_agent_trial" : "harness_fixture",
     at_utc: new Date().toISOString(),
     source_sha: git(sourceRoot, "rev-parse", "HEAD"),
     source_tree_clean: true,
     runtime_versions: {
       node: process.version,
       bun: execFileSync("bun", ["--version"], { encoding: "utf8" }).trim(),
-      claude: opts["claude-version"] || null,
+      codex: codexVersion,
     },
     model_id: opts["model-id"],
-    effort: "xhigh",
+    effort: "high",
     count_source: opts["count-source"],
-    hook_smoke_attested: opts["hook-smoke-passed"] === true,
+    hook_smoke_attested: smoke !== null,
+    hook_smoke_sha256: smokePath
+      ? sha256Text(readFileSync(smokePath, "utf8"))
+      : null,
+    hook_config_template_sha256: configHash,
+    codex_binary_sha256: smoke?.binary_sha256 ?? null,
     usage_source: opts["usage-source"],
     host_label: opts["host-label"],
     host: { cpus: cpus().length, loadavg_1m: loadavg()[0] },
@@ -561,6 +631,10 @@ function cmdFreeze(opts) {
   };
   const manifest = { ...declaration, kind: "frozen", frozen };
   manifest.frozen_sha256 = sha256Text(canonicalJson(manifest));
+  if (existsSync(join(run, "manifest.frozen.json")))
+    fail(
+      "frozen manifest already exists; retain it and use a new run directory",
+    );
   writeJson(join(run, "manifest.frozen.json"), manifest);
   console.log(
     `frozen at ${frozen.source_sha}; hook smoke attested: ${frozen.hook_smoke_attested}`,
@@ -593,7 +667,11 @@ function scenarioFor(slot) {
 
 function cmdPrepare(opts) {
   const run = resolve(opts["run-dir"] ?? fail("prepare needs --run-dir"));
-  const manifest = readJson(join(run, "manifest.frozen.json"));
+  const manifest = opts.preflight
+    ? { ...readJson(study(opts).declPath), frozen: { host_label: "preflight" } }
+    : readJson(join(run, "manifest.frozen.json"));
+  if (opts.preflight && !["w-A", "w-B"].includes(opts.trial))
+    fail("--preflight permits only the unscored warm-up trials w-A and w-B");
   if (!opts.trial) fail("prepare needs --trial (t1..t4, w-A or w-B)");
   const slot = trialSlot(manifest, opts.trial);
   const scenario = scenarioFor(slot);
@@ -722,7 +800,7 @@ function cmdPrepare(opts) {
     `${renderDecisionMessage(scenario)}\n`,
   );
 
-  // run-owned hook settings, one file per role, outside every worktree; use with `claude --settings`
+  // Invocation-local Codex argv, outside every worktree; the lead reviews trust/permissions.
   for (const role of ["w1", "w2"]) {
     writeJson(
       join(dir, `settings-${role}.json`),
@@ -1064,7 +1142,11 @@ function cmdEvaluate(opts) {
     const f = join(config.shared, "HANDOFFS", `${replaced}.md`);
     handoffText = existsSync(f) ? readFileSync(f, "utf8") : null;
   } else {
-    const list = sdkCall(join(dir, "store.json"), "evaluator", "handoff-list");
+    const list = sdkCall(
+      join(dir, "store.json"),
+      config.participants[replaced],
+      "handoff-list",
+    );
     const mine = (list.handoffs ?? []).filter(
       (h) => h.creator?.participant_id === config.participants[replaced],
     );
@@ -1098,6 +1180,7 @@ function cmdEvaluate(opts) {
       : {
           role: replaced,
           decision_candidate: resumeDecisionCandidate(resumeText, scenario),
+          text_sha256: sha256Text(resumeText),
         };
 
   // captured facts a separate reviewer verifies the handoff and RESUME note against
@@ -1144,6 +1227,7 @@ function cmdEvaluate(opts) {
     },
     handoff_text: handoffText,
     resume_text: resumeText,
+    resume_sha256: resumeText === null ? null : sha256Text(resumeText),
     candidates: {
       handoff: handoff?.facts ?? null,
       resume: resume?.decision_candidate ?? null,
@@ -1161,6 +1245,7 @@ function cmdEvaluate(opts) {
         ),
       },
       resume: {
+        text_sha256: resumeText === null ? null : sha256Text(resumeText),
         decision_correct:
           "<true only if the full D1 rule is stated and not contradicted>",
       },

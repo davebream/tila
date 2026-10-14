@@ -1291,7 +1291,7 @@ const TRAINING = [
   "Two coding workers (w1, w2) share this repository through separate git worktrees. Follow the working agreement in NOTES.md.",
   "Your duties are the same whatever tools you have: own the shared helper before you edit it, acknowledge decision changes, save a handoff when asked, resume from durable resources if you are a replacement, and declare your result explicitly.",
   "A result declared before the decision change is provisional: you stay in the study, the decision change still arrives on schedule, and you declare or reaffirm your result again after it. Do not edit code that is already correct.",
-  "You have at most 40 admitted tool calls and 12 minutes of wall time for your role, including a replacement. Spend them on the task; there is no credit for coordination for its own sake.",
+  "You have at most 40 admitted hook-covered local operations and 12 minutes of wall time for your role, including a replacement. Spend them on the task; there is no credit for coordination for its own sake.",
 ].join("\n");
 
 /** Ordinary shell coordination recipes used in packets and exercised by preflight tests. */
@@ -1310,6 +1310,7 @@ function conditionAppendix(ctx) {
   const { condition, role, scenario, itemKey, shared } = ctx;
   const base = role.replace(/r$/, "");
   const helper = scenario.helper.name;
+  const boardRecorder = `node ${ctx.runner} board --run-dir ${ctx.run} --trial ${ctx.trial} --participant ${ctx.participant}`;
   const itemFile = scenario.items[itemKey].file;
   if (condition === "A") {
     const lock = `${shared}/locks/shared-helper`;
@@ -1325,10 +1326,10 @@ function conditionAppendix(ctx) {
             `2. Takeover (replacements only, after your entry packet says the previous context ended): \`${commands.transfer}\`. This transfers only from ${base}, keeps another role's ownership, and uses normal atomic acquisition if no lock exists. Read \`${lock}/owner\` before editing.`,
           ]
         : ["2. Takeover: not applicable to you."]),
-      `3. Acknowledge: when the orchestrator posts a decision change, append \`ACK <decision id> ${role}\` to DECISIONS.md.`,
+      `3. Acknowledge: when the orchestrator posts a decision change, run \`${boardRecorder} ack <decision id>\`. It appends ACK to DECISIONS.md and confirms the write after success.`,
       `4. Handoff: when asked, write HANDOFFS/${base}.md with these headings: Goal and acceptance, Current status, Artifacts and commits, Verification, Active decision or blocker, Next owner and action.`,
       "5. Resume: a replacement reads BOARD.md, DECISIONS.md and HANDOFFS/, then writes RESUME.txt in its worktree root. Line 1: `DECISION: <active decision id and its full rule>`. Line 2: `NEXT: <your next action>`.",
-      `6. Result: after committing \`${itemFile}\` on your branch, append \`RESULT ${role} <commit sha>\` to BOARD.md. After the decision change, append \`RESULT ...\` again, or \`REAFFIRM ${role} <commit sha>\` if nothing needed to change and you re-ran the tests. Nothing counts as done until you do.`,
+      `6. Result: after committing \`${itemFile}\` on your branch, run \`${boardRecorder} result <commit sha>\`. It appends RESULT to BOARD.md and confirms the write after success. After the decision change run it again, or use \`${boardRecorder} reaffirm <commit sha>\` if nothing needed to change and you re-ran the tests. Nothing counts as done until you do.`,
     ].join("\n");
   }
   const { run, trial, participant, runner, taskIds } = ctx;
@@ -1345,14 +1346,14 @@ function conditionAppendix(ctx) {
     `- Renew:   \`${sdk("renew task:<id> --fence <n> --ttl-ms 120000")}\``,
     `- Update:  \`${cli("task update <id> --field <name>=<value> --fence <n> --json")}\``,
     `- Show:    \`${cli("task show <id> --json")}\``,
-    `- Handoff: \`${sdk("handoff-create --summary <text> --ref task:<id>")}\`; resume: \`${sdk("reentry")}\``,
+    `- Handoff: \`${sdk("handoff-create --summary <text> --ref task:<id>")}\`; resume: \`${sdk(`reentry --resource task:${taskIds.item}`)}\``,
     "",
     `1. Own the helper: claim \`task:${taskIds.helper}\` before editing \`${scenario.helper.file}\`. If you lose it, do not implement a second \`${helper}\`. A claim expires after its TTL; a replacement for the owner claims it again once it has expired.`,
     `2. Claim your item \`task:${taskIds.item}\` once to get a fence for your updates; if an update is rejected as a stale fence, claim again and retry once.`,
     `3. Acknowledge: when the orchestrator posts a decision change, run \`task update ${taskIds.item} --field decision_ack=<decision id> --fence <n>\`.`,
-    "4. Handoff: when asked, create a handoff whose summary covers: goal and acceptance, current status, artifacts and commits, verification, active decision or blocker, next owner and action.",
-    "5. Resume: a replacement runs `reentry`, reads the task state, then writes RESUME.txt in its worktree root. Line 1: `DECISION: <active decision id and its full rule>`. Line 2: `NEXT: <your next action>`.",
-    `6. Result: after committing \`${itemFile}\` on your branch, run \`task update ${taskIds.item} --field status=done --field result_commit=<sha> --fence <n>\`. After the decision change run it again, or \`--field reaffirmed=<sha>\` if nothing needed to change and you re-ran the tests. Nothing counts as done until you do.`,
+    "4. Handoff: when asked, create a handoff with a reference to your item task; its summary covers: goal and acceptance, current status, artifacts and commits, verification, active decision or blocker, next owner and action.",
+    `5. Resume: a replacement runs \`${sdk(`reentry --resource task:${taskIds.item}`)}\`, reads the task state, then writes RESUME.txt in its worktree root. Line 1: \`DECISION: <active decision id and its full rule>\`. Line 2: \`NEXT: <your next action>\`.`,
+    `6. Result: after committing \`${itemFile}\` on your branch, run \`task update ${taskIds.item} --field result_commit=<sha> --fence <n>\`. After the decision change run it again, or \`--field reaffirmed=<sha>\` if nothing needed to change and you re-ran the tests. Set status with a separate single-field update if needed. Nothing counts as done until you do.`,
   ].join("\n");
 }
 
