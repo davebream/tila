@@ -1,4 +1,8 @@
 import {
+  SETTINGS_TRANSFER_MAX_BYTES,
+  type SettingsDocument,
+} from "@tila/schemas";
+import {
   Document,
   isAlias,
   isMap,
@@ -20,6 +24,13 @@ import {
   renderTomlDefinitionExport,
 } from "./definition-transfer";
 import { isTable } from "./schema-document";
+import {
+  type SettingsResult,
+  readSettingsTree,
+  readTomlSettings,
+  renderTomlSettings,
+  settingsFormat,
+} from "./settings-transfer";
 
 /**
  * YAML adapter for definition import and export. It is a separate entry
@@ -37,6 +48,52 @@ const CORE_TAGS = new Set(
     (t) => `tag:yaml.org,2002:${t}`,
   ),
 );
+
+export function readSettingsFile(
+  text: string,
+  options: ReadDefinitionFileOptions = {},
+): SettingsResult<SettingsDocument> {
+  const format =
+    options.format === undefined || options.format === "auto"
+      ? options.filename
+        ? settingsFormat(options.filename)
+        : "auto"
+      : options.format;
+  if (format === "toml") return readTomlSettings(text);
+  if (format === "auto") {
+    const toml = readTomlSettings(text);
+    if (toml.ok || toml.errors[0]?.code !== "syntax") return toml;
+  }
+  const yaml = readYamlDocument(text, SETTINGS_TRANSFER_MAX_BYTES);
+  return yaml.ok
+    ? readSettingsTree(yaml.doc)
+    : {
+        ok: false,
+        errors: [
+          {
+            code: yaml.errors[0]?.code ?? "syntax",
+            message: "Invalid YAML settings document.",
+          },
+        ],
+      };
+}
+export function renderSettingsFile(
+  doc: SettingsDocument,
+  format: DefinitionFormat,
+): string {
+  const toml = renderTomlSettings(doc);
+  if (format === "toml") return toml;
+  const prepared = readTomlSettings(toml);
+  if (!prepared.ok) throw new Error("Invalid settings export");
+  const dates: DefinitionTransferError[] = [];
+  dateErrors(prepared.value, [], dates);
+  if (dates.length)
+    throw new Error("Export definitions with TOML dates as TOML");
+  const yaml = new Document(prepared.value, { aliasDuplicateObjects: false });
+  yaml.commentBefore =
+    "Portable settings; caller-scoped coverage. Not a backup.";
+  return yaml.toString({ lineWidth: 0 });
+}
 
 function fail(
   code: DefinitionTransferError["code"],
@@ -83,8 +140,11 @@ function nullErrors(
 }
 
 /** Read YAML definition text into the same document a TOML file produces. */
-export function readYamlDefinition(text: string): ReadDefinitionResult {
-  const tooLarge = definitionSizeError(text, "The file");
+export function readYamlDocument(
+  text: string,
+  maxBytes?: number,
+): ReadDefinitionResult {
+  const tooLarge = definitionSizeError(text, "The file", maxBytes);
   if (tooLarge) return { ok: false, errors: [tooLarge] };
 
   const docs = parseAllDocuments(text, {
@@ -160,12 +220,31 @@ export function readYamlDefinition(text: string): ReadDefinitionResult {
     },
   });
   if (errors.length > 0) return { ok: false, errors };
-  if (!isMap(doc.contents)) return readDefinitionTree(doc.toJS(), "yaml");
+  if (!isMap(doc.contents))
+    return {
+      ok: false,
+      errors: [
+        fail(
+          "not-a-table",
+          "A definition file must be a table of sections (schema_version, work_units, records, ...).",
+        ),
+      ],
+    };
 
   const tree = doc.toJS({ maxAliasCount: 0 }) as unknown;
   nullErrors(tree, [], errors);
   if (errors.length > 0) return { ok: false, errors };
-  return readDefinitionTree(tree, "yaml");
+  return {
+    ok: true,
+    doc: tree as Record<string, unknown>,
+    format: "yaml",
+    metadata: null,
+  };
+}
+
+export function readYamlDefinition(text: string): ReadDefinitionResult {
+  const parsed = readYamlDocument(text);
+  return parsed.ok ? readDefinitionTree(parsed.doc, "yaml") : parsed;
 }
 
 export type ReadDefinitionFileOptions = {

@@ -247,3 +247,14 @@ export {
   createRepoMethods,
   type MembershipEvent,
 } from "./access";
+export {
+  createSettingsTransferMethods,
+  type SettingsTransferMethods,
+} from "./settings-transfer";
+export {
+  SettingsPlanSchema,
+  SettingsReceiptSchema,
+  type SettingsPlan,
+  type SettingsReceipt,
+  type SettingsMappings,
+} from "@tila/schemas";

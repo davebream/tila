@@ -76,12 +76,13 @@ function kib(bytes: number): string {
 export function definitionSizeError(
   text: string,
   what = "The definition",
+  maxBytes = DEFINITION_MAX_BYTES,
 ): DefinitionTransferError | null {
   const bytes = definitionByteLength(text);
-  if (bytes <= DEFINITION_MAX_BYTES) return null;
+  if (bytes <= maxBytes) return null;
   return fail(
     "too-large",
-    `${what} is ${kib(bytes)}; definitions are limited to ${kib(DEFINITION_MAX_BYTES)}.`,
+    `${what} is ${kib(bytes)}; definitions are limited to ${kib(maxBytes)}.`,
   );
 }
 
