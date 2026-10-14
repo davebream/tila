@@ -381,3 +381,43 @@ it("rechecks Herdr foreground during native pre-effect I/O", async () => {
   );
   expect(f.effect).not.toHaveBeenCalled();
 });
+
+it("retains the committed binding epoch and pauses replacement during bind I/O", async () => {
+  const f = fixture();
+  const original = f.bind.getMockImplementation();
+  f.bind.mockImplementationOnce(async () => {
+    const result = await original?.();
+    if (!result) throw new Error("Fixture missing binding");
+    f.live.evidence.account_ref = "replacement-account";
+    return result;
+  });
+  await expect(f.connector.request(f.request)).rejects.toThrow();
+  expect(f.store.read().registrations[0]).toMatchObject({
+    bindingEpoch: 1,
+    state: "paused",
+    expectedEpoch: 0,
+  });
+  expect(f.closeRelay).toHaveBeenCalledTimes(1);
+  expect(f.effect).not.toHaveBeenCalled();
+});
+
+it("startup inspection checks persisted associations without binding, wake, recovery or epoch adoption", async () => {
+  const f = fixture();
+  await f.connector.request(f.request);
+  const before = f.store.read();
+  f.bind.mockClear();
+  vi.mocked(f.factory.start).mockClear();
+  f.replaceTerminal();
+  const report = await f.connector.request({
+    action: "inspect-herdr-registrations",
+  });
+  expect(report).toMatchObject({
+    support: { supported: false },
+    registrations: [{ key: f.live.state.key, eligibility: "unavailable" }],
+  });
+  expect(f.store.read()).toEqual(before);
+  expect(f.bind).not.toHaveBeenCalled();
+  expect(f.factory.start).not.toHaveBeenCalled();
+  expect(f.factory.recover).not.toHaveBeenCalled();
+  expect(f.effect).not.toHaveBeenCalled();
+});
