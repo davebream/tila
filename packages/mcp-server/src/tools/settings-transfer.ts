@@ -147,7 +147,7 @@ export function registerSettingsTransferTools(
   registerPrimitiveTool(
     server,
     "tila_settings_resume",
-    "Inspect or apply an explicit retained settings receipt. apply:true sends only unresolved actions, persisting their exact IDs/revisions before calls. Confirm listed removals. Authorization is checked again; conflicts never rebase, prior commits remain. Retain the returned receipt for the next retry.",
+    "Inspect or apply an explicit retained settings receipt. apply:true sends only unresolved actions and retains per-call progress in memory. Caller must retain the frozen receipt before apply and the returned receipt for retry; there is no crash-durable server journal. Confirm listed removals. Authorization is checked again; conflicts never rebase, prior commits remain.",
     {
       receipt: SettingsReceiptSchema,
       apply: z.boolean().default(false),
