@@ -1,14 +1,14 @@
 # Backlog execution plan — 14 October 2026
 
-**Status: lead reviewed the full plan and released #400, #449 and #439 to implementation. This is the reviewed execution baseline; subsequent progress is recorded in the adjacent ledger.** Completion of this document does not authorize production secrets or a release. Routine builder handoff follows the repository's existing commit/push/non-draft PR/Mergify policy.
+**Status: plan PR #452 and issues #450, #400, #449, #398, #439, #362 merged, with GitHub and main ancestry verified. Dependency PRs #314 and #311 also merged and verified. #416 is queued as PR #465; #448 / #399 / #440 are implementing. Release planning is requested; candidate scope/version and publication remain unelected.** Routine builder handoff follows the existing commit/push/non-draft PR/Mergify policy.
 
 This plan covers the entire open `davebream/tila` backlog at source **f231ba532b55fe33de15bc49cdb2e5c35a6439de**: 16 issues and three dependency PRs. The adjacent [DAG](2026-10-14-backlog-dag.json) contains inventory, provenance, task status, hard acceptance edges, preferred ordering, execution stages, and progress ledger. Run [the validator](validate-backlog-plan.py) after changing either file. All implementation and acceptance work below is **planned**, except work explicitly marked implementing or delivered in the execution ledger.
 
 ## Authority, people, and worktrees
 
-- Architect: **plan-backlog-astra**, GPT-6-Astra HIGH; Herdr session `tila`, pane `w3:p3`. Lead/reviewer: **lead-backlog**. The planner writes and locally commits this plan only.
-- The intended builder pool is at most **three active coding lanes**, not three additional workers. GPT-6.1-Sol XHIGH remains the default for complex changes. The user subsequently authorized base-subscription Claude Sonnet XHIGH substitutions for suitable bounded tasks within these same slots; the lead verified claude.ai firstParty subscription authentication with no API override (installed Claude 2.1.299 supports `--effort xhigh`). Do not add a fourth builder for this option. **build-450-deploy** implemented #450 externally in session `tila`, pane `w1:p1`. PR #451 has now merged and issue #450 is closed; lane A has passed to **build-439-revisions**. Its model/launch configuration is the lead's existing session responsibility; do not start a replacement or fourth builder to enforce the pool description.
-- **build-400-stepup** (lane B), **build-449-mcp-transfer** (lane C), and **build-439-revisions** (lane A, pane `w3:p4`) are implementing after lead approval in the user-visible `tila` workspace. Do not confuse the separate default Herdr session with `tila`; any eventual lead orchestration must select the session explicitly. This planner does not control panes.
+- Architect: **plan-backlog-astra**, GPT-6-Astra HIGH; Herdr session `tila`, Brain pane `w2:p2` (current name **plan-release-astra**). Lead/reviewer: **lead-backlog**. The planner writes and locally commits this plan only.
+- The intended builder pool is at most **three active coding lanes**, not three additional workers. GPT-6.1-Sol XHIGH remains the default for complex changes. The user subsequently authorized base-subscription Claude Sonnet XHIGH substitutions for suitable bounded tasks within these same slots; the lead verified claude.ai firstParty subscription authentication with no API override (installed Claude 2.1.299 supports `--effort xhigh`). Do not add a fourth builder for this option. **build-450-deploy** implemented #450 externally in session `tila`, pane `w1:p1`. PR #451 has now merged and issue #450 is closed; lane A passed through **build-439-revisions** and now belongs to **build-440-ghes-oidc**. Its model/launch configuration is the lead's existing session responsibility; do not start a replacement or fourth builder to enforce the pool description.
+- **build-448-settings-transfer** (lane B, Sol XHIGH), **build-399-task-filters** (lane C, Sol XHIGH), and **build-440-ghes-oidc** (lane A, Sol XHIGH, Builders pane `w2:p5`) are implementing after lead approval in the user-visible `tila` workspace. #400 finished local review and merged through Mergify as PR #453 (`8397f3da`, GitHub and main ancestry verified). Do not confuse the separate default Herdr session with `tila`; any eventual lead orchestration must select the session explicitly. This planner does not control panes.
 - One issue per worktree and branch. Reuse a lane only by moving the worker to a **new issue-specific worktree**. Multiple slices of the same issue stay in that issue's worktree. Dependency PR repairs use separate `pr-<number>` worktrees. The canceled duplicate #450 checkout and branch have been removed cleanly; do not recreate them.
 - Optional fourth worker: a separate release worker **only when the lead elects a release**, using the repository `tila-release` skill at `.agents/skills/tila-release/SKILL.md`. It must not become a fourth feature builder. No release is needed to develop from source or to finish this plan.
 - Preserve the lead checkout's preexisting untracked `packages/backend-do/src/version.ts`. Never stage generated files or another worker's changes.
@@ -16,11 +16,17 @@ This plan covers the entire open `davebream/tila` backlog at source **f231ba532b
 | Lane / first task | Worktree | Branch / state |
 |---|---|---|
 | A: build-450-deploy, externally owned | `/home/dawid/code/tila-worktrees/issue-450` | `fix/450-deploy-target-selection`; PR #451 merged, issue closed; external slot released |
-| B: build-400-stepup | `/home/dawid/code/tila-workers/issue-400` | `fix/400-step-up-resume`; implementing; baseline 2 tests passed |
-| C: build-449-mcp-transfer | `/home/dawid/code/tila-workers/issue-449` | `feat/449-mcp-definition-transfer`; implementing; baseline 37 focused tests passed |
+| B: build-400-stepup | `/home/dawid/code/tila-workers/issue-400` | `fix/400-step-up-resume`; PR #453 merged as `8397f3da`; 662 UI tests, typecheck/build/lint passed |
+| C: build-449-mcp-transfer | `/home/dawid/code/tila-workers/issue-449` | `feat/449-mcp-definition-transfer`; PR #456 merged as `eba51068`, GitHub and main ancestry verified; 205 MCP and 125 runtime tests passed |
+| B: build-398-readiness | `/home/dawid/code/tila-workers/issue-398` | `fix/398-legacy-readiness-context`; PR #458 merged as `dea6c11b`; GitHub and main ancestry verified |
+| B: build-362-cleanup-guide | `/home/dawid/code/tila-workers/issue-362` | `docs/362-worker-cleanup`; PR #463 merged as `626fd827`, independently verified; 141 runtime tests passed |
+| B, current: build-448-settings-transfer | `/home/dawid/code/tila-workers/issue-448` | `feat/448-settings-transfer`; Sol XHIGH implementing shared format/planner/executor from `e9c90458`, then CLI/UI/MCP |
 | Canceled duplicate, retired | `/home/dawid/code/tila-workers/issue-450` | `fix/450-deploy-target`; inspection only; worktree/branch now removed |
-| A, current: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; implementing, base `ba26881e5ac36032e33670eb324ed58c63117a58` |
-| Planner | `/home/dawid/code/tila-workers/backlog-plan` | `docs/backlog-execution-plan`; local review hold |
+| C: build-416-revision-warning | `/home/dawid/code/tila-workers/issue-416` | PR #465 queued after final integrated validation; head `9249ff3f` |
+| C, current: build-399-task-filters | `/home/dawid/code/tila-workers/issue-399` | `feat/399-task-filter-parity`; implementing from reviewed `9249ff3f`; transplant only #399 after parent merge |
+| A: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; PR #459 merged as `e9c90458`, GitHub and main ancestry verified |
+| A, current: build-440-ghes-oidc | `/home/dawid/code/tila-workers/issue-440` | `feat/440-ghes-actions-oidc`; Sol XHIGH on reviewed PR #459; transplant only440 commits onto merged main before handoff |
+| Planner | `/home/dawid/code/tila-workers/backlog-plan` | Plan PR #452 merged as `69c463b1`; lead maintains progress on `docs/backlog-execution-progress` |
 
 Subsequent issue worktrees are `/home/dawid/code/tila-workers/issue-<number>`; dependency worktrees are `/home/dawid/code/tila-workers/pr-<number>`. Check existing worktree ownership before creating any path. Branches and explicit future task names are in the DAG. Assignment is a proposal to the lead, not an action already taken.
 
@@ -94,7 +100,7 @@ After review hold is released and local validation completes: commit, push, crea
 
 ### #439 — service and binding revision safety (`i439`)
 
-**Owner:** build-439-revisions (Sol XHIGH), session `tila`, pane `w3:p4`, branch `feat/439-service-revisions`, worktree `/home/dawid/code/tila-workers/issue-439`, base `ba26881e5ac36032e33670eb324ed58c63117a58`. Lead released this task after external #450 finished; it occupies lane A, not a fourth slot.
+**Owner:** build-439-revisions (Sol XHIGH), session `tila`, Builders pane `w2:p5`, branch `feat/439-service-revisions`, worktree `/home/dawid/code/tila-workers/issue-439`, base `ba26881e5ac36032e33670eb324ed58c63117a58`. Lead released this task after external #450 finished; it occupies lane A, not a fourth slot.
 
 **Slices:** (1) shared response/request schemas, additive D1 migration and conditional stores; (2) SDK/CLI/UI propagation; (3) concurrency, restore and authorization regression tests/docs. Keep one issue worktree; merge only a coherent service/client contract.
 
@@ -124,6 +130,8 @@ Expose warning through HTTP and SDK response types (including the embedded path)
 
 **Sources:** `packages/ops-sqlite/src/schema-ops.ts`, journal contracts/ops, `packages/core/src/interfaces/schema-backend.ts`, shared API schemas, Worker schema route, SDK `schema.ts`/local adapters, CLI `commands/schema.ts`, MCP `tools/schema.ts`. **Validate:** schema revision/idempotency tests, local/HTTP SDK warning tests and diagnostic capture, MCP discovery/apply response tests, `runtime/schema-revision.test.ts`, then `pnpm test:runtime`; cross-package typechecks. Changelog and upgrade notes name current CLI apply (revision optional), conditional import/editor callers and MCP update behavior. No DDL expected; additive response/journal behavior, no enforcement date set. Document future mandatory revision migration separately.
 
+**Execution review addition:** the builder reproduced 24 dangling private declaration imports in the baseline and candidate SDK main bundle. The new `SchemaApplyWarning` also points at missing `./api`, so lead requires a bounded declaration-rollup repair in a separate build/fix commit and an installed-consumer TypeScript test proving the new warning/sink types resolve, reject invalid values and do not degrade to `any`. Preserve the zod-only main runtime bundle; do not copy private source files or disable declaration checks. This is a public-contract prerequisite for #416, not a general SDK refactor.
+
 ### #399 — task filter parity and truthful pagination (`i399`)
 
 **Owner:** lane C after #416; `build-399-task-filters`, branch `feat/399-task-filter-parity`. Preferred after #398 to share documented examples; not a hard semantic blocker because #398 preserves readiness.
@@ -140,7 +148,7 @@ Expose warning through HTTP and SDK response types (including the embedded path)
 
 **Owner:** lane B after #398; `build-362-cleanup-guide`, branch `docs/362-worker-cleanup`. Documentation/reproducible validation, not a new delete policy.
 
-Document two supported paths. For recurring isolated rehearsals, a run-owned disposable project and the existing owner cleanup procedure is preferred; worker processes never receive owner credentials. For existing projects, the owner creates a separate maintainer-level cleanup service with only the needed delete/read/claim capabilities and available resource restrictions. Record deletion can be bounded to explicit type/key prefixes. Artifact access currently refuses namespace-restricted credentials; **do not claim artifact prefix restriction exists**. Artifact cleanup therefore requires an owner-reviewed exact resource manifest in a disposable project or attended cleanup by a suitably authorized operator. Do not offer an unattended broadly scoped janitor in a shared project as safe creator-only deletion.
+Document two supported paths. For recurring isolated rehearsals, a run-owned disposable project and the existing owner cleanup procedure is preferred; worker processes never receive owner credentials. For existing projects, the owner creates a separate participant cleanup service with explicit membership and key roles with only the needed delete/read/claim capabilities and available resource restrictions. Record deletion can be bounded to explicit type/key prefixes. Artifact access currently refuses namespace-restricted credentials; **do not claim artifact prefix restriction exists**. Artifact cleanup therefore requires an owner-reviewed exact resource manifest in a disposable project or attended cleanup by a suitably authorized operator. Do not offer an unattended broadly scoped janitor in a shared project as safe creator-only deletion.
 
 A run receipt records project/deployment identity, created record keys and artifact lineage/revision IDs, intended retention and operator. Cleanup checks current identity and ownership of the *run receipt*, then calls existing authorized archive/delete/destroy APIs with current required fences and stable retry keys. It must reject resources absent from that receipt and stop on mismatch/uncertainty; never enumerate and delete by a loose prefix. Explain archive versus byte deletion, asynchronous lifecycle drain, protected heads, retained audit/history, retry after failure and verification of exact removed resources. No fake namespace TTL and no changes to `worker` preset, creator semantics, membership administration or claim exemptions.
 
@@ -158,7 +166,7 @@ Use an allowlist of configured fields: agent name/bind policy/profile selection 
 
 **Apply:** shared SDK orchestration over existing service methods, in order: optional conditional definitions; agents; room configuration/members; groups. Freeze reviewed normalized payload, target project, mapping and expected revisions into a resumable operation plan. Persist non-secret operation IDs and per-action receipts before calls; reuse each key after ambiguous failure. Report `committed` with revision, `failed`, `not-attempted`, or `uncertain` for each action. Stop later actions on failure, retain successes and resume only unresolved actions; never roll back another resource automatically. Authorization is rechecked by every service operation. Stable-ID agent/room creation already refuses mismatched settings; use that contract for reconciliation, not an invented create transaction. Existing SDK create helpers lack general write options: add compatible idempotency options only where the endpoint supports them, or reconcile exact created state and require review on ambiguity. Room creation auto-adds its creator; the plan must show this and explicitly reconcile final members, retaining access until necessary writes finish. Multiple room member changes each advance the revision: use the previous committed revision for the next planned action, not the initial room revision repeatedly. A changed destination between review and apply conflicts; do not refresh away the conflict.
 
-CLI writes a private resume file; UI keeps a downloadable resumable non-secret receipt and preserves it across step-up, without storing credentials. MCP returns the receipt/plan for an explicit resume call. Never retry committed work by generating new IDs. Import UI previews identity/grant changes and partial outcomes; plain definition import remains separate and unchanged. Host-local profile verification uses existing capabilities; unknown/offline profile mappings remain pending, never “verified.”
+CLI writes a private resume file; UI keeps a downloadable resumable non-secret receipt and preserves it across step-up, without storing credentials. MCP returns the receipt/plan for an explicit resume call. Never retry committed work by generating new IDs. Import UI previews identity/grant changes and partial outcomes; plain definition import remains separate and unchanged. Host-local profile verification uses existing capabilities; unknown/offline profile mappings remain pending, never “verified.” An explicitly chosen destination profile may be saved with visible pending/unverified status where the existing profile-setting API allows it; unresolved identity mapping still blocks writes. Do not invent a remote verification service or treat offline status as a new blanket import prohibition. Imported configuration alone never authorizes runtime binding.
 
 **Sources:** new shared settings-transfer schemas/core module, SDK executor; existing `agent-binding-ops`, `conversation-ops`, `signal-ops`, `config-revision-ops`; SDK agents/conversations/signals and UI Settings editors. New CLI sibling/settings UI and MCP tools. **Validate:** pure mapping/secret/format fixtures, fresh-project round trip, hidden fields, unknown refs causing zero calls, create/update collisions, revision races, lost responses, multi-member revision progression, partial retry after reload, changed authority before replay, TOML/YAML equivalence, old definitions compatibility. Target core/SDK/CLI/UI/MCP suites and `runtime/settings-identities`, `definition-transfer`, `settings-restore`, then full runtime gate. Additive format/tools; no cross-store transaction or new DDL expected. A required new write primitive is a bounded service change with auth/runtime review, not client bypass.
 
@@ -218,7 +226,7 @@ Predeclare repository/task set, participants and runtime versions, same-budget w
 
 ### Dependency PRs and #261 (`pr311`, `pr312`, `pr314`, `i261`)
 
-**Owner:** lane C after #399, sequential lockfile window; task names `build-314-ui-deps`, `build-311-cf-deps`, `build-312-runtime-deps`. Use existing Renovate PR branches in isolated PR worktrees; avoid replacement duplicate PRs. Refresh heads/diffs/checks before work; snapshot success is not permanent validation. No updates are hard product acceptance dependencies unless a specific failing contract demonstrates one.
+**Owner:** preferred lane C after #399, sequential lockfile window; lead may perform read-only review/validation without another coding worker. PR #314 was validated and merged this way after #449 merged, with no source changes or competing lock writer. task names `build-314-ui-deps`, `build-311-cf-deps`, `build-312-runtime-deps`. Use existing Renovate PR branches in isolated PR worktrees; avoid replacement duplicate PRs. Refresh heads/diffs/checks before work; snapshot success is not permanent validation. No updates are hard product acceptance dependencies unless a specific failing contract demonstrates one.
 
 | Work | Contract and validation |
 |---|---|
@@ -232,7 +240,7 @@ Predeclare repository/task set, participants and runtime versions, same-budget w
 
 The JSON's `hard_edges` mean **required for completion/acceptance**, with provenance (`native`, `contract`, or `safety`). They do not forbid preparing tests or reviewing source early. `preferred_edges` mean conflict/risk serialization only and can be rescheduled by the lead without waiving acceptance. Native closed dependencies are recorded as satisfied evidence, not reintroduced as build tasks. The validator checks both the hard DAG and the combined proposed ordering for cycles.
 
-The practical three-lane schedule is below. Stage 0 is historical: #450 completed and lane A has advanced to #439 while B/C implement #400/#449. These are work stages, not time estimates or mandatory barriers: a free lane may take an eligible unowned task once its hard prerequisites and conflict locks permit. If live resources are unavailable, release that coding slot for other work and retain the gate as blocked. A queued PR stops occupying a coding slot only when the lead confirms its implementation/review handoff complete; later corrections reacquire a slot, never create a fourth.
+The practical three-lane schedule is below. Stages 0–1 are historical: #450, #400, #449 and #398 are merged; #439 is merged, and lanes A/B/C implement #440/#448/#399; #362 merged and #416 has handed off queued PR #465. These are work stages, not time estimates or mandatory barriers: a free lane may take an eligible unowned task once its hard prerequisites and conflict locks permit. If live resources are unavailable, release that coding slot for other work and retain the gate as blocked. A queued PR stops occupying a coding slot only when the lead confirms its implementation/review handoff complete; later corrections reacquire a slot, never create a fourth.
 
 | Stage | Lane A | Lane B | Lane C |
 |---|---|---|---|
@@ -267,6 +275,8 @@ Stop a mutation on ambiguous deployment identity, stale revision, revoked author
 
 ## Release scope and gates
 
+The user has now requested a dedicated release worker. Astra is persisting its comprehensive plan in the separate `/home/dawid/code/tila-workers/release-plan` worktree. This authorizes planning and preparation, not an inferred tag publication. Current read-only preflight found no `~/.tila/.env` or `infra.toml`, and the ambient Cloudflare token returned HTTP 401/403. Disposable live gates need working credentials and verified target identity. Continue useful local inventory and validation while those inputs remain missing.
+
 Source execution and isolated local runtime validation are sufficient for builder work. **Do not publish a release to make backlog closure possible.** First decide whether an installed-host candidate is necessary; a pinned immutable source build can supply evidence if its provenance and deployment are explicit. Feature completion, npm publication, deployed service activation and live product support are distinct states.
 
 If the lead elects a release, the separate release worker must read and follow the current repository **tila-release** skill, not this document as a substitute. Scope only reviewed, merged changes with honest limitations; #283 support and #307 activation cannot be advertised while held. Select version from actual compatibility impact (e.g. additive tools/settings format versus behavioral fixes), not a predetermined version number. Keep public artifact versions in lockstep using `scripts/bump-version.sh`, `pnpm version:check` and `pnpm version:test`; private packages do not require product bumps.
@@ -275,23 +285,32 @@ Require full local build/test/typecheck/lint/runtime checks, additive D1 migrati
 
 ## Progress ledger and handoff
 
+Astra performed a read-only architecture review of #440 after the lead caught a cross-endpoint JWKS cache race. The revised issuer+URI namespace isolates that race. Review additionally found an introduced Actions-session issuer function/value error and a pre-existing signing-key TTL defect (successful cache hits never expired). Both were sent to the builder, with a bounded expiry repair and clock-controlled regressions authorized; final acceptance remains pending.
+
 Machine ledger is authoritative for task state; update it with UTC, worker, worktree, base/head SHA, PR, commands/results, evidence paths, lead findings/corrections, queue state and closure decision. Unknown stays unknown; attach immutable evidence or links rather than replacing it with “done.” Keep snapshot inventory immutable and append execution updates (such as PR #451) separately.
 
-| Item | State at plan handoff |
+| Item | Current recorded state |
 |---|---|
-| Snapshot/reconciliation | 16 open issues, three dependency PRs; full open relations/comments read; relevant closed foundations checked against source |
-| A, current: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; implementing, base `ba26881e5ac36032e33670eb324ed58c63117a58` |
-| Planner | Plan and DAG persisted; validator result and local docs commit reported separately; no application code changed |
-| #450 | Completed externally; PR #451 head `2cb07e2d89e4f759a4b4f495632dab159c089700`, merge `ba26881e5ac36032e33670eb324ed58c63117a58`; lead verified GitHub MERGED and fetched main ancestry; issue CLOSED |
-| #400 / #449 / #439 | Implementing after lead release; #400 baseline 2 passed; #449 baseline 37 focused passed and packed/unpacked 63,786/289,180 bytes; #439 starts at merged #450 |
+| Snapshot/reconciliation | 16 open issues, three dependency PRs; full relations/comments read; closed foundations checked against source |
+| #450 / #400 / #449 / #398 / #439 / #362 | Merged and issues closed; immutable heads, merge SHAs and independent fetched-main verification in the machine ledger |
+| #416 | Reviewed and validated; PR #465 entered Mergify queue, integration draft #466; head `9249ff3f` |
+| #399 | Sol XHIGH implementing from reviewed #416 head; only issue-specific commits will be transplanted after parent merge |
+| #440 | Sol XHIGH final auth validation after lead/Astra corrections; issue-only transplant and integrated validation before handoff |
+| #448 | Sol XHIGH implementing shared transfer contracts, then CLI/UI/MCP; lead correcting locale-dependent receipt digest and package boundary |
 | #307 | #434 runbook/rehearsal delivered; audit and explicit production gate remain; no production secret touched |
 | #283 / #308 / #194 | Live execution/measurements not passed by this planning work |
-| #311 / #314 / #312 | Snapshot green / green / failing respectively; all originally unlabelled; validation/repair/handoff still planned |
+| #314 / #311 | Reviewed unchanged dependency heads; merged as `ff7bdf3d` / `bbe0252d`; GitHub state and main ancestry independently verified |
+| #312 | Portable auth declaration repair and validation still planned |
 | #261 | Ongoing automation, never scheduled for closure |
-| Release | Not elected, optional release worker not started |
+| Release | Dedicated worker and comprehensive plan requested; Astra drafting in `release-plan`. Formal preflight blocked on verified operator configuration; scope freeze and publication remain pending |
+
 
 Lead review checklist: validate coverage/order with the script; confirm #398/#362 choices and #448 format/executor contract; inspect #416 warning semantics and #440 issuer propagation; confirm external #450 avoids duplicate staffing; the initial internal tasks are already released. Final review corrections are made locally and the planner does not push. For subsequent approved work, use the per-task contracts and normal Mergify workflow without another routine permission loop.
 
 Execution-state validation preserves the immutable snapshot while permitting progress. Terminal nodes require evidence; merged work requires GitHub state, head/merge SHA and independently verified main ancestry. Release election may advance only with a recorded lead decision and selected scope; production activation still requires its own explicit authorization. The validator must not encode today's pending states as permanent invariants.
 
 Plan validation: 16 issues + three snapshot PRs covered, PR #451 tracked as an execution update; 35 nodes, 67 hard edges and 16 preferred edges, both graphs acyclic; seven hard topological waves. Seven synthetic validator checks passed: future merged state, missing completion evidence, missing main ancestry, permitted evidenced release election, rejected unevidenced election, immutable snapshot and fourth-builder rejection. These checks do not execute application tests or live acceptance. JSON formatting uses repository-pinned Biome 1.9.4; secret scanning remains enabled.
+
+## Current Herdr layout
+
+One `tila` workspace (`w2`) contains Brain (`w2:t1`: lead `p1`, Astra `p2`), Builders (`w2:t2`: #448 `p3` left, #399 `p4` upper right, #440 `p5` lower right), and Release (`w2:t3`: reserved `p6`). Sessions were moved without restarting. Historical pane IDs in evidence retain their original meaning; use agent names for orchestration.
