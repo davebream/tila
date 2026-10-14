@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { LastRefreshed } from "@/components/ui/last-refreshed";
 import { SectionNotice } from "@/components/ui/query-section";
+import { ReadinessNote } from "@/components/work/readiness-note";
 import { useAdminCapabilities } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
 import { type OverviewData, useOverview } from "@/hooks/use-overview";
@@ -244,9 +245,11 @@ function AsOf({ row }: { row: AttentionRow }) {
 function AttentionTable({
   view,
   prefix,
+  data,
 }: {
   view: OverviewView;
   prefix: string;
+  data: OverviewData;
 }) {
   if (view.rows.length === 0) return null;
   return (
@@ -262,8 +265,18 @@ function AttentionTable({
         <tbody>
           {view.rows.map((row) => (
             <tr key={row.rule.id} className="border-t border-border align-top">
-              <td className="p-3">
+              <td className="space-y-2 p-3">
                 <Observed row={row} prefix={prefix} />
+                {/* Also at zero: a count alone does not show which types
+                    the legacy rule judged (#398). */}
+                {row.rule.id === "work.blocked" &&
+                  row.state.kind === "ready" &&
+                  data.readiness && (
+                    <ReadinessNote
+                      context={data.readiness}
+                      definitionsHref={data.definitionsHref}
+                    />
+                  )}
               </td>
               <td className="p-3 text-muted-foreground">{row.rule.rule}</td>
               <td className="p-3">
@@ -423,7 +436,7 @@ export function OverviewPage() {
       </header>
       {view.state === "setup" && <SetupChecklist prefix={prefix} />}
       <Summary data={data} prefix={prefix} />
-      <AttentionTable view={view} prefix={prefix} />
+      <AttentionTable view={view} prefix={prefix} data={data} />
       {(hiddenSources.length > 0 || data.restricted) && (
         <div className="space-y-1 text-xs text-muted-foreground">
           {hiddenSources.length > 0 && (

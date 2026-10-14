@@ -55,6 +55,12 @@ export interface AccessTarget {
   minRole?: ProjectRole;
 }
 
+/** What Settings › Definitions needs; shared with every link that points there. */
+export const DEFINITIONS_ACCESS: AccessTarget = {
+  requires: ["schema:read"],
+  surface: "schema",
+};
+
 export interface NavSection {
   id: SectionId;
   label: string;
@@ -249,8 +255,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         id: "definitions",
         label: "Definitions",
         segment: "settings/definitions",
-        requires: ["schema:read"],
-        surface: "schema",
+        ...DEFINITIONS_ACCESS,
         keywords: ["schema", "types", "fields", "lifecycle"],
       },
       {
