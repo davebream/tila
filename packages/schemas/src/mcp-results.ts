@@ -108,6 +108,43 @@ export const McpCloseResultSchema = z.object({
     }),
   ),
 });
+
+/** A small review snapshot clients retain unchanged for apply and receipt replay. */
+export const McpDefinitionReviewSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  definition: z.string(),
+  removed: z.array(z.string()),
+});
+export const McpDefinitionImportResultSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("preview"),
+    format: z.enum(["toml", "yaml"]),
+    mode: z.enum(["merge", "replace"]),
+    units: z.object({
+      added: z.array(z.string()),
+      changed: z.array(z.string()),
+      unchanged: z.array(z.string()),
+      preserved: z.array(z.string()),
+      removed: z.array(z.string()),
+    }),
+    warnings: z.array(z.string()),
+    noChange: z.boolean(),
+    reviewed_plan: McpDefinitionReviewSchema,
+    preview: api.SchemaPreviewResponseSchema,
+  }),
+  z.object({
+    status: z.literal("applied"),
+    reviewed_plan: McpDefinitionReviewSchema,
+    application: api.SchemaApplyResponseSchema,
+  }),
+]);
+export const McpDefinitionExportResultSchema = z.object({
+  status: z.enum(["exported", "empty"]),
+  revision: z.number().int().nonnegative(),
+  format: z.enum(["toml", "yaml"]),
+  text: z.string().nullable(),
+  verbatim_paths: z.array(z.string()),
+});
 const templates = api.TemplateListResponseSchema;
 export const McpPrimitiveResults = {
   tila_room_list: conversations.RoomListResponseSchema,
@@ -200,6 +237,8 @@ export const McpPrimitiveResults = {
   tila_gate_cancel: ok,
   tila_schema_update: api.SchemaApplyResponseSchema,
   tila_schema_preview: api.SchemaPreviewResponseSchema,
+  tila_schema_import: McpDefinitionImportResultSchema,
+  tila_schema_export: McpDefinitionExportResultSchema,
   tila_template_list: templates,
   tila_template_instantiate: api.InstantiateTemplateResponseSchema,
   tila_reentry: reentry,
