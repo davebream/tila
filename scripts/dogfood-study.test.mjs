@@ -1491,6 +1491,135 @@ function replaceEvent(t, kind, change) {
   change(t.events.find((e) => e.kind === kind));
 }
 
+const defaultParticipants = { w1: "w1", w2: "w2", w1r: "w1r", w2r: "w2r" };
+const survivorRole = (slot) => (slot.replaced_role === "w1" ? "w2" : "w1");
+const registration = (t, role) =>
+  t.events.find((e) => e.kind === "worker.started" && e.payload.role === role);
+
+function configureParticipants(t, slot, participants) {
+  t.participants = participants;
+  t.trialDir = scratch();
+  writeFileSync(
+    join(t.trialDir, "trial.json"),
+    JSON.stringify({
+      trial: slot.trial,
+      condition: slot.condition,
+      participants,
+      shared: t.trialDir,
+      run_dir: t.trialDir,
+      helper_resource: "src/x.mjs",
+    }),
+  );
+}
+
+function optionalRetirementIdentity(t, slot, fields) {
+  const original = registration(t, slot.replaced_role);
+  replaceEvent(t, "worker.stopped", (e) => {
+    for (const field of fields) e.payload[field] = original.payload[field];
+  });
+}
+
+const identityMutations = {
+  "replacement reuses survivor participant": (t, slot) => {
+    const survivor = survivorRole(slot);
+    const replacement = `${slot.replaced_role}r`;
+    configureParticipants(t, slot, {
+      ...defaultParticipants,
+      [replacement]: survivor,
+    });
+    registration(t, replacement).payload.participant = survivor;
+    replaceEvent(t, "worker.replaced", (e) => {
+      e.payload.to_participant = survivor;
+    });
+    for (const e of t.events.filter((e) => e.kind.startsWith("recovery."))) {
+      e.payload.participant = survivor;
+      e.payload.session_id = "s3";
+    }
+  },
+  "original participant alias": (t, slot) => {
+    registration(t, survivorRole(slot)).payload.participant =
+      slot.replaced_role;
+  },
+  "original session alias": (t, slot) => {
+    registration(t, survivorRole(slot)).payload.session_id = registration(
+      t,
+      slot.replaced_role,
+    ).payload.session_id;
+  },
+  "survivor configured identity mismatch": (t, slot) => {
+    configureParticipants(t, slot, { ...defaultParticipants });
+    registration(t, survivorRole(slot)).payload.participant =
+      "distinct-stranger";
+  },
+  "departing configured identity mismatch": (t, slot) => {
+    configureParticipants(t, slot, {
+      ...defaultParticipants,
+      [slot.replaced_role]: "distinct-stranger",
+    });
+  },
+  "empty survivor participant": (t, slot) => {
+    registration(t, survivorRole(slot)).payload.participant = " ";
+  },
+  "empty original session": (t, slot) => {
+    registration(t, slot.replaced_role).payload.session_id = " ";
+  },
+  "wrong retirement participant": (t, slot) => {
+    replaceEvent(t, "worker.stopped", (e) => {
+      e.payload.participant = survivorRole(slot);
+    });
+  },
+  "wrong retirement session": (t, slot) => {
+    replaceEvent(t, "worker.stopped", (e) => {
+      e.payload.session_id = registration(
+        t,
+        survivorRole(slot),
+      ).payload.session_id;
+    });
+  },
+  "wrong retirement participant and session": (t, slot) => {
+    replaceEvent(t, "worker.stopped", (e) => {
+      const survivor = registration(t, survivorRole(slot));
+      e.payload.participant = survivor.payload.participant;
+      e.payload.session_id = survivor.payload.session_id;
+    });
+  },
+};
+
+function assertIdentityRejected(result, slot) {
+  assert.equal(result.ok, false);
+  assert.equal(result.reading, "inconclusive");
+  assert.equal(result.outcomes.length, 4);
+  assert.ok(
+    result.findings.some(
+      (f) => f.code === "replacement_invalid" && f.trial === slot.trial,
+    ),
+    JSON.stringify(result.findings),
+  );
+  const ledger = result.ledgers[slot.trial];
+  assert.equal(ledger.outcome, "harness_invalid");
+  for (const metric of recoveryMetrics) {
+    assert.equal(ledger.metrics[metric].availability, "unavailable", metric);
+    assert.equal(ledger.metrics[metric].value, null, metric);
+  }
+  if (slot.condition === "B") {
+    assert.equal(ledger.gates.G2_lost_acknowledged_decision.undetermined, true);
+    assert.equal(ledger.gates.G2_lost_acknowledged_decision.value, null);
+  }
+}
+
+test("ambiguous active identities and contradictory retirements invalidate complete bundles", async (ctx) => {
+  for (const slot of declaration.trials)
+    for (const [name, mutate] of Object.entries(identityMutations))
+      await ctx.test(`${slot.trial}: ${name}`, () => {
+        const bundle = completeBundle();
+        const t = bundle.trials[slot.trial];
+        mutate(t, slot);
+        const raw = JSON.stringify(t.events);
+        assertIdentityRejected(validateStudy(bundle), slot);
+        assert.equal(JSON.stringify(t.events), raw);
+      });
+});
+
 const replacementMutations = {
   "wrong-role lifecycle": (t, slot) => {
     const wrong = {
@@ -1729,44 +1858,160 @@ test("early aborts preserve partial lifecycle evidence without requiring future 
   }
 });
 
-test("replacement binding uses registered participant IDs rather than role-shaped IDs", () => {
+test("early abort after retirement retains optional identities and rejects observed contradictions", async (ctx) => {
+  for (const slot of declaration.trials)
+    for (const reason of [
+      "abort_wrong_target",
+      "abort_privacy",
+      "harness_failure",
+    ])
+      for (const name of [
+        "correct optional identities",
+        ...Object.keys(identityMutations).filter(
+          (n) => !n.startsWith("replacement reuses"),
+        ),
+      ])
+        await ctx.test(`${slot.trial}/${reason}: ${name}`, () => {
+          const bundle = completeBundle();
+          const t = bundle.trials[slot.trial];
+          optionalRetirementIdentity(t, slot, ["participant", "session_id"]);
+          if (identityMutations[name]) identityMutations[name](t, slot);
+          const retirement = t.events.find((e) => e.kind === "worker.stopped");
+          t.events = t.events.filter((e) => e.seq <= retirement.seq);
+          t.events.push({
+            ...retirement,
+            seq: retirement.seq + 1,
+            mono_ms: retirement.mono_ms + 1,
+            actor: { role: "harness" },
+            kind: "trial.stopped",
+            payload: { reason },
+          });
+          t.evaluation = null;
+          t.review = null;
+          const raw = JSON.stringify(t.events);
+          const result = validateStudy(bundle);
+          assert.notEqual(result.reading, "informative");
+          const bad = name !== "correct optional identities";
+          assert.equal(
+            result.findings.some(
+              (f) => f.code === "replacement_invalid" && f.trial === slot.trial,
+            ),
+            bad,
+            JSON.stringify(result.findings),
+          );
+          assert.equal(
+            result.ledgers[slot.trial].outcome,
+            reason === "harness_failure"
+              ? "harness_invalid"
+              : "aborted_wrong_target_or_privacy",
+          );
+          for (const metric of recoveryMetrics)
+            assert.equal(
+              result.ledgers[slot.trial].metrics[metric].availability,
+              "unavailable",
+            );
+          assert.equal(JSON.stringify(t.events), raw);
+        });
+});
+
+test("correct optional retirement identities preserve late recovery censoring in all slots", () => {
+  for (const slot of declaration.trials)
+    for (const boundary of ["retirement", "stop", "deadline"]) {
+      const bundle = completeBundle();
+      const t = bundle.trials[slot.trial];
+      optionalRetirementIdentity(t, slot, ["participant", "session_id"]);
+      const stop = t.events.find((e) => e.kind === "trial.stopped");
+      let cutoff = stop.mono_ms;
+      if (boundary === "retirement") {
+        cutoff = 1_370_000;
+        t.events.push({
+          ...stop,
+          actor: { role: `${slot.replaced_role}r` },
+          kind: "worker.stopped",
+          mono_ms: cutoff,
+          payload: { role: `${slot.replaced_role}r`, reason: "complete" },
+        });
+      } else if (boundary === "deadline") {
+        cutoff = 1_720_000;
+        stop.mono_ms = cutoff + 5;
+        stop.payload.reason = "hard_stop";
+        t.events.find(
+          (e) => e.payload.topic === "runtime_coverage_attested",
+        ).mono_ms = cutoff + 10;
+      }
+      for (const kind of ["recovery.decision_stated", "recovery.first_action"])
+        replaceEvent(t, kind, (e) => {
+          e.mono_ms = cutoff + 1;
+        });
+      orderSyntheticEvents(t);
+      const raw = JSON.stringify(t.events);
+      const result = validateStudy(bundle);
+      const ledger = result.ledgers[slot.trial];
+      assert.equal(ledger.outcome, "harness_invalid");
+      assert.ok(!result.findings.some((f) => f.code === "replacement_invalid"));
+      assert.ok(result.findings.some((f) => f.code === "late_state_evidence"));
+      for (const metric of [
+        "recovery_to_decision_ms",
+        "recovery_to_first_action_ms",
+      ]) {
+        assert.equal(ledger.metrics[metric].censored, true);
+        assert.equal(ledger.metrics[metric].value, cutoff - 1_360_300);
+      }
+      assert.equal(ledger.metrics.handoff_score.value, 4);
+      assert.equal(JSON.stringify(t.events), raw);
+    }
+});
+
+function distinctIdentities(t, slot) {
+  const participants = Object.fromEntries(
+    ["w1", "w2", "w1r", "w2r"].map((r) => [
+      r,
+      `participant-${slot.trial}-${r}`,
+    ]),
+  );
+  for (const e of t.events) {
+    if (["worker.started", "recovery.started"].includes(e.kind))
+      e.payload.participant = participants[e.payload.role];
+    if (e.kind === "worker.replaced") {
+      e.payload.from_participant = participants[slot.replaced_role];
+      e.payload.to_participant = participants[`${slot.replaced_role}r`];
+    }
+    if (e.kind === "handoff.saved") {
+      e.payload.participant = participants[slot.replaced_role];
+      e.payload.session_id = slot.replaced_role === "w1" ? "s1" : "s2";
+    }
+    if (e.kind.startsWith("recovery.")) {
+      e.payload.participant = participants[`${slot.replaced_role}r`];
+      e.payload.session_id = "s3";
+    }
+  }
+  // Sessions, like participants, need not encode roles or fixture names.
+  const sessions = {
+    s1: "context-alpha",
+    s2: "context-beta",
+    s3: "context-new",
+  };
+  for (const e of t.events) {
+    if (Object.hasOwn(e.payload, "session_id"))
+      e.payload.session_id = sessions[e.payload.session_id];
+    if (e.payload.session_ids)
+      e.payload.session_ids = e.payload.session_ids.map((s) => sessions[s]);
+  }
+  optionalRetirementIdentity(t, slot, ["participant", "session_id"]);
+  return participants;
+}
+
+test("replacement binding uses arbitrary distinct IDs and accepts correct optional retirement identities", () => {
   const bundle = completeBundle();
   for (const slot of declaration.trials) {
     const t = bundle.trials[slot.trial];
-    const participants = Object.fromEntries(
-      ["w1", "w2", "w1r", "w2r"].map((r) => [
-        r,
-        `participant-${slot.trial}-${r}`,
-      ]),
+    const participants = distinctIdentities(t, slot);
+    // Exercise the registration-only seam before adding configuration.
+    assert.equal(
+      deriveLedger({ trial: slot, ...t, frozen: frozenHook, rubric }).outcome,
+      "success",
     );
-    for (const e of t.events) {
-      if (["worker.started", "recovery.started"].includes(e.kind))
-        e.payload.participant = participants[e.payload.role];
-      if (e.kind === "worker.replaced") {
-        e.payload.from_participant = participants[slot.replaced_role];
-        e.payload.to_participant = participants[`${slot.replaced_role}r`];
-      }
-      if (e.kind === "handoff.saved") {
-        e.payload.participant = participants[slot.replaced_role];
-        e.payload.session_id = slot.replaced_role === "w1" ? "s1" : "s2";
-      }
-      if (e.kind.startsWith("recovery.")) {
-        e.payload.participant = participants[`${slot.replaced_role}r`];
-        e.payload.session_id = "s3";
-      }
-    }
-    t.trialDir = scratch();
-    writeFileSync(
-      join(t.trialDir, "trial.json"),
-      JSON.stringify({
-        trial: slot.trial,
-        condition: slot.condition,
-        participants,
-        shared: t.trialDir,
-        run_dir: t.trialDir,
-        helper_resource: "src/x.mjs",
-      }),
-    );
+    configureParticipants(t, slot, participants);
   }
   const result = validateStudy(bundle);
   assert.equal(result.ok, true, JSON.stringify(result.findings));
@@ -1778,7 +2023,7 @@ test("replacement binding uses registered participant IDs rather than role-shape
     );
 });
 
-test("CLI derivation and validation bind declared replacement roles and registered identities", () => {
+test("CLI derivation and validation bind declared replacement roles and registered identities", async (ctx) => {
   const run = scratch();
   const cli = (...args) =>
     spawnSync("node", [join(repo, "scripts/dogfood-study.mjs"), ...args], {
@@ -1816,7 +2061,7 @@ test("CLI derivation and validation bind declared replacement roles and register
           helper_resource: "src/x.mjs",
           shared: dir,
           run_dir: run,
-          participants: { w1: "w1", w2: "w2", w1r: "w1r", w2r: "w2r" },
+          participants: t.participants ?? defaultParticipants,
         }),
       );
       const raw = readFileSync(join(dir, "events.jsonl"), "utf8");
@@ -1829,6 +2074,41 @@ test("CLI derivation and validation bind declared replacement roles and register
   const positive = cli("validate", "--bundle", run, "--json");
   assert.equal(positive.status, 0, positive.stdout + positive.stderr);
   assert.equal(JSON.parse(positive.stdout).reading, "informative");
+  for (const fields of [
+    ["participant"],
+    ["session_id"],
+    ["participant", "session_id"],
+  ]) {
+    const bundle = completeBundle();
+    for (const slot of declaration.trials) {
+      const t = bundle.trials[slot.trial];
+      if (fields.length === 2) t.participants = distinctIdentities(t, slot);
+      optionalRetirementIdentity(t, slot, fields);
+    }
+    writeBundle(bundle);
+    const checked = cli("validate", "--bundle", run, "--json");
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    assert.equal(JSON.parse(checked.stdout).reading, "informative");
+  }
+  for (const slot of declaration.trials)
+    for (const [name, mutate] of Object.entries(identityMutations))
+      await ctx.test(`${slot.trial}: ${name}`, () => {
+        const bundle = completeBundle();
+        mutate(bundle.trials[slot.trial], slot);
+        writeBundle(bundle);
+        const rawFile = join(run, "trials", slot.trial, "events.jsonl");
+        const raw = readFileSync(rawFile, "utf8");
+        const ledger = JSON.parse(
+          readFileSync(join(run, "trials", slot.trial, "ledger.json"), "utf8"),
+        );
+        const checked = cli("validate", "--bundle", run, "--json");
+        assert.equal(checked.status, 1, checked.stdout + checked.stderr);
+        assertIdentityRejected(JSON.parse(checked.stdout), slot);
+        assert.equal(ledger.outcome, "harness_invalid");
+        for (const metric of recoveryMetrics)
+          assert.equal(ledger.metrics[metric].availability, "unavailable");
+        assert.equal(readFileSync(rawFile, "utf8"), raw);
+      });
   for (const slot of declaration.trials) {
     for (const name of [
       "wrong-role lifecycle",
