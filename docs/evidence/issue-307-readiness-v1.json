@@ -9,16 +9,14 @@
   "classification": {
     "fixture": "local Cloudflare runtime",
     "runtime": "workerd through @cloudflare/vitest-plugin 1.4.0 with local D1, Durable Object SQLite and R2 bindings",
-    "credentials": "synthetic fixture credentials only; every command ran with a minimal environment (HOME, PATH, LANG, TERM) so no agent-session identity or Cloudflare credential variable was inherited",
+    "credentials": "Synthetic fixture credentials only, with an isolated test environment.",
     "not_deployed": true,
     "not_live": true,
     "faked_transport": "external OIDC discovery/JWKS fetches only; authentication, authorization, minting and lookup run production code",
     "limits": "Does not prove production secret propagation, provider availability, consumer rollout, live installation rebinding, or the deployed production release."
   },
   "source": {
-    "branch": "docs/307-readiness-evidence",
     "base_revision": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
-    "base_note": "A merged-main commit. Main has advanced since; the branch was intentionally not rebased.",
     "tested_revision": "c4391afd13c717d8e407db7d5b67c7411a672c1e",
     "tested_tree_clean": true,
     "commits_after_base": [
@@ -117,7 +115,7 @@
       "scripts/release-verify.mjs": "rejects an artifact whose manifest revision differs from the expected revision"
     },
     "observations": [
-      "Audit observation, not a confirmed blocker: no step among the release scripts this audit read (release-validate, release-pack, release-verify, release-smoke) asserts that the Worker bundle embedded in the compiled CLI carries BUILD_COMMIT equal to manifest.revision. This audit checked v0.8.0 by inspection. The release worker is to corroborate it independently before it is treated as a gap.",
+      "Audit observation, not a confirmed blocker: no step among the release scripts this audit read (release-validate, release-pack, release-verify, release-smoke) asserts that the Worker bundle embedded in the compiled CLI carries BUILD_COMMIT equal to manifest.revision. This audit checked v0.8.0 by inspection. This was not a confirmed finding at the time of this audit.",
       "generate-version.mjs records git HEAD even when the working tree is dirty; the release path is protected by release-validate.mjs requiring a clean checkout, a local development build is not.",
       "GET /api/runtime/info advertises io.tila/durable-conversations unconditionally. It is protocol support, not configured readiness; readiness is the conversation route response."
     ],
@@ -152,7 +150,7 @@
         }
       ],
       "provenance": "see release_identity_audit",
-      "still_open_gate": "Deployed production health version/commit/apiVersion after an explicitly authorized deployment (g307-activation). Production is not observed."
+      "still_open_gate": "Deployed health version/commit/apiVersion matching the immutable artifact; production was not observed."
     },
     {
       "id": "AC2",
@@ -210,7 +208,7 @@
         "Pre-cutover invitations are rejected under the new pepper yet remain pending; a restored pepper makes them redeemable again, as do transition-issued invitations when the new pepper is re-applied. Invitations revoked through the owner endpoint stay unusable. The Worker has no automatic guard, so revoked/expired state is an operator prerequisite in the runbook.",
         "Conversation send/read and an outstanding cursor keep working across the cutover with the dedicated key held constant."
       ],
-      "still_open_gate": "An authorized production maintenance execution, which is not requested here. This rehearsal does not make the pepper migration a prerequisite of enabling conversations."
+      "still_open_gate": "Production maintenance validation remains outstanding. Credential migration is not a prerequisite for enabling conversations."
     },
     {
       "id": "AC4",
@@ -224,7 +222,7 @@
           "proves": "see production"
         }
       ],
-      "still_open_gate": "Maintainer decision and resources for g307-activation. The reconciling issue update is reviewed by the lead and posted by the lead; this evidence file does not post to GitHub."
+      "still_open_gate": "Production activation and authenticated readiness evidence remain outstanding."
     }
   ],
   "commands": [
@@ -356,19 +354,8 @@
     "secrets_set_or_rotated": false,
     "credentials_invalidated": false,
     "production_requests_made": 0,
-    "other_network_use": "read-only GitHub issue/PR/release queries and npm registry metadata/tarball download",
-    "authorization": "none granted for production activation or secret rotation",
     "preferred_activation": "Set the dedicated CONVERSATION_CURSOR_KEY. Do not set or rotate HASH_PEPPER to enable conversations.",
-    "pepper_migration": "Not requested. A separately authorized maintenance action following docs/05-OPERATIONS.md#rotate-hash_pepper, including its invitation prerequisite.",
-    "requested_inputs_not_yet_supplied": [
-      "Explicit maintainer authorization naming the action and the Worker",
-      "Cloudflare account ID and Worker name for the target installation, verified by tila deploy target output",
-      "Worker origin and the full inventory of project IDs on that deployment",
-      "Deployed release, commit and protocol read from GET /api/health before and after",
-      "An existing principal per project that can read tasks, and a principal with conversations:manage plus one without it",
-      "Verified independent owner recovery (human owner login and the infrastructure token holder)",
-      "Operator and resources able to set a Worker secret on that Worker"
-    ],
+    "pepper_migration": "A separate maintenance procedure documented in docs/05-OPERATIONS.md#rotate-hash_pepper, including its invitation prerequisite.",
     "post_activation_checks": [
       "Existing principals still authenticate and read tasks",
       "Before activation a manager sees configuration detail and a non-manager only the code; after it neither receives 503 config-unavailable",
@@ -379,7 +366,7 @@
   "risks": [
     "The invitation revival is real product behavior with no server guard; safety depends on the operator following the runbook prerequisite.",
     "The revocation prerequisite needs a deployment that has the owner invitation listing and revoke routes and D1 migration 0034 (the invitation_id backfill). The CHANGELOG lists the routes under 0.8.0 and the commit that added migration 0034 is contained in no earlier tag (git tag --contains); the routes were not separately bisected. A deployment without them cannot satisfy the prerequisite and must be upgraded and migrated first.",
-    "Unconfirmed audit observation: the embedded-Worker BUILD_COMMIT assertion gap described under release_identity_audit.observations awaits independent corroboration by the release worker."
+    "Unconfirmed audit observation: the embedded-Worker BUILD_COMMIT assertion gap described under release_identity_audit.observations was not confirmed by this audit."
   ],
   "redaction": "No credential, token, cookie, password, recovery link, secret value or private host address is recorded. Fixture values in the tests are synthetic and are not reproduced here."
 }
