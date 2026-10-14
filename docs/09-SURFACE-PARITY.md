@@ -37,8 +37,8 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 | Journal list | Y | Y | Y | Y | |
 | Schema show | Y | Y | Y | - | MCP: use project-schema resource |
 | Schema update | Y | Y | Y | Y | |
-| Definition import (merge/replace, TOML/YAML) | Y | Y | - | - | Planned in `@tila/core`, then HTTP preview and conditional apply; also Settings › Definitions |
-| Definition export (TOML/YAML) | Y | Y | - | - | Rendered from `GET /schema`; also Settings › Definitions |
+| Definition import (merge/replace, TOML/YAML) | Y | Y | - | Y | Planned in `@tila/core`, then preview and conditional apply; Settings › Definitions and MCP `tila_schema_import` |
+| Definition export (TOML/YAML) | Y | Y | - | Y | Rendered from `GET /schema`; Settings › Definitions and MCP `tila_schema_export` |
 | Template list | Y | Y | Y | Y | |
 | Template instantiate | Y | Y | Y | Y | |
 | Presence heartbeat | Y | Y | Y | Y | |
@@ -67,7 +67,6 @@ All tila capabilities are accessible from every appropriate surface (HTTP, CLI, 
 - **Artifact/index list** -- Use `tila_artifact_search` or `tila_search` for discovery; listing all artifacts is a human admin operation.
 - **Gate list** -- Gates are visible via `tila_task_show` (task detail includes gate status). A dedicated list is admin tooling.
 - **Schema show** -- Available as `project-schema` MCP resource (read via resource subscription, not tool invocation).
-- **Definition import/export** -- Follow-up work. Agents preview with `tila_schema_preview` and apply with a conditional `tila_schema_update` (`expected_revision`, `reviewed_definition`).
 - **Presence list** -- Available as `project-presence` MCP resource.
 - **Claim state/renew** -- Admin operations for manual claim management.
 - **Task artifact-refs** -- Use `tila_artifact_put` with `resource` parameter to associate artifacts during upload.
