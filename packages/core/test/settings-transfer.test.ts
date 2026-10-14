@@ -531,3 +531,65 @@ describe("coverage-aware export", () => {
     ).rejects.toMatchObject({ code: "export-incomplete" });
   });
 });
+
+const credentialShapes = [
+  `tila_d1_${"a".repeat(72)}`,
+  `tila_u_${"a".repeat(20)}`,
+  `ghp_${"a".repeat(32)}`,
+  `github_pat_${"a".repeat(32)}`,
+  ["-----BEGIN", "PRIVATE KEY-----"].join(" "),
+  `AKIA${"A".repeat(16)}`,
+  `ASIA${"B".repeat(16)}`,
+  `xoxb-${"a".repeat(20)}`,
+  `sk-${"a".repeat(25)}`,
+  `sk-ant-${"a".repeat(25)}`,
+  `eyJ${"a".repeat(12)}.eyJ${"b".repeat(12)}.${"c".repeat(12)}`,
+];
+it.each(
+  credentialShapes.flatMap((secret, index) =>
+    ["host_ref", "account_ref"].map((field) => ({ secret, index, field })),
+  ),
+)(
+  "blocks credential pattern $index in mapping-only $field before any artifact/persistence/service call",
+  async ({ secret, field }) => {
+    const doc = file();
+    sourceAgent(doc).profile = {
+      state: "selected",
+      selection: { profile_id: "source-profile" },
+    };
+    const choices = mappings();
+    choices.profiles.sourceagent = {
+      selection: {
+        profile_id: "destination-profile",
+        host_ref: null,
+        account_ref: null,
+        [field]: secret,
+      },
+    };
+    expect(SettingsMappingsSchema.safeParse(choices).success).toBe(false);
+    const rejected = planSettingsImport(doc, choices, destination(), operation);
+    expect(rejected.ok).toBe(false);
+    expect(JSON.stringify(rejected)).not.toContain(secret);
+    const raw = await createSettingsReceipt(plan());
+    raw.plan.mappings = choices;
+    const persist = vi.fn();
+    const preflight = vi.fn(async () => {
+      throw new Error("Access denied");
+    });
+    const write = vi.fn();
+    await expect(
+      executeSettingsTransfer(
+        { projectId: "destination", preflight, write },
+        raw,
+        persist,
+        { confirmRemovals: true },
+      ),
+    ).rejects.toThrow();
+    expect(persist).not.toHaveBeenCalled();
+    expect(preflight).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    await expect(
+      createSettingsReceipt({ ...plan(), mappings: choices }),
+    ).rejects.toThrow();
+  },
+);
