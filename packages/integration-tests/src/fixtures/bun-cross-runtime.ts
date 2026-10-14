@@ -24,6 +24,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import type { EntityListFilter } from "@tila/core";
 import {
   LocalArtifactBackend,
   LocalProject,
@@ -48,6 +49,86 @@ function emit(obj: unknown): void {
 
 async function main(): Promise<void> {
   switch (OP) {
+    case "task-filter-boundaries": {
+      const project = LocalProject.open(DB, ORG, PROJECT, {
+        skipFilesystemCheck: true,
+      });
+      let rejected = 0;
+      try {
+        for (const key of ["limit", "offset"] as const)
+          for (const value of [
+            -1,
+            1.5,
+            Number.NaN,
+            Number.POSITIVE_INFINITY,
+            Number.MAX_SAFE_INTEGER + 1,
+            ...(key === "limit" ? [0] : []),
+          ]) {
+            try {
+              await project.listPage({ [key]: value });
+            } catch {
+              rejected++;
+            }
+          }
+        for (const cursor of ["", "x".repeat(2049)]) {
+          try {
+            await project.listPage({ cursor });
+          } catch {
+            rejected++;
+          }
+        }
+        const page = await project.listPage({ limit: 501, offset: 0 });
+        emit({
+          rejected,
+          limit: page.limit,
+          offset: page.offset,
+          total: page.total,
+        });
+      } finally {
+        project.close();
+      }
+      return;
+    }
+
+    case "task-filter-pages": {
+      const project = LocalProject.open(DB, ORG, PROJECT, {
+        skipFilesystemCheck: true,
+      });
+      const query = JSON.parse(requireEnv("QUERY"));
+      const filter: EntityListFilter = { ...query, limit: Number(query.limit) };
+      const ids: string[] = [];
+      const totals: number[] = [];
+      let cursor: string | undefined;
+      let mismatch: string | undefined;
+      let outcome_types: string[] | undefined;
+      try {
+        do {
+          const page = await project.listPage({ ...filter, cursor });
+          ids.push(...page.entities.map((e) => e.id));
+          totals.push(page.total);
+          outcome_types = page.scope.outcome_types;
+          if (!cursor && page.next_cursor) {
+            try {
+              await project.listPage({
+                ...filter,
+                blocked: !filter.blocked,
+                cursor: page.next_cursor,
+              });
+            } catch (error) {
+              mismatch = (error as { code?: string }).code;
+            }
+          }
+          cursor = page.next_cursor ?? undefined;
+          if (totals.length > 30)
+            throw new Error("task cursor did not advance");
+        } while (cursor);
+        emit({ ids, totals, outcome_types, mismatch });
+      } finally {
+        project.close();
+      }
+      return;
+    }
+
     case "ack-cursor": {
       const proj = LocalProject.open(
         DB,

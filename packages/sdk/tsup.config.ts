@@ -13,9 +13,10 @@ const mainConfig = {
   // for the declaration rollup only.
   dts: {
     compilerOptions: { composite: false, incremental: false },
-    // Follow private barrels' sibling imports as well as workspace names.
-    // This preserves #416's self-contained declarations for packed consumers;
-    // a name allowlist leaves dangling private imports.
+    // Inline private types and their relative declaration siblings: a package
+    // allowlist leaves ./api and ./interfaces/schema-backend dangling in packed
+    // consumers. Runtime bundling remains limited to schemas and the isolated
+    // settings executor below; the core parser and native stack stay excluded.
     resolve: true,
   },
   clean: true,

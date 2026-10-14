@@ -378,6 +378,8 @@ export {
   TASK_LIST_SORTS,
   TaskListQuerySchema,
   type TaskListQuery,
+  TaskListPageOptionsSchema,
+  type TaskListPageOptions,
   ArtifactGrepLineSchema,
   ArtifactGrepResultSchema,
   ArtifactGrepResponseSchema,
@@ -400,6 +402,8 @@ export {
   type SchemaGetResponse,
   SchemaApplyResponseSchema,
   type SchemaApplyResponse,
+  SchemaApplyWarningSchema,
+  type SchemaApplyWarning,
   SchemaHistoryResponseSchema,
   type SchemaHistoryResponse,
 } from "./api";

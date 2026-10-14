@@ -38,6 +38,7 @@ import {
   parseSchemaToml,
 } from "@tila/core";
 import { mapProjectError, signalOps, templateOps } from "@tila/ops-sqlite";
+import { TaskListQuerySchema } from "@tila/schemas";
 import type {
   ArtifactDeleteOptions,
   TemplateListResponse,
@@ -79,6 +80,7 @@ import type {
   InstantiateTemplateResponse,
   JournalResponse,
   ListEntityRelationshipsResponse,
+  PaginatedEntityListResponse,
   PresenceAllListResponse,
   PresenceHeartbeatSuccessResponse,
   PresenceListResponse,
@@ -124,9 +126,14 @@ import {
   createUnsupportedDispatchMethods,
   createUnsupportedInboxMethods,
 } from "../conversations";
+import type { TaskListOptions } from "../entities";
 import { toTilaErrorCode } from "../error-codes";
 import { questionFacade } from "../questions";
 import { attemptFacade, queueFacade } from "../queue-commands";
+import {
+  type SchemaWarningSink,
+  reportSchemaWarnings,
+} from "../schema-warnings";
 import type { SearchOptions } from "../search";
 import { localQueueErrors } from "./queue";
 
@@ -183,33 +190,35 @@ function createLocalTaskMethods(project: EmbeddedProject) {
       return { ok: true, entity, relationships };
     },
 
-    async list(query?: {
-      type?: string;
-      status?: string;
-      limit?: string;
-      cursor?: string;
-      tagFilter?: string[];
-      // Local DIVERGENCE: `compact` is an HTTP-only projection (the Worker's
-      // compact list). The embedded backend has no compact list, so this is
-      // accepted (surface parity) but ignored — local always returns full
-      // entities.
-      compact?: boolean;
-    }): Promise<EntityListResponse> {
-      // DIVERGENCE (Task 14): `cursor` is accepted by the factory signature but
-      // the wire `EntityListResponse` carries NO pagination meta (no
-      // next_cursor/total) — unlike the wire `RecordListResponse`. So this
-      // adapter cannot return a cursor without breaking the shared return shape;
-      // `cursor` is a no-op here, matching the factory's non-paginated tasks.list
-      // contract. (Lifting tasks.list to a paginated response is a wire-shape
-      // change tracked for Task 14.)
-      const entities = await project.list({
-        type: query?.type,
-        archived: 0,
-        limit: query?.limit ? Number(query.limit) : undefined,
-        dataFilter: query?.status ? { status: query.status } : undefined,
-        tagFilter: query?.tagFilter,
+    async list(query?: TaskListOptions): Promise<PaginatedEntityListResponse> {
+      const paging = TaskListQuerySchema.parse({
+        limit: query?.limit,
+        offset: query?.offset,
+        cursor: query?.cursor,
+        sort: query?.sort,
+        order: query?.order,
       });
-      return { ok: true, entities };
+      // `compact` remains an HTTP-only projection; local returns full entities.
+      const status = query?.status;
+      const page = await project.listPage({
+        type: query?.type,
+        limit: paging.limit !== undefined ? Number(paging.limit) : undefined,
+        offset: paging.offset !== undefined ? Number(paging.offset) : undefined,
+        cursor: paging.cursor,
+        sort: paging.sort,
+        order: paging.order,
+        dataFilter: status
+          ? {
+              status: status.includes(",")
+                ? status.split(",").filter(Boolean)
+                : status,
+            }
+          : undefined,
+        tagFilter: query?.tagFilter,
+        blocked: query?.blocked,
+        outcome: query?.outcome,
+      });
+      return { ok: true, ...page };
     },
 
     async catalog(): Promise<WorkCatalogResponse> {
@@ -1019,6 +1028,7 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
 /** Schema methods (mirrors `createSchemaMethods` in `schema.ts`). */
 function createLocalSchemaMethods(
   project: EmbeddedProject,
+  warningSink?: SchemaWarningSink,
 ): TilaFacade["schema"] {
   return {
     async get() {
@@ -1069,6 +1079,7 @@ function createLocalSchemaMethods(
           result.hint ?? "Schema apply failed",
           false,
         );
+      reportSchemaWarnings(result.warnings, warningSink);
       return {
         ...result,
         ok: true as const,
@@ -1343,6 +1354,7 @@ function createLocalAccessMethods() {
 export function buildLocalResources(
   project: EmbeddedProject,
   artifacts: EmbeddedArtifactBackend,
+  warningSink?: SchemaWarningSink,
 ) {
   return {
     queue: queueFacade(localQueueErrors(project.queue)),
@@ -1381,7 +1393,7 @@ export function buildLocalResources(
       list: (input: HandoffListRequest = {}) => project.listHandoffs(input),
     },
     presence: createLocalPresenceMethods(project),
-    schema: createLocalSchemaMethods(project),
+    schema: createLocalSchemaMethods(project, warningSink),
     summary: createLocalSummaryMethods(project),
     search: createLocalSearchMethods(project),
     templates: createLocalTemplateMethods(project),

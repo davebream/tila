@@ -14,6 +14,7 @@ import {
   type CreateRecordInput,
   type EntityBackend,
   type EntityListFilter,
+  type EntityListPage,
   type EntityTree,
   type GateBackend,
   type GateFilter,
@@ -95,10 +96,12 @@ import {
   type EntityRelationship,
   type IdentityContext,
   IdentityContextSchema,
+  LifecycleOutcomeSchema,
   type Presence,
   type RecordHistoryItem,
   type RecordListItem,
   type RecordRow,
+  TaskListPageOptionsSchema,
 } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -250,7 +253,42 @@ export class EmbeddedProject
   }
 
   async list(filter?: EntityListFilter): Promise<Entity[]> {
+    if (filter?.outcome !== undefined)
+      LifecycleOutcomeSchema.array().min(1).parse(filter.outcome);
     return entityOps.list(this.db, filter).entities;
+  }
+
+  async listPage(filter?: EntityListFilter): Promise<EntityListPage> {
+    if (filter?.outcome !== undefined)
+      LifecycleOutcomeSchema.array().min(1).parse(filter.outcome);
+    const paging = TaskListPageOptionsSchema.parse(filter ?? {});
+    const { entities, total, next_cursor, outcome_types } = entityOps.list(
+      this.db,
+      {
+        ...filter,
+        type: filter?.type?.includes(",")
+          ? filter.type.split(",").filter(Boolean)
+          : filter?.type,
+        ...paging,
+      },
+    );
+    return {
+      entities,
+      total,
+      limit: paging.limit ?? null,
+      offset: paging.offset ?? 0,
+      has_more: next_cursor !== null,
+      next_cursor,
+      scope: {
+        restricted: false,
+        ...(filter?.archived === 0
+          ? { archived: "excluded" as const }
+          : filter?.archived === undefined
+            ? { archived: "included" as const }
+            : {}),
+        ...(outcome_types !== undefined ? { outcome_types } : {}),
+      },
+    };
   }
 
   async update(id: string, data: Partial<Entity["data"]>): Promise<Entity> {
@@ -806,6 +844,7 @@ export class EmbeddedProject
           revision: result.revision,
           changes: result.changes,
           noChange: false,
+          warnings: result.warnings ?? [],
         };
       }
       if (result.reason === "no-change") {
@@ -815,6 +854,7 @@ export class EmbeddedProject
           changes: [],
           noChange: true,
           revision: result.revision,
+          warnings: result.warnings ?? [],
         };
       }
       // destructive

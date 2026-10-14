@@ -99,6 +99,8 @@ it("forwards task pagination and participant override, normalizes empty results"
       limit: 2,
       offset: 3,
       has_more: false,
+      next_cursor: null,
+      scope: { restricted: false, archived: "included" },
     });
   const result = await invoke([
     "--json",
@@ -112,8 +114,12 @@ it("forwards task pagination and participant override, normalizes empty results"
   expect(result.status, result.stderr).toBe(0);
   expect(JSON.parse(result.stdout.toString())).toMatchObject({
     ok: true,
-    result: { items: [] },
-    meta: { count: 0, limit: 2, offset: 3 },
+    result: {
+      items: [],
+      has_more: false,
+      scope: { restricted: false, archived: "included" },
+    },
+    meta: { count: 0, total: 0, limit: 2, offset: 3, next_cursor: null },
   });
   expect(requests[0].url).toContain("limit=2");
   expect(requests[0].url).toContain("offset=3");

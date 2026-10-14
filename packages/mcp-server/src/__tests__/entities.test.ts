@@ -102,6 +102,56 @@ describe("registerEntityTools", () => {
       });
     });
 
+    it("preserves truthful filter page metadata in text and structured output", async () => {
+      const page = {
+        ok: true,
+        entities: [],
+        total: 8,
+        limit: 2,
+        offset: 0,
+        has_more: true,
+        next_cursor: "opaque",
+        scope: { restricted: true, outcome_types: ["issue"] },
+      };
+      facade.tasks.list.mockResolvedValue(page);
+      const result = await findHandler("tila_task_list")({
+        blocked: true,
+        outcome: ["failure", "abandoned"],
+        limit: 2,
+        cursor: "previous",
+      });
+      expect(facade.tasks.list).toHaveBeenCalledWith({
+        type: undefined,
+        status: undefined,
+        compact: true,
+        blocked: true,
+        outcome: ["failure", "abandoned"],
+        limit: "2",
+        cursor: "previous",
+      });
+      expect(JSON.parse(result.content[0].text)).toEqual(page);
+      expect(result).toHaveProperty("structuredContent", { result: page });
+    });
+
+    it("advertises the shared lifecycle enum and rejects empty or invalid outcomes", () => {
+      const tool = server.tool.mock.calls.find(
+        (call) => call[0] === "tila_task_list",
+      );
+      const input = tool?.[2];
+      expect(
+        input.outcome.safeParse([
+          "success",
+          "failure",
+          "cancelled",
+          "abandoned",
+        ]).success,
+      ).toBe(true);
+      expect(input.outcome.safeParse(["failed"]).success).toBe(false);
+      expect(input.outcome.safeParse([]).success).toBe(false);
+      expect(input.limit.safeParse(0).success).toBe(false);
+      expect(input.cursor.safeParse("").success).toBe(false);
+    });
+
     it("passes undefined for omitted optional filters", async () => {
       facade.tasks.list.mockResolvedValue({ ok: true, entities: [] });
 
@@ -389,14 +439,15 @@ describe("registerEntityTools", () => {
     });
   });
 
-  describe("tila_task_list — no limit param", () => {
-    it("tila_task_list has no limit key in its input schema", () => {
+  describe("tila_task_list pagination", () => {
+    it("tila_task_list advertises limit and cursor", () => {
       const listCall = server.tool.mock.calls.find(
         (c: unknown[]) => c[0] === "tila_task_list",
       );
       if (!listCall) throw new Error("tila_task_list not found");
       const schema = listCall[2] as Record<string, unknown>;
-      expect(schema).not.toHaveProperty("limit");
+      expect(schema).toHaveProperty("limit");
+      expect(schema).toHaveProperty("cursor");
     });
   });
 

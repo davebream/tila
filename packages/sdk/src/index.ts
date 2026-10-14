@@ -47,6 +47,9 @@ export { createJournalMethods } from "./journal";
 export { createPresenceMethods } from "./presence";
 export { createRecordMethods } from "./records";
 export { createSchemaMethods } from "./schema";
+export { defaultSchemaWarningSink } from "./schema-warnings";
+export type { SchemaWarningSink } from "./schema-warnings";
+export type { SchemaApplyResponse, SchemaApplyWarning } from "@tila/schemas";
 export { createSignalMethods } from "./signals";
 export {
   createAgentMethods,
@@ -85,11 +88,16 @@ export {
 } from "./backends/remote";
 
 // Re-export key types consumers need
+export type { TaskListOptions, TaskListResponse } from "./entities";
 export type {
   // Entity types
   EntityResponse,
   EntityDetailResponse,
   EntityListResponse,
+  PaginatedEntityListResponse,
+  PaginatedCompactEntityListResponse,
+  LifecycleOutcome,
+  TaskListScope,
   // Claim types
   AcquireSuccessResponse,
   RenewSuccessResponse,

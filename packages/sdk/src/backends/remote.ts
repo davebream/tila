@@ -15,6 +15,7 @@ import type {
   CreateRecordInput,
   EntityBackend,
   EntityListFilter,
+  EntityListPage,
   EntityTree,
   GateBackend,
   GateFilter,
@@ -46,6 +47,8 @@ import type {
 import {
   ArtifactRevisionSchema,
   type JournalAppendRequest,
+  LifecycleOutcomeSchema,
+  SchemaApplyWarningSchema,
   SchemaPreviewResponseSchema,
 } from "@tila/schemas";
 import type {
@@ -115,6 +118,7 @@ import { z } from "zod";
 import { createArtifactMethods } from "../artifacts";
 import { TilaApiError, type TilaClient } from "../client";
 import { createJournalMethods } from "../journal";
+import { reportSchemaWarnings } from "../schema-warnings";
 
 // Internal schemas for artifact endpoints not exported from @tila/schemas.
 //
@@ -170,6 +174,7 @@ const SchemaApplyLenientSchema = z.object({
   changes: z.array(z.string()).optional(),
   noChange: z.boolean().optional(),
   revision: z.number().int().nonnegative().optional(),
+  warnings: z.array(SchemaApplyWarningSchema).optional(),
 });
 
 const StateListInternalSchema = z.object({
@@ -287,6 +292,17 @@ export class RemoteBackend
   }
 
   async list(filter?: EntityListFilter): Promise<Entity[]> {
+    return (await this.fetchEntityList(filter)).entities;
+  }
+
+  async listPage(filter?: EntityListFilter): Promise<EntityListPage> {
+    const { ok, ...page } = await this.fetchEntityList(filter);
+    if (page.next_cursor === undefined || page.scope === undefined)
+      throw new Error("The server does not support task list page metadata");
+    return { ...page, next_cursor: page.next_cursor, scope: page.scope };
+  }
+
+  private async fetchEntityList(filter?: EntityListFilter) {
     const query: Record<string, string | undefined> = {};
     if (filter?.type) query.type = filter.type;
     if (filter?.archived !== undefined)
@@ -319,17 +335,24 @@ export class RemoteBackend
     // EmbeddedProject (which applies tagFilter via entityOps.list).
     if (filter?.tagFilter?.length)
       query.tag_filter = filter.tagFilter.join(",");
+    if (filter?.blocked) query.blocked = "1";
+    if (filter?.outcome !== undefined)
+      query.outcome = LifecycleOutcomeSchema.array()
+        .min(1)
+        .parse(filter.outcome)
+        .join(",");
     // Pagination and sorting params
     if (filter?.sort) query.sort = filter.sort;
     if (filter?.order) query.order = filter.order;
     if (filter?.limit !== undefined) query.limit = String(filter.limit);
     if (filter?.offset !== undefined) query.offset = String(filter.offset);
+    if (filter?.cursor !== undefined) query.cursor = filter.cursor;
     const result = await this.client.get(`/projects/${this.projectId}/tasks`, {
       schema: PaginatedEntityListResponseSchema,
       validate: true,
       query,
     });
-    return result.entities;
+    return result;
   }
 
   async update(id: string, data: Partial<Entity["data"]>): Promise<Entity> {
@@ -875,12 +898,14 @@ export class RemoteBackend
       body,
       { schema: SchemaApplyLenientSchema, validate: true },
     );
+    reportSchemaWarnings(result.warnings, this.client.warningSink);
     return {
       ok: true,
       version: result.version ?? null,
       changes: result.changes ?? [],
       noChange: result.noChange ?? false,
       revision: result.revision,
+      warnings: result.warnings,
     };
   }
 

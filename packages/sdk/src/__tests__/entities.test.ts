@@ -120,4 +120,42 @@ describe("createTaskMethods — outgoing request shape", () => {
     [url] = mockFetch.mock.calls[1];
     expect(new URL(url).searchParams.has("compact")).toBe(false);
   });
+  it("serializes attention filters without losing page metadata", async () => {
+    const page = {
+      ok: true,
+      entities: [],
+      total: 18,
+      limit: 2,
+      offset: 0,
+      has_more: true,
+      next_cursor: "next",
+      scope: { restricted: true, outcome_types: ["issue"] },
+    };
+    mockFetch.mockResolvedValueOnce(ok(page));
+    expect(
+      await tasks().list({
+        blocked: true,
+        outcome: ["failure", "abandoned"],
+        limit: "2",
+        cursor: "previous",
+      }),
+    ).toEqual(page);
+    const query = new URL(mockFetch.mock.calls[0][0]).searchParams;
+    expect(query.get("blocked")).toBe("1");
+    expect(query.get("outcome")).toBe("failure,abandoned");
+    expect(query.get("cursor")).toBe("previous");
+    mockFetch.mockResolvedValueOnce(ok(page));
+    await tasks().list({ blocked: false });
+    expect(
+      new URL(mockFetch.mock.calls[1][0]).searchParams.has("blocked"),
+    ).toBe(false);
+  });
+
+  it("rejects invalid and empty outcome lists before sending HTTP", async () => {
+    for (const outcome of [[], ["failed"], ["failure", ""]])
+      await expect(
+        tasks().list({ outcome: outcome as never }),
+      ).rejects.toThrow();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });

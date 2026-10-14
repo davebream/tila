@@ -24,6 +24,7 @@ import {
   type LifecycleOutcome,
   LifecycleOutcomeSchema,
   type SearchKind,
+  TaskListPageOptionsSchema,
   UpdateEntityRequestSchema,
   parseTagFilter,
 } from "@tila/schemas";
@@ -46,8 +47,6 @@ const {
   checkReferenceSlotDeclared,
   resolveCurrentSchema,
 } = constraintOps;
-
-const MAX_ENTITY_LIST_LIMIT = 500;
 
 /** Compact titles follow presentation metadata; a corrupt schema only loses that. */
 function currentSchemaOrNull(
@@ -218,16 +217,23 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     const parent = c.req.query("parent");
     if (parent) dataFilter.parent_id = parent;
 
-    const sort = c.req.query("sort") as entityOps.TaskListSort | undefined;
-    const order = c.req.query("order") as "asc" | "desc" | undefined;
     const limitParam = c.req.query("limit");
-    const limit =
-      limitParam !== undefined
-        ? Math.min(Number(limitParam), MAX_ENTITY_LIST_LIMIT)
-        : undefined;
     const offsetParam = c.req.query("offset");
-    const offset = offsetParam !== undefined ? Number(offsetParam) : 0;
-    const cursor = c.req.query("cursor") || undefined;
+    const parsedPaging = TaskListPageOptionsSchema.safeParse({
+      sort: c.req.query("sort"),
+      order: c.req.query("order"),
+      limit: limitParam !== undefined ? Number(limitParam) : undefined,
+      offset: offsetParam !== undefined ? Number(offsetParam) : 0,
+      cursor: c.req.query("cursor"),
+    });
+    if (!parsedPaging.success)
+      return jsonError(
+        c,
+        400,
+        "validation-error",
+        formatZodIssues(parsedPaging.error.issues),
+      );
+    const { sort, order, limit, offset = 0, cursor } = parsedPaging.data;
     const restrictions = readCredentialPolicy(
       c.req.header("X-Tila-Credential-Policy"),
     )?.restrictions;

@@ -1006,7 +1006,8 @@ values = ["open", "done"]
   expect(recovered.answer_applicable).toBe(true);
   expect(recovered.question.answer.text).toBe("Proceed");
   expect(
-    (await b.questions.answer(question.id, answerCommand)).question.answer.text,
+    (await b.questions.answer(question.id, answerCommand)).question.answer
+      ?.text,
   ).toBe("Proceed");
 
   expect((await b.queue.inspect()).counts).toMatchObject({

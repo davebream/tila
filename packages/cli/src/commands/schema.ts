@@ -337,10 +337,6 @@ export default defineCommand({
           (!Number.isSafeInteger(expected) || expected < 0)
         )
           throw new Error("expected-revision must be a nonnegative integer");
-        if (expected === undefined)
-          warning(
-            "schema apply sends the local files as the complete definition and replaces what the server has, without a revision check. Use tila schema import to preview a merge and apply it against the revision you reviewed.",
-          );
         const result = await schema.applySchema({
           definition,
           strategy: args.strategy as string | undefined,
@@ -352,6 +348,18 @@ export default defineCommand({
             ? {}
             : { idempotency_key: args["idempotency-key"] }),
         });
+
+        if (result.ok) {
+          for (const note of result.warnings ?? [])
+            warning(
+              `${note.code}: ${note.message} Use tila schema import to preview a merge, or tila schema diff and apply with --expected-revision.`,
+            );
+          // Older servers cannot return structured warnings yet.
+          if (expected === undefined && !result.warnings?.length)
+            warning(
+              "schema apply sends the local files as the complete definition and replaces what the server has, without a revision check. Use tila schema import to preview a merge and apply it against the revision you reviewed.",
+            );
+        }
 
         if (args.json) {
           if (!result.ok)
@@ -365,6 +373,8 @@ export default defineCommand({
             version: result.version,
             changes: result.changes,
             noChange: result.noChange ?? false,
+            revision: result.revision,
+            warnings: result.warnings ?? [],
           });
           return;
         }

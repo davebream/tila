@@ -251,6 +251,26 @@ export const TASK_LIST_SORTS = [
   "id",
 ] as const;
 
+/** Numeric paging contract shared by HTTP and embedded task lists. */
+export const TaskListPageOptionsSchema = z
+  .object({
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .transform((value) => Math.min(value, 500))
+      .optional(),
+    offset: z.number().int().nonnegative().optional(),
+    cursor: ListCursorSchema.optional(),
+    sort: z.enum(TASK_LIST_SORTS).optional(),
+    order: z.enum(["asc", "desc"]).optional(),
+  })
+  .refine((q) => !(q.cursor && q.offset), {
+    message: "cursor and offset cannot be combined",
+    path: ["cursor"],
+  });
+export type TaskListPageOptions = z.infer<typeof TaskListPageOptionsSchema>;
+
 /**
  * Query validation for `GET /tasks`. Only the paging contract is strict;
  * filter params stay lenient strings so existing callers keep working.
@@ -258,9 +278,21 @@ export const TASK_LIST_SORTS = [
 export const TaskListQuerySchema = z
   .object({
     cursor: ListCursorSchema.optional(),
+    limit: z
+      .string()
+      .regex(/^\d+$/, "limit must be a positive integer")
+      .refine(
+        (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0,
+        "limit must be a positive safe integer",
+      )
+      .optional(),
     offset: z
       .string()
       .regex(/^\d+$/, "offset must be a non-negative integer")
+      .refine(
+        (value) => Number.isSafeInteger(Number(value)),
+        "offset must be a non-negative safe integer",
+      )
       .optional(),
     sort: z.enum(TASK_LIST_SORTS).optional(),
     order: z.enum(["asc", "desc"]).optional(),
@@ -1613,6 +1645,17 @@ export const SchemaGetResponseSchema = z.object({
 
 export type SchemaGetResponse = z.infer<typeof SchemaGetResponseSchema>;
 
+/** Accepted legacy writes remain compatible, but must be visible to callers. */
+export const SchemaApplyWarningSchema = z.object({
+  code: z.literal("schema-revision-deprecated"),
+  message: z.string(),
+  /** Absent on receipts created before warnings were recorded. */
+  observed_revision: z.number().int().nonnegative().optional(),
+  result_revision: z.number().int().nonnegative(),
+});
+
+export type SchemaApplyWarning = z.infer<typeof SchemaApplyWarningSchema>;
+
 export const SchemaApplyResponseSchema = z.object({
   ok: z.literal(true),
   version: z.number().int().nullable(),
@@ -1620,6 +1663,8 @@ export const SchemaApplyResponseSchema = z.object({
   changes: z.array(z.string()).optional(),
   noChange: z.boolean().optional(),
   diff: z.unknown().optional(),
+  // Optional for compatibility with servers predating revision warnings.
+  warnings: z.array(SchemaApplyWarningSchema).optional(),
 });
 
 export type SchemaApplyResponse = z.infer<typeof SchemaApplyResponseSchema>;

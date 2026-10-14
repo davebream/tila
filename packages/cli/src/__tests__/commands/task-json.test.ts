@@ -126,6 +126,24 @@ describe("tila task --json", () => {
       expect(output).toHaveProperty("result.filters");
     });
 
+    it("keeps third-party array backends compatible and marks missing metadata", async () => {
+      mockList.mockResolvedValue([]);
+      const command = getSubCommand(await loadCommand(), "list");
+      await runCmd(command, { json: true });
+      const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+      expect(output.result.metadata_supported).toBe(false);
+      expect(output.meta).not.toHaveProperty("total");
+      for (const args of [
+        { blocked: true },
+        { outcome: "failure" },
+        { cursor: "opaque" },
+      ])
+        await expect(runCmd(command, { ...args, json: true })).rejects.toThrow(
+          "EntityBackend.listPage is required",
+        );
+      expect(mockList).toHaveBeenCalledTimes(1);
+    });
+
     it("outputs human-readable text when no --json", async () => {
       const entities = [
         {

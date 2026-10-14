@@ -213,6 +213,24 @@ for mapping shapes, pending profile selections and recovery.
 | `tila_presence_heartbeat` | Record a heartbeat to mark agent as online |
 | `tila_summary` | Get compact project summary |
 
+### Definition apply warnings
+
+`tila_schema_update` accepts a full TOML definition. Preview with
+`tila_schema_preview` and pass the returned `revision` as `expected_revision`,
+plus `reviewed_definition` for destructive conditional writes. Stale writes
+retain 412 behavior; retain the original payload/revision/idempotency key when
+retrying a lost response.
+
+Omitting the revision on a non-managed project remains compatible and returns
+`warnings` with code `schema-revision-deprecated`, guidance and observed/result
+revisions in both text and structured results. SDK diagnostics use stderr,
+preserving the stdio protocol on stdout. Successful revisionless state changes
+record `schema.revisionless_applied` in the durable journal; retries do not
+duplicate it and no-change warns without another event. Managed projects still
+require a revision, including cached legacy retries. No enforcement release is
+set for other projects. `tila_schema_import` already requires a reviewed revision
+on apply.
+
 ### Definition import and export
 
 Select `TILA_MCP_TOOLS=workflow,schema` (or `all`) to expose these tools.

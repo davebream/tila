@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Task attention filters (#399)
+
+- SDK HTTP/local task lists, CLI `task list --blocked` / `--outcome`, and MCP `tila_task_list` expose blocked and lifecycle-outcome filters with exact totals, cursor continuation and `scope.outcome_types`. An undeclared outcome returns an empty page with total zero. Invalid and empty outcome lists are rejected. Paging rejects non-positive, fractional or non-finite limits and negative, fractional or non-finite offsets; valid limits above 500 remain capped. Compact SDK requests expose a projection union rather than promising full HTTP rows.
+- `EntityBackend.list` keeps its array result; optional `listPage` carries metadata for remote and Node/Bun embedded backends. Array-only third-party backends remain compatible and report unavailable metadata explicitly. Local SDK lists now honor cursors and match HTTP's default inclusion of archived rows; the local compact projection difference remains. No DDL or deployment configuration changes.
+
+### Definition revision warnings (#416)
+
+- Accepted definition applies without `expected_revision` return structured `warnings` with code `schema-revision-deprecated`, guidance, and observed/result revisions. The SDK shows them through an injectable `warningSink` (default `console.warn`); CLI diagnostics go to stderr, including `--json`; MCP `tila_schema_update` includes them in text and structured output. Embedded/local applies have the same behavior.
+- A revisionless state change records `schema.revisionless_applied` in the same project SQLite transaction as the definition, history and receipt. It contains identity/provenance, idempotency context and revision numbers, without definition contents. Exact retries retain the warning without another revision/event; no-change warns without a state-change event. Rejected writes do not record a successful apply.
+
+### Upgrade notes
+
+- Task-list compatibility (#399): invalid HTTP `limit` values, including zero, negative, fractional and non-finite values, now return `400 validation-error`; valid limits above 500 remain capped. The local SDK's default task list now includes archived rows to match HTTP. SDK `compact: true` (or a variable boolean) returns a compact/full projection union, so callers must narrow before reading `.data`; omitted/false compact retains full-row typing. These are observable behavior and typing changes, alongside the additive filters and page metadata.
+
+- Upgrade the Worker to record warnings and journal events, then upgrade clients to display them. An older client may ignore the new response field; the project journal remains observable (`tila journal list --kind schema.revisionless_applied`). No database migration or product-version bump accompanies this change.
+- Current `tila schema apply` still permits revision omission; use `--expected-revision` from a reviewed diff or `--review`. CLI definition import, the dashboard definition editor/importer, and MCP `tila_schema_import` send reviewed revisions on apply. Direct SDK/API applies and MCP `tila_schema_update` still accept omission on non-managed projects and now warn. Preview, retain its `revision`/`reviewed_definition`, and submit them with a stable idempotency key; never substitute a newer revision on retry.
+- Supplied revisions retain HTTP 412 `schema-revision-conflict` behavior without a deprecation warning. Managed projects still require a revision, even for a cached legacy receipt. Requiring revisions everywhere is a future migration; no enforcement release or date is set.
+
 ## [0.8.0] - 2026-10-13
 
 ### Upgrade notes

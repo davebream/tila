@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { InstantiateTemplateRequestSchema } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
@@ -38,10 +39,9 @@ export function registerTemplateTools(
         .string()
         .optional()
         .describe("Override the auto-generated root entity ID"),
-      variables: z
-        .record(z.string(), z.unknown())
-        .default({})
-        .describe("Template variable substitutions"),
+      variables: InstantiateTemplateRequestSchema.shape.vars.describe(
+        "String template variable substitutions",
+      ),
     },
     async ({ template, id, variables }) => {
       try {

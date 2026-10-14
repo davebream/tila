@@ -3,6 +3,7 @@ export type {
   EntityBackend,
   CreateEntityInput,
   EntityListFilter,
+  EntityListPage,
   RelationshipInput,
   RelationshipFilter,
   ReadyFilter,
