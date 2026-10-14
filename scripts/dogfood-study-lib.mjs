@@ -28,6 +28,7 @@ import {
   sep,
   win32,
 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Stable JSON: object keys sorted recursively so hashes do not depend on insertion order. */
 export function canonicalJson(value) {
@@ -52,6 +53,18 @@ export const sha256Text = (text) =>
 
 export const baseRole = (role) =>
   role === "w1r" ? "w1" : role === "w2r" ? "w2" : role;
+
+/** Ordinary shell coordination recipes used in packets and exercised by preflight tests. */
+export function baselineHelperCommands({ shared, role }) {
+  const quote = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
+  const lock = quote(`${shared}/locks/shared-helper`);
+  const owner = quote(`${shared}/locks/shared-helper/owner`);
+  const board = quote(`${shared}/BOARD.md`);
+  const base = role.replace(/r$/, "");
+  const acquire = `if mkdir ${lock}; then echo "${role} $(date +%T)" > ${owner} && echo "shared-helper: owner=${role} since=$(date +%T)" >> ${board}; elif [ "$(cut -d' ' -f1 ${owner})" = "${role}" ]; then echo 'already owned'; else cat ${owner}; exit 1; fi`;
+  const transfer = `if [ ! -d ${lock} ]; then ${acquire}; elif [ "$(cut -d' ' -f1 ${owner})" = "${base}" ]; then echo "${role} $(date +%T) transfer from ${base}" > ${owner} && echo "TRANSFER shared-helper ${base} -> ${role} $(date +%T)" >> ${board}; elif [ "$(cut -d' ' -f1 ${owner})" = "${role}" ]; then echo 'already owned'; else cat ${owner}; exit 1; fi`;
+  return { acquire, transfer };
+}
 
 // ---------------------------------------------------------------------------
 // Allocation and declaration
@@ -336,7 +349,10 @@ export function validateEvent(event, rubric) {
   const need = (cond, message) => {
     if (!cond) problems.push(message);
   };
-  need(event && typeof event === "object", "event is not an object");
+  need(
+    event && typeof event === "object" && !Array.isArray(event),
+    "event is not an object",
+  );
   if (problems.length) return problems;
   need(event.schema === EVENT_SCHEMA, `schema must be ${EVENT_SCHEMA}`);
   need(typeof event.study_id === "string", "study_id missing");
@@ -359,7 +375,12 @@ export function validateEvent(event, rubric) {
     Object.hasOwn(rubric.provenance_classes, event.provenance),
     `unknown provenance ${event.provenance}`,
   );
-  need(event.payload && typeof event.payload === "object", "payload missing");
+  need(
+    event.payload &&
+      typeof event.payload === "object" &&
+      !Array.isArray(event.payload),
+    "payload missing or not an object",
+  );
   const payload = event.payload ?? {};
   for (const field of REQUIRED_PAYLOAD[event.kind] ?? []) {
     need(
@@ -397,6 +418,13 @@ export function validateEvent(event, rubric) {
     need(
       ["I1", "I2", "I3"].includes(payload.level),
       `unknown intervention level ${payload.level}`,
+    );
+  }
+  if (event.kind === "gate.violation") {
+    need(
+      Object.hasOwn(rubric.hard_gates, payload.gate ?? "") &&
+        payload.gate.startsWith("G"),
+      "unknown correctness gate",
     );
   }
   if (event.kind === "usage.record") {
@@ -738,18 +766,162 @@ function readOverlapRecord(trialDir, record) {
   return JSON.parse(bytes.toString("utf8"));
 }
 
+/** Reject a malformed stream without modifying or dropping retained raw evidence. */
+export function assertValidEvents(
+  events,
+  rubric,
+  { envelopesOnly = false } = {},
+) {
+  if (!Array.isArray(events))
+    throw new Error("invalid event stream: expected an array");
+  for (const [index, event] of events.entries()) {
+    const envelopeValid =
+      event &&
+      typeof event === "object" &&
+      !Array.isArray(event) &&
+      event.payload &&
+      typeof event.payload === "object" &&
+      !Array.isArray(event.payload) &&
+      event.actor &&
+      typeof event.actor === "object" &&
+      typeof event.kind === "string" &&
+      Number.isInteger(event.seq) &&
+      Number.isFinite(event.mono_ms);
+    const problems = validateEvent(event, rubric);
+    if (
+      problems.length &&
+      (!envelopesOnly || !envelopeValid || event.kind !== "tool_call")
+    )
+      throw new Error(
+        `invalid event at index ${index}: ${problems.join("; ")}; retain raw log for audit`,
+      );
+  }
+}
+
+/** Context is reopened from the same prepared trial for evaluate, derive and validate. */
+export function preventionContext({ trial, events, rubric, trialDir }) {
+  try {
+    assertValidEvents(events, rubric);
+    const config = JSON.parse(
+      readFileSync(join(trialDir, "trial.json"), "utf8"),
+    );
+    if (
+      config.trial !== trial.trial ||
+      config.condition !== trial.condition ||
+      !config.helper_resource ||
+      !config.shared ||
+      !config.run_dir ||
+      !config.participants
+    )
+      return null;
+    const started = events.filter((e) => e.kind === "trial.started");
+    if (started.length > 1) return null;
+    return {
+      config,
+      events,
+      rubric,
+      started: started[0] ?? null,
+      deadline: started[0]
+        ? started[0].mono_ms + rubric.budgets.wall_ms_per_trial
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function preventionOwner(context, at = Number.POSITIVE_INFINITY) {
+  if (!context) return null;
+  const { config, events } = context;
+  if (config.condition === "B") {
+    if (!context.started) return null;
+    const resource = `task:${config.task_ids?.helper}`;
+    const ownership = events.filter(
+      (e) =>
+        e.kind === "tila_call" &&
+        e.provenance === "local_agent_trial" &&
+        e.actor.role === e.payload.role &&
+        e.payload.resource === resource &&
+        e.payload.outcome === "ok" &&
+        ["sdk claim", "sdk release"].includes(e.payload.verb) &&
+        e.mono_ms >= context.started.mono_ms &&
+        e.mono_ms < context.deadline &&
+        e.mono_ms <= at,
+    );
+    const last = ownership.at(-1);
+    return last?.payload.verb === "sdk claim" &&
+      ["w1", "w2"].includes(baseRole(last.payload.role))
+      ? baseRole(last.payload.role)
+      : null;
+  }
+  try {
+    const board = readFileSync(join(config.shared, "BOARD.md"), "utf8");
+    const named = [...board.matchAll(/shared-helper:\s*owner=(w[12]r?)\b/g)].at(
+      -1,
+    )?.[1];
+    const lock = join(config.shared, "locks/shared-helper/owner");
+    const locked = existsSync(lock)
+      ? /^(w[12]r?)\b/.exec(readFileSync(lock, "utf8"))?.[1]
+      : null;
+    if (named && locked && baseRole(named) !== baseRole(locked)) return null;
+    return baseRole(locked ?? named ?? null);
+  } catch {
+    return null;
+  }
+}
+
+function supportedPreventionCommand(command, context, role, participant) {
+  const { config } = context;
+  if (config.condition === "A") {
+    const recipes = baselineHelperCommands({ shared: config.shared, role });
+    return (
+      ["bash", "sh", "/bin/bash", "/bin/sh"].includes(command[0]) &&
+      command.length === 3 &&
+      command[1] === "-c" &&
+      [
+        recipes.acquire,
+        ...(role.endsWith("r") ? [recipes.transfer] : []),
+      ].includes(command[2])
+    );
+  }
+  const prefix = [
+    command[0],
+    join(dirname(fileURLToPath(import.meta.url)), "dogfood-study-tila.mjs"),
+    "sdk",
+    "--run-dir",
+    config.run_dir,
+    "--trial",
+    config.trial,
+    "--participant",
+    participant,
+    "claim",
+    `task:${config.task_ids?.helper}`,
+  ];
+  return (
+    ["node", process.execPath].includes(command[0]) &&
+    config.task_ids?.helper &&
+    prefix.every((arg, i) => command[i] === arg) &&
+    (command.length === prefix.length ||
+      (command.length === prefix.length + 2 &&
+        command.at(-2) === "--ttl-ms" &&
+        /^\d+$/.test(command.at(-1)) &&
+        Number(command.at(-1)) > 0))
+  );
+}
+
 /**
  * Verify retained bytes and their explicit attempt/response/edit-audit contents.
  * Unsupported native formats remain unavailable. This checks corroborating
  * records, not their capture authenticity; native coverage still needs audit.
  * No caller-supplied `verified` boolean or cached result earns credit.
  */
-export function verifyPreventionEvidence(event, trialDir) {
-  const p = event.payload;
-  const evidence = p.prevention_evidence;
+export function verifyPreventionEvidence(event, trialDir, context = null) {
+  const p = event?.payload;
+  const evidence = p?.prevention_evidence;
   const fail = (reason) => ({ verified: false, reason });
   if (
     !(
+      p &&
       event.kind === "overlap.observed" &&
       event.provenance === "local_agent_trial" &&
       ["stopped", "redirected"].includes(p.response) &&
@@ -762,6 +934,57 @@ export function verifyPreventionEvidence(event, trialDir) {
     )
   )
     return fail("incomplete or unordered prevention claim");
+  if (
+    !context?.started ||
+    context.started.provenance !== "local_agent_trial" ||
+    validateEvent(event, context.rubric).length ||
+    event.trial_id !== context.config.trial ||
+    p.resource !== context.config.helper_resource ||
+    !["w1", "w2", "w1r", "w2r"].includes(p.role)
+  )
+    return fail("prepared trial/helper context missing or mismatched");
+  const owner = preventionOwner(context, evidence.attempt.mono_ms);
+  if (!owner || baseRole(p.role) === owner)
+    return fail("attempt role is not the known helper owner's competitor");
+  const registration = context.events
+    .filter(
+      (e) =>
+        e.kind === "worker.started" &&
+        e.payload.role === p.role &&
+        e.mono_ms <= evidence.attempt.mono_ms,
+    )
+    .at(-1);
+  const participant = context.config.participants[p.role];
+  const boundaries = context.events.filter(
+    (e) =>
+      e.kind === "trial.stopped" ||
+      (["worker.stopped", "worker.replaced"].includes(e.kind) &&
+        e.payload.role === p.role),
+  );
+  if (
+    !registration ||
+    !participant ||
+    registration.payload.participant !== participant ||
+    registration.provenance !== "local_agent_trial" ||
+    registration.actor.role !== p.role ||
+    registration.payload.context !==
+      (p.role.endsWith("r") ? "replacement" : "original") ||
+    (p.role.endsWith("r") &&
+      !context.events.some(
+        (e) =>
+          e.kind === "worker.replaced" &&
+          e.payload.role === baseRole(p.role) &&
+          e.payload.to_participant === participant &&
+          e.mono_ms <= registration.mono_ms &&
+          e.seq < registration.seq,
+      )) ||
+    typeof registration.payload.session_id !== "string" ||
+    !registration.payload.session_id.trim() ||
+    evidence.attempt.mono_ms < context.started.mono_ms ||
+    evidence.response.mono_ms >= context.deadline ||
+    boundaries.some((e) => evidence.response.mono_ms >= e.mono_ms)
+  )
+    return fail("attempt/response outside the registered live trial context");
   let attempt;
   let response;
   let before;
@@ -781,6 +1004,10 @@ export function verifyPreventionEvidence(event, trialDir) {
   const sameClaim = (record, kind) =>
     record?.schema === "tila.dogfood.overlap-record/1" &&
     record.kind === kind &&
+    record.provenance === "local_agent_trial" &&
+    record.study_id === event.study_id &&
+    record.participant === participant &&
+    record.session_id === registration.payload.session_id &&
     record.trial_id === event.trial_id &&
     record.overlap_id === p.overlap_id &&
     record.role === p.role &&
@@ -802,17 +1029,11 @@ export function verifyPreventionEvidence(event, trialDir) {
     attempt.mono_ms !== evidence.attempt.mono_ms
   )
     return fail("record does not establish a competing helper attempt");
-  const claimCommand =
-    attempt.command.includes("claim") &&
-    attempt.command.some((arg) => /^task:\S+$/.test(arg));
-  const lockCommand =
-    ["bash", "sh"].includes(basename(attempt.command[0])) &&
-    attempt.command.some(
-      (arg) => /\bmkdir\s/.test(arg) && arg.includes("locks/shared-helper"),
-    );
-  if (!claimCommand && !lockCommand)
+  if (
+    !supportedPreventionCommand(attempt.command, context, p.role, participant)
+  )
     return fail(
-      "unsupported command: no competing helper claim or lock attempt",
+      "unsupported command: competing helper target/trial/participant not established",
     );
   if (
     response.mono_ms !== evidence.response.mono_ms ||
@@ -827,17 +1048,9 @@ export function verifyPreventionEvidence(event, trialDir) {
     /already[_ -]held|already[_ -]owned|file exists/i.test(
       response.stdout + response.stderr,
     );
-  const redirected =
-    response.disposition === "redirected" &&
-    response.exit_code === 0 &&
-    typeof response.redirected_to === "string" &&
-    response.redirected_to.trim().length > 0 &&
-    response.redirected_to !== p.resource &&
-    response.stdout.includes(response.redirected_to);
-  if (!stopped && !redirected)
-    return fail(
-      "response does not corroborate stopping or redirecting the attempt",
-    );
+  // These exact lock/claim commands deny competing acquisition; neither redirects.
+  if (!stopped)
+    return fail("response does not corroborate the supported stopping command");
   if (
     before.from_mono_ms !== attempt.mono_ms ||
     before.through_mono_ms !== response.mono_ms ||
@@ -858,8 +1071,8 @@ export function verifyPreventionEvidence(event, trialDir) {
   return { verified: true };
 }
 
-export const hasPreventionEvidence = (event, trialDir) =>
-  verifyPreventionEvidence(event, trialDir).verified;
+export const hasPreventionEvidence = (event, trialDir, context) =>
+  verifyPreventionEvidence(event, trialDir, context).verified;
 
 /**
  * Derive the per-trial ledger from raw events plus the evaluator's report.
@@ -875,6 +1088,8 @@ export function deriveLedger({
   rubric,
   trialDir = null,
 }) {
+  assertValidEvents(events, rubric, { envelopesOnly: true });
+  const context = preventionContext({ trial, events, rubric, trialDir });
   const cond = trial.condition;
   const roles = ["w1", "w2"];
   const flags = [];
@@ -1093,8 +1308,18 @@ export function deriveLedger({
     (e) => e.kind === "tila_call" && e.payload.outcome === "stale_fence",
   );
   const audit = evaluation?.fence_audit ?? null;
-  const staleAccepted = audit?.stale_accepted ?? [];
-  const holderMismatch = audit?.holder_mismatch ?? [];
+  const auditComplete =
+    audit &&
+    Array.isArray(audit.stale_accepted) &&
+    Array.isArray(audit.holder_mismatch) &&
+    Number.isInteger(audit.fenced_updates) &&
+    audit.fenced_updates >= 0;
+  const staleAccepted = Array.isArray(audit?.stale_accepted)
+    ? audit.stale_accepted
+    : [];
+  const holderMismatch = Array.isArray(audit?.holder_mismatch)
+    ? audit.holder_mismatch
+    : [];
   if (audit) {
     const okUpdates = events.filter(
       (e) =>
@@ -1117,7 +1342,7 @@ export function deriveLedger({
     ? decisionCases.every((c) => c.pass)
     : null;
   let lostDecisions = 0;
-  let decisionUndetermined = false;
+  let decisionUndetermined = acked.length > 0 && decisionHonoredValue === null;
   if (decisionHonoredValue === false)
     lostDecisions += new Set(acked.map((e) => baseRole(e.payload.role))).size;
   const replacedRole = trial.replaced_role;
@@ -1130,10 +1355,24 @@ export function deriveLedger({
   const resumed = events.some(
     (e) => e.kind === "recovery.started" && timely(e),
   );
+  if (
+    ackedReplaced &&
+    events.some(
+      (e) =>
+        e.kind === "handoff.saved" &&
+        baseRole(e.payload.role) === replacedRole &&
+        timely(e),
+    )
+  ) {
+    const verdict = review?.handoff?.facts?.decision_or_blocker;
+    if (!["correct", "incorrect", "absent"].includes(verdict))
+      decisionUndetermined = true;
+    else if (verdict !== "correct") lostDecisions += 1;
+  }
   if (ackedReplaced && resumed) {
     if (!stated) lostDecisions += 1;
     else if (
-      !review ||
+      typeof review?.resume?.decision_correct !== "boolean" ||
       (rubric.rubric_version >= 3 &&
         (!stated.payload.text_sha256 ||
           review.resume?.text_sha256 !== evaluation?.resume?.text_sha256))
@@ -1142,25 +1381,54 @@ export function deriveLedger({
     else if (review.resume?.decision_correct !== true) lostDecisions += 1;
   }
 
+  const silentComplete = Array.isArray(evaluation?.silent_overwrite_candidates);
   const silent =
-    evaluation?.silent_overwrite_candidates?.filter(
+    (silentComplete ? evaluation.silent_overwrite_candidates : [])?.filter(
       (c) => c.confirmed !== false,
     ) ?? [];
   const gates = {
     G1_stale_authority_write: gate(
       "stale_authority_accepted",
-      staleAccepted.length,
+      auditComplete ? staleAccepted.length : staleAccepted.length || null,
       cond,
+      !auditComplete || flags.includes("journal_update_count_mismatch"),
     ),
     G2_lost_acknowledged_decision: gate(
       "acknowledged_decision_lost",
-      lostDecisions,
+      decisionUndetermined && !lostDecisions ? null : lostDecisions,
       cond,
       decisionUndetermined,
     ),
-    G3_silent_overwrite: gate("silent_overwrites", silent.length, cond),
-    G4_inferred_completion: gate("completions_inferred", inferred.length, cond),
+    G3_silent_overwrite: gate(
+      "silent_overwrites",
+      silentComplete ? silent.length : null,
+      cond,
+      !silentComplete,
+    ),
+    G4_inferred_completion: gate(
+      "completions_inferred",
+      started && stopped
+        ? inferred.length +
+            (stopReason === "complete"
+              ? roles.filter(
+                  (role) =>
+                    !declared.some(
+                      (e) => baseRole(e.payload.role) === role && timely(e),
+                    ),
+                ).length
+              : 0)
+        : null,
+      cond,
+      !started || !stopped,
+    ),
   };
+
+  for (const event of events.filter((e) => e.kind === "gate.violation")) {
+    const g = gates[event.payload.gate];
+    g.value = Math.max(g.value ?? 0, 1);
+    g.violated = cond === "B";
+    g.explicit_evidence = [...(g.explicit_evidence ?? []), event.seq];
+  }
 
   // --- interventions ---
   const interventions = events.filter((e) => e.kind === "intervention");
@@ -1191,7 +1459,7 @@ export function deriveLedger({
   const duplicateIds = new Set(duplicateEdits.map((o) => o.payload.overlap_id));
   const verified = new Set();
   for (const event of overlaps.filter((o) => o.payload.prevention_evidence)) {
-    const result = verifyPreventionEvidence(event, trialDir);
+    const result = verifyPreventionEvidence(event, trialDir, context);
     if (result.verified) verified.add(event);
     else
       flags.push(`prevention_evidence_invalid:${event.seq}:${result.reason}`);
@@ -1667,11 +1935,27 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
       );
   }
   for (const id of present) {
-    if (!declared.includes(id)) {
-      const replacement = (bundle.trials[id].events ?? []).some(
-        (e) => e.kind === "harness.note" && e.payload.replacement_of,
+    const raw = bundle.trials[id].events ?? [];
+    if (
+      Array.isArray(raw) &&
+      raw.some((e) => e?.payload?.rule_id === "V-memory")
+    )
+      add(
+        "memory_contaminated",
+        "cross-trial memory contamination precludes comparative statements",
+        id,
       );
-      if (!replacement)
+    if (!declared.includes(id)) {
+      for (const p of bundle.trials[id].parseProblems ?? [])
+        add("event_parse", p, id);
+      if (!Array.isArray(raw))
+        add("event_schema", "event stream is not an array", id);
+      for (const e of Array.isArray(raw) ? raw : [])
+        for (const p of validateEvent(e, rubric)) add("event_schema", p, id);
+      const replacement = (Array.isArray(raw) ? raw : []).some(
+        (e) => e?.kind === "harness.note" && e.payload?.replacement_of,
+      );
+      if (!replacement && !id.startsWith("w-"))
         add(
           "trial_unplanned",
           `trial ${id} is not declared and is not marked replacement_of`,
@@ -1686,20 +1970,25 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
     const slot = declaration.trials.find((t) => t.trial === id);
     const t = bundle.trials[id];
     const events = t.events ?? [];
-    if (events.some((e) => e.payload?.rule_id === "V-memory"))
-      add(
-        "memory_contaminated",
-        "cross-trial memory contamination precludes comparative statements",
-        id,
-      );
     for (const p of t.parseProblems ?? []) add("event_parse", p, id);
+    if (!Array.isArray(events)) {
+      add("event_schema", "event stream is not an array", id);
+      continue;
+    }
 
+    // Invalid raw envelopes remain retained; never derive a scored ledger from them.
+    let invalid = false;
+    for (const [index, e] of events.entries()) {
+      for (const p of validateEvent(e, rubric)) {
+        add("event_schema", `index ${index}: ${p}`, id);
+        invalid = true;
+      }
+    }
+    if (invalid || t.parseProblems?.length) continue;
     // event integrity
     let lastSeq = 0;
     let lastMono = Number.NEGATIVE_INFINITY;
     for (const e of events) {
-      for (const p of validateEvent(e, rubric))
-        add("event_schema", `seq ${e.seq}: ${p}`, id);
       if (e.trial_id !== id)
         add(
           "event_trial",
@@ -1954,9 +2243,9 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
       if (g.undetermined)
         add(
           "gate_undetermined",
-          `${name} cannot be determined without a semantic review`,
+          `${name} lacks complete applicable correctness evidence`,
           id,
-          "warn",
+          g.kind === "gate" ? "error" : "warn",
         );
       if (g.violated)
         add(

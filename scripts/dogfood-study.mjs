@@ -39,6 +39,7 @@ import {
   HOOK_CONFIG_TEMPLATE_SHA256,
   allocateVariants,
   appendEvent,
+  assertValidEvents,
   auditJournal,
   buildDeclaration,
   buildHookSettings,
@@ -48,6 +49,8 @@ import {
   deriveLedger,
   hasPreventionEvidence,
   parseEvents,
+  preventionContext,
+  preventionOwner,
   sha256Text,
   studyCliEnv,
   validateBundle,
@@ -714,6 +717,7 @@ function cmdPrepare(opts) {
     trial: slot.trial,
     condition: slot.condition,
     scenario: scenario.id,
+    helper_resource: scenario.helper.file,
     run_dir: run,
     repo_root: repoRoot,
     rubric_path: manifest.rubric.path,
@@ -908,6 +912,10 @@ function cmdEvaluate(opts) {
   const cases = readJson(join(evalDir, "cases.json"));
   const sheets = readJson(join(evalDir, "factsheets.json"));
   const repo = join(dir, "repo");
+  const events = readTrialEvents(
+    dir,
+    readJson(join(repoRoot, config.rubric_path)),
+  );
   const scratch = join(dir, "eval-scratch");
   rmSync(scratch, { recursive: true, force: true });
   mkdirSync(scratch, { recursive: true });
@@ -1069,31 +1077,13 @@ function cmdEvaluate(opts) {
   }
 
   // 4. Ownership identifies the opportunity, never a prevented competing attempt.
-  const events = parseEvents(
-    existsSync(join(dir, "events.jsonl"))
-      ? readFileSync(join(dir, "events.jsonl"), "utf8")
-      : "",
-  ).events;
-  let owner = null;
-  if (config.condition === "B") {
-    const claim = events.find(
-      (e) =>
-        e.kind === "tila_call" &&
-        e.payload.verb === "sdk claim" &&
-        e.payload.resource === `task:${config.task_ids.helper}` &&
-        e.payload.outcome === "ok",
-    );
-    owner = claim ? baseOf(claim.payload.role) : null;
-  } else {
-    const board = readFileSync(join(config.shared, "BOARD.md"), "utf8");
-    const m = /shared-helper:\s*owner=(w[12])/.exec(board);
-    owner = m ? m[1] : null;
-    const lock = join(config.shared, "locks/shared-helper/owner");
-    if (!owner && existsSync(lock)) {
-      const named = /^(w[12])/.exec(readFileSync(lock, "utf8"));
-      owner = named ? named[1] : null;
-    }
-  }
+  const context = preventionContext({
+    trial: slot,
+    events,
+    rubric,
+    trialDir: dir,
+  });
+  const owner = preventionOwner(context);
   const other = owner === "w1" ? "w2" : owner === "w2" ? "w1" : null;
   const definingRoles = ["w1", "w2"].filter((role) =>
     authoredDefinesHelper(repo, branches[role].authored_commits, scenario),
@@ -1107,12 +1097,7 @@ function cmdEvaluate(opts) {
     (e) =>
       e.actor.role !== "evaluator" &&
       e.payload.overlap_id === "injected-helper" &&
-      e.payload.resource === scenario.helper.file &&
-      typeof e.payload.role === "string" &&
-      (other
-        ? baseOf(e.payload.role) === other
-        : ["w1", "w2"].includes(e.payload.role)) &&
-      hasPreventionEvidence(e, dir),
+      hasPreventionEvidence(e, dir, context),
   );
   const overlap = {
     overlap_id: "injected-helper",
@@ -1446,11 +1431,24 @@ function authoredDefinesHelper(repo, commits, scenario) {
   ).test(diff);
 }
 
+function readTrialEvents(dir, rubric) {
+  const parsed = parseEvents(readFileSync(join(dir, "events.jsonl"), "utf8"));
+  if (parsed.problems.length)
+    fail(
+      `invalid event log: ${parsed.problems.join("; ")}; retain raw log for audit`,
+    );
+  try {
+    assertValidEvents(parsed.events, rubric);
+  } catch (error) {
+    fail(error.message);
+  }
+  return parsed.events;
+}
+
 function loadBundle(dir, manifest) {
   const trials = {};
   const tdir = join(dir, "trials");
   for (const id of existsSync(tdir) ? readdirSync(tdir) : []) {
-    if (id.startsWith("w-")) continue;
     const t = join(tdir, id);
     const evFile = join(t, "events.jsonl");
     const parsed = existsSync(evFile)
@@ -1486,9 +1484,7 @@ function cmdDerive(opts) {
   const rubric = readJson(join(repoRoot, manifest.rubric.path));
   const slot = trialSlot(manifest, opts.trial ?? fail("derive needs --trial"));
   const dir = join(run, "trials", slot.trial);
-  const events = parseEvents(
-    readFileSync(join(dir, "events.jsonl"), "utf8"),
-  ).events;
+  const events = readTrialEvents(dir, rubric);
   const evaluation = existsSync(join(dir, "evaluation.json"))
     ? readJson(join(dir, "evaluation.json"))
     : null;

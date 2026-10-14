@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { canonicalJson } from "./dogfood-study-lib.mjs";
+import { baselineHelperCommands, canonicalJson } from "./dogfood-study-lib.mjs";
 
 export const PAIRS = ["p1", "p2"];
 export const VARIANTS = ["x", "y"];
@@ -1294,17 +1294,7 @@ const TRAINING = [
   "You have at most 40 admitted hook-covered local operations and 12 minutes of wall time for your role, including a replacement. Spend them on the task; there is no credit for coordination for its own sake.",
 ].join("\n");
 
-/** Ordinary shell coordination recipes used in packets and exercised by preflight tests. */
-export function baselineHelperCommands({ shared, role }) {
-  const quote = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
-  const lock = quote(`${shared}/locks/shared-helper`);
-  const owner = quote(`${shared}/locks/shared-helper/owner`);
-  const board = quote(`${shared}/BOARD.md`);
-  const base = role.replace(/r$/, "");
-  const acquire = `if mkdir ${lock}; then echo "${role} $(date +%T)" > ${owner} && echo "shared-helper: owner=${role} since=$(date +%T)" >> ${board}; elif [ "$(cut -d' ' -f1 ${owner})" = "${role}" ]; then echo 'already owned'; else cat ${owner}; exit 1; fi`;
-  const transfer = `if [ ! -d ${lock} ]; then ${acquire}; elif [ "$(cut -d' ' -f1 ${owner})" = "${base}" ]; then echo "${role} $(date +%T) transfer from ${base}" > ${owner} && echo "TRANSFER shared-helper ${base} -> ${role} $(date +%T)" >> ${board}; elif [ "$(cut -d' ' -f1 ${owner})" = "${role}" ]; then echo 'already owned'; else cat ${owner}; exit 1; fi`;
-  return { acquire, transfer };
-}
+export { baselineHelperCommands } from "./dogfood-study-lib.mjs";
 
 function conditionAppendix(ctx) {
   const { condition, role, scenario, itemKey, shared } = ctx;
