@@ -1,6 +1,6 @@
 # tila-mcp-server
 
-Tila MCP provides project workflows using short-lived run credentials. Tila CLI remains the operator interface for projects, memberships, credentials, and administration. Version 0.4.0 requires runtime protocol 1 on the shared backend.
+Tila MCP provides project workflows using short-lived run credentials for the shared backend or explicit local SQLite configuration for the local subset. Tila CLI remains the operator interface for projects, memberships, credentials, and administration. Version 0.4.0 requires runtime protocol 1 on the shared backend.
 
 ## Setup
 
@@ -31,7 +31,7 @@ An enrollment has one canonical service membership; every run gets a different p
 
 Run credentials last at most 15 minutes and renew two minutes before expiry with jitter. A heartbeat runs every minute; missing heartbeats expire the lease after five minutes. Revocation, closure, expiry, or loss of authority stops access, including cached/retried operations. Temporary failures retry only while authorization remains valid. No stronger credential fallback exists.
 
-MCP authenticates tools, resources, prompts, and discovery on every request. Reconnects reuse an active run. Native shared clients must provide an unambiguous session mapping; Codex uses request metadata `sessionId` or `threadId`, and Claude Code uses a verified native process mapping. Unsupported or missing metadata fails closed. Use one MCP process per run where reliable mapping is unavailable.
+Remote MCP authenticates tools, resources, prompts, and discovery on every request. Reconnects reuse an active run. Native shared clients must provide an unambiguous session mapping; Codex uses request metadata `sessionId` or `threadId`, and Claude Code uses a verified native process mapping. Unsupported or missing metadata fails closed. Use one MCP process per run where reliable mapping is unavailable.
 
 The `worker` preset covers the default work operations. Queue administration still requires maintainer authority. It excludes deletion, governance, credentials, infrastructure, and gate resolution. Selecting extra tool groups changes visibility, never authority; denied operations return permission errors.
 
@@ -295,7 +295,7 @@ backups. A stored definition containing credentials is refused.
 
 ### Dynamic record resources
 
-Record types with `mcp_resource = true` in the project schema are exposed as MCP resources at `tila://records/{type}/{key}`. The generic resource template is registered without reading project data. Each read authenticates its run, fetches that project’s current schema, and checks that the record type is exposed.
+Record types with `mcp_resource = true` in the project schema are exposed as MCP resources at `tila://records/{type}/{key}`. The generic resource template is registered without reading project data. Each read uses the configured local project or authenticates its remote run, fetches that project’s current schema, and checks that the record type is exposed.
 
 ## Runtime configuration
 

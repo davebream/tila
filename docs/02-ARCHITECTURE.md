@@ -2111,7 +2111,7 @@ Surface modules: `client.entities`, `client.records`, `client.artifacts`, `clien
 
 ### 9.4 The MCP server
 
-`tila-mcp-server` is a shared-server project workflow interface. The CLI remains the comprehensive operator interface, constrained by the caller’s authority. MCP runs under one restricted authentication run, supplied through a local credential broker or resolved from a native host session mapping on each request.
+`tila-mcp-server` provides project workflows against the shared service or the explicit local SQLite subset. The CLI remains the comprehensive operator interface, constrained by the caller’s authority. Remote MCP runs under one restricted authentication run, supplied through a local credential broker or resolved from a native host session mapping on each request.
 
 The default tools are `tila_session`, `tila_inspect`, `tila_claim`, `tila_publish`, `tila_signal`, and `tila_close`. Primitive groups remain explicitly opt-in. Tool discovery grants no backend permissions. The worker preset supports those workflows while excluding administration, deletion, infrastructure, credential management, and gate resolution.
 
@@ -2121,7 +2121,9 @@ D1 stores enrollment authenticators, run metadata, credential versions, one-use 
 
 The local helper holds enrollment secrets outside child environments and exposes a run-specific socket capability. Credentials expire after at most 15 minutes, renew two minutes before expiry, and overlap for at most 60 seconds. Heartbeats occur every minute; five minutes without one expires the run. Terminal states cannot be renewed. Session shutdown saves a handoff and releases exact captured claims before closing access, with a five-minute cleanup limit. `tila_close` itself does not close authentication.
 
-MCP rejects personal/owner tokens, ambient keychain authentication, and local SQLite configuration. CLI/SDK local functionality remains available. Tools, resources, prompts and discovery share the authenticated per-request run scope. Generic record resources at `tila://records/{type}/{key}` check the current project schema and `mcp_resource = true` at read time; startup does not fetch schema under enrollment authority. Missing host session mappings fail closed; clients without reliable mappings use one process per run.
+Remote MCP rejects personal/owner tokens and ambient keychain authentication. Explicit local MCP works with `TILA_MODE=local`, `TILA_PROJECT_ID`, and absolute `TILA_DB_PATH` and `TILA_ARTIFACTS_PATH` paths; it rejects mixed remote credentials, `TILA_API_URL`, or run bindings. In remote mode, tools, resources, prompts and discovery share the authenticated per-request run scope. Missing host session mappings fail closed; clients without reliable mappings use one process per run.
+
+Generic record resources at `tila://records/{type}/{key}` check the current project schema and `mcp_resource = true` at read time; startup does not fetch schema under enrollment authority.
 
 See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for storage, recovery, supported session contracts, OIDC, and the coordinated 0.4.0 cutover. The broker is not an OS sandbox; hostile processes under one account require host-runtime isolation.
 
@@ -2220,7 +2222,7 @@ Supported via per-shell `CLOUDFLARE_ACCOUNT_ID` env var that tila sets implicitl
 Acme Corp may enforce: R2 jurisdiction (EU only), custom Worker subdomain (`tila.acme.com`), retention policy overrides, restricted Worker permissions. These are configured at the Cloudflare account level and at `wrangler.toml`. tila's `.tila/config.toml` supports `[cloudflare] worker_subdomain`, `jurisdiction`, and `custom_domain` flags. Org admins publish these defaults in their org's onboarding docs; engineers run `tila project create` and apply the org's configuration overrides.
 
 ### 10.32 Service account / CI token usage
-For unattended coding runs, use an enrolled shared runner with `tila run exec`, or supported runtime OIDC exchange. MCP requires these restricted run credentials. Operator automation can still use a dedicated project API token issued via `tila token issue --name=ci-prod`, stored in CI secrets as `TILA_API_TOKEN`. Provisioning from CI (rare) uses a Cloudflare API token (not OAuth) scoped to the specific account, stored as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. tila and wrangler both honor these env vars; no interactive login is required.
+For unattended coding runs, use an enrolled shared runner with `tila run exec`, or supported runtime OIDC exchange. Remote MCP requires these restricted run credentials. Operator automation can still use a dedicated project API token issued via `tila token issue --name=ci-prod`, stored in CI secrets as `TILA_API_TOKEN`. Provisioning from CI (rare) uses a Cloudflare API token (not OAuth) scoped to the specific account, stored as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. tila and wrangler both honor these env vars; no interactive login is required.
 
 ### 10.33 Creating a child of a leaf-type work unit
 Schema declares `[hierarchy] levels = ["epic", "issue", "task"]`. User runs `tila task new --parent=<task-id>`. tila rejects: `task` is the last level in the hierarchy and therefore a leaf. Returns `409 hierarchy-leaf-child`: "cannot create a work unit as a child of leaf-type 'task'. Declare a deeper hierarchy level in tila.schema.toml or attach as a non-hierarchical relationship instead."

@@ -2590,7 +2590,7 @@ verification", not by this suite.
 
 ## Runtime enrollment and unattended runs
 
-Version 0.4.0 separates operator credentials, installation authorization, and run access. CLI operators retain existing human authentication and administrative commands. MCP accepts only a shared-server project run. No compatibility adapter or automatic authentication fallback is provided.
+Version 0.4.0 separates operator credentials, installation authorization, and run access. CLI operators retain existing human authentication and administrative commands. Remote MCP accepts only a shared-server project run. No compatibility adapter or automatic authentication fallback is provided for remote MCP. Explicit local MCP remains supported with `TILA_MODE=local`, `TILA_PROJECT_ID`, and absolute `TILA_DB_PATH` and `TILA_ARTIFACTS_PATH` paths; it rejects mixed remote credentials, `TILA_API_URL`, or run bindings.
 
 ### Installation authorization
 
@@ -2759,7 +2759,7 @@ returns `unsupported-capability` for agent operations.
 ## Coding-client lifecycle integration
 
 The opt-in lifecycle adapters support **Claude Code CLI and Codex CLI on macOS
-and Linux**, using a configured Cloudflare-backed Tila project. Operator CLI use and CLI/SDK local mode remain available; MCP requires runtime access. Desktop clients, Conductor-managed
+and Linux**, using a configured Cloudflare-backed Tila project. Operator CLI use and explicit CLI/SDK/MCP local mode remain available; remote MCP requires runtime access. Desktop clients, Conductor-managed
 sessions, Windows, and independent subagent participants are outside this initial
 integration. Tila never takes control of client execution.
 
@@ -2954,7 +2954,7 @@ commit timestamp, target inventory, tarball integrity and every file checksum.
 Clean-directory consumers install the tarballs and check SDK ESM/CommonJS local
 SQLite persistence, MCP stdio initialization/tool discovery through a private managed-run broker, and the npm CLI. The MCP probe also checks that discovery fails after broker access is revoked.
 Node 22/24 consumers exercise both SQLite 12.10.0 and 13.0.3. Each SDK/MCP package
-must resolve the selected driver; the smoke test opens a native database and resolves the shipped WebSocket dependency. MCP no longer ships the keyring addon or accepts local SQLite configuration; the broker fixture uses no real credentials or native sessions.
+must resolve the selected driver; the smoke test opens a native database and resolves the shipped WebSocket dependency. MCP no longer ships the keyring addon. Remote MCP rejects local SQLite configuration; explicit local MCP remains supported. The broker fixture uses no real credentials or native sessions.
 Native Linux, macOS and Windows x64/arm64 runners also test packed SDK/MCP consumers
 with SQLite 13.0.3, execute the binaries and run local installer fixtures; both musl binaries run in native-architecture Alpine containers.
 The raw binary, the installer-installed copy and the npm CLI each run
