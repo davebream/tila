@@ -1,0 +1,211 @@
+{
+  "schema": "tila.dogfood.manifest/1",
+  "kind": "declaration",
+  "study_id": "tila-194-dogfood-pilot-v1",
+  "issue": 194,
+  "rubric": {
+    "path": "docs/evidence/issue-194-rubric-v3.json",
+    "sha256": "d9706a022131a5cb919c741a5e550f5f958332dc49af2f20d8a97a723702612f",
+    "version": 3
+  },
+  "protocol_document": "docs/14-DOGFOOD-STUDY-PROTOCOL.md",
+  "warmup": {
+    "scenario": "warmup-w",
+    "sha256": "cc766adf0d734c155939273430d8516c76c26a1bc9874b1290cd232ffccf8584"
+  },
+  "scenarios": {
+    "p1-x": {
+      "sha256": "8105ceb8cd22553fa049b87d01d27d7914f228f5611c159cb46443eca354903e",
+      "cases": 15,
+      "decision_cases": 9,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/detail.mjs",
+        "src/index.mjs",
+        "src/ledger.mjs",
+        "src/money.mjs",
+        "src/summary.mjs",
+        "test/smoke.test.mjs"
+      ]
+    },
+    "p1-y": {
+      "sha256": "771c46111989374a1a338befc0048b247ce8c08f726d7219e32f3cbc341d470e",
+      "cases": 15,
+      "decision_cases": 9,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/cost.mjs",
+        "src/index.mjs",
+        "src/lineitem.mjs",
+        "src/rollup.mjs",
+        "src/spend.mjs",
+        "test/smoke.test.mjs"
+      ]
+    },
+    "p2-x": {
+      "sha256": "4af07155cd0001212224ffa469bb2e7672d23ed3fbd53c0aba1fbf8e91b48b9b",
+      "cases": 16,
+      "decision_cases": 3,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/cmd-export.mjs",
+        "src/cmd-list.mjs",
+        "src/flags.mjs",
+        "src/index.mjs",
+        "src/store.mjs",
+        "test/smoke.test.mjs"
+      ]
+    },
+    "p2-y": {
+      "sha256": "78145303fb5a5083ff362b5e9bf97df9fd6777ef33d0c755f95d23fd73755b1c",
+      "cases": 16,
+      "decision_cases": 3,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/args.mjs",
+        "src/cmd-dump.mjs",
+        "src/cmd-find.mjs",
+        "src/index.mjs",
+        "src/shelf.mjs",
+        "test/smoke.test.mjs"
+      ]
+    }
+  },
+  "allocation": {
+    "seed": "tila-194-pilot-v1",
+    "rule": "for each pair p: h = sha256(seed + '|' + p); if (h[0] & 1) == 0 then variant x runs under A and y under B, else y under A and x under B",
+    "pairs": {
+      "p1": {
+        "A": "x",
+        "B": "y",
+        "digest": "26f6ab57cf5d609cc88feac456087c3476d454ebd5229a33a1e7da470c516c2a"
+      },
+      "p2": {
+        "A": "y",
+        "B": "x",
+        "digest": "89cb8f0af51cf19cafbf1b076b88b703d0cd3938e3e3b74db03c8acb480c7968"
+      }
+    }
+  },
+  "trials": [
+    {
+      "trial": "t1",
+      "order": 1,
+      "pair": "p1",
+      "condition": "A",
+      "variant": "x",
+      "scenario": "p1-x",
+      "scenario_sha256": "8105ceb8cd22553fa049b87d01d27d7914f228f5611c159cb46443eca354903e",
+      "replaced_role": "w2",
+      "role_items": {
+        "w1": "item1",
+        "w2": "item2"
+      }
+    },
+    {
+      "trial": "t2",
+      "order": 2,
+      "pair": "p1",
+      "condition": "B",
+      "variant": "y",
+      "scenario": "p1-y",
+      "scenario_sha256": "771c46111989374a1a338befc0048b247ce8c08f726d7219e32f3cbc341d470e",
+      "replaced_role": "w1",
+      "role_items": {
+        "w1": "item1",
+        "w2": "item2"
+      }
+    },
+    {
+      "trial": "t3",
+      "order": 3,
+      "pair": "p2",
+      "condition": "B",
+      "variant": "x",
+      "scenario": "p2-x",
+      "scenario_sha256": "4af07155cd0001212224ffa469bb2e7672d23ed3fbd53c0aba1fbf8e91b48b9b",
+      "replaced_role": "w2",
+      "role_items": {
+        "w1": "item2",
+        "w2": "item1"
+      }
+    },
+    {
+      "trial": "t4",
+      "order": 4,
+      "pair": "p2",
+      "condition": "A",
+      "variant": "y",
+      "scenario": "p2-y",
+      "scenario_sha256": "78145303fb5a5083ff362b5e9bf97df9fd6777ef33d0c755f95d23fd73755b1c",
+      "replaced_role": "w1",
+      "role_items": {
+        "w1": "item2",
+        "w2": "item1"
+      }
+    }
+  ],
+  "budgets": {
+    "predeclared_before_observation": true,
+    "wall_ms_per_trial": 720000,
+    "tool_calls_per_role_per_trial": 40,
+    "role_budget_includes_replacement": true,
+    "tool_call_definition": "one hook-covered local operation admitted by the synchronous Codex PreToolUse hook; Bash shell launches count once including terminal transport continuations, apply_patch and other explicitly smoked local invocations count individually; shell subcommands and code-mode wrappers add no slots beyond intercepted nested operations; distinct retry IDs count separately; no hosted tools, subagents, external provider sessions or unsmoked specialized paths",
+    "provider_usage_budget": "not capped by the pilot; logged separately when native usage records exist",
+    "no_selective_extension": "bounds are never extended after an outcome is seen; a trial that reaches a bound is stopped and recorded as such",
+    "claim_ttl_ms": 120000,
+    "admitted_per_role_per_trial": 40,
+    "attempts_and_denials": "every submitted invocation is logged as attempted; denied ones are logged separately with the reason and never counted as admitted or dropped",
+    "count_hook": {
+      "kind": "codex_pretooluse_command_hook",
+      "settings_delivery": "invocation-local -c inline hooks, features.hooks=true, agents.enabled=false, web_search=disabled; exact argv and allowed tool surface frozen; no global configuration/auth edits",
+      "exact_hook_frozen": "hook script, library, config template and installed binary sha256 frozen with linked sanitized installed-runtime smoke evidence",
+      "counter": "one locked append-only event log per trial; registered original/replacement session IDs share the base-role counter; retired or unknown sessions are denied",
+      "records": "hook event, session_id, turn_id, tool_use_id, tool name, role, category, admitted/denied reason and time; never raw inputs",
+      "deny_after": "40 admitted operations, wall deadline, trial closure or context retirement",
+      "must_be_smoke_tested": "lead-owned exact installed interactive CLI smoke demonstrating coverage, IDs, parallel 39/40/41, zero-effect denial, retirement/replacement, deadline, malformed input and missing-state/failure behavior",
+      "failure_rule": "missing/unsmoked coverage, identity, count-source mismatch, malformed state, hook failure/timeout or uncovered state-changing use makes the trial harness_invalid; hooks cannot prove a universal native-call cap",
+      "lock_rule": "mkdir lock is never stolen based on age; abandoned locks cause denial and require lead-owned harness invalidation/cleanup, with evidence retained"
+    },
+    "schedule_lateness_tolerance_ms": 15000,
+    "wall_includes": "replacement startup and claim-expiry waits are inside the same 12-minute wall budget",
+    "no_pause_or_extension": "the clock is never paused, moved or extended to help a slow arm",
+    "deadline_state": "at the deadline the harness blocks new calls, stops only run-owned activity and captures the state; work completing after the deadline does not enter the scored artifact",
+    "unit": "hook-covered local operations, deliberately amended before observation; not all native tool invocations",
+    "transport_reporting": "write_stdin polls/continuations and available full runtime-call totals are reported separately from admitted operations; unavailable without complete run-owned runtime records"
+  },
+  "timeline_ms_from_t0": {
+    "t0": "the packet barrier: trial.started is recorded once both packets are delivered; all offsets use this one monotonic trial clock",
+    "overlap_opportunity": "exists from t0 by construction: both items need the same new shared helper",
+    "decision_change_issued": 240000,
+    "handoff_checkpoint_requested": 330000,
+    "context_replacement": 360000,
+    "hard_stop": 720000,
+    "lateness_tolerance_ms": 15000,
+    "scheduled_events": {
+      "decision.issued": 240000,
+      "checkpoint.reached:handoff_requested": 330000,
+      "checkpoint.reached:replacement_started": 360000
+    }
+  },
+  "freeze_requires": [
+    "source_sha",
+    "source_tree_clean",
+    "runtime_versions",
+    "model_id",
+    "count_source",
+    "hook_smoke_attested",
+    "count_hook_sha256",
+    "usage_source",
+    "host_label",
+    "count_hook_lib_sha256",
+    "hook_config_template_sha256",
+    "hook_smoke_sha256",
+    "codex_binary_sha256"
+  ],
+  "declaration_sha256": "c5f54a3e1f0f07a8d311ce8580b52d7b3fc43611e11d536640e1ec9067f4cd4f"
+}
