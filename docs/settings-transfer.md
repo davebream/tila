@@ -124,6 +124,11 @@ const { result: outcome } = await tila_settings_resume({
 Resume defaults to inspection. MCP accepts no filesystem path or credential
 artifact. The calling client owns retention of the returned non-secret receipt.
 It contains configuration and identity IDs; handle it as project information.
+During one tool call the server retains action progress in memory before each
+service call. This is not a crash-durable server journal. If the process exits
+or a tool response is lost, resume the last caller-retained exact receipt;
+unresolved actions use their original IDs and conditional revisions so server
+receipts or exact initial-create reconciliation can settle ambiguous progress.
 
 ## Outcomes and validation
 
