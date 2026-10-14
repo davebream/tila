@@ -14,6 +14,8 @@ import { z } from "zod";
 const reads = new Set([
   "tila_schema_preview",
   "tila_schema_export",
+  "tila_settings_export",
+  "tila_settings_import",
   "tila_room_list",
   "tila_room_history",
   "tila_room_get",
@@ -72,6 +74,7 @@ const additive = new Set([
   "tila_gate_create",
 ]);
 const idempotent = new Set([
+  "tila_settings_resume",
   "tila_queue",
   // Revision-checked settings writes replay with their idempotency key and
   // otherwise conflict rather than applying twice.

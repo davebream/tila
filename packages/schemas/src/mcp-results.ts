@@ -1,5 +1,49 @@
 import { z } from "zod";
 import {
+  SettingsDocumentSchema,
+  SettingsReceiptSchema,
+} from "./settings-transfer";
+
+export const McpSettingsExportResultSchema = z.object({
+  status: z.literal("exported"),
+  format: z.enum(["toml", "yaml"]),
+  text: z.string(),
+  coverage: SettingsDocumentSchema.shape.coverage,
+});
+export const McpSettingsImportResultSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("mapping-required"),
+    references: z.array(z.string()),
+    profile_references: z.array(z.string()),
+    resource_ids: z.object({
+      agents: z.array(z.string()),
+      rooms: z.array(z.string()),
+      signal_groups: z.array(z.string()),
+    }),
+    coverage: SettingsDocumentSchema.shape.coverage,
+  }),
+  z.object({
+    status: z.literal("blocked"),
+    errors: z.array(
+      z.object({
+        code: z.string(),
+        message: z.string(),
+        path: z.string().optional(),
+      }),
+    ),
+  }),
+  z.object({
+    status: z.literal("preview"),
+    receipt: SettingsReceiptSchema,
+    definition_previews: z.array(api.SchemaPreviewResponseSchema),
+  }),
+]);
+export const McpSettingsResumeResultSchema = z.object({
+  status: z.enum(["preview", "complete", "partial", "blocked"]),
+  receipt: SettingsReceiptSchema,
+  error_code: z.string().optional(),
+});
+import {
   AgentArchivePreviewResponseSchema,
   AgentArchiveResponseSchema,
   AgentBindingResponseSchema,
@@ -239,6 +283,9 @@ export const McpPrimitiveResults = {
   tila_schema_preview: api.SchemaPreviewResponseSchema,
   tila_schema_import: McpDefinitionImportResultSchema,
   tila_schema_export: McpDefinitionExportResultSchema,
+  tila_settings_export: McpSettingsExportResultSchema,
+  tila_settings_import: McpSettingsImportResultSchema,
+  tila_settings_resume: McpSettingsResumeResultSchema,
   tila_template_list: templates,
   tila_template_instantiate: api.InstantiateTemplateResponseSchema,
   tila_reentry: reentry,

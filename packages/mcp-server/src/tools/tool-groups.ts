@@ -13,6 +13,7 @@ import { registerPresenceTools } from "./presence";
 import { registerQueueTools } from "./queue";
 import { registerRecordTools } from "./records";
 import { registerSchemaTools } from "./schema";
+import { registerSettingsTransferTools } from "./settings-transfer";
 import { registerSignalTools } from "./signals";
 import { registerSummaryTool } from "./summary";
 import { registerTemplateTools } from "./templates";
@@ -44,6 +45,7 @@ export const GROUP_MAP: Record<string, RegisterFn> = {
   journal: registerJournalTools,
   continuity: registerContinuityTools,
   schema: registerSchemaTools,
+  settings: registerSettingsTransferTools,
   templates: registerTemplateTools,
   summary: registerSummaryTool,
 };
