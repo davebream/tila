@@ -44,6 +44,10 @@ require(len(nodes) == len(DATA['nodes']), 'duplicate node IDs')
 inventory = DATA['inventory']
 keys = [(item['kind'], item['number']) for item in inventory]
 require(len(keys) == len(set(keys)), 'duplicate snapshot item')
+for item in DATA.get('followup_inventory', []):
+    require(item.get('source') and item.get('nodes'), 'unsourced execution follow-up')
+    for node_id in item['nodes']:
+        require(node_id in nodes and nodes[node_id]['issue'] == item['number'], 'follow-up ownership mismatch')
 require({n for kind, n in keys if kind == 'issue'} == EXPECTED_ISSUES, 'open issue coverage')
 require({n for kind, n in keys if kind == 'pr'} == EXPECTED_PRS, 'snapshot PR coverage')
 for item in inventory:
@@ -154,6 +158,9 @@ for edge in DATA['hard_edges']:
     if nodes[edge['after']]['state'] in terminal:
         require(nodes[edge['before']]['state'] in terminal, f'completed task has unfinished hard prerequisite: {edge["before"]} -> {edge["after"]}')
 
+release_active = {n['id'] for n in nodes.values() if n['kind'] == 'release-builder' and n['state'] == 'implementing'}
+require(len(release_active) <= DATA['resource_policy']['optional_release_workers'], 'release worker ceiling exceeded')
+require(release_active == set(DATA['execution_state_policy'].get('current_active_release_workers', [])), 'release dispatch ledger is stale')
 active = {n['id'] for n in nodes.values() if n['kind'] == 'builder' and n['state'] in {'implementing', 'external-in-progress'}}
 require(len(active) <= DATA['resource_policy']['max_active_builders'], 'active coding ceiling exceeded')
 require(len({nodes[n]['owner'] for n in active}) == len(active), 'two active builders share one lane')
