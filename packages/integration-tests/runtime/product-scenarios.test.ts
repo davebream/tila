@@ -7,6 +7,7 @@ import {
   schema,
 } from "@tila/ops-sqlite";
 import {
+  AttemptViewSchema,
   PaginatedEntityListResponseSchema,
   UnifiedSearchResponseSchema,
 } from "@tila/schemas";
@@ -23,6 +24,7 @@ import {
   worker,
 } from "../../ops-sqlite/test/question-contract";
 import { post } from "./helpers";
+import { member, queueApiFixture } from "./queue-api-fixture";
 import { bindings } from "./setup";
 
 // These compose actual local DO persistence operations. Synthetic identities,
@@ -30,7 +32,7 @@ import { bindings } from "./setup";
 it("S1 walks all 301 custom tasks and search hits through eviction without truncation", async () => {
   const stub = bindings.PROJECT.get(bindings.PROJECT.newUniqueId());
   const definition =
-    '[work_units.bug.fields.title]\ntype = "string"\n[work_units.empty.fields.title]\ntype = "string"\n';
+    'schema_version = 1\n[work_units.bug.fields.title]\ntype = "string"\n[work_units.empty.fields.title]\ntype = "string"\n';
   expect(
     (
       await post(stub, "/schema/apply", {
@@ -98,7 +100,8 @@ it("S1 walks all 301 custom tasks and search hits through eviction without trunc
 
 it("S1 serializes three revisionful client-shaped edits and rejects a stale original file", async () => {
   const stub = bindings.PROJECT.get(bindings.PROJECT.newUniqueId());
-  const original = '[work_units.bug.fields.title]\ntype = "string"\n';
+  const original =
+    'schema_version = 1\n[work_units.bug.fields.title]\ntype = "string"\n';
   expect(
     (
       await post(stub, "/schema/apply", {
@@ -281,6 +284,103 @@ it("S2 retains two distinct answers and one logical replay effect across outage 
   });
 });
 
+it("S2 two local participant principals sharing a participant label cannot exchange grants", async () => {
+  const f = await queueApiFixture();
+  const workers = [
+    await member(f.project, 8301),
+    await member(f.project, 8302),
+  ];
+  await f.queue.configure({
+    idempotency_key: "enable",
+    expected_revision: 0,
+    enabled: true,
+    paused: false,
+    execution_limit: 2,
+  });
+  const attempts = [];
+  for (const [index, actor] of workers.entries()) {
+    const taskId = `assigned-${index}`;
+    const created = await f.http("/tasks", {
+      id: taskId,
+      type: "issue",
+      data: { phase: "todo" },
+    });
+    expect(created.status, await created.text()).toBe(200);
+    await f.queue.enroll({
+      idempotency_key: `assign-${index}`,
+      task_id: taskId,
+      target_principal: actor.principal,
+    });
+    const read = async (response: Response) => {
+      expect(response.status, await response.clone().text()).toBe(200);
+      return AttemptViewSchema.parse(
+        (await response.json<{ result: unknown }>()).result,
+      ).attempt;
+    };
+    let attempt = await read(
+      await actor.post(
+        "/queue/claim",
+        { idempotency_key: "same-key-distinct-principal" },
+        "worker",
+      ),
+    );
+    attempt = await read(
+      await actor.post(
+        `/attempts/${attempt.id}/accept`,
+        authority(attempt),
+        "worker",
+      ),
+    );
+    attempt = await read(
+      await actor.post(
+        `/attempts/${attempt.id}/started`,
+        {
+          ...authority(attempt),
+          session: { provider: "fixture", id: `session-${index}` },
+        },
+        "worker",
+      ),
+    );
+    expect(attempt.task_id).toBe(taskId);
+    expect(attempt.principal_id).toBe(actor.principal);
+    expect(attempt.outcome).toBeNull();
+    attempts.push(attempt);
+  }
+  expect(attempts[0].id).not.toBe(attempts[1].id);
+  await evictDurableObject(
+    bindings.PROJECT.get(bindings.PROJECT.idFromName(f.project)),
+  );
+  const outcome = {
+    status: "success",
+    execution_stopped: true,
+    unresolved_external_execution: false,
+    evidence: ["fixture-artifact"],
+  };
+  for (const [index, attempt] of attempts.entries()) {
+    for (const [actor, participant] of [
+      [workers[1 - index], "worker"],
+      [workers[index], "different-process"],
+    ] as const) {
+      const denied = await actor.post(
+        `/attempts/${attempt.id}/finish`,
+        { ...authority(attempt), outcome },
+        participant,
+      );
+      expect(denied.status, await denied.text()).toBe(403);
+    }
+    const retained = await workers[index].get(
+      `/attempts/${attempt.id}`,
+      "worker",
+    );
+    expect(retained.status, await retained.clone().text()).toBe(200);
+    expect(
+      AttemptViewSchema.parse(
+        (await retained.json<{ result: unknown }>()).result,
+      ).attempt.outcome,
+    ).toBeNull();
+  }
+});
+
 for (const answerFirst of [true, false])
   it(`S3 retains acknowledged decisions through cancellation and explicit result (answer ${answerFirst ? "first" : "last"})`, async () => {
     const stub = bindings.PROJECT.get(bindings.PROJECT.newUniqueId());
@@ -297,6 +397,7 @@ for (const answerFirst of [true, false])
         attempt.id,
         authority(attempt),
         attemptOrigin,
+        false,
         now + 2,
       ).attempt;
       if (!answerFirst)

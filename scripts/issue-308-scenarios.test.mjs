@@ -166,6 +166,24 @@ test("retains failed commands, continues, links reruns and detects artifact tamp
         }),
       /relative/,
     );
+    assert.throws(() =>
+      validateObservation({
+        ...observation,
+        measurements: {
+          ...observation.measurements,
+          recovery_ms: "unobserved success",
+        },
+      }),
+    );
+    validateObservation({
+      ...observation,
+      timestamps: {
+        started_at: null,
+        finished_at: null,
+        recorded_at: new Date().toISOString(),
+        limitation: "Execution times not captured for retained diagnostic",
+      },
+    });
     writeFileSync(resolve(base, observation.artifact_refs[0].path), "changed");
     assert.throws(
       () => verifyArtifacts(first.report, base),

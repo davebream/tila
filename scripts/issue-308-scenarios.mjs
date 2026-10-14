@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -105,6 +106,18 @@ export const checks = [
     provenance: "local Cloudflare runtime",
     command: ["pnpm", "test:runtime"],
   },
+  {
+    scenario: "S1",
+    step: "root-script-suites",
+    provenance: "unit/fixture",
+    command: ["pnpm", "test:scripts"],
+  },
+  {
+    scenario: "S1",
+    step: "repository-lint-version-quality",
+    provenance: "unit/fixture",
+    command: ["pnpm", "lint"],
+  },
 ];
 
 export function sanitize(log, workspace = root) {
@@ -170,14 +183,28 @@ export function validateObservation(o) {
   for (const group of ["do", "d1", "configuration"])
     assert.ok(o.migrations[group]?.length > 0, `Missing migrations.${group}`);
   assert.ok(o.migrations.scope);
-  for (const stamp of [o.timestamps.started_at, o.timestamps.finished_at])
+  const validTime = (stamp) =>
+    typeof stamp === "string" && Number.isFinite(Date.parse(stamp));
+  if (o.timestamps.started_at === null && o.timestamps.finished_at === null) {
     assert.ok(
-      typeof stamp === "string" && Number.isFinite(Date.parse(stamp)),
+      validTime(o.timestamps.recorded_at) && o.timestamps.limitation,
+      "Retrospective diagnostics require a recording time and explicit missing-time limitation",
+    );
+    assert.equal(
+      o.result,
+      "failed",
+      "Only retained failure diagnostics may lack execution timestamps",
+    );
+  } else {
+    assert.ok(
+      validTime(o.timestamps.started_at) && validTime(o.timestamps.finished_at),
       "Invalid timestamp",
     );
-  assert.ok(
-    Date.parse(o.timestamps.finished_at) >= Date.parse(o.timestamps.started_at),
-  );
+    assert.ok(
+      Date.parse(o.timestamps.finished_at) >=
+        Date.parse(o.timestamps.started_at),
+    );
+  }
   assert.ok(Array.isArray(o.artifact_refs) && o.artifact_refs.length > 0);
   for (const ref of [
     ...o.artifact_refs,
@@ -207,7 +234,13 @@ export function validateObservation(o) {
     "stale_writes_rejected",
     "interventions",
   ])
-    assert.ok(Object.hasOwn(o.measurements, metric));
+    assert.ok(
+      Object.hasOwn(o.measurements, metric) &&
+        (o.measurements[metric] === null ||
+          (Number.isFinite(o.measurements[metric]) &&
+            o.measurements[metric] >= 0)),
+      "Measurements must be observed nonnegative numbers or null",
+    );
   return o;
 }
 
@@ -262,18 +295,28 @@ export function metadata() {
   const localRequire = createRequire(
     resolve(root, "packages/integration-tests/package.json"),
   );
-  const installedVersion = (name) => {
-    try {
-      const resolver =
-        name === "miniflare" || name === "workerd"
-          ? createRequire(localRequire.resolve("@cloudflare/vitest-plugin"))
-          : localRequire;
-      const packagePath = resolver.resolve(`${name}/package.json`);
-      return JSON.parse(readFileSync(packagePath, "utf8")).version;
-    } catch {
-      return "unavailable (dependency not installed/resolvable)";
+  // ESM-only packages may not export package.json. Read manifests from the
+  // actual resolution search paths without importing test plugins into Node.
+  const installed = (name, resolver) => {
+    for (const directory of resolver.resolve.paths(name) ?? []) {
+      const path = resolve(directory, name, "package.json");
+      try {
+        const pkg = JSON.parse(readFileSync(path, "utf8"));
+        return {
+          version: pkg.version,
+          require: createRequire(realpathSync(path)),
+        };
+      } catch {
+        /* Continue through actual Node resolution directories. */
+      }
     }
+    return {
+      version: "unavailable (dependency not installed/resolvable)",
+      require: resolver,
+    };
   };
+  const plugin = installed("@cloudflare/vitest-plugin", localRequire);
+  const miniflare = installed("miniflare", plugin.require);
   return {
     candidate_sha: git("rev-parse", "HEAD"),
     release: version("package.json"),
@@ -302,11 +345,13 @@ export function metadata() {
       pnpm: execFileSync("pnpm", ["--version"], { encoding: "utf8" }).trim(),
       profiles:
         "Synthetic local test identities only; no native profiles or deployed credentials",
-      runtime_versions: Object.fromEntries(
-        ["vitest", "@cloudflare/vitest-plugin", "miniflare", "workerd"].map(
-          (p) => [p, installedVersion(p)],
-        ),
-      ),
+      runtime_versions: {
+        vitest: installed("vitest", localRequire).version,
+        "@cloudflare/vitest-plugin": plugin.version,
+        miniflare: miniflare.version,
+        workerd: installed("workerd", miniflare.require).version,
+      },
+      environment_isolation: 'env -i HOME="$HOME" PATH="$PATH"',
       dataset:
         "Predeclared in docs/issue-308-protocol.md; suite timings are validation cost, not usability measurements",
     },
@@ -319,16 +364,12 @@ export function metadata() {
 
 export function execute(command) {
   return new Promise((done) => {
-    // All commands are fixed local test commands. Remove credential environment
-    // overrides so a developer shell cannot silently introduce a live identity.
-    const env = Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key]) => !/TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/i.test(key),
-      ),
-    );
+    // Equivalent to env -i HOME="$HOME" PATH="$PATH": ambient runtime/session
+    // configuration must not select a live backend or affect compiled CLI tests.
+    const env = { HOME: process.env.HOME, PATH: process.env.PATH };
     const child = spawn(command[0], command.slice(1), {
       cwd: root,
-      env: { ...env, NO_COLOR: "1" },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let log = "";
@@ -387,6 +428,29 @@ export async function runChecks({
     );
     const sanitized = sanitize(log, base);
     writeFileSync(path, sanitized, { flag: "wx" });
+    const artifactRefs = [
+      { path: relative(base, path), sha256: hash(sanitized) },
+    ];
+    if (check.provenance === "local Cloudflare runtime") {
+      let runtimeReport;
+      try {
+        runtimeReport = JSON.parse(
+          readFileSync(resolve(base, ".ci-reports/runtime.json"), "utf8"),
+        );
+      } catch {
+        /* A command may fail before Vitest starts; its log remains evidence. */
+      }
+      // Do not attach an earlier suite's report when a command never started.
+      if (runtimeReport?.startTime >= Date.parse(startedAt)) {
+        const reportPath = path.replace(/\.log$/, ".runtime.json");
+        const bytes = `${JSON.stringify(runtimeReport, (_key, value) => (typeof value === "string" ? sanitize(value, base) : value), 2)}\n`;
+        writeFileSync(reportPath, bytes, { flag: "wx" });
+        artifactRefs.push({
+          path: relative(base, reportPath),
+          sha256: hash(bytes),
+        });
+      }
+    }
     const observation = validateObservation({
       ...check,
       ...context,
@@ -396,7 +460,7 @@ export async function runChecks({
         started_at: startedAt,
         finished_at: new Date().toISOString(),
       },
-      artifact_refs: [{ path: relative(base, path), sha256: hash(sanitized) }],
+      artifact_refs: artifactRefs,
       blocker_owner: result === "passed" ? null : `#308 / ${check.step}`,
       measurements,
       rerun_of:
