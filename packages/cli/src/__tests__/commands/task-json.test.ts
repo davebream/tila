@@ -210,6 +210,7 @@ describe("tila task --json", () => {
   describe("task claim", () => {
     it("outputs JSON with fence as number and expires_at as ISO 8601 when --json", async () => {
       mockAcquire.mockResolvedValue({
+        acquired: true,
         fence: 42,
         expires_at: 1700000300000,
         participant_id: "participant-1",
@@ -225,6 +226,25 @@ describe("tila task --json", () => {
       expect(typeof output.result.fence).toBe("number");
       expect(output.result.expires_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(output.result.participant_id).toBe("participant-1");
+    });
+
+    it("rejects a losing acquisition without printing success metadata", async () => {
+      mockAcquire.mockResolvedValue({
+        acquired: false,
+        fence: 42,
+        expires_at: 0,
+        participant_id: "loser",
+      });
+      const command = getSubCommand(await loadCommand(), "claim");
+      await expect(
+        runCmd(command, { id: "T-1", ttl: "300", json: true }),
+      ).rejects.toMatchObject({ status: 409, code: "already-held" });
+      expect(mockAcquire).toHaveBeenCalledWith(
+        "task:T-1",
+        "exclusive",
+        300_000,
+      );
+      expect(logSpy).not.toHaveBeenCalled();
     });
   });
 
