@@ -174,6 +174,119 @@ test("dev seed writes the complete dataset with request identity and acquired fe
   }
 });
 
+// The seed must not reproduce #398: with no lifecycle, only status "closed"
+// is finished, so seeded `done` tasks were counted as waiting on prerequisites.
+// The seeded tasks and edges go through the real shared readiness rules.
+const READINESS = String.raw`
+import { readFileSync } from "node:fs";
+import { parseSchemaToml } from "./packages/core/src/schema-parser.ts";
+import {
+  blockedTaskIds,
+  evaluateReadiness,
+} from "./packages/ops-sqlite/src/ready-ops.ts";
+
+const { definition, tasks, relationships } = JSON.parse(readFileSync(0, "utf8"));
+const parsed = parseSchemaToml(definition);
+if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+
+const snapshotFor = (schema) => {
+  const predecessors = new Map();
+  for (const edge of relationships) {
+    if (edge.type !== "blocks" && edge.type !== "soft-blocks") continue;
+    predecessors.set(edge.to_id, [...(predecessors.get(edge.to_id) ?? []), edge.from_id]);
+  }
+  return {
+    definition: schema,
+    entities: new Map(
+      tasks.map((t) => [t.id, { id: t.id, type: t.type, data: t.data, archived: 0, tags: [] }]),
+    ),
+    predecessors,
+    gates: new Map(),
+  };
+};
+const report = (schema) => {
+  const snapshot = snapshotFor(schema);
+  return {
+    blocked: [...blockedTaskIds(snapshot)].sort(),
+    // Containers (epic, milestone) stay legacy by design; judge the tasks.
+    ready: tasks
+      .filter((t) => t.type === "task")
+      .filter((t) => evaluateReadiness(snapshot, t.id).ready)
+      .map((t) => t.id)
+      .sort(),
+  };
+};
+
+// The same seed with the task lifecycle removed is the legacy fallback.
+const { lifecycle, ...task } = parsed.schema.work_units.task;
+const legacy = {
+  ...parsed.schema,
+  work_units: { ...parsed.schema.work_units, task },
+};
+console.log(JSON.stringify({
+  declared: parsed.schema.work_units.task.lifecycle ?? null,
+  seeded: report(parsed.schema),
+  legacy: report(legacy),
+}));
+`;
+
+test("dev seed declares the task lifecycle, so finished tasks do not count as blocked", async () => {
+  const result = await runSeed();
+  assert.equal(result.status, 0, result.stderr);
+  const at = (path) => result.requests.filter((r) => r.path === prefix + path);
+  const done = at("/tasks")
+    .filter((r) => r.body.data.status === "done")
+    .map((r) => r.body.id)
+    .sort();
+  assert.deepEqual(done, [
+    "task.api-routes",
+    "task.ci-pipeline",
+    "task.db-migrations",
+  ]);
+
+  const run = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", READINESS],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      input: JSON.stringify({
+        definition: at("/schema")[0].body.definition,
+        tasks: at("/tasks").map((r) => r.body),
+        relationships: at("/tasks/relationships").map((r) => r.body),
+      }),
+    },
+  );
+  assert.ifError(run.error);
+  assert.equal(run.status, 0, run.stderr);
+  const { declared, seeded, legacy } = JSON.parse(run.stdout);
+
+  // The seed maps `done` as the finished and successful state. Nothing else is
+  // declared: no cancelled/failed meaning is guessed for this fixture.
+  assert.deepEqual(declared, {
+    field: "status",
+    dispatchable: ["queued"],
+    terminal: ["done"],
+    dependency_satisfied: ["done"],
+    on_start: "in-progress",
+    outcomes: { success: "done" },
+  });
+
+  // Only integration-tests really waits: auth-middleware is still in progress.
+  assert.deepEqual(seeded.blocked, ["task.integration-tests"]);
+  for (const id of done) assert.ok(!seeded.blocked.includes(id), id);
+  assert.deepEqual(seeded.ready, [
+    "task.docs-api",
+    "task.error-handling",
+    "task.rate-limiting",
+  ]);
+
+  // Without the lifecycle the seeded `done` tasks are reported as waiting.
+  assert.ok(legacy.blocked.includes("task.api-routes"));
+  assert.ok(legacy.blocked.includes("task.ci-pipeline"));
+});
+
 for (const [stage, path, body] of [
   ["schema", "/schema"],
   ["task", "/tasks"],
