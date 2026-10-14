@@ -204,6 +204,7 @@ entities.get("/:id", async (c) => {
 entities.get("/", async (c) => {
   const stub = c.get("doStub");
   const paging = TaskListQuerySchema.safeParse({
+    limit: c.req.query("limit"),
     cursor: c.req.query("cursor"),
     offset: c.req.query("offset"),
     sort: c.req.query("sort"),

@@ -3,6 +3,8 @@ import type {
   Entity,
   EntityArtifactReference,
   EntityRelationship,
+  LifecycleOutcome,
+  TaskListScope,
 } from "@tila/schemas";
 
 export interface CreateEntityInput {
@@ -55,10 +57,27 @@ export interface EntityListFilter {
    * backend.
    */
   tagFilter?: string[];
-  sort?: "created_at" | "updated_at" | "type" | "title" | "status";
+  /** Only open tasks waiting on unresolved, missing or cyclic prerequisites. */
+  blocked?: boolean;
+  /** Non-empty list of lifecycle outcomes; types without a declaration cannot match. */
+  outcome?: LifecycleOutcome[];
+  sort?: "created_at" | "updated_at" | "type" | "title" | "status" | "id";
   order?: "asc" | "desc";
   limit?: number;
   offset?: number;
+  /** Opaque keyset cursor bound to the filter and sort that issued it. */
+  cursor?: string;
+}
+
+/** Exact counts and continuation metadata for an entity list. */
+export interface EntityListPage {
+  entities: Entity[];
+  total: number;
+  limit: number | null;
+  offset: number;
+  has_more: boolean;
+  next_cursor: string | null;
+  scope: TaskListScope;
 }
 
 /** Options for {@link EntityBackend.listReady}, mirroring `readyOps.computeReadyEntities`. */
@@ -94,6 +113,12 @@ export interface EntityBackend {
   get(id: string): Promise<Entity | null>;
   /** List entities. See {@link EntityListFilter.dataFilter} for the data-field filter contract. */
   list(filter?: EntityListFilter): Promise<Entity[]>;
+  /**
+   * List with exact metadata. Optional for existing third-party backends.
+   * Consumers needing metadata must report unsupported when absent; a page's
+   * length is not a total, and cursors must never be silently ignored.
+   */
+  listPage?(filter?: EntityListFilter): Promise<EntityListPage>;
   update(id: string, data: Partial<Entity["data"]>): Promise<Entity>;
   archive(id: string): Promise<void>;
   addRelationship(input: RelationshipInput): Promise<{ created: boolean }>;

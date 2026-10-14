@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { LifecycleOutcomeSchema, ListCursorSchema } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
@@ -50,10 +51,31 @@ function registerCrudTools(
   registerPrimitiveTool(
     server,
     `${namePrefix}_list`,
-    `List all ${labelPlural} in the project. Returns compact format (id, type, title, status, claimed_by, blockers, artifacts) to minimize token usage.`,
+    `List ${labelPlural} with exact total, scope, has_more and next_cursor. Pass the cursor with the same filters to continue. HTTP returns compact entities; local mode returns full entities.`,
     {
       type: z.string().optional().describe(`Filter by ${labelSingular} type`),
       status: z.string().optional().describe("Filter by status field value"),
+      blocked: z
+        .boolean()
+        .optional()
+        .describe(
+          "Only open tasks waiting on unresolved, missing or cyclic prerequisites; false does not filter",
+        ),
+      outcome: z
+        .array(LifecycleOutcomeSchema)
+        .min(1)
+        .optional()
+        .describe("Match states declared for these lifecycle outcomes"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Maximum results in this page"),
+      cursor: ListCursorSchema.optional().describe(
+        "next_cursor from the preceding page with the same filters",
+      ),
       tag_filter: z
         .array(z.string())
         .optional()
@@ -61,12 +83,16 @@ function registerCrudTools(
           'AND filter: return only tasks with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
-    async ({ type, status, tag_filter }) => {
+    async ({ type, status, tag_filter, blocked, outcome, limit, cursor }) => {
       try {
         const result = await tasks.list({
           type,
           status,
           compact: true,
+          ...(blocked !== undefined ? { blocked } : {}),
+          ...(outcome !== undefined ? { outcome } : {}),
+          ...(limit !== undefined ? { limit: String(limit) } : {}),
+          ...(cursor !== undefined ? { cursor } : {}),
           ...(tag_filter?.length ? { tagFilter: tag_filter } : {}),
         });
         return {

@@ -8,9 +8,14 @@
  * Relationship type, resource, file:, mime_type, ids, keys, slots are NEVER prefixed.
  */
 
+import type { PaginatedEntityListResponse } from "@tila/schemas";
 import { createArtifactMethods } from "./artifacts";
 import { TilaApiError, type TilaClient } from "./client";
-import { createTaskMethods } from "./entities";
+import {
+  type TaskListOptions,
+  type TaskListResponse,
+  createTaskMethods,
+} from "./entities";
 import {
   applyPrefix,
   stripPrefix,
@@ -29,6 +34,46 @@ export function namespacedTaskMethods(
   ns: string,
 ) {
   const inner = createTaskMethods(client, projectId);
+
+  async function list(
+    query?: TaskListOptions & { compact?: false },
+  ): Promise<PaginatedEntityListResponse>;
+  async function list(query?: TaskListOptions): Promise<TaskListResponse>;
+  async function list(query?: TaskListOptions): Promise<TaskListResponse> {
+    const prefixedQuery = query
+      ? {
+          ...query,
+          type:
+            query.type !== undefined ? applyPrefix(ns, query.type) : undefined,
+        }
+      : undefined;
+    const result = await inner.list(prefixedQuery);
+    return stripTypes(result);
+  }
+
+  function stripTypes<T extends TaskListResponse>(result: T): T {
+    return {
+      ...result,
+      ...(result.scope
+        ? {
+            scope: {
+              ...result.scope,
+              ...(result.scope.outcome_types
+                ? {
+                    outcome_types: result.scope.outcome_types.map((type) =>
+                      stripPrefix(ns, type),
+                    ),
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      entities: result.entities.map((e) => ({
+        ...e,
+        type: stripPrefix(ns, e.type),
+      })),
+    };
+  }
 
   return {
     ...inner,
@@ -57,30 +102,7 @@ export function namespacedTaskMethods(
       };
     },
 
-    async list(query?: {
-      type?: string;
-      status?: string;
-      limit?: string;
-      cursor?: string;
-    }) {
-      const prefixedQuery = query
-        ? {
-            ...query,
-            type:
-              query.type !== undefined
-                ? applyPrefix(ns, query.type)
-                : undefined,
-          }
-        : undefined;
-      const result = await inner.list(prefixedQuery);
-      return {
-        ...result,
-        entities: result.entities.map((e) => ({
-          ...e,
-          type: stripPrefix(ns, e.type),
-        })),
-      };
-    },
+    list,
   };
 }
 
