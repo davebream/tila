@@ -1349,7 +1349,7 @@
       "issue": 481,
       "pr": 485,
       "kind": "release-builder",
-      "state": "ready",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-481",
       "contract": "2026-10-14-backlog-execution.md#481--follow-up-correction",
@@ -1358,7 +1358,19 @@
         "scripts/deploy-payload-native.test.mjs"
       ],
       "validation": ["native", "packed", "docs"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 485,
+          "head_sha": "010304230e2f0d72cd23bdea6854831581ae5512",
+          "merge_sha": "cc3df83df31a8d4390381ae40fe8aace48bb428c",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/485"
+        }
+      ],
       "task_name": "release-481-build-identity",
       "branch": "fix/481-embedded-release-identity",
       "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
@@ -2611,6 +2623,22 @@
       "main_ancestry_verified": true,
       "verified_by": "lead-backlog",
       "source": "https://github.com/davebream/tila/pull/484"
+    },
+    {
+      "kind": "merge",
+      "pr": 485,
+      "head_sha": "010304230e2f0d72cd23bdea6854831581ae5512",
+      "merge_sha": "cc3df83df31a8d4390381ae40fe8aace48bb428c",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/485"
+    },
+    {
+      "kind": "study-pretrial-amendment",
+      "source": "Lead accepted Sol xhigh proposal before any scored observations",
+      "detail": "Prospective immutable rubric v3: both conditions GPT-6.1-Sol high; 40 admitted hook-covered operations per base role including replacement, terminal transport reported separately, common 720s wall limit. Installed-runtime smoke and P2 evaluator/recorder corrections remain required. No universal native-tool hard-cap claim."
     }
   ],
   "progress_ledger": [
@@ -3615,7 +3643,7 @@
     },
     {
       "node": "i481",
-      "state": "ready",
+      "state": "merged",
       "worker": "release-481-build-identity",
       "base_sha": "581c99d71588a82ffc8b5045f625dc4a06dc43f0",
       "head_sha": "010304230e2f0d72cd23bdea6854831581ae5512",
@@ -3640,11 +3668,23 @@
           "kind": "handoff",
           "source": "https://github.com/davebream/tila/pull/485",
           "detail": "Reviewed offline tooling fix; CI passed and Mergify entered queue at14:38 UTC. Formal release remains blocked."
+        },
+        {
+          "kind": "merge",
+          "pr": 485,
+          "head_sha": "010304230e2f0d72cd23bdea6854831581ae5512",
+          "merge_sha": "cc3df83df31a8d4390381ae40fe8aace48bb428c",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/485"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "queued-in-progress",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-481-closed",
+      "merge_sha": "cc3df83df31a8d4390381ae40fe8aace48bb428c"
     },
     {
       "node": "i482",
