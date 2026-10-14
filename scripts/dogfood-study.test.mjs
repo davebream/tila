@@ -2249,6 +2249,7 @@ test("an integrated condition-A trial passes, imported commits are not authored 
 test("the evaluator accepts an actual competing attempt denied before edits in either condition", () => {
   for (const trialId of ["t1", "t2"]) {
     const { run, trial, slot, scenario, cli } = preparedTrialA(trialId);
+    const competingRole = slot.condition === "B" ? "w2r" : "w2";
     const command = (role) =>
       slot.condition === "A"
         ? [
@@ -2274,8 +2275,8 @@ test("the evaluator accepts an actual competing attempt denied before edits in e
     assert.equal(invoke(command("w1")).status, 0);
     const attemptedAt = Number(process.hrtime.bigint() / 1_000_000n);
     const attempt = {
-      command: command("w2"),
-      role: "w2",
+      command: command(competingRole),
+      role: competingRole,
       resource: scenario.helper.file,
     };
     const denied = invoke(attempt.command);
@@ -2293,7 +2294,7 @@ test("the evaluator accepts an actual competing attempt denied before edits in e
       overlap_id: "injected-helper",
       kind: "injected",
       resource: scenario.helper.file,
-      role: "w2",
+      role: competingRole,
       response: "stopped",
       edits_before_redirect: 0,
     };
@@ -2332,6 +2333,7 @@ test("the evaluator accepts an actual competing attempt denied before edits in e
       readFileSync(join(run, `trials/${trialId}/evaluation.json`), "utf8"),
     );
     assert.equal(evaluation.overlap.response, "stopped");
+    assert.equal(evaluation.overlap.role, competingRole);
     assert.deepEqual(evaluation.overlap.prevention_evidence, evidence);
     assert.equal(cli("derive", "--run-dir", run, "--trial", trialId).status, 0);
     const ledgerPath = join(run, `trials/${trialId}/ledger.json`);
