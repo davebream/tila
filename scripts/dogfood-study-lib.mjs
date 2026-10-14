@@ -422,10 +422,15 @@ export function validateEvent(event, rubric) {
   }
   if (event.kind === "gate.violation") {
     need(
-      Object.hasOwn(rubric.hard_gates, payload.gate ?? "") &&
-        payload.gate.startsWith("G"),
-      "unknown correctness gate",
+      typeof payload.gate === "string",
+      "gate.violation: payload.gate must be a string",
     );
+    if (typeof payload.gate === "string")
+      need(
+        Object.hasOwn(rubric.hard_gates, payload.gate) &&
+          payload.gate.startsWith("G"),
+        "unknown correctness gate",
+      );
   }
   if (event.kind === "usage.record") {
     need(
