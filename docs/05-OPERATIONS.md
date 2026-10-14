@@ -1210,6 +1210,61 @@ D1 migrations must be applied **before** deploying a new Worker version when the
 
 ### CLI deployment
 
+`tila deploy` selects saved infrastructure for the active instance and verifies
+the Cloudflare account, Worker, D1 `DB` binding and R2 `ARTIFACTS` binding before
+any migration or upload. A repository pointing at instance A cannot silently
+deploy global infrastructure B. Custom domains are matched to their Worker through
+Cloudflare's domain API; matching URL strings alone is insufficient.
+
+```bash
+tila deploy                         # Infrastructure matching this repository
+tila deploy --instance <key>         # Explicit registered instance
+tila deploy --infra <slug>           # Explicit saved installation
+tila deploy --infra <slug> --instance <key> # Assert both identify the same Worker
+```
+
+Explicit flags override ambient context. Otherwise selection follows
+`TILA_INSTANCE`, the config file named by `TILA_CONFIG`, the walked-up repository
+config, then the registry's current context. An invalid selection stops the
+command. Without a selected instance, provide `--infra` or `--instance`, even if
+only one installation is saved. Deployment uses the Cloudflare API token and
+does not require a Tila login, read the keychain, or use `--token`/`TILA_TOKEN`
+to select infrastructure.
+
+The global `--project` flag remains an assertion against the repository's
+`project_id`, including with explicit deployment selectors. When an inline
+Tila token would make other commands target the repository URL, deploy also
+verifies that URL identifies the chosen Worker. For example, repository A plus
+`TILA_TOKEN` and `TILA_INSTANCE=B` refuses instead of checking A and deploying B.
+Use `--infra` to intentionally select infrastructure independently of ambient
+authentication context.
+
+Saved installations are read from `~/.tila/infra/<slug>.toml`, with legacy
+`~/.tila/infra.toml` also supported; `TILA_HOME` replaces `~/.tila` in both paths.
+A per-installation record supersedes a legacy record with the same slug. The
+Worker name is `infra_slug`, or the filename slug when that field is absent
+from a per-installation record (legacy files default to `tila`). These files
+must supply the account and D1 identifiers; existing R2 defaults remain supported
+only when they match the Worker's actual binding. No metadata is automatically
+created or rewritten by deployment.
+
+Automatic selection must establish exactly one match. If another account is
+inaccessible, or matching records are ambiguous, use `--infra` to narrow the
+selection. Incorrect bindings, missing Workers, API failures and unprovable
+routing stop deployment. Direct Worker custom domains and workers.dev URLs are
+supported; proxied URLs, path-based routes, service environments and non-default
+R2 jurisdictions require a separate deployment workflow.
+
+Before mutation, stderr reports the installation, selection source, account,
+Worker, database and bucket. Successful `--json` output includes these fields
+in `target`; stdout remains one result document. An explicit selector does not
+bypass resource verification and does not require an extra confirmation prompt.
+
+Normal deployment preserves the Worker's existing secrets. It no longer reloads
+HMAC or GitHub App credentials from local files. Secret setup and rotation remain
+separate infrastructure operations; select and verify that operation's own
+configuration before using it.
+
 `tila deploy` applies pending bundled D1 migrations before uploading the Worker
 and UI. A migration error stops deployment. The completion summary includes the
 latest applied migration filename; `--json` includes it in
