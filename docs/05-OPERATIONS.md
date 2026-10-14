@@ -1307,6 +1307,31 @@ authentication (step-up), and a stale `expected_revision` returns 412
 `revision-conflict`. Clients that omit `expected_revision` keep the previous
 unconditional writes.
 
+### Service identity revisions (#439)
+
+Apply `0036_service_identity_revisions.sql` before deploying the Worker; `tila deploy` applies pending D1 migrations before upload. Existing and new service
+accounts and workload bindings start at revision 1. List, create and update
+responses include `revision`. Each successful display-name or binding-policy
+PATCH increments it once, including legacy writes that omit `expected_revision`.
+A stale supplied revision returns 412 `revision-conflict` with the current
+`revision` and `resource`; a missing/revoked target returns 404 without a revision.
+Failed updates append no successful credential audit event. Binding policies
+remain capped by live canonical membership and refuse bootstrap-only capabilities.
+Revocation takes no revision.
+
+The SDK accepts the optional revision as the last argument of `update` and
+`updateWorkloadBinding`. Both CLI update commands accept `--expected-revision`.
+Settings › Service identities sends the drawer's opened revision, retains edits
+on conflict, and offers an explicit rebase or reload after fetching the current
+values. A failed refresh keeps the draft without silently retrying the save.
+
+D1 metadata backups include service/binding revisions but exclude the destination
+watermark and bearer credentials. Import and rollback assign revisions above the
+maximum of snapshot revisions and retained destination history in the replacement
+transaction. Older archives without these fields remain supported. This protects
+project metadata restore, including deleted-row history since migration tracking
+began; a whole-database infrastructure rollback remains outside this guarantee.
+
 ### Project bootstrap repair (#360)
 
 Upgrade the CLI and Worker together. `tila deploy` applies

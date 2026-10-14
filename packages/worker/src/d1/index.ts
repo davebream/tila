@@ -56,6 +56,7 @@ export {
   CredentialStore,
   CredentialConflict,
   CredentialDenied,
+  CredentialRevisionConflict,
   SCOPED_TOKEN_MARKER,
   type CredentialActor,
 } from "./credential-store";

@@ -329,7 +329,11 @@ describe("applyD1Migrations", () => {
           { name: "project_settings_revision_update" },
           { name: "repo_settings_revision_insert" },
           { name: "repo_settings_revision_update" },
+          { name: "service_identity_revision_insert" },
+          { name: "service_identity_revision_update" },
           { name: "tokens_credential_name" },
+          { name: "workload_binding_revision_insert" },
+          { name: "workload_binding_revision_update" },
         ]);
         expect(
           db

@@ -7,7 +7,12 @@ import {
   policyContains,
 } from "@tila/schemas";
 import { Hono } from "hono";
-import { CredentialConflict, CredentialDenied, CredentialStore } from "../d1";
+import {
+  CredentialConflict,
+  CredentialDenied,
+  CredentialRevisionConflict,
+  CredentialStore,
+} from "../d1";
 import { expireAgentBindings } from "../lib/agent-authority";
 import { zodValidationError } from "../lib/validation";
 import { denied, scopedPolicy } from "../middleware/capability";
@@ -59,6 +64,7 @@ serviceAccountRoutes.patch("/:principalId", async (c) => {
     c.req.param("principalId"),
     parsed.data.display_name,
     { principalId: principalIdFor(token), tokenId: token.tokenId },
+    parsed.data.expected_revision,
   );
   return c.json(
     { ok: !!account, service_account: account },
@@ -116,6 +122,7 @@ serviceAccountRoutes.patch(
       c.req.param("bindingId"),
       parsed.data.policy,
       { principalId: principalIdFor(token), tokenId: token.tokenId },
+      parsed.data.expected_revision,
     );
     return c.json({ ok: !!binding, binding }, binding ? 200 : 404);
   },
@@ -138,6 +145,20 @@ serviceAccountRoutes.delete(
   },
 );
 serviceAccountRoutes.onError((error, c) => {
+  if (error instanceof CredentialRevisionConflict)
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "revision-conflict",
+          message: error.message,
+          retryable: false,
+          revision: error.revision,
+          resource: error.resource,
+        },
+      },
+      412,
+    );
   if (
     error instanceof CredentialConflict ||
     error.message.includes("UNIQUE constraint failed")

@@ -132,7 +132,12 @@ describe("backup operator routes", () => {
       expect(statement).not.toContain("SELECT *");
       expect(statement).not.toContain("token_hash");
       expect(statement).not.toContain("session_hash");
-      expect(statement).not.toContain("revision");
+      if (
+        statement.includes("FROM _service_accounts") ||
+        statement.includes("FROM _workload_bindings")
+      )
+        expect(statement).toContain("SELECT revision,");
+      else expect(statement).not.toContain("revision");
     }
     const repoExport = sql.mock.calls.find(([statement]) =>
       statement.includes("FROM _project_repos"),
