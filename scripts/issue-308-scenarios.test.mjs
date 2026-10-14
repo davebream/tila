@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { test } from "node:test";
@@ -7,9 +14,35 @@ import {
   checks,
   runChecks,
   sanitize,
+  sourceFingerprint,
   validateObservation,
   verifyArtifacts,
 } from "./issue-308-scenarios.mjs";
+
+test("source fingerprint hashes directory symlinks without traversing them and excludes evidence", () => {
+  const base = mkdtempSync(resolve(tmpdir(), "tila-source-"));
+  try {
+    mkdirSync(resolve(base, "fixture-dir"));
+    symlinkSync("fixture-dir", resolve(base, "link"));
+    writeFileSync(resolve(base, "source.ts"), "fixture source");
+    const fingerprint = sourceFingerprint(["source.ts", "link"], base);
+    writeFileSync(resolve(base, "fixture-dir/ignored"), "not tracked");
+    assert.equal(
+      sourceFingerprint(
+        ["link", "docs/evidence/not-read.json", "source.ts"],
+        base,
+      ),
+      fingerprint,
+    );
+    writeFileSync(resolve(base, "source.ts"), "changed source");
+    assert.notEqual(
+      sourceFingerprint(["source.ts", "link"], base),
+      fingerprint,
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
 
 const context = {
   candidate_sha: "a".repeat(40),

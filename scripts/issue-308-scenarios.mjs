@@ -3,8 +3,10 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   appendFileSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -225,8 +227,23 @@ export function verifyArtifacts(report, base = root) {
 }
 
 const git = (...args) =>
-  execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  execFileSync("git", args, { cwd: root, encoding: "utf8" }).trimEnd();
 const isEvidence = (path) => path.startsWith("docs/evidence/issue-308-");
+export function sourceFingerprint(paths, base = root) {
+  return hash(
+    paths
+      .filter((p) => !p.startsWith("docs/evidence/"))
+      .sort()
+      .map((p) => {
+        const path = resolve(base, p);
+        const content = lstatSync(path).isSymbolicLink()
+          ? readlinkSync(path)
+          : readFileSync(path);
+        return `${p}\0${hash(content)}\n`;
+      })
+      .join(""),
+  );
+}
 export function metadata() {
   const changes = git("status", "--porcelain", "--untracked-files=all")
     .split("\n")
@@ -236,7 +253,6 @@ export function metadata() {
     "Commit source before recording evidence",
   );
   const paths = git("ls-files").split("\n").sort();
-  const source = paths.filter((p) => !p.startsWith("docs/evidence/"));
   const ref = (path) => ({
     path,
     sha256: hash(readFileSync(resolve(root, path))),
@@ -261,7 +277,7 @@ export function metadata() {
   return {
     candidate_sha: git("rev-parse", "HEAD"),
     release: version("package.json"),
-    source_sha256: hash(source.map((p) => `${p}\0${ref(p).sha256}\n`).join("")),
+    source_sha256: sourceFingerprint(paths),
     migrations: {
       scope:
         "Local test setup only; no deployed migration observation. D1 setup applies global files; ProjectDO applies DO files; R2 is ephemeral.",
