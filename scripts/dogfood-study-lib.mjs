@@ -1146,15 +1146,27 @@ function replacementEvidence({
     replacementRegistrations.length ||
     retired.length ||
     recoveries.length;
+  for (const r of ["w1", "w2"]) {
+    const originals = registrations.filter((e) => e.payload.role === r);
+    if (observedLifecycle || originals.length)
+      need(
+        originals.length === 1 &&
+          registered(originals[0], r, participant(r, originals[0]), "original"),
+        `${r} original registration/identity is missing or ambiguous`,
+      );
+  }
+  // Every observed context must remain distinguishable, including the survivor.
+  // Before an early stop, compare only registrations that have actually arrived.
+  for (const field of ["participant", "session_id"])
+    need(
+      new Set(registrations.map((e) => e.payload[field])).size ===
+        registrations.length,
+      `registered contexts must have distinct ${field} values`,
+    );
   if (observedLifecycle) {
     need(
       replacements.length === 1 || (early && replacements.length === 0),
       "expected exactly one declared worker replacement",
-    );
-    need(
-      original.length === 1 &&
-        registered(original[0], role, originalParticipant, "original"),
-      "declared original registration/identity is missing or ambiguous",
     );
     need(
       (early && replacementRegistrations.length === 0) ||
@@ -1166,21 +1178,6 @@ function replacementEvidence({
             "replacement",
           )),
       "declared replacement registration/identity is missing or ambiguous",
-    );
-    need(
-      (early && !replacement) ||
-        (originalParticipant &&
-          replacementParticipant &&
-          originalParticipant !== replacementParticipant),
-      "replacement must have a distinct registered participant",
-    );
-    need(
-      (early && !replacement) ||
-        (replacement &&
-          registrations.filter(
-            (e) => e.payload.session_id === replacement.payload.session_id,
-          ).length === 1),
-      "replacement must have a distinct registered session",
     );
     const change = replacements[0];
     need(
@@ -1201,9 +1198,7 @@ function replacementEvidence({
     need(
       (early && retired.length === 0 && !change && !replacement) ||
         (retired.length === 1 &&
-          retired[0].payload.role === role &&
-          retired[0].actor.role === role &&
-          retired[0].provenance === "local_agent_trial" &&
+          identity(retired[0], role, originalParticipant, original[0]) &&
           withinTrial(retired[0]) &&
           before(original[0], retired[0]) &&
           (change ? before(retired[0], change) : early && !replacement) &&
