@@ -303,10 +303,18 @@ export async function verifyOidcJwt(
   // 8. Key lookup — fetch if not cached for this issuer.
   const namespace = JSON.stringify([issuer, jwksUri]);
   const ck = cacheKey(namespace, kid);
-  let key = jwksCache.get(ck);
-
-  if (!key) {
+  const fetchedAt = lastFetchedAt.get(namespace);
+  // Cached successful signatures do not extend trust in a removed key. Expiry
+  // requires a successful refresh before any key from this source can be used.
+  let fetched = false;
+  if (fetchedAt === undefined || Date.now() - fetchedAt >= JWKS_TTL_MS) {
     await fetchJwks(issuer, jwksUri);
+    fetched = true;
+  }
+  let key = jwksCache.get(ck);
+  if (!key && !fetched) {
+    await fetchJwks(issuer, jwksUri);
+    fetched = true;
     key = jwksCache.get(ck);
   }
 
@@ -333,16 +341,11 @@ export async function verifyOidcJwt(
     valid = false;
   }
 
-  // 10. Rotation retry — if signature fails and the cached keys are still
-  //     within the TTL, force an unconditional re-fetch so that key rotation
-  //     that happened within the TTL window is actually picked up, then
-  //     re-verify once with the freshly imported key for this kid.
-  //
-  //     Guard: retry only when the cache is considered fresh (last fetch was
-  //     within JWKS_TTL_MS).  `?? 0` prevents NaN arithmetic without changing
-  //     the "retry on fresh cache" semantics.
+  // 10. Retry a failed cached signature once for rotation within the TTL.
+  // A request that already refreshed this source cannot fetch a second time.
   if (
     !valid &&
+    !fetched &&
     Date.now() - (lastFetchedAt.get(namespace) ?? 0) < JWKS_TTL_MS
   ) {
     // Force unconditional re-fetch (don't short-circuit on current freshness).
