@@ -147,5 +147,7 @@ it.each(["mts", "cts"])(
       ),
     ).toBe(true);
   },
-  30_000,
+  // Packs and fully typechecks declarations in both module formats. Compiler
+  // work competes with other package suites in CI; this is no latency contract.
+  120_000,
 );
