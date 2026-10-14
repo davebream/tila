@@ -14,7 +14,7 @@
     "external_450_counts": true,
     "optional_release_workers": 1,
     "release_skill": ".agents/skills/tila-release/SKILL.md",
-    "planner": "plan-release-astra",
+    "planner": "audit-292-acceptance-astra",
     "lead": "lead-backlog",
     "herdr_session": "tila",
     "planner_pane": "w2:p2",
@@ -25,17 +25,17 @@
       "Brain": {
         "tab": "w2:t1",
         "lead-backlog": "w2:p1",
-        "plan-release-astra": "w2:p2"
+        "audit-292-acceptance-astra": "w2:p2"
       },
       "Builders": {
         "tab": "w2:t2",
         "build-448-settings-transfer": "w2:p3",
-        "build-399-task-filters": "w2:p4",
-        "build-440-ghes-oidc": "w2:p5"
+        "build-312-runtime-deps": "w2:p4",
+        "build-307-readiness-audit": "w2:p5"
       },
       "Release": {
         "tab": "w2:t3",
-        "reserved_pane": "w2:p6"
+        "release-prepare-sol": "w2:p6"
       }
     }
   },
@@ -660,7 +660,7 @@
       "issue": 416,
       "pr": 465,
       "kind": "builder",
-      "state": "queued",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-416",
       "contract": "2026-10-14-backlog-execution.md#416--visible-revisionless-deprecation-i416",
@@ -670,7 +670,20 @@
         "packages/mcp-server/src/tools/schema.ts"
       ],
       "validation": ["sqlite", "sdk", "cli", "mcp", "runtime", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 465,
+          "head_sha": "9249ff3fce282f99344ca5e0987971ad45b4d72b",
+          "merge_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/465",
+          "issue_state": "CLOSED"
+        }
+      ],
       "task_name": "build-416-revision-warning",
       "branch": "feat/416-schema-apply-warning",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -681,9 +694,9 @@
       "owner": "A",
       "stage": 2,
       "issue": 440,
-      "pr": null,
+      "pr": 474,
       "kind": "builder",
-      "state": "implementing",
+      "state": "ready",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-440",
       "contract": "2026-10-14-backlog-execution.md#440--ghes-actions-oidc-i440",
@@ -739,9 +752,9 @@
       "owner": "C",
       "stage": 2,
       "issue": 399,
-      "pr": null,
+      "pr": 473,
       "kind": "builder",
-      "state": "implementing",
+      "state": "ready",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-399",
       "contract": "2026-10-14-backlog-execution.md#399--task-filter-parity-and-truthful-pagination-i399",
@@ -765,7 +778,7 @@
       "issue": 307,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-307",
       "contract": "2026-10-14-backlog-execution.md#307--delivered-readiness-evidence-reconciliation-and-held-activation-i307-audit-g307-activation",
@@ -1032,7 +1045,7 @@
       "issue": null,
       "pr": 312,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/pr-312",
       "contract": "2026-10-14-backlog-execution.md#dependency-prs-and-261-pr311-pr312-pr314-i261",
@@ -1246,7 +1259,7 @@
       "issue": null,
       "pr": null,
       "kind": "release",
-      "state": "not-elected",
+      "state": "blocked",
       "conditional": true,
       "worktree": null,
       "contract": "2026-10-14-backlog-execution.md#release-scope-and-gates",
@@ -2352,6 +2365,50 @@
       "kind": "layout-and-release-plan",
       "source": "User request and lead Herdr moves 2026-10-14",
       "detail": "Single tila workspace: Brain, Builders, Release tabs. Existing sessions moved without restart. Astra writes dedicated release plan; scope/version election awaits plan review; publication not authorized."
+    },
+    {
+      "kind": "progress-plan-merge",
+      "pr": 467,
+      "head_sha": "255e31bc982bb8d28be31b28f6c9b8d66e540a28",
+      "merge_sha": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/467"
+    },
+    {
+      "kind": "native-capability-audit",
+      "source": "Astra source/installed protocol audit 2026-10-14; /tmp/tila-283-astra-capability-audit.txt",
+      "detail": "Standalone attended restoration shipped; unattended unsupported. Herdr observation validator has no production caller; register/open remain gated. Installed0.9.3 protocol22 matches historical asset, start/resume metadata not account-bound transcript proof. Mac still offline; no operator config. Next useful work: Linux fixture/protocol schema evidence and bounded gated adapter wiring, not live acceptance."
+    },
+    {
+      "kind": "release-plan-merge",
+      "pr": 468,
+      "head_sha": "d433efd52ede68b8ca351e37e6f257eead270f77",
+      "merge_sha": "363384aef4852baf898366601f51fa7bc38236f1",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/468"
+    },
+    {
+      "kind": "release-readiness-merge",
+      "pr": 471,
+      "head_sha": "2c5a4eb61be952f7b08aa29f58cd5e2d23442377",
+      "merge_sha": "53e64ba5cbda6b5c52d6c1382a7001a35b879d0c",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/471"
+    },
+    {
+      "kind": "issue-scope-amendment",
+      "issue": 194,
+      "source": "https://github.com/davebream/tila/issues/194",
+      "detail": "Lead reconciled stale engine-only positioning with Decisions0 and current product direction. Actual measured study remains required. Original/revised body retained in /tmp/tila-194-{original,reconciled}-body.md."
     }
   ],
   "progress_ledger": [
@@ -2570,7 +2627,7 @@
     },
     {
       "node": "i416",
-      "state": "queued",
+      "state": "merged",
       "worker": "build-416-revision-warning",
       "base_sha": "e9c904580eabf91abd917dbc066386ead7d8e479",
       "head_sha": "9249ff3fce282f99344ca5e0987971ad45b4d72b",
@@ -2608,20 +2665,40 @@
           "kind": "queue",
           "source": "GitHub check-runs for9249ff3f, Mergify Merge Queue 2026-10-14T13:06Z",
           "detail": "Entered queue; integration draft466; nine issue-only commits rebased and validated; no auto-merge"
+        },
+        {
+          "kind": "merge",
+          "pr": 465,
+          "head_sha": "9249ff3fce282f99344ca5e0987971ad45b4d72b",
+          "merge_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/465",
+          "issue_state": "CLOSED"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "entered-queue-checks-running-draft-466",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-416-closed",
+      "merge_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c"
     },
     {
       "node": "i440",
-      "state": "implementing",
+      "state": "ready",
       "worker": "build-440-ghes-oidc",
-      "base_sha": "0ddc0f94eb25b06de7e2658a4cfe795951e89dbb",
-      "head_sha": null,
-      "pr": null,
-      "tests": [],
+      "base_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c",
+      "head_sha": "9409b454078e146bcff83600d3fa2c1f71376e77",
+      "pr": 474,
+      "tests": [
+        {
+          "phase": "integrated-final",
+          "result": "passed",
+          "command": "Full frozen install/build/typecheck/package tests;109 clean root tests;162 runtime across37files, zero skips/TODOs;lint/version",
+          "source": "/home/dawid/code/tila-workers/issue-440/.ci-reports/issue-440-integrated-handoff.json"
+        }
+      ],
       "evidence": [
         {
           "kind": "dispatch",
@@ -2649,10 +2726,20 @@
             "Personal enrollments created by Actions session drop upstream context; preserve eligibility while retaining and revalidating sponsor authority through descendants"
           ],
           "decision": "bounded fixes and regression coverage authorized; push held"
+        },
+        {
+          "kind": "integrated-transplant",
+          "source": "lead git range-diff and local validation logs 2026-10-14",
+          "detail": "Eight issue-only commits transplanted from parent439 boundary0ddc0f94; six implementation/test patches identical; changelog conflict preserves416/440notes. 143runtime andfullgates passed originalhead343602b9; integratedgates inprogress."
+        },
+        {
+          "kind": "handoff",
+          "source": "https://github.com/davebream/tila/pull/474",
+          "detail": "Non-draft main PR with merge-ready, auto-merge off; Mergify actual check waiting for ci/scopes."
         }
       ],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "waiting-ci-and-scopes",
       "closure": "not-closed"
     },
     {
@@ -2705,12 +2792,19 @@
     },
     {
       "node": "i399",
-      "state": "implementing",
+      "state": "ready",
       "worker": "build-399-task-filters",
-      "base_sha": "9249ff3fce282f99344ca5e0987971ad45b4d72b",
-      "head_sha": null,
-      "pr": null,
-      "tests": [],
+      "base_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c",
+      "head_sha": "33ccd6146606b55ca829c790419e9555e6c212b6",
+      "pr": 473,
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "Full build/test/typecheck/lint/version; 146 runtime tests across38files, zero skips/TODOs",
+          "source": "/tmp/tila-399-logs/handoff.txt"
+        }
+      ],
       "evidence": [
         {
           "kind": "dispatch",
@@ -2719,21 +2813,42 @@
           "model": "GPT-6.1-Sol xhigh",
           "push_hold": true,
           "base_note": "Reviewed416 head; transplant only399 commits after parent merge before PR"
+        },
+        {
+          "kind": "review",
+          "reviewer": "lead-backlog and Astra",
+          "source": "Herdr review 2026-10-14T13:27Z",
+          "detail": "Compactresponse typedunion/overloads, numericpagingvalidation, namespace comma-type mapping, truthfulmetadata andscope reviewed. Finalgates pending."
+        },
+        {
+          "kind": "handoff",
+          "source": "https://github.com/davebream/tila/pull/473",
+          "detail": "Non-draft main PR with merge-ready; auto-merge off; Mergify waiting for ci/scopes, not queued yet."
         }
       ],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "waiting-ci-and-scopes",
       "closure": "not-closed"
     },
     {
       "node": "i307-audit",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-307-readiness-audit",
-      "base_sha": null,
+      "base_sha": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr dispatch2026-10-14",
+          "pane": "tila/w2:p5",
+          "model": "Sonnet xhigh",
+          "session": "ad347763-d6fe-486a-ac96-54a5edce2e01",
+          "push_hold": true,
+          "detail": "Existing delivered runbook/readiness audit, local cutover evidence, no production activation."
+        }
+      ],
       "lead_review": "pending",
       "queue_state": "unverified",
       "closure": "not-closed"
@@ -2754,6 +2869,18 @@
           "model": "GPT-6.1-Sol xhigh",
           "push_hold": true,
           "scope": "All four448 slices sequentially in one issue worktree; initial shared planner/executor active"
+        },
+        {
+          "kind": "shared-milestone-review",
+          "reviewer": "lead-backlog and Astra",
+          "source": "commits4019fee2,dc75815e,25cb0809",
+          "detail": "Sharedslice344core/strictpacked/9runtime passed; corrected locale-dependentcanonicalordering and narrowSDKsubpath. P2 inconsistentsecretpattern guard resolved by sharedschemahelper;366core and22mapping zero-call regressions pass. CLI15tests/typecheckpassed, UI/MCP ongoing."
+        },
+        {
+          "kind": "ui-review",
+          "reviewer": "GPT-6-Astra high",
+          "source": "/tmp/tila-448-ui-review-findings.md",
+          "detail": "Blockers: receipt restoration/import must bind principal+project before display; stale asynchronous preview and restore/import races. Builder assigned regression-backed corrections."
         }
       ],
       "lead_review": "dispatch-approved",
@@ -2948,13 +3075,22 @@
     },
     {
       "node": "pr312",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-312-runtime-deps",
-      "base_sha": null,
-      "head_sha": null,
+      "base_sha": "f231ba532b55fe33de15bc49cdb2e5c35a6439de",
+      "head_sha": "086752f0f1ee5a319577d295fde9ab2ce892368b",
       "pr": 312,
       "tests": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr dispatch2026-10-14",
+          "pane": "tila/w2:p4",
+          "model": "GPT-6.1-Sol xhigh",
+          "push_hold": true,
+          "detail": "Existing Renovate PR and branch; exclusive lock writer; portable auth declarations repair and full validation."
+        }
+      ],
       "lead_review": "pending",
       "queue_state": "unverified",
       "closure": "not-closed"
@@ -3091,13 +3227,19 @@
     },
     {
       "node": "release-rehearsal",
-      "state": "not-elected",
-      "worker": "release-worker",
+      "state": "blocked",
+      "worker": "release-prepare-sol",
       "base_sha": null,
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "kind": "missing-prerequisite",
+          "source": "User reply 2026-10-14: there is none",
+          "detail": "No valid configured Cloudflare operator account/token/exclusioninventory. Independentreadinessdocs prepared; no formalrelease candidate/dispatch/livegate authorized by missinginputs."
+        }
+      ],
       "lead_review": "pending",
       "queue_state": "unverified",
       "closure": "not-closed"
@@ -3125,7 +3267,19 @@
     "planning_requested": true,
     "planning_source": "User: please plan a releas worker too; dedicated fourth worker authorized",
     "plan_worktree": "/home/dawid/code/tila-workers/release-plan",
-    "publication_authorized": false
+    "publication_authorized": false,
+    "plan_pr": 468,
+    "plan_head": "d433efd52ede68b8ca351e37e6f257eead270f77",
+    "readiness_worker": "release-prepare-sol",
+    "readiness_worktree": "/home/dawid/code/tila-workers/release-readiness",
+    "formal_preflight": "blocked-confirmed-missing-operator-config",
+    "operator_input": "User confirmed no alternative valid operator configuration exists; no further credential search/probes.",
+    "proposed_version": "0.9.0 subject to frozen inventory",
+    "readiness_pr": 471,
+    "readiness_head": "2c5a4eb61be952f7b08aa29f58cd5e2d23442377",
+    "readiness_state": "merged-verified-independent-preparation",
+    "plan_merge": "363384aef4852baf898366601f51fa7bc38236f1",
+    "readiness_merge": "53e64ba5cbda6b5c52d6c1382a7001a35b879d0c"
   },
   "validation_profiles": {
     "full": [
@@ -3219,7 +3373,7 @@
       "source"
     ],
     "release_election_allowed_with_evidence": true,
-    "current_active_builders": ["i448-plan", "i399", "i440"],
+    "current_active_builders": ["i448-plan", "pr312", "i307-audit"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient"
   }
 }
