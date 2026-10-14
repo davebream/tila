@@ -2948,11 +2948,18 @@ can manage conversations also get `details.reason` (`missing` or
 `cursor-key-too-short`); other callers get only the code. Tasks, records,
 artifacts and settings are unaffected.
 
-To enable conversations on a deployment without `HASH_PEPPER`:
+To enable conversations on a deployment without `HASH_PEPPER`, name the Worker
+explicitly. Use the account and Worker that `tila deploy` reports as `target` for
+this installation and stop on any mismatch; `tila deploy` itself never sets or
+rotates secrets:
 
 ```bash
-openssl rand -base64 32 | wrangler secret put CONVERSATION_CURSOR_KEY
+openssl rand -base64 32 | pnpm --filter @tila/worker exec wrangler secret put CONVERSATION_CURSOR_KEY --name <worker>
 ```
+
+Then verify with an existing principal's normal read plus an authenticated room
+send and read. `GET /api/health` and `GET /api/runtime/info` (which advertises
+protocol support regardless of secrets) are not readiness evidence.
 
 This changes no credential hash, so tokens and sessions keep working. Do not set
 or rotate `HASH_PEPPER` to enable conversations: it changes every stored
