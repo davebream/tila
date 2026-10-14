@@ -1820,6 +1820,8 @@ participant membership. Template expansion checks every generated task before an
 Ordinary writes do not imply delete: archive/unarchive and relationship removal
 require explicit delete capabilities. A service promotion cannot expand a key's
 issuance ceiling; demotions and revocations immediately reduce current authority.
+To remove what an automated run created without widening its key, see
+[Cleaning up automated run resources](#cleaning-up-automated-run-resources-362).
 
 ### Expiry, rotation and revocation
 
@@ -2049,6 +2051,327 @@ projects remain outside the mutation scope. This gate neither deploys code nor
 simulates SQLite loss or multi-day retention expiry: local lifecycle and recovery
 tests cover those cases. Record deployment/version metadata alongside behavioral
 results; health output alone does not identify the deployed source revision.
+
+## Cleaning up automated run resources (#362)
+
+A key issued with the `worker` preset (and a runtime run, whose ceiling is a
+superset of it) can create records and upload artifacts but cannot archive or
+delete them: it holds no `records:delete`, `artifacts:delete` or `tasks:delete`,
+and the Worker answers `403 permission-denied`. That is deliberate and is not
+changed here. Tila has **no** creator-based deletion ("let a key remove what it
+wrote") and **no** time-to-live on a namespace, so do not plan around either.
+Cleanup is a separate, owner-reviewed step that acts only on resources a run
+reported in a receipt.
+
+### What each removal needs
+
+| Resource | Operation | Capability | Also required | Effect |
+| --- | --- | --- | --- | --- |
+| Record | `POST /records/<type>/~/archive/<key>`; CLI `tila record archive <type> <key> --fence <n>` | `records:delete` | participant membership; the record's current fence | Marks the record archived and bumps its fence. Value and revision history stay; `unarchive` reverses it. There is no record byte-delete short of destroying the project. |
+| Task | `POST /tasks/<id>/archive` | `tasks:delete` | the task's claim fence | Archive only. Restrictions match whole task *types*, never id prefixes, so a per-run task cleaner cannot be expressed. |
+| Versioned artifact revision | `DELETE /artifacts/<key>?fence=<n>` with an `Idempotency-Key`; SDK `artifacts.delete` | `artifacts:delete` | a **live claim** on `artifact:<lineage_id>` and its current fence | Durable tombstone, answered `202 cleanup_pending`. Bytes leave R2 later (see below). |
+| Whole lineage | `POST /artifacts/~/destroy/<lineage_id>` with an `Idempotency-Key`; SDK `artifacts.destroyLineage` | `artifacts:delete` | same claim and fence | Permanently retires the lineage and every revision in it. Metadata and history are kept. |
+| Legacy artifact (`sources/<sha256>.<ext>`, `produced/<resource>/<sha256>.<ext>`) | `DELETE /artifacts/<key>` | `artifacts:delete` | nothing | Tombstones the pointer and deletes the blob immediately, with no fence and no claim. |
+
+The CLI has no `artifact delete` or `artifact destroy` subcommand; artifact
+removal uses the SDK or HTTP. Do not add a wrapper that guesses keys.
+
+### Choose a path
+
+1. **Run-owned disposable project (preferred).** The orchestrator, not the run,
+   owns a project created for that one run. The run gets only a `worker` key for
+   it and never sees an owner credential. Cleanup is the existing owner
+   `tila project destroy`, after the receipt is checked.
+2. **A separate cleanup identity in an existing project.** Usable for records
+   under a key prefix. Artifacts cannot be restricted this way (below), so
+   artifact cleanup in a shared project is attended, short-lived and driven by an
+   exact manifest.
+3. **Leave it.** If neither fits, the resources remain until an owner removes them
+   deliberately. Nothing expires them automatically.
+
+### Path 1: run-owned disposable project
+
+Orchestrator side, with the owner credential, in a private per-run directory.
+Flags below are from `tila <command> --help`; creating and destroying a project
+needs a provisioned deployment, so this sequence is not exercised by the local
+runtime suite (see Validation).
+
+```sh
+tila project create --name rehearsal-<run-id> --json   # owner token lands in this directory's .tila/.env
+tila service-account create --name rehearsal --display-name "Rehearsal run" --role participant --json
+tila token issue --name rehearsal-key --principal 'service:<uuid>' --preset worker --expires <ISO-8601> --json
+```
+
+Give the run the base URL, project ID and the issued key only. A service created
+with the default `--role viewer` cannot write even with the `worker` preset,
+because effective authority is the lower of key and membership. After the run,
+the run's receipt is reviewed (below). Then, still in the same directory:
+
+```sh
+tila token inspect --json    # project_id and instance_id must equal the receipt's
+tila project destroy --force --json
+```
+
+Without `--force` the command asks you to type the project slug. It wipes the
+project's Durable Object and R2 state, cleans D1 records, verifies the domain
+stores are empty and then removes `.tila/`. `--json` reports
+`{ ok, stores: { do, r2, d1, local }, failures }` and exits non-zero on any
+failure. `r2: "gc-skipped"` means some blobs were not removed and nothing will
+reclaim them later; treat the run as incomplete and record the project ID for
+attended follow-up. After a failure `.tila/` is kept so the command can be re-run;
+a project whose state is already empty counts as wiped. Confirm with
+`tila project list` that the slug is gone.
+`tila project destroy <slug>` destroys by slug without local configuration and
+needs `INFRA_ADMIN_TOKEN` and a Cloudflare API token; use it only attended.
+
+Never run destroy against a project the receipt does not name. The command acts
+on the configuration in the current directory; check `project_id` first.
+
+### Path 2: a separate cleanup identity in an existing project
+
+**Records.** Record keys can be restricted by type and slash-delimited key
+prefix. Create one cleaner per run namespace, owned and reviewed by an owner:
+
+```sh
+tila service-account create --name cleanup-run-0001 --display-name "Cleanup run-0001" --role participant --json
+tila token issue --name cleanup-run-0001-key --principal 'service:<uuid>' \
+  --role participant --capabilities records:read,records:delete \
+  --restrictions '{"records":[{"type":"rehearsal","key_prefixes":["run-0001"]}]}' \
+  --expires <ISO-8601> --json
+```
+
+Both `--role participant` flags matter. `--capabilities` replaces the preset's
+list but not its role, so omitting `--role` on the key, or leaving the service at
+its `viewer` default, still issues a key, but one that cannot archive: the lower
+role silently drops the delete capability. `tila token inspect --json` then shows
+`role: viewer` and a `policy.capabilities` without `records:delete`; check it
+before the run.
+
+The prefix `run-0001` permits `run-0001` and `run-0001/...` but not `run-00010`.
+It is a **namespace boundary, not ownership**: any principal that wrote under that
+prefix can also be archived by this key. Make the run ID unique and never reuse
+it. A namespace-restricted key reaches only tasks, records, claims, templates,
+queue, attempts, questions and exact search; every other route is refused.
+
+**Artifacts.** A credential with any namespace restriction is refused on every
+artifact route, so there is no prefix-scoped artifact cleaner. An artifact
+cleaner needs `artifacts:read,artifacts:delete,claims:read,claims:acquire,claims:release`
+and is then **project-wide**: with a lineage claim it can remove any lineage, and
+a legacy key removes any run's bytes. Three properties make that sharper than it
+looks, each covered by a test:
+
+- A lineage fence is not bound to its holder. The server checks that the fence is
+  current and that *some* claim on the lineage is live. A key that only reads
+  claim state can delete using another participant's live fence.
+- Uploads without a `lineage_id` are content-addressed. Two runs that upload the
+  same bytes share one key (the second is `deduplicated`), and deleting that key
+  removes the bytes for both, with no fence.
+- Authorization never consults who wrote an artifact. Provenance is recorded but
+  not enforced, so "the run's artifacts" exists only in the receipt.
+
+So do not run an unattended artifact janitor in a shared project and do not call
+it creator-only deletion. Issue the artifact cleaner for one cleanup, short
+expiry, from a reviewed manifest; revoke it afterwards with
+`tila token revoke <name>` (and `tila service-account revoke <principal>`).
+For runs that must be cleaned without an operator, use Path 1.
+
+### The run receipt
+
+The receipt is a convention for this procedure; Tila neither stores nor validates
+it. The run reports it, an owner reviews it, and cleanup refuses anything not in
+it.
+
+```json
+{
+  "project_id": "rehearsal-run-0001",
+  "instance_id": "<deployment instance_id from GET /api/whoami at run start>",
+  "run_id": "run-0001",
+  "reviewed_by": "owner display name or ticket (recorded, not verified by Tila)",
+  "cleanup_principal_ids": ["service:<records-cleaner>", "service:<artifacts-cleaner>"],
+  "retention": "delete-bytes",
+  "records": [{ "type": "rehearsal", "key": "run-0001/main" }],
+  "artifacts": [
+    {
+      "lineage_id": "run-0001-report",
+      "revisions": [{ "r2_key": "versioned/...", "revision": 1, "sha256": "<hex>" }],
+      "destroy_lineage": true
+    }
+  ]
+}
+```
+
+- **Identity.** `project_id`, `instance_id` and `cleanup_principal_ids` are checked
+  against the cleaner's own `GET /api/whoami` (`tila token inspect --json`:
+  `project_id`, `instance_id`, `principal_id`). `instance_id` comes from the
+  deployment's own database, so every hostname of one deployment reports the same
+  value; compare it, not the URL.
+  `reviewed_by` is an audit note; nothing can verify it, so do not describe the
+  procedure as having checked the reviewer.
+- **Retention.** `archive-only` means records are archived and **no artifact
+  bytes are removed**; the artifact phase refuses to start. `delete-bytes` is the
+  owner's explicit authorization to remove the listed artifacts. Records are
+  archived under either, since there is no record byte-delete.
+- **Artifacts.** List exact revision keys, numbers and hashes. Set
+  `destroy_lineage` only when the lineage is exclusive to the run. Have the run
+  write under a unique `lineage_id` and release its claim when done; avoid
+  lineage-less uploads. For `history = "snapshot"` record types, the canonical and
+  source snapshot artifacts are separate legacy keys that archiving the record does
+  not remove; they appear in `tila record history <type> <key> --values --json`
+  and belong in the receipt if they should go.
+
+### Procedure
+
+Fail closed: each step stops the whole run on mismatch or uncertainty, and
+nothing is inferred from a prefix or a listing.
+
+**This is not atomic.** Records and artifacts are separate operations in separate
+stores, and artifacts are removed one request at a time. Verifying everything
+before the first destructive call limits the damage from a mismatch; it does not
+make cleanup transactional. If a call fails after others succeeded, those stay
+removed. Stop, keep the receipt, and re-run once the cause is understood.
+
+0. **Receipt.** Refuse a receipt that repeats a record, a lineage or a revision
+   key (within a lineage or across lineages), repeats a revision number within a
+   lineage, or lists a lineage with no revisions. A repeated key can make a count
+   agree with the live set while an unlisted revision stays live. This needs no
+   request.
+1. **Identity.** Read `GET /api/whoami` with the cleanup key. Refuse unless
+   project, deployment and `principal_id` match the receipt.
+2. **Scope.** Refuse any target not in the receipt, before any request that
+   changes state. Refuse the artifact phase unless `retention` is `delete-bytes`.
+3. **Records.** `tila record get <type> <key> --json` for each listed record.
+   If it cannot be read (including `403`), stop: that is uncertainty, not "done".
+   Skip records already archived. Archive with the fence just read:
+   `tila record archive <type> <key> --fence <fence>`. The fence is a
+   compare-and-set, so a record changed after the read is refused rather than
+   archived.
+4. **Claims first.** For each listed lineage, in a fixed order, acquire an
+   exclusive claim on `artifact:<lineage_id>` **before reading anything that will
+   justify a deletion**. A claim is exclusive, so no writer can append between
+   verification and the destructive call. A read taken before the claim proves
+   nothing: a writer can append and release in the gap. If a claim is held
+   (`409 already-held`), release what you hold and stop.
+5. **Verify under the claims.** Page through
+   `GET /artifacts/~/history/<revision key>`. Every receipt revision must be
+   present with the receipt's `lineage_id`, `revision` and `sha256`. If
+   `destroy_lineage` is set, compare the actual key sets, never counts: refuse if
+   any revision that is still available (not tombstoned, `blob_deleted_at` unset)
+   is not in the receipt. All lineages are verified before any is changed.
+6. **Destructive calls.** With each claim's own fence and a stable per-item
+   idempotency key (`cleanup:<run_id>:delete:<key>` or
+   `cleanup:<run_id>:destroy:<lineage_id>`): `artifacts.delete(key, { fence,
+   idempotencyKey })` for each receipt revision, or one
+   `artifacts.destroyLineage(lineage, { fence, idempotencyKey })` when the
+   lineage is exclusive. Per-revision deletion leaves any revision a writer added
+   after review untouched.
+7. **Release** every claim in `finally`; a release failure does not change the
+   outcome and the claim expires with its TTL.
+
+Steps 4–6 as SDK calls (these are the calls the tested fixture makes):
+
+```ts
+const claims = createClaimMethods(client, projectId);
+const artifacts = createArtifactMethods(client, projectId);
+
+const claim = await claims.acquire(`artifact:${lineage}`, "exclusive", 60_000);
+try {
+  const history = await artifacts.history(firstRevisionKey, { limit: 100 });
+  // ...verify every receipt revision against `history.items`; refuse on mismatch...
+  await artifacts.destroyLineage(lineage, {
+    fence: claim.fence,
+    idempotencyKey: `cleanup:${runId}:destroy:${lineage}`,
+  });
+} finally {
+  await claims.release(`artifact:${lineage}`, claim.fence);
+}
+```
+
+The executable reference is `cleanFromReceipt` in
+`packages/integration-tests/runtime/run-cleanup.test.ts`. It is test code, not a
+shipped tool; Tila has no cleanup subcommand or daemon.
+
+### Responses and retries
+
+Reuse the same idempotency key for the same item. A key replays its original
+outcome even after the claim has expired; a different key, or no key, is a new
+operation.
+
+| Response | Meaning | Do |
+| --- | --- | --- |
+| `403 permission-denied` | Missing capability, restriction, or membership role | Stop. Do not widen the key; have the owner fix and review the cleaner. |
+| `409 stale-fence` | Fence is old, or no claim on the lineage is live | Re-acquire, re-read, re-verify against the receipt, then retry with the new fence. Never reuse an old fence. |
+| `409 already-held` | Someone holds the lineage claim | Stop; do not force. Retry after it expires or is released. |
+| `409 invalid-state` "already archived" | Record is archived (checked before the fence, so a stale fence gives this too) | Read the record; if archived and listed in the receipt, count it done. |
+| `404 not-found` | Record or revision missing | Stop and investigate; absent is not "removed by me". |
+| `400 missing-fence` / `400 missing-idempotency-key` | Request malformed | A cleaner bug; fix before retrying. |
+| `202 cleanup_pending` | Tombstone is durable; bytes pending | Verify later (below). |
+| `410 artifact-unavailable` | Content is unavailable: returned as soon as the tombstone is durable, **before** the bytes are deleted. History remains. | Count the revision as retired, not as removed. Confirm byte removal with `blob_deleted_at` (below). |
+| `409 artifact-lineage-busy` (retryable) | A revision is still publishing | Retry the same request later. |
+| `503 artifact-storage-unavailable` (retryable), timeout, network error | Outcome unknown | Do not assume either way. Retry with the same key and fence while the claim lives; once it lapsed, re-acquire and re-verify, then reuse the key. |
+| `422 idempotency-key-conflict` | Key reused with different input | Do not mint a new key to push through; re-read and re-verify. |
+
+Rerunning the whole procedure is safe: archived records and tombstoned revisions
+are skipped, and an unchanged receipt sends no destructive request.
+
+### Archive, bytes, retention and audit
+
+- **Archive versus byte deletion.** Record archive is soft and reversible. Artifact
+  tombstone makes content unavailable (`410`) at once but the bytes remain in R2
+  until the lifecycle queue deletes them; lineage destroy is permanent. Revision
+  metadata and history survive byte removal.
+- **Asynchronous drain.** `202` means the retirement record is durable, not that
+  bytes are gone. The project's alarm and the daily sweep process the queue; a
+  failure keeps its work item and retries with exponential backoff capped at one
+  hour. Confirm removal per revision: `GET /artifacts/~/history/<key>` shows
+  `blob_deleted_at` as a number (`tila artifact history <key> --json`). Neither a
+  `410` on download nor the table view's `Unavailable` column shows that: both are
+  already true at tombstone, so they cannot tell "tombstoned" from "bytes gone".
+- **Protected heads.** Configured per-kind `retention_days` removes only
+  non-head revisions older than the period, and only once a newer live revision
+  exists. A live head is never expired automatically; explicit delete or destroy
+  with a current fence is the only way its bytes leave. A deployment-wide R2
+  `produced/` expiration (365 days) is a Worker-sweep backstop, not a per-run or
+  per-namespace TTL.
+- **Audit retention.** Cleanup does not remove audit data. Archive and tombstone
+  append `record.archived` and `artifact.tombstoned` journal events with the
+  actor and participant; record history and artifact revision metadata remain.
+  Journal maintenance may move old events to archive objects; destroying the
+  project removes them.
+- **Verify exact removal.** Check each receipt item by name: records via
+  `tila record get <type> <key> --json` (`archived: 1`); artifacts via history,
+  where `blob_deleted_at` set is the only API evidence that bytes were removed. A
+  `410` on download verifies only that the content is unavailable. Until
+  `blob_deleted_at` is set, the revision is retired but its bytes may still exist;
+  report it as pending, not removed. An empty prefix listing, or the absence of an
+  error, is not verification, and a restricted key cannot list artifacts at all.
+
+### Validation
+
+`packages/integration-tests/runtime/run-cleanup.test.ts` runs against the real
+Worker, Durable Object, D1 and R2 with synthetic identities only:
+
+- the `worker` preset gets `403` for record archive, artifact delete and lineage
+  destroy, and nothing changes;
+- a prefix-restricted record cleaner archives with the current fence, is refused
+  with a stale fence, outside its prefix or type, and when the membership or the
+  key role is only `viewer`;
+- an artifact cleaner is refused while the run holds the claim, with a stale or
+  missing fence, and succeeds with its own claim; download answers `410` and
+  `blob_deleted_at` stays unset while the bytes remain, until the queue drains;
+- the receipt procedure archives and retires exactly the listed resources,
+  refuses before any state-changing request for project, deployment, principal,
+  scope, `archive-only` and repeated record, lineage or revision keys, refuses
+  under the claims when history no longer matches, refuses to retire a lineage a
+  writer extended after review (comparing key sets, not counts), and excludes
+  writers between verification and deletion;
+- the limits above: artifact routes refuse restricted keys, a live fence is not
+  holder-bound, and legacy keys are shared and fence-free.
+
+`tila project create`, `tila project destroy` and `tila token issue` flags were
+checked against `--help`; the policy a flag set produces is the CLI's own
+`policyFromArgs` in the test. Project creation and destruction against a deployed
+instance are covered by the live gate in "Disposable deployed artifact
+verification", not by this suite.
 
 ## Runtime enrollment and unattended runs
 
