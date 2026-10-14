@@ -18,10 +18,11 @@ const mainConfig = {
     // ONLY (the remote backends import it type-only), so it is inlined into the
     // declarations here but deliberately NOT added to noExternal — that would
     // drag core's runtime (schema parser, grep engine) into the zod-only entry.
-    // Without dts.resolve, rollup-dts would leave bare `import ... from
-    // "@tila/core"`/"@tila/schemas"` in the declarations, breaking consumers
-    // since neither package is published.
-    resolve: ["@tila/schemas", "@tila/core"],
+    // Resolve their relative declaration siblings too: a package-name allowlist
+    // leaves imports such as ./api and ./interfaces/schema-backend dangling in
+    // the published bundle. This changes declaration bundling only; the main
+    // runtime still excludes core and SQLite via the configuration below.
+    resolve: true,
   },
   clean: true,
   treeshake: true,
