@@ -2,13 +2,13 @@ import {
   type CredentialPolicy,
   CredentialPolicyReadSchema,
   CredentialPolicySchema,
-  GITHUB_ACTIONS_ISSUER,
   type GitHubActionsContext,
   GitHubActionsContextSchema,
   type ProjectRole,
   type WorkloadBindingRequest,
   delegablePolicy,
   effectiveCredentialPolicy,
+  githubActionsIdentity,
   hasRootCapabilities,
   intersectCredentialPolicies,
 } from "@tila/schemas";
@@ -59,7 +59,10 @@ export const SCOPED_TOKEN_MARKER = "scoped-v1";
 
 export class CredentialStore {
   private db;
-  constructor(private binding: D1Database) {
+  constructor(
+    private binding: D1Database,
+    private trustedActionsIssuers?: string,
+  ) {
     this.db = drizzle(binding);
   }
   private event(
@@ -552,7 +555,7 @@ export class CredentialStore {
         );
         if (
           !parsed.success ||
-          binding.issuer !== GITHUB_ACTIONS_ISSUER ||
+          binding.issuer !== githubActionsIdentity(parsed.data).issuer ||
           binding.subject !== parsed.data.sub
         )
           return null;
@@ -560,6 +563,7 @@ export class CredentialStore {
           this.binding,
           row.credential.project_id,
           parsed.data,
+          this.trustedActionsIssuers,
         );
         if (!current) return null;
         policy = effectiveCredentialPolicy(policy, current.role);

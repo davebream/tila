@@ -2111,6 +2111,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
     mockOidcPolicy();
     mockVerifyOidcToken.mockResolvedValue({
       iss: "https://token.actions.githubusercontent.com",
+      repository_host: "github.com",
       aud: "https://tila.example.com",
       sub: "repo:test-org/test-repo:ref:refs/heads/main",
       exp: Math.floor(Date.now() / 1000) + 600,
@@ -2513,6 +2514,7 @@ describe("POST /api/auth/github/exchange-oidc", () => {
     // Mock verifyOidcToken to return valid claims (needed to construct idempotency key)
     mockVerifyOidcToken.mockResolvedValue({
       iss: "https://token.actions.githubusercontent.com",
+      repository_host: "github.com",
       aud: "https://tila.example.com",
       sub: "repo:test-org/test-repo:ref:refs/heads/main",
       exp: Math.floor(Date.now() / 1000) + 600,
@@ -2717,6 +2719,7 @@ describe("instance_id binding in minted session JWT and login response", () => {
     // the exchange reaches 200 rather than 403 (repo not in allowlist).
     mockVerifyOidcToken.mockResolvedValue({
       iss: "https://token.actions.githubusercontent.com",
+      repository_host: "github.com",
       aud: "https://tila.example.com",
       sub: "repo:test-org/test-repo:ref:refs/heads/main",
       exp: Math.floor(Date.now() / 1000) + 600,
@@ -3005,6 +3008,7 @@ describe("WI-H tiered TTL: OIDC /exchange-oidc path", () => {
     mockOidcPolicy({ max_permission: "read" });
     mockVerifyOidcToken.mockResolvedValue({
       iss: "https://token.actions.githubusercontent.com",
+      repository_host: "github.com",
       aud: "https://tila.example.com",
       sub: "repo:test-org/test-repo:ref:refs/heads/main",
       exp: Math.floor(Date.now() / 1000) + 600,
@@ -3257,6 +3261,7 @@ describe("cnf.jkt DPoP binding in session JWT (WI-G Task 4)", () => {
 
     mockVerifyOidcToken.mockResolvedValue({
       iss: "https://token.actions.githubusercontent.com",
+      repository_host: "github.com",
       aud: "https://tila.example.com",
       sub: "repo:test-org/test-repo:ref:refs/heads/main",
       exp: Math.floor(Date.now() / 1000) + 600,

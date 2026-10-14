@@ -31,6 +31,8 @@ export interface Env {
   GITHUB_APP_CLIENT_ID?: string;
   GITHUB_APP_CLIENT_SECRET?: string;
   GITHUB_OIDC_AUDIENCE?: string;
+  /** Optional JSON array of explicit GHES Actions {issuer, host, jwks_uri} entries. */
+  GITHUB_ACTIONS_TRUSTED_ISSUERS?: string;
   SWEEP_SECRET?: string;
   // Optional infra-owner admin secret. When set, the infra admin sub-router
   // accepts a matching bearer to operate on ANY project by slug (no per-project

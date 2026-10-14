@@ -76,6 +76,14 @@ run_worker_first = ["/api/*", "/auth/*", "/projects/*", "/_internal/*"]
 #
 # GITHUB_OIDC_AUDIENCE — Expected 'aud' claim in OIDC tokens (set via wrangler secret put)
 #
+# GITHUB_ACTIONS_TRUSTED_ISSUERS — Optional JSON array of GHES Actions
+#   {issuer, host, jwks_uri} mappings. GitHub.com remains built in when unset.
+#   Endpoints require HTTPS; issuer identity is exact; private egress is refused.
+#   The mapping is not secret, but storing it as a Worker secret preserves it
+#   across CLI-generated deploys (which intentionally emit no [vars]).
+#   Set: wrangler secret put GITHUB_ACTIONS_TRUSTED_ISSUERS --name <worker-name> < actions-issuers.json
+#   See docs/05-OPERATIONS.md, "Enterprise Actions issuer trust".
+#
 # INFRA_ADMIN_TOKEN — infra-owner admin secret (a shared, identity-less credential, NOT a per-project token)
 #   When set, the /_internal/admin/* routes accept a matching `Authorization: Bearer <token>`.
 #   When unset, those routes return 404 (the endpoints are invisible).

@@ -163,6 +163,7 @@ workspace.get("/projects", async (c) => {
       c.env.DB,
       token,
       token.projectId,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
     );
     const meta = membership ? await registry.get(token.projectId) : null;
     return c.json({

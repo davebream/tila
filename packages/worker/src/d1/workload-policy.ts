@@ -1,11 +1,13 @@
 import { evaluateGitHubOidcPolicy } from "@tila/core";
 import {
-  GITHUB_ACTIONS_ISSUER,
   type GitHubActionsContext,
+  GitHubActionsContextSchema,
   PROJECT_ROLE_RANK,
   type ProjectRole,
+  githubActionsIdentity,
   permissionToRole,
 } from "@tila/schemas";
+import { trustedActionsIssuer } from "../lib/github-actions-trust";
 import {
   ProjectMembershipStore,
   canonicalMembershipPrincipal,
@@ -17,10 +19,16 @@ export async function resolveActionsPolicy(
   db: D1Database,
   projectId: string,
   context: GitHubActionsContext,
+  trustedIssuers?: string,
 ) {
+  const parsed = GitHubActionsContextSchema.safeParse(context);
+  if (!parsed.success) return null;
+  const identity = githubActionsIdentity(parsed.data);
+  const trusted = trustedActionsIssuer(identity.issuer, trustedIssuers);
+  if (!trusted || trusted.host !== identity.host) return null;
   const result = await new RepoAllowlistStore(db).getOidcPolicy(
     projectId,
-    "github.com",
+    identity.host,
     context.repository_id,
   );
   if (
@@ -40,12 +48,18 @@ export async function resolveActionsMembership(
   projectId: string,
   context: GitHubActionsContext,
   issuedRole?: ProjectRole,
+  trustedIssuers?: string,
 ) {
-  const current = await resolveActionsPolicy(db, projectId, context);
+  const current = await resolveActionsPolicy(
+    db,
+    projectId,
+    context,
+    trustedIssuers,
+  );
   if (!current) return null;
   const principal = canonicalMembershipPrincipal({
     provider: "oidc",
-    issuer: GITHUB_ACTIONS_ISSUER,
+    issuer: githubActionsIdentity(context).issuer,
     subject: context.sub,
   });
   const cap = current.repo.membership_role_cap;

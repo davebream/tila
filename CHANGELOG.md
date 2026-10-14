@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Enterprise Server Actions OIDC support through optional deployment JSON `GITHUB_ACTIONS_TRUSTED_ISSUERS` (`issuer`, `host`, `jwks_uri`). Verified issuer and repository host select the linked repository policy and remain part of credential, runtime run and signed-session authorization. Removing issuer trust or disabling repository policy denies subsequent protected requests for context-bearing Actions authority. GitHub.com remains trusted by default.
+- Actions-sponsored personal runtime enrollments persist verified sponsor provenance and revalidate it for existing descendant runs, recovery, renewal and heartbeat. Recovery cannot switch repository/context or exceed the caller's current ceiling; original capabilities and restrictions remain frozen.
+
 ### Task attention filters (#399)
 
 - SDK HTTP/local task lists, CLI `task list --blocked` / `--outcome`, and MCP `tila_task_list` expose blocked and lifecycle-outcome filters with exact totals, cursor continuation and `scope.outcome_types`. An undeclared outcome returns an empty page with total zero. Invalid and empty outcome lists are rejected. Paging rejects non-positive, fractional or non-finite limits and negative, fractional or non-finite offsets; valid limits above 500 remain capped. Compact SDK requests expose a projection union rather than promising full HTTP rows.
@@ -24,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgrade the Worker to record warnings and journal events, then upgrade clients to display them. An older client may ignore the new response field; the project journal remains observable (`tila journal list --kind schema.revisionless_applied`). No database migration or product-version bump accompanies this change.
 - Current `tila schema apply` still permits revision omission; use `--expected-revision` from a reviewed diff or `--review`. CLI definition import, the dashboard definition editor/importer, and MCP `tila_schema_import` send reviewed revisions on apply. Direct SDK/API applies and MCP `tila_schema_update` still accept omission on non-managed projects and now warn. Preview, retain its `revision`/`reviewed_definition`, and submit them with a stable idempotency key; never substitute a newer revision on retry.
 - Supplied revisions retain HTTP 412 `schema-revision-conflict` behavior without a deprecation warning. Managed projects still require a revision, even for a cached legacy receipt. Requiring revisions everywhere is a future migration; no enforcement release or date is set.
+- Upgrade every Worker instance before enabling GHES issuer trust or exchanging GHES assertions. Workload JSON and signed session claims gain `issuer` and `repository_host`; old contexts without these fields remain GitHub.com only. Older Workers discard the new fields and cannot safely authorize GHES sessions. No additional D1 migration is required for #440. The existing generic OIDC configuration and hardened public HTTPS egress rules are unchanged; private-network-only GHES requires a separate network design.
+- Pre-fix Actions personal enrollments with null sponsor context remain membership-only; their existing credentials are not retroactively repaired. Known affected enrollments must be revoked and re-enrolled with a new operation ID/current assertion. Recovery cannot invent provenance. Existing contextless human/generic OIDC behavior and untagged GitHub mirrored context remain supported; repository-specific revocation cannot be inferred for contextless legacy installations.
+
+### Fixed
+
+- OIDC verification refreshes expired JWKS before using cached keys, rejects removed keys, and fails closed if refresh fails. Stable-kid rotation retains one retry for a failed cached signature. Cache keys and fetch bookkeeping include both issuer and configured JWKS URI, so an old in-flight fetch cannot restore keys under a new endpoint configuration.
 
 ## [0.8.0] - 2026-10-13
 

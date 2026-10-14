@@ -521,3 +521,48 @@ test("a conflict whose refresh fails retains the draft and cannot rebase from th
   ).toBeDisabled();
   expect(writes(api.sent)).toHaveLength(1);
 });
+
+test("an Actions binding accepts an explicit Enterprise issuer without adding deployment trust", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ workload_bindings_manage: true }));
+  const api = servicesApi();
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: "Workload bindings of ci-bot" }),
+  );
+  const drawer = await screen.findByRole("dialog", {
+    name: /Workload bindings/,
+  });
+  await user.click(
+    await within(drawer).findByRole("button", { name: "Add workload binding" }),
+  );
+  const form = within(drawer).getByRole("form", {
+    name: "New workload binding",
+  });
+  expect(
+    within(form).getByText(/A binding does not add issuer trust/),
+  ).toBeInTheDocument();
+  await user.type(
+    within(form).getByRole("textbox", { name: /^Name/ }),
+    "enterprise-ci",
+  );
+  const issuer = within(form).getByRole("textbox", { name: /^Issuer/ });
+  await user.clear(issuer);
+  await user.type(issuer, "http://github--enterprise.example/token");
+  await user.type(
+    within(form).getByRole("textbox", { name: /^Subject/ }),
+    "repo:acme/widgets:ref:refs/heads/main",
+  );
+  await user.click(within(form).getByRole("button", { name: "Add binding" }));
+  expect(writes(api.sent)).toEqual([]);
+  await user.clear(issuer);
+  await user.type(issuer, "https://github--enterprise.example/_services/token");
+  await user.click(within(form).getByRole("button", { name: "Add binding" }));
+  expect(
+    await within(drawer).findByText("Added enterprise-ci."),
+  ).toBeInTheDocument();
+  expect(writes(api.sent)[0].body).toMatchObject({
+    provider: "github-actions",
+    issuer: "https://github--enterprise.example/_services/token",
+  });
+});

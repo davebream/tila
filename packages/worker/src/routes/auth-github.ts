@@ -1,6 +1,5 @@
 import {
   AUTHORIZATION_VERSION,
-  GITHUB_ACTIONS_ISSUER,
   GitHubActionsContextSchema,
 } from "@tila/schemas";
 import {
@@ -1236,11 +1235,20 @@ authGithub.post("/exchange-oidc", async (c) => {
   // Verify OIDC token
   let claims: Awaited<ReturnType<typeof verifyOidcToken>>;
   try {
-    claims = await verifyOidcToken(oidc_token, c.env.GITHUB_OIDC_AUDIENCE);
+    claims = await verifyOidcToken(
+      oidc_token,
+      c.env.GITHUB_OIDC_AUDIENCE,
+      c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    );
   } catch (err) {
     // Map OIDC verification errors to HTTP status codes
     if (err instanceof OidcVerificationError) {
-      const statusCode = err.code === "oidc-jwks-unavailable" ? 502 : 401;
+      const statusCode =
+        err.code === "oidc-invalid-configuration"
+          ? 500
+          : err.code === "oidc-jwks-unavailable"
+            ? 502
+            : 401;
 
       // Record rate-limit failure for auth errors
       if (statusCode === 401) {
@@ -1278,7 +1286,7 @@ authGithub.post("/exchange-oidc", async (c) => {
   // bypass a policy that was disabled or tightened after the original mint.
   const policyResult = await new RepoAllowlistStore(c.env.DB).getOidcPolicy(
     project_id,
-    "github.com",
+    claims.repository_host,
     claims.repository_id,
   );
   const policyDecision =
@@ -1323,14 +1331,18 @@ authGithub.post("/exchange-oidc", async (c) => {
     throw new Error("OIDC policy decision invariant violated");
   }
 
+  const workload = GitHubActionsContextSchema.parse({
+    ...claims,
+    issuer: claims.iss,
+  });
   const scopedResponse = await exchangeScopedWorkload(c, {
     projectId: project_id,
     provider: "github-actions",
-    issuer: "https://token.actions.githubusercontent.com",
+    issuer: claims.iss,
     subject: claims.sub,
     githubLogin: claims.actor,
     githubRepoId: claims.repository_id,
-    workloadContext: GitHubActionsContextSchema.parse(claims),
+    workloadContext: workload,
     assertionId: claims.jti,
     expiresAt: claims.exp,
     jkt: parsed.data.jkt,
@@ -1339,11 +1351,12 @@ authGithub.post("/exchange-oidc", async (c) => {
   });
   if (scopedResponse) return scopedResponse;
 
-  const workload = GitHubActionsContextSchema.parse(claims);
   const membership = await resolveActionsMembership(
     c.env.DB,
     project_id,
     workload,
+    undefined,
+    c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
   );
   if (!membership)
     return c.json(
@@ -1359,7 +1372,7 @@ authGithub.post("/exchange-oidc", async (c) => {
     );
 
   // Idempotency check (keyed by project_id + jti from verified claims)
-  const idempotencyKey = `oidc-v2:${project_id}:${claims.jti}:${membership.role}${parsed.data.jkt ? `:jkt:${parsed.data.jkt}` : ""}`;
+  const idempotencyKey = `oidc-v3:${JSON.stringify([project_id, claims.iss, claims.repository_host, claims.repository_id, claims.sub, claims.jti, membership.role, parsed.data.jkt ?? null])}`;
   const idempotencyStore = new D1IdempotencyStore(c.env.DB);
 
   const cachedOidcBody = await checkIdempotentExchange(
@@ -1419,7 +1432,7 @@ authGithub.post("/exchange-oidc", async (c) => {
       github_repo_id: claims.repository_id,
       principal_id: canonicalMembershipPrincipal({
         provider: "oidc",
-        issuer: GITHUB_ACTIONS_ISSUER,
+        issuer: claims.iss,
         subject: claims.sub,
       }).principalId,
       permission,

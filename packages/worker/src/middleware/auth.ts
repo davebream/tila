@@ -1,9 +1,9 @@
 import {
   AUTHORIZATION_VERSION,
   CAPABILITIES,
-  GITHUB_ACTIONS_ISSUER,
   delegablePolicy,
   effectiveCredentialPolicy,
+  githubActionsIdentity,
   roleToPermission,
 } from "@tila/schemas";
 import { SessionPayloadSchema, canonicalizeHtu } from "@tila/schemas";
@@ -652,9 +652,10 @@ export function createAuthMiddleware(
               401,
             );
           if (source.scopes === SCOPED_TOKEN_MARKER) {
-            const scoped = await new CredentialStore(c.env.DB).resolve(
-              source.tokenId,
-            );
+            const scoped = await new CredentialStore(
+              c.env.DB,
+              c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+            ).resolve(source.tokenId);
             if (!scoped)
               return c.json(
                 {
@@ -1040,7 +1041,10 @@ export function createAuthMiddleware(
       {
         const { identityHost, subjectId } =
           payload.sub_type === "github-actions"
-            ? canonicalizePrincipal(GITHUB_ACTIONS_ISSUER, payload.workload.sub)
+            ? canonicalizePrincipal(
+                githubActionsIdentity(payload.workload).issuer,
+                payload.workload.sub,
+              )
             : payload.sub_type === "oidc"
               ? canonicalizePrincipal(payload.oidc_issuer, payload.oidc_subject)
               : canonicalizePrincipal(
@@ -1061,7 +1065,10 @@ export function createAuthMiddleware(
           // above so the cache-key and the D1 lookup stay consistent.
           const [hostArg, subjectArg] =
             payload.sub_type === "github-actions"
-              ? ([GITHUB_ACTIONS_ISSUER, payload.workload.sub] as const)
+              ? ([
+                  githubActionsIdentity(payload.workload).issuer,
+                  payload.workload.sub,
+                ] as const)
               : payload.sub_type === "oidc"
                 ? ([payload.oidc_issuer, payload.oidc_subject] as const)
                 : ([payload.github_host, payload.github_user_id] as const);
@@ -1148,6 +1155,7 @@ export function createAuthMiddleware(
             payload.project_id,
             payload.workload,
             payload.role,
+            c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
           );
         } catch {
           return c.json(
@@ -1298,7 +1306,10 @@ export function createAuthMiddleware(
       if (claims?.scopes === SCOPED_TOKEN_MARKER) {
         const tokenId = claims.tokenId;
         const scoped = await measurePhase(c, "auth_credential", () =>
-          new CredentialStore(c.env.DB).resolve(tokenId),
+          new CredentialStore(
+            c.env.DB,
+            c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+          ).resolve(tokenId),
         );
         claims = scoped
           ? {
@@ -1312,9 +1323,12 @@ export function createAuthMiddleware(
           : null;
       }
       if (claims?.scopes === RUNTIME_TOKEN_MARKER) {
-        const runtime = await new RuntimeStore(c.env.DB).context(
-          claims.tokenId,
-        );
+        const runtime = await new RuntimeStore(
+          c.env.DB,
+          undefined,
+          undefined,
+          c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+        ).context(claims.tokenId);
         claims = {
           ...claims,
           principalId: runtime.principal_id,
