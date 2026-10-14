@@ -127,6 +127,10 @@ import {
 import { toTilaErrorCode } from "../error-codes";
 import { questionFacade } from "../questions";
 import { attemptFacade, queueFacade } from "../queue-commands";
+import {
+  type SchemaWarningSink,
+  reportSchemaWarnings,
+} from "../schema-warnings";
 import type { SearchOptions } from "../search";
 import { localQueueErrors } from "./queue";
 
@@ -1019,6 +1023,7 @@ function createLocalPresenceMethods(project: EmbeddedProject) {
 /** Schema methods (mirrors `createSchemaMethods` in `schema.ts`). */
 function createLocalSchemaMethods(
   project: EmbeddedProject,
+  warningSink?: SchemaWarningSink,
 ): TilaFacade["schema"] {
   return {
     async get() {
@@ -1069,6 +1074,7 @@ function createLocalSchemaMethods(
           result.hint ?? "Schema apply failed",
           false,
         );
+      reportSchemaWarnings(result.warnings, warningSink);
       return {
         ...result,
         ok: true as const,
@@ -1343,6 +1349,7 @@ function createLocalAccessMethods() {
 export function buildLocalResources(
   project: EmbeddedProject,
   artifacts: EmbeddedArtifactBackend,
+  warningSink?: SchemaWarningSink,
 ) {
   return {
     queue: queueFacade(localQueueErrors(project.queue)),
@@ -1381,7 +1388,7 @@ export function buildLocalResources(
       list: (input: HandoffListRequest = {}) => project.listHandoffs(input),
     },
     presence: createLocalPresenceMethods(project),
-    schema: createLocalSchemaMethods(project),
+    schema: createLocalSchemaMethods(project, warningSink),
     summary: createLocalSummaryMethods(project),
     search: createLocalSearchMethods(project),
     templates: createLocalTemplateMethods(project),

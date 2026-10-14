@@ -6,6 +6,7 @@ import type {
   SchemaPreviewResponse,
 } from "@tila/schemas";
 import type { TilaClient } from "./client";
+import { reportSchemaWarnings } from "./schema-warnings";
 
 export function createSchemaMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}/schema`;
@@ -25,7 +26,13 @@ export function createSchemaMethods(client: TilaClient, projectId: string) {
       // hop behind it is /schema/apply, but the public Worker route is /schema.
       const definition =
         typeof schema === "string" ? schema : JSON.stringify(schema);
-      return client.post(base, { definition, strategy, ...options });
+      const result = await client.post<SchemaApplyResponse>(base, {
+        definition,
+        strategy,
+        ...options,
+      });
+      reportSchemaWarnings(result.warnings, client.warningSink);
+      return result;
     },
 
     async preview(definition: string): Promise<SchemaPreviewResponse> {

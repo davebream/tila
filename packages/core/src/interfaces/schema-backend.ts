@@ -1,6 +1,6 @@
 // packages/core/src/interfaces/schema-backend.ts
 
-import type { SchemaPreviewChange } from "@tila/schemas";
+import type { SchemaApplyWarning, SchemaPreviewChange } from "@tila/schemas";
 
 export interface SchemaRecord {
   version: number | null;
@@ -28,6 +28,7 @@ export interface ApplySchemaOutput {
   noChange?: boolean;
   reason?: string;
   hint?: string;
+  warnings?: SchemaApplyWarning[];
 }
 
 /** Server preview of a definition against the data and revision applied now. */
