@@ -528,7 +528,7 @@
       "issue": 449,
       "pr": 456,
       "kind": "builder",
-      "state": "queued",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-449",
       "contract": "2026-10-14-backlog-execution.md#449--mcp-definition-transfer-i449",
@@ -538,7 +538,20 @@
         "packages/core/src/definition-transfer.ts"
       ],
       "validation": ["mcp", "core", "packed", "runtime", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 456,
+          "head_sha": "29173ee1dcce2109261f8a6fd874ba2843f715f3",
+          "merge_sha": "eba5106878697c2002824006d5111fd542b82e10",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/456",
+          "issue_state": "CLOSED"
+        }
+      ],
       "task_name": "build-449-mcp-transfer",
       "branch": "feat/449-mcp-definition-transfer",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -549,9 +562,9 @@
       "owner": "A",
       "stage": 1,
       "issue": 439,
-      "pr": null,
+      "pr": 459,
       "kind": "builder",
-      "state": "implementing",
+      "state": "queued",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-439",
       "contract": "2026-10-14-backlog-execution.md#439--service-and-binding-revision-safety-i439",
@@ -579,7 +592,7 @@
       "issue": 398,
       "pr": 458,
       "kind": "builder",
-      "state": "in-review",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-398",
       "contract": "2026-10-14-backlog-execution.md#398--honest-legacy-blocked-counts-i398",
@@ -589,7 +602,20 @@
         "scripts/dev-seed.sh"
       ],
       "validation": ["ui", "sqlite", "runtime", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 458,
+          "head_sha": "1ed1917d84822710cdb2447a41b0b50d85652d6b",
+          "merge_sha": "dea6c11bbaa3d6bfbe3e8efba2142a0fd7e5d365",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/458",
+          "issue_state": "CLOSED"
+        }
+      ],
       "task_name": "build-398-readiness",
       "branch": "fix/398-legacy-readiness-context",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -625,7 +651,7 @@
       "issue": 440,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-440",
       "contract": "2026-10-14-backlog-execution.md#440--ghes-actions-oidc-i440",
@@ -2347,7 +2373,7 @@
     },
     {
       "node": "i449",
-      "state": "queued",
+      "state": "merged",
       "worker": "build-449-mcp-transfer",
       "base_sha": null,
       "head_sha": "29173ee1dcce2109261f8a6fd874ba2843f715f3",
@@ -2373,28 +2399,48 @@
           "packed_bytes": 63786,
           "unpacked_bytes": 289180,
           "source": "lead orchestration review on 2026-10-14"
+        },
+        {
+          "kind": "merge",
+          "pr": 456,
+          "head_sha": "29173ee1dcce2109261f8a6fd874ba2843f715f3",
+          "merge_sha": "eba5106878697c2002824006d5111fd542b82e10",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/456",
+          "issue_state": "CLOSED"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "entered-queue-waiting-for-batch",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-449-closed",
+      "merge_sha": "eba5106878697c2002824006d5111fd542b82e10"
     },
     {
       "node": "i439",
-      "state": "implementing",
+      "state": "queued",
       "worker": "build-439-revisions",
       "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
       "head_sha": "0ddc0f94eb25b06de7e2658a4cfe795951e89dbb",
-      "pr": null,
-      "tests": [],
+      "pr": 459,
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "27 package tasks; 108 clean-env root scripts; 126 runtime; full build/typecheck/lint/version",
+          "source": "build-439-revisions final handoff; lead reviewed diff and logs"
+        }
+      ],
       "evidence": [],
       "lead_review": "approved",
-      "queue_state": "unverified",
+      "queue_state": "entered-queue-checks-running-batch-461",
       "closure": "not-closed"
     },
     {
       "node": "i398",
-      "state": "in-review",
+      "state": "merged",
       "worker": "build-398-readiness",
       "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
       "head_sha": "1ed1917d84822710cdb2447a41b0b50d85652d6b",
@@ -2415,11 +2461,24 @@
           "pane": "tila/w3:p1",
           "auth": "claude.ai firstParty subscription",
           "push_hold": true
+        },
+        {
+          "kind": "merge",
+          "pr": 458,
+          "head_sha": "1ed1917d84822710cdb2447a41b0b50d85652d6b",
+          "merge_sha": "dea6c11bbaa3d6bfbe3e8efba2142a0fd7e5d365",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/458",
+          "issue_state": "CLOSED"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "awaiting-ci",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-398-closed",
+      "merge_sha": "dea6c11bbaa3d6bfbe3e8efba2142a0fd7e5d365"
     },
     {
       "node": "i416",
@@ -2437,6 +2496,12 @@
           "model": "GPT-6.1-Sol xhigh",
           "push_hold": true,
           "base_note": "unpublished issue branch based on reviewed PR456; transplant only issue416 commits onto verified origin/main after parent merge before PR"
+        },
+        {
+          "kind": "review-scope-correction",
+          "source": "lead review of dist/index.d.ts and .ci-reports/416-sdk-declarations.txt on 2026-10-14",
+          "finding": "24 dangling SDK private declaration imports exist in base and candidate; new SchemaApplyWarning also references missing ./api",
+          "decision": "bounded main declaration rollup repair and installed-consumer no-any/type rejection regression as part of416; preserve main runtime bundle hygiene"
         }
       ],
       "lead_review": "dispatch-approved",
@@ -2445,14 +2510,33 @@
     },
     {
       "node": "i440",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-440-ghes-oidc",
-      "base_sha": null,
+      "base_sha": "0ddc0f94eb25b06de7e2658a4cfe795951e89dbb",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr orchestration 2026-10-14",
+          "pane": "tila/w3:p4",
+          "model": "GPT-6.1-Sol xhigh",
+          "push_hold": true,
+          "base_note": "unpublished issue branch on reviewed PR459; transplant only440 commits onto main after parent merge before PR"
+        },
+        {
+          "kind": "architecture-review",
+          "source": "Herdr review-440-auth-astra source review 2026-10-14",
+          "findings": [
+            "Introduced Actions session issuer function/value error; correction requested",
+            "Pre-existing successful-key cache TTL defect; bounded expiry fix and regression tests authorized"
+          ],
+          "reviewer": "GPT-6-Astra high",
+          "status": "corrections-requested"
+        }
+      ],
+      "lead_review": "dispatch-approved",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
@@ -2915,7 +2999,7 @@
       "source"
     ],
     "release_election_allowed_with_evidence": true,
-    "current_active_builders": ["i362", "i439", "i416"],
+    "current_active_builders": ["i362", "i416", "i440"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient"
   }
 }
