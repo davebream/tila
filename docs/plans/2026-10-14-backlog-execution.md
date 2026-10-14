@@ -214,7 +214,7 @@ Report setup steps/time, blocked-work diagnosis time, recovery time, duplicates,
 
 ### #194 — predeclared dogfood study and positioning (`i194-rubric`, `i194-study`)
 
-**Owner:** lane C, `build-194-dogfood-study`, branch `docs/194-dogfood-study`. Define the rubric before #308 measured execution, then publish results after it. Work can be split in time within the same issue worktree.
+**Owner:** lane C, `build-194-dogfood-study`, branch `docs/194-dogfood-study`. Define the rubric before measured execution. The actual #194 criterion permits a real multi-worktree comparison, so a bounded local agent study may publish independently of #308 live acceptance. Work can be split in time within the same issue worktree.
 
 Adopt Decisions §0/Roadmap's current product boundary in the proposed issue/doc amendment: Tila owns durable assignments/questions/results and supported host adapters, while runtime process supervision/model retries stay at the host boundary; generic scheduling, new topologies and native apps remain later. The issue's blanket “does not launch or assign” sentence is stale. Lead records the amendment when updating the issue; do not silently pretend old criteria match current code.
 
@@ -259,7 +259,7 @@ The practical three-lane schedule is below. Stages 0–1 are historical: #450, #
 
 Prefer #449 → #416 → #399 for shared MCP/schema files; #400 → #398 → #448 for UI Settings/navigation; #439 → #440 for D1 credential/auth files. #398 → #399 is semantic-example/test serialization, not a change in readiness dependency. #449's initial manifest/lock changes precede #314 → #311 → #312. #448 should add no dependencies; if it needs one, acquire the same lockfile window. One worker per migration family allocates final sequence numbers against current main; do not preassign migration numbers in parallel. Shared Operations/Architecture/changelog edits land in task order with lead reconciliation; isolated worktrees do not eliminate merge conflicts.
 
-**Critical acceptance path:** live resources → #283 authenticated native probe → bounded supported adapter → full Mac/Linux matrix → #308 live S2/S3 → #308/#292 acceptance. Independent production path: #450 final target-safety evidence + #307 audit → explicit operational authorization/resources → authenticated activation proof → final #308/#292 support claim. Neither path has a reliable duration until resources are supplied. Functional path: #448 shared plan → CLI → UI → MCP (after #449), plus #416/#439 revision safety → #308 S1/fixture verification. #194 rubric must precede measured #308 execution; the study consumes its results. Dependency PRs and ongoing #261 are off the product critical path unless their actual diffs uncover a blocking defect.
+**Critical acceptance path:** live resources → #283 authenticated native probe → bounded supported adapter → full Mac/Linux matrix → #308 live S2/S3 → #308/#292 acceptance. Independent production path: #450 final target-safety evidence + #307 audit → explicit operational authorization/resources → authenticated activation proof → final #308/#292 support claim. Neither path has a reliable duration until resources are supplied. Functional path: #448 shared plan → CLI → UI → MCP (after #449), plus #416/#439 revision safety → #308 S1/fixture verification. #194 rubric must precede any measured execution; a local multi-worktree study is independent of live acceptance, while later S1–S3 observations may extend it. Dependency PRs and ongoing #261 are off the product critical path unless their actual diffs uncover a blocking defect.
 
 ## Stop conditions and real missing inputs
 
@@ -294,7 +294,7 @@ Machine ledger is authoritative for task state; update it with UTC, worker, work
 | Snapshot/reconciliation | 16 open issues, three dependency PRs; full relations/comments read; closed foundations checked against source |
 | #450 / #400 / #449 / #398 / #439 / #362 | Merged and issues closed; immutable heads, merge SHAs and independent fetched-main verification in the machine ledger |
 | #416 | PR #465 merged as `d4b7075b`; GitHub state/main ancestry verified, issue closed |
-| #399 | PR #473 submitted with merge-ready after integrated full gates; Mergify waiting for CI/scopes |
+| #399 | PR #473 merged as `b63cd894`; GitHub state and fetched-main ancestry verified; issue closed |
 | #440 | PR #474 submitted with merge-ready after integrated full gates; Mergify waiting for CI/scopes |
 | #448 | Sol XHIGH implementing shared transfer contracts, then CLI/UI/MCP; lead correcting locale-dependent receipt digest and package boundary |
 | #307 | Sonnet XHIGH auditing delivered readiness/runbook and rerunning local cutover evidence; production activation remains unperformed |
@@ -309,7 +309,7 @@ Lead review checklist: validate coverage/order with the script; confirm #398/#36
 
 Execution-state validation preserves the immutable snapshot while permitting progress. Terminal nodes require evidence; merged work requires GitHub state, head/merge SHA and independently verified main ancestry. Release election may advance only with a recorded lead decision and selected scope; production activation still requires its own explicit authorization. The validator must not encode today's pending states as permanent invariants.
 
-Plan validation: 16 issues + three snapshot PRs covered, PR #451 tracked as an execution update; 35 nodes, 67 hard edges and 16 preferred edges, both graphs acyclic; seven hard topological waves. Seven synthetic validator checks passed: future merged state, missing completion evidence, missing main ancestry, permitted evidenced release election, rejected unevidenced election, immutable snapshot and fourth-builder rejection. These checks do not execute application tests or live acceptance. JSON formatting uses repository-pinned Biome 1.9.4; secret scanning remains enabled.
+Plan validation: 16 issues + three snapshot PRs covered, PR #451 tracked as an execution update; 35 nodes, 66 hard edges and 16 preferred edges, both graphs acyclic; seven hard topological waves. Seven synthetic validator checks passed: future merged state, missing completion evidence, missing main ancestry, permitted evidenced release election, rejected unevidenced election, immutable snapshot and fourth-builder rejection. These checks do not execute application tests or live acceptance. JSON formatting uses repository-pinned Biome 1.9.4; secret scanning remains enabled.
 
 ## Current Herdr layout
 
@@ -318,3 +318,5 @@ One `tila` workspace (`w2`) contains Brain (`w2:t1`: lead `p1`, Astra `p2`), Bui
 Release readiness update: the user confirmed no alternative valid operator configuration exists. No further credential search or repeated ambient probes are warranted. The dedicated `release-prepare-sol` worker in Release pane `w2:p6` has a separate `release-readiness` worktree and private state at `/tmp/tila-release-readiness-20261014.LLZLOW/vars.sh`. Formal preflight, candidate freeze, rehearsal and publication remain unpassed; reviewed inventory/upgrade drafts are independent preparation. Astra completed the #283 capability audit and is defining the #194 predeclared study design in Brain.
 
 Execution update: release plan PR #468 and independent readiness PR #471 merged, with GitHub state and fetched-main ancestry verified. No formal release gate has advanced. Lead amended #194’s stale engine-only scope to Decisions §0 while retaining the measured-study requirement. Astra found two #448 UI blockers (cross-account receipt disclosure and stale asynchronous preview/restoration); corrections and regressions are in progress.
+
+Study dependency correction: the planner had inferred a hard #308 live-run prerequisite for #194. The issue permits an actual multi-worktree study, so that edge is removed while the immutable predeclared rubric remains required. Prepare two matched task pairs (four trials), 12-minute wall and 40-tool-call budgets per worker, equal Sonnet XHIGH conditions, ordinary durable notes in the baseline, seeded variants and A/B then B/A order. These are proposed pilot limits, not measurements. Reserve two coding slots for execution later; keep all #283/#308/#292 live gates unchanged. API drills alone do not satisfy an agent comparison.

@@ -14,7 +14,7 @@
     "external_450_counts": true,
     "optional_release_workers": 1,
     "release_skill": ".agents/skills/tila-release/SKILL.md",
-    "planner": "audit-292-acceptance-astra",
+    "planner": "plan-283-adapter-astra",
     "lead": "lead-backlog",
     "herdr_session": "tila",
     "planner_pane": "w2:p2",
@@ -25,7 +25,7 @@
       "Brain": {
         "tab": "w2:t1",
         "lead-backlog": "w2:p1",
-        "audit-292-acceptance-astra": "w2:p2"
+        "plan-283-adapter-astra": "w2:p2"
       },
       "Builders": {
         "tab": "w2:t2",
@@ -754,7 +754,7 @@
       "issue": 399,
       "pr": 473,
       "kind": "builder",
-      "state": "ready",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-399",
       "contract": "2026-10-14-backlog-execution.md#399--task-filter-parity-and-truthful-pagination-i399",
@@ -765,7 +765,20 @@
         "packages/sdk/src/local/resource-adapters.ts"
       ],
       "validation": ["sqlite", "sdk", "cli", "mcp", "runtime", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 473,
+          "head_sha": "33ccd6146606b55ca829c790419e9555e6c212b6",
+          "merge_sha": "b63cd89440ed532249aa210c52500558cd228ba7",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/473",
+          "issue_state": "CLOSED"
+        }
+      ],
       "task_name": "build-399-task-filters",
       "branch": "feat/399-task-filter-parity",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -1538,12 +1551,6 @@
       "provenance": "native"
     },
     {
-      "before": "i308-live",
-      "after": "i194-study",
-      "reason": "Study publishes measured observations, never fixture-only claims.",
-      "provenance": "contract"
-    },
-    {
       "before": "i194-rubric",
       "after": "i194-study",
       "reason": "Compare against the predeclared rubric.",
@@ -1814,6 +1821,7 @@
     ],
     [
       "g-production-authorization",
+      "i194-study",
       "i283-adapter",
       "i308-protocol",
       "i448-cli",
@@ -1823,7 +1831,7 @@
     ],
     ["g307-activation", "i283-live", "i308-fixtures", "release-publish"],
     ["i308-live"],
-    ["i194-study", "i308-close"],
+    ["i308-close"],
     ["i292-close"]
   ],
   "proposed_ordering_waves": [
@@ -1832,12 +1840,12 @@
     ["i283-adapter", "i398", "i416", "i440", "release-rehearsal"],
     ["i307-audit", "i362", "i399", "release-publish"],
     ["g-production-authorization", "i194-rubric", "i283-live", "i448-plan"],
-    ["g307-activation", "i308-protocol", "i448-cli", "pr314"],
+    ["g307-activation", "i194-study", "i308-protocol", "i448-cli", "pr314"],
     ["i448-ui", "pr311"],
     ["i448-mcp", "pr312"],
     ["i308-fixtures"],
     ["i308-live"],
-    ["i194-study", "i308-close"],
+    ["i308-close"],
     ["i292-close"]
   ],
   "execution_stages": [
@@ -2409,6 +2417,30 @@
       "issue": 194,
       "source": "https://github.com/davebream/tila/issues/194",
       "detail": "Lead reconciled stale engine-only positioning with Decisions0 and current product direction. Actual measured study remains required. Original/revised body retained in /tmp/tila-194-{original,reconciled}-body.md."
+    },
+    {
+      "kind": "progress-plan-merge",
+      "pr": 475,
+      "head_sha": "34c30f0f81b6b9bc2368859155e5778ea17d04db",
+      "merge_sha": "d36bb6a403015d1b365a8db0e3fe483d0c17e2da",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/475"
+    },
+    {
+      "kind": "acceptance-audit",
+      "issue": 292,
+      "pr": 477,
+      "head_sha": "ddfed5fc1c96b2a4a57b8de276050164a91aab23",
+      "source": "https://github.com/davebream/tila/issues/292",
+      "detail": "Lead reviewed Astra matrix, updated15closed/3open nativechildren, preserved research/scenarios and all8broad unchecked gates. Durable audit PR submitted; no application tests run for read-only audit."
+    },
+    {
+      "kind": "dependency-correction",
+      "source": "https://github.com/davebream/tila/issues/194",
+      "detail": "Removed inferred i308-live -> i194-study hard edge: actual194 criterion permits a real multi-worktree comparison. Bounded local agent pilot can publish measured findings without claiming native/shared-live support. Rubric remains hard prerequisite;292/308 live gates remain unchanged. Local fixture drills alone cannot complete study."
     }
   ],
   "progress_ledger": [
@@ -2792,7 +2824,7 @@
     },
     {
       "node": "i399",
-      "state": "ready",
+      "state": "merged",
       "worker": "build-399-task-filters",
       "base_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c",
       "head_sha": "33ccd6146606b55ca829c790419e9555e6c212b6",
@@ -2824,11 +2856,24 @@
           "kind": "handoff",
           "source": "https://github.com/davebream/tila/pull/473",
           "detail": "Non-draft main PR with merge-ready; auto-merge off; Mergify waiting for ci/scopes, not queued yet."
+        },
+        {
+          "kind": "merge",
+          "pr": 473,
+          "head_sha": "33ccd6146606b55ca829c790419e9555e6c212b6",
+          "merge_sha": "b63cd89440ed532249aa210c52500558cd228ba7",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/473",
+          "issue_state": "CLOSED"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "waiting-ci-and-scopes",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-399-closed",
+      "merge_sha": "b63cd89440ed532249aa210c52500558cd228ba7"
     },
     {
       "node": "i307-audit",
@@ -2858,7 +2903,7 @@
       "state": "implementing",
       "worker": "build-448-settings-transfer",
       "base_sha": "e9c904580eabf91abd917dbc066386ead7d8e479",
-      "head_sha": null,
+      "head_sha": "36a8bc67c1217695e5fee9f05958b80def6bfc54",
       "pr": null,
       "tests": [],
       "evidence": [
@@ -2881,6 +2926,12 @@
           "reviewer": "GPT-6-Astra high",
           "source": "/tmp/tila-448-ui-review-findings.md",
           "detail": "Blockers: receipt restoration/import must bind principal+project before display; stale asynchronous preview and restore/import races. Builder assigned regression-backed corrections."
+        },
+        {
+          "kind": "ui-rereview",
+          "reviewer": "lead-backlog and Astra",
+          "source": "/tmp/tila-448-ui-rereview.md",
+          "detail": "Prior principal/project disclosure and stale publication resolved at page blob182d705902917447d6ddedf06a4ee4325893a872;9page+2browseradapter tests pass. RemainingP2: export controls invalidate apply status; corrupt saved receipt lacks explicit recovery. Corrections assigned; MCP ongoing."
         }
       ],
       "lead_review": "dispatch-approved",
@@ -3078,7 +3129,7 @@
       "state": "implementing",
       "worker": "build-312-runtime-deps",
       "base_sha": "f231ba532b55fe33de15bc49cdb2e5c35a6439de",
-      "head_sha": "086752f0f1ee5a319577d295fde9ab2ce892368b",
+      "head_sha": "8651fb262870f59844d6299c417f8e2368d5bfc9",
       "pr": 312,
       "tests": [],
       "evidence": [
@@ -3089,9 +3140,15 @@
           "model": "GPT-6.1-Sol xhigh",
           "push_hold": true,
           "detail": "Existing Renovate PR and branch; exclusive lock writer; portable auth declarations repair and full validation."
+        },
+        {
+          "kind": "review",
+          "reviewer": "lead-backlog and Astra",
+          "source": "/tmp/tila-312-auth-review.md",
+          "detail": "Public named Better Auth/AuthEndpoint boundary preserves exact custom fields, plugin endpoints and getSession modes; real emitted consumers, no suppression or dependency downgrade. Full gates running; native OS store unavailable KeyRevoked recorded separately."
         }
       ],
-      "lead_review": "pending",
+      "lead_review": "source-approved-pending-final-gates",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
