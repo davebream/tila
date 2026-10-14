@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RemoteBackend } from "../backends/remote";
 import { TilaClient } from "../client";
 import { createSchemaMethods } from "../schema";
 
@@ -12,6 +13,7 @@ describe("createSchemaMethods — outgoing request shape", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   function ok(body: unknown) {
@@ -81,5 +83,110 @@ describe("createSchemaMethods — outgoing request shape", () => {
       reviewed_definition: definition,
       idempotency_key: "edit-1",
     });
+  });
+
+  const note = {
+    code: "schema-revision-deprecated" as const,
+    message: "Preview and supply expected_revision.",
+    observed_revision: 1,
+    result_revision: 2,
+  };
+
+  it.each([false, true])(
+    "preserves warnings through the SDK%s and uses the injected sink once",
+    async (backend) => {
+      const sink = vi.fn();
+      const client = new TilaClient({
+        baseUrl: "https://api.test",
+        token: "t",
+        warningSink: sink,
+      });
+      mockFetch.mockResolvedValueOnce(
+        ok({ ok: true, version: 2, revision: 2, warnings: [note] }),
+      );
+      const result = backend
+        ? await new RemoteBackend(client, "p").applySchema({
+            definition: "schema_version = 1\n",
+          })
+        : await createSchemaMethods(client, "p").apply("schema_version = 1\n");
+      expect(result.warnings).toEqual([note]);
+      expect(sink).toHaveBeenCalledExactlyOnceWith(note);
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).not.toHaveProperty(
+        "expected_revision",
+      );
+    },
+  );
+
+  it("uses visible console.warn diagnostics by default and never console.log", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockFetch.mockResolvedValueOnce(
+      ok({ ok: true, version: 2, warnings: [note] }),
+    );
+    expect((await schema().apply("schema_version = 1\n")).warnings).toEqual([
+      note,
+    ]);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("schema-revision-deprecated"),
+    );
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("does not disguise a committed apply as a failure if the warning sink throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = new TilaClient({
+      baseUrl: "https://api.test",
+      token: "t",
+      warningSink: () => {
+        throw new Error("sink unavailable");
+      },
+    });
+    mockFetch.mockResolvedValueOnce(
+      ok({ ok: true, version: 2, warnings: [note] }),
+    );
+    await expect(
+      createSchemaMethods(client, "p").apply("schema_version = 1\n"),
+    ).resolves.toMatchObject({ ok: true, warnings: [note] });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits no warning on conditional success or 412", async () => {
+    const sink = vi.fn();
+    const client = TilaClient.fromConfig(
+      {
+        backend: "cloudflare",
+        project_id: "p",
+        worker_url: "https://api.test",
+        schema_version: 1,
+        tila_version: "0.0.0",
+        created_at: new Date(0).toISOString(),
+      },
+      "t",
+      { warningSink: sink },
+    );
+    const methods = createSchemaMethods(client, "p");
+    mockFetch.mockResolvedValueOnce(ok({ ok: true, version: 2, warnings: [] }));
+    await methods.apply("schema_version = 1\n", undefined, {
+      expected_revision: 1,
+    });
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: "schema-revision-conflict",
+            message: "stale",
+            retryable: false,
+          },
+        }),
+        { status: 412 },
+      ),
+    );
+    await expect(
+      methods.apply("schema_version = 1\n", undefined, {
+        expected_revision: 1,
+      }),
+    ).rejects.toMatchObject({ status: 412 });
+    expect(sink).not.toHaveBeenCalled();
   });
 });

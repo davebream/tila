@@ -9,7 +9,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTila } from "../../client";
 
 import type { TilaApiError } from "../../client";
 import {
@@ -36,6 +37,7 @@ describe("createTilaLocal — full local round-trip", () => {
   afterEach(() => {
     local.close();
     rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
   it("reports unsupported agent operations in embedded mode", async () => {
@@ -94,6 +96,82 @@ describe("createTilaLocal — full local round-trip", () => {
     await expect(
       schema.apply(definition, undefined, { expected_revision: -1 }),
     ).rejects.toMatchObject({ status: 400, code: "validation-error" });
+  });
+
+  it("warns visibly for real embedded applies and retains one durable event on retry and no-change", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { schema, journal } = buildLocalResources(
+      local.project,
+      local.artifacts,
+    );
+    const definition = "schema_version = 1\n[work_units.task]\n";
+    const options = { idempotency_key: "legacy" };
+    const first = await schema.apply(definition, undefined, options);
+    expect(first).toMatchObject({
+      ok: true,
+      revision: 1,
+      warnings: [
+        {
+          code: "schema-revision-deprecated",
+          observed_revision: 0,
+          result_revision: 1,
+        },
+      ],
+    });
+    expect(await schema.apply(definition, undefined, options)).toEqual(first);
+    expect(await schema.apply(definition)).toMatchObject({
+      noChange: true,
+      warnings: [
+        {
+          observed_revision: 1,
+          result_revision: 1,
+        },
+      ],
+    });
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("expected_revision"),
+    );
+    expect(log).not.toHaveBeenCalled();
+    expect(
+      (await journal.query({ kind: "schema.revisionless_applied" })).events,
+    ).toHaveLength(1);
+    expect((await schema.history()).entries).toHaveLength(1);
+    await expect(schema.apply("schema_version = [")).rejects.toBeDefined();
+    await expect(
+      schema.apply("schema_version = 1\nwork_units = {}"),
+    ).rejects.toMatchObject({ code: "schema-destructive" });
+    await schema.apply(definition, undefined, { expected_revision: 1 });
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it("accepts a warning sink through createTila's local entry", async () => {
+    const sink = vi.fn();
+    const facade = await createTila(
+      {
+        backend: "local",
+        project_id: "test-project",
+        schema_version: 1,
+        tila_version: "0.0.0",
+        created_at: new Date(0).toISOString(),
+        local: {
+          db_path: join(dir, "project.db"),
+          artifacts_path: join(dir, "artifacts"),
+          org: "test-org",
+        },
+      },
+      undefined,
+      { warningSink: sink },
+    );
+    try {
+      const result = await facade.schema.apply(
+        "schema_version = 1\n[work_units.task]\n",
+      );
+      expect(sink).toHaveBeenCalledExactlyOnceWith(result.warnings?.[0]);
+    } finally {
+      facade.close();
+    }
   });
 
   it("exposes version history, metadata and append-only restore under Node", async () => {
