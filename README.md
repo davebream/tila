@@ -33,7 +33,8 @@ topologies, and sandbox scheduling remain roadmap direction. See
 [the active roadmap](docs/03-ROADMAP.md).
 
 **Compatibility:** standalone local persistence and GitHub auth remain implemented.
-Local mode covers a subset of the product; MCP requires a remote project run.
+Local mode, including explicit local MCP, covers a subset of the product. Remote
+MCP requires a managed project run or supported session mapping.
 Key-only onboarding and retirement of GitHub auth or local persistence require
 separate migrations and have not shipped.
 
@@ -212,7 +213,14 @@ tila --instance https://tila.example.com --project my-project machine enroll
 tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.10.0
 ```
 
-MCP uses a single project run through a local credential helper. It rejects owner/personal credentials and local SQLite configuration. Generated editor settings contain only non-secret references. CLI administration and SDK local mode remain available.
+Remote MCP uses a managed project run through a local credential helper or a
+supported session mapping. It rejects owner/personal credentials. Generated editor
+settings contain only non-secret references.
+
+Explicit local MCP uses embedded SQLite with `TILA_MODE=local`, `TILA_PROJECT_ID`,
+and absolute `TILA_DB_PATH` and `TILA_ARTIFACTS_PATH` paths. It supports a bounded
+subset of the product and cannot be combined with remote credentials or run
+bindings. CLI administration and SDK local mode remain available.
 
 **3. TypeScript SDK**
 ```sh

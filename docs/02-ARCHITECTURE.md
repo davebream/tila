@@ -33,8 +33,12 @@ Keys bound to native principals and explicit memberships are the target auth pat
 The membership foundation from #184 / #218 is implemented. GitHub App/session auth
 and standalone local persistence remain implemented compatibility; key-only
 onboarding and auth/local-mode retirement have not shipped. Local mode supports a
-subset of the service; MCP uses remote project runs. Preserve current compatibility
-until migration/export and access tests cover each removal.
+subset of the service. Remote MCP requires a managed project run or supported
+session mapping. Explicit local MCP uses embedded SQLite with `TILA_MODE=local`,
+`TILA_PROJECT_ID`, and absolute `TILA_DB_PATH` and `TILA_ARTIFACTS_PATH` paths; it
+supports the local subset and cannot be combined with remote credentials or run
+bindings. Preserve current compatibility until migration/export and access tests
+cover each removal.
 
 Earlier v0.1/v0.2 sketches are historical design context, not release promises.
 Shipped behavior below is reconciled with v0.10.0; alternatives without an
