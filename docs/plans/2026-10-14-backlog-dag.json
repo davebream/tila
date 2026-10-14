@@ -685,9 +685,9 @@
       "owner": "B",
       "stage": 2,
       "issue": 362,
-      "pr": null,
+      "pr": 463,
       "kind": "builder",
-      "state": "implementing",
+      "state": "in-review",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-362",
       "contract": "2026-10-14-backlog-execution.md#362--cleanup-without-broadening-worker-authority-i362",
@@ -756,7 +756,7 @@
       "issue": 448,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-448",
       "contract": "2026-10-14-backlog-execution.md#448--portable-identity-bearing-settings-i448-plan-i448-cli-i448-ui-i448-mcp",
@@ -856,7 +856,7 @@
       "issue": null,
       "pr": 314,
       "kind": "builder",
-      "state": "planned",
+      "state": "queued",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/pr-314",
       "contract": "2026-10-14-backlog-execution.md#dependency-prs-and-261-pr311-pr312-pr314-i261",
@@ -916,7 +916,7 @@
       "issue": null,
       "pr": 311,
       "kind": "builder",
-      "state": "planned",
+      "state": "in-review",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/pr-311",
       "contract": "2026-10-14-backlog-execution.md#dependency-prs-and-261-pr311-pr312-pr314-i261",
@@ -2511,8 +2511,8 @@
       "node": "i416",
       "state": "implementing",
       "worker": "build-416-revision-warning",
-      "base_sha": "29173ee1dcce2109261f8a6fd874ba2843f715f3",
-      "head_sha": null,
+      "base_sha": "e9c904580eabf91abd917dbc066386ead7d8e479",
+      "head_sha": "6fbbf810e456f27c6b8cfc30cc5308ae13c5fb5d",
       "pr": null,
       "tests": [],
       "evidence": [
@@ -2529,6 +2529,12 @@
           "source": "lead review of dist/index.d.ts and .ci-reports/416-sdk-declarations.txt on 2026-10-14",
           "finding": "24 dangling SDK private declaration imports exist in base and candidate; new SchemaApplyWarning also references missing ./api",
           "decision": "bounded main declaration rollup repair and installed-consumer no-any/type rejection regression as part of416; preserve main runtime bundle hygiene"
+        },
+        {
+          "kind": "review-correction",
+          "source": "Astra review through083acaef and builder clean transplant handoff 2026-10-14",
+          "finding": "Async diagnostic rejection and fallback console failure could affect committed apply",
+          "resolution": "Contained sync/async custom/default sink failures; focused regressions pass; eight issue-only commits cleanly transplanted onto merged main, range-diff unchanged; integrated validation pending"
         }
       ],
       "lead_review": "dispatch-approved",
@@ -2561,6 +2567,15 @@
           ],
           "reviewer": "GPT-6-Astra high",
           "status": "corrections-requested"
+        },
+        {
+          "kind": "final-review-correction",
+          "source": "Herdr review-440-auth-astra and build-440-ghes-oidc findings 2026-10-14",
+          "findings": [
+            "Same issuer+URI concurrent JWKS import can leave unindexed removed keys; private staging map plus atomic replacement/coalescing required",
+            "Personal enrollments created by Actions session drop upstream context; preserve eligibility while retaining and revalidating sponsor authority through descendants"
+          ],
+          "decision": "bounded fixes and regression coverage authorized; push held"
         }
       ],
       "lead_review": "dispatch-approved",
@@ -2569,12 +2584,19 @@
     },
     {
       "node": "i362",
-      "state": "implementing",
+      "state": "in-review",
       "worker": "build-362-cleanup-guide",
       "base_sha": "8397f3da26a01afeb692a73a9d510e3991653866",
-      "head_sha": null,
-      "pr": null,
-      "tests": [],
+      "head_sha": "13bc1f087c1d722f3569ad2edf3a0e9c7221403c",
+      "pr": 463,
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "141 runtime/36files;16 focused cleanup;15 typecheck tasks;lint/version;graphify;mutation evidence",
+          "source": "https://github.com/davebream/tila/pull/463"
+        }
+      ],
       "evidence": [
         {
           "kind": "dispatch",
@@ -2582,10 +2604,17 @@
           "pane": "tila/w3:p1",
           "model": "Sonnet xhigh",
           "push_hold": true
+        },
+        {
+          "kind": "review",
+          "reviewer": "lead-backlog",
+          "result": "approved",
+          "source": "https://github.com/davebream/tila/pull/463",
+          "scope": "Docs alternative; no worker preset expansion; corrected claim/history race, retention/principal validation, duplicate receipt set checks and410 versus byte deletion"
         }
       ],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "awaiting-ci-and-scopes",
       "closure": "not-closed"
     },
     {
@@ -2616,14 +2645,23 @@
     },
     {
       "node": "i448-plan",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-448-settings-transfer",
-      "base_sha": null,
+      "base_sha": "e9c904580eabf91abd917dbc066386ead7d8e479",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr orchestration 2026-10-14",
+          "pane": "tila/w3:p1",
+          "model": "GPT-6.1-Sol xhigh",
+          "push_hold": true,
+          "scope": "All four448 slices sequentially in one issue worktree; initial shared planner/executor active"
+        }
+      ],
+      "lead_review": "dispatch-approved",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
@@ -2681,15 +2719,31 @@
     },
     {
       "node": "pr314",
-      "state": "planned",
-      "worker": "build-314-ui-deps",
+      "state": "queued",
+      "worker": "lead-backlog",
       "base_sha": null,
-      "head_sha": null,
+      "head_sha": "b882186e1157090ffb89aafc675bfee2aa019e23",
       "pr": 314,
-      "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
-      "queue_state": "unverified",
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "pnpm install --frozen-lockfile; pnpm --filter @tila/ui... build; UI typecheck; VITEST_MAX_WORKERS=2 UI test (456/39files); 6 SVG render probes",
+          "source": "/tmp/tila-314-install.log; /tmp/tila-314-build.log; /tmp/tila-314-typecheck.log; /tmp/tila-314-test.log"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "review",
+          "source": "https://github.com/davebream/tila/pull/314",
+          "reviewer": "lead-backlog",
+          "result": "approved",
+          "scope": "Unchanged Renovate head in isolated detached pr-314 worktree; lock-only lucide1.55 and libc metadata; no source edits",
+          "schedule": "Lead performed read-only review/validation while three builders ran; preferred lane order rescheduled, no fourth coding worker or concurrent lock writer"
+        }
+      ],
+      "lead_review": "approved",
+      "queue_state": "entered-queue-waiting-batch",
       "closure": "not-closed"
     },
     {
@@ -2720,15 +2774,31 @@
     },
     {
       "node": "pr311",
-      "state": "planned",
-      "worker": "build-311-cf-deps",
+      "state": "in-review",
+      "worker": "lead-backlog",
       "base_sha": null,
-      "head_sha": null,
+      "head_sha": "38f98dbcdefd53dc432fb2a07af41e884b2ad2d5",
       "pr": 311,
-      "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
-      "queue_state": "unverified",
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "frozen install; Worker dependency build and typecheck;125 runtime tests, zero skips/TODOs",
+          "source": "/tmp/tila-311-install.log; /tmp/tila-311-build.log; /tmp/tila-311-typecheck.log; /tmp/tila-311-runtime.log"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "review",
+          "reviewer": "lead-backlog",
+          "result": "approved",
+          "source": "https://github.com/davebream/tila/pull/311",
+          "scope": "Unchanged Renovate head, detached pr-311 worktree. Installed plugin1.4 supports retained Vitest4.1.11; Wrangler4.149 dry-run. No product source or lock edits.",
+          "schedule": "Lead read-only validation after314 handoff; Mergify owns integration order, no competing lock writer or fourth coding worker"
+        }
+      ],
+      "lead_review": "approved",
+      "queue_state": "merge-ready-awaiting-mergify-refresh",
       "closure": "not-closed"
     },
     {
@@ -3026,7 +3096,7 @@
       "source"
     ],
     "release_election_allowed_with_evidence": true,
-    "current_active_builders": ["i362", "i416", "i440"],
+    "current_active_builders": ["i448-plan", "i416", "i440"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient"
   }
 }
