@@ -3130,11 +3130,23 @@ function preparedTrialA(trialId = "t1") {
     drills,
     JSON.stringify({ provenance: "harness_fixture", pass: true, results: [] }),
   );
+  const syntheticCodexVersion = "codex synthetic-unit-test";
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  // Freeze probes the version; keep it synthetic and local to this fixture's CLI.
+  writeFileSync(
+    join(bin, "codex"),
+    `#!/bin/sh\nprintf '%s\\n' '${syntheticCodexVersion}'\n`,
+    { mode: 0o755 },
+  );
   const cli = (...args) =>
     spawnSync(
       "node",
       [join(repo, "scripts/dogfood-study.mjs"), ...args, "--declaration", decl],
-      { encoding: "utf8" },
+      {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      },
     );
   const smoke = join(root, "synthetic-smoke.json");
   const syntheticEvidence =
@@ -3148,9 +3160,7 @@ function preparedTrialA(trialId = "t1") {
       provenance: "harness_fixture",
       note: "synthetic unit-test contract, not runtime evidence",
       source_sha: git(source, "rev-parse", "HEAD").stdout.trim(),
-      codex_version: spawnSync("codex", ["--version"], {
-        encoding: "utf8",
-      }).stdout.trim(),
+      codex_version: syntheticCodexVersion,
       permissions: { sandbox_mode: "synthetic", approval_policy: "synthetic" },
       binary_path: binary,
       binary_sha256: sha256Text(syntheticEvidence),
