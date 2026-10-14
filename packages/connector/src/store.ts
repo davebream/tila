@@ -97,7 +97,7 @@ export class ConnectorStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       return {
-        version: 1,
+        version: 2,
         hostRef: randomUUID(),
         heartbeat: 0,
         registrations: [],

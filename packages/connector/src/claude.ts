@@ -31,9 +31,17 @@ export function validateClaudeEndpoint(
 export async function wakeClaude(
   endpoint: ClaudeEndpoint,
   nonce: string,
-  options: { directory?: string; timeoutMs?: number; allowBusy?: boolean } = {},
+  options: {
+    directory?: string;
+    timeoutMs?: number;
+    allowBusy?: boolean;
+    beforeEffect?: () => Promise<void>;
+    preEffectCheck?: () => void;
+  } = {},
 ): Promise<WakeOutcome> {
   if (!endpoint.idle && !options.allowBusy) return "deferred";
+  await options.beforeEffect?.();
+  options.preEffectCheck?.();
   validateClaudeEndpoint(endpoint, options.directory);
   const notice = wakeNotice(nonce);
   return new Promise((resolve) => {
@@ -53,6 +61,13 @@ export async function wakeClaude(
     );
     socket.on("error", () => complete(connected ? "unknown" : "rejected"));
     socket.on("connect", () => {
+      try {
+        options.preEffectCheck?.();
+        validateClaudeEndpoint(endpoint, options.directory);
+      } catch {
+        complete("rejected");
+        return;
+      }
       connected = true;
       const authentication = endpoint.token
         ? `${JSON.stringify({ type: "auth", token: endpoint.token })}\n`
