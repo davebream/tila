@@ -492,9 +492,9 @@
       "owner": "B",
       "stage": 0,
       "issue": 400,
-      "pr": null,
+      "pr": 453,
       "kind": "builder",
-      "state": "implementing",
+      "state": "queued",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-400",
       "contract": "2026-10-14-backlog-execution.md#400--step-up-return-navigation-i400",
@@ -567,7 +567,7 @@
       "issue": 398,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-398",
       "contract": "2026-10-14-backlog-execution.md#398--honest-legacy-blocked-counts-i398",
@@ -2229,6 +2229,17 @@
       "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
       "session": "tila",
       "pane": "w3:p4"
+    },
+    {
+      "kind": "plan-merge",
+      "pr": 452,
+      "head_sha": "f18437d66c47287d4c9c00b3d865f312910a99cb",
+      "merge_sha": "69c463b13d986c695557dc4a1f5a20a0e38cc073",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/452"
     }
   ],
   "progress_ledger": [
@@ -2283,11 +2294,11 @@
     },
     {
       "node": "i400",
-      "state": "implementing",
+      "state": "queued",
       "worker": "build-400-stepup",
-      "base_sha": null,
-      "head_sha": null,
-      "pr": null,
+      "base_sha": "f231ba532b55fe33de15bc49cdb2e5c35a6439de",
+      "head_sha": "f7330d6c8d57fc401ba93105d91ffc35c6780462",
+      "pr": 453,
       "tests": [
         {
           "phase": "baseline",
@@ -2295,11 +2306,18 @@
           "passed": 2,
           "source": "lead orchestration review on 2026-10-14",
           "command": "focused step-up suite; exact invocation held by builder"
+        },
+        {
+          "phase": "final",
+          "result": "passed",
+          "passed": 662,
+          "command": "UI suite (61 files), UI typecheck/build, root lint, git diff --check",
+          "source": "build-400-stepup handoff; lead final diff review"
         }
       ],
       "evidence": [],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "entered-queue-preparing-checks",
       "closure": "not-closed"
     },
     {
@@ -2345,14 +2363,23 @@
     },
     {
       "node": "i398",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-398-readiness",
-      "base_sha": null,
+      "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr orchestration 2026-10-14",
+          "model": "Sonnet xhigh",
+          "pane": "tila/w3:p1",
+          "auth": "claude.ai firstParty subscription",
+          "push_hold": true
+        }
+      ],
+      "lead_review": "dispatch-approved",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
@@ -2833,7 +2860,7 @@
       "source"
     ],
     "release_election_allowed_with_evidence": true,
-    "current_active_builders": ["i400", "i449", "i439"],
+    "current_active_builders": ["i398", "i449", "i439"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient"
   }
 }
