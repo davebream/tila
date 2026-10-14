@@ -89,6 +89,9 @@ export function SettingsTransferPage() {
       marker={marker}
       isCurrent={isCurrent}
       known={known}
+      retryIdentity={() => {
+        void whoami.refetch();
+      }}
     />
   );
 }
@@ -96,10 +99,12 @@ function SettingsTransferView({
   marker,
   isCurrent,
   known,
+  retryIdentity,
 }: {
   marker: TransferMarker;
   isCurrent: (candidate: TransferMarker) => boolean;
   known: boolean;
+  retryIdentity: () => void;
 }) {
   const project = marker.project;
   const principalHint = marker.principal;
@@ -130,6 +135,14 @@ function SettingsTransferView({
   ]);
   const [format, setFormat] = useState<"toml" | "yaml">("toml");
   const [definitionPreviews, setDefinitionPreviews] = useState<unknown[]>([]);
+  const [identityFailure, setIdentityFailure] = useState(false);
+  const [corruptSaved, setCorruptSaved] = useState(false);
+  const [identityRetry, setIdentityRetry] = useState(0);
+  const liveIdentityRetry = useRef(identityRetry);
+  liveIdentityRetry.current = identityRetry;
+  const [activeStorageKey, setActiveStorageKey] = useState<string | null>(
+    storageKey,
+  );
   const [restoredMarker, setRestoredMarker] = useState<typeof marker | null>(
     null,
   );
@@ -152,45 +165,63 @@ function SettingsTransferView({
 
   useEffect(() => {
     let active = true;
+    const current = () =>
+      active &&
+      isCurrent(marker) &&
+      liveIdentityRetry.current === identityRetry;
     setRestoredMarker(null);
     setRetained(null);
-    setDoc(null);
-    setText("");
-    setMappings(emptyMappings());
-    setChoices(noChoices);
-    setDefinitionPreviews([]);
-    setErrors([]);
-    setNotice(null);
-    setStepUp(false);
-    if (!project || !principalHint || !marker.authenticated || !storageKey)
+    setIdentityFailure(false);
+    setCorruptSaved(false);
+    if (!project || !principalHint || !marker.authenticated || !storageKey) {
+      if (known && marker.authenticated) setIdentityFailure(true);
       return;
+    }
     void (async () => {
       try {
         const identity = await transfer.read.identity();
-        if (!active || !isCurrent(marker)) return;
+        if (!current()) return;
         if (
           identity.project_id !== project ||
           identity.principal_id !== principalHint
         )
           throw new Error("Current identity changed");
-        const saved = window.sessionStorage.getItem(storageKey);
+      } catch {
+        if (current()) setIdentityFailure(true);
+        return;
+      }
+      try {
+        const pointer = window.sessionStorage.getItem(`${storageKey}:active`);
+        if (
+          pointer &&
+          (!pointer.startsWith(`${storageKey}:recovery:`) ||
+            !/^[a-f0-9-]{36}$/.test(
+              pointer.slice(`${storageKey}:recovery:`.length),
+            ))
+        )
+          throw new Error("Invalid receipt slot");
+        const slot = pointer ?? storageKey;
+        const saved = window.sessionStorage.getItem(slot);
         const loaded = saved
           ? await validateSettingsReceipt(JSON.parse(saved), project)
           : null;
         if (
           loaded &&
-          loaded.plan.creator_member !== `principal:${identity.principal_id}`
+          loaded.plan.creator_member !== `principal:${principalHint}`
         )
           throw new Error("Receipt belongs to another identity");
-        if (active && isCurrent(marker)) {
+        if (current()) {
+          setActiveStorageKey(slot);
           setRetained({ marker, receipt: loaded });
           setConfirmed(false);
           setRestoredMarker(marker);
         }
       } catch {
-        if (active && isCurrent(marker)) {
+        if (current()) {
+          setCorruptSaved(true);
+          setRestoredMarker(marker);
           setNotice(
-            "The current identity or saved receipt could not be verified. Previous account receipts stay hidden. Refresh access before importing or resuming.",
+            "The saved receipt is invalid or unreadable. Its original contents are preserved. Explicitly open a recovery slot before importing a valid matching-account receipt or reviewing current destination state.",
           );
         }
       }
@@ -204,20 +235,34 @@ function SettingsTransferView({
     project,
     principalHint,
     marker.authenticated,
+    known,
     transfer.read.identity,
     isCurrent,
+    identityRetry,
   ]);
+
+  function recoverLocalReceipt() {
+    if (!storageKey || !resumeReady || !isCurrent(marker)) return;
+    const slot = `${storageKey}:recovery:${crypto.randomUUID()}`;
+    window.sessionStorage.setItem(`${storageKey}:active`, slot);
+    setActiveStorageKey(slot);
+    setCorruptSaved(false);
+    setNotice(
+      "Original receipt preserved in browser storage. Import a valid receipt for this account to resume exactly, or review destination state in a new plan.",
+    );
+  }
 
   function persist(value: SettingsReceipt) {
     if (
       !resumeReady ||
       !isCurrent(marker) ||
-      !storageKey ||
+      !activeStorageKey ||
+      corruptSaved ||
       value.plan.project_id !== project ||
       value.plan.creator_member !== `principal:${principalHint}`
     )
       throw new Error("Receipt identity changed");
-    window.sessionStorage.setItem(storageKey, JSON.stringify(value));
+    window.sessionStorage.setItem(activeStorageKey, JSON.stringify(value));
     setRetained({ marker, receipt: value });
   }
   function problem(err: unknown) {
@@ -451,7 +496,7 @@ function SettingsTransferView({
     });
   }
   async function importReceipt(file: File) {
-    if (!resumeReady || busy || receipt) return;
+    if (!resumeReady || busy || receipt || corruptSaved) return;
     const importMarker = marker;
     await task(async (publish) => {
       if (file.size > SETTINGS_TRANSFER_MAX_BYTES * 4)
@@ -476,13 +521,14 @@ function SettingsTransferView({
     });
   }
   function newReview() {
-    if (!storageKey || !resumeReady || !isCurrent(marker)) return;
+    if (!activeStorageKey || !resumeReady || !isCurrent(marker) || corruptSaved)
+      return;
     if (receipt)
       window.sessionStorage.setItem(
-        `${storageKey}:saved:${receipt.plan.operation_id}`,
+        `${activeStorageKey}:saved:${receipt.plan.operation_id}`,
         JSON.stringify(receipt),
       );
-    window.sessionStorage.removeItem(storageKey);
+    window.sessionStorage.removeItem(activeStorageKey);
     setRetained({ marker, receipt: null });
     setConfirmed(false);
     setStepUp(false);
@@ -491,7 +537,7 @@ function SettingsTransferView({
     );
   }
   const unresolved = receipt?.actions.some((a) => a.status !== "committed");
-  const locked = busy || !!receipt || !resumeReady;
+  const locked = busy || !!receipt || !resumeReady || corruptSaved;
 
   return (
     <div className="space-y-6 p-3 md:p-6">
@@ -503,6 +549,28 @@ function SettingsTransferView({
         </Link>{" "}
         also have their own import/export.
       </SettingsHeading>
+      {identityFailure && (
+        <FormNotice>
+          Current canonical identity could not be verified. Receipts stay hidden
+          and operations are disabled.{" "}
+          <Button
+            onClick={() => {
+              retryIdentity();
+              setIdentityRetry((n) => n + 1);
+            }}
+          >
+            Retry identity verification
+          </Button>
+        </FormNotice>
+      )}
+      {corruptSaved && (
+        <FormNotice tone="warning">
+          Saved receipt recovery is required. The original remains untouched.{" "}
+          <Button onClick={recoverLocalReceipt}>
+            Preserve original and open recovery slot
+          </Button>
+        </FormNotice>
+      )}
       {notice && <FormNotice tone="info">{notice}</FormNotice>}
       {errors.length > 0 && (
         <FormNotice>
@@ -539,7 +607,10 @@ function SettingsTransferView({
         className="space-y-3 rounded-lg border p-4"
       >
         <h2 className="text-lg">Export settings</h2>
-        <fieldset className="flex flex-wrap gap-4">
+        <fieldset
+          disabled={busy || !resumeReady}
+          className="flex flex-wrap gap-4"
+        >
           <legend className="text-sm">Sections to export</legend>
           {SECTIONS.map((section) => (
             <label key={section}>
@@ -559,6 +630,7 @@ function SettingsTransferView({
           ))}
         </fieldset>
         <SelectField
+          disabled={busy || !resumeReady}
           label="Export format"
           value={format}
           options={[
@@ -568,7 +640,7 @@ function SettingsTransferView({
           onChange={(e) => setFormat(e.target.value as "toml" | "yaml")}
         />
         <Button
-          disabled={busy || !known || !project}
+          disabled={busy || !known || !project || !resumeReady || corruptSaved}
           onClick={() =>
             task(async (publish) => {
               const identity = await transfer.read.identity();
@@ -901,7 +973,7 @@ function SettingsTransferView({
           label="Load a resume receipt"
           type="file"
           accept=".json"
-          disabled={busy || !!receipt || !resumeReady}
+          disabled={busy || !!receipt || !resumeReady || corruptSaved}
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) void importReceipt(file);
