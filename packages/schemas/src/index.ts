@@ -100,6 +100,7 @@ export {
 } from "./d1";
 
 // --- Config schemas ---
+export { DeployTargetSchema, type DeployTarget } from "./deploy-target";
 export {
   TilaProjectConfigSchema,
   type TilaProjectConfig,
@@ -399,6 +400,8 @@ export {
   type SchemaGetResponse,
   SchemaApplyResponseSchema,
   type SchemaApplyResponse,
+  SchemaApplyWarningSchema,
+  type SchemaApplyWarning,
   SchemaHistoryResponseSchema,
   type SchemaHistoryResponse,
 } from "./api";

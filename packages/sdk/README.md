@@ -164,6 +164,39 @@ Provider credentials must carry their own signer; combining a provider with the
 legacy top-level `dpopSigner` is rejected. Generated `Authorization` and `DPoP`
 headers take precedence over all case variants in `extraHeaders`.
 
+### Definition revision warnings
+
+Preview a definition and pass the revision you reviewed when applying it:
+
+```ts
+const review = await tila.schema.preview(definition);
+const applied = await tila.schema.apply(definition, undefined, {
+  expected_revision: review.revision,
+  reviewed_definition: review.reviewed_definition,
+  idempotency_key: "my-reviewed-change",
+});
+```
+
+Retain that exact request for a lost-response retry. A fresh stale write returns
+412 `schema-revision-conflict`; review current state before preparing another
+write. Without `expected_revision`, non-managed projects accept the apply and
+return `warnings` containing `schema-revision-deprecated`, guidance,
+`observed_revision` and `result_revision`. Older receipts may omit the observation.
+Managed projects still require a revision, including on cached legacy retries.
+
+`TilaClient`, `TilaClient.fromConfig` and `createTila` accept `warningSink`:
+`createTila(config, token, { warningSink: warning => logger.warn(warning) })`.
+The default calls `console.warn` (stderr in Node); the result retains structured
+warnings. The same behavior applies to the local facade and `RemoteBackend`.
+With the lower-level `createTilaLocal`, pass a sink as the third argument to
+`buildLocalResources(project, artifacts, sink)`; the raw embedded backend returns
+structured warnings for its caller to render.
+
+Accepted revisionless state changes also record `schema.revisionless_applied`
+atomically in the journal. Receipt retries retain warnings without duplicating
+the event or revision; no-change warns without a state-change event. Revisions
+will be mandatory in a future migration, with no enforcement release set.
+
 ### `createTila` — one facade, local or remote
 
 `createTila(config, token?)` returns a uniform facade exposing the same resource

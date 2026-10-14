@@ -157,7 +157,7 @@ it("lists exactly nine default tools, validates real calls, and preserves the ex
     data: { status: "done" },
   });
   const all = await connect(a, ["all"]);
-  expect((await all.listTools()).tools).toHaveLength(87);
+  expect((await all.listTools()).tools).toHaveLength(89);
   const legacy = await all.callTool({
     name: "tila_task_show",
     arguments: { id: "T-1" },
@@ -535,7 +535,7 @@ it("calls the complete primitive catalog and compatibility aliases through MCP w
   const { a } = await fixture();
   const client = await connect(a, ["all", "core", "claims"]);
   const listed = (await client.listTools()).tools;
-  expect(listed).toHaveLength(89);
+  expect(listed).toHaveLength(91);
   const called = new Set<string>();
   async function primitive(name: string, args: Record<string, unknown> = {}) {
     called.add(name);
@@ -578,6 +578,8 @@ id_suffix = ""
 title = "Evidence"
 `,
   });
+  await primitive("tila_schema_import", { text: "schema_version = 1" });
+  await primitive("tila_schema_export", { format: "yaml" });
   await primitive("tila_template_list");
   await primitive("tila_template_instantiate", {
     template: "simple",
@@ -1004,7 +1006,8 @@ values = ["open", "done"]
   expect(recovered.answer_applicable).toBe(true);
   expect(recovered.question.answer.text).toBe("Proceed");
   expect(
-    (await b.questions.answer(question.id, answerCommand)).question.answer.text,
+    (await b.questions.answer(question.id, answerCommand)).question.answer
+      ?.text,
   ).toBe("Proceed");
 
   expect((await b.queue.inspect()).counts).toMatchObject({

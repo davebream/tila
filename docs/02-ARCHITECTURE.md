@@ -631,7 +631,9 @@ Preview changes are typed (`SchemaPreviewChangeSchema`) and carry impact counts 
 
 `@tila/core` also exports the editable definition document used by the dashboard: `parseDefinitionDocument`/`serializeDefinitionDocument` keep the raw TOML table tree, so keys the schema does not model survive an edit, and `rebaseDefinition` merges a draft onto a newer revision one declaration at a time. Serialization keeps values but not comments or layout. Validation remains `parseSchemaToml` and the server preview.
 
-The SDK exposes `schema.preview(definition)`, `schema.apply(definition, strategy, { expected_revision, reviewed_definition, idempotency_key })` and paginated `schema.history({ limit, before })`. CLI users can save `tila schema diff --json` to a review file and pass it with `tila schema apply --review <file> --strategy force --idempotency-key <stable-key>`. MCP exposes `tila_schema_preview` and the same conditional fields on `tila_schema_update`. History is retained remotely and locally. Embedded databases now apply the previously skipped canonical migration 21 to add the transactional receipt table; the legacy local response-cache table remains intact. Legacy unconditional applies remain compatible; they do not provide stale-editor protection, and `tila schema apply` now warns when it sends one.
+The SDK exposes `schema.preview(definition)`, `schema.apply(definition, strategy, { expected_revision, reviewed_definition, idempotency_key })` and paginated `schema.history({ limit, before })`. CLI users can save `tila schema diff --json` to a review file and pass it with `tila schema apply --review <file> --strategy force --idempotency-key <stable-key>`. MCP exposes `tila_schema_preview` and the same conditional fields on `tila_schema_update`. History is retained remotely and locally. Embedded databases now apply the previously skipped canonical migration 21 to add the transactional receipt table; the legacy local response-cache table remains intact.
+
+Legacy revisionless applies remain compatible outside managed projects, with structured `schema-revision-deprecated` warnings carrying guidance and observed/result revisions. SDK applies use an injectable `warningSink` with a visible `console.warn` default; CLI renders one diagnostic on stderr, including JSON mode, and MCP includes warnings in text and structured results. A successful revisionless mutation appends `schema.revisionless_applied` in the same SQLite transaction as history and its receipt. The event carries canonical identity/environment, actor, idempotency context and revision numbers, without definition contents. Exact retries preserve the warning without another event/revision; no-change warns without a state-change event. Invalid/rejected requests do not claim a successful apply. Pre-warning receipts gain a warning on replay without inventing an observed revision or historical event. Managed `revision_required` is checked before receipt replay. Older clients can ignore the new field, but journal readers still observe new revisionless changes. Conditional applies keep 412 semantics and no warning. Requiring revisions on every project is a future migration, with no enforcement release set.
 
 Every new definition write (preview and apply) passes a guard before it is parsed: a definition or reviewed copy over 256 KiB (`DEFINITION_MAX_BYTES`) returns 413 `payload-too-large`, and credentials, a `[tila_export]` table or a client connection file return 400 `schema-parse-error` with one path per problem. The Worker also caps schema request bodies ahead of the idempotency middleware. Stored definitions are never re-checked on read. `tila schema import` and `tila schema export` move definitions in and out as TOML or YAML through the same preview and conditional apply; §14.6 has the contract.
 
@@ -1367,7 +1369,7 @@ Declared states must match the field's allowed values when present. Start mappin
 
 Readiness respects hard and soft dependency edges, unresolved gates, archive state, and transitive prerequisites. Cycles remain blocked with a diagnostic path. Archiving an unfinished predecessor never counts as success; an explicitly successful predecessor can subsequently be archived without losing its recorded success. Configured work depending on an unconfigured type is blocked until its predecessor's lifecycle is declared. The shared evaluator returns diagnostic reasons for missing work, missing lifecycle metadata, unsuccessful dependencies, cycles and gates.
 
-Unconfigured types retain legacy readiness (`status != closed`, archived predecessors ignored, soft blockers included by default). Managed admission requires lifecycle metadata explicitly and cannot use this fallback. Readiness inspection remains read-only: it ignores expired timer gates without resolving them or appending journal events. Execution ownership and queue capacity are separate admission checks.
+Unconfigured types retain legacy readiness (`status != closed`, archived predecessors ignored, soft blockers included by default). Managed admission requires lifecycle metadata explicitly and cannot use this fallback. The dashboard explains the fallback beside blocked-work counts instead of altering it (§14.9). Readiness inspection remains read-only: it ignores expired timer gates without resolving them or appending journal events. Execution ownership and queue capacity are separate admission checks.
 
 ### 6.3 Adding a new work-unit type
 
@@ -2094,7 +2096,7 @@ Applied definitions, operation receipts and their journal event commit in one pr
 Product release, physical database migration, serialized schema-format version and applied definition revision are distinct. A high history revision does not by itself mean an older client cannot parse the format. Preserve existing compatibility checks; #296 owns the explicit settings-client transition, and #307 reports immutable release/protocol identity. Do not restore old definitions as a database downgrade.
 
 ### 10.7 User runs concurrent `tila schema apply` from two machines
-Both callers send the revision they read as `expected_revision` (`tila schema import --expected-revision <n>` does). The first transaction commits; the second receives `schema-revision-conflict` and must read/preview again. Legacy callers that omit the precondition retain unconditional behavior. There is no schema claim or cross-store transaction in this path.
+Both callers send the revision they read as `expected_revision` (`tila schema import --expected-revision <n>` does). The first transaction commits; the second receives `schema-revision-conflict` and must read/preview again. Legacy callers that omit the precondition retain unconditional behavior outside managed projects, with an explicit warning and `schema.revisionless_applied` journal event on change. There is no schema claim or cross-store transaction in this path.
 
 ### 10.8 Lease TTL too short, agent loses lease mid-work
 Renew loop runs every TTL/3 (default: every 60s for a 180s lease, every 200s for a 600s lease). If three consecutive renews fail, the agent aborts its current critical section and surfaces the issue.
@@ -2843,7 +2845,7 @@ destructive confirmation, fed by an archive preview.
 | Membership mode; principal/provider identity, subject kind, role, display name; grant/revoke | D1; `/membership-policy`, `/memberships`, `/membership-events`, `/membership-repos`; Settings → Access; SDK `memberships`, CLI `member list/grant/role/revoke/policy/events`; MCP `tila_access_members` (read-only); compatibility `/admins` maps into canonical membership | O / X | Settings → Access (delivered). Demoting or revoking the last active owner fails with `last-owner` inside the same D1 write, so concurrent removals cannot leave a project without an owner; the `/admins` route uses the same guard, and only the full bootstrap credential bypasses it. Never a second roster. |
 | Repository association (`host`, owner/repo identity, repository ID); read/write permission thresholds, maximum permission, mirrored-membership enablement/role cap; `access_policy_revision` | D1; `GET/POST /api/repos`, `GET/PUT /api/repos/:repoId/access-policy`, `DELETE /api/repos/:repoId`, each with `?host=` (default `github.com`); SDK `repos`, CLI `repos list/policy/remove`; MCP `tila_access_repos` (read-only) | O / X | Settings → Repositories (delivered). Policy writes and link removal take `expected_revision` and apply it in the conditional write (412 `revision-conflict`). Removing a link never removes explicit memberships. |
 | Repository OIDC enablement, permission ceiling, subject pattern, allowed events/refs/environments/workflows; `oidc_policy_revision` | D1; `GET/PUT /api/repos/:repoId/oidc-policy?host=`; SDK `repos`, CLI `repos oidc`; MCP read-only through `tila_access_repos` | O / X | Settings → Repositories, Actions OIDC policy (delivered). Revision-checked like the access policy, with its own revision. The GitHub Actions token exchange currently honours the policy for `github.com` links only. Conditions are authorization policy, not runtime observations. |
-| Service account name/display name, initial membership role; workload binding name/provider/issuer/subject/policy | D1; `/service-accounts` and `/:principalId/workload-bindings`; SDK and CLI service accounts; MCP `tila_access_service_accounts` (read-only) | O / X | Settings → Service identities (delivered): create, rename, revoke, and workload bindings. The principal is stable; role changes go through canonical membership. Revocation preserves attribution. Known gap: display-name and binding-policy edits carry no revision, so concurrent edits are last-write-wins. |
+| Service account name/display name, initial membership role; workload binding name/provider/issuer/subject/policy | D1; `/service-accounts` and `/:principalId/workload-bindings`; SDK and CLI service accounts; MCP `tila_access_service_accounts` (read-only) | O / X | Settings → Service identities (delivered): create, rename, revoke, and workload bindings. The principal is stable; role changes go through canonical membership. Revocation preserves attribution. Display-name and binding-policy edits accept optional `expected_revision` and increment their D1 revision atomically (#439). The dashboard keeps conflict drafts for explicit rebase/reload; legacy callers may omit the revision. Revocation needs no revision. |
 | Credential name/note, principal, role/capabilities, task-type/record-key restrictions, expiry, optional DPoP key binding; rotation expected token ID/overlap | D1 hashes and credential versions; `/api/tokens` issue/list/revoke/rotate; SDK/CLI token; MCP `tila_access_credentials` (metadata only) | K / X | Settings → Credentials (delivered): issue, rotate and revoke. The secret is shown once at issuance or rotation and is never stored by the browser, exported or recoverable through history. Issuance is not idempotent; after an unconfirmed failure the user checks the list and revokes or reissues. |
 | Runtime enrollment name/installation reference/policy, invitation policy; revocation | D1; `/runtime/enrollments` (list, revoke), `/runtime/invitations` (create, list, revoke), `/runtime/redeem`; SDK runtime and CLI `machine` flows including `machine invitations/revoke-invitation` | E / X | Settings → Runtime access (delivered), linked to Runtime (#301): list and revoke enrollments, create, list and revoke invitations. One invitation enrolls one installation. Creating an enrollment needs a device proof key, so it stays in the CLI. Run tokens, proof keys and invitation bearer values are never listed or editable. |
 | Project display name and identity metadata; `settings_revision` | D1 registry; `GET/PATCH /projects/:id/project-settings`; SDK `project`, CLI `project settings/rename` | O (`project:configure`) for rename; root for destructive project operations / I | Settings → General (delivered). Rename is revision-checked and audited, and display only. IDs, creation time/actor and account binding are read-only provenance; archive/destroy remain explicit operational actions. |
@@ -2905,13 +2907,13 @@ participant-level apply change requires an explicit authorization decision.
 
 | Code / resource | Current behavior and required activation contract |
 |---|---|
-| D — applied definitions | Apply parses input, then diffs/commits inside a DO SQLite transaction, increments history `version`, and journals. `expected_revision` is checked in the same transaction (412 on mismatch), destructive conditional writes bind to the previewed `reviewed_definition`, and retries replay their receipt. Writes without `expected_revision` stay unconditional except on managed-queue projects (428). No-change and destructive outcomes remain documented; history is public and restore applies an old definition as a new revision. New writes use current validation; legacy reads retain supported lazy `default_for_legacy` behavior without bulk rewriting stored rows. Retiring a type must not conceal its remaining rows. |
+| D — applied definitions | Apply parses input, then diffs/commits inside a DO SQLite transaction, increments history `version`, and journals. `expected_revision` is checked in the same transaction (412 on mismatch), destructive conditional writes bind to the previewed `reviewed_definition`, and retries replay their receipt. Writes without `expected_revision` warn and journal changes; managed-queue projects reject omission (428), even on receipt replay. No-change warns without another event/revision; rejected writes never record an apply. History is public and restore applies an old definition as a new revision. New writes use current validation; legacy reads retain supported lazy `default_for_legacy` behavior without bulk rewriting stored rows. Retiring a type must not conceal its remaining rows. |
 | T — templates | Instantiation validates and creates work/relationships using the active definition. Edits affect later instantiations only; previously created work is independent. Attempts record the definition and queue-policy revisions in force at reservation, authorization and result (#303, migration 39) as audit evidence; template edits are not task mutations. |
 | A — artifact policy | New versioned writes/restores capture current retention at reservation. Existing unassigned revisions get one persisted policy snapshot through bounded backfill; already assigned expiry is not rewritten by later schema edits. Expired non-head revisions may be swept; live lineage heads are protected. Explicit deletion/lineage retirement uses durable intent/retry records and preserves metadata/provenance. Restore cannot recover deleted bytes or revive a destroyed lineage. Search policy changes do not promise automatic historical reindexing. |
 | I — stable identity / archive | Rename, grants and profile selection are revision-checked updates; IDs and attribution stay stable. Archive, in one DO transaction, checks the revision and the reviewed `expected_epoch` of the active binding (`stale-binding` if the occupant changed), releases that binding and advances the epoch so the running session loses agent authority, supersedes the agent's open questions, stops dispatch, and refuses new runs, attaches, publications and room membership. Pending deliveries remain as evidence until their TTL; unfinished attempts keep their own lifecycle and need an explicit cancel or reassignment in Queue. Unarchive restores the identity only: no binding, lease or expired delivery is revived, and an attach must use the current epoch. Project destruction is a separate root operation, never “archive”. |
 | R — rooms | Updates and member changes check the room revision. New TTL, hop and pair budgets apply to later publications and wake budgets to the next dispatch lease; already stored recipient/expiry snapshots remain evidence. Visibility and member removal govern subsequent access immediately. Archive stops publication and thread creation now and wakes at the next lease; authorized history stays readable, pending deliveries can still be fetched and acknowledged until their TTL, and nothing is deleted. Recreating an archived room's ID fails with `room-archived`; unarchive restores publication. |
 | G — signal groups | PUT/DELETE change future recipient expansion and check `expected_revision` when given (0 = create only). Existing deliveries retain their snapshotted recipients/acknowledgements until expiry/retention cleanup; group deletion is not cancellation of past signals. |
-| X — access/credentials | Repository access and OIDC policies and the project name carry their own D1 revision (migration 0034); writes are conditional on the reviewed revision. These revisions are not part of D1 backups, so a restored link or project starts again at revision 1. D1 policy/credential versions and current membership own effect timing. Narrowing/revocation governs subsequent authorized requests and cannot be undone by a schema restore. Credential rotation retains its explicit overlap policy; expanding policy requires newly authorized issuance, not widening an old snapshot. Preserve audit identity after revocation; no old secret recovery. New editor preconditions must not disable immediate security revocation. |
+| X — access/credentials | Repository access and OIDC policies and the project name carry their own D1 revision (migration 0034); service accounts and workload bindings do too (0036). Supplied revisions make writes conditional on the reviewed version; omitted revisions preserve legacy callers. Restore re-stamps settings above both retained destination history (0035/0036) and imported service/binding revisions, so a pre-restore editor cannot become current again. D1 policy/credential versions and current membership own effect timing. Narrowing/revocation governs subsequent authorized requests and cannot be undone by a schema restore. Credential rotation retains its explicit overlap policy; expanding policy requires newly authorized issuance, not widening an old snapshot. Preserve audit identity after revocation; no old secret recovery. New editor preconditions must not disable immediate security revocation. |
 | H — host/profile selection | Host profile revisions and binding evidence are distinct. The agent's profile selection is enforced on the next new attach; it cannot switch an active account/session. A supported host command has requested/acknowledged/observed outcomes and an applied revision. Offline is pending/unavailable, never success. #283 owns adapter proof; #298/#301 own management/projection. Settings shows host-local profile changes as unavailable, and the Runtime view exposes binding release (expected epoch) only; reconnect and stop are reported as unsupported until an adapter command exists. |
 
 When identity, room and access changes take effect:
@@ -3011,12 +3013,12 @@ other whole top-level key (`hierarchy`, `schema_version`, an unmodeled key).
 | Mode | Behaviour |
 |---|---|
 | `merge` (default) | Each unit in the file replaces the same unit; units the file omits are kept. A declaration is replaced whole, so fields it drops are removals the preview reports. An empty section changes nothing. `schema_version` comes from the file, else the project. |
-| `replace` | The file becomes the whole definition. Every removed unit is listed and must be confirmed (`--confirm-removals`, or the dashboard checkbox), including template removals the server treats as non-destructive. |
+| `replace` | The file becomes the whole definition. Every removed unit is listed and must be confirmed (`--confirm-removals`, the dashboard checkbox, or MCP `confirm_removals: true`), including template removals the server treats as non-destructive. |
 
 The result is validated as a complete definition before preview; any error means
-nothing is drafted or written. Destructive changes still need the typed
-confirmation and a strategy. An import that only changes comments or unmodeled
-keys records no revision.
+nothing is drafted or written. Destructive changes still need review and a
+strategy; the dashboard also requires its typed confirmation. An import that
+only changes comments or unmodeled keys records no revision.
 
 TOML and YAML are supported (`.toml`, `.yaml`, `.yml`; pasted text is detected).
 YAML is read with the 1.2 core schema and normalizes to the same document as
@@ -3025,7 +3027,7 @@ The server stores and validates TOML only, so clients convert YAML first. The
 adapter is the `@tila/core/definition-yaml` entry, which keeps the `yaml`
 library out of the Worker, Durable Object and SDK bundles.
 
-Export (`tila schema export`, Settings › Definitions) writes the applied
+Export (`tila schema export`, Settings › Definitions, MCP `tila_schema_export`) writes the applied
 definition with a `[tila_export]` table: `format = "tila-definitions"`,
 `format_version`, `project_id`, `revision`, `exported_at`, and optionally
 `applied_at` and `exported_with`. Import checks `format` and `format_version`
@@ -3050,9 +3052,22 @@ stored text is never re-checked on read.
 `tila schema status` compares local `*.schema.toml` files with the server by unit
 (`up-to-date`, `differs`, `unknown`) instead of treating the file as pending.
 `tila schema apply` without a revision still sends the files as the whole
-definition, and warns. MCP import/export is follow-up work;
-`tila_schema_preview` plus a conditional `tila_schema_update` already give
-preview-then-apply.
+definition, and warns. MCP `tila_schema_import` accepts file text, TOML/YAML/detect
+format and merge/replace mode. It plans by default and returns the shared unit
+plan, warnings, server preview and a `reviewed_plan` snapshot (revision,
+canonical TOML definition, removed units). Applying requires explicit `apply:
+true`, caller-supplied `expected_revision`, and this unchanged snapshot;
+destructive changes also require a strategy. First apply checks the snapshot
+against the same revision before sending the normal conditional schema write.
+Preview races conflict; an import never silently replans onto newer state.
+Idempotent retries retain the original definition, revision, key and strategy:
+the server can replay its receipt before checking the stale revision, while a
+fresh stale request conflicts without writing. No additional server operation
+or transport retry system is introduced. The schema tool group exposes both
+transfer tools; the nine-tool default workflow catalog is unchanged. Export
+from an unapplied project returns an explicit empty result, while a valid import
+can bootstrap against revision 0. `tila_schema_preview` and conditional
+`tila_schema_update` remain compatible.
 
 | Scenario / child ownership | Contract review and acceptance probes |
 |---|---|
@@ -3196,6 +3211,49 @@ rather than a standing red alarm. `decisions.waiting` is red because the worker
 that asked stops until someone answers. It is not applicable when the credential
 has no principal, since nothing can be routed to it. Escalation reroutes a
 question to one named owner, so filtering by responder covers it.
+
+**Blocked counts and legacy readiness (#398).** `work.blocked` and
+`GET /tasks?blocked=1` use the same readiness rules as the queue
+(`evaluateReadiness`, `isTerminal` and `blockedTaskIds` in
+`packages/ops-sqlite/src/ready-ops.ts`). A task type that declares no
+`[work_units.<type>.lifecycle]` is judged by the legacy rule: only status
+`closed` is finished. A project that marks finished work `done` therefore sees
+those tasks counted as open, and a prerequisite in any other status keeps its
+dependents waiting. A type that does declare a lifecycle also waits on a
+prerequisite of an undeclared type, whatever that prerequisite's status.
+
+The dashboard keeps these semantics and explains the count instead of changing
+it:
+
+- **No guessed meanings.** `done`, `completed` and `cancelled` are not treated
+  as finished for a type that has not said so, and no type is left out of the
+  count in the dashboard only. The count and the list it links to stay equal to
+  the queue's own reasons. Declaring a lifecycle for the type is the fix, and it
+  needs no data migration. The development seed declares one for `task`
+  (`packages/cli/tila.schema.toml`: `done` is terminal and successful);
+  `epic` and `milestone` are dependency-free containers with no known finished
+  state, so they stay unconfigured on purpose.
+- **Where it shows.** A note sits in the `work.blocked` row of the Overview and
+  under the filtered Tasks list (`tasks?blocked=1`), including when the count
+  is zero: a zero does not show that every type declares a lifecycle. Search
+  results do not apply the filter and do not carry the note.
+- **Where it comes from.** Only the work type catalog (§14.7): a visible type is
+  named when it is `declared` without a `definition.lifecycle`, or `undeclared`.
+  The names never come from a page of rows, which can omit a type, and never
+  from a prerequisite's reasons.
+- **Unknown is stated as unknown.** A failed or stale catalog, an `unknown`
+  declaration, or `incomplete` in the catalog reads as "coverage unknown", never
+  as every type having a lifecycle. When every visible type declares one and
+  the catalog is complete, there is nothing to explain and no note.
+- **Restricted credentials.** A `task_types` restriction adds a caveat that
+  prerequisites of types the credential cannot see are counted but not named,
+  and the note lists only the types in that credential's own catalog. Any
+  namespace restriction, including records only, hides the schema's read state,
+  so an undeclared type is worded as one the credential "sees no lifecycle
+  for" rather than as declared absent. A records-only restriction hides no task
+  type and makes no claim that some are hidden.
+- **Access-aware link.** The note links to Settings › Definitions only when the
+  caller's access includes it; otherwise it says so and names no page.
 
 Workflow-attempt rules wait for a list page that can show them.
 

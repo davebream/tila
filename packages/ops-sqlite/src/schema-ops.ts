@@ -12,6 +12,7 @@ import {
   type ArtifactPolicyImpact,
   DEFINITION_MAX_BYTES,
   SchemaApplyRequestSchema,
+  type SchemaApplyWarning,
   type SchemaHistory,
   type SchemaPreviewChange,
   type TilaSchemaToml,
@@ -47,9 +48,37 @@ export type PreviewSchemaResult = {
 };
 
 export type ApplySchemaResult =
-  | { ok: true; version: number; revision: number; changes: string[] }
-  | { ok: false; reason: "no-change"; revision: number }
+  | {
+      ok: true;
+      version: number;
+      revision: number;
+      changes: string[];
+      warnings?: SchemaApplyWarning[];
+    }
+  | {
+      ok: false;
+      reason: "no-change";
+      revision: number;
+      warnings?: SchemaApplyWarning[];
+    }
   | { ok: false; reason: "destructive"; changes: string[]; hint: string };
+
+function revisionWarnings(
+  resultRevision: number,
+  observedRevision?: number,
+): SchemaApplyWarning[] {
+  return [
+    {
+      code: "schema-revision-deprecated",
+      message:
+        "Applying definitions without expected_revision is deprecated and can overwrite newer edits. Preview the current definitions and supply the revision you reviewed as expected_revision. Revisions will be required in a future release; no enforcement release is set.",
+      ...(observedRevision === undefined
+        ? {}
+        : { observed_revision: observedRevision }),
+      result_revision: resultRevision,
+    },
+  ];
+}
 
 export class SchemaPreconditionError extends Error {
   constructor(
@@ -226,7 +255,7 @@ export function applySchema(
         "schema-revision-required",
         getCurrentSchema(tx)?.version ?? 0,
       );
-    return withDoIdempotency<ApplySchemaResult>(
+    const { result } = withDoIdempotency<ApplySchemaResult>(
       tx,
       options.idempotency_key
         ? {
@@ -282,6 +311,10 @@ export function applySchema(
               ok: false as const,
               reason: "no-change" as const,
               revision,
+              warnings:
+                options.expected_revision === undefined
+                  ? revisionWarnings(revision, revision)
+                  : [],
             };
           }
 
@@ -357,15 +390,47 @@ export function applySchema(
           sourceVersion: origin?.sourceVersion,
         });
 
+        if (options.expected_revision === undefined) {
+          appendJournal(tx, {
+            ...journalOrigin,
+            kind: "schema.revisionless_applied",
+            resource: "schema",
+            actor: appliedBy,
+            fence: null,
+            // Identity/provenance live in the canonical journal envelope.
+            // Never include submitted definitions or change contents here.
+            data: {
+              actor: appliedBy,
+              idempotency_key: options.idempotency_key ?? null,
+              expected_revision: null,
+              observed_revision: revision,
+              result_revision: newVersion,
+            },
+          });
+        }
+
         // Step 9: Return result
         return {
           ok: true as const,
           version: newVersion,
           revision: newVersion,
           changes: changeSummary,
+          warnings:
+            options.expected_revision === undefined
+              ? revisionWarnings(newVersion, revision)
+              : [],
         };
       },
-    ).result;
+    );
+    // Pre-warning receipts still replay without changing history or inventing
+    // an observed revision. The managed precondition above always runs first.
+    if (
+      options.expected_revision === undefined &&
+      (result.ok || result.reason === "no-change") &&
+      !result.warnings?.length
+    )
+      return { ...result, warnings: revisionWarnings(result.revision) };
+    return result;
   });
 }
 

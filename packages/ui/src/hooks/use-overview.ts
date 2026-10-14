@@ -1,5 +1,6 @@
 import { useWhoami } from "@/hooks/use-admin";
 import { useAuth } from "@/hooks/use-auth";
+import { readinessAccess } from "@/hooks/use-readiness-access";
 import {
   type AppliedSchemaResponse,
   getSchema,
@@ -16,19 +17,20 @@ import {
 } from "@/lib/attention";
 import {
   type AccessTarget,
-  isRestricted,
+  DEFINITIONS_ACCESS,
   navVisibility,
 } from "@/lib/navigation";
 import { type SectionState, deriveSectionState } from "@/lib/query-state";
+import {
+  type ReadinessContext,
+  readinessContext,
+} from "@/lib/readiness-context";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import type { RecordTypesResponse, WorkCatalogResponse } from "@tila/schemas";
 
 const REFRESH_MS = 30_000;
 
-const DEFINITIONS: AccessTarget = {
-  requires: ["schema:read"],
-  surface: "schema",
-};
+const DEFINITIONS = DEFINITIONS_ACCESS;
 const WORK: AccessTarget = { requires: ["tasks:read"], surface: "tasks" };
 const RECORDS: AccessTarget = {
   requires: ["records:read"],
@@ -48,6 +50,13 @@ export interface OverviewData {
   records: SectionState<RecordTypesResponse> | "hidden";
   /** The credential only sees some task and record types. */
   restricted: boolean;
+  /**
+   * Why the blocked count may include finished work (#398): which visible task
+   * types declare no lifecycle. Null when there is nothing to explain.
+   */
+  readiness: ReadinessContext | null;
+  /** Settings › Definitions when the caller's access includes it. */
+  definitionsHref: string | null;
   /** Newest successful read across the page's queries. */
   updatedAt: number;
   refetch: () => void;
@@ -124,13 +133,19 @@ export function useOverview(): OverviewData {
       records: recordState,
     });
 
+  const access = readinessAccess(identity.data, projectId, identityKnown);
+
   return {
     view: evaluateOverview({ rows, unconfigured }),
     schema: schemaState,
     work: workState,
     records: recordState,
-    restricted:
-      identity.data?.project_id === projectId && isRestricted(identity.data),
+    restricted: access.restricted,
+    readiness: readinessContext(workState, {
+      taskTypes: access.taskTypesRestricted,
+      any: access.restricted,
+    }),
+    definitionsHref: access.definitionsHref,
     updatedAt: Math.max(
       0,
       ...[...sources, schema, work, records].map((q) => q.dataUpdatedAt),

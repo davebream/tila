@@ -46,6 +46,7 @@ import type {
 import {
   ArtifactRevisionSchema,
   type JournalAppendRequest,
+  SchemaApplyWarningSchema,
   SchemaPreviewResponseSchema,
 } from "@tila/schemas";
 import type {
@@ -115,6 +116,7 @@ import { z } from "zod";
 import { createArtifactMethods } from "../artifacts";
 import { TilaApiError, type TilaClient } from "../client";
 import { createJournalMethods } from "../journal";
+import { reportSchemaWarnings } from "../schema-warnings";
 
 // Internal schemas for artifact endpoints not exported from @tila/schemas.
 //
@@ -170,6 +172,7 @@ const SchemaApplyLenientSchema = z.object({
   changes: z.array(z.string()).optional(),
   noChange: z.boolean().optional(),
   revision: z.number().int().nonnegative().optional(),
+  warnings: z.array(SchemaApplyWarningSchema).optional(),
 });
 
 const StateListInternalSchema = z.object({
@@ -875,12 +878,14 @@ export class RemoteBackend
       body,
       { schema: SchemaApplyLenientSchema, validate: true },
     );
+    reportSchemaWarnings(result.warnings, this.client.warningSink);
     return {
       ok: true,
       version: result.version ?? null,
       changes: result.changes ?? [],
       noChange: result.noChange ?? false,
       revision: result.revision,
+      warnings: result.warnings,
     };
   }
 

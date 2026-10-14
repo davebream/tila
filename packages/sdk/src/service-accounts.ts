@@ -2,18 +2,12 @@ import type {
   CredentialPolicy,
   ProjectRole,
   ServiceAccount,
+  WorkloadBinding,
   WorkloadBindingRequest,
 } from "@tila/schemas";
 import type { TilaClient } from "./client";
 
-export interface WorkloadBinding extends WorkloadBindingRequest {
-  binding_id: string;
-  principal_id: string;
-  project_id: string;
-  created_at: number;
-  created_by: string;
-  revoked_at: number | null;
-}
+export type { WorkloadBinding } from "@tila/schemas";
 export function createServiceAccountMethods(
   client: TilaClient,
   projectId: string,
@@ -29,10 +23,10 @@ export function createServiceAccountMethods(
       role?: ProjectRole;
     }) =>
       client.post<{ ok: true; service_account: ServiceAccount }>(base, input),
-    update: (id: string, displayName: string) =>
+    update: (id: string, displayName: string, expectedRevision?: number) =>
       client.patch<{ ok: true; service_account: ServiceAccount }>(
         accountPath(id),
-        { display_name: displayName },
+        { display_name: displayName, expected_revision: expectedRevision },
       ),
     revoke: (id: string) => client.delete<{ ok: true }>(accountPath(id)),
     listWorkloadBindings: (id: string) =>
@@ -48,10 +42,11 @@ export function createServiceAccountMethods(
       id: string,
       bindingId: string,
       policy: CredentialPolicy,
+      expectedRevision?: number,
     ) =>
       client.patch<{ ok: true; binding: WorkloadBinding }>(
         `${accountPath(id)}/workload-bindings/${encodeURIComponent(bindingId)}`,
-        { policy },
+        { policy, expected_revision: expectedRevision },
       ),
     revokeWorkloadBinding: (id: string, bindingId: string) =>
       client.delete<{ ok: true }>(

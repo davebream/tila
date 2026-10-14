@@ -335,6 +335,7 @@ export const serviceAccounts = sqliteTable("_service_accounts", {
   created_at: integer("created_at").notNull(),
   created_by: text("created_by").notNull(),
   revoked_at: integer("revoked_at"),
+  revision: integer("revision").notNull().default(1),
 });
 export const credentials = sqliteTable("_credentials", {
   credential_id: text("credential_id").primaryKey(),
@@ -369,6 +370,7 @@ export const workloadBindings = sqliteTable("_workload_bindings", {
   created_at: integer("created_at").notNull(),
   created_by: text("created_by").notNull(),
   revoked_at: integer("revoked_at"),
+  revision: integer("revision").notNull().default(1),
 });
 export const credentialEvents = sqliteTable("_credential_events", {
   event_id: text("event_id").primaryKey(),

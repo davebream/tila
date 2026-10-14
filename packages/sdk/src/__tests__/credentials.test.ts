@@ -59,4 +59,55 @@ describe("credential HTTP contracts", () => {
       policy: CREDENTIAL_PRESETS["coordination-only"],
     });
   });
+  it("passes caller revisions through and propagates conflicts without retry", async () => {
+    const services = createServiceAccountMethods(client, "project");
+    await services.update("service:id", "Reviewed", 7);
+    await services.updateWorkloadBinding(
+      "service:id",
+      "binding",
+      CREDENTIAL_PRESETS.worker,
+      9,
+    );
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      display_name: "Reviewed",
+      expected_revision: 7,
+    });
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      policy: CREDENTIAL_PRESETS.worker,
+      expected_revision: 9,
+    });
+    fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: "revision-conflict",
+            message: "Reload",
+            revision: 10,
+            resource: "workload-binding",
+          },
+        }),
+        { status: 412 },
+      ),
+    );
+    await expect(
+      services.updateWorkloadBinding(
+        "service:id",
+        "binding",
+        CREDENTIAL_PRESETS.worker,
+        9,
+      ),
+    ).rejects.toMatchObject({
+      code: "revision-conflict",
+      status: 412,
+      extras: { revision: 10, resource: "workload-binding" },
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await services.revoke("service:id");
+    await services.revokeWorkloadBinding("service:id", "binding");
+    expect(fetch.mock.calls.slice(3).map((call) => call[1].body)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
 });

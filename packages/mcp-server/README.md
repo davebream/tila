@@ -41,7 +41,7 @@ This helper is not an OS sandbox. An unrestricted process under the same OS acco
 
 See [runtime operations](../../docs/05-OPERATIONS.md#runtime-enrollment-and-unattended-runs) for shared runners, OIDC, recovery, revocation, and the backend-first upgrade.
 
-## Tools (93)
+## Tools (95)
 
 The default catalog contains **nine workflow tools**. Primitive tools are opt-in with
 `TILA_MCP_TOOLS=all`, existing named groups, or `core`. Combine groups with commas, for example
@@ -185,6 +185,8 @@ Artifact results expose provenance and review state; a matching hash does not es
 | `tila_handoff_list` | List this participant's handoffs or handoffs referencing a resource |
 | `tila_schema_update` | Apply a new TOML schema definition |
 | `tila_schema_preview` | Preview configuration changes and return the revision and reviewed definition for conditional apply |
+| `tila_schema_import` | Plan or conditionally apply a TOML/YAML definition file, merging named declarations by default |
+| `tila_schema_export` | Export the applied definition as TOML/YAML with provenance metadata |
 | `tila_template_list` | List available task templates |
 | `tila_template_instantiate` | Create tasks from a template |
 
@@ -194,6 +196,75 @@ Artifact results expose provenance and review state; a matching hash does not es
 |------|-------------|
 | `tila_presence_heartbeat` | Record a heartbeat to mark agent as online |
 | `tila_summary` | Get compact project summary |
+
+### Definition apply warnings
+
+`tila_schema_update` accepts a full TOML definition. Preview with
+`tila_schema_preview` and pass the returned `revision` as `expected_revision`,
+plus `reviewed_definition` for destructive conditional writes. Stale writes
+retain 412 behavior; retain the original payload/revision/idempotency key when
+retrying a lost response.
+
+Omitting the revision on a non-managed project remains compatible and returns
+`warnings` with code `schema-revision-deprecated`, guidance and observed/result
+revisions in both text and structured results. SDK diagnostics use stderr,
+preserving the stdio protocol on stdout. Successful revisionless state changes
+record `schema.revisionless_applied` in the durable journal; retries do not
+duplicate it and no-change warns without another event. Managed projects still
+require a revision, including cached legacy retries. No enforcement release is
+set for other projects. `tila_schema_import` already requires a reviewed revision
+on apply.
+
+### Definition import and export
+
+Select `TILA_MCP_TOOLS=workflow,schema` (or `all`) to expose these tools.
+`tila_schema_import` takes `text`, `format` (`toml`, `yaml`, or `detect`, the
+default), and `mode` (`merge`, the default, or `replace`). It plans without
+writing, even if `expected_revision` is supplied. The `result` contains units
+added, changed, unchanged, preserved and removed, warnings, the server preview,
+and `reviewed_plan`: the revision, resulting canonical TOML in `definition`, and
+removed units. Merge replaces each declaration the file mentions whole and
+keeps omitted declarations. Replace makes the file the whole definition.
+
+Retain and review the plan before applying:
+
+```js
+const { result: plan } = await tila_schema_import({ text, format: "detect" });
+await tila_schema_import({
+  text,
+  apply: true,
+  expected_revision: plan.reviewed_plan.revision,
+  reviewed_plan: plan.reviewed_plan,
+  idempotency_key: "unique-key-for-this-reviewed-import",
+});
+```
+
+Apply requires `apply: true`, `expected_revision`, and the unchanged
+`reviewed_plan`; revision 0 bootstraps an unapplied project. Keep the same file,
+format and mode. Replace removals also require `confirm_removals: true`, including
+template removals that the server considers non-destructive. If
+`preview.autoApplicable` is false, review its changes and provide `strategy:
+"relax"` or `"force"`. Missing confirmation, strategy or revision, changed
+review/file contents, malformed or oversized definitions, and credential-shaped
+values are rejected without writing. Diagnostics do not quote definition text.
+Preview races conflict; apply never merges onto a newer revision automatically.
+
+Use a stable idempotency key for an apply. If its response is lost, retry the
+same request with the original reviewed TOML, revision, key, strategy and
+confirmation. The existing server receipt can replay even after another
+revision lands. A fresh stale request conflicts, and a reused key with different
+apply contents is rejected. The applied result contains the original review and
+`application` response; a replay's application revision can be older than the
+project's current revision. A no-change apply records no new revision.
+
+`tila_schema_export({ format: "toml" })` returns `result.text` and
+`verbatim_paths`; `yaml` is also supported. The file includes `tila_export`
+provenance, which import validates and strips. Export renders the applied
+definition, including unknown keys, through the same helpers as CLI and UI;
+comments and layout are not retained. A project without an applied definition
+returns `status: "empty"`, revision 0 and `text: null`. Definition exports exclude
+agents, rooms, access settings, credentials and stored data; they are not project
+backups. A stored definition containing credentials is refused.
 
 ## Resources
 

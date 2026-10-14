@@ -4,6 +4,7 @@ import {
   SchemaGetResponseSchema,
   SchemaHistoryResponseSchema,
 } from "../src/api";
+import { JournalEventSchema } from "../src/journal";
 import {
   GitHubExchangeResponseSchema,
   SessionPayloadSchema,
@@ -38,6 +39,34 @@ describe("SchemaGetResponseSchema", () => {
 });
 
 describe("SchemaApplyResponseSchema", () => {
+  it("retains structured warnings and accepts the corresponding built-in journal event", () => {
+    const warning = {
+      code: "schema-revision-deprecated",
+      message: "Preview and send expected_revision",
+      observed_revision: 2,
+      result_revision: 3,
+    };
+    expect(
+      SchemaApplyResponseSchema.parse({
+        ok: true,
+        version: 3,
+        warnings: [warning],
+      }).warnings,
+    ).toEqual([warning]);
+    expect(
+      JournalEventSchema.parse({
+        seq: 1,
+        t: 0,
+        kind: "schema.revisionless_applied",
+        resource: "schema",
+        principal_id: "alice",
+        participant_id: "cli",
+        environment: {},
+        fence: null,
+        data: { observed_revision: 2, result_revision: 3 },
+      }).kind,
+    ).toBe("schema.revisionless_applied");
+  });
   it("parses a valid schema-apply response with diff field", () => {
     const raw = {
       ok: true,

@@ -13,6 +13,7 @@ import { z } from "zod";
 
 const reads = new Set([
   "tila_schema_preview",
+  "tila_schema_export",
   "tila_room_list",
   "tila_room_history",
   "tila_room_get",

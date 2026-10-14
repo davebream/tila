@@ -22,6 +22,7 @@ import {
 import { TableError } from "@/components/ui/table-error";
 import { TableSkeleton } from "@/components/ui/table-skeleton";
 import { NewTaskLink } from "@/components/work/create-links";
+import { ReadinessNote } from "@/components/work/readiness-note";
 import {
   TASK_SEARCH_MIN_LENGTH,
   useTaskPage,
@@ -36,12 +37,14 @@ import {
   useDropInvalidCursor,
 } from "@/hooks/use-cursor-paging";
 import { useDebouncedValue } from "@/hooks/use-debounce";
+import { useReadinessAccess } from "@/hooks/use-readiness-access";
 import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import type { TaskListSort } from "@/lib/api";
 import { taskFiltersFromSearch } from "@/lib/list-queries";
 import { catalogIndex, taskState, taskTitle } from "@/lib/presentation";
-import { classifyApiError } from "@/lib/query-state";
+import { classifyApiError, deriveSectionState } from "@/lib/query-state";
+import { readinessContext } from "@/lib/readiness-context";
 import { sanitizeSnippet } from "@/lib/snippet";
 import { relativeTime } from "@/lib/time";
 import type { WorkCatalogEntry } from "@tila/schemas";
@@ -338,6 +341,17 @@ export function TasksPage() {
     ? catalog.types.reduce((n, e) => n + e.count + e.archived_count, 0)
     : null;
 
+  // Why a blocked list can include finished work (#398). Read from the
+  // catalog, not from this page's rows, which can omit a type.
+  const access = useReadinessAccess();
+  const readiness =
+    !searchMode && blocked
+      ? readinessContext(deriveSectionState(catalogQuery), {
+          taskTypes: access.taskTypesRestricted,
+          any: access.restricted,
+        })
+      : null;
+
   // --- Keyboard ---
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -546,6 +560,13 @@ export function TasksPage() {
             </span>
           )}
         </div>
+      )}
+
+      {readiness && (
+        <ReadinessNote
+          context={readiness}
+          definitionsHref={access.definitionsHref}
+        />
       )}
 
       {shortQuery && (
