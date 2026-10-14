@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { canonicalJson } from "./dogfood-study-lib.mjs";
 
 export const PAIRS = ["p1", "p2"];
 export const VARIANTS = ["x", "y"];
@@ -18,23 +19,42 @@ export const DECISION_ID = "D1";
 
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
-/** Stable JSON: object keys sorted recursively so hashes do not depend on insertion order. */
-export function canonicalJson(value) {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+export { canonicalJson };
 
 // ---------------------------------------------------------------------------
 // Template p1: report. Two report functions share one new amount formatter.
 // ---------------------------------------------------------------------------
 
 const REPORT = {
+  w: {
+    entity: "credit",
+    plural: "credits",
+    group: "account",
+    note: "reason",
+    symbol: "£",
+    dataFile: "src/credits.mjs",
+    helperFile: "src/pounds.mjs",
+    helperFn: "formatPounds",
+    item1File: "src/digest.mjs",
+    item1Fn: "digest",
+    item2File: "src/entry.mjs",
+    item2Fn: "entry",
+    header: (n, plural) => `Digest: ${n} ${plural}`,
+    line: (g, m, c) => `* ${g} => ${m} [${c}]`,
+    totalLabel: "Sum",
+    detail1: (r, g, n) => `#${r.id} ${r[g]} (${r[n]})`,
+    amountLabel: "Value",
+    unknown: (id) => `missing credit ${id}`,
+    rows: [
+      ["C-1", "north", "welcome", 2500],
+      ["C-2", "south", "goodwill", -1200],
+      ["C-3", "north", "bonus", 150000],
+      ["C-4", "east", "reversal", -75000],
+      ["C-5", "south", "adjustment", 40],
+      ["C-6", "east", "expired", 0],
+    ],
+    idPrefix: "C-",
+  },
   x: {
     entity: "invoice",
     plural: "invoices",
@@ -169,7 +189,44 @@ function reportCases(spec, amended) {
   const sum = (subset) => (a) => ({ equals: reportSummary(spec, subset, a) });
   const det = (id) => (a) => reportDetail(spec, rows, id, a);
   const fmt = (cents) => (a) => ({ equals: money(spec, cents, a) });
+  // Rows that exist only in the call: an implementation that ignores its argument fails these.
+  const alt = [
+    {
+      id: `${spec.idPrefix}901`,
+      [spec.group]: "zeta",
+      [spec.note]: "alt a",
+      cents: -2500050,
+    },
+    {
+      id: `${spec.idPrefix}902`,
+      [spec.group]: "alpha",
+      [spec.note]: "alt b",
+      cents: 1999,
+    },
+    {
+      id: `${spec.idPrefix}903`,
+      [spec.group]: "zeta",
+      [spec.note]: "alt c",
+      cents: 100000,
+    },
+  ];
   const cases = [
+    mk(
+      "summary of rows that are not the sample data",
+      ["item1"],
+      spec.item1File,
+      spec.item1Fn,
+      [alt],
+      sum(alt),
+    ),
+    mk(
+      "detail of an id that exists only in the supplied rows",
+      ["item2"],
+      spec.item2File,
+      spec.item2Fn,
+      [alt, alt[0].id],
+      (a) => reportDetail(spec, alt, alt[0].id, a),
+    ),
     mk(
       "summary of every row",
       ["item1"],
@@ -491,8 +548,7 @@ function parseModel(spec, argv, allowed, amended) {
 }
 
 /** Model of a command run: returns { code, out, err } under D0 or D1. */
-function commandModel(spec, verb, argv, amended) {
-  const records = commandsRecords(spec);
+function commandModel(spec, verb, argv, amended, records) {
   const allowed =
     verb === "list"
       ? [spec.filterFlag, spec.limitFlag]
@@ -542,6 +598,16 @@ function commandModel(spec, verb, argv, amended) {
   return { code: 64, out: [], err: [`unsupported format: ${format}`] };
 }
 
+function altCommandRecords(spec) {
+  const [id, state, text] = spec.fields;
+  const common = spec.records[0][1];
+  return [
+    { [id]: "Z-1", [state]: common, [text]: "two\nlines" },
+    { [id]: "Z-2", [state]: "other", [text]: 'has, comma and "quote"' },
+    { [id]: "Z-3", [state]: common, [text]: "plain" },
+  ];
+}
+
 function commandCases(spec, amended) {
   const records = commandsRecords(spec);
   const f = spec;
@@ -560,9 +626,9 @@ function commandCases(spec, amended) {
       expect: amended ? e1 : e0,
     });
   };
-  const addCmd = (name, tags, file, fn, verb, argv) => {
-    const e0 = commandModel(spec, verb, argv, false);
-    const e1 = commandModel(spec, verb, argv, true);
+  const addCmd = (name, tags, file, fn, verb, argv, given = records) => {
+    const e0 = commandModel(spec, verb, argv, false, given);
+    const e1 = commandModel(spec, verb, argv, true, given);
     const differs = JSON.stringify(e0) !== JSON.stringify(e1);
     cases.push({
       name,
@@ -571,7 +637,7 @@ function commandCases(spec, amended) {
       file,
       fn,
       argv,
-      records,
+      records: given,
       expect: amended ? e1 : e0,
     });
   };
@@ -621,6 +687,43 @@ function commandCases(spec, amended) {
     ["--colour=red"],
   );
   const ff = `--${f.formatFlag}=`;
+  const alt = altCommandRecords(spec);
+  addCmd(
+    `${f.listVerb} over supplied records`,
+    ["item1"],
+    f.item1File,
+    f.item1Fn,
+    "list",
+    [`${lf}${f.records[0][1]}`],
+    alt,
+  );
+  addCmd(
+    `${f.listVerb} over no records`,
+    ["item1"],
+    f.item1File,
+    f.item1Fn,
+    "list",
+    [],
+    [],
+  );
+  addCmd(
+    `${f.exportVerb} csv over supplied records`,
+    ["item2"],
+    f.item2File,
+    f.item2Fn,
+    "export",
+    [`${ff}csv`],
+    alt,
+  );
+  addCmd(
+    `${f.exportVerb} csv over no records`,
+    ["item2"],
+    f.item2File,
+    f.item2Fn,
+    "export",
+    [`${ff}csv`],
+    [],
+  );
   addCmd(`${f.exportVerb} csv`, ["item2"], f.item2File, f.item2Fn, "export", [
     `${ff}csv`,
   ]);
@@ -923,9 +1026,34 @@ const DECISION_KEYS = {
   commands: ["unknown flag", "64"],
 };
 
+/**
+ * Constant-sample mutants of the reference items: same behaviour on the sample data, but the
+ * supplied argument is ignored. Every item must fail at least one case when mutated this way.
+ */
+function constantMutants(spec, template, reference) {
+  const dataImport = (name) =>
+    `import { ${name} as __sample } from "./${spec.dataFile.slice(4)}";\n`;
+  const out = { item1: {}, item2: {} };
+  for (const key of ["item1", "item2"]) {
+    for (const [file, text] of Object.entries(reference[key])) {
+      const rows = template === "report";
+      const pattern = rows
+        ? /\((rows)(, id)?\) \{/
+        : /\(argv, io, records\) \{/;
+      const replaced = text.replace(pattern, (_m, _a, id) =>
+        rows
+          ? `(__ignored${id ?? ""}) {\n  const rows = __sample;`
+          : "(argv, io, __ignored) {\n  const records = __sample;",
+      );
+      out[key][file] = dataImport(rows ? "rows" : "records") + replaced;
+    }
+  }
+  return out;
+}
+
 /** Build one scenario (pair, variant): repository, frozen cases, references, fact sheet. */
 export function buildScenario(pair, variant) {
-  const template = pair === "p1" ? "report" : "commands";
+  const template = pair === "p2" ? "commands" : "report";
   const spec = (template === "report" ? REPORT : COMMANDS)[variant];
   if (!spec) throw new Error(`unknown variant ${variant}`);
   const key = `${pair}-${variant}`;
@@ -963,6 +1091,7 @@ export function buildScenario(pair, variant) {
     repoFiles,
     cases,
     reference: { amended: ref(true), original: ref(false) },
+    mutant: constantMutants(spec, template, ref(true)),
     decision: {
       id: DECISION_ID,
       text: DECISION_TEXT[template](spec),
@@ -984,12 +1113,18 @@ export function buildScenario(pair, variant) {
       repoFiles: scenario.repoFiles,
       cases: scenario.cases,
       reference: scenario.reference,
+      mutant: scenario.mutant,
       decision: scenario.decision,
       frozenPaths: scenario.frozenPaths,
       sharedPaths: scenario.sharedPaths,
     }),
   );
   return scenario;
+}
+
+/** Unscored training fixture; used for the equal warm-up exercise in both conditions. */
+export function warmupScenario() {
+  return buildScenario("warmup", "w");
 }
 
 export function allScenarios() {
@@ -1002,7 +1137,7 @@ export function allScenarios() {
 export function allowedPaths(scenario, role, itemKey) {
   const own = scenario.items[itemKey].file;
   return {
-    exact: [own, ...scenario.sharedPaths],
+    exact: [own, ...scenario.sharedPaths, "RESUME.txt"],
     prefixNewOnly: ["test/"],
     role,
   };
@@ -1118,23 +1253,26 @@ export function factSheet(scenario, role, itemKey) {
   };
 }
 
-/** Score handoff text against a fact sheet. Mechanical: a lower bound, not a judgement. */
-export function scoreHandoff(text, sheet) {
+/**
+ * Lexical candidate extraction for the six handoff facts. A match is only a candidate for a
+ * reviewer to verify against captured state; it never awards a point and can be wrong.
+ */
+export function handoffCandidates(text, sheet) {
   const results = sheet.facts.map((fact) => {
     const ok = fact.alternatives.some((group) =>
       group.every((pattern) => new RegExp(pattern, "i").test(text)),
     );
-    return { id: fact.id, label: fact.label, present: ok };
+    return { id: fact.id, label: fact.label, candidate: ok };
   });
   return {
-    score: results.filter((r) => r.present).length,
+    candidate_count: results.filter((r) => r.candidate).length,
     max: results.length,
     facts: results,
   };
 }
 
-/** Does a RESUME note state the active decision? */
-export function resumeStatesDecision(text, scenario) {
+/** Lexical candidate: does a RESUME note mention D1 and a key phrase? A reviewer confirms the rule. */
+export function resumeDecisionCandidate(text, scenario) {
   const line = text.split("\n").find((l) => /^DECISION:/i.test(l.trim()));
   if (!line) return false;
   if (!new RegExp(scenario.decision.id, "i").test(line)) return false;
@@ -1151,31 +1289,40 @@ const TRAINING = [
   "## How coordination works in this study",
   "",
   "Two coding workers (w1, w2) share this repository through separate git worktrees. Follow the working agreement in NOTES.md.",
-  "Your duties are the same whatever tools you have: claim the shared helper before you edit it, acknowledge decision changes, save a handoff when asked, resume from durable resources if you are a replacement, and declare your result explicitly.",
-  "You have 40 tool calls and 12 minutes of wall time. Spend them on the task; there is no credit for coordination for its own sake.",
+  "Your duties are the same whatever tools you have: own the shared helper before you edit it, acknowledge decision changes, save a handoff when asked, resume from durable resources if you are a replacement, and declare your result explicitly.",
+  "A result declared before the decision change is provisional: you stay in the study, the decision change still arrives on schedule, and you declare or reaffirm your result again after it. Do not edit code that is already correct.",
+  "You have at most 40 admitted tool calls and 12 minutes of wall time for your role, including a replacement. Spend them on the task; there is no credit for coordination for its own sake.",
 ].join("\n");
 
 function conditionAppendix(ctx) {
   const { condition, role, scenario, itemKey, shared } = ctx;
+  const base = role.replace(/r$/, "");
   const helper = scenario.helper.name;
   const itemFile = scenario.items[itemKey].file;
   if (condition === "A") {
+    const lock = `${shared}/locks/shared-helper`;
     return [
       "## Coordination tools (condition A)",
       "",
-      `Shared directory (outside your worktree): \`${shared}\`. It holds BOARD.md, DECISIONS.md and HANDOFFS/.`,
+      `Shared directory (outside your worktree): \`${shared}\`. It holds BOARD.md, DECISIONS.md, HANDOFFS/ and locks/. Use ordinary shell commands.`,
       "",
-      `1. Claim: before editing \`${scenario.helper.file}\`, look at BOARD.md. If a line starting \`shared-helper:\` exists, you do not own \`${helper}\`: do not implement it. Otherwise add \`shared-helper: owner=${role} since=<HH:MM:SS>\` and then implement it.`,
-      `2. Acknowledge: when the orchestrator posts a decision change, append \`ACK <decision id> ${role}\` to DECISIONS.md.`,
-      `3. Handoff: when asked, write HANDOFFS/${role}.md with these headings: Goal and acceptance, Current status, Artifacts and commits, Verification, Active decision or blocker, Next owner and action.`,
-      "4. Resume: a replacement reads BOARD.md, DECISIONS.md and HANDOFFS/, then writes RESUME.txt in its worktree root. Line 1: `DECISION: <active decision id and its rule>`. Line 2: `NEXT: <your next action>`.",
-      `5. Result: after committing \`${itemFile}\` on your branch, append \`RESULT ${role} <commit sha>\` to BOARD.md. Nothing counts as done until you do.`,
+      `1. Own the helper: \`mkdir ${lock} && echo "${role} $(date +%T)" > ${lock}/owner && echo "shared-helper: owner=${role} since=$(date +%T)" >> ${shared}/BOARD.md\`. \`mkdir\` is atomic: if it fails, read \`${lock}/owner\`. If another role owns it, do not implement a second \`${helper}\`; obtain the owner's work from its branch.`,
+      ...(role.endsWith("r")
+        ? [
+            `2. Takeover (replacements only, for the role you replace, after your entry packet says the previous context ended): \`echo "${role} $(date +%T) transfer from ${base}" > ${lock}/owner && echo "TRANSFER shared-helper ${base} -> ${role} $(date +%T)" >> ${shared}/BOARD.md\`.`,
+          ]
+        : ["2. Takeover: not applicable to you."]),
+      `3. Acknowledge: when the orchestrator posts a decision change, append \`ACK <decision id> ${role}\` to DECISIONS.md.`,
+      `4. Handoff: when asked, write HANDOFFS/${base}.md with these headings: Goal and acceptance, Current status, Artifacts and commits, Verification, Active decision or blocker, Next owner and action.`,
+      "5. Resume: a replacement reads BOARD.md, DECISIONS.md and HANDOFFS/, then writes RESUME.txt in its worktree root. Line 1: `DECISION: <active decision id and its full rule>`. Line 2: `NEXT: <your next action>`.",
+      `6. Result: after committing \`${itemFile}\` on your branch, append \`RESULT ${role} <commit sha>\` to BOARD.md. After the decision change, append \`RESULT ...\` again, or \`REAFFIRM ${role} <commit sha>\` if nothing needed to change and you re-ran the tests. Nothing counts as done until you do.`,
     ].join("\n");
   }
   const { run, trial, participant, runner, taskIds } = ctx;
-  const base = `node ${runner} {verb} --run-dir ${run} --trial ${trial} --participant ${participant}`;
-  const sdk = (rest) => `${base.replace("{verb}", "sdk")} ${rest}`;
-  const cli = (rest) => `${base.replace("{verb}", "tila")} -- ${rest}`;
+  const prefix = (verb) =>
+    `node ${runner} ${verb} --run-dir ${run} --trial ${trial} --participant ${participant}`;
+  const sdk = (rest) => `${prefix("sdk")} ${rest}`;
+  const cli = (rest) => `${prefix("tila")} -- ${rest}`;
   return [
     "## Coordination tools (condition B)",
     "",
@@ -1187,12 +1334,12 @@ function conditionAppendix(ctx) {
     `- Show:    \`${cli("task show <id> --json")}\``,
     `- Handoff: \`${sdk("handoff-create --summary <text> --ref task:<id>")}\`; resume: \`${sdk("reentry")}\``,
     "",
-    `1. Claim: claim \`task:${taskIds.helper}\` before editing \`${scenario.helper.file}\`. If you lose it you do not own \`${helper}\`: do not implement it.`,
+    `1. Own the helper: claim \`task:${taskIds.helper}\` before editing \`${scenario.helper.file}\`. If you lose it, do not implement a second \`${helper}\`. A claim expires after its TTL; a replacement for the owner claims it again once it has expired.`,
     `2. Claim your item \`task:${taskIds.item}\` once to get a fence for your updates; if an update is rejected as a stale fence, claim again and retry once.`,
     `3. Acknowledge: when the orchestrator posts a decision change, run \`task update ${taskIds.item} --field decision_ack=<decision id> --fence <n>\`.`,
     "4. Handoff: when asked, create a handoff whose summary covers: goal and acceptance, current status, artifacts and commits, verification, active decision or blocker, next owner and action.",
-    "5. Resume: a replacement runs `reentry`, reads the task state, then writes RESUME.txt in its worktree root. Line 1: `DECISION: <active decision id and its rule>`. Line 2: `NEXT: <your next action>`.",
-    `6. Result: after committing \`${itemFile}\` on your branch, run \`task update ${taskIds.item} --field status=done --fence <n>\` with the commit sha in \`--field result_commit=<sha>\`. Nothing counts as done until you do.`,
+    "5. Resume: a replacement runs `reentry`, reads the task state, then writes RESUME.txt in its worktree root. Line 1: `DECISION: <active decision id and its full rule>`. Line 2: `NEXT: <your next action>`.",
+    `6. Result: after committing \`${itemFile}\` on your branch, run \`task update ${taskIds.item} --field status=done --field result_commit=<sha> --fence <n>\`. After the decision change run it again, or \`--field reaffirmed=<sha>\` if nothing needed to change and you re-ran the tests. Nothing counts as done until you do.`,
   ].join("\n");
 }
 
@@ -1213,11 +1360,12 @@ export function renderWorkerPacket(ctx) {
     "",
     "## Shared helper",
     "",
-    `Both work items need \`${scenario.helper.name}\` in \`${scenario.helper.file}\`. It must be implemented exactly once. Whoever claims it implements it; the other worker codes against the signature in NOTES.md and obtains the implementation from the owner's branch (for example \`git merge <branch>\`) rather than writing a second one.`,
+    `Both work items need \`${scenario.helper.name}\` in \`${scenario.helper.file}\`. It must be implemented exactly once. Whoever owns it implements it; the other worker codes against the signature in NOTES.md and obtains the implementation from the owner's branch (for example \`git merge <branch>\`) rather than writing a second one.`,
     "",
     "## Constraints",
     "",
-    `- Edit only \`${item.file}\`, \`${scenario.helper.file}\` (if you own the helper) and \`src/index.mjs\`. Add tests only as new files under \`test/\`.`,
+    `- Author changes only in \`${item.file}\`, \`${scenario.helper.file}\` (if you own the helper) and \`src/index.mjs\`. Add tests only as new files under \`test/\`. Merging the other worker's branch is allowed.`,
+    "- A replacement writes one extra file, `RESUME.txt`, in its worktree root.",
     "- Do not edit the data module, NOTES.md or existing tests.",
     "- Do not look for acceptance tests; they are not available to you.",
     "",
@@ -1234,11 +1382,23 @@ export function renderEntryPacket(ctx) {
   return [
     `# Replacement entry packet (${role})`,
     "",
-    `You continue the work of an earlier worker whose context ended. Repository: \`${worktree}\` (branch \`${branch}\`). You have only this packet and the durable resources below; you do not have the previous conversation.`,
+    `You continue the work of an earlier worker whose context ended. Repository: \`${worktree}\` (branch \`${branch}\`). You have only this packet and the durable resources below; you do not have the previous conversation. The current decision and the progress so far are in the durable resources, not here.`,
     "",
-    `The item is \`${item.fn}\` in \`${item.file}\`; the shared helper is \`${scenario.helper.name}\` in \`${scenario.helper.file}\`. Read NOTES.md and the existing diff (\`git status\`, \`git log\`, \`git diff\`) before editing.`,
+    "## The item (unchanged requirement)",
     "",
-    "Your first action must be to write RESUME.txt as described below, before any edit.",
+    item.text,
+    "",
+    "## Shared helper",
+    "",
+    `The shared helper is \`${scenario.helper.name}\` in \`${scenario.helper.file}\`; it must exist exactly once. Check who owns it before editing it.`,
+    "",
+    "## Constraints",
+    "",
+    `- Author changes only in \`${item.file}\`, \`${scenario.helper.file}\` (if you own the helper) and \`src/index.mjs\`. Merging the other worker's branch is allowed.`,
+    "- You write one extra file, `RESUME.txt`, in your worktree root.",
+    "- Do not edit the data module, NOTES.md or existing tests.",
+    "",
+    "Read NOTES.md, the durable resources below and the existing diff (`git status`, `git log`, `git diff`). Write RESUME.txt before your first edit; reading comes first and is expected. If your item already satisfies the current decision, reaffirm it instead of editing.",
     "",
     TRAINING,
     "",
@@ -1249,9 +1409,4 @@ export function renderEntryPacket(ctx) {
 
 export function renderDecisionMessage(scenario) {
   return `Decision change ${scenario.decision.id}: ${scenario.decision.text}\nAcknowledge it in your system of record as described in your packet.`;
-}
-
-/** Length of the condition-specific appendix, for the equal-training check. */
-export function appendixLength(ctx) {
-  return conditionAppendix(ctx).length;
 }
