@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Task attention filters (#399)
+
+- SDK HTTP/local task lists, CLI `task list --blocked` / `--outcome`, and MCP `tila_task_list` expose blocked and lifecycle-outcome filters with exact totals, cursor continuation and `scope.outcome_types`. An undeclared outcome returns an empty page with total zero. Invalid and empty outcome lists are rejected. Paging rejects non-positive, fractional or non-finite limits and negative, fractional or non-finite offsets; valid limits above 500 remain capped. Compact SDK requests expose a projection union rather than promising full HTTP rows.
+- `EntityBackend.list` keeps its array result; optional `listPage` carries metadata for remote and Node/Bun embedded backends. Array-only third-party backends remain compatible and report unavailable metadata explicitly. Local SDK lists now honor cursors and match HTTP's default inclusion of archived rows; the local compact projection difference remains. No DDL or deployment configuration changes.
+
 ### Definition revision warnings (#416)
 
 - Accepted definition applies without `expected_revision` return structured `warnings` with code `schema-revision-deprecated`, guidance, and observed/result revisions. The SDK shows them through an injectable `warningSink` (default `console.warn`); CLI diagnostics go to stderr, including `--json`; MCP `tila_schema_update` includes them in text and structured output. Embedded/local applies have the same behavior.

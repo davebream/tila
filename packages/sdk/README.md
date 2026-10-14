@@ -49,6 +49,54 @@ const updated = await tila.tasks.update("task-1", {
 await tila.tasks.archive("task-1");
 ```
 
+### Task attention filters and pagination
+
+`tasks.list` supports `blocked: true` and a non-empty `outcome` array containing
+`success`, `failure`, `cancelled` or `abandoned`. These work over HTTP and local
+Node/Bun SQLite. Outcomes match each type's declared lifecycle, not conventional
+status names. `blocked: false` and omission leave the list unfiltered.
+
+```typescript
+const first = await tila.tasks.list({
+  outcome: ["failure", "abandoned"],
+  limit: "20",
+});
+console.log(first.entities, first.total, first.scope?.outcome_types);
+if (first.next_cursor) {
+  const next = await tila.tasks.list({
+    outcome: ["failure", "abandoned"],
+    limit: "20",
+    cursor: first.next_cursor,
+  });
+}
+```
+
+Limits must be positive safe integers (capped at 500); offsets must be non-negative
+safe integers. Invalid paging inputs are rejected. Each page carries `total`
+(all matches), `limit`, `offset`, `has_more`,
+`next_cursor` and `scope`. Keep filters and sorting unchanged when continuing a
+cursor; changing them rejects the cursor. An outcome that no visible type
+mentions returns no entities, total zero, and `scope.outcome_types: []`.
+Without an outcome filter, `outcome_types` is omitted. Lists include archived
+rows by default, matching HTTP; blocked filtering always excludes them.
+
+The CLI accepts `tila task list --blocked` and
+`tila task list --type bug --outcome failure,abandoned --limit 20 --json`.
+Continue with `--cursor` from the JSON metadata. MCP `tila_task_list` accepts
+`blocked`, `outcome`, `limit` and `cursor` and retains page metadata in both text
+and structured results.
+
+Without `compact` (or with `compact: false`), the return type retains full entity
+rows. With `compact: true` or a variable boolean, the public result is a union
+of compact HTTP rows and full local rows; narrow with `"data" in row` before
+reading projection-specific fields.
+
+For backend implementers, `EntityBackend.list` still returns an array. The
+optional `listPage` method supplies exact counts, scope and continuation.
+Third-party backends can retain the array interface; CLI JSON reports
+`metadata_supported: false` when it is absent, and requests requiring attention
+filters or cursors fail explicitly rather than ignoring them or inventing totals.
+
 ### Refreshable credentials
 
 `TilaClient`, `TilaClient.fromConfig`, and the remote branch of `createTila`
@@ -328,7 +376,7 @@ HTTP backend. These are intentional and called out so consumers are not surprise
 |--------|----------------|-----|
 | `schema.history` | Returns `[]` | Dead on **both** sides — the Worker exposes no schema-history route either, so the cloudflare branch would 404. (The data exists in `_schema_history`; it is simply not surfaced.) |
 | `presence.listAll` | Returns only **active** participants (every row `active: true`) | The embedded backend's `listPresence()` already filters to active participants by TTL; remote additionally includes stale participants as `active: false`. |
-| `tasks.list` | Ignores `compact`, emits no pagination cursor | `compact` is an HTTP-only projection; the local list is non-paginated (no `next_cursor`/`total`). |
+| `tasks.list` | Ignores `compact` and returns full entities, with exact pagination metadata | `compact` is an HTTP-only projection. Filters, totals and cursors work in both modes. |
 | `templates.list` | `variables` derived from `{{placeholders}}` | Local derives variables by scanning each template's entity data for `{{name}}` placeholders (`/\{\{(\w+)\}\}/`). |
 | Generic `idempotency_key` (e.g. on `claims.acquire`) | Accepted but **not honored** | Generic local request deduplication is not wired; a retried entity create can fail on its existing primary key. This does not apply to versioned artifact operations, which persist their own retry receipts using `idempotencyKey`. |
 
