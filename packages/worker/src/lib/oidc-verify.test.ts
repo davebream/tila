@@ -1216,3 +1216,144 @@ describe("JWKS source expiry", () => {
     expect(mockOidcFetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("atomic concurrent JWKS refresh", () => {
+  it("coalesces same-source imports and cannot retain orphan removed keys after expiry", async () => {
+    const issuer = "https://concurrent.example/token";
+    const params = {
+      issuer,
+      audience: VALID_GITHUB_CLAIMS.aud,
+      jwksUri: "https://concurrent.example/keys",
+    };
+    const claims = { ...VALID_GITHUB_CLAIMS, iss: issuer, exp: NOW + 8000 };
+    const firstFactory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    const secondFactory = await makeJwksResponseFactory([
+      { kid: ALT_KID, publicKey: altPublicKey },
+    ]);
+    const firstToken = await signTestJwt(claims);
+    const secondToken = await signTestJwt(claims, {}, altPrivateKey, ALT_KID);
+    const importKey = crypto.subtle.importKey.bind(crypto.subtle);
+    let started!: () => void;
+    let release!: () => void;
+    const importing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const now = vi.spyOn(Date, "now").mockReturnValue(NOW * 1000);
+    const importSpy = vi
+      .spyOn(crypto.subtle, "importKey")
+      .mockImplementation(async (...args) => {
+        const jwk = args[1] as unknown as JsonWebKey & { kid?: string };
+        if (jwk.kid === testKid) {
+          started();
+          await gate;
+        }
+        return Reflect.apply(importKey, undefined, args) as Promise<CryptoKey>;
+      });
+    mockOidcFetch
+      .mockImplementationOnce(async () => firstFactory())
+      .mockImplementation(async () => secondFactory());
+    const first = verifyOidcJwt(firstToken, params);
+    const firstSettled = first.then(
+      () => ({ ok: true }),
+      (error) => ({ ok: false, error }),
+    );
+    let second: Promise<{ ok: boolean; code?: string }> | undefined;
+    try {
+      await importing;
+      second = verifyOidcJwt(secondToken, params).then(
+        () => ({ ok: true }),
+        (error) => ({ ok: false, code: error.code }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockOidcFetch).toHaveBeenCalledTimes(1);
+      release();
+      expect(await firstSettled).toEqual({ ok: true });
+      expect(await second).toEqual({
+        ok: false,
+        code: "oidc-jwks-unavailable",
+      });
+      mockOidcFetch.mockImplementation(async () => Response.json({ keys: [] }));
+      now.mockReturnValue((NOW + 3600) * 1000);
+      await expect(verifyOidcJwt(secondToken, params)).rejects.toMatchObject({
+        code: "oidc-jwks-unavailable",
+      });
+      await expect(verifyOidcJwt(firstToken, params)).rejects.toMatchObject({
+        code: "oidc-jwks-unavailable",
+      });
+    } finally {
+      release();
+      await firstSettled;
+      await second;
+      importSpy.mockRestore();
+      now.mockRestore();
+    }
+  });
+
+  it("keeps the previous complete snapshot until replacement imports finish", async () => {
+    const issuer = "https://atomic.example/token";
+    const params = {
+      issuer,
+      audience: VALID_GITHUB_CLAIMS.aud,
+      jwksUri: "https://atomic.example/keys",
+    };
+    const claims = { ...VALID_GITHUB_CLAIMS, iss: issuer };
+    const oldFactory = await makeJwksResponseFactory([
+      { kid: testKid, publicKey: testPublicKey },
+    ]);
+    const newFactory = await makeJwksResponseFactory([
+      { kid: ALT_KID, publicKey: altPublicKey },
+    ]);
+    const oldToken = await signTestJwt(claims);
+    const newToken = await signTestJwt(claims, {}, altPrivateKey, ALT_KID);
+    mockOidcFetch
+      .mockImplementationOnce(async () => oldFactory())
+      .mockImplementation(async () => newFactory());
+    await verifyOidcJwt(oldToken, params);
+    const importKey = crypto.subtle.importKey.bind(crypto.subtle);
+    let started!: () => void;
+    let release!: () => void;
+    const importing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const importSpy = vi
+      .spyOn(crypto.subtle, "importKey")
+      .mockImplementation(async (...args) => {
+        const jwk = args[1] as unknown as JsonWebKey & { kid?: string };
+        if (jwk.kid === ALT_KID) {
+          started();
+          await gate;
+        }
+        return Reflect.apply(importKey, undefined, args) as Promise<CryptoKey>;
+      });
+    const refreshed = verifyOidcJwt(newToken, params);
+    try {
+      await importing;
+      const pendingOld = verifyOidcJwt(oldToken, params);
+      const result = await Promise.race([
+        pendingOld.then(() => "verified"),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("blocked"), 1000),
+        ),
+      ]);
+      expect(result).toBe("verified");
+      expect(mockOidcFetch).toHaveBeenCalledTimes(2);
+      release();
+      await refreshed;
+      await expect(verifyOidcJwt(oldToken, params)).rejects.toMatchObject({
+        code: "oidc-jwks-unavailable",
+      });
+    } finally {
+      release();
+      await refreshed;
+      importSpy.mockRestore();
+    }
+  });
+});

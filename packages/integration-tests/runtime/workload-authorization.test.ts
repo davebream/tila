@@ -8,6 +8,7 @@ import {
   GITHUB_ACTIONS_JWKS_URI,
   ROOT_CAPABILITIES,
   type RuntimeContext,
+  type RuntimeEnrollmentRequest,
   accessTokenHash,
   canonicalizeHtu,
 } from "@tila/schemas";
@@ -28,7 +29,7 @@ import {
   RuntimeStore,
 } from "../../worker/src/d1";
 import worker from "../../worker/src/index";
-import { hashToken } from "../../worker/src/lib/hash";
+import { generateToken, hashToken } from "../../worker/src/lib/hash";
 import { clearCacheForTesting } from "../../worker/src/lib/oidc-verify";
 import type { Env } from "../../worker/src/types";
 import { bindings } from "./setup";
@@ -498,6 +499,14 @@ it("revalidates issued GHES credentials and historical cookie sessions after tru
     principal_id: string;
   }>();
   expect(issued.principal_id).toBe(service.principal_id);
+  await expectStatus(
+    await f.http(
+      `/projects/${projectId}/runtime/enrollments`,
+      {},
+      { Authorization: `Bearer ${issued.session_token}` },
+    ),
+    403,
+  );
   const row = await bindings.DB.prepare(
     "SELECT workload_context_json FROM _credentials WHERE credential_id=?",
   )
@@ -740,4 +749,439 @@ it("keeps legacy GitHub.com runtime contexts usable without Enterprise deploymen
   await expect(runtime.context(run.token_id)).rejects.toMatchObject({
     code: "enrollment-revoked",
   });
+});
+
+async function actionsSponsoredEnrollment() {
+  const f = await enterpriseFixture();
+  const principal = {
+    provider: "oidc" as const,
+    issuer: enterprise.issuer,
+    subject: context.sub,
+  };
+  await new ProjectMembershipStore(bindings.DB).grant({
+    projectId,
+    principal,
+    subjectKind: "service",
+    role: "participant",
+    actorPrincipalId: actor.principalId,
+  });
+  const sponsorExtras = {
+    environment: "staging",
+    job_workflow_ref: "org/repo/.github/workflows/ci.yml@refs/heads/main",
+  };
+  const sessionResponse = await f.exchange({}, sponsorExtras);
+  await expectStatus(sessionResponse, 200);
+  const session = await sessionResponse.json<{
+    session_token: string;
+    principal_id: string;
+  }>();
+  const pair = await generateKeyPair("ES256");
+  const jwk = await exportJWK(pair.publicKey);
+  const jkt = await calculateJwkThumbprint(jwk);
+  const policy = { ...actionsPolicy, restrictions: { task_types: ["bug"] } };
+  const input: RuntimeEnrollmentRequest = {
+    operation_id: crypto.randomUUID(),
+    installation_id: crypto.randomUUID(),
+    name: "Actions installation",
+    jkt,
+    policy,
+  };
+  const path = `/projects/${projectId}/runtime/enrollments`;
+  async function proof(token: string, target: string, method: string) {
+    return new SignJWT({
+      htm: method,
+      htu: canonicalizeHtu(`https://worker${target}`),
+      ath: await accessTokenHash(token),
+      iat: Math.floor(Date.now() / 1000),
+      jti: crypto.randomUUID(),
+    })
+      .setProtectedHeader({ alg: "ES256", typ: "dpop+jwt", jwk })
+      .sign(pair.privateKey);
+  }
+  async function enroll(sponsor = session.session_token) {
+    return f.http(path, input, {
+      Authorization: `Bearer ${sponsor}`,
+      "X-Tila-Enrollment-Proof": await proof(sponsor, path, "POST"),
+    });
+  }
+  const response = await enroll();
+  await expectStatus(response, 200);
+  const issued = await response.json<{
+    token: string;
+    context: RuntimeContext;
+  }>();
+  const store = new RuntimeStore(
+    bindings.DB,
+    undefined,
+    undefined,
+    trustedIssuers,
+  );
+  const sponsorContext = {
+    provider: "github-actions" as const,
+    workload: {
+      ...context,
+      ...sponsorExtras,
+      issuer: enterprise.issuer,
+      repository_host: enterprise.host,
+    },
+  };
+  const childToken = await generateToken();
+  const childInput = { operation_id: crypto.randomUUID(), jkt, policy };
+  const child = await store.start(
+    issued.context.enrollment_id as string,
+    childInput,
+    {
+      id: crypto.randomUUID(),
+      hash: await hashToken(childToken, bindings.HASH_PEPPER),
+    },
+  );
+  async function childRead() {
+    const target = `/projects/${projectId}/tasks`;
+    return f.http(target, undefined, {
+      Authorization: `Bearer ${childToken}`,
+      DPoP: await proof(childToken, target, "GET"),
+    });
+  }
+  const secret = () => ({
+    id: crypto.randomUUID(),
+    hash: `fixture-${crypto.randomUUID()}`,
+  });
+  return {
+    f,
+    store,
+    input,
+    policy,
+    issued,
+    session,
+    sponsorContext,
+    child,
+    childInput,
+    secret,
+    enroll,
+    childRead,
+  };
+}
+
+it.each(["issuer-removal", "disabled-policy", "issuer-revocation"] as const)(
+  "revalidates Actions-sponsored installations and existing child runs after %s",
+  async (change) => {
+    const s = await actionsSponsoredEnrollment();
+    const enrollmentId = s.issued.context.enrollment_id as string;
+    const runId = s.child.run_id as string;
+    const row = await bindings.DB.prepare(
+      "SELECT sponsor_context_json FROM _runtime_enrollments WHERE enrollment_id=?",
+    )
+      .bind(enrollmentId)
+      .first<{ sponsor_context_json: string }>();
+    expect(JSON.parse(row?.sponsor_context_json ?? "null")).toEqual(
+      s.sponsorContext,
+    );
+    await expectStatus(await s.childRead(), 200);
+    if (change === "issuer-removal")
+      s.f.env.GITHUB_ACTIONS_TRUSTED_ISSUERS = "[]";
+    else if (change === "disabled-policy")
+      await bindings.DB.prepare(
+        "UPDATE _project_repos SET oidc_enabled=0 WHERE project_id=? AND github_host=?",
+      )
+        .bind(projectId, enterprise.host)
+        .run();
+    else
+      await new D1RevokedSubjectsStore(bindings.DB).revokeSubject(
+        projectId,
+        enterprise.issuer,
+        context.sub,
+        Date.now() + 1000,
+      );
+    const current = new RuntimeStore(
+      bindings.DB,
+      undefined,
+      undefined,
+      s.f.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+    );
+    for (const check of [
+      () => current.context(s.issued.context.token_id),
+      () => current.context(s.child.token_id),
+      () =>
+        current.start(
+          enrollmentId,
+          { ...s.childInput, operation_id: crypto.randomUUID() },
+          s.secret(),
+        ),
+      () =>
+        current.enroll(
+          projectId,
+          s.input,
+          s.session.principal_id,
+          s.policy,
+          s.secret(),
+          undefined,
+          s.sponsorContext,
+        ),
+      () => current.renew(runId, s.child.token_id, s.secret()),
+      () => current.heartbeat(runId),
+    ])
+      await expect(check()).rejects.toMatchObject({
+        code: "enrollment-revoked",
+      });
+    await expectStatus(await s.childRead(), 403);
+    await expectStatus(
+      await s.enroll(),
+      change === "issuer-revocation" ? 401 : 403,
+    );
+  },
+);
+
+it("preserves frozen capabilities/restrictions when Actions sponsor policy tightens and refuses recovery above caller ceiling", async () => {
+  const s = await actionsSponsoredEnrollment();
+  const enrollmentId = s.issued.context.enrollment_id as string;
+  const readOnly = {
+    role: "viewer" as const,
+    capabilities: ["tasks:read" as const],
+    restrictions: s.policy.restrictions,
+  };
+  await expect(
+    s.store.enroll(
+      projectId,
+      { ...s.input, policy: readOnly },
+      s.session.principal_id,
+      readOnly,
+      s.secret(),
+      undefined,
+      s.sponsorContext,
+    ),
+  ).rejects.toMatchObject({ code: "runtime-policy-denied" });
+  await bindings.DB.prepare(
+    "UPDATE _project_repos SET oidc_max_permission='read' WHERE project_id=? AND github_host=?",
+  )
+    .bind(projectId, enterprise.host)
+    .run();
+  expect(
+    (await s.store.context(s.issued.context.token_id)).policy,
+  ).toMatchObject(readOnly);
+  expect((await s.store.context(s.child.token_id)).policy).toMatchObject(
+    readOnly,
+  );
+  await s.store.heartbeat(s.child.run_id as string);
+  const renewed = await s.store.renew(
+    s.child.run_id as string,
+    s.child.token_id,
+    s.secret(),
+  );
+  expect(renewed.policy).toMatchObject(readOnly);
+  const recovered = await s.store.enroll(
+    projectId,
+    { ...s.input, policy: readOnly },
+    s.session.principal_id,
+    readOnly,
+    s.secret(),
+    undefined,
+    s.sponsorContext,
+  );
+  expect(recovered.policy).toMatchObject(readOnly);
+  const row = await bindings.DB.prepare(
+    "SELECT policy_json FROM _runtime_enrollments WHERE enrollment_id=?",
+  )
+    .bind(enrollmentId)
+    .first<{ policy_json: string }>();
+  expect(JSON.parse(row?.policy_json ?? "null")).toMatchObject(s.policy);
+});
+
+it("binds Actions enrollment recovery to the original repository/context even with identical issuer and sub", async () => {
+  const s = await actionsSponsoredEnrollment();
+  await new RepoAllowlistStore(bindings.DB).register({
+    projectId,
+    githubHost: enterprise.host,
+    githubOwner: "org",
+    githubRepo: "other",
+    githubRepoId: 43,
+    createdBy: "fixture",
+    membershipEnabled: true,
+    membershipRoleCap: "participant",
+  });
+  await bindings.DB.prepare(
+    "UPDATE _project_repos SET oidc_enabled=1, oidc_max_permission='write', oidc_allowed_events='[\"push\"]' WHERE project_id=? AND github_host=? AND github_repo_id=43",
+  )
+    .bind(projectId, enterprise.host)
+    .run();
+  const other = await s.f.exchange({}, { repository_id: "43" });
+  await expectStatus(other, 200);
+  const changed = await other.json<{ session_token: string }>();
+  await expectStatus(await s.enroll(changed.session_token), 403);
+  await expect(
+    s.store.enroll(
+      projectId,
+      s.input,
+      s.session.principal_id,
+      s.policy,
+      s.secret(),
+      undefined,
+      {
+        ...s.sponsorContext,
+        workload: { ...s.sponsorContext.workload, ref: "refs/heads/other" },
+      },
+    ),
+  ).rejects.toMatchObject({ code: "runtime-binding-mismatch" });
+  // Reordered JSON fields normalize to the same original context.
+  const reordered = {
+    provider: "github-actions" as const,
+    workload: {
+      issuer: enterprise.issuer,
+      repository_host: enterprise.host,
+      event_name: context.event_name,
+      sub: context.sub,
+      ref: context.ref,
+      repository_id: context.repository_id,
+      environment: s.sponsorContext.workload.environment,
+      job_workflow_ref: s.sponsorContext.workload.job_workflow_ref,
+    },
+  };
+  await expect(
+    s.store.enroll(
+      projectId,
+      s.input,
+      s.session.principal_id,
+      s.policy,
+      s.secret(),
+      undefined,
+      reordered,
+    ),
+  ).resolves.toMatchObject({ enrollment_id: s.issued.context.enrollment_id });
+});
+
+it.each(["malformed-tag", "wrong-principal"] as const)(
+  "denies %s Actions enrollment sponsor provenance instead of membership-only fallback",
+  async (change) => {
+    const s = await actionsSponsoredEnrollment();
+    const workload =
+      change === "malformed-tag"
+        ? { issuer: enterprise.issuer }
+        : { ...s.sponsorContext.workload, sub: "another-subject" };
+    await bindings.DB.prepare(
+      "UPDATE _runtime_enrollments SET sponsor_context_json=? WHERE enrollment_id=?",
+    )
+      .bind(
+        JSON.stringify({ provider: "github-actions", workload }),
+        s.issued.context.enrollment_id,
+      )
+      .run();
+    await expect(s.store.context(s.child.token_id)).rejects.toMatchObject({
+      code: "enrollment-revoked",
+    });
+  },
+);
+
+it("refuses to infer Actions provenance during recovery of a contextless enrollment and preserves generic OIDC enrollment", async () => {
+  const s = await actionsSponsoredEnrollment();
+  await bindings.DB.prepare(
+    "UPDATE _runtime_enrollments SET sponsor_context_json=NULL WHERE enrollment_id=?",
+  )
+    .bind(s.issued.context.enrollment_id)
+    .run();
+  await expect(
+    s.store.enroll(
+      projectId,
+      s.input,
+      s.session.principal_id,
+      s.policy,
+      s.secret(),
+      undefined,
+      s.sponsorContext,
+    ),
+  ).rejects.toMatchObject({ code: "runtime-binding-mismatch" });
+  const generic = {
+    provider: "oidc" as const,
+    issuer: "https://generic.example/token",
+    subject: "personal-sponsor",
+  };
+  const member = await new ProjectMembershipStore(bindings.DB).grant({
+    projectId,
+    principal: generic,
+    subjectKind: "human",
+    role: "participant",
+    actorPrincipalId: actor.principalId,
+  });
+  const runtime = new RuntimeStore(bindings.DB);
+  const enrolled = await runtime.enroll(
+    projectId,
+    {
+      ...s.input,
+      operation_id: crypto.randomUUID(),
+      installation_id: crypto.randomUUID(),
+    },
+    member.membership.principal_id,
+    s.policy,
+    s.secret(),
+  );
+  expect((await runtime.context(enrolled.token_id)).policy).toMatchObject(
+    s.policy,
+  );
+  const genericRow = await bindings.DB.prepare(
+    "SELECT sponsor_context_json FROM _runtime_enrollments WHERE enrollment_id=?",
+  )
+    .bind(enrolled.enrollment_id)
+    .first<{ sponsor_context_json: string | null }>();
+  expect(genericRow?.sponsor_context_json).toBeNull();
+});
+
+it("keeps GitHub.com Actions legacy contexts and historical human mirrored sponsor provenance compatible", async () => {
+  await setup();
+  const memberships = new ProjectMembershipStore(bindings.DB);
+  const actions = await memberships.grant({
+    projectId,
+    principal: {
+      provider: "oidc",
+      issuer: GITHUB_ACTIONS_ISSUER,
+      subject: context.sub,
+    },
+    subjectKind: "service",
+    role: "participant",
+    actorPrincipalId: actor.principalId,
+  });
+  const runtime = new RuntimeStore(bindings.DB);
+  const input = {
+    operation_id: crypto.randomUUID(),
+    installation_id: crypto.randomUUID(),
+    name: "Legacy Actions sponsor",
+    jkt: "a".repeat(43),
+    policy: actionsPolicy,
+  };
+  const enrolled = await runtime.enroll(
+    projectId,
+    input,
+    actions.membership.principal_id,
+    actionsPolicy,
+    { id: crypto.randomUUID(), hash: "legacy-actions-sponsor" },
+    undefined,
+    { provider: "github-actions", workload: context },
+  );
+  expect((await runtime.context(enrolled.token_id)).policy).toMatchObject(
+    actionsPolicy,
+  );
+  const human = await runtime.enroll(
+    projectId,
+    {
+      ...input,
+      operation_id: crypto.randomUUID(),
+      name: "Human mirrored sponsor",
+    },
+    "github:github.com:7",
+    actionsPolicy,
+    { id: crypto.randomUUID(), hash: "human-mirrored-sponsor" },
+    undefined,
+    { role: "participant", githubRepoId: 42 },
+  );
+  expect((await runtime.context(human.token_id)).policy).toMatchObject(
+    actionsPolicy,
+  );
+  await bindings.DB.prepare(
+    "UPDATE _project_repos SET oidc_enabled=0 WHERE project_id=?",
+  )
+    .bind(projectId)
+    .run();
+  await expect(runtime.context(enrolled.token_id)).rejects.toMatchObject({
+    code: "enrollment-revoked",
+  });
+  expect((await runtime.context(human.token_id)).policy).toMatchObject(
+    actionsPolicy,
+  );
 });
