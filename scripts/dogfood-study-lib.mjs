@@ -708,6 +708,49 @@ export function deriveLedger({
   const stopReason = stopped?.payload.reason ?? null;
   const wall = started && stopped ? stopped.mono_ms - started.mono_ms : null;
   const issued = events.find((e) => e.kind === "decision.issued");
+  const deadline = started
+    ? started.mono_ms + rubric.budgets.wall_ms_per_trial
+    : null;
+  const closesContext = (boundary, role) =>
+    boundary.kind === "trial.stopped" ||
+    (boundary.kind === "worker.stopped" && boundary.payload.role === role) ||
+    (boundary.kind === "worker.replaced" && boundary.payload.role === role);
+  const timely = (event) => {
+    const role = event.payload.role ?? event.actor.role;
+    return (
+      started &&
+      event.mono_ms >= started.mono_ms &&
+      event.mono_ms < deadline &&
+      !events.some(
+        (boundary) =>
+          closesContext(boundary, role) &&
+          (event.mono_ms > boundary.mono_ms ||
+            (event.mono_ms === boundary.mono_ms && event.seq >= boundary.seq)),
+      )
+    );
+  };
+  // Keep all raw events. Late durable writes/evidence cannot certify deadline state.
+  for (const event of events) {
+    const stateEvidence =
+      [
+        "result.declared",
+        "decision.acked",
+        "handoff.saved",
+        "recovery.decision_stated",
+        "recovery.first_action",
+      ].includes(event.kind) ||
+      (event.kind === "tila_call" &&
+        event.payload.outcome === "ok" &&
+        [
+          "task update",
+          "sdk claim",
+          "sdk renew",
+          "sdk release",
+          "sdk handoff-create",
+        ].includes(event.payload.verb));
+    if (stateEvidence && !timely(event))
+      flags.push(`late_state_evidence:${event.seq}`);
+  }
 
   // --- fixed schedule: a message later than the tolerance invalidates the schedule ---
   const tolerance = rubric.budgets.schedule_lateness_tolerance_ms;
@@ -821,7 +864,10 @@ export function deriveLedger({
       );
     }
     const results = events.filter(
-      (e) => e.kind === "result.declared" && baseRole(e.payload.role) === role,
+      (e) =>
+        e.kind === "result.declared" &&
+        baseRole(e.payload.role) === role &&
+        timely(e),
     );
     const initialResult = results[0] ?? null;
     const finalResult = issued
@@ -889,7 +935,7 @@ export function deriveLedger({
   const declared = events.filter((e) => e.kind === "result.declared");
   const inferred = declared.filter((e) => !e.payload.explicit_ref);
 
-  const acked = events.filter((e) => e.kind === "decision.acked");
+  const acked = events.filter((e) => e.kind === "decision.acked" && timely(e));
   const cases = evaluation?.cases ?? [];
   const decisionCases = cases.filter((c) => c.tags.includes("D1"));
   const decisionHonoredValue = decisionCases.length
@@ -903,8 +949,12 @@ export function deriveLedger({
   const ackedReplaced = acked.some(
     (e) => baseRole(e.payload.role) === replacedRole,
   );
-  const stated = events.find((e) => e.kind === "recovery.decision_stated");
-  const resumed = events.some((e) => e.kind === "recovery.started");
+  const stated = events.find(
+    (e) => e.kind === "recovery.decision_stated" && timely(e),
+  );
+  const resumed = events.some(
+    (e) => e.kind === "recovery.started" && timely(e),
+  );
   if (ackedReplaced && resumed) {
     if (!stated) lostDecisions += 1;
     else if (
@@ -981,10 +1031,13 @@ export function deriveLedger({
     .filter((v) => v !== null);
 
   // --- recovery ---
-  const recStart = events.find((e) => e.kind === "recovery.started");
+  const recStart = events.find(
+    (e) => e.kind === "recovery.started" && timely(e),
+  );
   const recDecision = events.find(
     (e) =>
       e.kind === "recovery.decision_stated" &&
+      timely(e) &&
       e.payload.candidate === true &&
       (rubric.rubric_version < 3 ||
         (e.payload.text_sha256 &&
@@ -992,9 +1045,19 @@ export function deriveLedger({
           e.payload.text_sha256 === evaluation?.resume?.text_sha256)),
   );
   const recAction = events.find(
-    (e) => e.kind === "recovery.first_action" && e.payload.valid === true,
+    (e) =>
+      e.kind === "recovery.first_action" &&
+      e.payload.valid === true &&
+      timely(e),
   );
-  const censoredAt = stopped?.mono_ms ?? null;
+  const censoredAt = recStart
+    ? Math.min(
+        deadline,
+        ...events
+          .filter((e) => closesContext(e, recStart.payload.role))
+          .map((e) => e.mono_ms),
+      )
+    : null;
   const noteCount = (topic) =>
     events.filter((e) => e.kind === "harness.note" && e.payload.topic === topic)
       .length;
@@ -1330,6 +1393,8 @@ export function classifyOutcome({
   }
   if (stopReason === "harness_failure") return "harness_invalid";
   if (flags.includes("budget_not_enforced")) return "harness_invalid";
+  if (flags.some((f) => f.startsWith("late_state_evidence:")))
+    return "harness_invalid";
   if (flags.some((f) => f.startsWith("schedule_late")))
     return "harness_invalid";
   if (!evaluation) return "harness_invalid";
@@ -1594,6 +1659,14 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
       rubric,
     });
     ledgers[id] = trialLedger;
+    for (const flag of trialLedger.flags.filter((f) =>
+      f.startsWith("late_state_evidence:"),
+    ))
+      add(
+        "late_state_evidence",
+        `${flag}: retained evidence exceeds the trial/wall/context boundary; scored state integrity is unverified`,
+        id,
+      );
     if (!early) {
       for (const f of trialLedger.flags.filter((x) =>
         x.startsWith("schedule_event_missing"),

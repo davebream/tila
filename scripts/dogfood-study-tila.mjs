@@ -324,6 +324,38 @@ const nonempty = (v) => typeof v === "string" && v.trim().length > 0;
 const snapshotHash = (file) =>
   existsSync(file) ? sha256Text(readFileSync(file, "utf8")) : null;
 
+function postToolSuccess(tool, response) {
+  if (Number.isInteger(response?.exit_code)) return response.exit_code === 0;
+  if (tool !== "Bash" || typeof response !== "string") return null;
+  // Only the runtime header precedes this delimiter. Command stdout is never status.
+  // This representative format still requires confirmation in installed-runtime smoke.
+  const lines = response.replace(/\r\n/g, "\n").split("\n");
+  const outputAt = lines.indexOf("Final output:");
+  if (outputAt < 0) return null;
+  const header = lines.slice(0, outputAt);
+  const statuses = header.flatMap((line) => {
+    const match = /^(?:Process exited with code |Exit code: )(-?\d+)$/.exec(
+      line,
+    );
+    return match ? [Number(match[1])] : [];
+  });
+  if (statuses.some((status) => Number.isSafeInteger(status) && status !== 0))
+    return false;
+  if (
+    statuses.length !== 1 ||
+    !Number.isSafeInteger(statuses[0]) ||
+    header.some(
+      (line) =>
+        line !== "" &&
+        !/^(?:Chunk ID: .+|Wall time: .+|Process exited with code -?\d+|Exit code: -?\d+)$/.test(
+          line,
+        ),
+    )
+  )
+    return null;
+  return statuses[0] === 0;
+}
+
 async function budgetHook(opts) {
   let decision = { allow: true };
   let eventName = "PreToolUse";
@@ -388,18 +420,8 @@ async function budgetHook(opts) {
         }
         if (existing.some((e) => e.kind === "tool.completed" && sameCall(e)))
           return null;
-        const response = input.tool_response;
         // Unknown response shapes stay unavailable until exact installed-runtime smoke.
-        const success =
-          typeof response?.exit_code === "number"
-            ? response.exit_code === 0
-            : typeof response === "string" &&
-                /(?:Process exited with code|Exit code:) 0\b/.test(response)
-              ? true
-              : typeof response === "string" &&
-                  /^(?:Success\.|Done!)/.test(response)
-                ? true
-                : null;
+        const success = postToolSuccess(input.tool_name, input.tool_response);
         const out = [
           {
             kind: "tool.completed",
