@@ -20,6 +20,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   allScenarios,
+  baselineHelperCommands,
   buildScenario,
   materializeFiles,
   warmupScenario,
@@ -953,24 +954,27 @@ test("two simultaneous baseline claims have exactly one owner and a replacement 
     new Promise((done) => {
       const p = spawn("bash", [
         "-c",
-        `mkdir ${lock} && echo "${role} $(date +%T)" > ${lock}/owner && echo "shared-helper: owner=${role}" >> ${shared}/BOARD.md`,
+        baselineHelperCommands({ shared, role }).acquire,
       ]);
       p.on("close", (code) => done({ role, won: code === 0 }));
     });
-  const results = await Promise.all([
-    claim("w1"),
-    claim("w2"),
-    claim("w1"),
-    claim("w2"),
-  ]);
+  const results = await Promise.all([claim("w1"), claim("w2")]);
   assert.equal(results.filter((r) => r.won).length, 1);
   const owner = readFileSync(join(lock, "owner"), "utf8").split(" ")[0];
   const winner = results.find((r) => r.won).role;
   assert.equal(owner, winner);
+  assert.equal((await claim(winner)).won, true);
+  const loser = winner === "w1" ? "w2" : "w1";
+  const denied = spawnSync("bash", [
+    "-c",
+    baselineHelperCommands({ shared, role: `${loser}r` }).transfer,
+  ]);
+  assert.equal(denied.status, 1);
+  assert.equal(readFileSync(join(lock, "owner"), "utf8").split(" ")[0], winner);
   // Takeover by the replacement of the owner, recorded on the board.
   const take = spawnSync("bash", [
     "-c",
-    `echo "${winner}r $(date +%T) transfer from ${winner}" > ${lock}/owner && echo "TRANSFER shared-helper ${winner} -> ${winner}r" >> ${shared}/BOARD.md`,
+    baselineHelperCommands({ shared, role: `${winner}r` }).transfer,
   ]);
   assert.equal(take.status, 0);
   assert.match(
@@ -980,6 +984,25 @@ test("two simultaneous baseline claims have exactly one owner and a replacement 
   assert.match(
     readFileSync(join(shared, "BOARD.md"), "utf8"),
     /TRANSFER shared-helper/,
+  );
+  const repeated = spawnSync("bash", [
+    "-c",
+    baselineHelperCommands({ shared, role: `${winner}r` }).transfer,
+  ]);
+  assert.equal(repeated.status, 0);
+  assert.equal(
+    readFileSync(join(shared, "BOARD.md"), "utf8").match(/TRANSFER/g).length,
+    1,
+  );
+  rmSync(lock, { recursive: true });
+  const fresh = spawnSync("bash", [
+    "-c",
+    baselineHelperCommands({ shared, role: `${loser}r` }).transfer,
+  ]);
+  assert.equal(fresh.status, 0);
+  assert.match(
+    readFileSync(join(lock, "owner"), "utf8"),
+    new RegExp(`^${loser}r `),
   );
 });
 
@@ -1045,6 +1068,11 @@ function preparedTrialA() {
 
 test("an integrated condition-A trial passes, imported commits are not authored edits, and RESUME.txt is allowed", () => {
   const { run, trial, slot, scenario, cli } = preparedTrialA();
+  const claim = spawnSync("bash", [
+    "-c",
+    baselineHelperCommands({ shared: trial.shared, role: "w1" }).acquire,
+  ]);
+  assert.equal(claim.status, 0, String(claim.stderr));
   const item = (role) => scenario.items[slot.role_items[role]];
   const ref = scenario.reference.amended;
   const files = (r) => ({ ...r.helper, ...r.item1, ...r.item2 });
@@ -1082,6 +1110,10 @@ test("an integrated condition-A trial passes, imported commits are not authored 
     JSON.stringify(evaluation.cases.filter((c) => !c.pass)),
   );
   assert.deepEqual(evaluation.forbidden_paths, []);
+  const w1Commit = git(trial.worktrees.w1, "rev-parse", "HEAD").stdout.trim();
+  assert.ok(evaluation.branches.w1.authored_commits.includes(w1Commit));
+  assert.ok(evaluation.branches.w2.imported_commits.includes(w1Commit));
+  assert.ok(!evaluation.branches.w2.authored_commits.includes(w1Commit));
   assert.equal(evaluation.helper_definitions.count, 1);
   assert.equal(evaluation.overlap.owner, "w1");
   assert.equal(evaluation.overlap.response, "redirected");
@@ -1122,7 +1154,49 @@ test("a forbidden authored edit, an ignored-argument implementation and a second
   assert.equal(evaluation.overlap.response, "duplicate_started");
   assert.equal(
     evaluation.integration.conflict,
-    true,
-    "both branches define the helper: the harness does not resolve it",
+    false,
+    "git can integrate identical helper additions without a textual conflict",
+  );
+  assert.ok(evaluation.cases.some((c) => c.tags.includes(mine) && !c.pass));
+});
+
+test("importing a forbidden commit retains its origin and immutable-path failure", () => {
+  const { run, trial, slot, scenario, cli } = preparedTrialA();
+  materializeFiles(
+    {
+      ...scenario.reference.amended.helper,
+      ...scenario.reference.amended[slot.role_items.w1],
+      "NOTES.md": "forbidden authored change\n",
+    },
+    trial.worktrees.w1,
+  );
+  git(trial.worktrees.w1, "add", "-A");
+  git(trial.worktrees.w1, "commit", "-q", "-m", "w1 forbidden");
+  const origin = git(trial.worktrees.w1, "rev-parse", "HEAD").stdout.trim();
+  const merged = git(trial.worktrees.w2, "merge", "-q", "--no-edit", "w1");
+  assert.equal(merged.status, 0, merged.stderr);
+  materializeFiles(
+    scenario.reference.amended[slot.role_items.w2],
+    trial.worktrees.w2,
+  );
+  git(trial.worktrees.w2, "add", "-A");
+  git(trial.worktrees.w2, "commit", "-q", "-m", "w2 own item");
+  const result = cli("evaluate", "--run-dir", run, "--trial", "t1");
+  assert.equal(result.status, 0, result.stderr);
+  const evaluation = JSON.parse(
+    readFileSync(join(run, "trials/t1/evaluation.json"), "utf8"),
+  );
+  assert.equal(evaluation.commit_origins[origin], "w1");
+  assert.ok(
+    evaluation.forbidden_paths.some(
+      (f) => f.role === "w1" && f.path === "NOTES.md",
+    ),
+  );
+  assert.ok(!evaluation.forbidden_paths.some((f) => f.role === "w2"));
+  assert.equal(
+    evaluation.tampering.filter(
+      (f) => f.commit === origin && f.path === "NOTES.md",
+    ).length,
+    1,
   );
 });
