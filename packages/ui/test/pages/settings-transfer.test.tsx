@@ -306,11 +306,16 @@ function deferred<T>() {
   let resolve: (value: T) => void = () => {
     throw new Error("Promise not initialized");
   };
-  const promise = new Promise<T>((r) => {
+  let reject: (error: unknown) => void = () => {
+    throw new Error("Promise not initialized");
+  };
+  const promise = new Promise<T>((r, fail) => {
     resolve = r;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
+
 it("hides account A's partial receipt from B, rejects B importing it, and restores A unchanged", async () => {
   const user = userEvent.setup();
   const receipt = await retainedReceipt();
@@ -529,4 +534,86 @@ it("discards old-account export downloads and notices when the export read is de
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(state.download).not.toHaveBeenCalled();
   expect(screen.queryByText(/Export coverage:/)).not.toBeInTheDocument();
+});
+it("locks export options during apply so step-up and partial outcomes remain visible", async () => {
+  const receipt = await retainedReceipt();
+  sessionStorage.setItem(key, JSON.stringify(receipt));
+  const user = userEvent.setup();
+  render();
+  await screen.findByText("private A configuration");
+  const held = deferred<number>();
+  state.write.mockImplementationOnce(() => held.promise);
+  await user.click(
+    screen.getByRole("button", { name: "Resume unresolved actions" }),
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText("Export format")).toBeDisabled(),
+  );
+  expect(screen.getByLabelText("definitions")).toBeDisabled();
+  expect(screen.getByLabelText("agents")).toBeDisabled();
+  // A rejected in-flight operation must still publish its original outcome.
+  const rejection = Object.assign(new Error("Re-authenticate"), {
+    status: 403,
+    code: "step-up-required",
+  });
+  held.reject(rejection);
+  await screen.findByText("Re-authenticate to continue");
+  expect(
+    JSON.parse(sessionStorage.getItem(key) ?? "{}").actions[1].status,
+  ).toBe("failed");
+});
+it("preserves a corrupt saved receipt and explicitly recovers into a new slot before exact resume", async () => {
+  const valid = await retainedReceipt();
+  const original = "{invalid saved receipt with unresolved progress";
+  sessionStorage.setItem(key, original);
+  const user = userEvent.setup();
+  render();
+  await screen.findByText(/The saved receipt is invalid or unreadable/);
+  expect(screen.getByLabelText("Load a resume receipt")).toBeDisabled();
+  expect(state.write).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole("button", {
+      name: "Preserve original and open recovery slot",
+    }),
+  );
+  expect(sessionStorage.getItem(key)).toBe(original);
+  const slot = sessionStorage.getItem(`${key}:active`);
+  expect(slot).toMatch(/:recovery:/);
+  await user.upload(
+    screen.getByLabelText("Load a resume receipt"),
+    new File([JSON.stringify(valid)], "valid.json", {
+      type: "application/json",
+    }),
+  );
+  await screen.findByText("private A configuration");
+  expect(sessionStorage.getItem(key)).toBe(original);
+  expect(state.write).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole("button", { name: "Resume unresolved actions" }),
+  );
+  await screen.findByText(/Settings transfer complete/);
+  expect(state.write).toHaveBeenCalledTimes(1);
+  expect(state.write.mock.calls[0][0].id).toBe(valid.plan.actions[1].id);
+  expect(
+    JSON.parse(sessionStorage.getItem(slot ?? "") ?? "{}").actions[1].status,
+  ).toBe("committed");
+});
+it("keeps identity verification failures closed and offers retry without discarding receipts", async () => {
+  const receipt = await retainedReceipt();
+  const saved = JSON.stringify(receipt);
+  sessionStorage.setItem(key, saved);
+  state.identity
+    .mockResolvedValueOnce(actorIdentity())
+    .mockRejectedValueOnce(new Error("Identity offline"));
+  const user = userEvent.setup();
+  render();
+  await screen.findByText(/Current canonical identity could not be verified/);
+  expect(screen.getByLabelText("Load a resume receipt")).toBeDisabled();
+  expect(screen.queryByText("private A configuration")).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "Retry identity verification" }),
+  );
+  await screen.findByText("private A configuration");
+  expect(sessionStorage.getItem(key)).toBe(saved);
+  expect(state.write).not.toHaveBeenCalled();
 });
