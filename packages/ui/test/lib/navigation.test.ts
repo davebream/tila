@@ -44,6 +44,7 @@ describe("matchNav", () => {
     ["/p/acme/presence", "runtime", "presence"],
     ["/p/acme/settings", "settings", "settings"],
     ["/p/acme/settings/definitions", "settings", "definitions"],
+    ["/p/acme/settings/transfer", "settings", "settings-transfer"],
     ["/p/acme/settings/agents", "settings", "agent-settings"],
     ["/p/acme/settings/general", "settings", "general"],
     ["/p/acme/settings/repositories", "settings", "repositories"],
@@ -127,6 +128,18 @@ describe("navVisibility", () => {
       restrictions: { task_types: ["bug"] },
     });
     const isVisible = navVisibility(restricted, "test-project");
+    const transfer = NAV_SECTIONS.flatMap((section) => section.items).find(
+      (item) => item.id === "settings-transfer",
+    );
+    if (!transfer) throw new Error("Missing settings transfer navigation");
+    expect(transfer.surface).toBe("agents");
+    expect(isVisible(transfer)).toBe(false);
+    expect(
+      navVisibility(
+        identity({ role: "maintainer", capabilities: [...CAPABILITIES] }),
+        "test-project",
+      )(transfer),
+    ).toBe(true);
     expect(ids(isVisible)).toEqual([
       "overview",
       "tasks",

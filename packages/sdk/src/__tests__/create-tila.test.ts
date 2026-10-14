@@ -392,7 +392,7 @@ describe("createTila — cloudflare backend", () => {
   });
 });
 
-describe("createTila — local & cloudflare expose an IDENTICAL key set", () => {
+describe("createTila — shared resource parity and declared optional surfaces", () => {
   const mockFetch = vi.fn();
   let dir: string;
   let local: Awaited<ReturnType<typeof createTila>>;
@@ -418,21 +418,30 @@ describe("createTila — local & cloudflare expose an IDENTICAL key set", () => 
     vi.unstubAllGlobals();
   });
 
-  it("every resource has the SAME method names across both backends", async () => {
+  it("every shared resource has the SAME method names across both backends", async () => {
     const remote = await createTila(
       baseConfig({ backend: "cloudflare", worker_url: "https://api.test" }),
       "tok",
     );
 
-    // Every facade key is a resource object except `close` (a function).
+    // Settings transfer needs remote identity/access APIs. Its optional
+    // surface must be honestly absent locally, rather than a fabricated API.
+    expect(local.settingsTransfer).toBeUndefined();
+    expect(Object.hasOwn(local, "settingsTransfer")).toBe(false);
+    expect(Object.hasOwn(remote, "settingsTransfer")).toBe(true);
+    expect(remote.settingsTransfer?.read.identity).toBeTypeOf("function");
+    expect(remote.settingsTransfer?.execute).toBeTypeOf("function");
+
+    // Every shared facade key is a resource except `close` (a function).
     const resourceKeys = (
       Object.keys(local) as Array<keyof typeof local>
     ).filter((k) => k !== "close");
 
-    // The two facades must expose the SAME resource keys.
+    // Keep strict parity for every shared resource. Only the explicitly
+    // asserted optional remote settings surface is excluded.
     expect(resourceKeys.sort()).toEqual(
       (Object.keys(remote) as Array<keyof typeof remote>)
-        .filter((k) => k !== "close")
+        .filter((k) => k !== "close" && k !== "settingsTransfer")
         .sort(),
     );
 
