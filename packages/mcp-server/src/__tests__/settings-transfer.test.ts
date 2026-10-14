@@ -9,6 +9,7 @@ import {
 import {
   McpSettingsImportResultSchema,
   McpSettingsResumeResultSchema,
+  type RuntimeRunContext,
   type SettingsDocument,
   type SignalGroup,
 } from "@tila/schemas";
@@ -18,6 +19,7 @@ import {
   createSettingsTransferMethods,
 } from "tila-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { lifecycleTools } from "../lifecycle";
 import { registerSettingsTransferTools } from "../tools/settings-transfer";
 import { asFacade, createMockFacade } from "./helpers/mock-facade";
 
@@ -25,6 +27,7 @@ vi.setConfig({ testTimeout: 30_000 });
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
+  vi.unstubAllGlobals();
 });
 const coverage = {
   status: "omitted" as const,
@@ -78,7 +81,7 @@ const denied = (code: string, status = 403) =>
     { ok: false, error: { code, message: "Rejected", retryable: false } },
     { status },
   );
-async function context() {
+async function context(scoped = false) {
   const state = {
     authorized: true,
     failNext: "",
@@ -165,7 +168,23 @@ async function context() {
     schema: createSchemaMethods(http, "destination"),
   };
   const server = new McpServer({ name: "settings-transfer", version: "1" });
-  registerSettingsTransferTools(server, facade, "destination");
+  if (scoped) {
+    vi.stubGlobal("fetch", fetch);
+    const bound = lifecycleTools(server, {
+      mode: "remote",
+      projectId: "destination",
+      apiUrl: "https://worker",
+      resolveRun: async () => ({
+        deployment: "https://worker",
+        context: {
+          project_id: "destination",
+          participant_id: "fixture",
+        } as RuntimeRunContext,
+        provider: async () => ({ token: "fixture" }),
+      }),
+    });
+    registerSettingsTransferTools(bound.server, bound.facade, "destination");
+  } else registerSettingsTransferTools(server, facade, "destination");
   const client = new Client({ name: "settings-client", version: "1" });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -202,6 +221,23 @@ function resumed(result: CallToolResult) {
   return McpSettingsResumeResultSchema.parse(result.structuredContent?.result);
 }
 describe("MCP settings transfer over the real SDK and MCP protocol", () => {
+  it("forwards nested transfer reads and execution through production authenticated request scopes", async () => {
+    const ctx = await context(true);
+    const receipt = preview(await ctx.plan());
+    expect(ctx.writes).toHaveLength(0);
+    const complete = resumed(
+      await ctx.call("tila_settings_resume", { receipt, apply: true }),
+    );
+    expect(complete.status).toBe("complete");
+    expect(ctx.writes.map((write) => write.id)).toEqual(["review", "notify"]);
+    const exported = await ctx.call("tila_settings_export", {
+      sections: ["signal_groups"],
+    });
+    expect(exported.isError).not.toBe(true);
+    expect(exported.structuredContent?.result).toMatchObject({
+      status: "exported",
+    });
+  });
   it("discovers typed preview/export/resume tools and honest mutation annotations", async () => {
     const ctx = await context();
     const tools = (await ctx.client.listTools()).tools;
