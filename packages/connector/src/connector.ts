@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeRunContext } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import type { ControlRequest } from "./control";
-import type { DiscoveredSession, SessionDiscovery } from "./discovery";
+import {
+  type DiscoveredSession,
+  type SessionDiscovery,
+  assertSameSession,
+  sessionIdentity,
+} from "./discovery";
+import { HERDR_SUPPORT, requireHerdrSupport } from "./herdr";
 import type { ConnectorStore, Ledger, Registration } from "./store";
 
 export interface RelayHandle {
@@ -24,6 +30,9 @@ export class HostConnector {
     readonly store: ConnectorStore,
     readonly discovery: SessionDiscovery,
     readonly factory: RelayFactory,
+    readonly policy: { requireHerdrRegistration: () => void } = {
+      requireHerdrRegistration: requireHerdrSupport,
+    },
   ) {
     this.ledger = store.read();
   }
@@ -83,10 +92,69 @@ export class HostConnector {
         if (entry) await this.remove(entry);
         return this.status();
       }
+      if (request.action === "inspect-herdr-registrations") {
+        const registrations = [];
+        for (const entry of this.ledger.registrations.filter(
+          (r) => r.runtime.kind === "herdr",
+        )) {
+          try {
+            await this.discovery.discover(entry.key, entry);
+            registrations.push({ key: entry.key, eligibility: "eligible" });
+          } catch {
+            registrations.push({
+              key: entry.key,
+              eligibility: "unavailable",
+              code: "session-verification-failed",
+            });
+          }
+        }
+        return { support: HERDR_SUPPORT, registrations };
+      }
+      if (request.action === "inspect-herdr") {
+        try {
+          const existing = this.ledger.registrations.find(
+            (r) => r.key === request.key,
+          );
+          const session = await this.discovery.discover(
+            request.key,
+            existing,
+            request.target,
+          );
+          return {
+            eligibility: "eligible",
+            support: HERDR_SUPPORT,
+            observation:
+              session.runtime?.kind === "herdr"
+                ? session.runtime.observation
+                : null,
+          };
+        } catch {
+          return {
+            eligibility: "unavailable",
+            code: "session-verification-failed",
+            reason:
+              "Check the explicit lifecycle key, protected socket, pane, pinned profile/account and active acting run",
+            support: HERDR_SUPPORT,
+          };
+        }
+      }
+      if (request.target?.kind === "herdr") {
+        try {
+          this.policy.requireHerdrRegistration();
+        } catch (error) {
+          if ((error as { code?: string }).code !== "unsupported-capability")
+            throw error;
+          return { code: "unsupported-capability", support: HERDR_SUPPORT };
+        }
+      }
       const existing = this.ledger.registrations.find(
         (r) => r.key === request.key,
       );
-      const session = await this.discovery.discover(request.key, existing);
+      const session = await this.discovery.discover(
+        request.key,
+        existing,
+        request.target ?? { kind: "standalone" },
+      );
       if (existing) {
         if (
           existing.allowIdleStart !== request.allowIdleStart ||
@@ -119,12 +187,34 @@ export class HostConnector {
         actingRunId: session.context.run_id,
         expectedEpoch: request.expectedEpoch,
         allowIdleStart: request.allowIdleStart,
+        runtime: session.runtime ?? { kind: "standalone" },
+        identity: sessionIdentity(session),
         relayOperationId: randomUUID(),
         state: "registering",
       };
       this.ledger.registrations.push(entry);
-      this.persist(); // Intent precedes relay creation and attachment.
-      await this.attach(entry, session);
+      try {
+        this.persist();
+      } catch (error) {
+        this.ledger.registrations.pop();
+        throw error;
+      } // Intent precedes relay creation and attachment.
+      try {
+        await this.attach(entry, session);
+      } catch (error) {
+        entry.state = "paused";
+        entry.reason = "Registration outcome requires metadata reconciliation";
+        try {
+          this.persist();
+        } finally {
+          const relay = this.relays.get(entry.key);
+          if (relay) {
+            await relay.close().catch(() => {});
+            this.relays.delete(entry.key);
+          }
+        }
+        throw error;
+      }
       return this.status();
     });
   }
@@ -149,6 +239,9 @@ export class HostConnector {
       entry.relayRunId = relay.context.run_id;
       this.persist();
     }
+    const current = await this.discovery.discover(entry.key, entry);
+    assertSameSession(session, current);
+    if (this.stopping) throw new Error("Connector is stopping");
     const { binding } = await relay.api.agents.bind(entry.agent, {
       expected_epoch: entry.expectedEpoch,
       acting_run_id: entry.actingRunId,
@@ -257,6 +350,8 @@ export class HostConnector {
           continue;
         }
         try {
+          if (entry.runtime.kind === "herdr")
+            this.policy.requireHerdrRegistration();
           let relay = this.relays.get(entry.key);
           // Close orphaned relay authority even if its original occupant has died.
           if (!relay) await this.factory.recover(entry);
@@ -305,12 +400,15 @@ export class HostConnector {
           entry.state = "paused";
           entry.reason =
             "Session verification or dispatch failed; retrying metadata reconciliation";
-          this.persist();
-          // Stop heartbeat authority when the occupant/account cannot be verified.
-          const relay = this.relays.get(entry.key);
-          if (relay) {
-            await relay.close().catch(() => {});
-            this.relays.delete(entry.key);
+          try {
+            this.persist();
+          } finally {
+            // Stop only this relay's heartbeat authority, even if storage fails.
+            const relay = this.relays.get(entry.key);
+            if (relay) {
+              await relay.close().catch(() => {});
+              this.relays.delete(entry.key);
+            }
           }
         }
       }
