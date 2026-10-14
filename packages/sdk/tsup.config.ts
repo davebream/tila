@@ -21,7 +21,7 @@ const mainConfig = {
     // Without dts.resolve, rollup-dts would leave bare `import ... from
     // "@tila/core"`/"@tila/schemas"` in the declarations, breaking consumers
     // since neither package is published.
-    resolve: ["@tila/schemas", "@tila/core"],
+    resolve: true,
   },
   clean: true,
   treeshake: true,
