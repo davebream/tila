@@ -210,11 +210,8 @@ function cmdDeclare(opts) {
     rubricSha256,
     rubricPath: rubricRel,
     scenarios: scenarios.filter((s) => s.pair !== "warmup"),
+    warmup: scenarios.find((s) => s.pair === "warmup"),
   });
-  const warm = scenarios.find((s) => s.pair === "warmup");
-  declaration.warmup = { scenario: warm.id, sha256: warm.sha256 };
-  const { declaration_sha256: _drop, ...body } = declaration;
-  declaration.declaration_sha256 = sha256Text(canonicalJson(body));
   writeJson(opts.out ?? declPath, declaration);
   console.log(`declaration written: ${declaration.declaration_sha256}`);
 }
@@ -229,18 +226,11 @@ function manifestFindings(opts) {
       rubricSha256,
       rubricPath: rubricRel,
       scenarios: scored,
+      warmup: scenarios.find((s) => s.pair === "warmup"),
     }),
     ...checkMatching(scenarios),
     ...checkFixtures(scenarios),
   ];
-  const warm = scenarios.find((s) => s.pair === "warmup");
-  if (declaration.warmup?.sha256 !== warm.sha256) {
-    findings.push({
-      code: "warmup",
-      severity: "error",
-      message: "warm-up fixture changed since the declaration",
-    });
-  }
   return { findings, declaration };
 }
 

@@ -65,6 +65,7 @@ export function buildDeclaration({
   rubricSha256,
   rubricPath,
   scenarios,
+  warmup,
 }) {
   const seed = rubric.design.allocation.seed;
   const pairs = rubric.design.pairs.map((p) => p.pair);
@@ -100,6 +101,7 @@ export function buildDeclaration({
       version: rubric.rubric_version,
     },
     protocol_document: rubric.protocol_document,
+    warmup: { scenario: warmup.id, sha256: warmup.sha256 },
     scenarios: Object.fromEntries(
       scenarios.map((s) => [
         s.id,
@@ -148,7 +150,7 @@ export function declarationHash(declaration) {
 /** Compare a committed declaration with what the rubric and fixtures regenerate. */
 export function checkDeclaration(
   declaration,
-  { rubric, rubricSha256, rubricPath, scenarios },
+  { rubric, rubricSha256, rubricPath, scenarios, warmup },
 ) {
   const findings = [];
   const fail = (code, message) =>
@@ -172,6 +174,7 @@ export function checkDeclaration(
       rubricSha256,
       rubricPath,
       scenarios,
+      warmup,
     });
   } catch (error) {
     fail("declaration_rebuild", String(error.message ?? error));
@@ -195,6 +198,9 @@ export function checkDeclaration(
       "scenarios",
       "scenario fixtures changed since the declaration was written",
     );
+  }
+  if (canonicalJson(declaration.warmup) !== canonicalJson(expected.warmup)) {
+    fail("warmup", "warm-up fixture changed since the declaration");
   }
   return findings;
 }
