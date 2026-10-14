@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetGlobalFlags, setGlobalFlags } from "../../lib/global-flags";
 
 const mockDeployWorkerWithAssets = vi.fn();
 const mockDescribeDeployPayload = vi.fn();
@@ -31,6 +32,13 @@ vi.mock("../../lib/cloudflare-client", () => ({
     mockCreateCloudflareClient(...args),
 }));
 
+const mockResolveDeployTarget = vi.fn();
+vi.mock("../../lib/deploy-target", async (importActual) => ({
+  ...(await importActual<typeof import("../../lib/deploy-target")>()),
+  resolveDeployTarget: (...args: unknown[]) => mockResolveDeployTarget(...args),
+}));
+vi.mock("../../lib/instance-context", () => ({ buildAuthStore: () => ({}) }));
+const mockDiagnostic = vi.fn();
 const mockLoadInfraConfig = vi.fn();
 const mockGetInfraSlug = vi.fn((_config: unknown) => "tila");
 vi.mock("../../lib/infra-config", () => ({
@@ -51,6 +59,7 @@ const mockPrintJsonError = vi.fn((..._args: unknown[]): void => {
   throw new Error("printJsonError");
 });
 vi.mock("../../lib/output", () => ({
+  diagnostic: (...args: unknown[]) => mockDiagnostic(...args),
   exit: (code: number) => process.exit(code),
   printJson: (...args: unknown[]) => mockPrintJson(...args),
   printJsonError: (...args: unknown[]) => mockPrintJsonError(...args),
@@ -108,6 +117,7 @@ async function invokeDeploy(
 describe("deploy command", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetGlobalFlags();
 
     exitSpy = vi
       .spyOn(process, "exit")
@@ -121,6 +131,17 @@ describe("deploy command", () => {
       d1_database_id: "d1-456",
       worker_url: "https://tila.workers.dev",
       r2_bucket_name: "tila-artifacts",
+    });
+    mockResolveDeployTarget.mockResolvedValue({
+      source: "repo-pointer",
+      infraSlug: "tila",
+      instanceKey: "tila-id",
+      workerUrl: "https://tila.workers.dev",
+      accountId: "acc-123",
+      accountName: "test",
+      scriptName: "tila",
+      d1DatabaseId: "d1-456",
+      r2BucketName: "tila-artifacts",
     });
     mockResolveCfApiToken.mockReturnValue("cf-token-abc");
     mockCreateCloudflareClient.mockReturnValue({});
@@ -138,6 +159,7 @@ describe("deploy command", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    resetGlobalFlags();
   });
 
   it("deploys Worker and UI via wrangler and exits 0", async () => {
@@ -183,6 +205,7 @@ describe("deploy command", () => {
       expect(mockPrintJson).toHaveBeenCalledWith(summary);
       expect(mockLoadInfraConfig).not.toHaveBeenCalled();
       expect(mockCreateCloudflareClient).not.toHaveBeenCalled();
+      expect(mockResolveDeployTarget).not.toHaveBeenCalled();
       expect(mockApplyD1Migrations).not.toHaveBeenCalled();
       expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
     });
@@ -252,10 +275,8 @@ describe("deploy command", () => {
     );
   });
 
-  it("fails when infra.toml is missing", async () => {
-    mockLoadInfraConfig.mockImplementation(() => {
-      throw new Error("No infra.toml");
-    });
+  it("fails when infrastructure is missing", async () => {
+    mockResolveDeployTarget.mockRejectedValueOnce(new Error("No infra.toml"));
 
     await expect(invokeDeploy(false)).rejects.toThrow("process.exit(1)");
 
@@ -406,6 +427,81 @@ describe("deploy command", () => {
       "d1-456",
       "/mock/migrations",
       { migrate: false, quiet: true },
+    );
+  });
+  it.each([false, true])(
+    "blocks all mutations when target verification fails (json=%s)",
+    async (json) => {
+      const { DeployTargetError } = await import("../../lib/deploy-target");
+      mockResolveDeployTarget.mockRejectedValueOnce(
+        new DeployTargetError(
+          "DEPLOY_TARGET_MISMATCH",
+          "Repository A conflicts with infrastructure B",
+        ),
+      );
+      await expect(invokeDeploy(false, { json })).rejects.toThrow();
+      expect(mockApplyD1Migrations).not.toHaveBeenCalled();
+      expect(mockDeployWorkerWithAssets).not.toHaveBeenCalled();
+      expect(mockSetWorkerSecrets).not.toHaveBeenCalled();
+      if (json)
+        expect(mockPrintJsonError).toHaveBeenCalledWith(
+          expect.stringContaining("Repository A"),
+          "DEPLOY_TARGET_MISMATCH",
+        );
+    },
+  );
+
+  it("displays the verified target before migration and preserves secrets", async () => {
+    mockApplyD1Migrations.mockImplementationOnce(async () => {
+      expect(mockDiagnostic).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /acc-123[\s\S]*tila[\s\S]*d1-456[\s\S]*tila-artifacts/,
+        ),
+      );
+      return { applied: 0, skipped: 0, appliedNames: [], watermark: null };
+    });
+    await invokeDeploy(false, { json: true });
+    expect(mockSetWorkerSecrets).not.toHaveBeenCalled();
+    const { loadGithubAppCredentials } = await import(
+      "../../lib/github-app-setup"
+    );
+    expect(loadGithubAppCredentials).not.toHaveBeenCalled();
+    expect(mockPrintJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({
+          accountId: "acc-123",
+          scriptName: "tila",
+        }),
+      }),
+    );
+  });
+
+  it("passes explicit selectors through the CLI parser", async () => {
+    const { runCommand } = await import("citty");
+    const { default: command } = await import("../../commands/deploy");
+    await runCommand(command, {
+      rawArgs: ["--infra", "production", "--instance", "prod-id", "--json"],
+    });
+    expect(mockResolveDeployTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ infra: "production", instance: "prod-id" }),
+    );
+  });
+  it("forwards global project assertions and only the presence of inline credentials", async () => {
+    setGlobalFlags({
+      instance: "b-id",
+      project: "wrong-project",
+      token: "do-not-forward-this",
+    });
+    await invokeDeploy();
+    expect(mockResolveDeployTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instance: "b-id",
+        project: "wrong-project",
+        inlineToken: true,
+      }),
+    );
+    expect(JSON.stringify(mockResolveDeployTarget.mock.calls)).not.toContain(
+      "do-not-forward-this",
     );
   });
 });

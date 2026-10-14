@@ -1,10 +1,7 @@
-import { createPrivateKey } from "node:crypto";
+import type { DeployTarget } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { createCloudflareClient } from "../lib/cloudflare-client";
-import {
-  applyD1Migrations,
-  setWorkerSecrets,
-} from "../lib/cloudflare-resources";
+import { applyD1Migrations } from "../lib/cloudflare-resources";
 import type { MigrationResult } from "../lib/d1-migrations";
 import {
   type DeployPayloadSummary,
@@ -13,9 +10,16 @@ import {
   describeDeployPayload,
   describeUiOutcome,
 } from "../lib/deploy";
-import { loadGithubAppCredentials } from "../lib/github-app-setup";
-import { getInfraSlug, loadInfraConfig } from "../lib/infra-config";
-import { exit, jsonArg, printJson, printJsonError } from "../lib/output";
+import { DeployTargetError, resolveDeployTarget } from "../lib/deploy-target";
+import { getGlobalFlags, globalFlagArgs } from "../lib/global-flags";
+import { buildAuthStore } from "../lib/instance-context";
+import {
+  diagnostic,
+  exit,
+  jsonArg,
+  printJson,
+  printJsonError,
+} from "../lib/output";
 
 import * as p from "../lib/prompts";
 import {
@@ -23,7 +27,6 @@ import {
   resolveMigrationsDir,
   tilaHome,
 } from "../lib/provisioning";
-import { R2_BUCKET_NAME } from "../lib/resource-names";
 
 export default defineCommand({
   meta: {
@@ -32,6 +35,13 @@ export default defineCommand({
       "Deploy Worker and UI to Cloudflare via wrangler. Exit codes: 0 success, 1 deploy failed.",
   },
   args: {
+    infra: {
+      type: "string",
+      description:
+        "Select saved infrastructure by slug (overrides ambient instance context)",
+    },
+    instance: globalFlagArgs.instance,
+    project: globalFlagArgs.project,
     "skip-ui": {
       type: "boolean",
       description:
@@ -84,16 +94,6 @@ export default defineCommand({
       return;
     }
 
-    let infraConfig: ReturnType<typeof loadInfraConfig>;
-    try {
-      infraConfig = loadInfraConfig(tilaDir);
-    } catch {
-      fatal(
-        "No infra.toml found. Run `tila infra provision` first.",
-        "NO_INFRA_CONFIG",
-      );
-    }
-
     const cfToken = resolveCfApiToken();
     if (!cfToken) {
       fatal(
@@ -104,8 +104,31 @@ export default defineCommand({
     }
 
     const cf = createCloudflareClient(cfToken);
-    const scriptName = getInfraSlug(infraConfig);
-    const r2BucketName = infraConfig.r2_bucket_name ?? R2_BUCKET_NAME;
+    let target: DeployTarget;
+    try {
+      target = await resolveDeployTarget({
+        cf,
+        store: buildAuthStore(),
+        home: tilaDir,
+        infra: args.infra,
+        instance: args.instance ?? getGlobalFlags().instance,
+        project: args.project ?? getGlobalFlags().project,
+        inlineToken: Boolean(getGlobalFlags().token),
+      });
+    } catch (error) {
+      fatal(
+        error instanceof Error ? error.message : "Target verification failed.",
+        error instanceof DeployTargetError
+          ? error.code
+          : "DEPLOY_TARGET_UNVERIFIED",
+      );
+    }
+    diagnostic(
+      `Deployment target (${target.source}): ${target.infraSlug}\n` +
+        `Account: ${target.accountName} (${target.accountId})\n` +
+        `Worker: ${target.scriptName}${target.workerUrl ? ` (${target.workerUrl})` : ""}\n` +
+        `D1: ${target.d1DatabaseId}\nR2: ${target.r2BucketName}`,
+    );
 
     const s = json ? null : p.spinner();
     s?.start("Checking D1 migrations...");
@@ -115,40 +138,21 @@ export default defineCommand({
     try {
       migrations = await applyD1Migrations(
         cf,
-        infraConfig.account_id,
-        infraConfig.d1_database_id,
+        target.accountId,
+        target.d1DatabaseId,
         resolveMigrationsDir(),
         { migrate: args.migrate !== false, quiet: json },
       );
       s?.message("Deploying Worker and UI...");
       result = await deployWorkerWithAssets({
         cf,
-        accountId: infraConfig.account_id,
-        scriptName,
-        d1DatabaseId: infraConfig.d1_database_id,
-        r2BucketName,
+        accountId: target.accountId,
+        scriptName: target.scriptName,
+        d1DatabaseId: target.d1DatabaseId,
+        r2BucketName: target.r2BucketName,
         apiToken: cfToken,
         skipUi: args["skip-ui"],
       });
-
-      const secrets: Record<string, string> = {};
-      if (infraConfig.hmac_key) {
-        secrets.GITHUB_SESSION_HMAC_KEY = infraConfig.hmac_key;
-      }
-      const creds = loadGithubAppCredentials(tilaDir);
-      if (creds) {
-        secrets.GITHUB_APP_ID = String(creds.app_id);
-        const key = createPrivateKey({ key: creds.pem, format: "pem" });
-        secrets.GITHUB_APP_PRIVATE_KEY = key.export({
-          type: "pkcs8",
-          format: "pem",
-        }) as string;
-        secrets.GITHUB_APP_CLIENT_ID = creds.client_id;
-        secrets.GITHUB_APP_CLIENT_SECRET = creds.client_secret;
-      }
-      if (Object.keys(secrets).length > 0) {
-        await setWorkerSecrets(cf, infraConfig.account_id, scriptName, secrets);
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (json) printJsonError(`Deploy failed: ${msg}`, "DEPLOY_FAILED");
@@ -158,7 +162,12 @@ export default defineCommand({
     }
 
     if (json) {
-      printJson({ workerUrl: result.workerUrl, ui: result.ui, migrations });
+      printJson({
+        workerUrl: result.workerUrl,
+        ui: result.ui,
+        migrations,
+        target,
+      });
       return;
     }
 

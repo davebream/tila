@@ -439,6 +439,11 @@ export class AuthStore {
     return { meta, secrets };
   }
 
+  /** Read deployment metadata without accessing the keychain. */
+  async getInfraMeta(slug: string): Promise<PerSlugInfraMeta | null> {
+    return readInfraMeta(this.paths, slug);
+  }
+
   /**
    * Store an infra record for a slug.
    *
