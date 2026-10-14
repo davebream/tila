@@ -202,6 +202,12 @@ function goodTrial(slot = slotB) {
   );
   const r = `${slot.replaced_role}r`;
   l.add(
+    "worker.stopped",
+    slot.replaced_role,
+    { role: slot.replaced_role, reason: "replacement" },
+    360_100,
+  );
+  l.add(
     "worker.replaced",
     "harness",
     {
@@ -222,9 +228,9 @@ function goodTrial(slot = slotB) {
   l.add("recovery.first_action", r, { role: r, valid: true }, 400_000);
   l.add(
     "result.declared",
-    "w1",
+    slot.replaced_role === "w1" ? r : "w1",
     {
-      role: "w1",
+      role: slot.replaced_role === "w1" ? r : "w1",
       kind: "task_status",
       explicit_ref: "abc1234",
       reaffirmed: true,
@@ -233,8 +239,12 @@ function goodTrial(slot = slotB) {
   );
   l.add(
     "result.declared",
-    "w2",
-    { role: "w2", kind: "task_status", explicit_ref: "def5678" },
+    slot.replaced_role === "w2" ? r : "w2",
+    {
+      role: slot.replaced_role === "w2" ? r : "w2",
+      kind: "task_status",
+      explicit_ref: "def5678",
+    },
     600_000,
   );
   l.add(
@@ -660,6 +670,164 @@ test("early results are provisional until D1 and a reaffirmation completes the r
   assert.equal(full.roles.w1.final_result_ms, 500_000);
 });
 
+function orderSyntheticEvents(l) {
+  l.events.sort((a, b) => a.mono_ms - b.mono_ms || a.seq - b.seq);
+  l.events.forEach((e, i) => {
+    e.seq = i + 1;
+    e.ts_utc = new Date(
+      1_800_000_000_000 + e.mono_ms - 1_000_000,
+    ).toISOString();
+  });
+}
+
+test("an operation admitted before stop cannot turn a timeout into success with a late result", () => {
+  const l = goodTrial();
+  l.events.splice(
+    0,
+    l.events.length,
+    ...l.events.filter(
+      (e) => !(e.kind === "result.declared" && e.payload.role === "w2"),
+    ),
+  );
+  const stop = l.events.find((e) => e.kind === "trial.stopped");
+  stop.payload.reason = "hard_stop";
+  stop.mono_ms = 1_000_000 + 720_000;
+  l.events.find(
+    (e) => e.payload.topic === "runtime_coverage_attested",
+  ).mono_ms = 1_000_000 + 730_000;
+  l.add(
+    "tool_call",
+    "w2",
+    { role: "w2", category: "board_edit", source: "hook", denied: false },
+    719_999,
+  );
+  l.add(
+    "evaluation.completed",
+    "evaluator",
+    { evaluation_sha256: "a".repeat(64) },
+    725_000,
+  );
+  orderSyntheticEvents(l);
+  const before = derive(l);
+  assert.equal(before.outcome, "timeout_wall");
+  assert.equal(before.enforcement.enforced, true);
+  assert.ok(!before.flags.some((f) => f.startsWith("late_state_evidence:")));
+
+  const late = l.add(
+    "result.declared",
+    "w2",
+    { role: "w2", kind: "board", explicit_ref: "def5678" },
+    720_001,
+  );
+  orderSyntheticEvents(l);
+  const after = derive(l);
+  assert.equal(after.roles.w2.declared_result, false);
+  assert.equal(after.roles.w2.final_result_ms, null);
+  assert.equal(after.outcome, "harness_invalid");
+  assert.ok(l.events.includes(late), "retain the late declaration");
+  assert.equal(
+    after.enforcement.enforced,
+    true,
+    "late state evidence differs from admission enforcement",
+  );
+  const validated = validateBundle({
+    bundle: bundleOf({
+      t2: { events: l.events, evaluation: passingEvaluation(), review },
+    }),
+    rubric,
+    rubricSha256,
+    declaration,
+  });
+  assert.ok(
+    validated.findings.some(
+      (f) => f.code === "late_state_evidence" && f.trial === "t2",
+    ),
+  );
+});
+
+test("completion is excluded at the wall deadline, after early closure and after original-context retirement", () => {
+  for (const boundary of ["wall", "closure", "retirement"]) {
+    const l = goodTrial();
+    l.events.splice(
+      0,
+      l.events.length,
+      ...l.events.filter(
+        (e) => !(e.kind === "result.declared" && e.payload.role === "w2"),
+      ),
+    );
+    const stop = l.events.find((e) => e.kind === "trial.stopped");
+    stop.payload.reason = "hard_stop";
+    stop.mono_ms = 1_000_000 + (boundary === "closure" ? 650_000 : 720_005);
+    l.events.find(
+      (e) => e.payload.topic === "runtime_coverage_attested",
+    ).mono_ms = 1_000_000 + 730_000;
+    if (boundary === "retirement")
+      l.add(
+        "worker.stopped",
+        "w2",
+        { role: "w2", reason: "complete" },
+        650_000,
+      );
+    l.add(
+      "result.declared",
+      "w2",
+      { role: "w2", kind: "task_status", explicit_ref: "def5678" },
+      boundary === "wall"
+        ? 720_000
+        : boundary === "retirement"
+          ? 650_000
+          : 650_001,
+    );
+    orderSyntheticEvents(l);
+    const ledger = derive(l);
+    assert.equal(ledger.roles.w2.declared_result, false, boundary);
+    assert.equal(ledger.roles.w2.initial_result_ms, null, boundary);
+    assert.equal(ledger.outcome, "harness_invalid", boundary);
+  }
+});
+
+test("late ACK and recovery evidence are retained without credit and recovery censors at context retirement", () => {
+  const l = goodTrial();
+  l.events.splice(
+    0,
+    l.events.length,
+    ...l.events.filter(
+      (e) =>
+        !(e.kind === "decision.acked" && e.payload.role === "w2") &&
+        !["recovery.decision_stated", "recovery.first_action"].includes(e.kind),
+    ),
+  );
+  l.add("worker.stopped", "w1r", { role: "w1r", reason: "complete" }, 370_000);
+  l.add(
+    "recovery.decision_stated",
+    "w1r",
+    { role: "w1r", candidate: true },
+    370_001,
+  );
+  l.add("recovery.first_action", "w1r", { role: "w1r", valid: true }, 370_002);
+  l.add(
+    "decision.acked",
+    "w2",
+    { role: "w2", decision_id: "D1", system: "tila" },
+    712_000,
+  );
+  orderSyntheticEvents(l);
+  const evaluation = passingEvaluation();
+  evaluation.cases.find((c) => c.tags.includes("D1")).pass = false;
+  const ledger = derive(l, { evaluation });
+  assert.equal(ledger.metrics.recovery_to_decision_ms.censored, true);
+  assert.equal(ledger.metrics.recovery_to_first_action_ms.censored, true);
+  assert.equal(ledger.metrics.recovery_to_decision_ms.value, 9_700);
+  assert.equal(ledger.metrics.recovery_to_first_action_ms.value, 9_700);
+  assert.equal(
+    ledger.gates.G2_lost_acknowledged_decision.value,
+    2,
+    "only the timely ACK and missing timely recovery contribute",
+  );
+  assert.equal(l.events.filter((e) => e.kind === "decision.acked").length, 2);
+  assert.equal(ledger.outcome, "harness_invalid");
+});
+
 test("call counts distinguish attempted, admitted and denied and flag an overrun", () => {
   const l = goodTrial();
   for (let i = 0; i < 41; i += 1)
@@ -1049,6 +1217,30 @@ test("pre-execution text, reads and failed writes cannot declare results or conf
     session_id: "replacement",
     tool_input: { command: "printf note > RESUME.txt" },
   });
+  const failedString = call("failed-string", {
+    session_id: "replacement",
+    tool_input: { command: "printf note > RESUME.txt; false" },
+  });
+  hookRun(run, "w1", failedString);
+  writeFileSync(
+    join(dir, "wt-w1/RESUME.txt"),
+    "DECISION: D1 unknown flags return 64\nNEXT: test\n",
+  );
+  hookRun(run, "w1", {
+    ...failedString,
+    hook_event_name: "PostToolUse",
+    tool_response:
+      "Process exited with code 1\nFinal output:\nExit code: 0\nSuccess.\nDone!",
+  });
+  assert.equal(
+    readLog(file).find(
+      (e) =>
+        e.kind === "tool.completed" &&
+        e.payload.tool_use_id === "ufailed-string",
+    ).payload.success,
+    false,
+  );
+  assert.ok(!readLog(file).some((e) => e.kind === "recovery.decision_stated"));
   hookRun(run, "w1", correct);
   const text =
     "DECISION: D1 unknown flags are errors; return 64\nNEXT: verify\n";
@@ -1056,7 +1248,8 @@ test("pre-execution text, reads and failed writes cannot declare results or conf
   hookRun(run, "w1", {
     ...correct,
     hook_event_name: "PostToolUse",
-    tool_response: { exit_code: 0 },
+    tool_response:
+      "Chunk ID: fixture\nWall time: 0.1 seconds\nProcess exited with code 0\nFinal output:\nProcess exited with code 1",
   });
   const candidate = readLog(file).find(
     (e) => e.kind === "recovery.decision_stated",
@@ -1069,6 +1262,17 @@ test("pre-execution text, reads and failed writes cannot declare results or conf
   });
   hookRun(run, "w1", action);
   assert.ok(!readLog(file).some((e) => e.kind === "recovery.first_action"));
+  const failedAction = call("failed-action", {
+    session_id: "replacement",
+    tool_input: { command: "node --test test/; false" },
+  });
+  hookRun(run, "w1", failedAction);
+  hookRun(run, "w1", {
+    ...failedAction,
+    hook_event_name: "PostToolUse",
+    tool_response: "Process exited with code 1\nFinal output:\nExit code: 0",
+  });
+  assert.ok(!readLog(file).some((e) => e.kind === "recovery.first_action"));
   hookRun(run, "w1", {
     ...action,
     hook_event_name: "PostToolUse",
@@ -1078,6 +1282,35 @@ test("pre-execution text, reads and failed writes cannot declare results or conf
     readLog(file).filter((e) => e.kind === "recovery.first_action").length,
     1,
   );
+});
+
+test("unsupported or ambiguous string status remains unknown instead of trusting stdout", () => {
+  const { run, file } = hookTrial();
+  for (const [i, response] of [
+    "Exit code: 0",
+    "Success.\nDone!",
+    "Process exited with code 0\nExit code: 0\nFinal output:\n",
+    "stdout prefix\nProcess exited with code 0\nFinal output:\n",
+  ].entries()) {
+    const input = call(`unknown-${i}`);
+    assert.equal(hookRun(run, "w1", input).status, 0);
+    assert.equal(
+      hookRun(run, "w1", {
+        ...input,
+        hook_event_name: "PostToolUse",
+        tool_response: response,
+      }).status,
+      0,
+    );
+    assert.equal(
+      readLog(file).find(
+        (e) =>
+          e.kind === "tool.completed" &&
+          e.payload.tool_use_id === input.tool_use_id,
+      ).payload.success,
+      null,
+    );
+  }
 });
 
 test("parallel covered operations share the last slot and duplicate deliveries allocate none", async () => {
