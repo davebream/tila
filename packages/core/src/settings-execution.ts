@@ -16,6 +16,7 @@ import {
   type UpdateAgent,
   type UpdateRoom,
   type WhoamiResponse,
+  containsCredentialValue,
 } from "@tila/schemas";
 
 /** Portable JSON normalization also defines the reviewed plan's digest. */
@@ -54,15 +55,11 @@ function fail(code: string, message: string): never {
 
 /** Receipts contain reviewed payloads, never credentials or transport diagnostics. */
 function safeArtifact(value: unknown): void {
-  const secret =
-    /(?:tila_d1_[0-9a-f]{72}|tila_u_[A-Za-z0-9._~-]{16,}|\bgh[pousr]_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}|-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----|\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}|\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/;
-  if (typeof value === "string" && secret.test(value))
+  if (containsCredentialValue(value))
     fail(
       "forbidden-secret",
-      "A transfer artifact contains a credential-shaped value.",
+      "A transfer artifact contains credential-shaped content.",
     );
-  if (value && typeof value === "object")
-    for (const item of Object.values(value)) safeArtifact(item);
 }
 export function validateSettingsPlan(raw: unknown): SettingsPlan {
   const plan = SettingsPlanSchema.parse(raw);

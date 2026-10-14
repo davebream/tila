@@ -6,6 +6,7 @@ import {
   UpdateAgentSchema,
 } from "./agent";
 import { CreateRoomSchema, UpdateRoomSchema } from "./conversation";
+import { containsCredentialValue } from "./credential-patterns";
 import { SetSignalGroupRequestSchema, SignalGroupIdSchema } from "./signal";
 
 export const SETTINGS_TRANSFER_FORMAT = "tila-project-settings";
@@ -184,7 +185,14 @@ export const SettingsMappingsSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (containsCredentialValue(value))
+      ctx.addIssue({
+        code: "custom",
+        message: "Mappings must not contain credential-shaped content.",
+      });
+  });
 const actionBase = {
   id: z.string().min(1).max(256),
   resource_id: z.string().min(1),

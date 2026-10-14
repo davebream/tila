@@ -882,8 +882,8 @@ export function planSettingsImport(
 
 export function appliedSettingsDefinition(response: {
   revision?: number;
-  version?: number;
-  schema: unknown;
+  version?: number | null;
+  schema?: unknown;
 }): CurrentDefinition {
   const revision = response.revision ?? response.version ?? 0;
   const value = response.schema;
