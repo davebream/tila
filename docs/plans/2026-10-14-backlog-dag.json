@@ -9,12 +9,12 @@
   "resource_policy": {
     "max_active_builders": 3,
     "default_model": "GPT-6.1-Sol",
-    "default_effort": "xhigh",
-    "optional_substitution": "Claude Sonnet xhigh on verified base firstParty subscription; same ceiling",
+    "default_effort": "high",
+    "optional_substitution": null,
     "external_450_counts": true,
     "optional_release_workers": 1,
     "release_skill": ".agents/skills/tila-release/SKILL.md",
-    "planner": "review-448-mcp-astra",
+    "planner": "plan-review-sol",
     "lead": "lead-backlog",
     "herdr_session": "tila",
     "planner_pane": "w2:p2",
@@ -25,7 +25,7 @@
       "Brain": {
         "tab": "w2:t1",
         "lead-backlog": "w2:p1",
-        "review-448-mcp-astra": "w2:p2"
+        "plan-review-sol": "w2:p2"
       },
       "Builders": {
         "tab": "w2:t2",
@@ -35,9 +35,12 @@
       },
       "Release": {
         "tab": "w2:t3",
-        "release-481-build-identity": "w2:p6"
+        "release-readiness-hold": "w2:p6"
       }
-    }
+    },
+    "planner_model": "GPT-6.1-Sol",
+    "planner_effort": "xhigh",
+    "model_policy_source": "User 2026-10-14: stop Astra; Sol xhigh planning and Sol high implementations. Supersedes prior Sonnet allowance."
   },
   "inventory": [
     {
@@ -503,7 +506,7 @@
       "branch": "fix/450-deploy-target-selection",
       "task_name": "build-450-deploy",
       "reported_head": "2cb07e2d89e4f759a4b4f495632dab159c089700",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i400",
@@ -537,7 +540,7 @@
       ],
       "task_name": "build-400-stepup",
       "branch": "fix/400-step-up-resume",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i449",
@@ -573,7 +576,7 @@
       ],
       "task_name": "build-449-mcp-transfer",
       "branch": "feat/449-mcp-definition-transfer",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i439",
@@ -609,7 +612,7 @@
       ],
       "task_name": "build-439-revisions",
       "branch": "feat/439-service-revisions",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot",
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence.",
       "base_sha": "ba26881e5ac36032e33670eb324ed58c63117a58",
       "session": "tila",
       "pane": "w3:p4",
@@ -650,7 +653,7 @@
       ],
       "task_name": "build-398-readiness",
       "branch": "fix/398-legacy-readiness-context",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i416",
@@ -686,7 +689,7 @@
       ],
       "task_name": "build-416-revision-warning",
       "branch": "feat/416-schema-apply-warning",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i440",
@@ -696,7 +699,7 @@
       "issue": 440,
       "pr": 474,
       "kind": "builder",
-      "state": "ready",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-440",
       "contract": "2026-10-14-backlog-execution.md#440--ghes-actions-oidc-i440",
@@ -706,10 +709,22 @@
         "packages/schemas/src/workload.ts"
       ],
       "validation": ["worker", "schemas", "ui", "runtime", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 474,
+          "head_sha": "6c2626adf5020bca022fc7ad4a9cb1614f5202f5",
+          "merge_sha": "1df51b708612d5ac1b0e56a03edcb89a931c2e4f",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/474"
+        }
+      ],
       "task_name": "build-440-ghes-oidc",
       "branch": "feat/440-ghes-actions-oidc",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i362",
@@ -744,7 +759,7 @@
       ],
       "task_name": "build-362-cleanup-guide",
       "branch": "docs/362-worker-cleanup",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i399",
@@ -781,7 +796,7 @@
       ],
       "task_name": "build-399-task-filters",
       "branch": "feat/399-task-filter-parity",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i307-audit",
@@ -791,7 +806,7 @@
       "issue": 307,
       "pr": 479,
       "kind": "builder",
-      "state": "ready",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-307",
       "contract": "2026-10-14-backlog-execution.md#307--delivered-readiness-evidence-reconciliation-and-held-activation-i307-audit-g307-activation",
@@ -801,10 +816,22 @@
         "packages/worker/src/routes/health.ts"
       ],
       "validation": ["cutover", "runtime", "docs"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 479,
+          "head_sha": "a54aba4fca381866eb3cdbea25952e54e531379b",
+          "merge_sha": "1dbc60af1ba3e1fa0eb5532fc4859f69183c19a4",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/479"
+        }
+      ],
       "task_name": "build-307-readiness-audit",
       "branch": "docs/307-readiness-evidence",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i448-plan",
@@ -828,7 +855,7 @@
       "completion_evidence": [],
       "task_name": "build-448-settings-transfer",
       "branch": "feat/448-settings-transfer",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i194-rubric",
@@ -847,7 +874,7 @@
       "completion_evidence": [],
       "task_name": "build-194-dogfood-study",
       "branch": "docs/194-dogfood-study",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "g-live-resources",
@@ -885,7 +912,7 @@
       "completion_evidence": [],
       "task_name": "build-283-native-acceptance",
       "branch": "test/283-native-acceptance",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i448-cli",
@@ -904,7 +931,7 @@
       "completion_evidence": [],
       "task_name": "build-448-settings-transfer",
       "branch": "feat/448-settings-transfer",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "pr314",
@@ -935,7 +962,7 @@
       ],
       "branch": "renovate/ui-dependencies",
       "task_name": "build-314-ui-deps",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i283-adapter",
@@ -957,7 +984,7 @@
       "completion_evidence": [],
       "task_name": "build-283-native-acceptance",
       "branch": "test/283-native-acceptance",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i448-ui",
@@ -976,7 +1003,7 @@
       "completion_evidence": [],
       "task_name": "build-448-settings-transfer",
       "branch": "feat/448-settings-transfer",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "pr311",
@@ -1010,7 +1037,7 @@
       ],
       "branch": "renovate/cloudflare-tooling",
       "task_name": "build-311-cf-deps",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i283-live",
@@ -1029,7 +1056,7 @@
       "completion_evidence": [],
       "task_name": "build-283-native-acceptance",
       "branch": "test/283-native-acceptance",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i448-mcp",
@@ -1048,7 +1075,7 @@
       "completion_evidence": [],
       "task_name": "build-448-settings-transfer",
       "branch": "feat/448-settings-transfer",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "pr312",
@@ -1090,7 +1117,7 @@
       ],
       "branch": "renovate/runtime-dependencies",
       "task_name": "build-312-runtime-deps",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "g-production-authorization",
@@ -1143,7 +1170,7 @@
       "completion_evidence": [],
       "task_name": "build-308-product-scenarios",
       "branch": "test/308-product-scenarios",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i308-fixtures",
@@ -1165,7 +1192,7 @@
       "completion_evidence": [],
       "task_name": "build-308-product-scenarios",
       "branch": "test/308-product-scenarios",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i308-live",
@@ -1184,7 +1211,7 @@
       "completion_evidence": [],
       "task_name": "build-308-product-scenarios",
       "branch": "test/308-product-scenarios",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i308-close",
@@ -1203,7 +1230,7 @@
       "completion_evidence": [],
       "task_name": "build-308-product-scenarios",
       "branch": "test/308-product-scenarios",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i194-study",
@@ -1222,7 +1249,7 @@
       "completion_evidence": [],
       "task_name": "build-194-dogfood-study",
       "branch": "docs/194-dogfood-study",
-      "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i292-close",
@@ -1320,9 +1347,9 @@
       "owner": "release",
       "stage": null,
       "issue": 481,
-      "pr": null,
+      "pr": 485,
       "kind": "release-builder",
-      "state": "implementing",
+      "state": "ready",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-481",
       "contract": "2026-10-14-backlog-execution.md#481--follow-up-correction",
@@ -1334,7 +1361,7 @@
       "completion_evidence": [],
       "task_name": "release-481-build-identity",
       "branch": "fix/481-embedded-release-identity",
-      "model_policy": "GPT-6.1-Sol xhigh"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     },
     {
       "id": "i482",
@@ -1356,7 +1383,7 @@
       "completion_evidence": [],
       "task_name": "build-482-task-claim",
       "branch": "fix/482-task-claim-contention",
-      "model_policy": "Sonnet xhigh"
+      "model_policy": "GPT-6.1-Sol high for implementations; GPT-6.1-Sol xhigh for planning/review. Historical execution models remain in evidence."
     }
   ],
   "hard_edges": [
@@ -2566,6 +2593,24 @@
       "main_ancestry_verified": true,
       "verified_by": "lead-backlog",
       "source": "https://github.com/davebream/tila/pull/312"
+    },
+    {
+      "kind": "model-policy",
+      "source": "User 2026-10-14",
+      "planner": "GPT-6.1-Sol xhigh",
+      "builders_release_study": "GPT-6.1-Sol high",
+      "detail": "No Astra/Sonnet for new work. No scored study yet; immutable prior rubrics retained, prospective v3 required before freeze."
+    },
+    {
+      "kind": "plan-progress-merge",
+      "pr": 484,
+      "head_sha": "98fb51305fa75081fe195c09dddd07c27b42502b",
+      "merge_sha": "859374403dc6f160fe6d88d46efd6ef77bfb8167",
+      "github_state": "MERGED",
+      "main_ref": "origin/main",
+      "main_ancestry_verified": true,
+      "verified_by": "lead-backlog",
+      "source": "https://github.com/davebream/tila/pull/484"
     }
   ],
   "progress_ledger": [
@@ -2843,7 +2888,7 @@
     },
     {
       "node": "i440",
-      "state": "ready",
+      "state": "merged",
       "worker": "build-440-ghes-oidc",
       "base_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c",
       "head_sha": "6c2626adf5020bca022fc7ad4a9cb1614f5202f5",
@@ -2914,11 +2959,23 @@
           "kind": "queue-observation",
           "source": "https://github.com/davebream/tila/pull/474",
           "detail": "Required ci success; Mergify Merge Queue IN_PROGRESS at 14:19 UTC. Not yet merged."
+        },
+        {
+          "kind": "merge",
+          "pr": 474,
+          "head_sha": "6c2626adf5020bca022fc7ad4a9cb1614f5202f5",
+          "merge_sha": "1df51b708612d5ac1b0e56a03edcb89a931c2e4f",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/474"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "queued-in-progress",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-closed",
+      "merge_sha": "1df51b708612d5ac1b0e56a03edcb89a931c2e4f"
     },
     {
       "node": "i362",
@@ -3023,7 +3080,7 @@
     },
     {
       "node": "i307-audit",
-      "state": "ready",
+      "state": "merged",
       "worker": "build-307-readiness-audit",
       "base_sha": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
       "head_sha": "a54aba4fca381866eb3cdbea25952e54e531379b",
@@ -3055,11 +3112,23 @@
           "kind": "queue-observation",
           "source": "https://github.com/davebream/tila/pull/479",
           "detail": "Required ci success; Mergify Merge Queue IN_PROGRESS at 14:19 UTC. Not yet merged."
+        },
+        {
+          "kind": "merge",
+          "pr": 479,
+          "head_sha": "a54aba4fca381866eb3cdbea25952e54e531379b",
+          "merge_sha": "1dbc60af1ba3e1fa0eb5532fc4859f69183c19a4",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/479"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "queued-in-progress",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "slice-merged-live-open",
+      "merge_sha": "1dbc60af1ba3e1fa0eb5532fc4859f69183c19a4"
     },
     {
       "node": "i448-plan",
@@ -3101,6 +3170,12 @@
           "source": "/tmp/tila-448-ui-recovery-review.md",
           "reviewer": "Astra and lead",
           "detail": "Both remaining recoveryP2s resolved in inspected code;3regressions cover locked export controls, explicit corrupt-receipt recovery and identity retry generation. Final commit/tests and MCP remain builder-owned."
+        },
+        {
+          "kind": "model-policy-transition",
+          "source": "User 2026-10-14 model instruction",
+          "model": "GPT-6.1-Sol high",
+          "detail": "Codex workers resumed same sessions; #194 Sonnet checkpoint5821997e replaced by fresh Sol high session01a13add-e969-7be2-9ffa-089ffd710709. Worktrees and logs preserved."
         }
       ],
       "lead_review": "dispatch-approved",
@@ -3124,6 +3199,12 @@
           "session": "43c6cd86-8aeb-492c-934b-2367f144c44c",
           "push_hold": true,
           "detail": "Predeclared rubric and executable disposable local study fixtures; actual experiment not started."
+        },
+        {
+          "kind": "model-policy-transition",
+          "source": "User 2026-10-14 model instruction",
+          "model": "GPT-6.1-Sol high",
+          "detail": "Codex workers resumed same sessions; #194 Sonnet checkpoint5821997e replaced by fresh Sol high session01a13add-e969-7be2-9ffa-089ffd710709. Worktrees and logs preserved."
         }
       ],
       "lead_review": "pending",
@@ -3226,6 +3307,12 @@
           "model": "GPT-6.1-Sol xhigh",
           "push_hold": true,
           "detail": "Concrete protocol22 production observation/composite discovery and local ledger migration; fixture-backed registration remains activation-gated; cold open unsupported; no provider/host probes."
+        },
+        {
+          "kind": "model-policy-transition",
+          "source": "User 2026-10-14 model instruction",
+          "model": "GPT-6.1-Sol high",
+          "detail": "Codex workers resumed same sessions; #194 Sonnet checkpoint5821997e replaced by fresh Sol high session01a13add-e969-7be2-9ffa-089ffd710709. Worktrees and logs preserved."
         }
       ],
       "lead_review": "pending",
@@ -3528,12 +3615,19 @@
     },
     {
       "node": "i481",
-      "state": "implementing",
+      "state": "ready",
       "worker": "release-481-build-identity",
       "base_sha": "581c99d71588a82ffc8b5045f625dc4a06dc43f0",
-      "head_sha": null,
-      "pr": null,
-      "tests": [],
+      "head_sha": "010304230e2f0d72cd23bdea6854831581ae5512",
+      "pr": 485,
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "25 focused release/native/version/CI tests; lint/version; actual Wrangler embedded CLI raw/installer/npm positive and wrong-commit checks; Node22 and pinned Alpine parser",
+          "source": "https://github.com/davebream/tila/pull/485"
+        }
+      ],
       "evidence": [
         {
           "kind": "scope-review",
@@ -3541,10 +3635,15 @@
           "reviewer": "lead-backlog",
           "result": "approved",
           "detail": "Isolated correction, no production changes or expanded dependency upgrades."
+        },
+        {
+          "kind": "handoff",
+          "source": "https://github.com/davebream/tila/pull/485",
+          "detail": "Reviewed offline tooling fix; CI passed and Mergify entered queue at14:38 UTC. Formal release remains blocked."
         }
       ],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "queued-in-progress",
       "closure": "not-closed"
     },
     {
@@ -3686,7 +3785,7 @@
     "release_election_allowed_with_evidence": true,
     "current_active_builders": ["i448-plan", "i194-rubric", "i283-adapter"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient",
-    "current_active_release_workers": ["i481"]
+    "current_active_release_workers": []
   },
   "followup_inventory": [
     {
