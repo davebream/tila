@@ -3,7 +3,10 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { RuntimeStore } from "../d1";
 import { CredentialStore } from "../d1";
-import { createRestoreRevisionStatements } from "../d1/restore-revisions";
+import {
+  createRestoreRevisionStatements,
+  serviceIdentitySnapshotRevision,
+} from "../d1/restore-revisions";
 import { forwardToDO } from "../lib/do-forward";
 import { generateToken } from "../lib/hash";
 import { hashToken } from "../lib/hash-token";
@@ -110,6 +113,7 @@ export function createBackupRoutes(options: {
     ReadonlySet<string>
   > = {
     _service_accounts: new Set([
+      "revision",
       "principal_id",
       "project_id",
       "name",
@@ -119,6 +123,7 @@ export function createBackupRoutes(options: {
       "revoked_at",
     ]),
     _workload_bindings: new Set([
+      "revision",
       "binding_id",
       "project_id",
       "principal_id",
@@ -449,10 +454,23 @@ export function createBackupRoutes(options: {
         },
         404,
       );
+    const snapshotRevision = serviceIdentitySnapshotRevision(body.sections);
+    if (snapshotRevision === null) {
+      return c.json(
+        {
+          error: {
+            code: "validation-error",
+            message: "Invalid service identity revision",
+          },
+        },
+        400,
+      );
+    }
     const revisions = createRestoreRevisionStatements(
       c.env.DB,
       projectId,
       (body.sections._projects?.length ?? 0) > 0,
+      snapshotRevision,
     );
     const statements: D1PreparedStatement[] = [revisions.advance];
     for (const table of [...D1_BACKUP_TABLES].reverse()) {

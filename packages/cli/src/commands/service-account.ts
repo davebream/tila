@@ -1,6 +1,8 @@
 import {
   ServiceAccountCreateRequestSchema,
+  ServiceAccountUpdateRequestSchema,
   WorkloadBindingRequestSchema,
+  WorkloadBindingUpdateRequestSchema,
 } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { createServiceAccountMethods } from "tila-sdk";
@@ -12,6 +14,14 @@ async function client() {
   const ctx = await resolveContext();
   return createServiceAccountMethods(requireClient(ctx), ctx.config.project_id);
 }
+const revisionArg = {
+  "expected-revision": {
+    type: "string" as const,
+    description: "Revision reviewed before this edit",
+  },
+};
+const revisionFromArgs = (value: string | undefined) =>
+  value === undefined ? undefined : Number(value);
 const principalArg = {
   principal: {
     type: "positional" as const,
@@ -54,11 +64,20 @@ export default defineCommand({
       args: {
         ...principalArg,
         "display-name": { type: "string", required: true },
+        ...revisionArg,
         ...jsonArg,
       },
       async run({ args }) {
+        const input = ServiceAccountUpdateRequestSchema.parse({
+          display_name: args["display-name"],
+          expected_revision: revisionFromArgs(args["expected-revision"]),
+        });
         printJson(
-          await (await client()).update(args.principal, args["display-name"]),
+          await (await client()).update(
+            args.principal,
+            input.display_name,
+            input.expected_revision,
+          ),
         );
       },
     }),
@@ -107,15 +126,21 @@ export default defineCommand({
           args: {
             ...principalArg,
             ...credentialPolicyArgs,
+            ...revisionArg,
             binding: { type: "string", required: true },
             ...jsonArg,
           },
           async run({ args }) {
+            const input = WorkloadBindingUpdateRequestSchema.parse({
+              policy: policyFromArgs(args),
+              expected_revision: revisionFromArgs(args["expected-revision"]),
+            });
             printJson(
               await (await client()).updateWorkloadBinding(
                 args.principal,
                 args.binding,
-                policyFromArgs(args),
+                input.policy,
+                input.expected_revision,
               ),
             );
           },
