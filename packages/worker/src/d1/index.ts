@@ -75,6 +75,7 @@ export {
 export {
   createHumanAuth,
   type HumanAuth,
+  type HumanAuthConfiguration,
   type HumanSession,
 } from "./human-auth";
 export { HumanStore, HumanAccountError, humanSecretHash } from "./human-store";
