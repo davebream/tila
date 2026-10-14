@@ -1,8 +1,11 @@
 # S1–S3 protocol and local preparation (#308)
 
 Status: protocol and independent local fixtures only. This document predeclares
-the journeys; it does not record live acceptance or close #308. Full S1 waits
-for integrated #448 settings transfer. Authenticated S2/S3, #283's native
+the journeys; it does not record live acceptance or close #308. #448 merged
+upstream through #492 on 2026-10-14 at 16:59:22 UTC. Full S1 still waits for the
+integrated mapped UI/CLI/MCP settings-transfer journey to be executed on source
+including that implementation. This checkout's pinned v0.9 base predates the
+merge; its local results do not test #448. Authenticated S2/S3, #283's native
 matrix and #307's operational readiness/activation disposition remain separate
 gates. No deployment, production target, credential change or host seed is
 part of the local driver.
@@ -36,7 +39,7 @@ Never publish account identifiers, credential locations or transcript bodies.
 | --- | --- | --- |
 | S1.1 | UI-only bootstrap; separate one-time file bootstrap; edit all ordinary definitions and identity/access settings | Current settings inventory in architecture §14.2; UI settings suites, runtime `project-bootstrap`, `definition-editor`, `settings-identities`, `settings-access`, `service-identity-revisions`. No assumption that a mock click proves browser-only acceptance. |
 | S1.2 | Empty/custom/legacy types, 301 items, walk list/search pages through restart | Every expected ID exactly once; complete search, no 250-item truncation. UI tasks/search/catalog suites; `product-scenarios` runtime. |
-| S1.3 | Semantic definition/settings export/import, explicit mappings, partial input, secret-bearing input | Preserve unrelated fields; reject secrets without echoing them; preview before applying. Existing definition transfer coverage only. Mapped non-secret settings transfer is blocked on #448's integrated UI/CLI/MCP surfaces. |
+| S1.3 | Semantic definition/settings export/import, explicit mappings, partial input, secret-bearing input | Preserve unrelated fields; reject secrets without echoing them; preview before applying. Existing definition transfer coverage only on this source. #448's mapped non-secret settings transfer merged upstream in #492; its integrated UI/CLI/MCP journey remains unexecuted in #308 evidence. |
 | S1.4 | Stale original file and simultaneous UI/CLI/MCP revisionful edits; legacy revisionless apply | One revisionful winner, other writes rejected; replay creates no duplicate revision. #416 compatibility path emits the deprecation warning and minimal journal event. Old clients are **not** all revision-enforced. HTTP contenders labelled UI/CLI/MCP in a fixture model request ordering only; real clients remain a live journey. |
 | S1.5 | Restore history, keep draft during conflict, fail secondary fetch | Restore is a new revision; draft survives; failure remains unknown/partial. UI editor/history and overview foundations, runtime schema revision/restore suites. |
 | S2.1 | Assign and accept as independently authenticated workers | Durable identity stays distinct from provider session, epoch and fence; wrong principal/participant cannot use another grant. HTTP authority suites plus composed local fixture. |
@@ -96,7 +99,14 @@ Metadata includes exact git SHA and product release, checksummed DO/D1 migration
 files and Worker config, OS/architecture, Node/pnpm and local runtime package
 versions, test-only profile declaration, ISO start/end times, and relative
 artifact references with SHA-256. Migration metadata describes local test setup
-(D1/DO/R2), never deployed migration state. Dirty source is rejected. Retained
+(D1/DO/R2), never deployed migration state. Dirty source is rejected. Publication
+copies of every artifact, including historical failures, must be sanitized and
+checksummed separately: `source_artifact_sha256` identifies the immutable local
+original, while `sha256` identifies sanitized public bytes. Source ledger
+checksums continue to refer to local originals. Verify both sets and scan all
+public copies before committing. Historical prerequisites retain their original
+dates and wording; a later dependency merge does not change what an old run tested.
+Retained
 preflight failure excerpts explicitly mark unavailable execution timestamps as
 null and provide their recording time and limitation; no duration is inferred.
 Generated
@@ -122,6 +132,7 @@ credentials required:
 
 ```sh
 node --test scripts/issue-308-scenarios.test.mjs
+node --test scripts/issue-308-publish.test.mjs
 node scripts/issue-308-scenarios.mjs --list
 node scripts/issue-308-scenarios.mjs --run --output .ci-reports/issue-308
 # Repeat without deleting the failure; link the previous report explicitly:
@@ -149,12 +160,28 @@ dependency is a failed observation, not a skip. For publication, explicitly
 choose `--output docs/evidence/issue-308-local`; the path is constrained to those
 two evidence roots. Keep all committed run directories, including failed ones.
 
+To publish retained local reports together, including sanitized copies of old
+failures, use the product publisher (omit optional diagnostic reports if absent):
+
+```sh
+node scripts/issue-308-publish.mjs .ci-reports/issue-308-preflight/report.json .ci-reports/issue-308-privacy/report.json .ci-reports/issue-308/*/report.json
+```
+
+It verifies original artifact checksums before copying, sanitizes JSON string
+values and text logs, emits both source/public checksums, and verifies public
+copies. Original manifest copies retain source ledger references; the consolidated
+`docs/evidence/issue-308-local-v1.json` supplies publication references. Review and
+scan these public files for user-directory paths (with or without a leading
+slash), private identifiers and credentials before committing. Sanitized copies
+may be regenerated; immutable local ledgers are never rewritten.
+
 Reusable historical sources:
 [acceptance v3](evidence/issue-283-acceptance-v3.json) and
 [isolated Herdr probes v2](evidence/issue-283-herdr-0-9-3-v2.json).
 The driver records their checksums without republishing private profile details.
 Their fixture/isolated probe successes and incomplete live matrix retain their
 original dates/provenance. They are references, not fresh observations. Full
-closure still requires agreed #194 rubric, integrated #448, authenticated
+closure still requires agreed #194 rubric, the journey on integrated source
+including #448, authenticated
 browser journeys, both real host directions, all #283 gates and verified #307
 readiness/activation disposition.
