@@ -267,6 +267,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         keywords: ["register agent", "binding grants", "profile", "archive"],
       },
       {
+        id: "settings-transfer",
+        label: "Settings transfer",
+        segment: "settings/transfer",
+        requires: [],
+        keywords: ["export", "import", "template", "remap", "resume"],
+      },
+      {
         id: "room-settings",
         label: "Rooms",
         segment: "settings/rooms",
