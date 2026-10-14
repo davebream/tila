@@ -1,0 +1,10 @@
+
+> tila@0.9.0 lint <checkout>
+> biome check . && pnpm run version:check && node scripts/check-test-quality.mjs
+
+Checked 1592 files in 1485ms. No fixes applied.
+
+> tila@0.9.0 version:check <checkout>
+> node scripts/check-public-versions.mjs
+
+Public release versions aligned at 0.9.0.

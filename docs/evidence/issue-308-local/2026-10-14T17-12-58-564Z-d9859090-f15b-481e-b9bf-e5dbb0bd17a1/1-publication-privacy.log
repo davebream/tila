@@ -1,0 +1,11 @@
+{
+  "recorded_at": "2026-10-14T17:12:58.631Z",
+  "files": 94,
+  "findings": 0,
+  "categories": [
+    "rooted/slashless personal paths",
+    "private records and identifiers",
+    "credential patterns and inherited private identity/credential values"
+  ],
+  "scope": "New issue-308 publication files only; no contents or private values included in this scan report"
+}

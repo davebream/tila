@@ -1,0 +1,762 @@
+{
+  "schema_version": 1,
+  "issue": 308,
+  "observations": [
+    {
+      "candidate_sha": "52d01b87600932fca4932e2fc15fcbb6e5d943ab",
+      "release": "0.9.0",
+      "source_sha256": "da62c4d8cd51ca2b7c4554bd13b671ac86b702de7437873515c012c59585462f",
+      "source_state": "uncommitted staged fixture source; fingerprint computed from unchanged index retained after the failed commit",
+      "environment": {
+        "os": "linux",
+        "arch": "x64",
+        "node": "v22.22.3",
+        "pnpm": "9.15.0",
+        "profiles": "Synthetic fixtures only; no native profiles",
+        "runtime_versions": {
+          "biome_hook": "2.5.15 (npx without workspace install)",
+          "workspace_dependencies": "not installed at hook failure"
+        }
+      },
+      "migrations": {
+        "scope": "Source inventory only; these preflight checks apply no migrations",
+        "do": [
+          {
+            "path": "packages/worker/migrations/do/0001_initial.sql",
+            "sha256": "f47af22136e665c3f099de22d9cc8dae595778020c155aa5ac248fc211b1bc20"
+          },
+          {
+            "path": "packages/worker/migrations/do/0002_search.sql",
+            "sha256": "220a3a71a32ebb46c3b582953e16c7558af063f74a654aad4264678d2a4eaa96"
+          },
+          {
+            "path": "packages/worker/migrations/do/0003_records.sql",
+            "sha256": "5c2f30de18979135c9c527d024ba22125c47c8e985739881350fef5b988bd8c9"
+          },
+          {
+            "path": "packages/worker/migrations/do/0032_managed_queue.sql",
+            "sha256": "f604d81876118be81fc5650e504f63f2f47db8e5c2804ab9120e60e4d72e5d58"
+          },
+          {
+            "path": "packages/worker/migrations/do/0033_managed_configuration.sql",
+            "sha256": "0bbfdba58fefd20481b9861ab93df81674db9ece8ad63024db0b78639c7cdc11"
+          },
+          {
+            "path": "packages/worker/migrations/do/0034_queue_restore_authority.sql",
+            "sha256": "e9201ab7100337edeb59d09e5978f9c4ab02ca43e878fc69d095625f17a48b76"
+          },
+          {
+            "path": "packages/worker/migrations/do/0035_task_paging_search.sql",
+            "sha256": "5b57d76d6266396051a4e445c5a45e5ebb72ec6a7c02c2a6e5a487834e2775fa"
+          },
+          {
+            "path": "packages/worker/migrations/do/0036_work_questions.sql",
+            "sha256": "e682de4e5f7fb090de1f5432c3b847e5e26be01977a8780a22d7d0fb56cf5cf4"
+          },
+          {
+            "path": "packages/worker/migrations/do/0037_journal_reports.sql",
+            "sha256": "e5df9a773cfed27a219a07e6e1219e75f7538c973faca8868b3e14810407e9ce"
+          },
+          {
+            "path": "packages/worker/migrations/do/0038_queue_assigner.sql",
+            "sha256": "b60767d3cd6adf69da9b5d518ef92ab52fa962247b3242aacde935932ef92099"
+          },
+          {
+            "path": "packages/worker/migrations/do/0039_attempt_revisions.sql",
+            "sha256": "31f18f9d25e5a78b2c215931a387c76626a4b0ca6ad06bef8b690fcc6a5f96b9"
+          },
+          {
+            "path": "packages/worker/migrations/do/0040_attempt_corrections.sql",
+            "sha256": "badd0d9965a2fb08d5a180d2627ef3713e8300751ef6930609a49cdc907fdc40"
+          },
+          {
+            "path": "packages/worker/migrations/do/0042_settings_revisions.sql",
+            "sha256": "caac6ca67dbd4cdf18869eb4e75cb0c2d3d47e526b1479bcdbda27f2899f6429"
+          }
+        ],
+        "d1": [
+          {
+            "path": "packages/worker/migrations/global/0001_initial.sql",
+            "sha256": "6f99f2aff959c7a539d7787fe9f645666c03d0ac894b6f106eb0118ad8eb1fba"
+          },
+          {
+            "path": "packages/worker/migrations/global/0002_rate_limits.sql",
+            "sha256": "bc00e18fe29a0e48b3dfd26269b2e27f0be0216d2b1e7a053509c7a1ce608acd"
+          },
+          {
+            "path": "packages/worker/migrations/global/0003_revoked_by.sql",
+            "sha256": "04dfabd7eab1a86de14b9560850433145ff585717e100a08b7812ab60525af51"
+          },
+          {
+            "path": "packages/worker/migrations/global/0003_token_id.sql",
+            "sha256": "f7da2ff476a16c444398d5528d6aa90d75715a292c9bcb758f3b0bccf0599feb"
+          },
+          {
+            "path": "packages/worker/migrations/global/0004_sessions.sql",
+            "sha256": "aeac4696ec6afcb950036a64f1bf74f5dcf31a41013f2645b3c100ede5c87d00"
+          },
+          {
+            "path": "packages/worker/migrations/global/0005_project_repos.sql",
+            "sha256": "d308b8e87cee401057cd2b943cc64b40168d319061fff46430b328cf1807c3cb"
+          },
+          {
+            "path": "packages/worker/migrations/global/0006_github_app_config.sql",
+            "sha256": "10fdb6879b9468877b678e11996c3fe5ebc02c046e9cd21dc8b72fbe0cf3a561"
+          },
+          {
+            "path": "packages/worker/migrations/global/0007_oidc_permission.sql",
+            "sha256": "6f100da5e71b50ed61100d2153753e6b829b52e5a4a2fd20cd41831ec53ca319"
+          },
+          {
+            "path": "packages/worker/migrations/global/0008_revoked_jti.sql",
+            "sha256": "1b866aa75b199285be144067d1b1f83cf7c137e826bdae70bc6f84d45af07324"
+          },
+          {
+            "path": "packages/worker/migrations/global/0009_idempotency_request_hash.sql",
+            "sha256": "de3297cc20f078a6a355ed828d56001c7fa8263e8e1b040bf6c58420564ccc1f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0010_sessions_permission.sql",
+            "sha256": "23261870f2e52d9854cd7999bc9ab152a4cd82b3bf32acbd63db39cd338d2d7a"
+          },
+          {
+            "path": "packages/worker/migrations/global/0011_admin_grants.sql",
+            "sha256": "90ebf68827c87f684b58d86abe80ecff44f1aa71811f89b6f75b5f8f5d3e04fc"
+          },
+          {
+            "path": "packages/worker/migrations/global/0012_repo_admin_auto_admin.sql",
+            "sha256": "b3d20c20aafc407a6d8623916737e1ef81724689cb44b457716521c566301925"
+          },
+          {
+            "path": "packages/worker/migrations/global/0017_deployment_meta.sql",
+            "sha256": "4808f5cafa314ef681c8ba2849c17d608d4f7aa9a98c621fe572915e3286223b"
+          },
+          {
+            "path": "packages/worker/migrations/global/0018_admin_grants_subject.sql",
+            "sha256": "ce785b8e884eeada517c9a814f2724046c01640e3e086a2794a9cd68cee582b0"
+          },
+          {
+            "path": "packages/worker/migrations/global/0019_revoked_subjects.sql",
+            "sha256": "270f0d8b34aea3ba879bba76ccbaa96b801cbda52450e86cd54a50e09d5a5610"
+          },
+          {
+            "path": "packages/worker/migrations/global/0020_projects_oidc.sql",
+            "sha256": "294173072fb10b721b1378d68c63fa051b183d01130c502d2e73cf3e20ba5085"
+          },
+          {
+            "path": "packages/worker/migrations/global/0021_oidc_principals.sql",
+            "sha256": "8e068367b8715d70c6b98a4e66f88cef44b0e101106ad8225c9aa5f8994a772f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0022_tokens_cnf_jkt.sql",
+            "sha256": "ef3d973938f642171801f246790f249d86077f0972548a97c60f40bbbc3cb2b8"
+          },
+          {
+            "path": "packages/worker/migrations/global/0023_session_principals.sql",
+            "sha256": "e78c5d7fb74befa3db390a0eaefd384f3683aea292f279dce15d576952a4d0dc"
+          },
+          {
+            "path": "packages/worker/migrations/global/0024_repo_oidc_policy.sql",
+            "sha256": "d652fb3820d3627d27b6b0a707c93aabe752b88fb783a7a3cf58e4a43d17a6b1"
+          },
+          {
+            "path": "packages/worker/migrations/global/0025_repo_access_policy.sql",
+            "sha256": "dcb5dcece57ef929b9ac1f913014c72290e0358c8c8a81ca27a261757b0c20e1"
+          },
+          {
+            "path": "packages/worker/migrations/global/0026_project_memberships.sql",
+            "sha256": "7325a616aa535e6d4c84f12feddd3f2f5f8f864b0a129ea7c2ffaacd586c9a89"
+          },
+          {
+            "path": "packages/worker/migrations/global/0027_scoped_credentials.sql",
+            "sha256": "648c75772548bf25cfef8c6ed759d89eecbe81d2c49c7c6e90dd0fcb0b95d736"
+          },
+          {
+            "path": "packages/worker/migrations/global/0028_session_authenticated_at.sql",
+            "sha256": "f38929294d8a46d2e0a40f929dafbd891480dda7144180494332588ef5f4187b"
+          },
+          {
+            "path": "packages/worker/migrations/global/0029_workload_authorization_context.sql",
+            "sha256": "97b8c006c83611162cca3a876533c56862dbe7d29d7f790bc7aff8ab1269701f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0030_runtime_credentials.sql",
+            "sha256": "41aa1868773ec30d7367b366e573459066cfcb76255ffa75bbf89f5acd6d8709"
+          },
+          {
+            "path": "packages/worker/migrations/global/0031_runtime_agents.sql",
+            "sha256": "5711b2a724a72aedb795b53e77f1b656017b6746beb4f55440acac732d274009"
+          },
+          {
+            "path": "packages/worker/migrations/global/0032_human_accounts.sql",
+            "sha256": "10036556d35738456d7c03d39f94dde461039161a856fd32d79e9abf207a528a"
+          },
+          {
+            "path": "packages/worker/migrations/global/0033_project_bootstrap_repair.sql",
+            "sha256": "7a9b3aaa83764ce31b40ef4c1248fd696fcf576815f074bcfff2e279a5edac63"
+          },
+          {
+            "path": "packages/worker/migrations/global/0034_access_settings_revisions.sql",
+            "sha256": "3eb3c5324e0af30d4b7073afbe39175db788c84596932b164a72ac0d22c5bbb0"
+          },
+          {
+            "path": "packages/worker/migrations/global/0035_access_settings_revision_watermarks.sql",
+            "sha256": "747770f37b6a86a48fa28dc4d49f559f0b40135789a7232ba97cf38d5c419d35"
+          },
+          {
+            "path": "packages/worker/migrations/global/0036_service_identity_revisions.sql",
+            "sha256": "4789ff49775d21f475f29d26e5d0844d94e88dcd0ddc492ecd9cd069b1e73f66"
+          }
+        ],
+        "configuration": [
+          {
+            "path": "packages/worker/wrangler.toml",
+            "sha256": "27550d8b74fb00e261b2d254f5231657409c86a42f7678236a7cf0d062343de3"
+          }
+        ]
+      },
+      "id": "preflight-commit-hook",
+      "scenario": "S1",
+      "step": "commit-hook",
+      "provenance": "unit/fixture",
+      "result": "failed",
+      "command": [
+        "git",
+        "commit",
+        "-m",
+        "test(product): prepare independent s1-s3 fixtures and evidence driver"
+      ],
+      "timestamps": {
+        "recorded_at": "2026-10-14T16:32:03.695Z",
+        "started_at": null,
+        "finished_at": null,
+        "limitation": "Execution timestamps were not captured. Diagnostic excerpt retained retrospectively; no duration inferred."
+      },
+      "artifact_refs": [
+        {
+          "path": ".ci-reports/issue-308-preflight/commit-hook.log",
+          "sha256": "92217cbd3f462f84933a2eec0f8422e470d08f0f89523bb1f0ca48da1c985415"
+        }
+      ],
+      "blocker_owner": "#308 / local validation",
+      "reason": "Local preflight failed; retained diagnostic excerpt, not a scenario acceptance observation",
+      "measurements": {
+        "setup_steps": null,
+        "setup_ms": null,
+        "diagnosis_ms": null,
+        "recovery_ms": null,
+        "duplicates": null,
+        "lost_decisions": null,
+        "stale_writes_rejected": null,
+        "interventions": null
+      }
+    },
+    {
+      "candidate_sha": "52d01b87600932fca4932e2fc15fcbb6e5d943ab",
+      "release": "0.9.0",
+      "source_sha256": "da62c4d8cd51ca2b7c4554bd13b671ac86b702de7437873515c012c59585462f",
+      "source_state": "uncommitted staged fixture source; fingerprint computed from unchanged index retained after the failed commit",
+      "environment": {
+        "os": "linux",
+        "arch": "x64",
+        "node": "v22.22.3",
+        "pnpm": "9.15.0",
+        "profiles": "Synthetic fixtures only; no native profiles",
+        "runtime_versions": {
+          "biome_hook": "2.5.15 (npx without workspace install)",
+          "workspace_dependencies": "not installed at hook failure"
+        }
+      },
+      "migrations": {
+        "scope": "Source inventory only; these preflight checks apply no migrations",
+        "do": [
+          {
+            "path": "packages/worker/migrations/do/0001_initial.sql",
+            "sha256": "f47af22136e665c3f099de22d9cc8dae595778020c155aa5ac248fc211b1bc20"
+          },
+          {
+            "path": "packages/worker/migrations/do/0002_search.sql",
+            "sha256": "220a3a71a32ebb46c3b582953e16c7558af063f74a654aad4264678d2a4eaa96"
+          },
+          {
+            "path": "packages/worker/migrations/do/0003_records.sql",
+            "sha256": "5c2f30de18979135c9c527d024ba22125c47c8e985739881350fef5b988bd8c9"
+          },
+          {
+            "path": "packages/worker/migrations/do/0032_managed_queue.sql",
+            "sha256": "f604d81876118be81fc5650e504f63f2f47db8e5c2804ab9120e60e4d72e5d58"
+          },
+          {
+            "path": "packages/worker/migrations/do/0033_managed_configuration.sql",
+            "sha256": "0bbfdba58fefd20481b9861ab93df81674db9ece8ad63024db0b78639c7cdc11"
+          },
+          {
+            "path": "packages/worker/migrations/do/0034_queue_restore_authority.sql",
+            "sha256": "e9201ab7100337edeb59d09e5978f9c4ab02ca43e878fc69d095625f17a48b76"
+          },
+          {
+            "path": "packages/worker/migrations/do/0035_task_paging_search.sql",
+            "sha256": "5b57d76d6266396051a4e445c5a45e5ebb72ec6a7c02c2a6e5a487834e2775fa"
+          },
+          {
+            "path": "packages/worker/migrations/do/0036_work_questions.sql",
+            "sha256": "e682de4e5f7fb090de1f5432c3b847e5e26be01977a8780a22d7d0fb56cf5cf4"
+          },
+          {
+            "path": "packages/worker/migrations/do/0037_journal_reports.sql",
+            "sha256": "e5df9a773cfed27a219a07e6e1219e75f7538c973faca8868b3e14810407e9ce"
+          },
+          {
+            "path": "packages/worker/migrations/do/0038_queue_assigner.sql",
+            "sha256": "b60767d3cd6adf69da9b5d518ef92ab52fa962247b3242aacde935932ef92099"
+          },
+          {
+            "path": "packages/worker/migrations/do/0039_attempt_revisions.sql",
+            "sha256": "31f18f9d25e5a78b2c215931a387c76626a4b0ca6ad06bef8b690fcc6a5f96b9"
+          },
+          {
+            "path": "packages/worker/migrations/do/0040_attempt_corrections.sql",
+            "sha256": "badd0d9965a2fb08d5a180d2627ef3713e8300751ef6930609a49cdc907fdc40"
+          },
+          {
+            "path": "packages/worker/migrations/do/0042_settings_revisions.sql",
+            "sha256": "caac6ca67dbd4cdf18869eb4e75cb0c2d3d47e526b1479bcdbda27f2899f6429"
+          }
+        ],
+        "d1": [
+          {
+            "path": "packages/worker/migrations/global/0001_initial.sql",
+            "sha256": "6f99f2aff959c7a539d7787fe9f645666c03d0ac894b6f106eb0118ad8eb1fba"
+          },
+          {
+            "path": "packages/worker/migrations/global/0002_rate_limits.sql",
+            "sha256": "bc00e18fe29a0e48b3dfd26269b2e27f0be0216d2b1e7a053509c7a1ce608acd"
+          },
+          {
+            "path": "packages/worker/migrations/global/0003_revoked_by.sql",
+            "sha256": "04dfabd7eab1a86de14b9560850433145ff585717e100a08b7812ab60525af51"
+          },
+          {
+            "path": "packages/worker/migrations/global/0003_token_id.sql",
+            "sha256": "f7da2ff476a16c444398d5528d6aa90d75715a292c9bcb758f3b0bccf0599feb"
+          },
+          {
+            "path": "packages/worker/migrations/global/0004_sessions.sql",
+            "sha256": "aeac4696ec6afcb950036a64f1bf74f5dcf31a41013f2645b3c100ede5c87d00"
+          },
+          {
+            "path": "packages/worker/migrations/global/0005_project_repos.sql",
+            "sha256": "d308b8e87cee401057cd2b943cc64b40168d319061fff46430b328cf1807c3cb"
+          },
+          {
+            "path": "packages/worker/migrations/global/0006_github_app_config.sql",
+            "sha256": "10fdb6879b9468877b678e11996c3fe5ebc02c046e9cd21dc8b72fbe0cf3a561"
+          },
+          {
+            "path": "packages/worker/migrations/global/0007_oidc_permission.sql",
+            "sha256": "6f100da5e71b50ed61100d2153753e6b829b52e5a4a2fd20cd41831ec53ca319"
+          },
+          {
+            "path": "packages/worker/migrations/global/0008_revoked_jti.sql",
+            "sha256": "1b866aa75b199285be144067d1b1f83cf7c137e826bdae70bc6f84d45af07324"
+          },
+          {
+            "path": "packages/worker/migrations/global/0009_idempotency_request_hash.sql",
+            "sha256": "de3297cc20f078a6a355ed828d56001c7fa8263e8e1b040bf6c58420564ccc1f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0010_sessions_permission.sql",
+            "sha256": "23261870f2e52d9854cd7999bc9ab152a4cd82b3bf32acbd63db39cd338d2d7a"
+          },
+          {
+            "path": "packages/worker/migrations/global/0011_admin_grants.sql",
+            "sha256": "90ebf68827c87f684b58d86abe80ecff44f1aa71811f89b6f75b5f8f5d3e04fc"
+          },
+          {
+            "path": "packages/worker/migrations/global/0012_repo_admin_auto_admin.sql",
+            "sha256": "b3d20c20aafc407a6d8623916737e1ef81724689cb44b457716521c566301925"
+          },
+          {
+            "path": "packages/worker/migrations/global/0017_deployment_meta.sql",
+            "sha256": "4808f5cafa314ef681c8ba2849c17d608d4f7aa9a98c621fe572915e3286223b"
+          },
+          {
+            "path": "packages/worker/migrations/global/0018_admin_grants_subject.sql",
+            "sha256": "ce785b8e884eeada517c9a814f2724046c01640e3e086a2794a9cd68cee582b0"
+          },
+          {
+            "path": "packages/worker/migrations/global/0019_revoked_subjects.sql",
+            "sha256": "270f0d8b34aea3ba879bba76ccbaa96b801cbda52450e86cd54a50e09d5a5610"
+          },
+          {
+            "path": "packages/worker/migrations/global/0020_projects_oidc.sql",
+            "sha256": "294173072fb10b721b1378d68c63fa051b183d01130c502d2e73cf3e20ba5085"
+          },
+          {
+            "path": "packages/worker/migrations/global/0021_oidc_principals.sql",
+            "sha256": "8e068367b8715d70c6b98a4e66f88cef44b0e101106ad8225c9aa5f8994a772f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0022_tokens_cnf_jkt.sql",
+            "sha256": "ef3d973938f642171801f246790f249d86077f0972548a97c60f40bbbc3cb2b8"
+          },
+          {
+            "path": "packages/worker/migrations/global/0023_session_principals.sql",
+            "sha256": "e78c5d7fb74befa3db390a0eaefd384f3683aea292f279dce15d576952a4d0dc"
+          },
+          {
+            "path": "packages/worker/migrations/global/0024_repo_oidc_policy.sql",
+            "sha256": "d652fb3820d3627d27b6b0a707c93aabe752b88fb783a7a3cf58e4a43d17a6b1"
+          },
+          {
+            "path": "packages/worker/migrations/global/0025_repo_access_policy.sql",
+            "sha256": "dcb5dcece57ef929b9ac1f913014c72290e0358c8c8a81ca27a261757b0c20e1"
+          },
+          {
+            "path": "packages/worker/migrations/global/0026_project_memberships.sql",
+            "sha256": "7325a616aa535e6d4c84f12feddd3f2f5f8f864b0a129ea7c2ffaacd586c9a89"
+          },
+          {
+            "path": "packages/worker/migrations/global/0027_scoped_credentials.sql",
+            "sha256": "648c75772548bf25cfef8c6ed759d89eecbe81d2c49c7c6e90dd0fcb0b95d736"
+          },
+          {
+            "path": "packages/worker/migrations/global/0028_session_authenticated_at.sql",
+            "sha256": "f38929294d8a46d2e0a40f929dafbd891480dda7144180494332588ef5f4187b"
+          },
+          {
+            "path": "packages/worker/migrations/global/0029_workload_authorization_context.sql",
+            "sha256": "97b8c006c83611162cca3a876533c56862dbe7d29d7f790bc7aff8ab1269701f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0030_runtime_credentials.sql",
+            "sha256": "41aa1868773ec30d7367b366e573459066cfcb76255ffa75bbf89f5acd6d8709"
+          },
+          {
+            "path": "packages/worker/migrations/global/0031_runtime_agents.sql",
+            "sha256": "5711b2a724a72aedb795b53e77f1b656017b6746beb4f55440acac732d274009"
+          },
+          {
+            "path": "packages/worker/migrations/global/0032_human_accounts.sql",
+            "sha256": "10036556d35738456d7c03d39f94dde461039161a856fd32d79e9abf207a528a"
+          },
+          {
+            "path": "packages/worker/migrations/global/0033_project_bootstrap_repair.sql",
+            "sha256": "7a9b3aaa83764ce31b40ef4c1248fd696fcf576815f074bcfff2e279a5edac63"
+          },
+          {
+            "path": "packages/worker/migrations/global/0034_access_settings_revisions.sql",
+            "sha256": "3eb3c5324e0af30d4b7073afbe39175db788c84596932b164a72ac0d22c5bbb0"
+          },
+          {
+            "path": "packages/worker/migrations/global/0035_access_settings_revision_watermarks.sql",
+            "sha256": "747770f37b6a86a48fa28dc4d49f559f0b40135789a7232ba97cf38d5c419d35"
+          },
+          {
+            "path": "packages/worker/migrations/global/0036_service_identity_revisions.sql",
+            "sha256": "4789ff49775d21f475f29d26e5d0844d94e88dcd0ddc492ecd9cd069b1e73f66"
+          }
+        ],
+        "configuration": [
+          {
+            "path": "packages/worker/wrangler.toml",
+            "sha256": "27550d8b74fb00e261b2d254f5231657409c86a42f7678236a7cf0d062343de3"
+          }
+        ]
+      },
+      "id": "preflight-fixture-lint",
+      "scenario": "S1",
+      "step": "fixture-lint",
+      "provenance": "unit/fixture",
+      "result": "failed",
+      "command": [
+        "pnpm",
+        "exec",
+        "biome",
+        "check",
+        "--write",
+        "scripts/issue-308-scenarios.mjs",
+        "scripts/issue-308-scenarios.test.mjs",
+        "packages/ui/test/fixtures/overview-scenarios.ts",
+        "packages/ui/test/pages/overview.test.tsx",
+        "packages/integration-tests/runtime/product-scenarios.test.ts"
+      ],
+      "timestamps": {
+        "recorded_at": "2026-10-14T16:32:03.695Z",
+        "started_at": null,
+        "finished_at": null,
+        "limitation": "Execution timestamps were not captured. Diagnostic excerpt retained retrospectively; no duration inferred."
+      },
+      "artifact_refs": [
+        {
+          "path": ".ci-reports/issue-308-preflight/fixture-lint.log",
+          "sha256": "a38b741e9c2aac2a4b8897f282dad24acf805d3ded4040ab7ab6e48f2dad1266"
+        }
+      ],
+      "blocker_owner": "#308 / local validation",
+      "reason": "Local preflight failed; retained diagnostic excerpt, not a scenario acceptance observation",
+      "measurements": {
+        "setup_steps": null,
+        "setup_ms": null,
+        "diagnosis_ms": null,
+        "recovery_ms": null,
+        "duplicates": null,
+        "lost_decisions": null,
+        "stale_writes_rejected": null,
+        "interventions": null
+      }
+    },
+    {
+      "candidate_sha": "1a891798da9c402c9ab92a9fdf667c00d33a6402",
+      "release": "0.9.0",
+      "source_sha256": "5240d4d098b63842288adb1abe1e7bc9d0d6929a5a6af86d53401c14ecc66289",
+      "source_state": "Clean candidate source reconstructed from its immutable git tree; startup failed before checks",
+      "environment": {
+        "os": "linux",
+        "arch": "x64",
+        "node": "v22.22.3",
+        "pnpm": "9.15.0",
+        "profiles": "Synthetic fixtures only; no native profiles",
+        "runtime_versions": {
+          "biome": "1.9.4",
+          "@cloudflare/vitest-plugin": "1.4.0",
+          "workerd": "1.20261006.1",
+          "limit": "Installed dependencies unchanged since installation; startup did not execute runtime checks"
+        }
+      },
+      "migrations": {
+        "scope": "Source inventory only; these preflight checks apply no migrations",
+        "do": [
+          {
+            "path": "packages/worker/migrations/do/0001_initial.sql",
+            "sha256": "f47af22136e665c3f099de22d9cc8dae595778020c155aa5ac248fc211b1bc20"
+          },
+          {
+            "path": "packages/worker/migrations/do/0002_search.sql",
+            "sha256": "220a3a71a32ebb46c3b582953e16c7558af063f74a654aad4264678d2a4eaa96"
+          },
+          {
+            "path": "packages/worker/migrations/do/0003_records.sql",
+            "sha256": "5c2f30de18979135c9c527d024ba22125c47c8e985739881350fef5b988bd8c9"
+          },
+          {
+            "path": "packages/worker/migrations/do/0032_managed_queue.sql",
+            "sha256": "f604d81876118be81fc5650e504f63f2f47db8e5c2804ab9120e60e4d72e5d58"
+          },
+          {
+            "path": "packages/worker/migrations/do/0033_managed_configuration.sql",
+            "sha256": "0bbfdba58fefd20481b9861ab93df81674db9ece8ad63024db0b78639c7cdc11"
+          },
+          {
+            "path": "packages/worker/migrations/do/0034_queue_restore_authority.sql",
+            "sha256": "e9201ab7100337edeb59d09e5978f9c4ab02ca43e878fc69d095625f17a48b76"
+          },
+          {
+            "path": "packages/worker/migrations/do/0035_task_paging_search.sql",
+            "sha256": "5b57d76d6266396051a4e445c5a45e5ebb72ec6a7c02c2a6e5a487834e2775fa"
+          },
+          {
+            "path": "packages/worker/migrations/do/0036_work_questions.sql",
+            "sha256": "e682de4e5f7fb090de1f5432c3b847e5e26be01977a8780a22d7d0fb56cf5cf4"
+          },
+          {
+            "path": "packages/worker/migrations/do/0037_journal_reports.sql",
+            "sha256": "e5df9a773cfed27a219a07e6e1219e75f7538c973faca8868b3e14810407e9ce"
+          },
+          {
+            "path": "packages/worker/migrations/do/0038_queue_assigner.sql",
+            "sha256": "b60767d3cd6adf69da9b5d518ef92ab52fa962247b3242aacde935932ef92099"
+          },
+          {
+            "path": "packages/worker/migrations/do/0039_attempt_revisions.sql",
+            "sha256": "31f18f9d25e5a78b2c215931a387c76626a4b0ca6ad06bef8b690fcc6a5f96b9"
+          },
+          {
+            "path": "packages/worker/migrations/do/0040_attempt_corrections.sql",
+            "sha256": "badd0d9965a2fb08d5a180d2627ef3713e8300751ef6930609a49cdc907fdc40"
+          },
+          {
+            "path": "packages/worker/migrations/do/0042_settings_revisions.sql",
+            "sha256": "caac6ca67dbd4cdf18869eb4e75cb0c2d3d47e526b1479bcdbda27f2899f6429"
+          }
+        ],
+        "d1": [
+          {
+            "path": "packages/worker/migrations/global/0001_initial.sql",
+            "sha256": "6f99f2aff959c7a539d7787fe9f645666c03d0ac894b6f106eb0118ad8eb1fba"
+          },
+          {
+            "path": "packages/worker/migrations/global/0002_rate_limits.sql",
+            "sha256": "bc00e18fe29a0e48b3dfd26269b2e27f0be0216d2b1e7a053509c7a1ce608acd"
+          },
+          {
+            "path": "packages/worker/migrations/global/0003_revoked_by.sql",
+            "sha256": "04dfabd7eab1a86de14b9560850433145ff585717e100a08b7812ab60525af51"
+          },
+          {
+            "path": "packages/worker/migrations/global/0003_token_id.sql",
+            "sha256": "f7da2ff476a16c444398d5528d6aa90d75715a292c9bcb758f3b0bccf0599feb"
+          },
+          {
+            "path": "packages/worker/migrations/global/0004_sessions.sql",
+            "sha256": "aeac4696ec6afcb950036a64f1bf74f5dcf31a41013f2645b3c100ede5c87d00"
+          },
+          {
+            "path": "packages/worker/migrations/global/0005_project_repos.sql",
+            "sha256": "d308b8e87cee401057cd2b943cc64b40168d319061fff46430b328cf1807c3cb"
+          },
+          {
+            "path": "packages/worker/migrations/global/0006_github_app_config.sql",
+            "sha256": "10fdb6879b9468877b678e11996c3fe5ebc02c046e9cd21dc8b72fbe0cf3a561"
+          },
+          {
+            "path": "packages/worker/migrations/global/0007_oidc_permission.sql",
+            "sha256": "6f100da5e71b50ed61100d2153753e6b829b52e5a4a2fd20cd41831ec53ca319"
+          },
+          {
+            "path": "packages/worker/migrations/global/0008_revoked_jti.sql",
+            "sha256": "1b866aa75b199285be144067d1b1f83cf7c137e826bdae70bc6f84d45af07324"
+          },
+          {
+            "path": "packages/worker/migrations/global/0009_idempotency_request_hash.sql",
+            "sha256": "de3297cc20f078a6a355ed828d56001c7fa8263e8e1b040bf6c58420564ccc1f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0010_sessions_permission.sql",
+            "sha256": "23261870f2e52d9854cd7999bc9ab152a4cd82b3bf32acbd63db39cd338d2d7a"
+          },
+          {
+            "path": "packages/worker/migrations/global/0011_admin_grants.sql",
+            "sha256": "90ebf68827c87f684b58d86abe80ecff44f1aa71811f89b6f75b5f8f5d3e04fc"
+          },
+          {
+            "path": "packages/worker/migrations/global/0012_repo_admin_auto_admin.sql",
+            "sha256": "b3d20c20aafc407a6d8623916737e1ef81724689cb44b457716521c566301925"
+          },
+          {
+            "path": "packages/worker/migrations/global/0017_deployment_meta.sql",
+            "sha256": "4808f5cafa314ef681c8ba2849c17d608d4f7aa9a98c621fe572915e3286223b"
+          },
+          {
+            "path": "packages/worker/migrations/global/0018_admin_grants_subject.sql",
+            "sha256": "ce785b8e884eeada517c9a814f2724046c01640e3e086a2794a9cd68cee582b0"
+          },
+          {
+            "path": "packages/worker/migrations/global/0019_revoked_subjects.sql",
+            "sha256": "270f0d8b34aea3ba879bba76ccbaa96b801cbda52450e86cd54a50e09d5a5610"
+          },
+          {
+            "path": "packages/worker/migrations/global/0020_projects_oidc.sql",
+            "sha256": "294173072fb10b721b1378d68c63fa051b183d01130c502d2e73cf3e20ba5085"
+          },
+          {
+            "path": "packages/worker/migrations/global/0021_oidc_principals.sql",
+            "sha256": "8e068367b8715d70c6b98a4e66f88cef44b0e101106ad8225c9aa5f8994a772f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0022_tokens_cnf_jkt.sql",
+            "sha256": "ef3d973938f642171801f246790f249d86077f0972548a97c60f40bbbc3cb2b8"
+          },
+          {
+            "path": "packages/worker/migrations/global/0023_session_principals.sql",
+            "sha256": "e78c5d7fb74befa3db390a0eaefd384f3683aea292f279dce15d576952a4d0dc"
+          },
+          {
+            "path": "packages/worker/migrations/global/0024_repo_oidc_policy.sql",
+            "sha256": "d652fb3820d3627d27b6b0a707c93aabe752b88fb783a7a3cf58e4a43d17a6b1"
+          },
+          {
+            "path": "packages/worker/migrations/global/0025_repo_access_policy.sql",
+            "sha256": "dcb5dcece57ef929b9ac1f913014c72290e0358c8c8a81ca27a261757b0c20e1"
+          },
+          {
+            "path": "packages/worker/migrations/global/0026_project_memberships.sql",
+            "sha256": "7325a616aa535e6d4c84f12feddd3f2f5f8f864b0a129ea7c2ffaacd586c9a89"
+          },
+          {
+            "path": "packages/worker/migrations/global/0027_scoped_credentials.sql",
+            "sha256": "648c75772548bf25cfef8c6ed759d89eecbe81d2c49c7c6e90dd0fcb0b95d736"
+          },
+          {
+            "path": "packages/worker/migrations/global/0028_session_authenticated_at.sql",
+            "sha256": "f38929294d8a46d2e0a40f929dafbd891480dda7144180494332588ef5f4187b"
+          },
+          {
+            "path": "packages/worker/migrations/global/0029_workload_authorization_context.sql",
+            "sha256": "97b8c006c83611162cca3a876533c56862dbe7d29d7f790bc7aff8ab1269701f"
+          },
+          {
+            "path": "packages/worker/migrations/global/0030_runtime_credentials.sql",
+            "sha256": "41aa1868773ec30d7367b366e573459066cfcb76255ffa75bbf89f5acd6d8709"
+          },
+          {
+            "path": "packages/worker/migrations/global/0031_runtime_agents.sql",
+            "sha256": "5711b2a724a72aedb795b53e77f1b656017b6746beb4f55440acac732d274009"
+          },
+          {
+            "path": "packages/worker/migrations/global/0032_human_accounts.sql",
+            "sha256": "10036556d35738456d7c03d39f94dde461039161a856fd32d79e9abf207a528a"
+          },
+          {
+            "path": "packages/worker/migrations/global/0033_project_bootstrap_repair.sql",
+            "sha256": "7a9b3aaa83764ce31b40ef4c1248fd696fcf576815f074bcfff2e279a5edac63"
+          },
+          {
+            "path": "packages/worker/migrations/global/0034_access_settings_revisions.sql",
+            "sha256": "3eb3c5324e0af30d4b7073afbe39175db788c84596932b164a72ac0d22c5bbb0"
+          },
+          {
+            "path": "packages/worker/migrations/global/0035_access_settings_revision_watermarks.sql",
+            "sha256": "747770f37b6a86a48fa28dc4d49f559f0b40135789a7232ba97cf38d5c419d35"
+          },
+          {
+            "path": "packages/worker/migrations/global/0036_service_identity_revisions.sql",
+            "sha256": "4789ff49775d21f475f29d26e5d0844d94e88dcd0ddc492ecd9cd069b1e73f66"
+          }
+        ],
+        "configuration": [
+          {
+            "path": "packages/worker/wrangler.toml",
+            "sha256": "27550d8b74fb00e261b2d254f5231657409c86a42f7678236a7cf0d062343de3"
+          }
+        ]
+      },
+      "id": "preflight-driver-startup",
+      "scenario": "S1",
+      "step": "driver-startup",
+      "provenance": "unit/fixture",
+      "result": "failed",
+      "command": [
+        "node",
+        "scripts/issue-308-scenarios.mjs",
+        "--run",
+        "--output",
+        ".ci-reports/issue-308"
+      ],
+      "timestamps": {
+        "recorded_at": "2026-10-14T16:43:25.325505+00:00",
+        "started_at": null,
+        "finished_at": null,
+        "limitation": "Execution timestamps were not captured. Diagnostic excerpt retained retrospectively; no duration inferred."
+      },
+      "artifact_refs": [
+        {
+          "path": ".ci-reports/issue-308-preflight/driver-startup.log",
+          "sha256": "93072d1e3354024d42cd61382d6ed0756450c30ef11a6ab6dcae0f19c5d51064"
+        }
+      ],
+      "blocker_owner": "#308 / local validation",
+      "reason": "Driver startup failed on a tracked directory symlink; regression test and corrected run retained",
+      "measurements": {
+        "setup_steps": null,
+        "setup_ms": null,
+        "diagnosis_ms": null,
+        "recovery_ms": null,
+        "duplicates": null,
+        "lost_decisions": null,
+        "stale_writes_rejected": null,
+        "interventions": null
+      }
+    }
+  ]
+}

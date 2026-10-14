@@ -1,0 +1,5 @@
+Retained lead-review privacy finding:
+Historical runtime JSON publication copies retained slashless user-directory paths.
+The original publisher copied stored bytes after verifying checksums.
+Correction: sanitize every publication copy, including historical failures; record separate original and public byte checksums.
+Local ledgers and artifacts remain unchanged. No live acceptance observation.
