@@ -150,6 +150,41 @@ describe("createSchemaMethods — outgoing request shape", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
+  it("contains a late async sink rejection after returning a successful apply", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    let rejectSink: (error: Error) => void = () => {};
+    const diagnostic = new Promise<void>((_resolve, reject) => {
+      rejectSink = reject;
+    });
+    const client = new TilaClient({
+      baseUrl: "https://api.test",
+      token: "t",
+      warningSink: async () => {
+        await diagnostic;
+      },
+    });
+    mockFetch.mockResolvedValueOnce(
+      ok({ ok: true, version: 2, warnings: [note] }),
+    );
+    try {
+      const result = await createSchemaMethods(client, "p").apply(
+        "schema_version = 1\n",
+      );
+      expect(result).toMatchObject({ ok: true, version: 2, warnings: [note] });
+      expect(warn).not.toHaveBeenCalled();
+      rejectSink(new Error("late diagnostic failure"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        expect.stringContaining("schema-revision-deprecated"),
+      );
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
   it("emits no warning on conditional success or 412", async () => {
     const sink = vi.fn();
     const client = TilaClient.fromConfig(

@@ -174,6 +174,65 @@ describe("createTilaLocal — full local round-trip", () => {
     }
   });
 
+  it.each([
+    ["sync", "throw"],
+    ["async", "throw"],
+    ["default", "throw"],
+    ["sync", "reject"],
+    ["async", "reject"],
+    ["default", "reject"],
+  ])(
+    "preserves committed local apply and replay when %s diagnostics and a %s fallback fail",
+    async (custom, fallback) => {
+      const unhandled = vi.fn();
+      process.on("unhandledRejection", unhandled);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {
+        if (fallback === "reject")
+          return Promise.reject(new Error("async console failure"));
+        throw new Error("console failure");
+      });
+      const sink =
+        custom === "default"
+          ? undefined
+          : custom === "async"
+            ? async () => {
+                throw new Error("async sink failure");
+              }
+            : () => {
+                throw new Error("sink failure");
+              };
+      const { schema, journal } = buildLocalResources(
+        local.project,
+        local.artifacts,
+        sink,
+      );
+      const definition = "schema_version = 1\n[work_units.task]\n";
+      const options = { idempotency_key: "diagnostic-failure" };
+      try {
+        const result = await schema.apply(definition, undefined, options);
+        expect(result).toMatchObject({
+          ok: true,
+          revision: 1,
+          warnings: [{ code: "schema-revision-deprecated" }],
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect((await schema.get()).revision).toBe(1);
+        expect(await schema.apply(definition, undefined, options)).toEqual(
+          result,
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect((await schema.history()).entries).toHaveLength(1);
+        expect(
+          (await journal.query({ kind: "schema.revisionless_applied" })).events,
+        ).toHaveLength(1);
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(2);
+      } finally {
+        process.off("unhandledRejection", unhandled);
+      }
+    },
+  );
+
   it("exposes version history, metadata and append-only restore under Node", async () => {
     const claim = await local.project.acquire(
       "artifact:report",
