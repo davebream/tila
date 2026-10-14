@@ -45,6 +45,8 @@ export type SessionFlag = {
 /** Anything gated on capabilities and the restricted-credential surfaces. */
 export interface AccessTarget {
   requires: readonly Capability[];
+  /** A page spanning independently readable sections needs at least one. */
+  requiresAny?: readonly Capability[];
   surface?: string;
   /**
    * Session flags from `/auth/session/status`; the item needs at least one.
@@ -267,6 +269,17 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         keywords: ["register agent", "binding grants", "profile", "archive"],
       },
       {
+        id: "settings-transfer",
+        label: "Settings transfer",
+        segment: "settings/transfer",
+        requires: [],
+        requiresAny: ["agents:read", "conversations:read", "signals:read"],
+        // All transfer sections use non-namespace settings endpoints. Keep
+        // restricted credentials out while the page reports section coverage.
+        surface: "agents",
+        keywords: ["export", "import", "template", "remap", "resume"],
+      },
+      {
         id: "room-settings",
         label: "Rooms",
         segment: "settings/rooms",
@@ -368,6 +381,8 @@ export function navVisibility(
     flagged(item) &&
     ranked(item) &&
     item.requires.every((cap) => capabilities.has(cap)) &&
+    (!item.requiresAny?.length ||
+      item.requiresAny.some((cap) => capabilities.has(cap))) &&
     (!restricted ||
       item.surface === undefined ||
       RESTRICTED_SURFACES.has(item.surface));

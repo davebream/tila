@@ -53,6 +53,7 @@ export const groups: Record<string, string[]> = {
     "record",
     "artifact",
     "schema",
+    "settings",
     "journal",
     "search",
     "index",

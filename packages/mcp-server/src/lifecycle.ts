@@ -10,7 +10,17 @@ export function scopedFacade(
 ): TilaFacade {
   const proxy = (path: PropertyKey[]): unknown =>
     new Proxy(() => {}, {
-      get: (_target, key) => proxy([...path, key]),
+      get: (_target, key) => {
+        // This optional surface contains nested read functions and is checked
+        // for backend support inside a handler. Resolve it only from that
+        // handler's authenticated facade; a synthetic proxy cannot represent
+        // absence, and object spread would lose its read methods.
+        if (path.length === 0 && key === "settingsTransfer") {
+          const scoped = storage.getStore();
+          if (scoped) return scoped.settingsTransfer;
+        }
+        return proxy([...path, key]);
+      },
       apply: (_target, _thisArg, args) => {
         let value: unknown = storage.getStore();
         if (!value)
