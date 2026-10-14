@@ -1296,4 +1296,4 @@ TTL. A dual-verify path is a tracked follow-up, not yet implemented. Migration g
 
 ## MCP runtime cutover (0.4.0)
 
-The operator authentication methods above remain available for CLI/SDK administration. MCP now requires a project run through the enrollment broker or runtime OIDC flow; it does not resolve personal sessions, API-token environment variables, or local credential files. See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs).
+The operator authentication methods above remain available for CLI/SDK administration. Remote MCP requires a project run through the enrollment broker or runtime OIDC flow; it does not resolve personal sessions, API-token environment variables, or local credential files. Explicit local MCP uses complete local SQLite configuration without a remote run binding. See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs).

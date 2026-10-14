@@ -246,4 +246,4 @@ for navigational completeness.)
 
 ## MCP runtime binding (0.4.0)
 
-MCP does not use the operator credential-resolution chain described above. Its broker reference or native host session mapping selects one authenticated project run. Deployment, project, participant, run, and initial authority are pinned; missing mappings or conflicting overrides fail closed. See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs).
+Remote MCP does not use the operator credential-resolution chain described above. Its broker reference or native host session mapping selects one authenticated project run. Deployment, project, participant, run, and initial authority are pinned; missing mappings or conflicting overrides fail closed. See [runtime operations](05-OPERATIONS.md#runtime-enrollment-and-unattended-runs).
