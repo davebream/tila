@@ -271,6 +271,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: "Settings transfer",
         segment: "settings/transfer",
         requires: [],
+        // All transfer sections use non-namespace settings endpoints. Keep
+        // restricted credentials out while the page reports section coverage.
+        surface: "agents",
         keywords: ["export", "import", "template", "remap", "resume"],
       },
       {
