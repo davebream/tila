@@ -180,9 +180,9 @@ is the reference for editor coverage, current permissions and future API gaps.
 | [#305](https://github.com/davebream/tila/issues/305) — open | Browser work actions over the shared attempt and decision APIs. |
 | [#306](https://github.com/davebream/tila/issues/306), [#307](https://github.com/davebream/tila/issues/307), [#308](https://github.com/davebream/tila/issues/308), [#283](https://github.com/davebream/tila/issues/283), [#194](https://github.com/davebream/tila/issues/194) — open | Navigation/attention, operational readiness, three-scenario validation, live native transport and measured dogfooding retain distinct owners. #307 does not authorize silent production credential rotation; #308 cannot substitute fixtures for #283 live proof. |
 
-## 5. Remaining boundaries and proposed #194 alignment
+## 5. Remaining boundaries and #194 alignment
 
-These are ownership notes and one proposed issue amendment, not new implementation
+These are ownership notes and the applied issue amendment, not new implementation
 claims or requests to reopen closed issues.
 
 | Work | Owner / boundary |
@@ -193,12 +193,13 @@ claims or requests to reopen closed issues.
 | Configuration editors/import/export | #296–#299; one server authority, explicit revisions, per-resource permission checks and non-secret references. Definitions import/export is delivered; exporting agents, rooms and access settings is not. No Git/file synchronization. |
 | Product evidence | #308 executes S1–S3 and feeds #194; record failures, setup/diagnosis/recovery cost and exact evidence provenance. |
 
-### Proposed replacement positioning for #194 — not applied to GitHub
+### Applied positioning amendment for #194 — 2026-10-14
 
-#194 currently requires documentation to say Tila does not launch agents, assign
-work or schedule execution. That blanket exclusion conflicts with amended
-Decisions §0 and #292's first orchestrator/worker workflow. Preserve #194's measured
-case-study ownership and evidence requirements; replace that exclusion with:
+[#194](https://github.com/davebream/tila/issues/194) was amended on 2026-10-14 to
+replace the former blanket exclusion of launching or assigning work with the
+boundary in Decisions §0 and #292's first orchestrator/worker workflow. Its measured
+case-study ownership and evidence requirements remain open. The aligned positioning
+is:
 
 > Tila is one self-hosted development-management product with a reusable shared
 > state and coordination core. Its first workflow assigns durable work to an
@@ -211,8 +212,9 @@ case-study ownership and evidence requirements; replace that exclusion with:
 Keep the predeclared scenario/evaluation rubric, non-secret reproducible evidence,
 failures and limitations, and measured operator effort for setup, diagnosis and
 recovery. Feed the three #292 journeys and #283 live evidence into that case study.
-Public promotion is not a gate on shipping the settings contract. This proposal
-does not silently change #194's published scope or mark its evidence complete.
+Public promotion is not a gate on shipping the settings contract. The applied
+positioning amendment does not complete #194's measured evidence requirements;
+the issue remains open until the actual comparison study is published.
 
 ## 6. Development, pinning and repository policy
 
