@@ -657,6 +657,17 @@ export function studyCliEnv(participant, machine) {
   return env;
 }
 
+export const HOOK_CONFIG_TEMPLATE_SHA256 = sha256Text(
+  canonicalJson(
+    buildHookSettings({
+      hookScript: "$SOURCE/scripts/dogfood-study-tila.mjs",
+      runDir: "$RUN",
+      trial: "$TRIAL",
+      role: "$ROLE",
+    }),
+  ),
+);
+
 // ---------------------------------------------------------------------------
 // Ledger derivation
 // ---------------------------------------------------------------------------
@@ -1183,6 +1194,28 @@ export function deriveLedger({
     ])
       if (!/^[0-9a-f]{64}$/.test(frozen[key] ?? ""))
         enforcementReasons.push(`missing frozen ${key}`);
+    const sessions = events
+      .filter((e) => e.kind === "worker.started")
+      .map((e) => e.payload.session_id);
+    const coverage = events.find(
+      (e) =>
+        e.kind === "harness.note" &&
+        e.payload.topic === "runtime_coverage_attested" &&
+        stopped &&
+        e.seq > stopped.seq &&
+        e.payload.source === "native_runtime_records" &&
+        e.payload.complete === true &&
+        e.payload.uncovered_state_changes === 0 &&
+        e.payload.hook_failures === 0 &&
+        /^[0-9a-f]{64}$/.test(e.payload.evidence_sha256 ?? "") &&
+        Array.isArray(e.payload.session_ids) &&
+        sessions.length > 0 &&
+        sessions.every((id) => e.payload.session_ids.includes(id)),
+    );
+    if (!coverage)
+      enforcementReasons.push(
+        "complete runtime coverage was not attested from retained per-session records",
+      );
     const seen = new Set();
     for (const e of events.filter(
       (e) => e.kind === "tool_call" && !e.payload.denied,

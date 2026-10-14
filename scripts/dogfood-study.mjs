@@ -36,6 +36,7 @@ import {
   warmupScenario,
 } from "./dogfood-study-fixtures.mjs";
 import {
+  HOOK_CONFIG_TEMPLATE_SHA256,
   allocateVariants,
   appendEvent,
   auditJournal,
@@ -213,6 +214,10 @@ function cmdDeclare(opts) {
     scenarios: scenarios.filter((s) => s.pair !== "warmup"),
     warmup: scenarios.find((s) => s.pair === "warmup"),
   });
+  if (existsSync(opts.out ?? declPath))
+    fail(
+      "declaration already exists; retain it and declare a new version/path",
+    );
   writeJson(opts.out ?? declPath, declaration);
   console.log(`declaration written: ${declaration.declaration_sha256}`);
 }
@@ -518,6 +523,8 @@ function cmdFreeze(opts) {
   }
   const run = resolve(opts["run-dir"]);
   const { findings, declaration } = manifestFindings(opts);
+  if (declaration.rubric.version < 3)
+    fail("v1/v2 are superseded; freeze only the pretrial v3 declaration");
   if (findings.length)
     fail(`declaration does not verify:\n${JSON.stringify(findings, null, 2)}`);
   if (git(sourceRoot, "status", "--porcelain"))
@@ -530,16 +537,7 @@ function cmdFreeze(opts) {
     fail("preflight drills did not pass");
   const smokePath = opts["hook-smoke"] && resolve(opts["hook-smoke"]);
   const smoke = smokePath ? readJson(smokePath) : null;
-  const configHash = sha256Text(
-    canonicalJson(
-      buildHookSettings({
-        hookScript: "$SOURCE/scripts/dogfood-study-tila.mjs",
-        runDir: "$RUN",
-        trial: "$TRIAL",
-        role: "$ROLE",
-      }),
-    ),
-  );
+  const configHash = HOOK_CONFIG_TEMPLATE_SHA256;
   const codexVersion = execFileSync("codex", ["--version"], {
     encoding: "utf8",
   }).trim();
@@ -550,6 +548,8 @@ function cmdFreeze(opts) {
       smoke.source_sha !== git(sourceRoot, "rev-parse", "HEAD") ||
       smoke.codex_version !== codexVersion ||
       smoke.config_template_sha256 !== configHash ||
+      !smoke.permissions?.sandbox_mode ||
+      !smoke.permissions?.approval_policy ||
       !/^[0-9a-f]{64}$/.test(smoke.binary_sha256 ?? "") ||
       !Array.isArray(smoke.checks) ||
       [
@@ -611,6 +611,7 @@ function cmdFreeze(opts) {
     },
     model_id: opts["model-id"],
     effort: "high",
+    permissions: smoke?.permissions ?? null,
     count_source: opts["count-source"],
     hook_smoke_attested: smoke !== null,
     hook_smoke_sha256: smokePath
@@ -855,6 +856,7 @@ function cmdPrepare(opts) {
         trial: slot.trial,
         condition: slot.condition,
         dir,
+        hook_config_template_sha256: HOOK_CONFIG_TEMPLATE_SHA256,
         packets: packetsDir,
         settings: {
           w1: join(dir, "settings-w1.json"),
