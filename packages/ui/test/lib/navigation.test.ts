@@ -77,7 +77,8 @@ describe("navigation config", () => {
   test("every required capability exists", () => {
     for (const section of NAV_SECTIONS)
       for (const item of section.items)
-        for (const cap of item.requires) expect(CAPABILITIES).toContain(cap);
+        for (const cap of [...item.requires, ...(item.requiresAny ?? [])])
+          expect(CAPABILITIES).toContain(cap);
   });
 
   test("project segments include the entities alias", () => {
@@ -119,6 +120,32 @@ describe("navVisibility", () => {
     expect(visible).toContain("runtime");
     expect(visible).toContain("settings");
     expect(visible).toContain("definitions");
+  });
+
+  test.each(["agents:read", "conversations:read", "signals:read"] as const)(
+    "keeps settings transfer visible with only %s",
+    (capability) => {
+      const policy = identity({ role: "viewer", capabilities: [capability] });
+      expect(ids(navVisibility(policy, "test-project"))).toContain(
+        "settings-transfer",
+      );
+    },
+  );
+
+  test("hides settings transfer when a known policy has no readable settings section", () => {
+    const policy = identity({
+      role: "viewer",
+      capabilities: ["tasks:read", "schema:read"],
+    });
+    expect(ids(navVisibility(policy, "test-project"))).not.toContain(
+      "settings-transfer",
+    );
+    expect(ids(navVisibility(undefined, "test-project"))).toContain(
+      "settings-transfer",
+    );
+    expect(ids(navVisibility(policy, "other-project"))).toContain(
+      "settings-transfer",
+    );
   });
 
   test("a namespace-restricted credential sees only permitted surfaces", () => {
