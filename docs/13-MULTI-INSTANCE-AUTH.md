@@ -207,7 +207,10 @@ work, change the pepper, rotate/reissue affected credentials, and verify before
 resuming. It includes exact API requests, lost-response recovery, runtime/workload
 replacement and rollback limits. Never rewrite stored hashes or restore old
 revocation state. Restoring an old pepper can reactivate unrevoked old credentials
-while rejecting replacements issued under the new pepper.
+while rejecting replacements issued under the new pepper. This includes pending
+runtime invitations: they stay unrevoked while rejected, so the runbook requires
+owner-listed `revoked` or `expired` state for every invitation before a pepper is
+restored or re-applied.
 
 The required local Cloudflare rehearsal is
 `packages/integration-tests/runtime/hash-pepper-cutover.test.ts`. Production
