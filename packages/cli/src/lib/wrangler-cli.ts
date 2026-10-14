@@ -7,11 +7,12 @@ import {
  * Minimum wrangler version that supports:
  * - [assets] not_found_handling = "single-page-application"
  * - run_worker_first as a glob array
+ * - explicit preview_urls exposure configuration
  *
- * run_worker_first array support was introduced in wrangler 3.78.0.
+ * preview_urls configuration is supported by wrangler 3.91.0.
  */
-const MIN_WRANGLER_VERSION = [3, 78, 0] as const;
-const MIN_WRANGLER_VERSION_STR = "3.78.0";
+const MIN_WRANGLER_VERSION = [3, 91, 0] as const;
+const MIN_WRANGLER_VERSION_STR = "3.91.0";
 
 // ---------------------------------------------------------------------------
 // Typed error classes
@@ -38,7 +39,7 @@ export class WranglerNotFoundError extends Error {
 export class WranglerVersionError extends Error {
   constructor(detectedVersion: string) {
     super(
-      `wrangler version ${detectedVersion} is below the minimum required version ${MIN_WRANGLER_VERSION_STR}.\n\nThe minimum version is required for:\n  - [assets] not_found_handling = "single-page-application"\n  - run_worker_first glob array support\n\nUpgrade with:\n  npm i -g wrangler@latest\n  # or\n  pnpm add -g wrangler@latest`,
+      `wrangler version ${detectedVersion} is below the minimum required version ${MIN_WRANGLER_VERSION_STR}.\n\nThe minimum version is required for:\n  - [assets] not_found_handling = "single-page-application"\n  - run_worker_first glob array support\n  - preview_urls exposure configuration\n\nUpgrade with:\n  npm i -g wrangler@latest\n  # or\n  pnpm add -g wrangler@latest`,
     );
     this.name = "WranglerVersionError";
   }
@@ -230,8 +231,8 @@ export function detectWrangler(): Promise<void> {
 
 /**
  * Extract the deployed workers.dev URL from wrangler's stdout.
- * Returns null if no URL is found; the caller then constructs
- * https://<scriptName>.workers.dev from the known Worker script name as a fallback.
+ * Returns null if no URL is found. Deployment uses its independently verified
+ * endpoint instead, since stdout need not contain a workers.dev URL.
  */
 export function parseDeployedUrl(stdout: string): string | null {
   const match = stdout.match(/https:\/\/[^\s]+\.workers\.dev/);

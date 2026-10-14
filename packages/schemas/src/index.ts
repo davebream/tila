@@ -100,7 +100,12 @@ export {
 } from "./d1";
 
 // --- Config schemas ---
-export { DeployTargetSchema, type DeployTarget } from "./deploy-target";
+export {
+  DeployTargetSchema,
+  type DeployTarget,
+  DeploymentSettingsSchema,
+  type DeploymentSettings,
+} from "./deploy-target";
 export {
   TilaProjectConfigSchema,
   type TilaProjectConfig,
