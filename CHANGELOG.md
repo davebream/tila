@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deploy the Worker and bundled UI together before upgrading other clients. There are no new D1 or DO/embedded migrations, secrets or capabilities in this release; project backup format remains compatible at DO/embedded migration level 42. Settings transfer uses existing resource permissions and does not require credential reissue.
 - New connector ledger writes use version 2. Migration from version 1 preserves standalone registrations, pending outcomes and binding/relay IDs; older connector versions reject version 2. Do not downgrade a migrated ledger. Herdr registration and cold opening remain unsupported behind the live acceptance gate; there is no public activation flag (#494).
 - Scripts using local `tila task claim` must handle exclusive-claim contention as failure: exit status 1, empty stdout, and an `already-held` JSON error or actionable text on stderr. Successful acquisition and remote HTTP conflict behavior are unchanged (#493).
-- Disposable Cloudflare live Gate 1 (DO-state survival after restart) and Gate 4 (coordination benchmarks) were skipped for v0.10.0 because the Wrangler token was invalid. The dated v0.8.0 benchmark baseline from 2026-10-13 remains unchanged; it is not v0.10.0 validation.
+- Disposable Cloudflare live Gate 1 (DO-state survival after restart) and Gate 4 (coordination benchmarks) were not run for v0.10.0. The dated v0.8.0 benchmark baseline from 2026-10-13 remains unchanged; it is not v0.10.0 validation.
 
 ### Portable settings transfer (#492)
 
