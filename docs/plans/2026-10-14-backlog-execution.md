@@ -240,7 +240,7 @@ Predeclare repository/task set, participants and runtime versions, same-budget w
 
 The JSON's `hard_edges` mean **required for completion/acceptance**, with provenance (`native`, `contract`, or `safety`). They do not forbid preparing tests or reviewing source early. `preferred_edges` mean conflict/risk serialization only and can be rescheduled by the lead without waiving acceptance. Native closed dependencies are recorded as satisfied evidence, not reintroduced as build tasks. The validator checks both the hard DAG and the combined proposed ordering for cycles.
 
-The practical three-lane schedule is below. Stages 0–1 are historical: #450, #400, #449 and #398 are merged; #439 is merged, and lanes A/B/C implement #440/#448/#416; #362 has handed off PR #463. These are work stages, not time estimates or mandatory barriers: a free lane may take an eligible unowned task once its hard prerequisites and conflict locks permit. If live resources are unavailable, release that coding slot for other work and retain the gate as blocked. A queued PR stops occupying a coding slot only when the lead confirms its implementation/review handoff complete; later corrections reacquire a slot, never create a fourth.
+The practical three-lane schedule is below. Stages 0–1 are historical: #450, #400, #449 and #398 are merged; #439 is merged, and lanes A/B/C implement #440/#448/#399; #362 merged and #416 has handed off queued PR #465. These are work stages, not time estimates or mandatory barriers: a free lane may take an eligible unowned task once its hard prerequisites and conflict locks permit. If live resources are unavailable, release that coding slot for other work and retain the gate as blocked. A queued PR stops occupying a coding slot only when the lead confirms its implementation/review handoff complete; later corrections reacquire a slot, never create a fourth.
 
 | Stage | Lane A | Lane B | Lane C |
 |---|---|---|---|
@@ -289,24 +289,21 @@ Astra performed a read-only architecture review of #440 after the lead caught a 
 
 Machine ledger is authoritative for task state; update it with UTC, worker, worktree, base/head SHA, PR, commands/results, evidence paths, lead findings/corrections, queue state and closure decision. Unknown stays unknown; attach immutable evidence or links rather than replacing it with “done.” Keep snapshot inventory immutable and append execution updates (such as PR #451) separately.
 
-| Item | State at plan handoff |
+| Item | Current recorded state |
 |---|---|
-| Snapshot/reconciliation | 16 open issues, three dependency PRs; full open relations/comments read; relevant closed foundations checked against source |
-| C: build-416-revision-warning | `/home/dawid/code/tila-workers/issue-416` | PR #465 queued after final integrated validation; head `9249ff3f` |
-| C, current: build-399-task-filters | `/home/dawid/code/tila-workers/issue-399` | `feat/399-task-filter-parity`; implementing from reviewed `9249ff3f`; transplant only #399 after parent merge |
-| A: build-439-revisions | `/home/dawid/code/tila-workers/issue-439` | `feat/439-service-revisions`; PR #459 merged as `e9c90458`, GitHub and main ancestry verified |
-| A, current: build-440-ghes-oidc | `/home/dawid/code/tila-workers/issue-440` | `feat/440-ghes-actions-oidc`; Sol XHIGH on reviewed PR #459; transplant only440 commits onto merged main before handoff |
-| Planner | Plan and DAG persisted; validator result and local docs commit reported separately; no application code changed |
-| #450 | Completed externally; PR #451 head `2cb07e2d89e4f759a4b4f495632dab159c089700`, merge `ba26881e5ac36032e33670eb324ed58c63117a58`; lead verified GitHub MERGED and fetched main ancestry; issue CLOSED |
-| #400 / #449 / #398 | Merged and issues closed; GitHub state and main ancestry independently verified in the machine ledger |
-| #439 | PR #459 merged as `e9c90458`; GitHub state and fetched main ancestry verified; issue closed |
+| Snapshot/reconciliation | 16 open issues, three dependency PRs; full relations/comments read; closed foundations checked against source |
+| #450 / #400 / #449 / #398 / #439 / #362 | Merged and issues closed; immutable heads, merge SHAs and independent fetched-main verification in the machine ledger |
+| #416 | Reviewed and validated; PR #465 entered Mergify queue, integration draft #466; head `9249ff3f` |
+| #399 | Sol XHIGH implementing from reviewed #416 head; only issue-specific commits will be transplanted after parent merge |
+| #440 | Sol XHIGH final auth validation after lead/Astra corrections; issue-only transplant and integrated validation before handoff |
+| #448 | Sol XHIGH implementing shared transfer contracts, then CLI/UI/MCP; lead correcting locale-dependent receipt digest and package boundary |
 | #307 | #434 runbook/rehearsal delivered; audit and explicit production gate remain; no production secret touched |
 | #283 / #308 / #194 | Live execution/measurements not passed by this planning work |
-| #314 | Lead validated unchanged head (456 UI tests, build/typecheck/frozen install and SVG probes); merged as `ff7bdf3d`, GitHub and main ancestry verified |
-| #311 | Lead validated unchanged head, including 125 required runtime tests; merged as `bbe0252d`, GitHub and main ancestry verified |
+| #314 / #311 | Reviewed unchanged dependency heads; merged as `ff7bdf3d` / `bbe0252d`; GitHub state and main ancestry independently verified |
 | #312 | Portable auth declaration repair and validation still planned |
 | #261 | Ongoing automation, never scheduled for closure |
-| Release | User requested dedicated worker and comprehensive plan; Astra drafting in `release-plan` worktree. Scope/version election awaits review; publication not authorized |
+| Release | Dedicated worker and comprehensive plan requested; Astra drafting in `release-plan`. Formal preflight blocked on verified operator configuration; scope freeze and publication remain pending |
+
 
 Lead review checklist: validate coverage/order with the script; confirm #398/#362 choices and #448 format/executor contract; inspect #416 warning semantics and #440 issuer propagation; confirm external #450 avoids duplicate staffing; the initial internal tasks are already released. Final review corrections are made locally and the planner does not push. For subsequent approved work, use the per-task contracts and normal Mergify workflow without another routine permission loop.
 
