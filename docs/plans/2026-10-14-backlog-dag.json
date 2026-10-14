@@ -14,11 +14,30 @@
     "external_450_counts": true,
     "optional_release_workers": 1,
     "release_skill": ".agents/skills/tila-release/SKILL.md",
-    "planner": "plan-backlog-astra",
+    "planner": "plan-release-astra",
     "lead": "lead-backlog",
     "herdr_session": "tila",
-    "planner_pane": "w3:p3",
-    "one_issue_per_worktree": true
+    "planner_pane": "w2:p2",
+    "one_issue_per_worktree": true,
+    "current_layout": {
+      "workspace": "w2",
+      "label": "tila",
+      "Brain": {
+        "tab": "w2:t1",
+        "lead-backlog": "w2:p1",
+        "plan-release-astra": "w2:p2"
+      },
+      "Builders": {
+        "tab": "w2:t2",
+        "build-448-settings-transfer": "w2:p3",
+        "build-399-task-filters": "w2:p4",
+        "build-440-ghes-oidc": "w2:p5"
+      },
+      "Release": {
+        "tab": "w2:t3",
+        "reserved_pane": "w2:p6"
+      }
+    }
   },
   "inventory": [
     {
@@ -639,9 +658,9 @@
       "owner": "C",
       "stage": 1,
       "issue": 416,
-      "pr": null,
+      "pr": 465,
       "kind": "builder",
-      "state": "implementing",
+      "state": "queued",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-416",
       "contract": "2026-10-14-backlog-execution.md#416--visible-revisionless-deprecation-i416",
@@ -687,7 +706,7 @@
       "issue": 362,
       "pr": 463,
       "kind": "builder",
-      "state": "in-review",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-362",
       "contract": "2026-10-14-backlog-execution.md#362--cleanup-without-broadening-worker-authority-i362",
@@ -696,7 +715,20 @@
         "packages/schemas/src/capability.ts"
       ],
       "validation": ["docs", "runtime-if-executable-change"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 463,
+          "head_sha": "13bc1f087c1d722f3569ad2edf3a0e9c7221403c",
+          "merge_sha": "626fd8275127c7287d1b3418315844a4e8f4e44d",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/463",
+          "issue_state": "CLOSED"
+        }
+      ],
       "task_name": "build-362-cleanup-guide",
       "branch": "docs/362-worker-cleanup",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -709,7 +741,7 @@
       "issue": 399,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-399",
       "contract": "2026-10-14-backlog-execution.md#399--task-filter-parity-and-truthful-pagination-i399",
@@ -856,13 +888,25 @@
       "issue": null,
       "pr": 314,
       "kind": "builder",
-      "state": "queued",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/pr-314",
       "contract": "2026-10-14-backlog-execution.md#dependency-prs-and-261-pr311-pr312-pr314-i261",
       "source_targets": ["pnpm-lock.yaml"],
       "validation": ["ui", "frozen-install", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 314,
+          "head_sha": "b882186e1157090ffb89aafc675bfee2aa019e23",
+          "merge_sha": "ff7bdf3de31f472dafec9606244c426e5166c2e2",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/314"
+        }
+      ],
       "branch": "renovate/ui-dependencies",
       "task_name": "build-314-ui-deps",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -916,7 +960,7 @@
       "issue": null,
       "pr": 311,
       "kind": "builder",
-      "state": "in-review",
+      "state": "merged",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/pr-311",
       "contract": "2026-10-14-backlog-execution.md#dependency-prs-and-261-pr311-pr312-pr314-i261",
@@ -925,7 +969,19 @@
         "pnpm-lock.yaml"
       ],
       "validation": ["frozen-install", "runtime", "worker", "full"],
-      "completion_evidence": [],
+      "completion_evidence": [
+        {
+          "kind": "merge",
+          "pr": 311,
+          "head_sha": "38f98dbcdefd53dc432fb2a07af41e884b2ad2d5",
+          "merge_sha": "bbe0252d619626001db08139c1b95e0a5b4af465",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/311"
+        }
+      ],
       "branch": "renovate/cloudflare-tooling",
       "task_name": "build-311-cf-deps",
       "model_policy": "GPT-6.1-Sol XHIGH default; approved Sonnet XHIGH substitution only within same slot"
@@ -2291,6 +2347,11 @@
       "main_ancestry_verified": true,
       "verified_by": "lead-backlog",
       "source": "https://github.com/davebream/tila/pull/452"
+    },
+    {
+      "kind": "layout-and-release-plan",
+      "source": "User request and lead Herdr moves 2026-10-14",
+      "detail": "Single tila workspace: Brain, Builders, Release tabs. Existing sessions moved without restart. Astra writes dedicated release plan; scope/version election awaits plan review; publication not authorized."
     }
   ],
   "progress_ledger": [
@@ -2509,12 +2570,19 @@
     },
     {
       "node": "i416",
-      "state": "implementing",
+      "state": "queued",
       "worker": "build-416-revision-warning",
       "base_sha": "e9c904580eabf91abd917dbc066386ead7d8e479",
-      "head_sha": "6fbbf810e456f27c6b8cfc30cc5308ae13c5fb5d",
-      "pr": null,
-      "tests": [],
+      "head_sha": "9249ff3fce282f99344ca5e0987971ad45b4d72b",
+      "pr": 465,
+      "tests": [
+        {
+          "phase": "final",
+          "result": "passed",
+          "command": "Full build/typecheck;27 package tasks;109 clean-env root scripts;129 runtime;lint/version;strict packed ESM/CJS consumers",
+          "source": "https://github.com/davebream/tila/pull/465"
+        }
+      ],
       "evidence": [
         {
           "kind": "dispatch",
@@ -2535,10 +2603,15 @@
           "source": "Astra review through083acaef and builder clean transplant handoff 2026-10-14",
           "finding": "Async diagnostic rejection and fallback console failure could affect committed apply",
           "resolution": "Contained sync/async custom/default sink failures; focused regressions pass; eight issue-only commits cleanly transplanted onto merged main, range-diff unchanged; integrated validation pending"
+        },
+        {
+          "kind": "queue",
+          "source": "GitHub check-runs for9249ff3f, Mergify Merge Queue 2026-10-14T13:06Z",
+          "detail": "Entered queue; integration draft466; nine issue-only commits rebased and validated; no auto-merge"
         }
       ],
-      "lead_review": "dispatch-approved",
-      "queue_state": "unverified",
+      "lead_review": "approved",
+      "queue_state": "entered-queue-checks-running-draft-466",
       "closure": "not-closed"
     },
     {
@@ -2584,7 +2657,7 @@
     },
     {
       "node": "i362",
-      "state": "in-review",
+      "state": "merged",
       "worker": "build-362-cleanup-guide",
       "base_sha": "8397f3da26a01afeb692a73a9d510e3991653866",
       "head_sha": "13bc1f087c1d722f3569ad2edf3a0e9c7221403c",
@@ -2611,22 +2684,44 @@
           "result": "approved",
           "source": "https://github.com/davebream/tila/pull/463",
           "scope": "Docs alternative; no worker preset expansion; corrected claim/history race, retention/principal validation, duplicate receipt set checks and410 versus byte deletion"
+        },
+        {
+          "kind": "merge",
+          "pr": 463,
+          "head_sha": "13bc1f087c1d722f3569ad2edf3a0e9c7221403c",
+          "merge_sha": "626fd8275127c7287d1b3418315844a4e8f4e44d",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/463",
+          "issue_state": "CLOSED"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "awaiting-ci-and-scopes",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "issue-362-closed",
+      "merge_sha": "626fd8275127c7287d1b3418315844a4e8f4e44d"
     },
     {
       "node": "i399",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-399-task-filters",
-      "base_sha": null,
+      "base_sha": "9249ff3fce282f99344ca5e0987971ad45b4d72b",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
-      "lead_review": "pending",
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr orchestration 2026-10-14",
+          "pane": "tila/w2:p4",
+          "model": "GPT-6.1-Sol xhigh",
+          "push_hold": true,
+          "base_note": "Reviewed416 head; transplant only399 commits after parent merge before PR"
+        }
+      ],
+      "lead_review": "dispatch-approved",
       "queue_state": "unverified",
       "closure": "not-closed"
     },
@@ -2719,7 +2814,7 @@
     },
     {
       "node": "pr314",
-      "state": "queued",
+      "state": "merged",
       "worker": "lead-backlog",
       "base_sha": null,
       "head_sha": "b882186e1157090ffb89aafc675bfee2aa019e23",
@@ -2740,11 +2835,23 @@
           "result": "approved",
           "scope": "Unchanged Renovate head in isolated detached pr-314 worktree; lock-only lucide1.55 and libc metadata; no source edits",
           "schedule": "Lead performed read-only review/validation while three builders ran; preferred lane order rescheduled, no fourth coding worker or concurrent lock writer"
+        },
+        {
+          "kind": "merge",
+          "pr": 314,
+          "head_sha": "b882186e1157090ffb89aafc675bfee2aa019e23",
+          "merge_sha": "ff7bdf3de31f472dafec9606244c426e5166c2e2",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/314"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "entered-queue-waiting-batch",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "pr-314-merged",
+      "merge_sha": "ff7bdf3de31f472dafec9606244c426e5166c2e2"
     },
     {
       "node": "i283-adapter",
@@ -2774,7 +2881,7 @@
     },
     {
       "node": "pr311",
-      "state": "in-review",
+      "state": "merged",
       "worker": "lead-backlog",
       "base_sha": null,
       "head_sha": "38f98dbcdefd53dc432fb2a07af41e884b2ad2d5",
@@ -2795,11 +2902,23 @@
           "source": "https://github.com/davebream/tila/pull/311",
           "scope": "Unchanged Renovate head, detached pr-311 worktree. Installed plugin1.4 supports retained Vitest4.1.11; Wrangler4.149 dry-run. No product source or lock edits.",
           "schedule": "Lead read-only validation after314 handoff; Mergify owns integration order, no competing lock writer or fourth coding worker"
+        },
+        {
+          "kind": "merge",
+          "pr": 311,
+          "head_sha": "38f98dbcdefd53dc432fb2a07af41e884b2ad2d5",
+          "merge_sha": "bbe0252d619626001db08139c1b95e0a5b4af465",
+          "github_state": "MERGED",
+          "main_ref": "origin/main",
+          "main_ancestry_verified": true,
+          "verified_by": "lead-backlog",
+          "source": "https://github.com/davebream/tila/pull/311"
         }
       ],
       "lead_review": "approved",
-      "queue_state": "merge-ready-awaiting-mergify-refresh",
-      "closure": "not-closed"
+      "queue_state": "merged-verified",
+      "closure": "pr-merged",
+      "merge_sha": "bbe0252d619626001db08139c1b95e0a5b4af465"
     },
     {
       "node": "i283-live",
@@ -3002,7 +3121,11 @@
     "selected_nodes": [],
     "requires_current_skill": true,
     "production_activation_authorized": false,
-    "rule": "On election, persist selected merged SHAs and add scope-specific hard edges before rehearsal; release can precede live product closure with truthful limitations."
+    "rule": "On election, persist selected merged SHAs and add scope-specific hard edges before rehearsal; release can precede live product closure with truthful limitations.",
+    "planning_requested": true,
+    "planning_source": "User: please plan a releas worker too; dedicated fourth worker authorized",
+    "plan_worktree": "/home/dawid/code/tila-workers/release-plan",
+    "publication_authorized": false
   },
   "validation_profiles": {
     "full": [
@@ -3096,7 +3219,7 @@
       "source"
     ],
     "release_election_allowed_with_evidence": true,
-    "current_active_builders": ["i448-plan", "i416", "i440"],
+    "current_active_builders": ["i448-plan", "i399", "i440"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient"
   }
 }
