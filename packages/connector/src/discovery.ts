@@ -69,7 +69,16 @@ export function sessionIdentity(
       .update(JSON.stringify(session.state.runtime))
       .digest("hex"),
     nativeEndpointRef: createHash("sha256")
-      .update(JSON.stringify(session.state.nativeMessaging ?? null))
+      .update(
+        JSON.stringify(
+          session.state.nativeMessaging
+            ? {
+                socket: session.state.nativeMessaging.socket,
+                token: session.state.nativeMessaging.token,
+              }
+            : null,
+        ),
+      )
       .digest("hex"),
     principalId: session.context.principal_id,
   };
