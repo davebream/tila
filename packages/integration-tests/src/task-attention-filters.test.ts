@@ -12,6 +12,7 @@ import {
   RemoteBackend,
   type TaskListOptions,
   TilaClient,
+  createNamespace,
   createTaskMethods,
 } from "tila-sdk";
 import {
@@ -640,6 +641,87 @@ describe("SDK task filter and page parity over HTTP, Node and Bun", () => {
       offset: 0,
       total: 300,
     });
+  });
+
+  it("pages namespaced mixed-type outcomes with each type prefixed and scope stripped", async () => {
+    const namespacedDefinition = SCHEMA.replace("schema_version = 1", "")
+      .replaceAll("work_units.bug", "work_units.tools_bug")
+      .replaceAll("work_units.story", "work_units.tools_story");
+    await local.project.applySchema({
+      definition: `${SCHEMA}\n${namespacedDefinition}\n[work_units.tools_story.lifecycle.outcomes]\nfailure = "done"\n`,
+      expected_revision: 1,
+    });
+    for (const [id, type, status] of [
+      ["namespaced-a", "tools_bug", "failed"],
+      ["namespaced-b", "tools_story", "done"],
+      ["namespaced-c", "tools_bug", "dropped"],
+      ["namespaced-d", "tools_story", "done"],
+      ["namespaced-e", "tools_bug", "failed"],
+    ])
+      await local.project.create({
+        id,
+        type,
+        data: { status },
+        created_by: "test",
+      });
+    const tasks = createNamespace(sdkClient(), "p1", "tools").tasks;
+    const query = {
+      type: "bug,story",
+      outcome: ["failure", "abandoned"] as const,
+      sort: "id" as const,
+      limit: "2",
+    };
+    const first = await tasks.list({ ...query, outcome: [...query.outcome] });
+    expect(first).toMatchObject({
+      total: 5,
+      has_more: true,
+      scope: { outcome_types: ["bug", "story"] },
+    });
+    expect(first.entities.map((e) => [e.id, e.type])).toEqual([
+      ["namespaced-a", "bug"],
+      ["namespaced-b", "story"],
+    ]);
+    const cursor = first.next_cursor ?? undefined;
+    const second = await tasks.list({
+      ...query,
+      outcome: ["abandoned", "failure"],
+      cursor,
+    });
+    expect(second).toMatchObject({
+      total: 5,
+      has_more: true,
+      scope: { outcome_types: ["bug", "story"] },
+    });
+    const last = await tasks.list({
+      ...query,
+      outcome: [...query.outcome],
+      cursor: second.next_cursor ?? undefined,
+    });
+    expect(last).toMatchObject({
+      total: 5,
+      has_more: false,
+      next_cursor: null,
+      scope: { outcome_types: ["bug", "story"] },
+    });
+    expect(
+      [...first.entities, ...second.entities, ...last.entities].map(
+        (e) => e.id,
+      ),
+    ).toEqual([
+      "namespaced-a",
+      "namespaced-b",
+      "namespaced-c",
+      "namespaced-d",
+      "namespaced-e",
+    ]);
+    await expect(
+      tasks.list({
+        ...query,
+        type: "bug",
+        outcome: [...query.outcome],
+        cursor,
+      }),
+    ).rejects.toMatchObject({ code: "invalid-cursor" });
   });
 
   it("retains HTTP scope restrictions in SDK envelopes and remote backend pages", async () => {
