@@ -1,0 +1,416 @@
+{
+  "numTotalTestSuites": 5,
+  "numPassedTestSuites": 5,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 34,
+  "numPassedTests": 34,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1791996759477,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "links a hotfix to an accepted result over HTTP and the DO refuses to rewrite that result",
+          "status": "passed",
+          "title": "links a hotfix to an accepted result over HTTP and the DO refuses to rewrite that result",
+          "duration": 683,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996770976,
+      "endTime": 1791996771659,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/attempt-corrections.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "uses custom lifecycle success and cycle rules through real DO requests and cold starts",
+          "status": "passed",
+          "title": "uses custom lifecycle success and cycle rules through real DO requests and cold starts",
+          "duration": 417,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996770693,
+      "endTime": 1791996771110,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/readiness.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "suspension retains WIP, resume checks policy and creates fresh authority",
+          "status": "passed",
+          "title": "suspension retains WIP, resume checks policy and creates fresh authority",
+          "duration": 347,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "resume respects current capabilities, gates and occupied capacity",
+          "status": "passed",
+          "title": "resume respects current capabilities, gates and occupied capacity",
+          "duration": 293,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "durable cancellation retains capacity and terminal result wins once",
+          "status": "passed",
+          "title": "durable cancellation retains capacity and terminal result wins once",
+          "duration": 312,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "suspended cancellation can finish without an execution heartbeat",
+          "status": "passed",
+          "title": "suspended cancellation can finish without an execution heartbeat",
+          "duration": 267,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "unknown execution cannot retry and reconnect must match recorded session",
+          "status": "passed",
+          "title": "unknown execution cannot retry and reconnect must match recorded session",
+          "duration": 329,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "ownership rebind requires maintainer and invalidates previous participant",
+          "status": "passed",
+          "title": "ownership rebind requires maintainer and invalidates previous participant",
+          "duration": 241,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "automatic retry retains WIP, uses backoff and stops at three attempts",
+          "status": "passed",
+          "title": "automatic retry retains WIP, uses backoff and stops at three attempts",
+          "duration": 250,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "retry defaults off, explicit retry links same-millisecond history and keeps WIP after preaccept expiry",
+          "status": "passed",
+          "title": "retry defaults off, explicit retry links same-millisecond history and keeps WIP after preaccept expiry",
+          "duration": 222,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "force recovery records unresolved execution and rejects previous authority",
+          "status": "passed",
+          "title": "force recovery records unresolved execution and rejects previous authority",
+          "duration": 236,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "stopped reconciliation and automatic retry roll back together on schema conflict",
+          "status": "passed",
+          "title": "stopped reconciliation and automatic retry roll back together on schema conflict",
+          "duration": 257,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "an earlier resume receipt never authorizes a later resume",
+          "status": "passed",
+          "title": "an earlier resume receipt never authorizes a later resume",
+          "duration": 266,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "cancellation before acceptance never authorizes spawning",
+          "status": "passed",
+          "title": "cancellation before acceptance never authorizes spawning",
+          "duration": 212,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "confirmed stopped reconciliation schedules safe retry but unknown never does",
+          "status": "passed",
+          "title": "confirmed stopped reconciliation schedules safe retry but unknown never does",
+          "duration": 206,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "configured abandonment mapping permits replacement while preserving unresolved history",
+          "status": "passed",
+          "title": "configured abandonment mapping permits replacement while preserving unresolved history",
+          "duration": 225,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "control requests come from the owner, the assigner or a maintainer",
+          "status": "passed",
+          "title": "control requests come from the owner, the assigner or a maintainer",
+          "duration": 199,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "enrollments without a recorded assigner allow only owner or maintainer control",
+          "status": "passed",
+          "title": "enrollments without a recorded assigner allow only owner or maintainer control",
+          "duration": 228,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "explicit retry and receipt replay require current control",
+          "status": "passed",
+          "title": "explicit retry and receipt replay require current control",
+          "duration": 194,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "finishing suspended work requires the latest recorded fence",
+          "status": "passed",
+          "title": "finishing suspended work requires the latest recorded fence",
+          "duration": 215,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "stopped reconciliation never records a result for an unaccepted reservation",
+          "status": "passed",
+          "title": "stopped reconciliation never records a result for an unaccepted reservation",
+          "duration": 178,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "maintainer recovery records the maintainer and the owner in the journal",
+          "status": "passed",
+          "title": "maintainer recovery records the maintainer and the owner in the journal",
+          "duration": 202,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "a replacement native session keeps the attempt and retires the old session's authority",
+          "status": "passed",
+          "title": "a replacement native session keeps the attempt and retires the old session's authority",
+          "duration": 258,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "session replacement requires the owner, the recorded session and no pending cancellation",
+          "status": "passed",
+          "title": "session replacement requires the owner, the recorded session and no pending cancellation",
+          "duration": 237,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "a native restart after lease expiry reattaches without completing the attempt",
+          "status": "passed",
+          "title": "a native restart after lease expiry reattaches without completing the attempt",
+          "duration": 220,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "attempts record the definition and policy revisions in force at each transition",
+          "status": "passed",
+          "title": "attempts record the definition and policy revisions in force at each transition",
+          "duration": 225,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "a definition change that rejects a result names both versions and changes nothing",
+          "status": "passed",
+          "title": "a definition change that rejects a result names both versions and changes nothing",
+          "duration": 195,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "owner filters find one wrapper's unfinished work and keep every attempt's history",
+          "status": "passed",
+          "title": "owner filters find one wrapper's unfinished work and keep every attempt's history",
+          "duration": 246,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996770708,
+      "endTime": 1791996776971,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/recovery.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "links agents to runs, hosts and sessions and keeps replaced occupants distinct",
+          "status": "passed",
+          "title": "links agents to runs, hosts and sessions and keeps replaced occupants distinct",
+          "duration": 925,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "uses D1 run authority over the DO lease snapshot",
+          "status": "passed",
+          "title": "uses D1 run authority over the DO lease snapshot",
+          "duration": 618,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "redacts binding, run, host and session evidence for a viewer",
+          "status": "passed",
+          "title": "redacts binding, run, host and session evidence for a viewer",
+          "duration": 489,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "bounds pages, rejects bad cursors and keeps internal routes private",
+          "status": "passed",
+          "title": "bounds pages, rejects bad cursors and keeps internal routes private",
+          "duration": 367,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "looks up runs and enrollments in parameter-bounded chunks",
+          "status": "passed",
+          "title": "looks up runs and enrollments in parameter-bounded chunks",
+          "duration": 146,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996770673,
+      "endTime": 1791996773218,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/runtime-view.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "retains exact task filter pages, cursor bindings and scope after a DO restart",
+          "status": "passed",
+          "title": "retains exact task filter pages, cursor bindings and scope after a DO restart",
+          "duration": 457,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1791996770692,
+      "endTime": 1791996771149,
+      "status": "passed",
+      "message": "",
+      "name": "<checkout>/packages/integration-tests/runtime/task-filter-pages.test.ts"
+    }
+  ]
+}

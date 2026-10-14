@@ -1,0 +1,5 @@
+Retained diagnostic excerpt from failed local pre-commit check:
+Biome CLI 2.5.15 does not match repository schema 1.9.0.
+Configuration errors: unknown keys ignore, organizeImports, include, noRestrictedImports.
+The biome hook exited 1; gitleaks passed. Commit was not created.
+Resolution: install locked workspace dependencies; rerun repository Biome 1.9.4.
