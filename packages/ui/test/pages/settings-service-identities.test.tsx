@@ -10,6 +10,7 @@ const route = "/p/test-project/settings/service-identities";
 const CI = serviceAccounts[0];
 
 const binding = {
+  revision: 1,
   binding_id: "b-1",
   principal_id: CI.principal_id,
   project_id: "test-project",
@@ -50,11 +51,17 @@ function servicesApi(
   server.use(
     http.get("*/projects/test-project/service-accounts", () => {
       lists++;
-      return HttpResponse.json({ ok: true, service_accounts: serviceAccounts });
+      const answer = answers.list?.[lists - 1];
+      return answer
+        ? answer()
+        : HttpResponse.json({ ok: true, service_accounts: serviceAccounts });
     }),
     http.get(
       "*/projects/test-project/service-accounts/:id/workload-bindings",
-      () => HttpResponse.json({ ok: true, bindings: [binding] }),
+      ({ request }) =>
+        respond("bindings", request, () =>
+          HttpResponse.json({ ok: true, bindings: [binding] }),
+        ),
     ),
     http.post("*/projects/test-project/service-accounts", ({ request }) =>
       respond("create", request, () =>
@@ -260,6 +267,7 @@ test("a binding policy is replaced from a preset", async () => {
       method: "PATCH",
       path: `/projects/test-project/service-accounts/${encodeURIComponent(CI.principal_id)}/workload-bindings/b-1`,
       body: {
+        expected_revision: 1,
         policy: {
           role: "participant",
           capabilities: CREDENTIAL_PRESETS.worker.capabilities,
@@ -336,4 +344,180 @@ test("step-up on rename closes the drawer and shows the banner", async () => {
   await waitFor(() =>
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
   );
+});
+
+test("a rename conflict keeps the opened revision and draft until explicit rebase", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ service_accounts_manage: true }));
+  const api = servicesApi({
+    list: [
+      null,
+      () =>
+        HttpResponse.json({
+          ok: true,
+          service_accounts: [
+            { ...CI, display_name: "Other owner", revision: 2 },
+          ],
+        }),
+    ],
+    rename: [
+      () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "revision-conflict",
+              message: "Reload",
+              revision: 2,
+              resource: "service-account",
+            },
+          },
+          { status: 412 },
+        ),
+    ],
+  });
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: "Rename ci-bot" }),
+  );
+  const drawer = screen.getByRole("dialog", { name: "Rename ci-bot" });
+  const field = within(drawer).getByRole("textbox", { name: /Display name/ });
+  await user.clear(field);
+  await user.type(field, "My name");
+  await user.click(within(drawer).getByRole("button", { name: "Save name" }));
+  expect(
+    await within(drawer).findByText(
+      /Nothing was saved and your edits are kept/,
+    ),
+  ).toBeInTheDocument();
+  expect(field).toHaveValue("My name");
+  expect(writes(api.sent)).toHaveLength(1);
+  expect(writes(api.sent)[0].body).toEqual({
+    display_name: "My name",
+    expected_revision: 1,
+  });
+  expect(
+    within(drawer).getByRole("button", { name: "Save name" }),
+  ).toBeDisabled();
+  await user.click(
+    await within(drawer).findByRole("button", {
+      name: "Keep my edits on revision 2",
+    }),
+  );
+  expect(field).toHaveValue("My name");
+  await user.click(within(drawer).getByRole("button", { name: "Save name" }));
+  await screen.findByText(/Renamed ci-bot/);
+  expect(writes(api.sent)[1].body).toEqual({
+    display_name: "My name",
+    expected_revision: 2,
+  });
+});
+
+test("binding conflict keeps policy edits and Load latest explicitly replaces them", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ workload_bindings_manage: true }));
+  const api = servicesApi({
+    bindings: [
+      null,
+      () =>
+        HttpResponse.json({
+          ok: true,
+          bindings: [
+            {
+              ...binding,
+              revision: 2,
+              policy: CREDENTIAL_PRESETS["artifact-writer"],
+            },
+          ],
+        }),
+    ],
+    policy: [
+      () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "revision-conflict",
+              message: "Reload",
+              revision: 2,
+              resource: "workload-binding",
+            },
+          },
+          { status: 412 },
+        ),
+    ],
+  });
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: "Workload bindings of ci-bot" }),
+  );
+  const drawer = screen.getByRole("dialog", { name: /Workload bindings/ });
+  await user.click(
+    await within(drawer).findByRole("button", {
+      name: "Edit policy of deploy",
+    }),
+  );
+  const form = within(drawer).getByRole("form", { name: "Policy of deploy" });
+  const preset = within(form).getByRole("combobox", { name: /Preset/ });
+  await user.selectOptions(preset, "worker");
+  await user.click(within(form).getByRole("button", { name: "Save policy" }));
+  expect(
+    await within(form).findByText(/Nothing was saved and your edits are kept/),
+  ).toBeInTheDocument();
+  expect(preset).toHaveValue("worker");
+  expect(writes(api.sent)).toHaveLength(1);
+  expect(writes(api.sent)[0].body).toMatchObject({ expected_revision: 1 });
+  expect(
+    within(form).getByRole("button", { name: "Save policy" }),
+  ).toBeDisabled();
+  await user.click(
+    await within(form).findByRole("button", { name: "Load latest" }),
+  );
+  expect(preset).toHaveValue("artifact-writer");
+  expect(writes(api.sent)).toHaveLength(1);
+});
+
+test("a conflict whose refresh fails retains the draft and cannot rebase from the error alone", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ service_accounts_manage: true }));
+  const api = servicesApi({
+    list: [
+      null,
+      () =>
+        HttpResponse.json(
+          { error: { code: "unavailable", message: "Offline" } },
+          { status: 503 },
+        ),
+    ],
+    rename: [
+      () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "revision-conflict",
+              message: "Reload",
+              revision: 2,
+            },
+          },
+          { status: 412 },
+        ),
+    ],
+  });
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: "Rename ci-bot" }),
+  );
+  const drawer = screen.getByRole("dialog", { name: "Rename ci-bot" });
+  const field = within(drawer).getByRole("textbox", { name: /Display name/ });
+  await user.clear(field);
+  await user.type(field, "Draft");
+  await user.click(within(drawer).getByRole("button", { name: "Save name" }));
+  await within(drawer).findByText(/Nothing was saved and your edits are kept/);
+  await waitFor(() => expect(api.lists()).toBeGreaterThan(1));
+  expect(field).toHaveValue("Draft");
+  expect(
+    within(drawer).queryByRole("button", { name: /Keep my edits/ }),
+  ).toBeNull();
+  expect(
+    within(drawer).getByRole("button", { name: "Save name" }),
+  ).toBeDisabled();
+  expect(writes(api.sent)).toHaveLength(1);
 });

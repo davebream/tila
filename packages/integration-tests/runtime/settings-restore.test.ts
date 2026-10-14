@@ -1,4 +1,5 @@
 import { SELF } from "cloudflare:test";
+import { CREDENTIAL_PRESETS } from "@tila/schemas";
 import { expect, it } from "vitest";
 import { D1TokenStore, RepoAllowlistStore } from "../../worker/src/d1";
 import { hashToken } from "../../worker/src/lib/hash-token";
@@ -57,6 +58,29 @@ it.each(["import", "rollback"] as const)(
     }
     const backup = (path: string, method = "GET", body?: unknown) =>
       call(`${backupRoot}${path}`, method, body, backupToken);
+
+    const { service_account: account } = await ok<{
+      service_account: { principal_id: string; revision: number };
+    }>(
+      await call(`${root}/service-accounts`, "POST", {
+        name: "ci",
+        display_name: "Backup CI",
+        role: "participant",
+      }),
+    );
+    const servicePath = `${root}/service-accounts/${encodeURIComponent(account.principal_id)}`;
+    const { binding } = await ok<{
+      binding: { binding_id: string; revision: number };
+    }>(
+      await call(`${servicePath}/workload-bindings`, "POST", {
+        name: "ci",
+        provider: "oidc",
+        issuer: "https://issuer.example",
+        subject: "ci",
+        policy: CREDENTIAL_PRESETS["read-only"],
+      }),
+    );
+    const bindingPath = `${servicePath}/workload-bindings/${binding.binding_id}`;
 
     await ok(
       await backup("/transfer/begin", "POST", {
@@ -132,8 +156,51 @@ it.each(["import", "rollback"] as const)(
       }),
     );
     await ok(
+      await call(servicePath, "PATCH", {
+        display_name: "Before restore",
+        expected_revision: account.revision,
+      }),
+    );
+    await ok(
+      await call(bindingPath, "PATCH", {
+        policy: CREDENTIAL_PRESETS.worker,
+        expected_revision: binding.revision,
+      }),
+    );
+    // Retained destination history dominates older archives, while a newer
+    // snapshot revision dominates the destination. Neither can become current.
+    await bindings.DB.prepare(
+      "UPDATE _service_accounts SET revision = 25 WHERE principal_id = ?",
+    )
+      .bind(account.principal_id)
+      .run();
+    expect(exported.sections._service_accounts[0].revision).toBe(1);
+    expect(exported.sections._workload_bindings[0].revision).toBe(1);
+    if (mode === "import")
+      exported.sections._workload_bindings[0].revision = 100;
+    else {
+      exported.sections._service_accounts[0].revision = undefined;
+      exported.sections._workload_bindings[0].revision = undefined;
+    }
+
+    await ok(
       await backup("/transfer/begin", "POST", { sessionId: "restore", mode }),
     );
+    const invalidRevision = await backup("/d1/restore", "POST", {
+      sessionId: "restore",
+      sections: {
+        ...exported.sections,
+        _service_accounts: [
+          { ...exported.sections._service_accounts[0], revision: 0 },
+        ],
+      },
+      createBootstrapToken: true,
+    });
+    expect(invalidRevision.status).toBe(400);
+    await invalidRevision.arrayBuffer();
+    // Validation precedes credential revocation; the same owner can still
+    // inspect and complete the reviewed transfer.
+    await ok(await backup("/transfer/status"));
     const restored = await ok<{ bootstrapToken: string }>(
       await backup("/d1/restore", "POST", {
         sessionId: "restore",
@@ -167,7 +234,37 @@ it.each(["import", "rollback"] as const)(
     expect(restoredAccess.policy.max_permission).toBe("write");
     expect(restoredOidc.policy.enabled).toBe(false);
 
+    const restoredServices = await ok<{
+      service_accounts: Array<{ revision: number; display_name: string }>;
+    }>(await call(`${root}/service-accounts`));
+    const restoredBindings = await ok<{
+      bindings: Array<{ revision: number; policy: unknown }>;
+    }>(await call(`${servicePath}/workload-bindings`));
+    expect(restoredServices.service_accounts[0].display_name).toBe("Backup CI");
+    expect(restoredBindings.bindings[0].policy).toEqual(
+      CREDENTIAL_PRESETS["read-only"],
+    );
+    const restoredRevision = mode === "import" ? 101 : 26;
+    expect(restoredServices.service_accounts[0].revision).toBe(
+      restoredRevision,
+    );
+    expect(restoredBindings.bindings[0].revision).toBe(restoredRevision);
+
     const edits = [
+      {
+        path: servicePath,
+        method: "PATCH",
+        body: { display_name: "Editor CI" },
+        stale: [1, 2, 25],
+        current: restoredRevision,
+      },
+      {
+        path: bindingPath,
+        method: "PATCH",
+        body: { policy: CREDENTIAL_PRESETS.worker },
+        stale: [1, 2, ...(mode === "import" ? [100] : [])],
+        current: restoredRevision,
+      },
       {
         path: `${root}/project-settings`,
         method: "PATCH",

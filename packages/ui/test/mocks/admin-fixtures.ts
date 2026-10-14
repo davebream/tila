@@ -74,6 +74,7 @@ export const serviceAccounts = [
     display_name: "CI bot",
     created_at: Math.floor(NOW / 1000) - 86_400,
     created_by: OWNER_ID,
+    revision: 1,
     revoked_at: null,
   },
   {
@@ -83,6 +84,7 @@ export const serviceAccounts = [
     display_name: "Nightly reporter",
     created_at: Math.floor(NOW / 1000) - 86_400,
     created_by: OWNER_ID,
+    revision: 1,
     revoked_at: null,
   },
 ];
