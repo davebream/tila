@@ -41,7 +41,7 @@
     "proper-lockfile": "^4.1.2",
     "smol-toml": "^1.8.0",
     "tila-sdk": "workspace:*",
-    "ws-node": "npm:ws@8.21.1",
+    "ws-node": "npm:ws@8.22.0",
     "zod": "^4.6.6"
   },
   "devDependencies": {

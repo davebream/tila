@@ -1,7 +1,8 @@
-import { betterAuth } from "better-auth";
+import { type Auth, type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import {
   APIError,
+  type AuthEndpoint,
   createAuthEndpoint,
   createAuthMiddleware,
   getSessionFromCtx,
@@ -25,12 +26,55 @@ export interface HumanAuthOptions {
   github?: { clientId: string; clientSecret: string };
 }
 
+const handoffBody = z.object({ token: z.string().length(64) });
+const userFields = {
+  role: { type: "string", defaultValue: "user", input: false },
+  disabled: { type: "boolean", defaultValue: false, input: false },
+} as const;
+const sessionFields = {
+  authenticatedAt: { type: "number", required: false, input: false },
+  device: { type: "boolean", defaultValue: false, input: false },
+  deviceName: { type: "string", required: false, input: false },
+  parentSessionId: { type: "string", required: false, input: false },
+  projectId: { type: "string", defaultValue: "", input: false },
+} as const;
+
+interface HandoffPlugin {
+  id: "tila-handoff";
+  endpoints: {
+    consumeHandoff: AuthEndpoint<
+      "/handoff/consume",
+      { method: "POST"; body: typeof handoffBody },
+      Response | { ok: boolean }
+    >;
+  };
+}
+
+// Name the public options boundary so declaration emit never has to expand
+// plugin endpoints through Better Auth's private better-call installation.
+export interface HumanAuthConfiguration extends BetterAuthOptions {
+  user: { additionalFields: typeof userFields };
+  session: {
+    expiresIn: number;
+    disableSessionRefresh: true;
+    cookieCache: { enabled: false };
+    additionalFields: typeof sessionFields;
+  };
+  plugins: [
+    ReturnType<typeof bearer>,
+    HandoffPlugin,
+    ReturnType<typeof deviceAuthorization<DeviceAuthorizationGrant>>,
+  ];
+}
+
+export type HumanAuth = Auth<HumanAuthConfiguration>;
+
 // Construct per request: the device grant's authentication event is request-local.
-export function createHumanAuth(options: HumanAuthOptions) {
+export function createHumanAuth(options: HumanAuthOptions): HumanAuth {
   const db = drizzle(options.db);
   let approvedAt: number | null = null;
   let deviceName: string | null = null;
-  return betterAuth({
+  return betterAuth<HumanAuthConfiguration>({
     appName: "tila",
     secret: options.secret,
     baseURL: options.baseURL,
@@ -55,23 +99,14 @@ export function createHumanAuth(options: HumanAuthOptions) {
       ? { github: { ...options.github, disableSignUp: true } }
       : {},
     user: {
-      additionalFields: {
-        role: { type: "string", defaultValue: "user", input: false },
-        disabled: { type: "boolean", defaultValue: false, input: false },
-      },
+      additionalFields: userFields,
     },
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       // No rolling renewal: a copied login must not outlive its parent device.
       disableSessionRefresh: true,
       cookieCache: { enabled: false },
-      additionalFields: {
-        authenticatedAt: { type: "number", required: false, input: false },
-        device: { type: "boolean", defaultValue: false, input: false },
-        deviceName: { type: "string", required: false, input: false },
-        parentSessionId: { type: "string", required: false, input: false },
-        projectId: { type: "string", defaultValue: "", input: false },
-      },
+      additionalFields: sessionFields,
     },
     databaseHooks: {
       session: {
@@ -151,7 +186,7 @@ export function createHumanAuth(options: HumanAuthOptions) {
             "/handoff/consume",
             {
               method: "POST",
-              body: z.object({ token: z.string().length(64) }),
+              body: handoffBody,
             },
             async (ctx) => {
               const parent = await new HumanStore(options.db).consumeHandoff(
@@ -219,7 +254,6 @@ export function createHumanAuth(options: HumanAuthOptions) {
     ],
   });
 }
-export type HumanAuth = ReturnType<typeof createHumanAuth>;
 export type HumanSession = NonNullable<
   Awaited<ReturnType<HumanAuth["api"]["getSession"]>>
 >;
