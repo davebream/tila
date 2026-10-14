@@ -3136,7 +3136,10 @@ function preparedTrialA(trialId = "t1") {
   // Freeze probes the version; keep it synthetic and local to this fixture's CLI.
   writeFileSync(
     join(bin, "codex"),
-    `#!/bin/sh\nprintf '%s\\n' '${syntheticCodexVersion}'\n`,
+    `#!/bin/sh
+[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 1
+printf '%s\\n' '${syntheticCodexVersion}'
+`,
     { mode: 0o755 },
   );
   const cli = (...args) =>
