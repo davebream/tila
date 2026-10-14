@@ -1,9 +1,24 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { entityOps, relationshipOps, schemaOps } from "@tila/ops-sqlite";
 import type {
   CredentialPolicy,
   PaginatedEntityListResponse,
 } from "@tila/schemas";
 import { Hono } from "hono";
+import {
+  RemoteBackend,
+  type TaskListOptions,
+  TilaClient,
+  createTaskMethods,
+} from "tila-sdk";
+import {
+  type TilaLocal,
+  buildLocalResources,
+  createTilaLocal,
+} from "tila-sdk/local";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createProjectRouter } from "../../worker/src/do/project-do-router";
 import type { RouterDeps } from "../../worker/src/do/routes/types";
@@ -11,10 +26,7 @@ import { capabilityMiddleware } from "../../worker/src/middleware/capability";
 import { errorHandler } from "../../worker/src/middleware/error";
 import { entities } from "../../worker/src/routes/entities";
 import type { Env, HonoVariables } from "../../worker/src/types";
-import {
-  type TestDb,
-  createTestDb,
-} from "../../worker/test/do/helpers/create-test-db";
+import type { TestDb } from "../../worker/test/do/helpers/create-test-db";
 
 // #306: `GET /tasks?blocked=1` and `GET /tasks?outcome=...` page through the
 // real Worker route and DO router with exact totals, also for a credential
@@ -120,6 +132,9 @@ const BLOCKED_IDS = [...ids("blocked-bug", 90), ...ids("blocked-story", 30)];
 const FAILED_OR_DROPPED = 5 + 10 + 12;
 
 let db: TestDb;
+let local: TilaLocal;
+let directory: string;
+let dbPath: string;
 let doApp: ReturnType<typeof createProjectRouter>;
 const env = { ANALYTICS: { writeDataPoint: () => {} } } as unknown as Env;
 const executionCtx = {
@@ -169,8 +184,19 @@ function workerApp(policy?: CredentialPolicy) {
   return app;
 }
 
-beforeEach(() => {
-  db = createTestDb();
+beforeEach(async () => {
+  directory = mkdtempSync(join(tmpdir(), "tila-task-filters-"));
+  dbPath = join(directory, "project.db");
+  local = await createTilaLocal({
+    dbPath,
+    artifactsPath: join(directory, "artifacts"),
+    project: "p1",
+    skipFilesystemCheck: true,
+  });
+  const handle = local.project.getDb() as TestDb["db"] & {
+    $client: TestDb["sqlite"];
+  };
+  db = { db: handle, sqlite: handle.$client };
   const deps: RouterDeps = {
     db: db.db as RouterDeps["db"],
     ctx: {
@@ -230,7 +256,10 @@ beforeEach(() => {
   // Every task shares one timestamp so only the id tie-break orders them.
   db.sqlite.exec("UPDATE entities SET created_at = 1, updated_at = 1");
 });
-afterEach(() => db.sqlite.close());
+afterEach(() => {
+  local.close();
+  rmSync(directory, { recursive: true, force: true });
+});
 
 async function get<T>(
   path: string,
@@ -406,5 +435,264 @@ describe("task attention filters through Worker and DO", () => {
       );
       expect(blocked.body.total).toBe(90);
     });
+  });
+});
+
+function sdkClient(app = workerApp()) {
+  return new TilaClient({
+    baseUrl: "https://tila.test",
+    token: "test",
+    fetch: async (input, init) =>
+      app.request(new Request(input, init), undefined, env, executionCtx),
+  });
+}
+
+describe("SDK task filter and page parity over HTTP, Node and Bun", () => {
+  const cases: [TaskListOptions, number, string[] | undefined][] = [
+    [{ blocked: true }, 120, undefined],
+    [{ outcome: ["failure", "abandoned"] }, FAILED_OR_DROPPED, ["bug"]],
+    [{ outcome: ["success"] }, 0, []],
+    [{ type: "story", outcome: ["failure"] }, 0, []],
+    [{ blocked: false }, 300, undefined],
+    [{}, 300, undefined],
+  ];
+
+  it.each(cases)(
+    "keeps ids, totals, ordering and scope for %j",
+    async (filter, total, outcomeTypes) => {
+      const remote = createTaskMethods(sdkClient(), "p1");
+      const node = buildLocalResources(local.project, local.artifacts).tasks;
+      const query = {
+        ...filter,
+        limit: "17",
+        sort: "id" as const,
+        order: "desc" as const,
+      };
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const options = { ...query, cursor };
+        const http = await remote.list(options);
+        const embedded = await node.list(options);
+        expect(embedded).toEqual(http);
+        expect(http.total).toBe(total);
+        expect(http.scope?.outcome_types).toEqual(outcomeTypes);
+        expect(http.has_more).toBe(http.next_cursor !== null);
+        seen.push(...http.entities.map((entity) => entity.id));
+        cursor = http.next_cursor ?? undefined;
+        pages++;
+        expect(pages).toBeLessThan(25);
+      } while (cursor);
+      expect(seen).toHaveLength(total);
+      expect(new Set(seen).size).toBe(total);
+      expect(seen).toEqual(seen.slice().sort().reverse());
+
+      // The Bun adapter reads the exact same migrated project file and walks
+      // every page in its own runtime, including the cursor/filter mismatch.
+      const result = spawnSync(
+        "bun",
+        ["run", resolve(import.meta.dirname, "fixtures/bun-cross-runtime.ts")],
+        {
+          env: {
+            ...process.env,
+            OP: "task-filter-pages",
+            DB: dbPath,
+            QUERY: JSON.stringify(query),
+          },
+          encoding: "utf8",
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const bun = JSON.parse(result.stdout.trim());
+      expect(bun.ids).toEqual(seen);
+      expect(bun.totals).toEqual(Array(pages).fill(total));
+      expect(bun.outcome_types).toEqual(outcomeTypes);
+      if (total > 17) expect(bun.mismatch).toBe("invalid-cursor");
+    },
+  );
+
+  it("preserves the array backend method and exposes real page metadata remotely", async () => {
+    const backend = new RemoteBackend(sdkClient(), "p1");
+    const filter = { blocked: true, limit: 11, archived: 0 as const };
+    const page = await backend.listPage(filter);
+    expect(await backend.list(filter)).toEqual(page.entities);
+    expect(await local.project.listPage(filter)).toEqual(page);
+    expect(await local.project.list(filter)).toEqual(page.entities);
+    expect(page.total).toBe(120);
+    expect(page.entities).toHaveLength(11);
+    expect(page.scope).toEqual({ restricted: false, archived: "excluded" });
+  });
+
+  it("rejects cursor reuse with changed filters and cursor plus offset", async () => {
+    const remote = createTaskMethods(sdkClient(), "p1");
+    const node = buildLocalResources(local.project, local.artifacts).tasks;
+    for (const tasks of [remote, node]) {
+      const first = await tasks.list({ blocked: true, limit: "7" });
+      const cursor = first.next_cursor ?? undefined;
+      await expect(tasks.list({ limit: "7", cursor })).rejects.toMatchObject({
+        code: "invalid-cursor",
+      });
+      await expect(
+        tasks.list({ blocked: true, limit: "7", offset: "2", cursor }),
+      ).rejects.toThrow();
+      const outcome = await tasks.list({
+        outcome: ["failure", "abandoned"],
+        limit: "7",
+      });
+      await expect(
+        tasks.list({
+          outcome: ["failure"],
+          limit: "7",
+          cursor: outcome.next_cursor ?? undefined,
+        }),
+      ).rejects.toMatchObject({ code: "invalid-cursor" });
+      // Reordering the same outcomes preserves the filter binding.
+      expect(
+        (
+          await tasks.list({
+            outcome: ["abandoned", "failure"],
+            limit: "7",
+            cursor: outcome.next_cursor ?? undefined,
+          })
+        ).total,
+      ).toBe(FAILED_OR_DROPPED);
+    }
+  });
+
+  it("validates outcome enums and empty lists in both SDK transports", async () => {
+    const remote = createTaskMethods(sdkClient(), "p1");
+    const node = buildLocalResources(local.project, local.artifacts).tasks;
+    for (const tasks of [remote, node]) {
+      for (const outcome of [[], ["bogus"], ["failure", ""]])
+        await expect(
+          tasks.list({ outcome: outcome as TaskListOptions["outcome"] }),
+        ).rejects.toThrow();
+    }
+  });
+
+  it("validates paging boundaries consistently over HTTP and Node/Bun adapters", async () => {
+    const http = createTaskMethods(sdkClient(), "p1");
+    const node = buildLocalResources(local.project, local.artifacts).tasks;
+    const invalid = [
+      "-1",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "9007199254740992",
+      "",
+      "1.0",
+      " 2 ",
+    ];
+    for (const key of ["limit", "offset"] as const) {
+      for (const value of [...invalid, ...(key === "limit" ? ["0"] : [])]) {
+        expect(
+          (await get(`/tasks?${key}=${encodeURIComponent(value)}`)).status,
+        ).toBe(400);
+        await expect(http.list({ [key]: value })).rejects.toThrow();
+        await expect(node.list({ [key]: value })).rejects.toThrow();
+      }
+    }
+    for (const key of ["limit", "offset"] as const)
+      for (const value of [
+        -1,
+        1.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.MAX_SAFE_INTEGER + 1,
+        ...(key === "limit" ? [0] : []),
+      ])
+        await expect(
+          local.project.listPage({ [key]: value }),
+        ).rejects.toThrow();
+    expect(await node.list({ offset: "0", limit: "501" })).toEqual(
+      await http.list({ offset: "0", limit: "501" }),
+    );
+    const zero = await node.list({ offset: "0", limit: "1" });
+    expect(zero).toMatchObject({
+      limit: 1,
+      offset: 0,
+      total: 300,
+      has_more: true,
+    });
+    const exhausted = await node.list({ offset: "300", limit: "1" });
+    expect(exhausted).toMatchObject({
+      entities: [],
+      total: 300,
+      has_more: false,
+      next_cursor: null,
+    });
+    const capped = await local.project.listPage({ limit: 501 });
+    expect(capped.limit).toBe(500);
+
+    const result = spawnSync(
+      "bun",
+      ["run", resolve(import.meta.dirname, "fixtures/bun-cross-runtime.ts")],
+      {
+        env: { ...process.env, OP: "task-filter-boundaries", DB: dbPath },
+        encoding: "utf8",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout.trim())).toEqual({
+      rejected: 13,
+      limit: 500,
+      offset: 0,
+      total: 300,
+    });
+  });
+
+  it("retains HTTP scope restrictions in SDK envelopes and remote backend pages", async () => {
+    const client = sdkClient(
+      workerApp({
+        role: "viewer",
+        capabilities: ["tasks:read"],
+        restrictions: { task_types: ["story"] },
+      }),
+    );
+    const tasks = createTaskMethods(client, "p1");
+    const first = await tasks.list({ blocked: true, limit: "13" });
+    const second = await tasks.list({
+      blocked: true,
+      limit: "13",
+      cursor: first.next_cursor ?? undefined,
+    });
+    expect(first.total).toBe(30);
+    expect(second.total).toBe(30);
+    expect(second.entities.every((e) => e.type === "story")).toBe(true);
+    expect(second.scope).toMatchObject({ restricted: true });
+    const none = await new RemoteBackend(client, "p1").listPage({
+      outcome: ["failure", "abandoned"],
+      limit: 3,
+    });
+    expect(none).toMatchObject({
+      entities: [],
+      total: 0,
+      next_cursor: null,
+      has_more: false,
+      scope: { restricted: true, outcome_types: [] },
+    });
+  });
+
+  it("keeps compact projection compatibility while preserving exact metadata", async () => {
+    const query = { outcome: ["failure"] as const, limit: "2", compact: true };
+    const http = await createTaskMethods(sdkClient(), "p1").list({
+      ...query,
+      outcome: [...query.outcome],
+    });
+    const embedded = await buildLocalResources(
+      local.project,
+      local.artifacts,
+    ).tasks.list({ ...query, outcome: [...query.outcome] });
+    expect(http.entities.map((e) => e.id)).toEqual(
+      embedded.entities.map((e) => e.id),
+    );
+    expect(http.entities[0]).toHaveProperty("title");
+    expect(http.entities[0]).not.toHaveProperty("data");
+    expect(embedded.entities[0]).toHaveProperty("data");
+    expect(http.total).toBe(15);
+    const { entities: _httpEntities, ...httpMetadata } = http;
+    const { entities: _embeddedEntities, ...embeddedMetadata } = embedded;
+    expect(embeddedMetadata).toEqual(httpMetadata);
   });
 });

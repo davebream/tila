@@ -131,6 +131,52 @@ describe("RemoteBackend", () => {
       await expect(backend.get("T-1")).rejects.toThrow("Server error");
     });
 
+    it("listPage preserves metadata and serializes attention filters and cursors", async () => {
+      const page = {
+        entities: [],
+        total: 42,
+        limit: 3,
+        offset: 0,
+        has_more: true,
+        next_cursor: "next",
+        scope: { restricted: true, outcome_types: ["issue"] },
+      };
+      client.get.mockResolvedValue({ ok: true, ...page });
+      const backend = await createBackend(client);
+      expect(
+        await backend.listPage({
+          blocked: true,
+          outcome: ["failure", "abandoned"],
+          cursor: "previous",
+          limit: 3,
+        }),
+      ).toEqual(page);
+      expect(client.get.mock.calls[0][1].query).toEqual({
+        blocked: "1",
+        outcome: "failure,abandoned",
+        cursor: "previous",
+        limit: "3",
+      });
+      await backend.list({ blocked: false });
+      expect(client.get.mock.calls[1][1].query).not.toHaveProperty("blocked");
+    });
+
+    it("reports unsupported page metadata explicitly for an older server", async () => {
+      client.get.mockResolvedValue({
+        ok: true,
+        entities: [],
+        total: 0,
+        limit: null,
+        offset: 0,
+        has_more: false,
+      });
+      const backend = await createBackend(client);
+      expect(await backend.list()).toEqual([]);
+      await expect(backend.listPage()).rejects.toThrow(
+        "does not support task list page metadata",
+      );
+    });
+
     it("list() flattens dataFilter keys to query params", async () => {
       client.get.mockResolvedValue({
         ok: true,

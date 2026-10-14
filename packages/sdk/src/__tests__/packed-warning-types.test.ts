@@ -60,9 +60,9 @@ afterAll(() => {
 });
 
 const imports = `import {
-  TilaClient, createTila,
+  TilaClient, createTila, createTaskMethods, createNamespace,
   type ClientOptions, type SchemaApplyResponse, type SchemaApplyWarning,
-  type SchemaWarningSink, type TilaFacade,
+  type SchemaWarningSink, type TilaFacade, type TaskListOptions, type LifecycleOutcome, type PaginatedEntityListResponse,
 } from "tila-sdk";
 `;
 const valid = `${imports}
@@ -78,6 +78,47 @@ type ResponseWarning = NonNullable<SchemaApplyResponse["warnings"]>[number];
 type ResponseWarningIsTyped = Assert<NotAny<ResponseWarning>>;
 type ApplyResult = Awaited<ReturnType<TilaFacade["schema"]["apply"]>>;
 type AppliedWarningIsTyped = Assert<NotAny<NonNullable<ApplyResult["warnings"]>[number]>>;
+
+type TaskPage = Awaited<ReturnType<TilaFacade["tasks"]["list"]>>;
+type TaskTotalIsTyped = Assert<NotAny<TaskPage["total"]>>;
+type TaskOutcomeIsTyped = Assert<NotAny<NonNullable<TaskListOptions["outcome"]>[number]>>;
+type TaskScopeIsTyped = Assert<NotAny<NonNullable<TaskPage["scope"]>["outcome_types"]>>;
+const filters: TaskListOptions = { blocked: true, outcome: ["failure", "abandoned"], limit: "2", cursor: "cursor" };
+const namedOutcome: LifecycleOutcome = "success";
+const consume = (page: PaginatedEntityListResponse) => {
+  const total: number = page.total;
+  const cursor: string | null | undefined = page.next_cursor;
+  const types: string[] | undefined = page.scope?.outcome_types;
+  const entityId: string | undefined = page.entities[0]?.id;
+};
+async function consumeTaskPages(facade: TilaFacade, client: TilaClient, options: TaskListOptions) {
+  const full = await facade.tasks.list({ blocked: true });
+  const data: Record<string, unknown> = full.entities[0].data;
+  const explicitFull = await facade.tasks.list({ compact: false });
+  const explicitData: Record<string, unknown> = explicitFull.entities[0].data;
+  const compact = await facade.tasks.list({ compact: true });
+  // @ts-expect-error HTTP compact rows have no data field; local may return full rows.
+  compact.entities[0].data;
+  const row = compact.entities[0];
+  if ("data" in row) { const localData: Record<string, unknown> = row.data; }
+  else { const title: string | null = row.title; }
+  const unknownProjection = await facade.tasks.list(options);
+  // @ts-expect-error A boolean compact option cannot promise full entities.
+  unknownProjection.entities[0].data;
+  const httpCompact = await createTaskMethods(client, "p").list({ compact: true });
+  // @ts-expect-error The HTTP factory cannot promise data on compact rows either.
+  httpCompact.entities[0].data;
+  const namespaced = createNamespace(client, "p", "tools").tasks;
+  const namespacedFull = await namespaced.list();
+  const namespaceData: Record<string, unknown> = namespacedFull.entities[0].data;
+  const namespacedCompact = await namespaced.list({ compact: true });
+  // @ts-expect-error Namespace wrappers preserve compact typing.
+  namespacedCompact.entities[0].data;
+}
+// @ts-expect-error Outcome is the lifecycle enum, not an arbitrary status.
+const invalidOutcome: TaskListOptions = { outcome: ["failed"] };
+// @ts-expect-error blocked is a boolean, not the HTTP query representation.
+const invalidBlocked: TaskListOptions = { blocked: "1" };
 
 const warning: SchemaApplyWarning = {
   code: "schema-revision-deprecated", message: "Preview and send expected_revision",

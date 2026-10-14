@@ -246,6 +246,79 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
     await project.create({ id, type: "task", data, created_by: "cli" });
   }
 
+  it.each([false, true])(
+    "lists blocked and outcome pages with exact metadata (compact=%s)",
+    async (compact) => {
+      await project.applySchema({
+        definition: `schema_version = 1
+[work_units.task.fields.status]
+type = "string"
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done", "failed"]
+dependency_satisfied = ["done"]
+[work_units.task.lifecycle.outcomes]
+failure = "failed"
+`,
+        expected_revision: 0,
+      });
+      await seedTask("gate", { status: "open" });
+      for (const id of ["A", "B", "C"]) {
+        await seedTask(id, { status: "open", title: id });
+        await project.addRelationship({
+          from_id: "gate",
+          to_id: id,
+          type: "blocks",
+        });
+        await seedTask(`failed-${id}`, { status: "failed" });
+      }
+      const command = getSubCommand(await loadCommand(), "list");
+      await runCmd(command, { blocked: true, limit: "2", compact, json: true });
+      const first = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+      expect(first.meta.total).toBe(3);
+      expect(first.meta.count).toBe(2);
+      expect(first.result.has_more).toBe(true);
+      expect(first.meta.next_cursor).toBeTypeOf("string");
+      await runCmd(command, {
+        blocked: true,
+        limit: "2",
+        cursor: first.meta.next_cursor,
+        compact,
+        json: true,
+      });
+      const last = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+      expect(last.meta.total).toBe(3);
+      expect(last.meta.count).toBe(1);
+      expect(last.meta.next_cursor).toBeNull();
+      await runCmd(command, {
+        outcome: "failure,abandoned",
+        limit: "1",
+        compact,
+        json: true,
+      });
+      const outcome = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+      expect(outcome.meta.total).toBe(3);
+      expect(outcome.result.scope.outcome_types).toEqual(["task"]);
+      await runCmd(command, { outcome: "success", compact, json: true });
+      const empty = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+      expect(empty.meta.total).toBe(0);
+      expect(empty.result.scope.outcome_types).toEqual([]);
+    },
+  );
+
+  it("rejects an invalid outcome before opening the backend", async () => {
+    const command = getSubCommand(await loadCommand(), "list");
+    mockResolveContext.mockClear();
+    await runCmd(command, { outcome: "failed", json: true });
+    expect(mockResolveContext).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(JSON.parse(errorSpy.mock.calls[0][0] as string)).toMatchObject({
+      ok: false,
+      error: { kind: "validation-error" },
+    });
+  });
+
   it("list --compact projects id/status/title/claimed_by from the local backend", async () => {
     await seedTask("T-1", { status: "open", title: "First" });
     // Claim T-1 so claimed_by is populated.

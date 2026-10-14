@@ -94,6 +94,8 @@ describe("task list --parent (remote mode, real RemoteBackend)", () => {
       limit: null,
       offset: 0,
       has_more: false,
+      next_cursor: null,
+      scope: { restricted: false, archived: "included" },
     });
 
     const cmd = await loadCommand();
@@ -119,6 +121,8 @@ describe("task list --parent (remote mode, real RemoteBackend)", () => {
         limit: null,
         offset: 0,
         has_more: false,
+        next_cursor: null,
+        scope: { restricted: false, archived: "included" },
       });
     });
 
