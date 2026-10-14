@@ -121,6 +121,7 @@ runtimeRoutes.post("/projects/:projectId/runtime/enrollments", async (c) => {
     "X-Tila-Enrollment-Proof",
   );
   const { token, secret } = await runtimeSecret(c);
+  const sponsor = c.get("tokenResult");
   const context = await new RuntimeStore(
     c.env.DB,
     undefined,
@@ -133,7 +134,9 @@ runtimeRoutes.post("/projects/:projectId/runtime/enrollments", async (c) => {
     runtimeCeiling(c),
     secret,
     undefined,
-    await mirroredCandidateForToken(c.env.DB, c.get("tokenResult")),
+    sponsor.kind === "github-actions-session"
+      ? { provider: "github-actions", workload: sponsor.workload }
+      : await mirroredCandidateForToken(c.env.DB, sponsor),
   );
   return c.json({ ok: true, token, context });
 });

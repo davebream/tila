@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProjectRoleSchema } from "./membership";
 
 export const GITHUB_ACTIONS_ISSUER =
   "https://token.actions.githubusercontent.com";
@@ -87,6 +88,31 @@ export const GitHubActionsContextSchema = z
     "Actions issuer and repository host must be supplied together",
   );
 export type GitHubActionsContext = z.infer<typeof GitHubActionsContextSchema>;
+
+/** Server-derived provenance for a personal enrollment sponsored by Actions. */
+export const GitHubActionsEnrollmentSponsorSchema = z
+  .object({
+    provider: z.literal("github-actions"),
+    workload: GitHubActionsContextSchema,
+  })
+  .strict();
+export type GitHubActionsEnrollmentSponsor = z.infer<
+  typeof GitHubActionsEnrollmentSponsorSchema
+>;
+
+/** The untagged form is the historical GitHub human mirrored sponsor context. */
+export const RuntimeEnrollmentSponsorSchema = z.union([
+  GitHubActionsEnrollmentSponsorSchema,
+  z
+    .object({
+      role: ProjectRoleSchema.exclude(["owner"]),
+      githubRepoId: z.number().int().positive(),
+    })
+    .strict(),
+]);
+export type RuntimeEnrollmentSponsor = z.infer<
+  typeof RuntimeEnrollmentSponsorSchema
+>;
 
 /** Legacy contexts can only denote the historical GitHub.com identity. */
 export function githubActionsIdentity(context: GitHubActionsContext) {
