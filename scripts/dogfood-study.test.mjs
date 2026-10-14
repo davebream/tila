@@ -36,9 +36,11 @@ import {
   checkDeclaration,
   checkMatching,
   deriveLedger,
+  parseEvents,
   sha256Text,
   validateBundle,
   validateEvent,
+  verifyPreventionEvidence,
 } from "./dogfood-study-lib.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -128,12 +130,37 @@ const frozenHook = {
   codex_binary_sha256: "a".repeat(64),
 };
 
-// Actual files and hashes, with explicitly synthetic contents for unit tests.
+// Synthetic models of admissible records, never captured subject evidence.
 function retainPrevention(event, trialDir = scratch(), overrides = {}) {
   const p = event.payload;
+  const configPath = join(trialDir, "trial.json");
+  if (!existsSync(configPath)) {
+    const slot = declaration.trials.find((t) => t.trial === event.trial_id);
+    const shared = join(trialDir, "shared");
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, "BOARD.md"), "shared-helper: owner=w1\n");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        trial: event.trial_id,
+        condition: slot.condition,
+        shared,
+        run_dir: join(trialDir, "run"),
+        repo_root: repo,
+        helper_resource: p.resource,
+        task_ids: { helper: "H" },
+        participants: { w1: "w1", w2: "w2", w1r: "w1r", w2r: "w2r" },
+      }),
+    );
+  }
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
   const common = {
     schema: "tila.dogfood.overlap-record/1",
-    provenance: "harness_fixture",
+    provenance: "local_agent_trial",
+    note: "synthetic unit-test model, not captured subject evidence",
+    study_id: "tila-194-dogfood-pilot-v1",
+    participant: config.participants[p.role],
+    session_id: p.role.endsWith("r") ? "s3" : p.role === "w1" ? "s1" : "s2",
     trial_id: event.trial_id,
     overlap_id: p.overlap_id,
     role: p.role,
@@ -145,7 +172,27 @@ function retainPrevention(event, trialDir = scratch(), overrides = {}) {
       ...common,
       kind: "attempt",
       intent: "implement_shared_helper",
-      command: ["sdk", "claim", "task:H"],
+      command:
+        config.condition === "A"
+          ? [
+              "bash",
+              "-c",
+              baselineHelperCommands({ shared: config.shared, role: p.role })
+                .acquire,
+            ]
+          : [
+              "node",
+              join(repo, "scripts/dogfood-study-tila.mjs"),
+              "sdk",
+              "--run-dir",
+              config.run_dir,
+              "--trial",
+              event.trial_id,
+              "--participant",
+              config.participants[p.role],
+              "claim",
+              `task:${config.task_ids.helper}`,
+            ],
       mono_ms: 1_000_200,
       ...overrides.attempt,
     },
@@ -323,7 +370,7 @@ function goodTrial(slot = slotB) {
       kind: "injected",
       resource: "src/x.mjs",
       role: "w2",
-      response: "redirected",
+      response: "stopped",
       evidence_ref: "7",
       edits_before_redirect: 0,
     },
@@ -350,6 +397,7 @@ function goodTrial(slot = slotB) {
     },
     711_000,
   );
+  for (const e of l.events) e.trial_id = slot.trial;
   return l;
 }
 
@@ -635,8 +683,14 @@ test("both conditions count retained attempt-response-before-edit evidence once 
         712_000,
       );
       const ledger = derive(l, { trialDir }, slot);
-      assert.equal(ledger.metrics.conflict_prevented.availability, "observed");
-      assert.equal(ledger.metrics.conflict_prevented.value, 1);
+      assert.equal(
+        ledger.metrics.conflict_prevented.availability,
+        response === "stopped" ? "observed" : "unavailable",
+      );
+      assert.equal(
+        ledger.metrics.conflict_prevented.value,
+        response === "stopped" ? 1 : null,
+      );
       assert.equal(ledger.metrics.conflict_opportunities.value, 1);
     }
   }
@@ -907,6 +961,137 @@ test("matching hashes cannot turn ownership, an unrelated failure or edits into 
     "unavailable",
     "no directory means no verified records",
   );
+});
+
+test("supported command adapters bind exact helper, trial and participant", () => {
+  for (const slot of [slotA, slotB]) {
+    const changes =
+      slot.condition === "A"
+        ? [
+            () => ["sh", "-c", "mkdir locks/shared-helper-unrelated"],
+            (c) => [
+              c[0],
+              c[1],
+              c[2].replace(/shared-helper/g, "shared-helper-unrelated"),
+            ],
+            (c) => [c[0], c[1], c[2].replace(/w2/g, "w1")],
+          ]
+        : [
+            () => ["sdk", "claim", "task:UNRELATED"],
+            () => ["echo", "claim", "task:H"],
+            (c) => c.map((a) => (a === "task:H" ? "task:UNRELATED" : a)),
+            (c) => c.map((a) => (a === slot.trial ? "other-trial" : a)),
+            (c) => c.map((a) => (a === "w2" ? "w1" : a)),
+            (c) =>
+              c.map((a) =>
+                a.endsWith("dogfood-study-tila.mjs") ? "/tmp/unrelated.mjs" : a,
+              ),
+          ];
+    for (const change of changes) {
+      const bundle = completeBundle();
+      const t = bundle.trials[slot.trial];
+      const overlap = t.events.find((e) => e.kind === "overlap.observed");
+      const retained = retainPrevention(overlap);
+      t.trialDir = retained.trialDir;
+      assert.equal(
+        validateStudy(bundle).ledgers[slot.trial].metrics.conflict_prevented
+          .value,
+        1,
+      );
+      retained.records.attempt.command = change(
+        retained.records.attempt.command,
+      );
+      retained.rewrite("attempt");
+      const result = validateStudy(bundle);
+      assert.equal(
+        result.ok,
+        false,
+        JSON.stringify(retained.records.attempt.command),
+      );
+      assert.equal(
+        result.ledgers[slot.trial].metrics.conflict_prevented.availability,
+        "unavailable",
+      );
+    }
+  }
+});
+
+test("underlying prevention must be in the registered live context and trial window", () => {
+  const slot = declaration.trials.find(
+    (t) => t.condition === "B" && t.replaced_role === "w2",
+  );
+  for (const [role, at, responseAt] of [
+    ["w2", 999000, 999010],
+    ["w2", 1000039, 1000040],
+    ["w2", 1361000, 1361010],
+    ["w2r", 1360100, 1360110],
+    ["w2r", 1720010, 1720020],
+    ["w2r", 1709999, 1710000],
+    ["w2", 1360099, 1360100],
+  ]) {
+    const bundle = completeBundle();
+    const t = bundle.trials[slot.trial];
+    const overlap = t.events.find((e) => e.kind === "overlap.observed");
+    overlap.payload.role = role;
+    overlap.mono_ms = Math.max(overlap.mono_ms, responseAt + 20);
+    t.events
+      .sort((a, b) => a.mono_ms - b.mono_ms)
+      .forEach((e, i) => {
+        e.seq = i + 1;
+      });
+    const retained = retainPrevention(overlap, scratch(), {
+      attempt: { mono_ms: at },
+      response: { mono_ms: responseAt },
+      before_edit: {
+        from_mono_ms: at,
+        through_mono_ms: responseAt,
+        mono_ms: responseAt + 1,
+      },
+    });
+    t.trialDir = retained.trialDir;
+    const result = validateStudy(bundle);
+    assert.equal(
+      result.ledgers[slot.trial].metrics.conflict_prevented.availability,
+      "unavailable",
+      `${role}/${at}/${responseAt}`,
+    );
+    assert.equal(result.ok, false);
+  }
+  // An evaluator observation after the deadline can corroborate a timely attempt.
+  const l = goodTrial();
+  const overlap = l.events.find((e) => e.kind === "overlap.observed");
+  overlap.mono_ms = 1720040;
+  const { trialDir } = retainPrevention(overlap);
+  assert.equal(derive(l, { trialDir }).metrics.conflict_prevented.value, 1);
+});
+
+test("retained record provenance and registered session cannot be promoted by a local envelope", () => {
+  for (const kind of ["attempt", "response", "before_edit"]) {
+    for (const [key, value] of [
+      ["provenance", "harness_fixture"],
+      ["provenance", "preflight_drill"],
+      ["provenance", "linked_external"],
+      ["provenance", undefined],
+      ["study_id", "other-study"],
+      ["participant", "other-worker"],
+      ["session_id", "retired-session"],
+    ]) {
+      const bundle = completeBundle();
+      const t = bundle.trials.t1;
+      const retained = retainPrevention(
+        t.events.find((e) => e.kind === "overlap.observed"),
+      );
+      t.trialDir = retained.trialDir;
+      retained.records[kind][key] = value;
+      retained.rewrite(kind);
+      const result = validateStudy(bundle);
+      assert.equal(result.ok, false, `${kind}/${key}/${value}`);
+      assert.equal(
+        result.ledgers.t1.metrics.conflict_prevented.availability,
+        "unavailable",
+      );
+    }
+  }
 });
 
 test("missing sources become unavailable or not applicable, never zero", () => {
@@ -1403,6 +1588,152 @@ test("memory contamination and failed B gates preclude an informative complete s
   const failed = completeBundle();
   failed.trials[slotB.trial].evaluation.fence_audit.stale_accepted = [9];
   assert.equal(validateStudy(failed).reading, "gate_failure");
+});
+
+test("every B correctness gate requires evidence and explicit violations override clear counters", () => {
+  for (const [gate, remove] of [
+    [
+      "G1_stale_authority_write",
+      (t) => {
+        t.evaluation.fence_audit = null;
+      },
+    ],
+    [
+      "G1_stale_authority_write",
+      (t) => {
+        t.evaluation.fence_audit = {};
+      },
+    ],
+    [
+      "G2_lost_acknowledged_decision",
+      (t) => {
+        t.review = null;
+      },
+    ],
+    [
+      "G2_lost_acknowledged_decision",
+      (t) => {
+        t.evaluation.cases = [];
+      },
+    ],
+    [
+      "G3_silent_overwrite",
+      (t) => {
+        t.evaluation.silent_overwrite_candidates = undefined;
+      },
+    ],
+    [
+      "G4_inferred_completion",
+      (t) => {
+        t.events = t.events.filter((e) => e.kind !== "trial.stopped");
+      },
+    ],
+  ]) {
+    const bundle = completeBundle();
+    remove(bundle.trials[slotB.trial]);
+    const result = validateStudy(bundle);
+    assert.equal(
+      result.ledgers[slotB.trial].gates[gate].undetermined,
+      true,
+      gate,
+    );
+    assert.equal(result.reading, "inconclusive", gate);
+    assert.ok(
+      result.findings.some(
+        (f) => f.code === "gate_undetermined" && f.message.includes(gate),
+      ),
+    );
+  }
+  for (const gate of Object.keys(
+    passingEvaluation() && rubric.hard_gates,
+  ).filter((k) => k.startsWith("G"))) {
+    for (const slot of [slotA, slotB]) {
+      const bundle = completeBundle();
+      const t = bundle.trials[slot.trial];
+      const last = t.events.at(-1);
+      t.events.push({
+        ...last,
+        seq: last.seq + 1,
+        kind: "gate.violation",
+        payload: { gate, detail: "synthetic explicit violation" },
+      });
+      const result = validateStudy(bundle);
+      assert.equal(result.ledgers[slot.trial].gates[gate].value, 1);
+      assert.equal(
+        result.reading,
+        slot.condition === "B" ? "gate_failure" : "informative",
+      );
+    }
+  }
+});
+
+test("replacement and warm-up evidence is scanned for study-wide memory contamination", () => {
+  for (const id of ["t1-replacement", "w-a"]) {
+    const bundle = completeBundle();
+    const event = {
+      ...bundle.trials.t1.events.at(-1),
+      trial_id: id,
+      seq: 1,
+      kind: "harness.note",
+      payload: { topic: "validity", replacement_of: "t1", rule_id: "V-memory" },
+    };
+    bundle.trials[id] = { events: [event] };
+    const result = validateStudy(bundle);
+    assert.equal(result.ok, false);
+    assert.equal(result.reading, "inconclusive");
+    assert.ok(
+      result.findings.some(
+        (f) => f.code === "memory_contaminated" && f.trial === id,
+      ),
+    );
+    assert.equal(result.outcomes.length, 4);
+  }
+});
+
+test("malformed parsed envelopes return bundle findings and cannot derive prevention", () => {
+  for (const malformed of [
+    null,
+    [],
+    7,
+    { kind: "overlap.observed" },
+    {
+      ...goodTrial().events.find((e) => e.kind === "overlap.observed"),
+      payload: null,
+    },
+  ]) {
+    const bundle = completeBundle();
+    bundle.trials.t1.events.push(malformed);
+    const parsed = parseEvents(`${JSON.stringify(malformed)}\n`);
+    assert.deepEqual(
+      parsed.events,
+      [malformed],
+      "raw parseable evidence is retained",
+    );
+    const result = validateBundle({
+      bundle,
+      rubric,
+      rubricSha256,
+      declaration,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reading, "inconclusive");
+    assert.ok(result.findings.some((f) => f.code === "event_schema"));
+    assert.equal(
+      verifyPreventionEvidence(malformed, scratch()).verified,
+      false,
+    );
+    assert.throws(
+      () =>
+        deriveLedger({
+          trial: slotA,
+          events: bundle.trials.t1.events,
+          evaluation: passingEvaluation(slotA),
+          frozen: frozenHook,
+          rubric,
+        }),
+      /invalid event/,
+    );
+  }
 });
 
 test("validation reports missing trials, failed outcomes stay, and dropped trials are errors", () => {
@@ -2236,7 +2567,12 @@ test("an integrated condition-A trial passes, imported commits are not authored 
   assert.equal(evaluation.overlap.response, "unavailable");
   const ledger = deriveLedger({
     trial: slot,
-    events: [{ kind: "overlap.observed", payload: evaluation.overlap, seq: 1 }],
+    events: [
+      {
+        ...goodTrial(slot).events.find((e) => e.kind === "overlap.observed"),
+        payload: evaluation.overlap,
+      },
+    ],
     evaluation,
     frozen: frozenHook,
     rubric,
@@ -2246,10 +2582,199 @@ test("an integrated condition-A trial passes, imported commits are not authored 
   assert.ok(existsSync(join(run, "review-packets")));
 });
 
+test("evaluate, derive and validate all refuse owner-role and wrong-helper prevention", () => {
+  for (const failure of [
+    "owner-role",
+    "wrong-helper",
+    "wrong-command-target",
+  ]) {
+    const { run, trial, scenario, cli } = preparedTrialA();
+    const dir = join(run, "trials/t1");
+    const eventFile = join(dir, "events.jsonl");
+    writeFileSync(join(trial.shared, "BOARD.md"), "shared-helper: owner=w1\n");
+    appendEvent(
+      eventFile,
+      { actor: { role: "harness" }, kind: "trial.started" },
+      rubric,
+    );
+    for (const role of ["w1", "w2"])
+      appendEvent(
+        eventFile,
+        {
+          actor: { role },
+          kind: "worker.started",
+          payload: {
+            role,
+            participant: role,
+            context: "original",
+            session_id: role === "w1" ? "s1" : "s2",
+          },
+        },
+        rubric,
+      );
+    const role = failure === "owner-role" ? "w1" : "w2";
+    const at = Number(process.hrtime.bigint() / 1_000_000n);
+    const payload = {
+      overlap_id: "injected-helper",
+      kind: "injected",
+      resource: scenario.helper.file,
+      role,
+      response: "stopped",
+      edits_before_redirect: 0,
+    };
+    const retained = retainPrevention({ trial_id: "t1", payload }, dir, {
+      attempt: { mono_ms: at },
+      response: { mono_ms: at },
+      before_edit: { from_mono_ms: at, through_mono_ms: at, mono_ms: at },
+    });
+    if (failure === "wrong-helper") {
+      payload.resource = "src/another-helper.mjs";
+      for (const kind of ["attempt", "response", "before_edit"]) {
+        retained.records[kind].resource = payload.resource;
+        retained.rewrite(kind);
+      }
+    }
+    if (failure === "wrong-command-target") {
+      retained.records.attempt.command[2] =
+        retained.records.attempt.command[2].replace(
+          /shared-helper/g,
+          "shared-helper-unrelated",
+        );
+      retained.rewrite("attempt");
+    }
+    appendEvent(
+      eventFile,
+      { actor: { role: "harness" }, kind: "overlap.observed", payload },
+      rubric,
+    );
+    const evaluated = cli("evaluate", "--run-dir", run, "--trial", "t1");
+    assert.equal(evaluated.status, 0, evaluated.stdout + evaluated.stderr);
+    const evaluation = JSON.parse(
+      readFileSync(join(dir, "evaluation.json"), "utf8"),
+    );
+    assert.equal(evaluation.overlap.owner, "w1");
+    assert.equal(evaluation.overlap.response, "unavailable", failure);
+    assert.equal(cli("derive", "--run-dir", run, "--trial", "t1").status, 0);
+    const ledger = JSON.parse(readFileSync(join(dir, "ledger.json"), "utf8"));
+    assert.equal(
+      ledger.metrics.conflict_prevented.availability,
+      "unavailable",
+      failure,
+    );
+    const validation = JSON.parse(
+      cli("validate", "--bundle", run, "--json").stdout,
+    );
+    assert.equal(
+      validation.ledgers.t1.metrics.conflict_prevented.availability,
+      "unavailable",
+      failure,
+    );
+    assert.ok(
+      validation.findings.some((f) => f.code === "prevention_evidence_invalid"),
+    );
+  }
+});
+
+test("malformed CLI event logs reject cleanly and retain bytes; warm-ups retain memory findings", () => {
+  const { run, cli } = preparedTrialA();
+  const dir = join(run, "trials/t1");
+  const file = join(dir, "events.jsonl");
+  for (const raw of ["null\n", '{"kind":"overlap.observed"}\n', "not JSON\n"]) {
+    writeFileSync(file, raw);
+    for (const command of ["evaluate", "derive"]) {
+      const result = cli(command, "--run-dir", run, "--trial", "t1");
+      assert.equal(result.status, 1, command);
+      assert.match(result.stderr, /invalid event/);
+      assert.doesNotMatch(result.stderr, /TypeError|at cmd/);
+      assert.equal(readFileSync(file, "utf8"), raw);
+    }
+    const result = cli("validate", "--bundle", run, "--json");
+    assert.equal(result.status, 1);
+    const validation = JSON.parse(result.stdout);
+    assert.equal(validation.ok, false);
+    assert.ok(
+      validation.findings.some((f) =>
+        ["event_schema", "event_parse"].includes(f.code),
+      ),
+    );
+    assert.equal(readFileSync(file, "utf8"), raw);
+  }
+  const warmFile = join(run, "trials/w-a/events.jsonl");
+  mkdirSync(dirname(warmFile), { recursive: true });
+  appendEvent(
+    warmFile,
+    {
+      actor: { role: "harness" },
+      kind: "harness.note",
+      provenance: "harness_fixture",
+      payload: { topic: "validity", rule_id: "V-memory" },
+    },
+    rubric,
+  );
+  const validation = JSON.parse(
+    cli("validate", "--bundle", run, "--json").stdout,
+  );
+  assert.ok(
+    validation.findings.some(
+      (f) => f.code === "memory_contaminated" && f.trial === "w-a",
+    ),
+  );
+});
+
 test("the evaluator accepts an actual competing attempt denied before edits in either condition", () => {
   for (const trialId of ["t1", "t2"]) {
     const { run, trial, slot, scenario, cli } = preparedTrialA(trialId);
     const competingRole = slot.condition === "B" ? "w2r" : "w2";
+    const eventFile = join(run, `trials/${trialId}/events.jsonl`);
+    appendEvent(
+      eventFile,
+      { actor: { role: "harness" }, kind: "trial.started" },
+      rubric,
+    );
+    for (const role of ["w1", "w2"])
+      appendEvent(
+        eventFile,
+        {
+          actor: { role },
+          kind: "worker.started",
+          payload: {
+            role,
+            participant: role,
+            context: "original",
+            session_id: role === "w1" ? "s1" : "s2",
+          },
+        },
+        rubric,
+      );
+    if (competingRole === "w2r") {
+      appendEvent(
+        eventFile,
+        {
+          actor: { role: "harness" },
+          kind: "worker.replaced",
+          payload: {
+            role: "w2",
+            from_participant: "w2",
+            to_participant: "w2r",
+          },
+        },
+        rubric,
+      );
+      appendEvent(
+        eventFile,
+        {
+          actor: { role: "w2r" },
+          kind: "worker.started",
+          payload: {
+            role: "w2r",
+            participant: "w2r",
+            context: "replacement",
+            session_id: "s3",
+          },
+        },
+        rubric,
+      );
+    }
     const command = (role) =>
       slot.condition === "A"
         ? [
