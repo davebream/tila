@@ -322,3 +322,13 @@ Execution update: release plan PR #468 and independent readiness PR #471 merged,
 Study dependency correction: the planner had inferred a hard #308 live-run prerequisite for #194. The issue permits an actual multi-worktree study, so that edge is removed while the immutable predeclared rubric remains required. Prepare two matched task pairs (four trials), 12-minute wall and 40-tool-call budgets per worker, equal Sonnet XHIGH conditions, ordinary durable notes in the baseline, seeded variants and A/B then B/A order. These are proposed pilot limits, not measurements. Reserve two coding slots for execution later; keep all #283/#308/#292 live gates unchanged. API drills alone do not satisfy an agent comparison.
 
 Adapter dependency correction: authenticated native probes gate activation and live acceptance, not the reviewed source/fixture-only adapter slice. The hard prerequisite now points to `i283-live`; `i283-adapter` can ship useful reconciliation and gated registration plumbing while all live claims remain withheld.
+
+### #481 — follow-up correction
+
+A bounded offline counterexample confirms release smoke does not compare the actual staged embedded Worker BUILD_COMMIT to the outer manifest revision. The dedicated release worker owns `issue-481` / `fix/481-embedded-release-identity`: structural identity parsing, exact full commit/product-version comparison, missing/ambiguous/incorrect identity rejection, override isolation and compiled native payload regression through existing raw/installer/npm smoke calls. Preserve Node22, artifact integrity, native targets and all formal release gates; no live/config/tag operation follows from this fix. Sol XHIGH, push hold pending source and focused validation review.
+
+### #482 — follow-up correction
+
+Study preparation found local `tila task claim` hardcodes acquisition success when the backend returns `acquired:false`. A separate `issue-482` / `fix/482-task-claim-contention` worker will correct text/JSON/exit behavior using existing CLI conventions. Prove real CLI contention with two participants sharing an isolated store, unchanged losing claim state, and successful acquisition after explicit release without timing sleeps. Preserve remote error handling and fence semantics; no auth redesign, dependencies or migrations. Sonnet XHIGH after the rubric worker hands off. The study consumes truthful SDK results meanwhile; repair is preferred before measured trials.
+
+These two issues were discovered during execution and live in `followup_inventory`; the original 16-issue/3-PR snapshot stays immutable. The DAG now has 37 nodes, 68 hard edges and 17 preferred edges. Release tooling has its own single-worker ceiling alongside the three coding lanes.

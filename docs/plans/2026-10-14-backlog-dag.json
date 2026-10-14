@@ -14,7 +14,7 @@
     "external_450_counts": true,
     "optional_release_workers": 1,
     "release_skill": ".agents/skills/tila-release/SKILL.md",
-    "planner": "review-448-recovery-astra",
+    "planner": "review-448-mcp-astra",
     "lead": "lead-backlog",
     "herdr_session": "tila",
     "planner_pane": "w2:p2",
@@ -25,7 +25,7 @@
       "Brain": {
         "tab": "w2:t1",
         "lead-backlog": "w2:p1",
-        "review-448-recovery-astra": "w2:p2"
+        "review-448-mcp-astra": "w2:p2"
       },
       "Builders": {
         "tab": "w2:t2",
@@ -35,7 +35,7 @@
       },
       "Release": {
         "tab": "w2:t3",
-        "release-prepare-sol": "w2:p6"
+        "release-481-build-identity": "w2:p6"
       }
     }
   },
@@ -1301,6 +1301,50 @@
       "source_targets": [],
       "validation": ["release-skill", "publication-verification"],
       "completion_evidence": []
+    },
+    {
+      "id": "i481",
+      "title": "Validate embedded Worker identity in native release smoke",
+      "owner": "release",
+      "stage": null,
+      "issue": 481,
+      "pr": null,
+      "kind": "release-builder",
+      "state": "implementing",
+      "conditional": false,
+      "worktree": "/home/dawid/code/tila-workers/issue-481",
+      "contract": "2026-10-14-backlog-execution.md#481--follow-up-correction",
+      "source_targets": [
+        "scripts/release-smoke.mjs",
+        "scripts/deploy-payload-native.test.mjs"
+      ],
+      "validation": ["native", "packed", "docs"],
+      "completion_evidence": [],
+      "task_name": "release-481-build-identity",
+      "branch": "fix/481-embedded-release-identity",
+      "model_policy": "GPT-6.1-Sol xhigh"
+    },
+    {
+      "id": "i482",
+      "title": "Report local CLI task contention truthfully",
+      "owner": "C",
+      "stage": 7,
+      "issue": 482,
+      "pr": null,
+      "kind": "builder",
+      "state": "planned",
+      "conditional": false,
+      "worktree": "/home/dawid/code/tila-workers/issue-482",
+      "contract": "2026-10-14-backlog-execution.md#482--follow-up-correction",
+      "source_targets": [
+        "packages/cli/src/commands/task.ts",
+        "packages/cli/test/local/local-project.test.ts"
+      ],
+      "validation": ["cli", "docs"],
+      "completion_evidence": [],
+      "task_name": "build-482-task-claim",
+      "branch": "fix/482-task-claim-contention",
+      "model_policy": "Sonnet xhigh"
     }
   ],
   "hard_edges": [
@@ -1699,6 +1743,18 @@
       "after": "i283-live",
       "reason": "Authenticated native probes and resources must pass before integration activation/live support; gated source wiring can precede them.",
       "provenance": "contract"
+    },
+    {
+      "before": "g-review",
+      "after": "i481",
+      "reason": "New scope reviewed and accepted by lead before dispatch.",
+      "provenance": "safety"
+    },
+    {
+      "before": "g-review",
+      "after": "i482",
+      "reason": "New scope reviewed and accepted by lead before dispatch.",
+      "provenance": "safety"
     }
   ],
   "preferred_edges": [
@@ -1797,6 +1853,12 @@
       "after": "i448-mcp",
       "reason": "Sequential slices in the same issue worktree; shared executor is the actual hard prerequisite.",
       "provenance": "serialization"
+    },
+    {
+      "before": "i482",
+      "after": "i194-study",
+      "reason": "Repair known misleading CLI acquisition result before measured study; SDK fixture still inspects actual acquired result.",
+      "provenance": "scheduling"
     }
   ],
   "topological_waves": [
@@ -1816,6 +1878,8 @@
       "i440",
       "i448-plan",
       "i449",
+      "i481",
+      "i482",
       "pr311",
       "pr312",
       "pr314"
@@ -1843,7 +1907,9 @@
       "i283-prereq",
       "i400",
       "i439",
-      "i449"
+      "i449",
+      "i481",
+      "i482"
     ],
     ["i398", "i416", "i440", "release-rehearsal"],
     ["i307-audit", "i362", "i399", "release-publish"],
@@ -1918,7 +1984,7 @@
       "lanes": {
         "A": [],
         "B": ["i308-protocol"],
-        "C": []
+        "C": ["i482"]
       }
     },
     {
@@ -3414,6 +3480,48 @@
       "lead_review": "pending",
       "queue_state": "unverified",
       "closure": "not-closed"
+    },
+    {
+      "node": "i481",
+      "state": "implementing",
+      "worker": "release-481-build-identity",
+      "base_sha": "581c99d71588a82ffc8b5045f625dc4a06dc43f0",
+      "head_sha": null,
+      "pr": null,
+      "tests": [],
+      "evidence": [
+        {
+          "kind": "scope-review",
+          "source": "https://github.com/davebream/tila/issues/481",
+          "reviewer": "lead-backlog",
+          "result": "approved",
+          "detail": "Isolated correction, no production changes or expanded dependency upgrades."
+        }
+      ],
+      "lead_review": "dispatch-approved",
+      "queue_state": "unverified",
+      "closure": "not-closed"
+    },
+    {
+      "node": "i482",
+      "state": "planned",
+      "worker": "build-482-task-claim",
+      "base_sha": "581c99d71588a82ffc8b5045f625dc4a06dc43f0",
+      "head_sha": null,
+      "pr": null,
+      "tests": [],
+      "evidence": [
+        {
+          "kind": "scope-review",
+          "source": "https://github.com/davebream/tila/issues/482",
+          "reviewer": "lead-backlog",
+          "result": "approved",
+          "detail": "Isolated correction, no production changes or expanded dependency upgrades."
+        }
+      ],
+      "lead_review": "scope-approved",
+      "queue_state": "unverified",
+      "closure": "not-closed"
     }
   ],
   "release_scope": {
@@ -3532,6 +3640,23 @@
     ],
     "release_election_allowed_with_evidence": true,
     "current_active_builders": ["i448-plan", "i194-rubric", "i283-adapter"],
-    "production_scope": "explicit authorization record required; coding/release election is insufficient"
-  }
+    "production_scope": "explicit authorization record required; coding/release election is insufficient",
+    "current_active_release_workers": ["i481"]
+  },
+  "followup_inventory": [
+    {
+      "kind": "issue",
+      "number": 481,
+      "source": "https://github.com/davebream/tila/issues/481",
+      "nodes": ["i481"],
+      "reason": "Confirmed release identity validation gap discovered during307/readiness audit."
+    },
+    {
+      "kind": "issue",
+      "number": 482,
+      "source": "https://github.com/davebream/tila/issues/482",
+      "nodes": ["i482"],
+      "reason": "Confirmed local CLI claim result defect discovered during194 fixture preparation."
+    }
+  ]
 }
