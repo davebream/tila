@@ -1079,6 +1079,187 @@ export function verifyPreventionEvidence(event, trialDir, context = null) {
 export const hasPreventionEvidence = (event, trialDir, context) =>
   verifyPreventionEvidence(event, trialDir, context).verified;
 
+// The frozen slot controls which context is replaced. Registrations control identity;
+// generic recovery events and semantic verdicts cannot stand in for that lifecycle.
+function replacementEvidence({
+  trial,
+  events,
+  evaluation,
+  context,
+  trialDir,
+  timely,
+  withinTrial,
+  early,
+}) {
+  const role = trial.replaced_role;
+  const replacementRole = `${role}r`;
+  const problems = [];
+  const need = (ok, reason) => {
+    if (!ok) problems.push(reason);
+  };
+  const replacements = events.filter((e) => e.kind === "worker.replaced");
+  const registrations = events.filter((e) => e.kind === "worker.started");
+  const replacementRegistrations = registrations.filter(
+    (e) =>
+      e.payload.context === "replacement" ||
+      (typeof e.payload.role === "string" && e.payload.role.endsWith("r")),
+  );
+  const recoveries = events.filter((e) => e.kind.startsWith("recovery."));
+  const starts = recoveries.filter((e) => e.kind === "recovery.started");
+  const handoffs = events.filter((e) => e.kind === "handoff.saved");
+  const original = registrations.filter((e) => e.payload.role === role);
+  const replacement = replacementRegistrations[0];
+  const retired = events.filter(
+    (e) => e.kind === "worker.stopped" && e.payload.reason === "replacement",
+  );
+  const before = (a, b) => a && b && a.seq < b.seq && a.mono_ms <= b.mono_ms;
+  const participant = (r, registration) =>
+    context?.config.participants[r] ??
+    (trialDir ? null : registration?.payload.participant);
+  const originalParticipant = participant(role, original[0]);
+  const replacementParticipant = participant(replacementRole, replacement);
+  const registered = (e, r, id, kind) =>
+    e &&
+    e.actor.role === r &&
+    e.payload.role === r &&
+    e.payload.participant === id &&
+    typeof id === "string" &&
+    id.trim() &&
+    e.payload.context === kind &&
+    typeof e.payload.session_id === "string" &&
+    e.payload.session_id.trim() &&
+    e.provenance === "local_agent_trial" &&
+    withinTrial(e);
+  const identity = (e, r, id, registration) =>
+    e.actor.role === r &&
+    e.payload.role === r &&
+    e.provenance === "local_agent_trial" &&
+    (!Object.hasOwn(e.payload, "participant") ||
+      e.payload.participant === id) &&
+    (!Object.hasOwn(e.payload, "session_id") ||
+      e.payload.session_id === registration?.payload.session_id);
+
+  // Absence before an early abort is allowed. Observed contradictory evidence is never
+  // erased or excused by the stop reason, and duplicate lifecycles are ambiguous.
+  const observedLifecycle =
+    replacements.length ||
+    replacementRegistrations.length ||
+    retired.length ||
+    recoveries.length;
+  if (observedLifecycle) {
+    need(
+      replacements.length === 1 || (early && replacements.length === 0),
+      "expected exactly one declared worker replacement",
+    );
+    need(
+      original.length === 1 &&
+        registered(original[0], role, originalParticipant, "original"),
+      "declared original registration/identity is missing or ambiguous",
+    );
+    need(
+      (early && replacementRegistrations.length === 0) ||
+        (replacementRegistrations.length === 1 &&
+          registered(
+            replacement,
+            replacementRole,
+            replacementParticipant,
+            "replacement",
+          )),
+      "declared replacement registration/identity is missing or ambiguous",
+    );
+    need(
+      (early && !replacement) ||
+        (originalParticipant &&
+          replacementParticipant &&
+          originalParticipant !== replacementParticipant),
+      "replacement must have a distinct registered participant",
+    );
+    need(
+      (early && !replacement) ||
+        (replacement &&
+          registrations.filter(
+            (e) => e.payload.session_id === replacement.payload.session_id,
+          ).length === 1),
+      "replacement must have a distinct registered session",
+    );
+    const change = replacements[0];
+    need(
+      (early && !change) ||
+        (change &&
+          change.payload.role === role &&
+          change.payload.from_participant === originalParticipant &&
+          typeof change.payload.to_participant === "string" &&
+          change.payload.to_participant.trim() &&
+          change.payload.to_participant !== originalParticipant &&
+          (replacementParticipant
+            ? change.payload.to_participant === replacementParticipant
+            : early && !replacement) &&
+          change.provenance === "local_agent_trial" &&
+          withinTrial(change)),
+      "worker.replaced contradicts the frozen role or registered participants",
+    );
+    need(
+      (early && retired.length === 0 && !change && !replacement) ||
+        (retired.length === 1 &&
+          retired[0].payload.role === role &&
+          retired[0].actor.role === role &&
+          retired[0].provenance === "local_agent_trial" &&
+          withinTrial(retired[0]) &&
+          before(original[0], retired[0]) &&
+          (change ? before(retired[0], change) : early && !replacement) &&
+          (replacement ? before(change, replacement) : early)),
+      "declared original retirement and replacement registration are not ordered",
+    );
+  }
+  for (const e of handoffs)
+    need(
+      identity(e, role, originalParticipant, original[0]) &&
+        registered(original[0], role, originalParticipant, "original") &&
+        before(original[0], e) &&
+        timely(e),
+      `handoff seq ${e.seq} is outside the declared original context`,
+    );
+  if (evaluation?.handoff)
+    need(
+      evaluation.handoff.role === role,
+      "evaluated handoff role contradicts the frozen role",
+    );
+  if (observedLifecycle && !early)
+    need(starts.length === 1, "expected exactly one declared recovery start");
+  if (recoveries.length) {
+    need(starts.length === 1, "expected exactly one declared recovery start");
+    const start = starts[0];
+    need(
+      start &&
+        identity(start, replacementRole, replacementParticipant, replacement) &&
+        start.payload.participant === replacementParticipant &&
+        before(replacement, start) &&
+        timely(start),
+      "recovery start is outside the declared registered replacement context",
+    );
+    for (const e of recoveries.filter((e) => e.kind !== "recovery.started"))
+      need(
+        identity(e, replacementRole, replacementParticipant, replacement) &&
+          before(start, e),
+        `recovery seq ${e.seq} is outside the declared registered replacement context`,
+      );
+  }
+  const lifecycleBound =
+    replacements.length === 1 &&
+    replacementRegistrations.length === 1 &&
+    retired.length === 1 &&
+    problems.length === 0;
+  return {
+    problems,
+    handoffBound:
+      lifecycleBound &&
+      handoffs.length > 0 &&
+      evaluation?.handoff?.role === role,
+    recoveryStart:
+      lifecycleBound && starts[0] && timely(starts[0]) ? starts[0] : null,
+  };
+}
+
 /**
  * Derive the per-trial ledger from raw events plus the evaluator's report.
  * Events, evaluation and verified retained records supply observations. Missing
@@ -1124,6 +1305,25 @@ export function deriveLedger({
       )
     );
   };
+  const replacement = replacementEvidence({
+    trial,
+    events,
+    evaluation,
+    context,
+    trialDir,
+    timely,
+    early: ["abort_wrong_target", "abort_privacy", "harness_failure"].includes(
+      stopReason,
+    ),
+    withinTrial: (e) =>
+      started &&
+      e.seq > started.seq &&
+      e.mono_ms >= started.mono_ms &&
+      e.mono_ms < deadline &&
+      (!stopped || (e.seq < stopped.seq && e.mono_ms <= stopped.mono_ms)),
+  });
+  for (const problem of replacement.problems)
+    flags.push(`replacement_invalid:${problem}`);
   // Keep all raw events. Late durable writes/evidence cannot certify deadline state.
   for (const event of events) {
     const stateEvidence =
@@ -1355,20 +1555,18 @@ export function deriveLedger({
     (e) => baseRole(e.payload.role) === replacedRole,
   );
   const stated = events.find(
-    (e) => e.kind === "recovery.decision_stated" && timely(e),
+    (e) =>
+      replacement.recoveryStart &&
+      e.kind === "recovery.decision_stated" &&
+      timely(e),
   );
-  const resumed = events.some(
-    (e) => e.kind === "recovery.started" && timely(e),
-  );
+  const resumed = Boolean(replacement.recoveryStart);
   if (
-    ackedReplaced &&
-    events.some(
-      (e) =>
-        e.kind === "handoff.saved" &&
-        baseRole(e.payload.role) === replacedRole &&
-        timely(e),
-    )
-  ) {
+    replacement.problems.length ||
+    (ackedReplaced && !replacement.handoffBound)
+  )
+    decisionUndetermined = true;
+  if (ackedReplaced && replacement.handoffBound) {
     const verdict = review?.handoff?.facts?.decision_or_blocker;
     if (!["correct", "incorrect", "absent"].includes(verdict))
       decisionUndetermined = true;
@@ -1487,11 +1685,10 @@ export function deriveLedger({
     .filter((v) => v !== null);
 
   // --- recovery ---
-  const recStart = events.find(
-    (e) => e.kind === "recovery.started" && timely(e),
-  );
+  const recStart = replacement.recoveryStart;
   const recDecision = events.find(
     (e) =>
+      recStart &&
       e.kind === "recovery.decision_stated" &&
       timely(e) &&
       e.payload.candidate === true &&
@@ -1502,6 +1699,7 @@ export function deriveLedger({
   );
   const recAction = events.find(
     (e) =>
+      recStart &&
       e.kind === "recovery.first_action" &&
       e.payload.valid === true &&
       timely(e),
@@ -1628,19 +1826,27 @@ export function deriveLedger({
     obsolete_work_accepted: fromEval((e) =>
       observed(e.obsolete_work_roles?.length ?? 0),
     ),
-    handoff_score: !review
+    handoff_score: !replacement.handoffBound
       ? unavailable(
-          "semantic review not recorded; lexical candidates are not scores",
+          "handoff is not bound to the declared registered replacement lifecycle",
         )
-      : observed(
-          Object.values(review.handoff?.facts ?? {}).filter(
-            (v) => v === "correct",
-          ).length,
-          [],
+      : !review
+        ? unavailable(
+            "semantic review not recorded; lexical candidates are not scores",
+          )
+        : observed(
+            Object.values(review.handoff?.facts ?? {}).filter(
+              (v) => v === "correct",
+            ).length,
+            [],
+          ),
+    handoff_candidate_count: !replacement.handoffBound
+      ? unavailable(
+          "handoff is not bound to the declared registered replacement lifecycle",
+        )
+      : fromEval((e) =>
+          e.handoff ? observed(e.handoff.candidate_count, []) : observed(0, []),
         ),
-    handoff_candidate_count: fromEval((e) =>
-      e.handoff ? observed(e.handoff.candidate_count, []) : observed(0, []),
-    ),
     time_to_initial_result_ms: {
       w1:
         perRole.w1.initial_result_ms === null
@@ -1853,6 +2059,8 @@ export function classifyOutcome({
   if (stopReason === "harness_failure") return "harness_invalid";
   if (flags.includes("budget_not_enforced")) return "harness_invalid";
   if (flags.some((f) => f.startsWith("late_state_evidence:")))
+    return "harness_invalid";
+  if (flags.some((f) => f.startsWith("replacement_invalid:")))
     return "harness_invalid";
   if (flags.some((f) => f.startsWith("schedule_late")))
     return "harness_invalid";
@@ -2146,6 +2354,10 @@ export function validateBundle({ bundle, rubric, rubricSha256, declaration }) {
       trialDir: t.trialDir,
     });
     ledgers[id] = trialLedger;
+    for (const flag of trialLedger.flags.filter((f) =>
+      f.startsWith("replacement_invalid:"),
+    ))
+      add("replacement_invalid", flag, id);
     for (const flag of trialLedger.flags.filter((f) =>
       f.startsWith("prevention_evidence_invalid:"),
     ))
