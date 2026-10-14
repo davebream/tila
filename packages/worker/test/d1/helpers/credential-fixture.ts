@@ -8,6 +8,7 @@ export function createCredentialFixture(
   beforeWorkloadMigration?: (sqlite: Database.Database) => void,
   beforeHumanMigration?: (sqlite: Database.Database) => void,
   beforeRevisionWatermarksMigration?: (sqlite: Database.Database) => void,
+  beforeServiceRevisionsMigration?: (sqlite: Database.Database) => void,
 ) {
   const sqlite = new Database(":memory:");
   const dir = new URL("../../../migrations/global/", import.meta.url);
@@ -18,6 +19,7 @@ export function createCredentialFixture(
     if (file.startsWith("0029_")) beforeWorkloadMigration?.(sqlite);
     if (file.startsWith("0032_")) beforeHumanMigration?.(sqlite);
     if (file.startsWith("0035_")) beforeRevisionWatermarksMigration?.(sqlite);
+    if (file.startsWith("0036_")) beforeServiceRevisionsMigration?.(sqlite);
     sqlite.exec(readFileSync(new URL(file, dir), "utf8"));
   }
   sqlite

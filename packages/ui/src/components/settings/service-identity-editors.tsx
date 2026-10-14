@@ -1,12 +1,12 @@
 import {
   PolicyFields,
-  type PolicyForm,
+  PolicyForm,
   formToPolicy,
   policySummary,
   policyToForm,
   presetForm,
 } from "@/components/settings/policy-fields";
-import { WriteFailure } from "@/components/settings/settings-ui";
+import { LandedNotice, WriteFailure } from "@/components/settings/settings-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmAction } from "@/components/ui/confirm-action";
@@ -33,11 +33,26 @@ import {
   revokeWorkloadBinding,
   updateWorkloadBinding,
 } from "@/lib/api";
-import { failureKind, failureMessage } from "@/lib/mutation-errors";
+import {
+  failureKind,
+  failureMessage,
+  revisionConflict,
+} from "@/lib/mutation-errors";
 import { deriveSectionState } from "@/lib/query-state";
+import { useSettingsDraft } from "@/lib/settings-draft";
 import { useMutation } from "@tanstack/react-query";
 import { GITHUB_ACTIONS_ISSUER } from "@tila/schemas";
 import { type FormEvent, useState } from "react";
+import { z } from "zod";
+
+const RenameForm = z.object({ display_name: z.string() });
+const BindingDraftSchema = z.object({
+  name: z.string(),
+  provider: z.enum(["github-actions", "oidc"]),
+  issuer: z.string(),
+  subject: z.string(),
+  policy: PolicyForm,
+});
 
 const NAME = /^[a-z0-9-]{1,64}$/;
 const NAME_RULE = "Use 1–64 lowercase letters, digits or hyphens.";
@@ -188,9 +203,18 @@ export function RenameServiceAccountDrawer({
   onSaved: (account: ServiceAccount) => void;
   onStepUp: (error: unknown) => boolean;
 }) {
-  const { projectId } = useAuth();
+  const { projectId, capabilities } = useAuth();
   const invalidate = useInvalidateAccess();
-  const [displayName, setDisplayName] = useState(account.display_name);
+  const draft = useSettingsDraft({
+    key: null,
+    current: {
+      revision: account.revision,
+      form: { display_name: account.display_name },
+    },
+    canonical: (form) => ({ display_name: form.display_name.trim() }),
+    schemas: { form: RenameForm, command: z.unknown() },
+  });
+  const displayName = draft.form.display_name;
   const rename = useMutation({
     networkMode: "always",
     mutationFn: () =>
@@ -198,20 +222,31 @@ export function RenameServiceAccountDrawer({
         projectId as string,
         account.principal_id,
         displayName.trim(),
+        draft.revision,
       ),
     onSuccess: (result) => {
+      draft.discard();
       void invalidate.services();
       onSaved(result.service_account);
     },
     onError: (error) => {
-      if (onStepUp(error)) onClose();
+      if (onStepUp(error)) return onClose();
+      if (failureKind(error) === "conflict") void invalidate.services();
+      if (failureKind(error) === "forbidden") void invalidate.access();
     },
   });
   const problem =
     displayName.trim() && displayName.trim().length <= 255
       ? null
       : "Enter a display name of up to 255 characters.";
-  const unchanged = displayName.trim() === account.display_name;
+  const unchanged = !draft.dirty;
+  const conflict = revisionConflict(rename.error);
+  const blocked =
+    capabilities?.service_accounts_manage !== true ||
+    draft.stale ||
+    Boolean(conflict) ||
+    account.revoked_at !== null ||
+    !Number.isSafeInteger(draft.revision);
 
   return (
     <Drawer title={`Rename ${account.name}`} onClose={onClose}>
@@ -220,7 +255,7 @@ export function RenameServiceAccountDrawer({
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          if (!problem && !unchanged) rename.mutate();
+          if (!problem && !unchanged && !blocked) rename.mutate();
         }}
       >
         <p className="text-sm text-muted-foreground">
@@ -228,13 +263,31 @@ export function RenameServiceAccountDrawer({
           <span className="font-mono">{account.principal_id}</span> never
           change, so credentials and history keep working.
         </p>
+        {draft.stale ? (
+          <LandedNotice
+            revision={account.revision}
+            changed={draft.landed.map(() => "display name")}
+            onKeepMine={() => {
+              rename.reset();
+              draft.keepMine();
+            }}
+            onLoadLatest={() => {
+              rename.reset();
+              draft.discard();
+            }}
+          />
+        ) : (
+          conflict && <LandedNotice revision={null} changed={[]} />
+        )}
         <TextField
           label="Display name"
           required
           value={displayName}
           disabled={rename.isPending}
           error={problem ?? undefined}
-          onChange={(e) => setDisplayName(e.target.value)}
+          onChange={(e) =>
+            draft.edit((form) => ({ ...form, display_name: e.target.value }))
+          }
         />
         <UnreplayableFailure error={rename.error} action="rename" />
         <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
@@ -242,13 +295,18 @@ export function RenameServiceAccountDrawer({
             type="button"
             variant="ghost"
             disabled={rename.isPending}
-            onClick={onClose}
+            onClick={() => {
+              draft.discard();
+              onClose();
+            }}
           >
             Cancel
           </Button>
           <Button
             type="submit"
-            disabled={rename.isPending || Boolean(problem) || unchanged}
+            disabled={
+              rename.isPending || Boolean(problem) || unchanged || blocked
+            }
           >
             {rename.isPending ? "Saving…" : "Save name"}
           </Button>
@@ -441,19 +499,33 @@ function BindingForm({
   onDone: (message: string | null) => void;
   onStepUp: (error: unknown) => boolean;
 }) {
-  const { projectId } = useAuth();
+  const { projectId, capabilities } = useAuth();
   const invalidate = useInvalidateAccess();
-  const [value, setValue] = useState<BindingDraft>(() =>
-    binding
-      ? {
-          name: binding.name,
-          provider: binding.provider,
-          issuer: binding.issuer,
-          subject: binding.subject,
-          policy: policyToForm(binding.policy),
-        }
-      : NEW_BINDING,
-  );
+  const draft = useSettingsDraft({
+    key: null,
+    current: {
+      revision: binding?.revision ?? 1,
+      form: binding
+        ? {
+            name: binding.name,
+            provider: binding.provider,
+            issuer: binding.issuer,
+            subject: binding.subject,
+            policy: policyToForm(binding.policy),
+          }
+        : NEW_BINDING,
+    },
+    canonical: (form) => {
+      const policy = formToPolicy(form.policy);
+      return {
+        ...form,
+        policy: policy.problem === null ? policy.policy : form.policy,
+      };
+    },
+    schemas: { form: BindingDraftSchema, command: z.unknown() },
+  });
+  const value = draft.form;
+  const setValue = (next: BindingDraft) => draft.edit(() => next);
   const [submitted, setSubmitted] = useState(false);
   const built = formToPolicy(value.policy);
   const save = useMutation({
@@ -466,6 +538,7 @@ function BindingForm({
           account.principal_id,
           binding.binding_id,
           built.policy,
+          draft.revision,
         );
       else
         await createWorkloadBinding(projectId as string, account.principal_id, {
@@ -477,6 +550,7 @@ function BindingForm({
         });
     },
     onSuccess: () => {
+      draft.discard();
       void invalidate.services();
       onDone(
         binding
@@ -485,7 +559,9 @@ function BindingForm({
       );
     },
     onError: (error) => {
-      onStepUp(error);
+      if (onStepUp(error)) return;
+      if (failureKind(error) === "conflict") void invalidate.services();
+      if (failureKind(error) === "forbidden") void invalidate.access();
     },
   });
   const problems = binding
@@ -501,7 +577,17 @@ function BindingForm({
             : "Enter the subject claim to match (up to 255 characters).",
       };
   const blocked =
-    Object.values(problems).some(Boolean) || built.problem !== null;
+    capabilities?.workload_bindings_manage !== true ||
+    Object.values(problems).some(Boolean) ||
+    built.problem !== null;
+  const conflict = revisionConflict(save.error);
+  const stale =
+    binding &&
+    (draft.stale ||
+      Boolean(conflict) ||
+      binding.revoked_at !== null ||
+      account.revoked_at !== null ||
+      !Number.isSafeInteger(draft.revision));
   const shown: Record<string, string | undefined> = submitted ? problems : {};
 
   return (
@@ -514,7 +600,7 @@ function BindingForm({
       onSubmit={(event) => {
         event.preventDefault();
         setSubmitted(true);
-        if (!blocked) save.mutate();
+        if (!blocked && !stale) save.mutate();
       }}
     >
       {!binding && (
@@ -572,6 +658,23 @@ function BindingForm({
           />
         </>
       )}
+      {binding &&
+        (draft.stale ? (
+          <LandedNotice
+            revision={binding.revision}
+            changed={draft.landed.map(() => "policy")}
+            onKeepMine={() => {
+              save.reset();
+              draft.keepMine();
+            }}
+            onLoadLatest={() => {
+              save.reset();
+              draft.discard();
+            }}
+          />
+        ) : (
+          conflict && <LandedNotice revision={null} changed={[]} />
+        ))}
       <PolicyFields
         form={value.policy}
         disabled={save.isPending}
@@ -588,11 +691,18 @@ function BindingForm({
           variant="ghost"
           size="sm"
           disabled={save.isPending}
-          onClick={() => onDone(null)}
+          onClick={() => {
+            draft.discard();
+            onDone(null);
+          }}
         >
           Cancel
         </Button>
-        <Button type="submit" size="sm" disabled={save.isPending}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={save.isPending || blocked || Boolean(stale)}
+        >
           {save.isPending ? "Saving…" : binding ? "Save policy" : "Add binding"}
         </Button>
       </div>

@@ -362,7 +362,10 @@ export const ServiceAccountCreateRequestSchema = z
   })
   .strict();
 export const ServiceAccountUpdateRequestSchema = z
-  .object({ display_name: z.string().min(1).max(255) })
+  .object({
+    display_name: z.string().min(1).max(255),
+    expected_revision: z.number().int().positive().optional(),
+  })
   .strict();
 export const ServiceAccountSchema = z.object({
   principal_id: z.string(),
@@ -372,6 +375,7 @@ export const ServiceAccountSchema = z.object({
   created_at: z.number().int(),
   created_by: z.string(),
   revoked_at: z.number().int().nullable(),
+  revision: z.number().int().positive(),
 });
 export type ServiceAccount = z.infer<typeof ServiceAccountSchema>;
 export const TokenRotateRequestSchema = z
@@ -398,8 +402,23 @@ export type WorkloadBindingRequest = z.infer<
 >;
 
 export const WorkloadBindingUpdateRequestSchema = z
-  .object({ policy: CredentialPolicySchema })
+  .object({
+    policy: CredentialPolicySchema,
+    expected_revision: z.number().int().positive().optional(),
+  })
   .strict();
+
+export const WorkloadBindingSchema = WorkloadBindingRequestSchema.extend({
+  binding_id: z.string(),
+  principal_id: z.string(),
+  project_id: z.string(),
+  created_at: z.number().int(),
+  created_by: z.string(),
+  revoked_at: z.number().int().nullable(),
+  revision: z.number().int().positive(),
+  policy: CredentialPolicyReadSchema,
+});
+export type WorkloadBinding = z.infer<typeof WorkloadBindingSchema>;
 
 /** Current authority can narrow, but never expand, an already issued session. */
 export function intersectCredentialPolicies(

@@ -33,6 +33,7 @@ import {
   credentials,
   membershipEvents,
   projectMemberships,
+  projects,
   serviceAccounts,
   sessions,
   tokens,
@@ -46,6 +47,14 @@ export interface CredentialActor {
 }
 export class CredentialConflict extends Error {}
 export class CredentialDenied extends Error {}
+export class CredentialRevisionConflict extends Error {
+  constructor(
+    public readonly revision: number,
+    public readonly resource: "service-account" | "workload-binding",
+  ) {
+    super("Another change landed; reload the resource before saving");
+  }
+}
 export const SCOPED_TOKEN_MARKER = "scoped-v1";
 
 export class CredentialStore {
@@ -71,6 +80,38 @@ export class CredentialStore {
       details_json: JSON.stringify(details),
     });
   }
+  /** Immediately follows an UPDATE in a D1 batch; failed writes have no audit. */
+  private updateEvent(
+    projectId: string,
+    actor: CredentialActor,
+    target: string,
+    action: string,
+    details: unknown,
+  ) {
+    return this.db.insert(credentialEvents).select(
+      this.db
+        .select({
+          event_id: sql<string>`${crypto.randomUUID()}`.as("event_id"),
+          project_id: sql<string>`${projectId}`.as("project_id"),
+          actor_principal_id: sql<string>`${actor.principalId}`.as(
+            "actor_principal_id",
+          ),
+          actor_token_id: sql<string | null>`${actor.tokenId ?? null}`.as(
+            "actor_token_id",
+          ),
+          target_id: sql<string>`${target}`.as("target_id"),
+          action: sql<string>`${action}`.as("action"),
+          occurred_at: sql<number>`${Math.floor(Date.now() / 1000)}`.as(
+            "occurred_at",
+          ),
+          details_json: sql<string>`${JSON.stringify(details)}`.as(
+            "details_json",
+          ),
+        })
+        .from(sql`(select 1)`)
+        .where(sql`changes() > 0`),
+    );
+  }
   async createService(
     projectId: string,
     input: { name: string; display_name: string; role: ProjectRole },
@@ -86,6 +127,7 @@ export class CredentialStore {
       created_at: Math.floor(Date.now() / 1000),
       created_by: actor.principalId,
       revoked_at: null,
+      revision: 1,
     };
     await this.db.batch([
       this.db.insert(serviceAccounts).values(row),
@@ -130,24 +172,45 @@ export class CredentialStore {
     principalId: string,
     displayName: string,
     actor: CredentialActor,
+    expectedRevision?: number,
   ) {
     const [rows] = await this.db.batch([
       this.db
         .update(serviceAccounts)
-        .set({ display_name: displayName })
+        .set({
+          display_name: displayName,
+          revision: sql`${serviceAccounts.revision} + 1`,
+        })
         .where(
           and(
             eq(serviceAccounts.project_id, projectId),
             eq(serviceAccounts.principal_id, principalId),
             isNull(serviceAccounts.revoked_at),
+            expectedRevision === undefined
+              ? undefined
+              : eq(serviceAccounts.revision, expectedRevision),
           ),
         )
         .returning(),
-      this.event(projectId, actor, principalId, "service-updated", {
+      this.updateEvent(projectId, actor, principalId, "service-updated", {
         display_name: displayName,
       }),
     ]);
-    return rows[0] ?? null;
+    if (rows[0]) return rows[0];
+    const current = await this.db
+      .select()
+      .from(serviceAccounts)
+      .where(
+        and(
+          eq(serviceAccounts.project_id, projectId),
+          eq(serviceAccounts.principal_id, principalId),
+          isNull(serviceAccounts.revoked_at),
+        ),
+      )
+      .get();
+    if (current && expectedRevision !== undefined)
+      throw new CredentialRevisionConflict(current.revision, "service-account");
+    return null;
   }
   async revokeService(
     projectId: string,
@@ -836,6 +899,7 @@ export class CredentialStore {
       created_at: Math.floor(Date.now() / 1000),
       created_by: actor.principalId,
       revoked_at: null,
+      revision: 1,
     };
     await this.db.batch([
       this.db.insert(workloadBindings).values(row),
@@ -852,7 +916,31 @@ export class CredentialStore {
     bindingId: string,
     requestedPolicy: CredentialPolicy,
     actor: CredentialActor,
+    expectedRevision?: number,
   ) {
+    const activeTarget = and(
+      eq(workloadBindings.project_id, projectId),
+      eq(workloadBindings.principal_id, principalId),
+      eq(workloadBindings.binding_id, bindingId),
+      isNull(workloadBindings.revoked_at),
+      exists(
+        this.db
+          .select({ id: serviceAccounts.principal_id })
+          .from(serviceAccounts)
+          .where(
+            and(
+              eq(serviceAccounts.project_id, projectId),
+              eq(serviceAccounts.principal_id, principalId),
+              isNull(serviceAccounts.revoked_at),
+            ),
+          ),
+      ),
+    );
+    const findActive = () =>
+      this.db.select().from(workloadBindings).where(activeTarget).get();
+    // Scope before membership/revision outcomes to avoid disclosing a foreign
+    // binding's revision or treating revoked authority as an editable conflict.
+    if (!(await findActive())) return null;
     const membership = await new ProjectMembershipStore(this.binding).resolve(
       projectId,
       principalId,
@@ -868,21 +956,85 @@ export class CredentialStore {
     const [rows] = await this.db.batch([
       this.db
         .update(workloadBindings)
-        .set({ policy_json: JSON.stringify(policy) })
+        .set({
+          policy_json: JSON.stringify(policy),
+          revision: sql`${workloadBindings.revision} + 1`,
+        })
         .where(
           and(
-            eq(workloadBindings.project_id, projectId),
-            eq(workloadBindings.principal_id, principalId),
-            eq(workloadBindings.binding_id, bindingId),
-            isNull(workloadBindings.revoked_at),
+            activeTarget,
+            expectedRevision === undefined
+              ? undefined
+              : eq(workloadBindings.revision, expectedRevision),
+            exists(
+              this.db
+                .select({ id: projectMemberships.membership_id })
+                .from(projectMemberships)
+                .where(
+                  and(
+                    eq(projectMemberships.project_id, projectId),
+                    eq(projectMemberships.principal_id, principalId),
+                    eq(
+                      projectMemberships.membership_id,
+                      membership.explicitMembershipId ?? "",
+                    ),
+                    eq(projectMemberships.role, membership.role),
+                    isNull(projectMemberships.revoked_at),
+                    exists(
+                      this.db
+                        .select({ id: projects.project_id })
+                        .from(projects)
+                        .where(
+                          and(
+                            eq(projects.project_id, projectId),
+                            eq(projects.archived, 0),
+                            or(
+                              inArray(projects.membership_mode, [
+                                "explicit",
+                                "hybrid",
+                                "service-only",
+                              ]),
+                              and(
+                                eq(projects.membership_mode, "github-mirrored"),
+                                eq(projectMemberships.role, "owner"),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ),
+                  ),
+                ),
+            ),
           ),
         )
         .returning(),
-      this.event(projectId, actor, bindingId, "workload-policy-updated", {
+      this.updateEvent(projectId, actor, bindingId, "workload-policy-updated", {
         policy,
       }),
     ]);
-    if (!rows[0]) return null;
+    if (!rows[0]) {
+      const current = await findActive();
+      if (!current) return null;
+      const live = await new ProjectMembershipStore(this.binding).resolve(
+        projectId,
+        principalId,
+      );
+      if (!live || live.role !== membership.role)
+        throw new CredentialDenied(
+          "Service membership changed; reload before saving",
+        );
+      if (
+        expectedRevision !== undefined &&
+        current.revision !== expectedRevision
+      )
+        throw new CredentialRevisionConflict(
+          current.revision,
+          "workload-binding",
+        );
+      throw new CredentialDenied(
+        "Service authority changed; reload before saving",
+      );
+    }
     const { policy_json, ...row } = rows[0];
     return { ...row, policy };
   }

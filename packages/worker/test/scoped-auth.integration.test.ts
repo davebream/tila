@@ -180,6 +180,117 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
     vi.unstubAllGlobals();
   });
 
+  it("revision-checks service and binding routes without leaking missing or revoked state", async () => {
+    const server = app();
+    const base = "/projects/p/service-accounts";
+    const created = await request(server, base, bootstrap, "POST", {
+      name: "ci",
+      display_name: "CI",
+      role: "participant",
+    });
+    expect(created.status).toBe(201);
+    const { service_account: account } = (await created.json()) as {
+      service_account: { principal_id: string; revision: number };
+    };
+    expect(account.revision).toBe(1);
+    const path = `${base}/${encodeURIComponent(account.principal_id)}`;
+    const bindingResponse = await request(
+      server,
+      `${path}/workload-bindings`,
+      bootstrap,
+      "POST",
+      {
+        name: "ci",
+        provider: "oidc",
+        issuer: "https://issuer.example",
+        subject: "ci",
+        policy,
+      },
+    );
+    expect(bindingResponse.status).toBe(201);
+    const { binding } = (await bindingResponse.json()) as {
+      binding: { binding_id: string; revision: number };
+    };
+    expect(binding.revision).toBe(1);
+    for (const edit of [
+      { path, body: { display_name: "Changed" }, resource: "service-account" },
+      {
+        path: `${path}/workload-bindings/${binding.binding_id}`,
+        body: { policy },
+        resource: "workload-binding",
+      },
+    ]) {
+      expect(
+        (
+          await request(server, edit.path, bootstrap, "PATCH", {
+            ...edit.body,
+            expected_revision: 1,
+          })
+        ).status,
+      ).toBe(200);
+      const stale = await request(server, edit.path, bootstrap, "PATCH", {
+        ...edit.body,
+        expected_revision: 1,
+      });
+      expect(stale.status).toBe(412);
+      expect(await stale.json()).toMatchObject({
+        error: {
+          code: "revision-conflict",
+          revision: 2,
+          resource: edit.resource,
+        },
+      });
+      expect(
+        (await request(server, edit.path, bootstrap, "PATCH", edit.body))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await request(server, edit.path, bootstrap, "PATCH", {
+            ...edit.body,
+            expected_revision: 0,
+          })
+        ).status,
+      ).toBe(400);
+    }
+    const foreign = await request(
+      server,
+      `${base}/service:foreign/workload-bindings/${binding.binding_id}`,
+      bootstrap,
+      "PATCH",
+      { policy, expected_revision: 1 },
+    );
+    expect(foreign.status).toBe(404);
+    expect(await foreign.json()).not.toHaveProperty("error.revision");
+    const restricted = await issue({
+      role: "participant",
+      capabilities: ["summary:read"],
+    });
+    const denied = await request(server, path, restricted.plaintext, "PATCH", {
+      display_name: "Unauthorized",
+      expected_revision: 1,
+    });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).not.toHaveProperty("error.revision");
+    expect((await request(server, path, bootstrap, "DELETE")).status).toBe(200);
+    for (const target of [
+      path,
+      `${path}/workload-bindings/${binding.binding_id}`,
+    ]) {
+      const response = await request(
+        server,
+        target,
+        bootstrap,
+        "PATCH",
+        target === path
+          ? { display_name: "Revived", expected_revision: 1 }
+          : { policy, expected_revision: 1 },
+      );
+      expect(response.status).toBe(404);
+      expect(await response.json()).not.toHaveProperty("error.revision");
+    }
+  });
+
   it("authorizes every continuity aggregate component and denies restricted snapshots", async () => {
     const server = app();
     for (const missing of [

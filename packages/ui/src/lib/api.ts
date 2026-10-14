@@ -56,11 +56,13 @@ import type {
   RepoOidcPolicy,
   RuntimeEnrollment,
   RuntimeInvitation,
+  ServiceAccount,
   SessionCapabilities,
   TokenIssueRequest,
   TokenListItem,
   UpdateProjectSettings,
   WhoamiResponse,
+  WorkloadBinding,
   WorkloadBindingRequest,
 } from "@tila/schemas";
 import type {
@@ -873,16 +875,7 @@ export type MembershipRepo = {
   membership_role_cap: Exclude<ProjectRole, "owner">;
 };
 
-export type ServiceAccount = {
-  principal_id: string;
-  project_id: string;
-  name: string;
-  display_name: string;
-  created_at: number;
-  created_by: string;
-  revoked_at: number | null;
-};
-
+export type { ServiceAccount } from "@tila/schemas";
 export function getMembershipPolicy(
   projectId: string,
 ): Promise<{ ok: true; mode: ProjectMembershipMode }> {
@@ -1687,14 +1680,7 @@ export function removeRepoLink(
   );
 }
 
-export interface WorkloadBinding extends WorkloadBindingRequest {
-  binding_id: string;
-  principal_id: string;
-  project_id: string;
-  created_at: number;
-  created_by: string;
-  revoked_at: number | null;
-}
+export type { WorkloadBinding } from "@tila/schemas";
 
 const servicePath = (projectId: string, principalId: string, rest = "") =>
   projectPath(
@@ -1713,9 +1699,11 @@ export function renameServiceAccount(
   projectId: string,
   principalId: string,
   displayName: string,
+  expectedRevision?: number,
 ): Promise<{ ok: true; service_account: ServiceAccount }> {
   return mutate("PATCH", servicePath(projectId, principalId), {
     display_name: displayName,
+    expected_revision: expectedRevision,
   });
 }
 
@@ -1756,6 +1744,7 @@ export function updateWorkloadBinding(
   principalId: string,
   bindingId: string,
   policy: CredentialPolicy,
+  expectedRevision?: number,
 ): Promise<{ ok: true; binding: WorkloadBinding }> {
   return mutate(
     "PATCH",
@@ -1764,7 +1753,7 @@ export function updateWorkloadBinding(
       principalId,
       `/workload-bindings/${encodeURIComponent(bindingId)}`,
     ),
-    { policy },
+    { policy, expected_revision: expectedRevision },
   );
 }
 
