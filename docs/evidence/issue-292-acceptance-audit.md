@@ -1,13 +1,13 @@
 # Product acceptance audit for #292 — 2026-10-14
 
-**Disposition: keep #292 open.** Closed children are delivered foundations, not evidence that S1–S3 or production activation passed. This is a read-only lead acceptance review, not a coding lane or a new implementation backlog.
+**Disposition: keep #292 open.** Closed children are delivered foundations, not evidence that S1–S3 or production activation passed. This records product acceptance boundaries at the cited source revision.
 
 ## Snapshot and evidence rules
 
 - The [epic body and native children](https://github.com/davebream/tila/issues/292) were independently read from GitHub on 2026-10-14. Current #307 body/comment, #308 body, amended #194 and PR #473 were also read.
-- Frozen merged source: `53e64ba5cbda6b5c52d6c1382a7001a35b879d0c` (origin/main when audit began). Existing release-readiness checkout `2c5a4eb61be952f7b08aa29f58cd5e2d23442377` was inspected without mutation. `git diff --name-only HEAD <frozen-main>` identified #416 schema warning and documentation deltas; those relevant files were read with `git show <frozen-main>:...`. Other cited paths are unchanged between those refs. Graphify pointers were verified against source/cross-package references.
+- Source revision: `53e64ba5cbda6b5c52d6c1382a7001a35b879d0c`. This is a dated snapshot; later changes require separate acceptance evidence.
 - C = merged implementation/contract inspected. F = focused fixture/unit/component tests present. R = local Cloudflare runtime test definitions using real DO SQLite/D1/R2 via `@cloudflare/vitest-plugin`. H = dated isolated host/native probe. L = authenticated live scenario evidence. Tests were **not run** in this audit; F/R establish coverage scope, not a new passing execution report. Closed issue state is not a substitute for such a report.
-- This audit ran no application tests, credential probes, provider sessions or deployments. The lead reviewed it and updated #292 to check verified closed children while retaining the broad acceptance gates. Original research and S1–S3 text were preserved; their citations remain dated design inputs, not newly verified product evidence.
+- No application tests were run for this audit. Coverage references describe existing tests, not new passing results.
 
 ## GitHub child checklist — independently verified
 
@@ -34,24 +34,6 @@
 
 There are 18 native children in this snapshot, 15 closed and 3 open. Mark only these verified closed child checkboxes. Preserve priority/dependency text as historical delivery planning; it does not reopen foundations.
 
-## Current follow-up progress, separate from acceptance
-
-GitHub MERGED and merge-commit ancestry of the frozen main were both verified for each merged PR below.
-
-| Work | Verified integration / present boundary |
-|---|---|
-| #450 / PR #451 | `ba26881e5ac36032e33670eb324ed58c63117a58`: deployment target safety. Safe tooling is not authorization/evidence for deployment. |
-| #400 / PR #453 | `8397f3da26a01afeb692a73a9d510e3991653866`: StrictMode step-up return fix; not proof every new form preserves its payload. |
-| #449 / PR #456 | `eba5106878697c2002824006d5111fd542b82e10`: reviewed definition transfer through MCP, exact retry contract. |
-| #398 / PR #458 | `dea6c11bbaa3d6bfbe3e8efba2142a0fd7e5d365`: visible explanation of legacy blocked readiness; unchanged shared readiness semantics. |
-| #439 / PR #459 | `e9c904580eabf91abd917dbc066386ead7d8e479`: service identity/workload binding revision checks; additive global D1 migration `0036_service_identity_revisions.sql`. Apply migrations with compatible server rollout. |
-| #362 / PR #463 | `626fd8275127c7287d1b3418315844a4e8f4e44d`: documented bounded cleanup alternative. No new general worker delete authority. |
-| #416 / PR #465 | `d4b7075b13b57a950602de1ed4f8445953af9c0c`: visibly warn and journal revisionless definition applies; compatibility retained, enforcement later. |
-| Dependency PRs #311 / #314 | `bbe0252d619626001db08139c1b95e0a5b4af465` / `ff7bdf3de31f472dafec9606244c426e5166c2e2`: merged tooling/icon updates, not scenario acceptance. |
-| #399 / PR #473 | GitHub OPEN, non-draft, head `33ccd6146606b55ca829c790419e9555e6c212b6`, no merge commit. Shared listPage/filter/client work is pending integration; existing #300 UI catalogs are already delivered. |
-| #440 / PR #474 | OPEN at `9409b454078e146bcff83600d3fa2c1f71376e77`, submitted with `merge-ready` after integrated validation; not merged source or live GHES/native acceptance. |
-| #448 | OPEN and active. Shared/CLI slices have lead-reported focused validation. UI account-scoped receipt and stale-preview findings were relayed for regression-backed correction; no correction acceptance is inferred here. Review covered shared head `25cb0809c69a7e8a956bc103fd3931bca7651260` and the in-progress UI; the page SHA-256 began `53d68c8133a2576f`. |
-
 ## Definition-of-done criteria
 
 All eight broad epic checkboxes remain unchecked in the proposed update. This preserves the distinction between delivered foundations and the final integrated acceptance record.
@@ -59,7 +41,7 @@ All eight broad epic checkboxes remain unchecked in the proposed update. This pr
 | Criterion (original order) | C / source evidence | F / R evidence available | Remaining gate / disposition |
 |---|---|---|---|
 | 1. Every project setting has tested UI/shared semantics; no file-only ordinary settings | `docs/02-ARCHITECTURE.md` §14.2 inventories definitions, identities/access and excluded host/operational state; `ui/src/pages/settings-definitions*.tsx`, `settings-{agents,rooms,signal-groups,service-identities,runtime-access,general,repositories,credentials}.tsx`; shared schemas and Worker routes. | UI settings page suites; R `definition-editor`, `settings-identities`, `settings-access`, `service-identity-revisions`. | Reconcile inventory against final integrated surfaces in #308 S1. #448 non-secret mapped settings transfer is still pending. Operational secrets/host credentials are intentionally not project fields. |
-| 2. Concurrent UI/CLI/MCP changes and stale imports cannot silently overwrite | `ops-sqlite/src/schema-ops.ts` transaction/receipt/preconditions; `config-revision-ops.ts`; `core/src/definition-transfer.ts`; `mcp-server/src/tools/schema.ts`; revision-aware UI/CLI/SDK clients. | F definition-transfer, schema-transfer, schema warning suites; R `schema-revision`, `definition-editor`, `definition-transfer`, `settings-identities`, `service-identity-revisions`. | Reviewed clients reject stale revisions. User-approved #416 still permits legacy revisionless applies with visible warning and journal event; do not claim unconditional rejection for every old client. Managed-project guard precedes cached replay. Other documented legacy optional revision paths must stay explicit. S1/S3 concurrent-client evidence and #448 retry regressions remain. |
+| 2. Concurrent UI/CLI/MCP changes and stale imports cannot silently overwrite | `ops-sqlite/src/schema-ops.ts` transaction/receipt/preconditions; `config-revision-ops.ts`; `core/src/definition-transfer.ts`; `mcp-server/src/tools/schema.ts`; revision-aware UI/CLI/SDK clients. | F definition-transfer, schema-transfer, schema warning suites; R `schema-revision`, `definition-editor`, `definition-transfer`, `settings-identities`, `service-identity-revisions`. | Reviewed clients reject stale revisions. The compatibility behavior in #416 still permits legacy revisionless applies with visible warning and journal event; do not claim unconditional rejection for every old client. Managed-project guard precedes cached replay. Other documented legacy optional revision paths must stay explicit. S1/S3 concurrent-client evidence and #448 retry regressions remain. |
 | 3. Definition/identity/work/runtime/history boundaries in UI/docs/contracts | Architecture §14.1/§14.5, `schemas/src/{runtime-view,question,schema-history}.ts`, UI settings/runtime/queue/conversation surfaces; `ops-sqlite/src/attempt-ops.ts` records revisions as audit evidence, never authority. | F runtime/settings/queue page suites; R `runtime-view`, `attempt-continuity`, `attempt-corrections`. | Substantial delivered coverage. Final inventory/docs reconciliation and integrated journey evidence still required; runtime observation never proves completion. |
 | 4. Dashboard correctness defects covered by regressions | `ui/src/lib/{lease,query-state,attention,readiness-context}.ts`; `components/admin/step-up-resume.tsx`; tasks/overview use the same readiness explanation. | F `ui/test/lib/{lease,query-state,attention,readiness-context}.test.ts`, presence/runtime/overview/tasks, `hooks/step-up-resume.test.tsx`. | Original #294/#295 fixes and follow-ups #400/#398 are delivered. Capture final integrated test provenance; do not reimplement closed fixes. #448 introduces separately tracked UI blockers, not proof these foundation fixes failed. |
 | 5. Durable assignments/questions/results and UI recover without inferred completion | `ops-sqlite/src/{attempt-ops,attempt-recovery-ops,attempt-correction-ops,question-ops,question-state-ops}.ts`; `worker/src/routes/questions.ts` rechecks membership; UI queue/work actions; delivery projection keeps work result separate. | R `attempts`, `attempt-authority`, `attempt-continuity`, `attempt-corrections`, `questions`, `question-api`; F queue/runtime pages. | R covers cold starts, stale/revoked authority, cancellation/answer races and immutable results. Actual provider-session replacement, Mac outage, draft/account/epoch preservation require #283 + #308 S2/S3. |
@@ -91,17 +73,15 @@ Paths in the table are relative to `packages/` unless prefixed `docs/`.
 
 #307 is no longer an all-unimplemented ticket. Build identity (#337), independent `CONVERSATION_CURSOR_KEY` (#340), readiness UI (#344), Operations cutover procedure and local Cloudflare cutover tests exist. `hash-pepper-cutover.test.ts` covers owner recovery, lost rotation response, rollback boundaries, installations/runs and workload re-exchange. These are fixture/runtime coverage, not proof that the operator executed the isolated deployed rehearsal or activated production. Supplying the independent cursor key does not require changing credential hashes; missing keys still fail closed. Retain explicit activation and authenticated proof gates. Do not repeat the historic v0.4.0/0.1.0 deployment report as a fresh production observation.
 
-`docs/evidence/issue-283-acceptance-v3.json` explicitly says incomplete: full two-account matrix and both host directions are not run; restoration is not proven. `issue-283-herdr-0-9-3-v2.json` sets supported=false. Historical native responses/account checks and isolated host probes do not prove current restoration/routing. The accepted capability audit identifies shipped standalone attended restoration and real adapter gaps; do not reimplement the former or bypass the latter with terminal injection. Local Herdr development orchestration is not Tila acceptance.
+`docs/evidence/issue-283-acceptance-v3.json` explicitly says incomplete: full two-account matrix and both host directions are not run; restoration is not proven. `issue-283-herdr-0-9-3-v2.json` sets supported=false. Historical native responses/account checks and isolated host probes do not prove current restoration/routing. Standalone attended restoration is available; Herdr registration and unattended restoration require their own acceptance evidence.
 
-Current user-confirmed prerequisite: this machine has no valid tila/Cloudflare operator configuration. Lead's latest host inventory reports the Mac peer offline. Needed later: supplied isolated deployment/project and scoped principals, authorized operator/run target, live Mac/Linux/native-account availability, exact source/runtime/profile/migration identity and redacted evidence retention. Do not probe ambient credentials.
+Live acceptance requires an isolated deployment/project with scoped principals, Mac and Linux hosts with authenticated native accounts, exact build/migration/runtime/profile identities, and redacted evidence. These requirements have not been demonstrated by this audit.
 
-## Minimal remaining acceptance work and closure rule
+## Remaining acceptance evidence
 
-1. Finish/merge feasible pending follow-ups with final review and targeted/package/runtime evidence; preserve #448 frozen receipt/account/race safeguards. Do not invent hard dependencies for unrelated GHES or dependency updates solely because files overlap.
-2. #308 freezes scenario protocol/datasets/environment and #194 rubric before measurements. Reuse existing foundation tests; add only missing journey orchestration/evidence, not replacement features.
-3. Run bounded local/browser/Cloudflare fixtures at the selected integrated source and record what they actually exercise. A passing local suite may advance F/R, never L.
-4. Complete #283's actual supported native/cross-host gates when inputs are supplied; preserve unsupported statuses until proven. Record any intentional scope revision explicitly rather than editing expected results to pass.
-5. Execute the isolated operational rehearsal and separately authorized activation/readiness proof required by #307/S3. Release readiness preparation, merged code or health-only smoke cannot substitute.
-6. Publish S1–S3 evidence with exact source/build/migrations, environment, observer, raw non-secret artifacts and failed probes; hand measured outcomes to #194. Reconcile the #293 inventory and compatibility caveats. Only then decide parent closure criterion by criterion.
+- Integrated S1–S3 results covering the settings inventory, concurrency, identity mapping, recovery and explicit outcomes.
+- Authenticated native and cross-host results required by #283, with unsupported capabilities identified.
+- Isolated operational rehearsal and production readiness evidence required by #307.
+- Measured setup, diagnosis and recovery outcomes for #194, including failed probes and limitations.
 
-The reviewed issue update preserves research and S1–S3, checks only verified closed children, labels the initial problem/review record historical and reconciles the obsolete #194/#307 status text. #292 remains open. No operational action is authorized by this audit.
+Local tests establish fixture/runtime coverage; they do not establish live cross-host or production acceptance. #292 remains open until its criteria are supported by the required evidence.
