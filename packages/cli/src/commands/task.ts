@@ -1,4 +1,8 @@
-import { EntityRelationshipTypeSchema } from "@tila/schemas";
+import type { EntityListFilter } from "@tila/core";
+import {
+  EntityRelationshipTypeSchema,
+  LifecycleOutcomeSchema,
+} from "@tila/schemas";
 import { defineCommand } from "citty";
 import { TILA_ERRORS, TilaApiError } from "tila-sdk";
 import { resolveContext } from "../context";
@@ -437,6 +441,24 @@ export default defineCommand({
           default: "0",
           description: "Skip this many results",
         },
+        type: {
+          type: "string",
+          default: "task",
+          description: "Filter by task type",
+        },
+        blocked: {
+          type: "boolean",
+          description: "Only open tasks waiting on prerequisites",
+        },
+        outcome: {
+          type: "string",
+          description:
+            "Lifecycle outcomes: success,failure,cancelled,abandoned (comma-separated)",
+        },
+        cursor: {
+          type: "string",
+          description: "Continue from next_cursor with the same filters",
+        },
         status: { type: "string", description: "Filter by status" },
         parent: { type: "string", description: "Filter by parent" },
         compact: {
@@ -447,10 +469,52 @@ export default defineCommand({
         ...jsonArg,
       },
       async run({ args }) {
+        const parsedOutcome =
+          args.outcome !== undefined
+            ? LifecycleOutcomeSchema.array()
+                .min(1)
+                .safeParse((args.outcome as string).split(","))
+            : undefined;
+        if (parsedOutcome && !parsedOutcome.success) {
+          failWithCliError(
+            new TilaApiError(
+              400,
+              TILA_ERRORS.VALIDATION_ERROR,
+              "outcome must list success, failure, cancelled, abandoned",
+              false,
+            ),
+            args.json === true,
+          );
+          return;
+        }
+        const outcome = parsedOutcome?.data;
+        const filter: EntityListFilter = {
+          limit: Number(args.limit ?? 100),
+          offset: Number(args.offset ?? 0),
+          type: (args.type as string | undefined) ?? "task",
+          cursor: args.cursor as string | undefined,
+          blocked: args.blocked as boolean | undefined,
+          outcome,
+          dataFilter: {
+            ...(args.status ? { status: args.status as string } : {}),
+            ...(args.parent ? { parent_id: args.parent as string } : {}),
+          },
+        };
+        const { entity, coordination } = await resolveContext();
+        const readPage = async () => {
+          if (entity.listPage) return entity.listPage(filter);
+          if (filter.cursor || filter.blocked || filter.outcome)
+            throw new Error(
+              "This backend does not support task list page metadata and attention filters (EntityBackend.listPage is required)",
+            );
+          return {
+            entities: await entity.list(filter),
+            metadata_supported: false as const,
+            offset: filter.offset ?? 0,
+          };
+        };
         if (args.compact) {
-          // Compact path: a client-side projection of the EntityBackend list()
-          // (+ active claims for claimed_by) so it works IDENTICALLY in local
-          // AND remote mode (both go through entity.list() now). Fields:
+          // Project full entity rows and active claims in both modes:
           // id, type, title, status, claimed_by.
           //
           // INTENTIONAL REDUCTION vs the server-side CompactEntity shape: the
@@ -461,28 +525,14 @@ export default defineCommand({
           // mode), so they are deliberately omitted to keep --compact a single
           // cheap call. The omission is consistent across both backends. If a
           // future bulk endpoint exposes these counts, add them in both modes.
-          const { entity, coordination } = await resolveContext();
-          const [tasks, claims] = await withSpinner(
+          const [page, claims] = await withSpinner(
             "Fetching tasks...",
-            async () =>
-              Promise.all([
-                entity.list({
-                  limit: Number(args.limit ?? 100),
-                  offset: Number(args.offset ?? 0),
-                  type: "task",
-                  dataFilter: {
-                    ...(args.status ? { status: args.status as string } : {}),
-                    ...(args.parent
-                      ? { parent_id: args.parent as string }
-                      : {}),
-                  },
-                }),
-                coordination.listClaims(),
-              ]),
+            async () => Promise.all([readPage(), coordination.listClaims()]),
           );
           const claimByResource = new Map(
             claims.map((c) => [c.resource, c.participant_id]),
           );
+          const { entities: tasks, ...metadata } = page;
           const entities = tasks.map((e) => {
             const data = e.data as Record<string, unknown>;
             return {
@@ -496,8 +546,8 @@ export default defineCommand({
           if (args.json) {
             printJson({
               entities,
+              ...metadata,
               count: entities.length,
-              offset: Number(args.offset ?? 0),
             });
             return;
           }
@@ -522,31 +572,20 @@ export default defineCommand({
           return;
         }
 
-        // Non-compact path: use EntityBackend interface (backward compatible).
-        // dataFilter keys are DATA-FIELD names (parent_id, status) — the single
-        // shape that works for both EmbeddedProject (json_extract directly) and
-        // RemoteBackend (which translates parent_id -> the Worker's `parent`
-        // query param). Mirrors the --compact path above.
-        const { entity } = await resolveContext();
-        const result = await withSpinner("Fetching tasks...", () =>
-          entity.list({
-            limit: Number(args.limit ?? 100),
-            offset: Number(args.offset ?? 0),
-            type: "task",
-            dataFilter: {
-              ...(args.status ? { status: args.status as string } : {}),
-              ...(args.parent ? { parent_id: args.parent as string } : {}),
-            },
-          }),
+        const { entities: result, ...metadata } = await withSpinner(
+          "Fetching tasks...",
+          readPage,
         );
         if (args.json) {
           printJson({
             entities: result,
             count: result.length,
-            offset: Number(args.offset ?? 0),
+            ...metadata,
             filters: {
               ...(args.status ? { status: args.status } : {}),
               ...(args.parent ? { parent: args.parent } : {}),
+              ...(args.blocked ? { blocked: true } : {}),
+              ...(outcome ? { outcome } : {}),
             },
           });
           return;

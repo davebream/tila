@@ -18,6 +18,7 @@ import {
   ArtifactRevisionSchema,
 } from "./artifact-version";
 import { ServiceAccountSchema } from "./capability";
+import { TaskListScopeSchema } from "./catalog";
 import {
   HandoffListResponseSchema,
   HandoffSchema,
@@ -78,6 +79,11 @@ const pagination = {
   limit: z.number().int().nullable().optional(),
   offset: z.number().int().optional(),
   has_more: z.boolean().optional(),
+};
+const taskPagination = {
+  ...pagination,
+  next_cursor: z.string().nullable().optional(),
+  scope: TaskListScopeSchema.optional(),
 };
 const ok = z.object({ ok: z.literal(true) });
 export const McpCursorResultSchema = ok.extend({ cursor: JournalCursorSchema });
@@ -184,8 +190,8 @@ export const McpPrimitiveResults = {
   tila_room_unarchive: conversations.RoomResponseSchema,
   tila_task_create: api.EntityResponseSchema,
   tila_task_list: z.union([
-    api.CompactEntityListResponseSchema.extend(pagination),
-    api.EntityListResponseSchema.extend(pagination),
+    api.CompactEntityListResponseSchema.extend(taskPagination),
+    api.EntityListResponseSchema.extend(taskPagination),
   ]),
   tila_task_show: McpTaskDetailSchema,
   tila_task_update: api.EntityResponseSchema,

@@ -3273,9 +3273,16 @@ links to always agree.
 | `GET /runtime-view?filter=attention` | Agents whose current occupant expired, cannot be confirmed, or whose host stopped reporting while attached (`runtimeAttention` in `@tila/core`). A run-store outage is reported in `sources`, not counted. The Worker scans at most 250 agents per request; `scan.complete` is false beyond that and `total` is then a floor. |
 
 `blocked`, `outcome`, `wake` and `expires_after` are bound to list cursors, so a
-cursor issued for one filter is rejected under another. The SDK exposes the
-runtime and delivery filters; the task filters are HTTP-only for now because the
-local backend's list contract does not carry them yet.
+cursor issued for one filter is rejected under another. The SDK exposes task
+`blocked?: boolean` and `outcome?: LifecycleOutcome[]` filters over HTTP and local
+Node/Bun backends. `tasks.list` preserves entities plus the exact total, limit,
+offset, has_more, next_cursor and scope (including outcome_types). Existing
+array-returning `EntityBackend.list` remains compatible; optional `listPage`
+supplies metadata without reconstructing totals from a page. CLI `task list`
+accepts `--blocked`, `--outcome` and `--cursor`; MCP `tila_task_list` accepts the
+same filters and paging options. Local SDK lists still return full entities
+when compact is requested. Third-party array-only backends report unsupported
+metadata explicitly and cannot silently ignore attention filters or cursors.
 
 The page states are derived in order:
 

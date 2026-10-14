@@ -5,12 +5,54 @@ import type {
   EntityDetailResponse,
   EntityListResponse,
   EntityResponse,
+  LifecycleOutcome,
   ListEntityRelationshipsResponse,
+  PaginatedCompactEntityListResponse,
+  PaginatedEntityListResponse,
   WorkCatalogResponse,
 } from "@tila/schemas";
+import { LifecycleOutcomeSchema } from "@tila/schemas";
 import type { TilaClient } from "./client";
 
+export interface TaskListOptions {
+  type?: string;
+  status?: string;
+  limit?: string;
+  cursor?: string;
+  offset?: string;
+  sort?: "created_at" | "updated_at" | "type" | "title" | "status" | "id";
+  order?: "asc" | "desc";
+  tagFilter?: string[];
+  blocked?: boolean;
+  /** Non-empty list of lifecycle outcomes declared by task types. */
+  outcome?: LifecycleOutcome[];
+  /** HTTP projection; local mode continues to return full entities. */
+  compact?: boolean;
+}
+
+/** Compact requests may return full entities locally; narrow rows before reading projection fields. */
+export type TaskListResponse =
+  | PaginatedEntityListResponse
+  | PaginatedCompactEntityListResponse;
+
 function _createMethods(client: TilaClient, base: string) {
+  async function list(
+    query?: TaskListOptions & { compact?: false },
+  ): Promise<PaginatedEntityListResponse>;
+  async function list(query?: TaskListOptions): Promise<TaskListResponse>;
+  async function list(query?: TaskListOptions): Promise<TaskListResponse> {
+    const { tagFilter, compact, blocked, outcome, ...rest } = query ?? {};
+    const q: Record<string, string | undefined> = { ...rest };
+    if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
+    if (compact) q.compact = "true";
+    if (blocked) q.blocked = "1";
+    if (outcome !== undefined)
+      q.outcome = LifecycleOutcomeSchema.array()
+        .min(1)
+        .parse(outcome)
+        .join(",");
+    return client.get<TaskListResponse>(base, { query: q });
+  }
   return {
     async create(
       id: string,
@@ -30,25 +72,7 @@ function _createMethods(client: TilaClient, base: string) {
       return client.get<EntityDetailResponse>(`${base}/${id}`);
     },
 
-    async list(query?: {
-      type?: string;
-      status?: string;
-      limit?: string;
-      cursor?: string;
-      tagFilter?: string[];
-      /**
-       * Request the Worker's compact projection (id/type/title/status/...). HTTP
-       * only — the embedded backend has no compact list, so the local adapter
-       * ignores this and returns full entities (a documented local divergence).
-       */
-      compact?: boolean;
-    }): Promise<EntityListResponse> {
-      const { tagFilter, compact, ...rest } = query ?? {};
-      const q: Record<string, string | undefined> = { ...rest };
-      if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
-      if (compact) q.compact = "true";
-      return client.get<EntityListResponse>(base, { query: q });
-    },
+    list,
 
     /**
      * Task type catalog: every type the caller may read, declared by the
