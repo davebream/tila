@@ -51,10 +51,15 @@ export const relayFactory: RelayFactory = {
       throw new Error("Invalid discovery namespace");
     const { api } = await enrolledRuntimeClient({ deployment, projectId });
     const old = (await api.runs()).runs.find(
-      (run) => run.run_id === entry.relayOperationId,
+      (run) => run.run_id === (entry.relayRunId ?? entry.relayOperationId),
     );
     if (!old) return;
-    if (old.run_role !== "relay" || old.agent_id !== entry.agent)
+    if (
+      old.run_role !== "relay" ||
+      old.agent_id !== entry.agent ||
+      old.project_id !== projectId ||
+      (entry.identity && old.enrollment_id !== entry.identity.enrollmentId)
+    )
       throw new Error("Recovery cannot close another run");
     await api.close(old.run_id);
   },

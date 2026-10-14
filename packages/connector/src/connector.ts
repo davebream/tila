@@ -260,6 +260,10 @@ export class HostConnector {
     });
     entry.bindingId = binding.consumer_binding_id;
     entry.bindingEpoch = binding.binding_epoch;
+    this.persist(); // Retain the committed epoch even if the occupant changed during bind.
+    const afterBind = await this.discovery.discover(entry.key, entry);
+    assertSameSession(current, afterBind);
+    if (this.stopping) throw new Error("Connector is stopping");
     entry.state = "active";
     entry.reason = undefined;
     this.persist();

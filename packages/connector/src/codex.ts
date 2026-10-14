@@ -187,11 +187,15 @@ export async function wakeCodex(
   },
 ): Promise<WakeOutcome> {
   const status = await codexThread(rpc, threadId);
+  policy.preEffectCheck?.();
   const input = [{ type: "text", text: wakeNotice(nonce) }];
   if (status.state === "idle" && policy.allowIdleStart && capabilities.start) {
     try {
       await policy.beforeEffect?.();
       policy.preEffectCheck?.();
+      const current = await codexThread(rpc, threadId);
+      policy.preEffectCheck?.();
+      if (current.state !== "idle") return "deferred";
       await rpc.request(
         "turn/start",
         { threadId, input },
@@ -211,6 +215,13 @@ export async function wakeCodex(
     try {
       await policy.beforeEffect?.();
       policy.preEffectCheck?.();
+      const current = await codexThread(rpc, threadId);
+      policy.preEffectCheck?.();
+      if (
+        current.state !== "active" ||
+        (current.turnId && current.turnId !== policy.expectedTurnId)
+      )
+        return "deferred";
       await rpc.request(
         "turn/steer",
         {
