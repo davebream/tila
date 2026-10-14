@@ -1,54 +1,6 @@
-import {
-  type DefinitionDocument,
-  type SchemaParseError,
-  type SchemaRecord,
-  isTable,
-  parseDefinitionDocument,
-  serializeDefinitionDocument,
-} from "@tila/core";
+import type { SchemaParseError } from "@tila/core";
 
-/** The applied definition as TOML text and an editable document. */
-export type CurrentDefinition = {
-  revision: number;
-  source: string | null;
-  doc: DefinitionDocument | null;
-  appliedAt: number | null;
-};
-
-/**
- * Normalize `getCurrentSchema()`. The Worker returns the stored TOML; older
- * remote responses carried a JSON-encoded schema instead, which is converted
- * to TOML so callers only ever see one format.
- */
-export function currentDefinition(record: SchemaRecord): CurrentDefinition {
-  const revision = record.revision ?? record.version ?? 0;
-  const appliedAt = record.applied_at ?? null;
-  if (!record.definition)
-    return { revision, source: null, doc: null, appliedAt };
-  const toml = parseDefinitionDocument(record.definition);
-  if (toml.ok)
-    return { revision, source: record.definition, doc: toml.doc, appliedAt };
-  let json: unknown;
-  try {
-    json = JSON.parse(record.definition);
-  } catch {
-    throw cliError(
-      "schema-corrupt",
-      `The applied definition (revision ${revision}) could not be read: ${toml.errors[0]?.message ?? "invalid TOML"}`,
-    );
-  }
-  if (!isTable(json))
-    throw cliError(
-      "schema-corrupt",
-      `The applied definition (revision ${revision}) is not a table`,
-    );
-  return {
-    revision,
-    source: serializeDefinitionDocument(json),
-    doc: json,
-    appliedAt,
-  };
-}
+export { type CurrentDefinition, currentDefinition } from "@tila/core";
 
 /** An Error carrying the CLI's structured `code` and optional `hint`. */
 export function cliError(code: string, message: string, hint?: string) {

@@ -3011,12 +3011,12 @@ other whole top-level key (`hierarchy`, `schema_version`, an unmodeled key).
 | Mode | Behaviour |
 |---|---|
 | `merge` (default) | Each unit in the file replaces the same unit; units the file omits are kept. A declaration is replaced whole, so fields it drops are removals the preview reports. An empty section changes nothing. `schema_version` comes from the file, else the project. |
-| `replace` | The file becomes the whole definition. Every removed unit is listed and must be confirmed (`--confirm-removals`, or the dashboard checkbox), including template removals the server treats as non-destructive. |
+| `replace` | The file becomes the whole definition. Every removed unit is listed and must be confirmed (`--confirm-removals`, the dashboard checkbox, or MCP `confirm_removals: true`), including template removals the server treats as non-destructive. |
 
 The result is validated as a complete definition before preview; any error means
-nothing is drafted or written. Destructive changes still need the typed
-confirmation and a strategy. An import that only changes comments or unmodeled
-keys records no revision.
+nothing is drafted or written. Destructive changes still need review and a
+strategy; the dashboard also requires its typed confirmation. An import that
+only changes comments or unmodeled keys records no revision.
 
 TOML and YAML are supported (`.toml`, `.yaml`, `.yml`; pasted text is detected).
 YAML is read with the 1.2 core schema and normalizes to the same document as
@@ -3025,7 +3025,7 @@ The server stores and validates TOML only, so clients convert YAML first. The
 adapter is the `@tila/core/definition-yaml` entry, which keeps the `yaml`
 library out of the Worker, Durable Object and SDK bundles.
 
-Export (`tila schema export`, Settings › Definitions) writes the applied
+Export (`tila schema export`, Settings › Definitions, MCP `tila_schema_export`) writes the applied
 definition with a `[tila_export]` table: `format = "tila-definitions"`,
 `format_version`, `project_id`, `revision`, `exported_at`, and optionally
 `applied_at` and `exported_with`. Import checks `format` and `format_version`
@@ -3050,9 +3050,22 @@ stored text is never re-checked on read.
 `tila schema status` compares local `*.schema.toml` files with the server by unit
 (`up-to-date`, `differs`, `unknown`) instead of treating the file as pending.
 `tila schema apply` without a revision still sends the files as the whole
-definition, and warns. MCP import/export is follow-up work;
-`tila_schema_preview` plus a conditional `tila_schema_update` already give
-preview-then-apply.
+definition, and warns. MCP `tila_schema_import` accepts file text, TOML/YAML/detect
+format and merge/replace mode. It plans by default and returns the shared unit
+plan, warnings, server preview and a `reviewed_plan` snapshot (revision,
+canonical TOML definition, removed units). Applying requires explicit `apply:
+true`, caller-supplied `expected_revision`, and this unchanged snapshot;
+destructive changes also require a strategy. First apply checks the snapshot
+against the same revision before sending the normal conditional schema write.
+Preview races conflict; an import never silently replans onto newer state.
+Idempotent retries retain the original definition, revision, key and strategy:
+the server can replay its receipt before checking the stale revision, while a
+fresh stale request conflicts without writing. No additional server operation
+or transport retry system is introduced. The schema tool group exposes both
+transfer tools; the nine-tool default workflow catalog is unchanged. Export
+from an unapplied project returns an explicit empty result, while a valid import
+can bootstrap against revision 0. `tila_schema_preview` and conditional
+`tila_schema_update` remain compatible.
 
 | Scenario / child ownership | Contract review and acceptance probes |
 |---|---|

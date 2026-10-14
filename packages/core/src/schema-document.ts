@@ -1,4 +1,5 @@
 import { parse as parseTOML, stringify as stringifyTOML } from "smol-toml";
+import type { SchemaRecord } from "./interfaces/schema-backend";
 import type { SchemaParseError } from "./schema-parser";
 
 /**
@@ -15,6 +16,42 @@ export type DefinitionTable = Record<string, unknown>;
 export type ParseDefinitionDocumentResult =
   | { ok: true; doc: DefinitionDocument }
   | { ok: false; errors: SchemaParseError[] };
+
+/** The applied definition, including legacy JSON-encoded stored definitions. */
+export type CurrentDefinition = {
+  revision: number;
+  source: string | null;
+  doc: DefinitionDocument | null;
+  appliedAt: number | null;
+};
+
+export function currentDefinition(record: SchemaRecord): CurrentDefinition {
+  const revision = record.revision ?? record.version ?? 0;
+  const appliedAt = record.applied_at ?? null;
+  if (!record.definition)
+    return { revision, source: null, doc: null, appliedAt };
+  const toml = parseDefinitionDocument(record.definition);
+  if (toml.ok)
+    return { revision, source: record.definition, doc: toml.doc, appliedAt };
+  try {
+    const json: unknown = JSON.parse(record.definition);
+    if (isTable(json))
+      return {
+        revision,
+        source: serializeDefinitionDocument(json),
+        doc: json,
+        appliedAt,
+      };
+  } catch {
+    // Stored text may contain credentials; never echo a parser's source excerpt.
+  }
+  throw Object.assign(
+    new Error(
+      `The applied definition (revision ${revision}) could not be read`,
+    ),
+    { code: "schema-corrupt" },
+  );
+}
 
 /** Sections whose entries are named declarations (`work_units.task`). */
 export const DECLARATION_SECTIONS = [

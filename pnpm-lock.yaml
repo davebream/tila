@@ -428,6 +428,9 @@ importers:
       '@tila/client-lifecycle':
         specifier: workspace:*
         version: link:../client-lifecycle
+      '@tila/core':
+        specifier: workspace:*
+        version: link:../core
       '@tila/schemas':
         specifier: workspace:*
         version: link:../schemas
