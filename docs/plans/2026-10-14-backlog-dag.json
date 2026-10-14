@@ -14,7 +14,7 @@
     "external_450_counts": true,
     "optional_release_workers": 1,
     "release_skill": ".agents/skills/tila-release/SKILL.md",
-    "planner": "plan-194-study-astra",
+    "planner": "audit-292-acceptance-astra",
     "lead": "lead-backlog",
     "herdr_session": "tila",
     "planner_pane": "w2:p2",
@@ -25,13 +25,13 @@
       "Brain": {
         "tab": "w2:t1",
         "lead-backlog": "w2:p1",
-        "plan-194-study-astra": "w2:p2"
+        "audit-292-acceptance-astra": "w2:p2"
       },
       "Builders": {
         "tab": "w2:t2",
         "build-448-settings-transfer": "w2:p3",
-        "build-440-ghes-oidc": "w2:p5",
-        "build-312-runtime-deps": "w2:p4"
+        "build-312-runtime-deps": "w2:p4",
+        "build-307-readiness-audit": "w2:p5"
       },
       "Release": {
         "tab": "w2:t3",
@@ -694,9 +694,9 @@
       "owner": "A",
       "stage": 2,
       "issue": 440,
-      "pr": null,
+      "pr": 474,
       "kind": "builder",
-      "state": "implementing",
+      "state": "ready",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-440",
       "contract": "2026-10-14-backlog-execution.md#440--ghes-actions-oidc-i440",
@@ -778,7 +778,7 @@
       "issue": 307,
       "pr": null,
       "kind": "builder",
-      "state": "planned",
+      "state": "implementing",
       "conditional": false,
       "worktree": "/home/dawid/code/tila-workers/issue-307",
       "contract": "2026-10-14-backlog-execution.md#307--delivered-readiness-evidence-reconciliation-and-held-activation-i307-audit-g307-activation",
@@ -2686,11 +2686,11 @@
     },
     {
       "node": "i440",
-      "state": "implementing",
+      "state": "ready",
       "worker": "build-440-ghes-oidc",
       "base_sha": "d4b7075b13b57a950602de1ed4f8445953af9c0c",
       "head_sha": "9409b454078e146bcff83600d3fa2c1f71376e77",
-      "pr": null,
+      "pr": 474,
       "tests": [
         {
           "phase": "integrated-final",
@@ -2731,10 +2731,15 @@
           "kind": "integrated-transplant",
           "source": "lead git range-diff and local validation logs 2026-10-14",
           "detail": "Eight issue-only commits transplanted from parent439 boundary0ddc0f94; six implementation/test patches identical; changelog conflict preserves416/440notes. 143runtime andfullgates passed originalhead343602b9; integratedgates inprogress."
+        },
+        {
+          "kind": "handoff",
+          "source": "https://github.com/davebream/tila/pull/474",
+          "detail": "Non-draft main PR with merge-ready, auto-merge off; Mergify actual check waiting for ci/scopes."
         }
       ],
       "lead_review": "approved",
-      "queue_state": "unverified",
+      "queue_state": "waiting-ci-and-scopes",
       "closure": "not-closed"
     },
     {
@@ -2827,13 +2832,23 @@
     },
     {
       "node": "i307-audit",
-      "state": "planned",
+      "state": "implementing",
       "worker": "build-307-readiness-audit",
-      "base_sha": null,
+      "base_sha": "2a9f2754250723b2b757f4692c63d0f8e2f890d3",
       "head_sha": null,
       "pr": null,
       "tests": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "kind": "dispatch",
+          "source": "lead Herdr dispatch2026-10-14",
+          "pane": "tila/w2:p5",
+          "model": "Sonnet xhigh",
+          "session": "ad347763-d6fe-486a-ac96-54a5edce2e01",
+          "push_hold": true,
+          "detail": "Existing delivered runbook/readiness audit, local cutover evidence, no production activation."
+        }
+      ],
       "lead_review": "pending",
       "queue_state": "unverified",
       "closure": "not-closed"
@@ -3358,7 +3373,7 @@
       "source"
     ],
     "release_election_allowed_with_evidence": true,
-    "current_active_builders": ["i448-plan", "pr312", "i440"],
+    "current_active_builders": ["i448-plan", "pr312", "i307-audit"],
     "production_scope": "explicit authorization record required; coding/release election is insufficient"
   }
 }

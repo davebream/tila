@@ -295,9 +295,9 @@ Machine ledger is authoritative for task state; update it with UTC, worker, work
 | #450 / #400 / #449 / #398 / #439 / #362 | Merged and issues closed; immutable heads, merge SHAs and independent fetched-main verification in the machine ledger |
 | #416 | PR #465 merged as `d4b7075b`; GitHub state/main ancestry verified, issue closed |
 | #399 | PR #473 submitted with merge-ready after integrated full gates; Mergify waiting for CI/scopes |
-| #440 | Sol XHIGH final auth validation after lead/Astra corrections; issue-only transplant and integrated validation before handoff |
+| #440 | PR #474 submitted with merge-ready after integrated full gates; Mergify waiting for CI/scopes |
 | #448 | Sol XHIGH implementing shared transfer contracts, then CLI/UI/MCP; lead correcting locale-dependent receipt digest and package boundary |
-| #307 | #434 runbook/rehearsal delivered; audit and explicit production gate remain; no production secret touched |
+| #307 | Sonnet XHIGH auditing delivered readiness/runbook and rerunning local cutover evidence; production activation remains unperformed |
 | #283 / #308 / #194 | Live execution/measurements not passed by this planning work |
 | #314 / #311 | Reviewed unchanged dependency heads; merged as `ff7bdf3d` / `bbe0252d`; GitHub state and main ancestry independently verified |
 | #312 | Sol XHIGH active in existing Renovate PR worktree; portable auth declaration repair, exclusive lock writer |
@@ -313,7 +313,7 @@ Plan validation: 16 issues + three snapshot PRs covered, PR #451 tracked as an e
 
 ## Current Herdr layout
 
-One `tila` workspace (`w2`) contains Brain (`w2:t1`: lead `p1`, Astra `p2`), Builders (`w2:t2`: #448 `p3` left, #312 `p4` upper right, #440 `p5` lower right), and Release (`w2:t3`: reserved `p6`). Sessions were moved without restarting. Historical pane IDs in evidence retain their original meaning; use agent names for orchestration.
+One `tila` workspace (`w2`) contains Brain (`w2:t1`: lead `p1`, Astra `p2`), Builders (`w2:t2`: #448 `p3` left, #312 `p4` upper right, #307 `p5` lower right), and Release (`w2:t3`: reserved `p6`). Sessions were moved without restarting. Historical pane IDs in evidence retain their original meaning; use agent names for orchestration.
 
 Release readiness update: the user confirmed no alternative valid operator configuration exists. No further credential search or repeated ambient probes are warranted. The dedicated `release-prepare-sol` worker in Release pane `w2:p6` has a separate `release-readiness` worktree and private state at `/tmp/tila-release-readiness-20261014.LLZLOW/vars.sh`. Formal preflight, candidate freeze, rehearsal and publication remain unpassed; reviewed inventory/upgrade drafts are independent preparation. Astra completed the #283 capability audit and is defining the #194 predeclared study design in Brain.
 
