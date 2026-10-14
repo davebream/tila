@@ -27,8 +27,11 @@ import {
 } from "./dogfood-study-fixtures.mjs";
 import {
   allocateVariants,
+  appendEvent,
   auditJournal,
   buildDeclaration,
+  buildHookSettings,
+  canonicalJson,
   checkDeclaration,
   checkMatching,
   deriveLedger,
@@ -39,7 +42,7 @@ import {
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rubricText = readFileSync(
-  join(repo, "docs/evidence/issue-194-rubric-v2.json"),
+  join(repo, "docs/evidence/issue-194-rubric-v3.json"),
   "utf8",
 );
 const rubric = JSON.parse(rubricText);
@@ -49,7 +52,7 @@ const warmup = warmupScenario();
 const declaration = buildDeclaration({
   rubric,
   rubricSha256,
-  rubricPath: "docs/evidence/issue-194-rubric-v2.json",
+  rubricPath: "docs/evidence/issue-194-rubric-v3.json",
   scenarios,
   warmup,
 });
@@ -87,7 +90,22 @@ function log() {
       actor: { role },
       kind,
       provenance,
-      payload,
+      payload:
+        kind === "tool_call"
+          ? {
+              session_id: role.endsWith("r")
+                ? "s3"
+                : role === "w1"
+                  ? "s1"
+                  : "s2",
+              turn_id: "turn-1",
+              tool_use_id: `call-${events.length + 1}`,
+              tool: "Bash",
+              ...payload,
+            }
+          : kind === "recovery.decision_stated"
+            ? { text_sha256: "b".repeat(64), ...payload }
+            : payload,
     });
     return events[events.length - 1];
   };
@@ -101,7 +119,12 @@ const frozenHook = {
   hook_smoke_attested: true,
   count_hook_sha256: "a".repeat(64),
   usage_source: "none",
-  model_id: "model",
+  model_id: "gpt-6.1-sol",
+  effort: "high",
+  count_hook_lib_sha256: "a".repeat(64),
+  hook_config_template_sha256: "a".repeat(64),
+  hook_smoke_sha256: "a".repeat(64),
+  codex_binary_sha256: "a".repeat(64),
 };
 
 /** A complete, well-behaved condition-B trial log; callers perturb it. */
@@ -235,6 +258,20 @@ function goodTrial(slot = slotB) {
     700_000,
   );
   l.add("trial.stopped", "harness", { reason: "complete" }, 710_000);
+  l.add(
+    "harness.note",
+    "harness",
+    {
+      topic: "runtime_coverage_attested",
+      source: "native_runtime_records",
+      complete: true,
+      uncovered_state_changes: 0,
+      hook_failures: 0,
+      session_ids: ["s1", "s2", "s3"],
+      evidence_sha256: "a".repeat(64),
+    },
+    711_000,
+  );
   return l;
 }
 
@@ -252,6 +289,7 @@ const passingEvaluation = (slot = slotB) => ({
   obsolete_work_roles: [],
   fence_audit: { stale_accepted: [], holder_mismatch: [], fenced_updates: 0 },
   handoff: { role: slot.replaced_role, candidate_count: 6, max: 6, facts: [] },
+  resume: { text_sha256: "b".repeat(64) },
   silent_overwrite_candidates: [],
 });
 
@@ -269,7 +307,7 @@ const review = {
       next_owner_action: "absent",
     },
   },
-  resume: { decision_correct: true },
+  resume: { decision_correct: true, text_sha256: "b".repeat(64) },
 };
 
 const derive = (l, extra = {}, slot = slotB) =>
@@ -306,7 +344,7 @@ test("a declaration that was edited or built on changed fixtures does not verify
   const ctx = {
     rubric,
     rubricSha256,
-    rubricPath: "docs/evidence/issue-194-rubric-v2.json",
+    rubricPath: "docs/evidence/issue-194-rubric-v3.json",
     scenarios,
     warmup,
   };
@@ -401,7 +439,7 @@ test("concurrent appenders get contiguous sequence numbers and non-decreasing cl
   const script = `
     import { appendEvent } from ${JSON.stringify(join(repo, "scripts/dogfood-study-lib.mjs"))};
     import { readFileSync } from "node:fs";
-    const rubric = JSON.parse(readFileSync(${JSON.stringify(join(repo, "docs/evidence/issue-194-rubric-v2.json"))}, "utf8"));
+    const rubric = JSON.parse(readFileSync(${JSON.stringify(join(repo, "docs/evidence/issue-194-rubric-v3.json"))}, "utf8"));
     for (let i = 0; i < 8; i++) appendEvent(${JSON.stringify(file)}, { kind: "harness.note", actor: { role: "harness" }, payload: { topic: "n" } }, rubric);
   `;
   await Promise.all(
@@ -514,7 +552,10 @@ test("a lexical candidate never earns a handoff or decision point without the re
   );
   assert.equal(noReview.gates.G2_lost_acknowledged_decision.undetermined, true);
   const contradicted = derive(l, {
-    review: { ...review, resume: { decision_correct: false } },
+    review: {
+      ...review,
+      resume: { ...review.resume, decision_correct: false },
+    },
   });
   assert.equal(contradicted.metrics.recovery_to_decision_ms.censored, true);
   assert.equal(contradicted.gates.G2_lost_acknowledged_decision.value, 1);
@@ -656,6 +697,7 @@ function bundleOf(trials, drills = null) {
       rubric: { sha256: rubricSha256 },
       declaration_sha256: declaration.declaration_sha256,
       frozen: {
+        ...frozenHook,
         source_sha: "1".repeat(40),
         source_tree_clean: true,
         runtime_versions: { node: "v22" },
@@ -805,7 +847,9 @@ function hookTrial() {
       trial: "t1",
       condition: "A",
       participants: { w1: "w1", w2: "w2", w1r: "w1r", w2r: "w2r" },
-      worktrees: {},
+      rubric_path: "docs/evidence/issue-194-rubric-v3.json",
+      worktrees: { w1: join(dir, "wt-w1"), w2: join(dir, "wt-w2") },
+      shared: join(dir, "shared"),
       decision: { id: "D1", key_phrases: ["unknown flag", "64"] },
       hidden_patterns: ["dogfood-study-fixtures", "accept.mjs"],
     }),
@@ -814,7 +858,25 @@ function hookTrial() {
     join(dir, "events.jsonl"),
     `${JSON.stringify({ schema: "tila.dogfood.event/1", study_id: "tila-194-dogfood-pilot-v1", trial_id: "t1", seq: 1, ts_utc: new Date().toISOString(), mono_ms: Number(process.hrtime.bigint() / 1_000_000n), actor: { role: "harness" }, kind: "trial.started", provenance: "local_agent_trial", payload: {} })}\n`,
   );
-  return { run, file: join(dir, "events.jsonl") };
+  mkdirSync(join(dir, "wt-w1"));
+  mkdirSync(join(dir, "shared"));
+  writeFileSync(join(dir, "shared/BOARD.md"), "");
+  writeFileSync(join(dir, "shared/DECISIONS.md"), "");
+  appendEvent(
+    join(dir, "events.jsonl"),
+    {
+      kind: "worker.started",
+      actor: { role: "w1" },
+      payload: {
+        role: "w1",
+        participant: "w1",
+        context: "original",
+        session_id: "s-w1",
+      },
+    },
+    rubric,
+  );
+  return { run, dir, file: join(dir, "events.jsonl") };
 }
 
 const readLog = (file) =>
@@ -823,6 +885,8 @@ const readLog = (file) =>
     .split("\n")
     .map((l) => JSON.parse(l));
 const call = (n, extra = {}) => ({
+  hook_event_name: "PreToolUse",
+  turn_id: "turn-1",
   session_id: "s-w1",
   tool_name: "Bash",
   tool_use_id: `u${n}`,
@@ -854,6 +918,40 @@ test("the hook admits 40 calls per role, denies the 41st with a JSON decision an
 test("a replacement session shares its role's counter and is mapped to the replacement participant", () => {
   const { run, file } = hookTrial();
   for (let i = 1; i <= 39; i += 1) hookRun(run, "w1", call(i));
+  appendEvent(
+    file,
+    {
+      kind: "worker.stopped",
+      actor: { role: "w1" },
+      payload: { role: "w1", reason: "replacement" },
+    },
+    rubric,
+  );
+  appendEvent(
+    file,
+    {
+      kind: "worker.started",
+      actor: { role: "w1r" },
+      payload: {
+        role: "w1r",
+        participant: "w1r",
+        context: "replacement",
+        session_id: "s-w1-new",
+      },
+    },
+    rubric,
+  );
+  appendEvent(
+    file,
+    {
+      kind: "recovery.started",
+      actor: { role: "w1r" },
+      payload: { role: "w1r", participant: "w1r" },
+    },
+    rubric,
+  );
+  const old = hookRun(run, "w1", call("old"));
+  assert.match(old.stdout, /retired_session/);
   const a = hookRun(run, "w1", call(40, { session_id: "s-w1-new" }));
   assert.equal(a.stdout.trim(), "");
   const b = hookRun(run, "w1", call(41, { session_id: "s-w1-new" }));
@@ -872,9 +970,7 @@ test("a replacement session shares its role's counter and is mapped to the repla
 test("hidden study files are denied and a hook that cannot read its trial fails closed", () => {
   const { run } = hookTrial();
   const r = hookRun(run, "w1", {
-    session_id: "s",
-    tool_name: "Bash",
-    tool_use_id: "x",
+    ...call("hidden"),
     tool_input: { command: "cat scripts/dogfood-study-fixtures.mjs" },
   });
   assert.match(r.stdout, /hidden_study_file/);
@@ -899,48 +995,250 @@ test("hidden study files are denied and a hook that cannot read its trial fails 
   assert.match(broken.stderr, /failed closed/);
 });
 
-test("the hook records acknowledgements, results and the replacement decision candidate", () => {
-  const { run, file } = hookTrial();
-  hookRun(run, "w1", call(1));
-  hookRun(run, "w1", {
-    session_id: "s-new",
-    tool_name: "Write",
-    tool_use_id: "r",
-    tool_input: {
-      file_path: "/w/RESUME.txt",
-      content: "DECISION: D1 unknown flags are an error, exit 64\nNEXT: test",
-    },
-  });
-  hookRun(run, "w1", {
-    session_id: "s-new",
-    tool_name: "Bash",
-    tool_use_id: "t",
-    tool_input: { command: "node --test test/" },
-  });
-  hookRun(run, "w1", {
-    session_id: "s-new",
-    tool_name: "Bash",
-    tool_use_id: "k",
-    tool_input: { command: 'echo "ACK D1 w1r" >> DECISIONS.md' },
-  });
-  hookRun(run, "w1", {
-    session_id: "s-new",
-    tool_name: "Bash",
-    tool_use_id: "z",
-    tool_input: { command: 'echo "REAFFIRM w1r abc1234" >> BOARD.md' },
-  });
-  const events = readLog(file);
-  const stated = events.find((e) => e.kind === "recovery.decision_stated");
-  assert.equal(stated.payload.candidate, true);
-  assert.ok(events.some((e) => e.kind === "recovery.first_action"));
+test("pre-execution text, reads and failed writes cannot declare results or confirm recovery", () => {
+  const { run, dir, file } = hookTrial();
+  hookRun(
+    run,
+    "w1",
+    call(1, {
+      tool_input: { command: "grep 'ACK D1 w1 RESULT w1 abc1234' BOARD.md" },
+    }),
+  );
   assert.ok(
-    events.some(
-      (e) => e.kind === "decision.acked" && e.payload.decision_id === "D1",
+    !readLog(file).some((e) =>
+      ["decision.acked", "result.declared"].includes(e.kind),
     ),
   );
-  const result = events.find((e) => e.kind === "result.declared");
-  assert.equal(result.payload.reaffirmed, true);
-  assert.equal(result.payload.explicit_ref, "abc1234");
+  appendEvent(
+    file,
+    {
+      kind: "worker.stopped",
+      actor: { role: "w1" },
+      payload: { role: "w1", reason: "replacement" },
+    },
+    rubric,
+  );
+  appendEvent(
+    file,
+    {
+      kind: "worker.started",
+      actor: { role: "w1r" },
+      payload: {
+        role: "w1r",
+        participant: "w1r",
+        context: "replacement",
+        session_id: "replacement",
+      },
+    },
+    rubric,
+  );
+  const attempt = call(2, {
+    session_id: "replacement",
+    tool_input: {
+      command: "echo DECISION: D1 unknown flags ignored > RESUME.txt",
+    },
+  });
+  hookRun(run, "w1", attempt);
+  hookRun(run, "w1", {
+    ...attempt,
+    hook_event_name: "PostToolUse",
+    tool_response: { exit_code: 1 },
+  });
+  assert.ok(!readLog(file).some((e) => e.kind === "recovery.decision_stated"));
+  const correct = call(3, {
+    session_id: "replacement",
+    tool_input: { command: "printf note > RESUME.txt" },
+  });
+  hookRun(run, "w1", correct);
+  const text =
+    "DECISION: D1 unknown flags are errors; return 64\nNEXT: verify\n";
+  writeFileSync(join(dir, "wt-w1/RESUME.txt"), text);
+  hookRun(run, "w1", {
+    ...correct,
+    hook_event_name: "PostToolUse",
+    tool_response: { exit_code: 0 },
+  });
+  const candidate = readLog(file).find(
+    (e) => e.kind === "recovery.decision_stated",
+  );
+  assert.equal(candidate.payload.text_sha256, sha256Text(text));
+  assert.equal(candidate.payload.tool_use_id, "u3");
+  const action = call(4, {
+    session_id: "replacement",
+    tool_input: { command: "node --test test/" },
+  });
+  hookRun(run, "w1", action);
+  assert.ok(!readLog(file).some((e) => e.kind === "recovery.first_action"));
+  hookRun(run, "w1", {
+    ...action,
+    hook_event_name: "PostToolUse",
+    tool_response: { exit_code: 0 },
+  });
+  assert.equal(
+    readLog(file).filter((e) => e.kind === "recovery.first_action").length,
+    1,
+  );
+});
+
+test("parallel covered operations share the last slot and duplicate deliveries allocate none", async () => {
+  const { run, file } = hookTrial();
+  for (let i = 1; i <= 39; i += 1)
+    assert.equal(hookRun(run, "w1", call(i)).status, 0);
+  const invoke = (n) =>
+    new Promise((done) => {
+      const child = spawn(
+        "node",
+        [
+          join(repo, "scripts/dogfood-study-tila.mjs"),
+          "budget-hook",
+          "--run-dir",
+          run,
+          "--trial",
+          "t1",
+          "--role",
+          "w1",
+        ],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
+      let stdout = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stdin.end(JSON.stringify(call(n)));
+      child.on("close", (status) => done({ status, stdout }));
+    });
+  const results = await Promise.all([invoke(40), invoke(41), invoke(42)]);
+  assert.ok(results.every((r) => r.status === 0));
+  assert.equal(results.filter((r) => !r.stdout).length, 1);
+  assert.equal(
+    readLog(file).filter((e) => e.kind === "tool_call" && !e.payload.denied)
+      .length,
+    40,
+  );
+  const duplicate = hookRun(run, "w1", call(1));
+  assert.match(duplicate.stdout, /duplicate_delivery/);
+  assert.equal(
+    readLog(file).filter((e) => e.kind === "tool_call" && !e.payload.denied)
+      .length,
+    40,
+  );
+});
+
+test("closed trials, unknown sessions and malformed metadata cannot receive admission", () => {
+  for (const reason of [
+    "trial_closed",
+    "unregistered_session",
+    "malformed_hook_identity",
+  ]) {
+    const { run, file } = hookTrial();
+    if (reason === "trial_closed")
+      appendEvent(
+        file,
+        {
+          kind: "trial.stopped",
+          actor: { role: "harness" },
+          payload: { reason: "harness_failure" },
+        },
+        rubric,
+      );
+    const result = hookRun(
+      run,
+      "w1",
+      call(
+        1,
+        reason === "unregistered_session"
+          ? { session_id: "stranger" }
+          : reason === "malformed_hook_identity"
+            ? { turn_id: "" }
+            : {},
+      ),
+    );
+    assert.match(result.stdout, new RegExp(reason));
+    assert.equal(
+      readLog(file).filter((e) => e.kind === "tool_call" && !e.payload.denied)
+        .length,
+      0,
+    );
+    if (reason !== "trial_closed")
+      assert.ok(readLog(file).some((e) => e.payload.topic === "hook_failure"));
+  }
+  const { run, file } = hookTrial();
+  const broken = `${readFileSync(file, "utf8")}broken-tail`;
+  writeFileSync(file, broken);
+  const result = hookRun(run, "w1", call(1));
+  assert.equal(result.status, 2);
+  assert.equal(readFileSync(file, "utf8"), broken);
+});
+
+test("semantic review of a later RESUME version cannot backdate decision recovery", () => {
+  const l = goodTrial();
+  const old = l.events.find((e) => e.kind === "recovery.decision_stated");
+  old.payload.text_sha256 = "c".repeat(64);
+  const later = {
+    ...structuredClone(old),
+    mono_ms: old.mono_ms + 10_000,
+    payload: { ...old.payload, text_sha256: "b".repeat(64) },
+  };
+  l.events.splice(l.events.indexOf(old) + 1, 0, later);
+  l.events.forEach((e, i) => {
+    e.seq = i + 1;
+  });
+  const ledger = derive(l);
+  assert.equal(ledger.metrics.recovery_to_decision_ms.value, 29_700);
+  const forged = derive(l, {
+    review: {
+      ...review,
+      resume: { decision_correct: true, text_sha256: "d".repeat(64) },
+    },
+  });
+  assert.equal(forged.metrics.recovery_to_decision_ms.censored, true);
+});
+
+test("a count-source or registered-identity gap makes enforcement unavailable", () => {
+  const l = goodTrial();
+  const tool = l.events.find((e) => e.kind === "tool_call");
+  tool.payload.source = "transcript";
+  assert.equal(derive(l).enforcement.enforced, false);
+  tool.payload.source = "hook";
+  tool.payload.session_id = "unknown";
+  assert.equal(derive(l).enforcement.enforced, false);
+});
+
+test("baseline declarations are recorded after durable writes and failed appends earn none", () => {
+  const { run, dir, file } = hookTrial();
+  const board = (...args) =>
+    spawnSync(
+      "node",
+      [
+        join(repo, "scripts/dogfood-study-tila.mjs"),
+        "board",
+        "--run-dir",
+        run,
+        "--trial",
+        "t1",
+        "--participant",
+        "w1",
+        ...args,
+      ],
+      { encoding: "utf8" },
+    );
+  assert.equal(board("ack", "D1").status, 0);
+  assert.equal(board("result", "abc1234").status, 0);
+  assert.match(
+    readFileSync(join(dir, "shared/BOARD.md"), "utf8"),
+    /RESULT w1 abc1234/,
+  );
+  assert.equal(
+    readLog(file).filter((e) => e.kind === "result.declared").length,
+    1,
+  );
+  rmSync(join(dir, "shared/BOARD.md"));
+  mkdirSync(join(dir, "shared/BOARD.md"));
+  assert.notEqual(board("reaffirm", "abc1234").status, 0);
+  assert.equal(
+    readLog(file).filter((e) => e.kind === "result.declared").length,
+    1,
+  );
 });
 
 // ---- baseline coordination recipe (ordinary atomic lock, recorded takeover) --------------
@@ -1016,7 +1314,7 @@ function git(cwd, ...args) {
   );
 }
 
-function preparedTrialA() {
+function preparedTrialA(trialId = "t1") {
   const root = scratch();
   const run = join(root, "run");
   const source = join(root, "src");
@@ -1039,32 +1337,104 @@ function preparedTrialA() {
       [join(repo, "scripts/dogfood-study.mjs"), ...args, "--declaration", decl],
       { encoding: "utf8" },
     );
+  const smoke = join(root, "synthetic-smoke.json");
+  const syntheticEvidence =
+    "synthetic unit-test contract; not installed runtime smoke";
+  const binary = join(root, "synthetic-binary");
+  writeFileSync(binary, syntheticEvidence);
+  writeFileSync(join(root, "synthetic-test-contract"), syntheticEvidence);
+  writeFileSync(
+    smoke,
+    JSON.stringify({
+      provenance: "harness_fixture",
+      note: "synthetic unit-test contract, not runtime evidence",
+      source_sha: git(source, "rev-parse", "HEAD").stdout.trim(),
+      codex_version: spawnSync("codex", ["--version"], {
+        encoding: "utf8",
+      }).stdout.trim(),
+      permissions: { sandbox_mode: "synthetic", approval_policy: "synthetic" },
+      binary_path: binary,
+      binary_sha256: sha256Text(syntheticEvidence),
+      config_template_sha256: sha256Text(
+        canonicalJson(
+          buildHookSettings({
+            hookScript: "$SOURCE/scripts/dogfood-study-tila.mjs",
+            runDir: "$RUN",
+            trial: "$TRIAL",
+            role: "$ROLE",
+          }),
+        ),
+      ),
+      checks: [
+        "coverage",
+        "identifiers",
+        "parallel_39_40_41",
+        "zero_effect_denial",
+        "replacement_retirement",
+        "deadline_closure",
+        "malformed_failure",
+        "terminal_cleanup",
+      ].map((name) => ({
+        name,
+        pass: true,
+        evidence_ref: "synthetic-test-contract",
+        evidence_sha256: sha256Text(syntheticEvidence),
+      })),
+    }),
+  );
   let r = cli(
     "freeze",
     "--run-dir",
     run,
     "--model-id",
-    "test-model",
+    "gpt-6.1-sol",
     "--count-source",
     "hook",
     "--usage-source",
     "none",
-    "--hook-smoke-passed",
+    "--hook-smoke",
+    smoke,
     "--host-label",
     "host-1",
     "--source-root",
     source,
   );
   assert.equal(r.status, 0, r.stderr);
-  r = cli("prepare", "--run-dir", run, "--trial", "t1");
+  r = cli("prepare", "--run-dir", run, "--trial", trialId);
   assert.equal(r.status, 0, r.stderr);
   const trial = JSON.parse(
-    readFileSync(join(run, "trials/t1/trial.json"), "utf8"),
+    readFileSync(join(run, `trials/${trialId}/trial.json`), "utf8"),
   );
-  const slot = declaration.trials.find((t) => t.trial === "t1");
+  const slot = declaration.trials.find((t) => t.trial === trialId);
   const scenario = buildScenario(slot.pair, slot.variant);
-  return { run, trial, slot, scenario, cli };
+  return { run, trial, slot, scenario, cli, source };
 }
+
+test("v3 refuses a boolean-only hook-smoke attestation before writing a frozen manifest", () => {
+  const { run, source, cli } = preparedTrialA();
+  const fresh = join(scratch(), "run");
+  const result = cli(
+    "freeze",
+    "--run-dir",
+    fresh,
+    "--model-id",
+    "gpt-6.1-sol",
+    "--count-source",
+    "hook",
+    "--usage-source",
+    "none",
+    "--host-label",
+    "fixture",
+    "--source-root",
+    source,
+    "--drills",
+    join(run, "preflight/drills.json"),
+    "--hook-smoke-passed",
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /boolean is insufficient/);
+  assert.ok(!existsSync(join(fresh, "manifest.frozen.json")));
+});
 
 test("an integrated condition-A trial passes, imported commits are not authored edits, and RESUME.txt is allowed", () => {
   const { run, trial, slot, scenario, cli } = preparedTrialA();
@@ -1173,14 +1543,14 @@ test("importing a forbidden commit retains its origin and immutable-path failure
   git(trial.worktrees.w1, "add", "-A");
   git(trial.worktrees.w1, "commit", "-q", "-m", "w1 forbidden");
   const origin = git(trial.worktrees.w1, "rev-parse", "HEAD").stdout.trim();
-  const merged = git(trial.worktrees.w2, "merge", "-q", "--no-edit", "w1");
-  assert.equal(merged.status, 0, merged.stderr);
   materializeFiles(
     scenario.reference.amended[slot.role_items.w2],
     trial.worktrees.w2,
   );
   git(trial.worktrees.w2, "add", "-A");
   git(trial.worktrees.w2, "commit", "-q", "-m", "w2 own item");
+  const merged = git(trial.worktrees.w2, "merge", "-q", "--no-edit", "w1");
+  assert.equal(merged.status, 0, merged.stderr);
   const result = cli("evaluate", "--run-dir", run, "--trial", "t1");
   assert.equal(result.status, 0, result.stderr);
   const evaluation = JSON.parse(
@@ -1199,4 +1569,117 @@ test("importing a forbidden commit retains its origin and immutable-path failure
     ).length,
     1,
   );
+});
+
+test("missing run-owned commit provenance refuses evaluation instead of hiding shared edits", () => {
+  const { run, trial, cli } = preparedTrialA();
+  writeFileSync(join(trial.worktrees.w1, "NOTES.md"), "forbidden\n");
+  git(trial.worktrees.w1, "add", "-A");
+  git(trial.worktrees.w1, "commit", "-q", "-m", "forbidden");
+  assert.equal(
+    git(trial.worktrees.w1, "reflog", "expire", "--expire=now", "w1").status,
+    0,
+  );
+  const result = cli("evaluate", "--run-dir", run, "--trial", "t1");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /missing branch provenance/);
+  assert.ok(!existsSync(join(run, "trials/t1/evaluation.json")));
+  assert.equal(
+    readFileSync(join(trial.worktrees.w1, "NOTES.md"), "utf8"),
+    "forbidden\n",
+  );
+});
+
+test("synthetic condition-B wrapper writes survive journal, handoff and state evaluation", () => {
+  const { run, trial, slot, scenario, cli } = preparedTrialA("t2");
+  const wrapper = (participant, command, ...args) => {
+    const result = spawnSync(
+      "node",
+      [
+        join(repo, "scripts/dogfood-study-tila.mjs"),
+        command,
+        "--run-dir",
+        run,
+        "--trial",
+        "t2",
+        "--participant",
+        participant,
+        ...args,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    return JSON.parse(result.stdout);
+  };
+  wrapper("w1", "sdk", "claim", `task:${trial.task_ids.helper}`);
+  for (const role of ["w1", "w2"]) {
+    const item = slot.role_items[role];
+    const task = trial.task_ids[item];
+    const claim = wrapper(role, "sdk", "claim", `task:${task}`);
+    materializeFiles(
+      {
+        ...(role === "w1" ? scenario.reference.amended.helper : {}),
+        ...scenario.reference.amended[item],
+      },
+      trial.worktrees[role],
+    );
+    git(trial.worktrees[role], "add", "-A");
+    git(trial.worktrees[role], "commit", "-q", "-m", `${role} work`);
+    const commit = git(
+      trial.worktrees[role],
+      "rev-parse",
+      "HEAD",
+    ).stdout.trim();
+    for (const field of [
+      "decision_ack=D1",
+      "status=done",
+      `result_commit=${commit}`,
+    ])
+      wrapper(
+        role,
+        "tila",
+        "--",
+        "task",
+        "update",
+        task,
+        "--field",
+        field,
+        "--fence",
+        String(claim.fence),
+      );
+  }
+  wrapper(
+    slot.replaced_role,
+    "sdk",
+    "handoff-create",
+    "--summary",
+    "Goal: complete item; status done; D1 applied; next replacement verifies",
+    "--ref",
+    `task:${trial.task_ids[slot.role_items[slot.replaced_role]]}`,
+  );
+  const resumed = wrapper(
+    `${slot.replaced_role}r`,
+    "sdk",
+    "reentry",
+    "--resource",
+    `task:${trial.task_ids[slot.role_items[slot.replaced_role]]}`,
+  );
+  assert.ok(resumed.handoff);
+  assert.equal(resumed.handoff.creator.participant_id, slot.replaced_role);
+  const result = cli("evaluate", "--run-dir", run, "--trial", "t2");
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const evaluation = JSON.parse(
+    readFileSync(join(run, "trials/t2/evaluation.json"), "utf8"),
+  );
+  assert.ok(evaluation.cases.every((c) => c.pass));
+  assert.ok(evaluation.handoff);
+  assert.ok(evaluation.fence_audit);
+  assert.deepEqual(evaluation.fence_audit.stale_accepted, []);
+  assert.deepEqual(evaluation.silent_overwrite_candidates, []);
+  const events = readFileSync(join(run, "trials/t2/events.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map(JSON.parse);
+  assert.equal(events.filter((e) => e.kind === "decision.acked").length, 2);
+  assert.equal(events.filter((e) => e.kind === "result.declared").length, 2);
 });
