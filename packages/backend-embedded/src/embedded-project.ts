@@ -806,6 +806,7 @@ export class EmbeddedProject
           revision: result.revision,
           changes: result.changes,
           noChange: false,
+          warnings: result.warnings ?? [],
         };
       }
       if (result.reason === "no-change") {
@@ -815,6 +816,7 @@ export class EmbeddedProject
           changes: [],
           noChange: true,
           revision: result.revision,
+          warnings: result.warnings ?? [],
         };
       }
       // destructive

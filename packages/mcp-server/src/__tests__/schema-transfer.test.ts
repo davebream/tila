@@ -557,6 +557,64 @@ async function local() {
 }
 
 describe("definition transfer through MCP with real SQLite", () => {
+  it("returns revisionless warnings in MCP text and structured output without writing diagnostics to stdout", async () => {
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+    const stderr = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ctx = await local();
+    const args = { definition: BASE, idempotency_key: "legacy-update" };
+    const first = await ctx.call("tila_schema_update", args);
+    expect(first.isError).not.toBe(true);
+    const value = first.structuredContent?.result;
+    expect(value).toMatchObject({
+      ok: true,
+      revision: 1,
+      warnings: [
+        {
+          code: "schema-revision-deprecated",
+          observed_revision: 0,
+          result_revision: 1,
+          message: expect.stringContaining("expected_revision"),
+        },
+      ],
+    });
+    expect(
+      JSON.parse(
+        first.content.find((item) => item.type === "text")?.text ?? "null",
+      ),
+    ).toEqual(value);
+    expect(
+      (await ctx.call("tila_schema_update", args)).structuredContent?.result,
+    ).toEqual(value);
+    const noChange = await ctx.call("tila_schema_update", { definition: BASE });
+    expect(noChange.structuredContent?.result).toMatchObject({
+      noChange: true,
+      warnings: [
+        {
+          observed_revision: 1,
+          result_revision: 1,
+        },
+      ],
+    });
+    expect(
+      (await ctx.a.journal.query({ kind: "schema.revisionless_applied" }))
+        .events,
+    ).toHaveLength(1);
+    const conditional = await ctx.call("tila_schema_update", {
+      definition: BASE,
+      expected_revision: 1,
+    });
+    expect(conditional.structuredContent?.result).toMatchObject({
+      warnings: [],
+    });
+    const stale = await ctx.call("tila_schema_update", {
+      definition: BASE,
+      expected_revision: 0,
+    });
+    expectFailure(stale, "schema-revision-conflict");
+    expect(stderr).toHaveBeenCalledTimes(3);
+    expect(stdout).not.toHaveBeenCalled();
+  });
+
   it("discovers typed import/export tools with conservative annotations", async () => {
     const ctx = await local();
     const { tools } = await ctx.client.listTools();
@@ -574,6 +632,11 @@ describe("definition transfer through MCP with real SQLite", () => {
     ).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect(tools.every((tool) => tool.outputSchema?.type === "object")).toBe(
       true,
+    );
+    const update = tools.find((tool) => tool.name === "tila_schema_update");
+    expect(update?.description).toContain("deprecated");
+    expect(JSON.stringify(update?.outputSchema)).toContain(
+      "schema-revision-deprecated",
     );
   });
 

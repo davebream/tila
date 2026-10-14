@@ -45,6 +45,10 @@ import { createJournalMethods } from "./journal";
 import { createPresenceMethods } from "./presence";
 import { createRecordMethods } from "./records";
 import { createSchemaMethods } from "./schema";
+import {
+  type SchemaWarningSink,
+  defaultSchemaWarningSink,
+} from "./schema-warnings";
 import { createSearchMethods } from "./search";
 import { createServiceAccountMethods } from "./service-accounts";
 import { createSignalMethods } from "./signals";
@@ -83,6 +87,8 @@ export interface ClientOptions {
    * patching globals. Called as a plain function, never bound to the client.
    */
   fetch?: typeof globalThis.fetch;
+  /** Schema compatibility diagnostics. Defaults to console.warn (stderr in Node). */
+  warningSink?: SchemaWarningSink;
 }
 
 export class TilaClient {
@@ -96,6 +102,7 @@ export class TilaClient {
   private fetchImpl?: typeof globalThis.fetch;
   readonly participantId: string;
   readonly environment: EnvironmentMetadata;
+  readonly warningSink: SchemaWarningSink;
 
   constructor(opts: ClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
@@ -116,6 +123,7 @@ export class TilaClient {
     }
     this.validate = opts.validate ?? false;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.warningSink = opts.warningSink ?? defaultSchemaWarningSink;
     this.participantId = ParticipantIdSchema.parse(
       opts.participantId ?? crypto.randomUUID(),
     );
@@ -159,6 +167,7 @@ export class TilaClient {
       | "timeoutMs"
       | "expirySkewMs"
       | "dpopSigner"
+      | "warningSink"
     >,
   ): TilaClient {
     if (config.backend === "local") {
@@ -186,6 +195,7 @@ export class TilaClient {
       timeoutMs: opts?.timeoutMs,
       expirySkewMs: opts?.expirySkewMs,
       dpopSigner: opts?.dpopSigner,
+      warningSink: opts?.warningSink,
     });
   }
 
@@ -607,11 +617,10 @@ export function buildHttpFacadeForTest(
  * `__tests__/bundle-hygiene.test.ts`).
  *
  * @param token Required for the Cloudflare backend; ignored for local.
- * @param opts  Optional Cloudflare-backend tuning. `opts.extraHeaders` is
- *   forwarded to the underlying `TilaClient` (e.g. a caller-attribution
- *   `X-Tila-Source: mcp-server/<version>` header). Ignored for the local
- *   backend, which makes no HTTP requests. Additive/back-compat: existing
- *   `createTila(config, token)` callers are unaffected.
+ * @param opts  Optional identity/environment and warning sink for either
+ *   backend, plus Cloudflare transport tuning. `opts.extraHeaders` is forwarded
+ *   to the HTTP `TilaClient` (e.g. `X-Tila-Source: mcp-server/<version>`).
+ *   Existing `createTila(config, token)` callers are unaffected.
  */
 export async function createTila(
   config: TilaProjectConfig,
@@ -624,6 +633,7 @@ export async function createTila(
     | "timeoutMs"
     | "expirySkewMs"
     | "dpopSigner"
+    | "warningSink"
   >,
 ): Promise<TilaFacade> {
   if (config.backend === "local") {
@@ -662,7 +672,11 @@ export async function createTila(
       },
     });
 
-    const resources = buildLocalResources(project, artifacts);
+    const resources = buildLocalResources(
+      project,
+      artifacts,
+      opts?.warningSink,
+    );
     // No `as unknown as` cast: `buildLocalResources` is compile-time asserted to
     // be structurally assignable to `Omit<TilaFacade, "close">` (see the
     // `_assertLocalSurfaceMatchesFacade` contract in resource-adapters.ts), so
@@ -684,6 +698,7 @@ export async function createTila(
     timeoutMs: opts?.timeoutMs,
     expirySkewMs: opts?.expirySkewMs,
     dpopSigner: opts?.dpopSigner,
+    warningSink: opts?.warningSink,
   });
   return buildHttpFacade(client, config.project_id);
 }

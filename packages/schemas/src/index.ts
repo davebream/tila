@@ -400,6 +400,8 @@ export {
   type SchemaGetResponse,
   SchemaApplyResponseSchema,
   type SchemaApplyResponse,
+  SchemaApplyWarningSchema,
+  type SchemaApplyWarning,
   SchemaHistoryResponseSchema,
   type SchemaHistoryResponse,
 } from "./api";
