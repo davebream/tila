@@ -95,16 +95,21 @@ Metadata includes exact git SHA and product release, checksummed DO/D1 migration
 files and Worker config, OS/architecture, Node/pnpm and local runtime package
 versions, test-only profile declaration, ISO start/end times, and relative
 artifact references with SHA-256. Migration metadata describes local test setup
-(D1/DO/R2), never deployed migration state. Dirty source is rejected. Generated
+(D1/DO/R2), never deployed migration state. Dirty source is rejected. Retained
+preflight failure excerpts explicitly mark unavailable execution timestamps as
+null and provide their recording time and limitation; no duration is inferred.
+Generated
 versions and evidence outputs are excluded from the source checksum; this
 allows an evidence-only commit while preserving which source was tested.
 
 Each run gets a new exclusively-created directory and append-only JSONL ledger;
 the complete JSON summary can be rebuilt from that ledger if interrupted.
 Use `--previous <report>` to link a rerun; never replace the earlier directory.
-Logs are redacted before storage (workspace/user paths, credentials, private
-execution records). Review sanitized logs before publishing; do not copy raw
-private records. Checksums cover the stored sanitized bytes. Keep missing
+Logs are redacted before storage (workspace/user paths and credentials).
+Runtime JSON reports are copied and sanitized before another suite can replace
+the shared report; an earlier report is never attached to a command that did
+not start. Review sanitized logs before publishing. Checksums cover the stored
+sanitized bytes. Keep missing
 dependencies and failed commands in the ledger. A suite process exit alone is
 not sufficient for the required runtime gate: `pnpm test:runtime` also validates
 its report, rejects skipped/TODO tests and requires all assertions to pass.
@@ -122,9 +127,19 @@ node scripts/issue-308-scenarios.mjs --run --output .ci-reports/issue-308
 node scripts/issue-308-scenarios.mjs --run --output .ci-reports/issue-308 --previous .ci-reports/issue-308/<run>/report.json
 ```
 
-`--list` prints the exact fixed local commands: UI test/typecheck, integration
-typecheck, S1/S2/S3 focused runtime suites and the mandatory full
-`pnpm test:runtime` gate. No arbitrary target or command is accepted. The driver
+`--list` prints the exact fixed local commands: `pnpm build`, UI test/typecheck,
+integration typecheck, S1/S2/S3 focused runtime suites, the mandatory full
+`pnpm test:runtime` gate, `pnpm test:scripts`, and `pnpm lint` (including version
+lockstep and test quality). Every child uses the equivalent of
+`env -i HOME="$HOME" PATH="$PATH"`, preserving only those two quoted environment
+values. This prevents ambient client/runtime configuration from changing test
+behavior. For a direct root-script rerun use:
+
+```sh
+env -i HOME="$HOME" PATH="$PATH" pnpm test:scripts
+```
+
+No arbitrary target or command is accepted. The driver
 continues after failures and exits nonzero if any command fails. It records
 blocked full S1 and authenticated S2/S3 separately on every run. A missing
 dependency is a failed observation, not a skip. For publication, explicitly
