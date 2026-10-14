@@ -160,11 +160,14 @@ This stack uses a Turborepo monorepo, Drizzle ORM, a Hono backend, and Promptfoo
 
 ### 1.1 The layers and their boundaries
 
+These simplified diagrams show CLI persistence paths, not the full product scope.
+tila's management workflows and external consumers reuse the coordination core;
+the service/host boundary and implementation status are described above.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              Framework consumer (out of scope for tila)          │
-│   (any workflow tool, agentic system, or orchestrator that       │
-│    needs coordination + artifact storage + audit trail)          │
+│          tila workflows and coordination-core consumers         │
+│       (humans and agents using tasks, records, and artifacts)     │
 └────────────────────────────────┬────────────────────────────────┘
                                  │ uses
                                  ▼
@@ -212,15 +215,19 @@ This stack uses a Turborepo monorepo, Drizzle ORM, a Hono backend, and Promptfoo
 
 **Local path (single machine -- `tila project create --local`):**
 
+Local mode shares CLI commands for supported operations, not full Cloudflare
+service coverage. Local facades reject durable conversations, inbox, and dispatch
+with `unsupported-capability`; see [local SDK limitations](../packages/sdk/README.md#durable-conversations).
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              Framework consumer (out of scope for tila)          │
+│         Local compatibility workflows and core consumers        │
 └────────────────────────────────┬────────────────────────────────┘
                                  │ uses
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                          tila CLI                                │
-│  (same commands as Cloudflare path; backend resolved at init)    │
+│       (supported CLI subset; backend resolved at startup)        │
 └────────────────────────────────┬────────────────────────────────┘
                                  │ direct call (no HTTP)
                                  ▼
