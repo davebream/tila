@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Enterprise Server Actions OIDC support through optional deployment JSON `GITHUB_ACTIONS_TRUSTED_ISSUERS` (`issuer`, `host`, `jwks_uri`). Verified issuer and repository host select the linked repository policy and remain part of credential, runtime run and signed-session authorization. Removing issuer trust or disabling repository policy denies subsequent protected requests. GitHub.com remains trusted by default.
+
+
 ### Definition revision warnings (#416)
 
 - Accepted definition applies without `expected_revision` return structured `warnings` with code `schema-revision-deprecated`, guidance, and observed/result revisions. The SDK shows them through an injectable `warningSink` (default `console.warn`); CLI diagnostics go to stderr, including `--json`; MCP `tila_schema_update` includes them in text and structured output. Embedded/local applies have the same behavior.
@@ -17,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgrade the Worker to record warnings and journal events, then upgrade clients to display them. An older client may ignore the new response field; the project journal remains observable (`tila journal list --kind schema.revisionless_applied`). No database migration or product-version bump accompanies this change.
 - Current `tila schema apply` still permits revision omission; use `--expected-revision` from a reviewed diff or `--review`. CLI definition import, the dashboard definition editor/importer, and MCP `tila_schema_import` send reviewed revisions on apply. Direct SDK/API applies and MCP `tila_schema_update` still accept omission on non-managed projects and now warn. Preview, retain its `revision`/`reviewed_definition`, and submit them with a stable idempotency key; never substitute a newer revision on retry.
 - Supplied revisions retain HTTP 412 `schema-revision-conflict` behavior without a deprecation warning. Managed projects still require a revision, even for a cached legacy receipt. Requiring revisions everywhere is a future migration; no enforcement release or date is set.
+- Upgrade every Worker instance before enabling GHES issuer trust or exchanging GHES assertions. Workload JSON and signed session claims gain `issuer` and `repository_host`; old contexts without these fields remain GitHub.com only. Older Workers discard the new fields and cannot safely authorize GHES sessions. No additional D1 migration is required for #440. The existing generic OIDC configuration and hardened public HTTPS egress rules are unchanged; private-network-only GHES requires a separate network design.
+
+### Fixed
+
+- OIDC verification refreshes expired JWKS before using cached keys, rejects removed keys, and fails closed if refresh fails. Stable-kid rotation retains one retry for a failed cached signature. Cache keys and fetch bookkeeping include both issuer and configured JWKS URI, so an old in-flight fetch cannot restore keys under a new endpoint configuration.
+
 
 ## [0.8.0] - 2026-10-13
 
