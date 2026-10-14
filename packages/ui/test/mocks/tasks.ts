@@ -120,6 +120,39 @@ export function declaredEntry(
   return { type, declaration: "declared", count, archived_count, definition };
 }
 
+/**
+ * A declared type whose lifecycle names its finished states, so readiness
+ * does not fall back to the legacy rule where only `closed` is finished.
+ */
+export function configuredEntry(
+  type: string,
+  count: number,
+  archived_count = 0,
+): WorkCatalogEntry {
+  return declaredEntry(
+    type,
+    count,
+    {
+      fields: [
+        {
+          name: "status",
+          type: "enum",
+          required: true,
+          values: ["open", "in_progress", "done", "cancelled"],
+        },
+      ],
+      lifecycle: {
+        field: "status",
+        dispatchable: ["open"],
+        terminal: ["done", "cancelled"],
+        dependency_satisfied: ["done"],
+        on_start: "in_progress",
+      },
+    },
+    archived_count,
+  );
+}
+
 export function catalogHandler(
   types: WorkCatalogEntry[],
   scope: { restricted: boolean } = { restricted: false },
